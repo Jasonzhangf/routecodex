@@ -1,0 +1,25 @@
+{
+  "typeKeywords": [
+    { "keywords": ["anthropic", "claude"], "providerType": "anthropic" },
+    { "keywords": ["responses"], "providerType": "responses" },
+    { "keywords": ["gemini"], "providerType": "gemini" },
+    { "keywords": ["glm"], "providerType": "glm" },
+    { "keywords": ["lmstudio"], "providerType": "lmstudio" }
+  ],
+  "defaultProviderType": "openai",
+  "outboundProfiles": {
+    "anthropic": "anthropic-messages",
+    "responses": "openai-responses",
+    "gemini": "gemini-chat"
+  },
+  "defaultOutboundProfile": "openai-chat",
+  "compatibilityProfileBlocks": [
+    { "providerId": "cc", "compatibilityProfile": "responses:cc" },
+    { "providerId": "cc-sol", "compatibilityProfile": "responses:thinking-tags" },
+    { "providerId": "lmstudio", "compatibilityProfile": "responses:lmstudio" },
+    { "providerId": "minimax", "compatibilityProfile": "chat:minimax" },
+    { "providerId": "minimonth", "compatibilityProfile": "chat:minimax" },
+    { "providerId": "opencode-go", "compatibilityProfile": "responses:deepseek-console-go" }
+  ],
+  "defaultCompatibilityProfile": "compat:passthrough"
+}

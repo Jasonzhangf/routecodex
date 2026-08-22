@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "preparation_id": "prepare-routecodex-v3-global-provider-cooldown-20260817",
+  "status": "confirmed",
+  "objective": "在 RouteCodex V3 provider-responses/runtime/server 主线上建立统一的全局 provider 持久化 cooldown、Reset 校正、持续 probe 与 server-ready 启动恢复机制；保持控制面与业务 payload 物理隔离，并按 AppSDK lifecycle 记录设计、资源锁、gate、候选实现、架构 review 和 effectiveness evidence。",
+  "change_kind": "module_refactor",
+  "project_root": ".",
+  "legacy_roots": [
+    "crates/routecodex-v3-provider-responses/src/health.rs",
+    "crates/routecodex-v3-provider-responses/src/provider_global_health.rs",
+    "crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs",
+    "crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs",
+    "crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs",
+    "crates/routecodex-v3-server/src/lib.rs"
+  ],
+  "new_roots": [
+    ".appsdk/**",
+    "playground/**",
+    "active/**",
+    "protected/**",
+    "generated/**",
+    "crates/routecodex-v3-provider-responses/src/**",
+    "crates/routecodex-v3-runtime/src/**",
+    "crates/routecodex-v3-server/src/**",
+    "crates/routecodex-v3-provider-responses/tests/**",
+    "crates/routecodex-v3-runtime/tests/**"
+  ],
+  "protected_roots": [
+    "protected/source/**",
+    "protected/contracts/**",
+    "protected/history/**",
+    "active/lib/**"
+  ],
+  "runtime_forbidden_roots": [
+    "playground/**",
+    "generated/**",
+    "protected/source/**",
+    ".appsdk-control/**",
+    "request_payload/**",
+    "response_payload/**"
+  ],
+  "boundary": {
+    "allowed_paths": [
+      ".appsdk/**",
+      ".gitignore",
+      "playground/**",
+      "active/**",
+      "protected/**",
+      "generated/**",
+      "crates/routecodex-v3-provider-responses/**",
+      "crates/routecodex-v3-runtime/**",
+      "crates/routecodex-v3-server/**"
+    ],
+    "forbidden_paths": [
+      "../src/**",
+      "../sharedmodule/**",
+      "../v4/**",
+      "target/**",
+      "request_payload/**",
+      "response_payload/**"
+    ],
+    "payload_control_separation": "confirmed: cooldown, health, probe, reset and persistence state are typed side-channel resources; they never enter provider request body, client response body or MetadataCenter payload projection"
+  },
+  "acceptance_criteria": [
+    "设计、resource/function/mainline/verification maps、module ownership、red tests 和 required gates 在 V3 AppSDK project contract 中可验证。",
+    "唯一 cooldown owner 负责持久化、availability、startup probe、due probe、Reset 校正和恢复。",
+    "provider 特殊 cooldown policy 可配置；未配置时最大冷却为 5 小时。",
+    "401、403、429、transport、semantic failure 保持 typed failure class；机器 reset 优先，所有 deadline 受 provider maximum 和 5 小时硬上限约束。",
+    "server ready 后所有持久化 cooldown 项执行 startup probe；只有 probe 成功才恢复。",
+    "旧的散落 provider/auth/global cooldown 与双重 probe 调度路径物理删除。",
+    "完成 AppSDK reproduction、FixCandidate、architecture PASS、effectiveness、merge、regression 和 evidence 链，并完成 global install/restart/online replay。"
+  ],
+  "non_goals": [
+    "不修改 V4 AppSDK 项目及其 records。",
+    "不修改 Hub payload 语义、请求历史、Responses continuation 或 provider wire payload。",
+    "不把 session-isolated cooldown 变成跨 session 持久化状态。",
+    "不在 Virtual Router、Error06 或 server handler 增加 cooldown owner。",
+    "不更换 OpenCode Go endpoint 或模型；OpenCode Go 只允许 deepseek-v4-flash。"
+  ],
+  "assumptions": [
+    "V3 现有 provider health/error policy 是行为基线，所有变更先在 clean candidate worktree 重放 baseline。",
+    "AppSDK external Bundle 是本项目 lifecycle/compiler/record schema 的唯一治理实现。",
+    "既有未提交改动属于其他工作，不作为本候选变更的 baseline，候选 worktree 必须从记录的 clean base 建立。"
+  ],
+  "questions": [],
+  "confirmed_by": "Jason",
+  "confirmed_at": "2026-08-17T00:00:00Z",
+  "created_at": "2026-01-01T00:00:00Z"
+}

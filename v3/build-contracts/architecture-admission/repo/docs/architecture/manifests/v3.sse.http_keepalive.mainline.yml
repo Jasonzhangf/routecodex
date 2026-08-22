@@ -1,0 +1,35 @@
+lifecycle_id: v3.sse.http_keepalive.mainline
+owner_feature_id: v3.sse_http_keepalive_boundary
+entrypoint:
+  node_id: V3SseTransportOut04EncodedChunk
+  call_map_chain_id: v3.sse.http_keepalive_boundary
+nodes:
+  - V3SseTransportOut04EncodedChunk
+  - V3ServerRespOutbound06ClientFrame
+edges:
+  - step_id: v3-sse-http-keepalive-01
+    from_node: V3SseTransportOut04EncodedChunk
+    to_node: V3ServerRespOutbound06ClientFrame
+    owner_feature_id: v3.sse_http_keepalive_boundary
+    status: anchored
+return_path:
+  success: Direct and Relay receive an initial comment, unchanged event bytes, idle comments, then EOF.
+  failure: Provider stream error closes the HTTP body and stops the timer.
+  error06: Standard event error remains the first frame and receives no keepalive.
+resource_reads:
+  - resource_id: v3.config.http_sse_keepalive_interval
+    owner_node: V3Config05ManifestPublished
+    consumer: v3_io_sse_body
+canonical_docs:
+  - docs/architecture/wiki/v3-sse-http-keepalive.md
+  - docs/goals/v3-responses-session-admission-and-sse-keepalive-test-design.md
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+verification_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --test config_v3_contract http_sse_keepalive_config_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --lib http_sse_keepalive_environment_compiler_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib responses_sse -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib tests::successful_responses_sse_emits_immediate_and_idle_periodic_keepalive_comments -- --exact --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib tests::successful_direct_responses_sse_starts_with_keepalive_before_provider_event -- --exact --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_responses_endpoint_projects_sse_without_materialize_repair -- --exact
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse -- --exact

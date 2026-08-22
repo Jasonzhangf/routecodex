@@ -1,0 +1,1 @@
+{"cleanup_id":"cleanup-edge-sdk013","experiment_id":"edge-sdk013-experiment","disposition":"archive_then_remove","archived_evidence":["edge-sdk013-baseline","edge-sdk013-candidate","edge-sdk013-positive","edge-sdk013-negative","edge-sdk013-fixed-replay","edge-sdk013-post-positive","edge-sdk013-post-negative","edge-sdk013-blackbox"],"created_at":"2026-08-16T04:25:20Z"}

@@ -1,0 +1,839 @@
+mod defaults;
+mod entry_protocol_validation;
+mod provider_directory;
+mod store;
+mod types;
+mod v2_compat;
+pub use v2_compat::{
+    generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderAuthConfig,
+    V2ProviderAuthEntry, V2ProviderConcurrencyConfig, V2ProviderConfig, V2ProviderConfigFile,
+    V2ProviderModelConfig, V2ProviderResponsesConfig, V2ProviderV3Config,
+};
+mod validate;
+#[cfg(test)]
+mod validate_auth_tests;
+#[cfg(test)]
+mod validate_debug_tests;
+mod validate_relations;
+
+pub use store::{default_v3_config_path, V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan};
+pub use types::*;
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+
+pub const V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS: u64 = 3_000;
+
+#[derive(Debug, thiserror::Error)]
+pub enum V3ConfigError {
+    #[error("config io failed: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("config parse failed: {0}")]
+    Parse(#[from] toml::de::Error),
+    #[error("config serialization failed: {0}")]
+    Serialize(#[from] toml::ser::Error),
+    #[error("config validation failed: {0}")]
+    Validation(String),
+}
+
+pub(crate) fn read_v3_config_01_file_source(
+    path: impl AsRef<Path>,
+) -> Result<V3Config01FileSource, V3ConfigError> {
+    let path = path.as_ref().to_path_buf();
+    let raw_toml = std::fs::read_to_string(&path)?;
+    Ok(V3Config01FileSource { path, raw_toml })
+}
+
+pub fn parse_v3_config_02_authoring(raw: &str) -> Result<V3Config02AuthoringParsed, V3ConfigError> {
+    Ok(toml::from_str(raw)?)
+}
+
+pub(crate) fn try_compile_v2_config_02_authoring_from_file(
+    config_path: impl AsRef<Path>,
+    raw: &str,
+) -> Result<Option<provider_directory::V3Config02AuthoringResolved>, V3ConfigError> {
+    v2_compat::compile_v2_config_02_authoring_from_file(config_path.as_ref(), raw)
+}
+
+pub fn validate_v3_config_03_schema_from_v3_config_02(
+    authoring: V3Config02AuthoringParsed,
+) -> Result<V3Config03SchemaValidated, V3ConfigError> {
+    validate::validate_schema(authoring)
+}
+
+pub fn build_v3_config_04_resource_registry_from_v3_config_03(
+    validated: V3Config03SchemaValidated,
+) -> Result<V3Config04ResourceRegistryBuilt, V3ConfigError> {
+    validate::build_resource_registry(validated)
+}
+
+pub fn publish_v3_config_05_manifest_from_v3_config_04(
+    registry: V3Config04ResourceRegistryBuilt,
+) -> Result<V3Config05ManifestPublished, V3ConfigError> {
+    validate::publish_manifest(registry)
+}
+
+pub fn compile_v3_config_05_manifest(
+    authoring: V3Config02AuthoringParsed,
+) -> Result<V3Config05ManifestPublished, V3ConfigError> {
+    publish_v3_config_05_manifest_from_v3_config_04(
+        build_v3_config_04_resource_registry_from_v3_config_03(
+            validate_v3_config_03_schema_from_v3_config_02(authoring)?,
+        )?,
+    )
+}
+
+pub fn resolve_v3_http_sse_keepalive_ms(
+    routecodex_value: Option<&str>,
+    legacy_value: Option<&str>,
+) -> Result<u64, V3ConfigError> {
+    if legacy_value.is_some() {
+        return Err(validation(
+            "RCC_HTTP_SSE_KEEPALIVE_MS is not supported; use ROUTECODEX_HTTP_SSE_KEEPALIVE_MS",
+        ));
+    }
+
+    fn parse(value: &str) -> Result<u64, V3ConfigError> {
+        let trimmed = value.trim();
+        let parsed = trimmed.parse::<u64>().map_err(|_| {
+            validation(
+                "ROUTECODEX_HTTP_SSE_KEEPALIVE_MS must be a positive integer number of milliseconds",
+            )
+        })?;
+        if parsed == 0 {
+            return Err(validation(
+                "ROUTECODEX_HTTP_SSE_KEEPALIVE_MS must be a positive integer number of milliseconds",
+            ));
+        }
+        Ok(parsed)
+    }
+
+    match routecodex_value {
+        Some(value) => parse(value),
+        None => Ok(V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS),
+    }
+}
+
+pub(crate) fn compile_v3_http_sse_keepalive_ms_from_environment() -> Result<u64, V3ConfigError> {
+    fn read(name: &str) -> Result<Option<String>, V3ConfigError> {
+        std::env::var_os(name)
+            .map(|value| {
+                value.into_string().map_err(|_| {
+                    validation(format!(
+                        "{name} must contain valid UTF-8 positive integer milliseconds"
+                    ))
+                })
+            })
+            .transpose()
+    }
+
+    let routecodex_value = read("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS")?;
+    let legacy_value = read("RCC_HTTP_SSE_KEEPALIVE_MS")?;
+    resolve_v3_http_sse_keepalive_ms(routecodex_value.as_deref(), legacy_value.as_deref())
+}
+
+#[cfg(test)]
+mod http_sse_keepalive_environment_tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::sync::Mutex;
+
+    static ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
+    const PRIMARY: &str = "ROUTECODEX_HTTP_SSE_KEEPALIVE_MS";
+    const LEGACY: &str = "RCC_HTTP_SSE_KEEPALIVE_MS";
+
+    struct EnvironmentRestore {
+        primary: Option<OsString>,
+        legacy: Option<OsString>,
+    }
+
+    impl EnvironmentRestore {
+        fn capture() -> Self {
+            Self {
+                primary: std::env::var_os(PRIMARY),
+                legacy: std::env::var_os(LEGACY),
+            }
+        }
+    }
+
+    impl Drop for EnvironmentRestore {
+        fn drop(&mut self) {
+            match self.primary.take() {
+                Some(value) => std::env::set_var(PRIMARY, value),
+                None => std::env::remove_var(PRIMARY),
+            }
+            match self.legacy.take() {
+                Some(value) => std::env::set_var(LEGACY, value),
+                None => std::env::remove_var(LEGACY),
+            }
+        }
+    }
+
+    #[test]
+    fn http_sse_keepalive_environment_compiler_rejects_invalid_primary() {
+        let _lock = ENVIRONMENT_LOCK.lock().unwrap();
+        let _restore = EnvironmentRestore::capture();
+        std::env::set_var(PRIMARY, "invalid");
+        std::env::remove_var(LEGACY);
+
+        let error = compile_v3_http_sse_keepalive_ms_from_environment().unwrap_err();
+        assert!(error.to_string().contains(PRIMARY), "{error}");
+    }
+
+    #[test]
+    fn http_sse_keepalive_environment_compiler_rejects_legacy_variable() {
+        let _lock = ENVIRONMENT_LOCK.lock().unwrap();
+        let _restore = EnvironmentRestore::capture();
+        std::env::set_var(PRIMARY, "25");
+        std::env::set_var(LEGACY, "25");
+
+        let error = compile_v3_http_sse_keepalive_ms_from_environment().unwrap_err();
+        assert!(error.to_string().contains("not supported"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn http_sse_keepalive_environment_compiler_rejects_non_utf8_values() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let _lock = ENVIRONMENT_LOCK.lock().unwrap();
+        let _restore = EnvironmentRestore::capture();
+        std::env::set_var(PRIMARY, OsString::from_vec(vec![0xff]));
+        std::env::remove_var(LEGACY);
+
+        let error = compile_v3_http_sse_keepalive_ms_from_environment().unwrap_err();
+        assert!(error.to_string().contains("valid UTF-8"), "{error}");
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct V3CatalogModelRef {
+    pub visible_id: String,
+    pub provider_id: String,
+    pub model_id: String,
+    pub capabilities: BTreeSet<String>,
+}
+
+pub fn collect_v3_route_group_catalog_model_refs(
+    manifest: &V3Config05ManifestPublished,
+    routing_group: &str,
+) -> BTreeMap<String, V3CatalogModelRef> {
+    let mut out = BTreeMap::new();
+    let Some(group) = manifest.route_groups.get(routing_group) else {
+        return out;
+    };
+    let mut visiting_forwarders = BTreeSet::new();
+    for pool in group.pools.values() {
+        for target in &pool.targets {
+            collect_v3_catalog_model_refs_from_target(
+                manifest,
+                target,
+                None,
+                &mut visiting_forwarders,
+                &mut out,
+            );
+        }
+    }
+    out
+}
+
+/// 路由组内"独立单 provider 承载"的模型判定：某个 visible_id 在路由组所有
+/// 池（含 forwarder 展开）中只被一个 provider 引用时返回 true。能力面
+/// （/v1/models catalog）据此条件化高级有状态能力（websocket / multi-agent /
+/// responses-lite 等）：多路由目标只保留无状态请求能力，独立单 provider 才
+/// 打开高级有状态能力。
+pub fn is_v3_route_group_single_provider_visible_model(
+    manifest: &V3Config05ManifestPublished,
+    routing_group: &str,
+    visible_id: &str,
+) -> bool {
+    let Some(group) = manifest.route_groups.get(routing_group) else {
+        return false;
+    };
+    let mut providers_by_visible: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut visiting_forwarders = BTreeSet::new();
+    for pool in group.pools.values() {
+        for target in &pool.targets {
+            collect_v3_visible_provider_ids_from_target(
+                manifest,
+                target,
+                None,
+                &mut visiting_forwarders,
+                &mut providers_by_visible,
+            );
+        }
+    }
+    providers_by_visible
+        .get(visible_id)
+        .is_some_and(|providers| providers.len() == 1)
+}
+
+fn collect_v3_visible_provider_ids_from_target(
+    manifest: &V3Config05ManifestPublished,
+    target: &V3RoutePoolTargetManifest,
+    visible_ids_override: Option<&[String]>,
+    visiting_forwarders: &mut BTreeSet<String>,
+    out: &mut BTreeMap<String, BTreeSet<String>>,
+) {
+    match target.kind {
+        V3RouteTargetKind::ProviderModel => {
+            let (Some(provider_id), Some(model_id)) =
+                (target.provider.as_ref(), target.model.as_ref())
+            else {
+                return;
+            };
+            let Some(provider) = manifest.providers.get(provider_id) else {
+                return;
+            };
+            if !provider.enabled {
+                return;
+            }
+            let Some(model) = provider.models.get(model_id) else {
+                return;
+            };
+            let visible_ids = visible_ids_override
+                .map(|ids| ids.to_vec())
+                .unwrap_or_else(|| v3_model_catalog_visible_ids(&model.id, &model.aliases));
+            for visible_id in visible_ids {
+                out.entry(visible_id)
+                    .or_default()
+                    .insert(provider_id.clone());
+            }
+        }
+        V3RouteTargetKind::Forwarder => {
+            let Some(forwarder_id) = target.id.as_ref() else {
+                return;
+            };
+            if !visiting_forwarders.insert(forwarder_id.clone()) {
+                return;
+            }
+            if let Some(forwarder) = manifest.forwarders.get(forwarder_id) {
+                if forwarder.enabled {
+                    let visible_ids =
+                        visible_ids_override
+                            .map(|ids| ids.to_vec())
+                            .unwrap_or_else(|| {
+                                v3_model_catalog_visible_ids(&forwarder.model, &forwarder.aliases)
+                            });
+                    for child in &forwarder.targets {
+                        let route_target = V3RoutePoolTargetManifest {
+                            kind: child.kind.clone(),
+                            id: child.id.clone(),
+                            provider: child.provider.clone(),
+                            model: child.model.clone(),
+                            key: child.key.clone(),
+                            priority: child.priority,
+                            weight: child.weight,
+                        };
+                        collect_v3_visible_provider_ids_from_target(
+                            manifest,
+                            &route_target,
+                            Some(&visible_ids),
+                            visiting_forwarders,
+                            out,
+                        );
+                    }
+                }
+            }
+            visiting_forwarders.remove(forwarder_id);
+        }
+    }
+}
+
+fn collect_v3_catalog_model_refs_from_target(
+    manifest: &V3Config05ManifestPublished,
+    target: &V3RoutePoolTargetManifest,
+    visible_ids_override: Option<&[String]>,
+    visiting_forwarders: &mut BTreeSet<String>,
+    out: &mut BTreeMap<String, V3CatalogModelRef>,
+) {
+    match target.kind {
+        V3RouteTargetKind::ProviderModel => {
+            let (Some(provider_id), Some(model_id)) =
+                (target.provider.as_ref(), target.model.as_ref())
+            else {
+                return;
+            };
+            let Some(provider) = manifest.providers.get(provider_id) else {
+                return;
+            };
+            if !provider.enabled {
+                return;
+            }
+            let Some(model) = provider.models.get(model_id) else {
+                return;
+            };
+            let visible_ids = visible_ids_override
+                .map(|ids| ids.to_vec())
+                .unwrap_or_else(|| v3_model_catalog_visible_ids(&model.id, &model.aliases));
+            for visible_id in visible_ids {
+                insert_v3_catalog_model_ref(
+                    out,
+                    visible_id,
+                    provider_id.clone(),
+                    model_id.clone(),
+                    model.capabilities.iter().cloned().collect(),
+                );
+            }
+        }
+        V3RouteTargetKind::Forwarder => {
+            let Some(forwarder_id) = target.id.as_ref() else {
+                return;
+            };
+            if !visiting_forwarders.insert(forwarder_id.clone()) {
+                return;
+            }
+            if let Some(forwarder) = manifest.forwarders.get(forwarder_id) {
+                if forwarder.enabled {
+                    let visible_ids =
+                        visible_ids_override
+                            .map(|ids| ids.to_vec())
+                            .unwrap_or_else(|| {
+                                v3_model_catalog_visible_ids(&forwarder.model, &forwarder.aliases)
+                            });
+                    for child in &forwarder.targets {
+                        collect_v3_catalog_model_refs_from_forwarder_target(
+                            manifest,
+                            child,
+                            &visible_ids,
+                            visiting_forwarders,
+                            out,
+                        );
+                    }
+                }
+            }
+            visiting_forwarders.remove(forwarder_id);
+        }
+    }
+}
+
+fn collect_v3_catalog_model_refs_from_forwarder_target(
+    manifest: &V3Config05ManifestPublished,
+    target: &V3ForwarderTargetManifest,
+    visible_ids: &[String],
+    visiting_forwarders: &mut BTreeSet<String>,
+    out: &mut BTreeMap<String, V3CatalogModelRef>,
+) {
+    let route_target = V3RoutePoolTargetManifest {
+        kind: target.kind.clone(),
+        id: target.id.clone(),
+        provider: target.provider.clone(),
+        model: target.model.clone(),
+        key: target.key.clone(),
+        priority: target.priority,
+        weight: target.weight,
+    };
+    collect_v3_catalog_model_refs_from_target(
+        manifest,
+        &route_target,
+        Some(visible_ids),
+        visiting_forwarders,
+        out,
+    );
+}
+
+fn v3_model_catalog_visible_ids(model_id: &str, aliases: &[String]) -> Vec<String> {
+    if aliases.is_empty() {
+        vec![model_id.to_string()]
+    } else {
+        aliases.to_vec()
+    }
+}
+
+fn insert_v3_catalog_model_ref(
+    out: &mut BTreeMap<String, V3CatalogModelRef>,
+    visible_id: String,
+    provider_id: String,
+    model_id: String,
+    capabilities: BTreeSet<String>,
+) {
+    let visible_id = visible_id.trim().to_string();
+    if visible_id.is_empty()
+        || internal::is_v3_hidden_codex_future_model(&visible_id)
+        || internal::is_v3_hidden_codex_future_model(&model_id)
+    {
+        return;
+    }
+    out.entry(visible_id.clone())
+        .and_modify(|existing| existing.capabilities.extend(capabilities.iter().cloned()))
+        .or_insert(V3CatalogModelRef {
+            visible_id,
+            provider_id,
+            model_id,
+            capabilities,
+        });
+}
+
+/// 内部配置层（internal）：RouteCodex 内部控制特判与内部模型清单。
+/// 用户配置面不承载任何特判；路由/流水线/能力面节点只消费本层判定结果。
+pub mod internal;
+
+pub fn looks_like_secret_literal(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.starts_with("sk-")
+        || trimmed.starts_with("Bearer ")
+        || trimmed.contains("api_key=")
+        || trimmed.contains("OPENAI_API_KEY=")
+        || trimmed.len() > 128
+}
+
+/// 从集中 secret 文件内容解析指定 key 的值。文件格式：每行 `name = value`，
+/// 支持 `#` 注释、空行、值两端引号（`"..."` / `'...'`）。key 名精确匹配。
+/// 解析归 config 层：编译时校验（文件可读 + key 存在 + 值非空）与运行时
+/// 取值（transport）共用同一实现，禁止在消费方重复解析。
+pub fn resolve_v3_secret_file_key(content: &str, key: &str) -> Result<String, String> {
+    for (name, value) in parse_v3_secret_file_entries(content)? {
+        if name == key {
+            return Ok(value);
+        }
+    }
+    Err(format!("secret file key {key} not found"))
+}
+
+/// Enumerates provider auth handles from a provider-owned secret file without
+/// returning secret values. A single key may be authored as `provider-id = value`
+/// (alias `key1`) or `key1 = value`; a list may use `provider-id.key1 = value`
+/// / `provider-id.key2 = value` or provider-local names such as `key1 = value`.
+///
+/// When scoped keys for the requested provider exist, keys scoped to other
+/// providers are ignored. Returned names are auth handles only and must never
+/// enter Debug, Error, provider, or client payloads.
+pub fn discover_v3_secret_file_auth_handles(
+    content: &str,
+    provider_id: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let provider_id = provider_id.trim();
+    if provider_id.is_empty() {
+        return Err("secret file provider id is empty".to_string());
+    }
+    let parsed = parse_v3_secret_file_entries(content)?;
+    let prefix = format!("{provider_id}.");
+    let has_scoped_entries = parsed.iter().any(|(name, _)| name.starts_with(&prefix));
+    let has_exact_provider_entry = parsed.iter().any(|(name, _)| name == provider_id);
+    let has_other_scoped_entries = parsed
+        .iter()
+        .any(|(name, _)| name.contains('.') && !name.starts_with(&prefix));
+    if !has_scoped_entries && !has_exact_provider_entry && has_other_scoped_entries {
+        return Err(format!(
+            "secret file has no scoped auth keys for provider {provider_id}"
+        ));
+    }
+    let mut handles = Vec::new();
+    let mut aliases = BTreeSet::new();
+    for (name, _) in parsed {
+        let alias = if let Some(alias) = name.strip_prefix(&prefix) {
+            alias.to_string()
+        } else if has_scoped_entries {
+            continue;
+        } else if name == provider_id {
+            "key1".to_string()
+        } else if has_exact_provider_entry {
+            continue;
+        } else {
+            name.clone()
+        };
+        if alias.trim().is_empty() {
+            return Err(format!("secret file key {name} has an empty auth alias"));
+        }
+        if !aliases.insert(alias.clone()) {
+            return Err(format!("secret file auth alias {alias} is duplicated"));
+        }
+        handles.push((alias, name));
+    }
+    if handles.is_empty() {
+        return Err(format!(
+            "secret file has no auth keys for provider {provider_id}"
+        ));
+    }
+    Ok(handles)
+}
+
+fn parse_v3_secret_file_entries(content: &str) -> Result<Vec<(String, String)>, String> {
+    let mut entries = Vec::new();
+    let mut names = BTreeSet::new();
+    for (index, raw_line) in content.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=') else {
+            return Err(format!(
+                "secret file line {} must use name = value",
+                index + 1
+            ));
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(format!(
+                "secret file line {} has an empty key name",
+                index + 1
+            ));
+        }
+        if !names.insert(name.to_string()) {
+            return Err(format!("secret file key {name} is duplicated"));
+        }
+        let value = value.trim();
+        let unquoted = match value.as_bytes().first() {
+            Some(b'"') if value.ends_with('"') && value.len() >= 2 => {
+                value[1..value.len() - 1].to_string()
+            }
+            Some(b'\'') if value.ends_with('\'') && value.len() >= 2 => {
+                value[1..value.len() - 1].to_string()
+            }
+            _ => value.to_string(),
+        };
+        if unquoted.is_empty() {
+            return Err(format!("secret file key {name} has an empty value"));
+        }
+        entries.push((name.to_string(), unquoted));
+    }
+    if entries.is_empty() {
+        return Err("secret file has no key entries".to_string());
+    }
+    Ok(entries)
+}
+
+/// List non-empty secret handles from a centralized secret file without exposing values.
+/// Caller supplies the provider namespace, e.g. `opencode-go`; returned names retain the
+/// full file key so runtime auth handles can resolve the same source of truth.
+pub fn list_v3_secret_file_keys(content: &str, provider_id: &str) -> Result<Vec<String>, String> {
+    let prefix = format!("{provider_id}.");
+    let mut keys = Vec::new();
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        let value = value.trim();
+        if value.is_empty() || (value.starts_with('"') && value.ends_with("\"")) && value.len() == 2
+        {
+            return Err(format!("secret file key {name} has an empty value"));
+        }
+        if !keys.iter().any(|key| key == name) {
+            keys.push(name.to_string());
+        }
+    }
+    if keys.is_empty() {
+        return Err(format!(
+            "secret file has no keys for provider {provider_id}"
+        ));
+    }
+    Ok(keys)
+}
+
+/// 读取集中 secret 文件并解析指定 key 的值（编译期校验辅助）。
+pub fn read_v3_secret_file_key(path: &str, key: &str) -> Result<String, V3ConfigError> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|error| validation(format!("secret file {path} is unreadable: {error}")))?;
+    resolve_v3_secret_file_key(&content, key).map_err(validation)
+}
+
+pub fn resolve_routecodex_package_version_from_executable(_executable: &Path) -> Option<String> {
+    let embedded = option_env!("ROUTECODEX_BUILD_VERSION")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .expect("ROUTECODEX_BUILD_VERSION must be embedded at compile time");
+    Some(embedded.to_string())
+}
+
+pub(crate) fn validation(message: impl Into<String>) -> V3ConfigError {
+    V3ConfigError::Validation(message.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_file_key_resolution_parses_key_value_lines() {
+        let content = "# comment\n\nopencode-go.key1 = \"sk-one\"\nopencode-go.key2 = 'sk-two'\nopencode-go.key3 = sk-three\n";
+        assert_eq!(
+            resolve_v3_secret_file_key(content, "opencode-go.key1").unwrap(),
+            "sk-one"
+        );
+        assert_eq!(
+            resolve_v3_secret_file_key(content, "opencode-go.key2").unwrap(),
+            "sk-two"
+        );
+        assert_eq!(
+            resolve_v3_secret_file_key(content, "opencode-go.key3").unwrap(),
+            "sk-three"
+        );
+        assert!(resolve_v3_secret_file_key(content, "missing.key").is_err());
+        assert!(resolve_v3_secret_file_key(content, "opencode-go.key1").is_ok());
+    }
+
+    #[test]
+    fn secret_file_key_resolution_rejects_empty_value() {
+        assert!(resolve_v3_secret_file_key("a.key = \"\"\n", "a.key").is_err());
+        assert!(resolve_v3_secret_file_key("a.key =\n", "a.key").is_err());
+    }
+
+    #[test]
+    fn secret_file_auth_handle_discovery_supports_single_and_list_forms() {
+        assert_eq!(
+            discover_v3_secret_file_auth_handles("opencode-go = one\n", "opencode-go").unwrap(),
+            vec![("key1".to_string(), "opencode-go".to_string())]
+        );
+        assert_eq!(
+            discover_v3_secret_file_auth_handles(
+                "opencode-go = one\nother.key1 = ignored\n",
+                "opencode-go",
+            )
+            .unwrap(),
+            vec![("key1".to_string(), "opencode-go".to_string())]
+        );
+        assert_eq!(
+            discover_v3_secret_file_auth_handles(
+                "opencode-go.key1 = one\nopencode-go.key2 = two\nother.key1 = ignored\n",
+                "opencode-go",
+            )
+            .unwrap(),
+            vec![
+                ("key1".to_string(), "opencode-go.key1".to_string()),
+                ("key2".to_string(), "opencode-go.key2".to_string()),
+            ]
+        );
+        assert_eq!(
+            discover_v3_secret_file_auth_handles("primary = one\nsecondary = two\n", "p").unwrap(),
+            vec![
+                ("primary".to_string(), "primary".to_string()),
+                ("secondary".to_string(), "secondary".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn secret_file_auth_handle_discovery_rejects_malformed_or_duplicate_keys() {
+        assert!(discover_v3_secret_file_auth_handles("not-an-entry\n", "p").is_err());
+        assert!(discover_v3_secret_file_auth_handles("p.key1 = one\np.key1 = two\n", "p").is_err());
+        assert!(discover_v3_secret_file_auth_handles("p.key1 = \"\"\n", "p").is_err());
+        assert!(discover_v3_secret_file_auth_handles("other.key1 = one\n", "p").is_err());
+    }
+
+    fn compile_catalog_scope_manifest() -> V3Config05ManifestPublished {
+        let source = r#"
+version = 3
+
+[pipelines.hub_v1]
+skeleton = "hub_v1"
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "primary"
+endpoints = ["responses"]
+
+[servers.secondary]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "secondary"
+endpoints = ["responses"]
+
+[providers.cc]
+type = "responses"
+base_url = "https://api.example.com/v1"
+default_model = "gpt-5.5"
+auth = { type = "api_key", entries = [{ alias = "key", env = "CC_API_KEY" }] }
+responses = { process = "chat", streaming = "always" }
+
+[providers.cc.models."gpt-5.5"]
+wire_name = "gpt-5.5"
+capabilities = ["text", "reasoning", "tools", "web_search", "multimodal"]
+supports_streaming = true
+supports_thinking = true
+
+[providers.cc.models."gpt-5.6-sol"]
+wire_name = "gpt-5.6-sol"
+capabilities = ["text", "reasoning", "tools", "web_search", "multimodal"]
+supports_streaming = true
+supports_thinking = true
+
+[providers.other]
+type = "responses"
+base_url = "https://api.other.example/v1"
+default_model = "other"
+auth = { type = "api_key", entries = [{ alias = "key", env = "OTHER_API_KEY" }] }
+responses = { process = "chat", streaming = "always" }
+
+[providers.other.models.other]
+wire_name = "other-wire"
+aliases = ["other-alias"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = false
+
+[providers.other.models.offroute]
+wire_name = "offroute-wire"
+aliases = ["offroute-alias"]
+capabilities = ["text", "tools", "web_search"]
+supports_streaming = true
+supports_thinking = false
+
+[forwarders."fwd.primary"]
+model = "gpt-5.5"
+aliases = ["gpt-5.5"]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "cc", model = "gpt-5.5", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "other", model = "other", key = "key", priority = 2 }
+]
+
+[forwarders."fwd.secondary"]
+model = "other-visible"
+aliases = ["other-visible"]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "other", model = "other", key = "key", priority = 1 }]
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "fwd.primary", priority = 1 }]
+
+[route_groups.primary.pools.future]
+selection = { strategy = "priority" }
+match = { precedence = 10, models = ["gpt-5.6-sol"] }
+targets = [{ kind = "provider_model", provider = "cc", model = "gpt-5.6-sol", key = "key", priority = 1 }]
+
+[route_groups.secondary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "fwd.secondary", priority = 1 }]
+"#;
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn route_group_catalog_refs_expand_forwarders_without_offroute_models() {
+        let manifest = compile_catalog_scope_manifest();
+        let refs = collect_v3_route_group_catalog_model_refs(&manifest, "primary");
+
+        assert!(refs.contains_key("gpt-5.5"));
+        assert_eq!(refs["gpt-5.5"].provider_id, "cc");
+        assert_eq!(refs["gpt-5.5"].model_id, "gpt-5.5");
+        assert!(refs["gpt-5.5"].capabilities.contains("web_search"));
+        assert!(refs["gpt-5.5"].capabilities.contains("multimodal"));
+        assert!(!refs.contains_key("other"));
+        assert!(!refs.contains_key("other-alias"));
+        assert!(!refs.contains_key("offroute-alias"));
+        assert!(!refs.contains_key("gpt-5.6-sol"));
+    }
+
+    #[test]
+    fn route_group_catalog_refs_are_listener_group_scoped() {
+        let manifest = compile_catalog_scope_manifest();
+        let refs = collect_v3_route_group_catalog_model_refs(&manifest, "secondary");
+
+        assert!(refs.contains_key("other-visible"));
+        assert_eq!(refs["other-visible"].provider_id, "other");
+        assert_eq!(refs["other-visible"].model_id, "other");
+        assert!(!refs.contains_key("gpt-5.5"));
+        assert!(!refs.contains_key("offroute-alias"));
+        assert!(!refs.contains_key("gpt-5.6-sol"));
+    }
+}

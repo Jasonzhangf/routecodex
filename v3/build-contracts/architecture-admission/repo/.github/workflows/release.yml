@@ -1,0 +1,123 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (default: v<package.json version>)"
+        required: false
+        type: string
+      npm_publish:
+        description: "Also publish @jsonstudio/rcc to npm (requires NPM_TOKEN secret)"
+        required: false
+        type: boolean
+        default: false
+      npm_tag:
+        description: "npm dist-tag when publishing (default: latest)"
+        required: false
+        type: string
+        default: "latest"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: v3-release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: v3/package-lock.json
+
+      - name: Install V3 local build dependencies
+        run: npm ci --prefix v3 --ignore-scripts
+
+      - name: Repo sanity (no root junk)
+        run: node scripts/ci/repo-sanity.mjs
+
+      - name: V3 admission snapshot lockstep
+        env:
+          V3_ISOLATION_BASE_COMMIT: ${{ github.event.before }}
+        run: node scripts/architecture/compile-v3-build-admission.mjs --check
+
+      - name: Verify V3 canonical build domain
+        run: npm --prefix v3 run verify:ci
+
+      - name: Repository file line limit
+        run: node scripts/ci/check-file-line-limit.mjs
+
+      - name: Repository ServerTool Rust-only boundary
+        run: node scripts/verify-servertool-rust-only.mjs
+
+      - name: Pack V3 npm tarball
+        run: npm --prefix v3 run pack:npm
+
+      - name: Resolve tag + asset name
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./v3/package.json').version")"
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="v${VERSION}"
+          fi
+          TARBALL="v3/artifacts/pack/routecodex-v3-${VERSION}.tgz"
+          if [[ ! -f "${TARBALL}" ]]; then
+            echo "missing tarball: ${TARBALL}" >&2
+            ls -la v3/artifacts/pack/routecodex-v3-*.tgz || true
+            exit 2
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
+
+      - name: Reject existing release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.meta.outputs.tag }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "release tag already exists: ${TAG}" >&2
+            exit 3
+          fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "GitHub release already exists: ${TAG}" >&2
+            exit 3
+          fi
+
+      - name: Create GitHub Release (and tag if missing)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          overwrite_files: false
+          files: ${{ steps.meta.outputs.tarball }}
+          body: |
+            - V3-only Rust binary (no V2 TS runtime)
+            - Asset: `${{ steps.meta.outputs.tarball }}`
+
+      - name: Publish to npm (optional)
+        if: ${{ inputs.npm_publish }}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${NPM_TOKEN}" ]]; then
+            echo "Missing NPM_TOKEN secret" >&2
+            exit 2
+          fi
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          npm publish "${{ steps.meta.outputs.tarball }}" --access public --tag "${{ inputs.npm_tag }}"

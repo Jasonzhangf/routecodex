@@ -1,0 +1,32 @@
+lifecycle_id: sse.transport_core_shared.mainline
+summary: Protocol-neutral streaming bytes move only through the shared Rust SSE transport topology; V2 and V3 adapters converge on the same encoder.
+owner_feature_id: sse.transport_core_shared
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core
+entrypoint:
+  node_id: SseTransportIn01RawChunk
+  wiki_page: docs/goals/v3-sse-transport-core-extraction-plan.md
+  call_map_chain_id: sse.transport_core_shared.mainline
+node_ids:
+  - SseTransportIn01RawChunk
+  - SseTransportIn02DecodedFrame
+  - SseTransportIn03ValidatedFrameStream
+  - SseTransportOut04EncodedChunk
+step_ids:
+  - sse-transport-core-01
+  - sse-transport-core-02
+  - sse-transport-core-03-v2
+  - sse-transport-core-03-v3
+edge_status_counts:
+  anchored: 4
+  partial: 0
+  binding_pending: 0
+  total: 4
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: sse.transport_core_shared.mainline
+  min_function_feature: sse.transport_core_shared
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "scope": "src/config TypeScript surface after VR/Hub config Rust artifact closeout",
+  "generatedFrom": "git ls-files src/config '*.ts' '*.d.ts' plus source import audit",
+  "classificationContract": {
+    "native_shell": "TypeScript only forwards to Rust/native owners and validates returned shape.",
+    "host_io_shell": "TypeScript owns Node host IO, injected filesystem, process env publication, cache, or public async/sync entrypoints only.",
+    "type_shell": "TypeScript declaration/type surface only; no runtime semantic owner.",
+    "removable": "No source/test/package/docs-live references remain and file can be physically deleted in this slice.",
+    "hardStopRule": "Every tracked src/config .ts/.d.ts file must be listed with removableNow, classification, ownerFeature, and cannotShrinkFurtherBecause."
+  },
+  "entries": [
+    {
+      "path": "src/config/auth-file-resolver.ts",
+      "classification": "host_io_shell",
+      "ownerFeature": "config.path_resolution_surface",
+      "removableNow": false,
+      "minimumTsRole": "AuthFile resolver class, in-process key cache, default auth dir host binding, and native key resolution call.",
+      "cannotShrinkFurtherBecause": "The remaining behavior is host object lifecycle and in-process cache/public class API. Literal removal requires replacing AuthFileResolver consumers with a Rust-backed cache/lifecycle owner or generated host API.",
+      "forbiddenSemantics": ["authfile prefix parsing", "auth path planning", "fallback"]
+    },
+    {
+      "path": "src/config/config-paths.ts",
+      "classification": "native_shell",
+      "ownerFeature": "config.path_resolution_surface",
+      "removableNow": false,
+      "minimumTsRole": "Public resolveRouteCodexConfigPath wrapper over UnifiedConfigPathResolver.",
+      "cannotShrinkFurtherBecause": "CLI/server/admin callers import this stable config path API. Deletion requires migrating all callers to the native bridge or generated config path facade in one public API migration.",
+      "forbiddenSemantics": ["path precedence", "directory scanning", "env fallback"]
+    },
+    {
+      "path": "src/config/provider-config-codec.ts",
+      "classification": "host_io_shell",
+      "ownerFeature": "config.provider_config_codec",
+      "removableNow": false,
+      "minimumTsRole": "Single-file provider config read API, injected sync fs test boundary, TOML-only native detect/decode/coerce calls, and return types.",
+      "cannotShrinkFurtherBecause": "Production/admin/tests still call the public codec API and sync tests pass injected fsImpl. Removing it requires moving those host IO and injected-fs boundaries to a Rust-backed or generated API.",
+      "forbiddenSemantics": ["TOML parsing", "provider v2 coercion", "provider root loading", "JSON support"]
+    },
+    {
+      "path": "src/config/provider-config-writer.ts",
+      "classification": "host_io_shell",
+      "ownerFeature": "config.provider_config_write_surface",
+      "removableNow": false,
+      "minimumTsRole": "Provider config async native writer facade plus sync injected-fs init writer boundary.",
+      "cannotShrinkFurtherBecause": "Async writes are Rust-owned, but writeProviderConfigFileSync(fsImpl) is still used by init authoring/tests with an injected synchronous filesystem. Deletion requires removing that injected fs boundary.",
+      "forbiddenSemantics": ["provider write policy", "JSON writing", "provider root planning"]
+    },
+    {
+      "path": "src/config/provider-v2-loader.ts",
+      "classification": "native_shell",
+      "ownerFeature": "config.provider_config_coercion",
+      "removableNow": false,
+      "minimumTsRole": "Provider root selection shell and native root loader call.",
+      "cannotShrinkFurtherBecause": "Config materialization/admin/CLI callers still import loadProviderConfigsV2 as the public host API. Removing it requires migrating all callers to native/generated provider-root loader bindings.",
+      "forbiddenSemantics": ["directory scan", "file read", "duplicate provider handling", "coercion"]
+    },
+    {
+      "path": "src/config/routecodex-config-loader.ts",
+      "classification": "native_shell",
+      "ownerFeature": "config.user_config_materialization",
+      "removableNow": false,
+      "minimumTsRole": "Public loadRouteCodexConfig host-env shell and compatibility export for config source validation.",
+      "cannotShrinkFurtherBecause": "CLI/server/admin callers import loadRouteCodexConfig. Deletion requires migrating the public config loader API to native/generated bindings and replacing the compatibility export.",
+      "forbiddenSemantics": ["file read", "TOML parsing", "provider root loading", "runtime materialization"]
+    },
+    {
+      "path": "src/config/toml-basic.ts",
+      "classification": "native_shell",
+      "ownerFeature": "config.toml_codec",
+      "removableNow": false,
+      "minimumTsRole": "parseTomlRecord/serializeTomlRecord public wrappers over Rust TOML codec.",
+      "cannotShrinkFurtherBecause": "CLI/tests/config authoring code import these public helpers. Deletion requires replacing callers with native/generated codec bindings.",
+      "forbiddenSemantics": ["TOML parse semantics", "TOML serialize semantics"]
+    },
+    {
+      "path": "src/config/toml-comment-preserving.ts",
+      "classification": "native_shell",
+      "ownerFeature": "config.toml_codec",
+      "removableNow": false,
+      "minimumTsRole": "Public wrapper for Rust comment-preserving scalar patch.",
+      "cannotShrinkFurtherBecause": "Config writer tests and direct patch callers still import this stable helper. Deletion requires moving those callers to native/generated patch bindings.",
+      "forbiddenSemantics": ["comment-preserving patch semantics", "TOML parsing"]
+    },
+    {
+      "path": "src/config/unified-config-paths.ts",
+      "classification": "native_shell",
+      "ownerFeature": "config.path_resolution_surface",
+      "removableNow": false,
+      "minimumTsRole": "UnifiedConfigPathResolver class facade over Rust config path resolver.",
+      "cannotShrinkFurtherBecause": "config-paths.ts and tests still use the public class facade. Deletion requires public path API migration.",
+      "forbiddenSemantics": ["candidate list construction", "env precedence", "directory scan", "TOML-only rejection"]
+    },
+    {
+      "path": "src/config/user-config-codec.ts",
+      "classification": "host_io_shell",
+      "ownerFeature": "config.user_config_codec",
+      "removableNow": false,
+      "minimumTsRole": "User config read API, injected sync fs test boundary, TOML-only native detect/decode calls, and return types.",
+      "cannotShrinkFurtherBecause": "CLI/admin/tests still call the public codec API and sync tests pass injected fsImpl. Removing it requires moving host IO and injected-fs boundaries to a Rust-backed or generated API.",
+      "forbiddenSemantics": ["TOML parsing", "format semantics", "JSON support"]
+    },
+    {
+      "path": "src/config/user-config-loader.ts",
+      "classification": "native_shell",
+      "ownerFeature": "config.user_config_materialization",
+      "removableNow": false,
+      "minimumTsRole": "Lower-level native manifest/materialization shell and runtime manifest type surface for direct materialization callers.",
+      "cannotShrinkFurtherBecause": "Server bootstrap/runtime setup and config tests call compileRouteCodexRuntimeConfigManifest/materializeRouteCodexConfig directly. Deletion requires moving these public entrypoints and TypeScript manifest type surface to generated/native bindings.",
+      "forbiddenSemantics": ["v2 normalization", "routingPolicyGroup selection", "provider extraction", "manifest materialization", "provider profile projection"]
+    },
+    {
+      "path": "src/config/user-config-writer.ts",
+      "classification": "native_shell",
+      "ownerFeature": "config.user_config_write_surface",
+      "removableNow": false,
+      "minimumTsRole": "Public async user config writer and scalar patch native facade.",
+      "cannotShrinkFurtherBecause": "CLI/admin callers import writeUserConfigFile/updateUserConfigStringScalar. Deletion requires migrating those public entrypoints to native/generated bindings.",
+      "forbiddenSemantics": ["TOML serialization", "atomic write policy", "scalar patch semantics"]
+    },
+    {
+      "path": "src/config/user-data-paths.d.ts",
+      "classification": "type_shell",
+      "ownerFeature": "config.path_resolution_surface",
+      "removableNow": false,
+      "minimumTsRole": "Tracked declaration surface for user-data-paths public API.",
+      "cannotShrinkFurtherBecause": "It is a published declaration artifact for a heavily imported runtime path API. Deletion requires replacing the declaration generation/public API surface, not config semantic migration.",
+      "forbiddenSemantics": ["path resolution", "env mutation", "runtime IO"]
+    },
+    {
+      "path": "src/config/user-data-paths.ts",
+      "classification": "host_io_shell",
+      "ownerFeature": "config.path_resolution_surface",
+      "removableNow": false,
+      "minimumTsRole": "RCC subdir constants, native path resolver calls, and process.env publication for host runtime.",
+      "cannotShrinkFurtherBecause": "Many CLI/server/debug/runtime callers import this path API and ensureRccUserDirEnvironment mutates Node process.env. Deletion requires a separate runtime lifecycle/public path API migration.",
+      "forbiddenSemantics": ["RCC root precedence", "subpath joining semantics", "snapshot env precedence", "retired path fallback"]
+    }
+  ]
+}

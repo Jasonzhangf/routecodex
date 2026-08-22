@@ -1,0 +1,250 @@
+{
+  "sourceProvider": "OpenAI",
+  "targetProvider": "Ollama",
+  "description": "Transformation table for converting OpenAI API format to Ollama compatible format",
+  "version": "1.0",
+  "endpointMappings": {
+    "chatCompletions": {
+      "sourceEndpoint": "/v1/chat/completions",
+      "targetEndpoint": "/api/chat",
+      "method": "POST"
+    },
+    "completions": {
+      "sourceEndpoint": "/v1/completions",
+      "targetEndpoint": "/api/generate",
+      "method": "POST"
+    },
+    "models": {
+      "sourceEndpoint": "/v1/models",
+      "targetEndpoint": "/api/tags",
+      "method": "GET"
+    },
+    "embeddings": {
+      "sourceEndpoint": "/v1/embeddings",
+      "targetEndpoint": "/api/embeddings",
+      "method": "POST"
+    }
+  },
+  "requestMappings": {
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping",
+      "description": "Ollama uses the same model parameter format"
+    },
+    "messages": {
+      "sourcePath": "messages",
+      "targetPath": "messages",
+      "transform": "directMapping",
+      "description": "Ollama uses the same message structure as OpenAI"
+    },
+    "maxTokens": {
+      "sourcePath": "max_tokens",
+      "targetPath": "options.num_predict",
+      "transform": "directMapping"
+    },
+    "temperature": {
+      "sourcePath": "temperature",
+      "targetPath": "options.temperature",
+      "transform": "directMapping"
+    },
+    "topP": {
+      "sourcePath": "top_p",
+      "targetPath": "options.top_p",
+      "transform": "directMapping"
+    },
+    "frequencyPenalty": {
+      "sourcePath": "frequency_penalty",
+      "targetPath": "options.repeat_penalty",
+      "transform": "penaltyMapping"
+    },
+    "presencePenalty": {
+      "sourcePath": "presence_penalty",
+      "targetPath": "options.presence_penalty",
+      "transform": "directMapping"
+    },
+    "stop": {
+      "sourcePath": "stop",
+      "targetPath": "options.stop",
+      "transform": "arrayMapping"
+    },
+    "stream": {
+      "sourcePath": "stream",
+      "targetPath": "stream",
+      "transform": "directMapping"
+    },
+    "seed": {
+      "sourcePath": "seed",
+      "targetPath": "options.seed",
+      "transform": "directMapping"
+    }
+  },
+  "responseMappings": {
+    "id": {
+      "sourcePath": "id",
+      "targetPath": "id",
+      "transform": "directMapping"
+    },
+    "object": {
+      "sourcePath": "object",
+      "targetPath": "object",
+      "transform": "directMapping"
+    },
+    "created": {
+      "sourcePath": "created",
+      "targetPath": "created",
+      "transform": "directMapping"
+    },
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping"
+    },
+    "choices": {
+      "sourcePath": "choices",
+      "targetPath": "choices",
+      "transform": "directMapping"
+    },
+    "usage": {
+      "sourcePath": "usage",
+      "targetPath": "usage",
+      "transform": "directMapping"
+    }
+  },
+  "completionMappings": {
+    "prompt": {
+      "sourcePath": "prompt",
+      "targetPath": "prompt",
+      "transform": "directMapping"
+    },
+    "suffix": {
+      "sourcePath": "suffix",
+      "targetPath": "suffix",
+      "transform": "directMapping"
+    }
+  },
+  "embeddingMappings": {
+    "input": {
+      "sourcePath": "input",
+      "targetPath": "input",
+      "transform": "directMapping"
+    },
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping"
+    }
+  },
+  "optionsMappings": {
+    "numCtx": {
+      "sourcePath": "num_ctx",
+      "targetPath": "options.num_ctx",
+      "transform": "directMapping"
+    },
+    "numBatch": {
+      "sourcePath": "num_batch",
+      "targetPath": "options.num_batch",
+      "transform": "directMapping"
+    },
+    "numGpu": {
+      "sourcePath": "num_gpu",
+      "targetPath": "options.num_gpu",
+      "transform": "directMapping"
+    },
+    "mainGpu": {
+      "sourcePath": "main_gpu",
+      "targetPath": "options.main_gpu",
+      "transform": "directMapping"
+    },
+    "lowVram": {
+      "sourcePath": "low_vram",
+      "targetPath": "options.low_vram",
+      "transform": "directMapping"
+    },
+    "f16Kv": {
+      "sourcePath": "f16_kv",
+      "targetPath": "options.f16_kv",
+      "transform": "directMapping"
+    },
+    "logitsAll": {
+      "sourcePath": "logits_all",
+      "targetPath": "options.logits_all",
+      "transform": "directMapping"
+    },
+    "vocabOnly": {
+      "sourcePath": "vocab_only",
+      "targetPath": "options.vocab_only",
+      "transform": "directMapping"
+    },
+    "useMmap": {
+      "sourcePath": "use_mmap",
+      "targetPath": "options.use_mmap",
+      "transform": "directMapping"
+    },
+    "useMlock": {
+      "sourcePath": "use_mlock",
+      "targetPath": "options.use_mlock",
+      "transform": "directMapping"
+    },
+    "numThread": {
+      "sourcePath": "num_thread",
+      "targetPath": "options.num_thread",
+      "transform": "directMapping"
+    }
+  },
+  "streamMappings": {
+    "chunkFormat": {
+      "sourceFormat": "data: {JSON}",
+      "targetFormat": "JSON line",
+      "transform": "formatConversion"
+    },
+    "eventTypes": {
+      "message_start": "start",
+      "message_delta": "response",
+      "message_stop": "done"
+    }
+  },
+  "authentication": {
+    "apiKey": {
+      "sourceHeader": "Authorization: Bearer {token}",
+      "targetHeader": "Not required",
+      "transform": "removeHeader"
+    }
+  },
+  "headers": {
+    "contentType": {
+      "sourceHeader": "Content-Type: application/json",
+      "targetHeader": "Content-Type: application/json",
+      "transform": "directMapping"
+    }
+  },
+  "errorMappings": {
+    "errorResponse": {
+      "sourceFormat": {
+        "error": {
+          "message": "string",
+          "type": "string",
+          "code": "string"
+        }
+      },
+      "targetFormat": {
+        "error": "string"
+      },
+      "transform": "errorFormatConversion"
+    }
+  },
+  "specialFeatures": {
+    "localModels": {
+      "description": "Ollama runs local models",
+      "handling": "No special transformation needed"
+    },
+    "modelManagement": {
+      "description": "Ollama manages model lifecycle",
+      "handling": "Use /api/tags for model listing, /api/pull for downloading"
+    },
+    "quantization": {
+      "description": "Ollama supports quantized models",
+      "handling": "Handled automatically by Ollama"
+    }
+  }
+}

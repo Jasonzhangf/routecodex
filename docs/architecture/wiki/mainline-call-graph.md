@@ -1,0 +1,1270 @@
+<!-- AUTO-GENERATED: do not edit by hand. Rebuild with `npm run render:architecture-mainline-mermaid`. -->
+# Mainline Call Graph
+
+Source of truth:
+- `docs/architecture/mainline-call-map.yml` defines request/response/error edges
+- `docs/architecture/function-map.yml` enriches owner summary and owner module context
+
+Render rules:
+- Mermaid page is a render artifact, not a second architecture truth source.
+- `anchored` = verified caller/callee binding
+- `partial` = edge is bound, but only part of the transition is concretely anchored
+- `binding pending` = edge intentionally left unresolved until code audit pins the real bridge
+
+## architecture.repository_filesystem.mainline
+
+Repository authoring policy is verified by the required repo-sanity build and CI gate without entering runtime paths.
+
+Entry contract: `RepoFilesystemAuthoring01Policy` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  RepoFilesystemVerify02Gate["RepoFilesystemVerify02Gate"]
+  RepoFilesystemAuthoring01Policy["RepoFilesystemAuthoring01Policy"]
+  RepoFilesystemAuthoring01Policy -->|repo-filesystem-01| RepoFilesystemVerify02Gate
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class RepoFilesystemAuthoring01Policy anchored;
+  class RepoFilesystemVerify02Gate anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| repo-filesystem-01 | `RepoFilesystemAuthoring01Policy -> RepoFilesystemVerify02Gate` | anchored | `checkRepositoryFilesystemGovernance -> verifyRepositoryFilesystemGovernance` |  | `architecture.repository_filesystem_governance`<br/>repository root, generated output, tracked residue, and critical source ignore governance |
+
+## config.user_config_materialization.mainline
+
+RouteCodex runtime config loading flows from the public TS shell into the native Rust loader, then into Rust path/provider/materialization owners before returning LoadedRouteCodexConfig.
+
+Entry contract: `ConfigLoad01PublicShell` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  HubConfig03RuntimeRouteTierArtifacts["HubConfig03RuntimeRouteTierArtifacts"]
+  HubConfig02RuntimePolicyArtifacts["HubConfig02RuntimePolicyArtifacts"]
+  HubConfig01PipelineRuntimeArtifact["HubConfig01PipelineRuntimeArtifact"]
+  VrConfig02NativeBootstrap["VrConfig02NativeBootstrap"]
+  VrConfig01RustBootstrapArtifact["VrConfig01RustBootstrapArtifact"]
+  ConfigLoad06LoadedConfigReturned["ConfigLoad06LoadedConfigReturned"]
+  ConfigLoad05RuntimeManifestCompiled["ConfigLoad05RuntimeManifestCompiled"]
+  ConfigLoad04UserConfigParsed["ConfigLoad04UserConfigParsed"]
+  ConfigLoad03RustLoader["ConfigLoad03RustLoader"]
+  ConfigLoad02NativeBridge["ConfigLoad02NativeBridge"]
+  ConfigLoad01PublicShell["ConfigLoad01PublicShell"]
+  ConfigLoad01PublicShell -->|cfg-load-01| ConfigLoad02NativeBridge
+  ConfigLoad02NativeBridge -->|cfg-load-02| ConfigLoad03RustLoader
+  ConfigLoad03RustLoader -->|cfg-load-03| ConfigLoad04UserConfigParsed
+  ConfigLoad04UserConfigParsed -->|cfg-load-04| ConfigLoad05RuntimeManifestCompiled
+  ConfigLoad05RuntimeManifestCompiled -->|cfg-load-05| ConfigLoad06LoadedConfigReturned
+  ConfigLoad05RuntimeManifestCompiled -->|cfg-runtime-vr-01| VrConfig01RustBootstrapArtifact
+  VrConfig01RustBootstrapArtifact -->|cfg-runtime-vr-02| VrConfig02NativeBootstrap
+  ConfigLoad05RuntimeManifestCompiled -->|cfg-runtime-hub-01| HubConfig01PipelineRuntimeArtifact
+  HubConfig01PipelineRuntimeArtifact -->|cfg-runtime-hub-02| HubConfig02RuntimePolicyArtifacts
+  HubConfig01PipelineRuntimeArtifact -->|cfg-runtime-hub-03| HubConfig03RuntimeRouteTierArtifacts
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ConfigLoad01PublicShell anchored;
+  class ConfigLoad02NativeBridge anchored;
+  class ConfigLoad03RustLoader anchored;
+  class ConfigLoad04UserConfigParsed anchored;
+  class ConfigLoad05RuntimeManifestCompiled anchored;
+  class ConfigLoad06LoadedConfigReturned anchored;
+  class VrConfig01RustBootstrapArtifact anchored;
+  class VrConfig02NativeBootstrap anchored;
+  class HubConfig01PipelineRuntimeArtifact anchored;
+  class HubConfig02RuntimePolicyArtifacts anchored;
+  class HubConfig03RuntimeRouteTierArtifacts anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| cfg-load-01 | `ConfigLoad01PublicShell -> ConfigLoad02NativeBridge` | anchored | `loadRouteCodexConfig -> loadRouteCodexConfigNativeSync` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-load-02 | `ConfigLoad02NativeBridge -> ConfigLoad03RustLoader` | anchored | `loadRouteCodexConfigNativeSync -> load_route_codex_config_json` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-load-03 | `ConfigLoad03RustLoader -> ConfigLoad04UserConfigParsed` | anchored | `load_route_codex_config_json -> load_routecodex_config_json` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-load-04 | `ConfigLoad04UserConfigParsed -> ConfigLoad05RuntimeManifestCompiled` | anchored | `load_routecodex_config_json -> compile_routecodex_runtime_manifest_json` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-load-05 | `ConfigLoad05RuntimeManifestCompiled -> ConfigLoad06LoadedConfigReturned` | anchored | `load_routecodex_config_json -> materialize_routecodex_user_config_from_manifest_json` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-runtime-vr-01 | `ConfigLoad05RuntimeManifestCompiled -> VrConfig01RustBootstrapArtifact` | anchored | `resolveRouterBootstrapConfig -> compileRouteCodexRuntimeConfigManifest` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-runtime-vr-02 | `VrConfig01RustBootstrapArtifact -> VrConfig02NativeBootstrap` | anchored | `bootstrapVirtualRouter -> bootstrapVirtualRouterConfig` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-runtime-hub-01 | `ConfigLoad05RuntimeManifestCompiled -> HubConfig01PipelineRuntimeArtifact` | anchored | `setupRuntime -> getRuntimeConfigManifestFromBootstrapInput` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-runtime-hub-02 | `HubConfig01PipelineRuntimeArtifact -> HubConfig02RuntimePolicyArtifacts` | anchored | `extractProviderKeysFromPipelineRuntimeConfig -> compile_routecodex_runtime_manifest` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-runtime-hub-03 | `HubConfig01PipelineRuntimeArtifact -> HubConfig03RuntimeRouteTierArtifacts` | anchored | `extractRoutingTiersForPipelineRuntimeConfigRoute -> compile_routecodex_runtime_manifest` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+
+## v3.v2_config_toml_compat_5555.mainline
+
+V3 config store detects explicit V2 root TOML and compiles it with provider config.v2.toml files into the V3 published manifest for 5555.
+
+Entry contract: `V3Config01FileSource` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  V3Config05ManifestPublished["V3Config05ManifestPublished"]
+  V3Config02AuthoringParsed["V3Config02AuthoringParsed"]
+  V3Config01FileSource["V3Config01FileSource"]
+  V3Config01FileSource -->|v3-v2-config-01| V3Config02AuthoringParsed
+  V3Config02AuthoringParsed -->|v3-v2-config-02| V3Config05ManifestPublished
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class V3Config01FileSource anchored;
+  class V3Config02AuthoringParsed anchored;
+  class V3Config05ManifestPublished anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| v3-v2-config-01 | `V3Config01FileSource -> V3Config02AuthoringParsed` | anchored | `parse_authoring_for_store -> compile_v2_config_02_authoring_from_file` |  | `v3.v2_config_toml_compat_5555`<br/>V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract |
+| v3-v2-config-02 | `V3Config02AuthoringParsed -> V3Config05ManifestPublished` | anchored | `load_snapshot_with_source_identity -> validate_v3_config_03_schema_from_v3_config_02` |  | `v3.v2_config_toml_compat_5555`<br/>V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract |
+
+## servertool.hook_skeleton.mainline
+
+Servertool standard hook skeleton: CLI remains the business execution lifecycle, while request/result injection, response interception, schema validation, hook response injection, followup/reenter effect planning, and finalization are governed by Rust-owned required/optional hooks.
+
+Entry contract: `HubRespChatProcess03Governed` via `docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md`
+
+```mermaid
+flowchart LR
+  HubReqChatProcess03Governed["HubReqChatProcess03Governed"]
+  ServertoolReqHook04RequestFinalized["ServertoolReqHook04RequestFinalized"]
+  ServertoolReqHook03ToolInjected["ServertoolReqHook03ToolInjected"]
+  ServertoolReqHook02TextRewritten["ServertoolReqHook02TextRewritten"]
+  ServertoolReqHook01ResultParsed["ServertoolReqHook01ResultParsed"]
+  ChatProcReqContinuation03CanonicalRestored["ChatProcReqContinuation03CanonicalRestored"]
+  ServertoolCli04ClientExecuted["ServertoolCli04ClientExecuted"]
+  HubRespOutbound04ClientSemantic["HubRespOutbound04ClientSemantic"]
+  ServertoolRespHook06ProjectionFinalized["ServertoolRespHook06ProjectionFinalized"]
+  ServertoolRespHook03HookResponseInjected["ServertoolRespHook03HookResponseInjected"]
+  ServertoolRespHook02SchemaValidated["ServertoolRespHook02SchemaValidated"]
+  ServertoolRespHook01Intercepted["ServertoolRespHook01Intercepted"]
+  HubRespChatProcess03Governed["HubRespChatProcess03Governed"]
+  HubRespChatProcess03Governed -->|sth-resp-01| ServertoolRespHook01Intercepted
+  ServertoolRespHook01Intercepted -->|sth-resp-02| ServertoolRespHook02SchemaValidated
+  ServertoolRespHook02SchemaValidated -->|sth-resp-03| ServertoolRespHook03HookResponseInjected
+  ServertoolRespHook03HookResponseInjected -->|sth-resp-06| ServertoolRespHook06ProjectionFinalized
+  ServertoolRespHook06ProjectionFinalized -->|sth-resp-07| HubRespOutbound04ClientSemantic
+  ServertoolRespHook03HookResponseInjected -->|sth-cli-01| ServertoolCli04ClientExecuted
+  ChatProcReqContinuation03CanonicalRestored -->|sth-req-01| ServertoolReqHook01ResultParsed
+  ServertoolReqHook01ResultParsed -->|sth-req-02| ServertoolReqHook02TextRewritten
+  ServertoolReqHook02TextRewritten -->|sth-req-03| ServertoolReqHook03ToolInjected
+  ServertoolReqHook03ToolInjected -->|sth-req-04| ServertoolReqHook04RequestFinalized
+  ServertoolReqHook04RequestFinalized -->|sth-req-05| HubReqChatProcess03Governed
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class HubRespChatProcess03Governed anchored;
+  class ServertoolRespHook01Intercepted anchored;
+  class ServertoolRespHook02SchemaValidated anchored;
+  class ServertoolRespHook03HookResponseInjected anchored;
+  class ServertoolRespHook06ProjectionFinalized anchored;
+  class HubRespOutbound04ClientSemantic anchored;
+  class ServertoolCli04ClientExecuted anchored;
+  class ChatProcReqContinuation03CanonicalRestored anchored;
+  class ServertoolReqHook01ResultParsed anchored;
+  class ServertoolReqHook02TextRewritten anchored;
+  class ServertoolReqHook03ToolInjected anchored;
+  class ServertoolReqHook04RequestFinalized anchored;
+  class HubReqChatProcess03Governed anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| sth-resp-01 | `HubRespChatProcess03Governed -> ServertoolRespHook01Intercepted` | anchored | `execute -> run_servertool_response_hooks` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| sth-resp-02 | `ServertoolRespHook01Intercepted -> ServertoolRespHook02SchemaValidated` | anchored | `run_stopless_response_hook -> inspect_stop_gateway_signal` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| sth-resp-03 | `ServertoolRespHook02SchemaValidated -> ServertoolRespHook03HookResponseInjected` | anchored | `run_stopless_response_hook -> run_stopless_auto_handler_runtime_json` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| sth-resp-06 | `ServertoolRespHook03HookResponseInjected -> ServertoolRespHook06ProjectionFinalized` | anchored | `run_stopless_response_hook -> build_stopless_auto_cli_projection_from_engine_json` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| sth-resp-07 | `ServertoolRespHook06ProjectionFinalized -> HubRespOutbound04ClientSemantic` | anchored | `finalize_hub_resp_outbound_04_client_semantic -> build_hub_resp_outbound_04_client_payload_for_protocol` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| sth-cli-01 | `ServertoolRespHook03HookResponseInjected -> ServertoolCli04ClientExecuted` | anchored | `build_stopless_auto_cli_projection_from_engine_json -> build_stopless_auto_cli_projection_json` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| sth-req-01 | `ChatProcReqContinuation03CanonicalRestored -> ServertoolReqHook01ResultParsed` | anchored | `run_servertool_request_hooks -> apply_req_process_tool_governance` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| sth-req-02 | `ServertoolReqHook01ResultParsed -> ServertoolReqHook02TextRewritten` | anchored | `normalize_responses_input_function_calls -> build_stop_hook_guidance_text_from_output` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
+| sth-req-03 | `ServertoolReqHook02TextRewritten -> ServertoolReqHook03ToolInjected` | anchored | `apply_req_process_tool_governance -> maybe_apply_servertool_orchestration` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
+| sth-req-04 | `ServertoolReqHook03ToolInjected -> ServertoolReqHook04RequestFinalized` | anchored | `apply_req_process_tool_governance -> build_processed_request` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
+| sth-req-05 | `ServertoolReqHook04RequestFinalized -> HubReqChatProcess03Governed` | anchored | `apply_hub_req_chatprocess_03_tool_governance -> run_hub_req_chatprocess_03_governed_entrypoint` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
+
+## request.mainline
+
+HTTP request enters host, standardizes in Hub, routes via VR, exits through provider wire build.
+
+Entry contract: `ServerReqInbound01ClientRaw` via `docs/design/pipeline-type-topology-and-module-boundaries.md`
+
+```mermaid
+flowchart LR
+  ProviderReqOutbound06WirePayload["ProviderReqOutbound06WirePayload"]
+  HubReqOutbound05ProviderSemantic["HubReqOutbound05ProviderSemantic"]
+  VrRoute04SelectedTarget["VrRoute04SelectedTarget"]
+  HubReqChatProcess03Governed["HubReqChatProcess03Governed"]
+  HubReqInbound02Standardized["HubReqInbound02Standardized"]
+  ServerReqInbound01ClientRaw["ServerReqInbound01ClientRaw"]
+  ServerReqInbound01ClientRaw -->|req-00| HubReqInbound02Standardized
+  ServerReqInbound01ClientRaw -->|req-01| HubReqInbound02Standardized
+  HubReqInbound02Standardized -->|req-02| HubReqChatProcess03Governed
+  HubReqChatProcess03Governed -->|req-03| VrRoute04SelectedTarget
+  VrRoute04SelectedTarget -->|req-04| HubReqOutbound05ProviderSemantic
+  HubReqOutbound05ProviderSemantic -->|req-05| ProviderReqOutbound06WirePayload
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ServerReqInbound01ClientRaw anchored;
+  class HubReqInbound02Standardized anchored;
+  class HubReqChatProcess03Governed anchored;
+  class VrRoute04SelectedTarget anchored;
+  class HubReqOutbound05ProviderSemantic anchored;
+  class ProviderReqOutbound06WirePayload anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| req-00 | `ServerReqInbound01ClientRaw -> HubReqInbound02Standardized` | anchored | `prepareResponsesHandlerEntryForHttp -> planResponsesHandlerEntry` |  | `server.responses_request_handler_bridge_surface`<br/>/v1/responses request handler uses one opaque request facade only; protocol semantics stay in Hub Pipeline/native owner |
+| req-01 | `ServerReqInbound01ClientRaw -> HubReqInbound02Standardized` | anchored | `buildResponsesRequestContextForHttp -> captureReqInboundResponsesContextSnapshotJson` |  | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse |
+| req-02 | `HubReqInbound02Standardized -> HubReqChatProcess03Governed` | anchored | `captureReqInboundResponsesContextSnapshotJson -> capture_req_inbound_responses_context_snapshot_json` |  | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse |
+| req-03 | `HubReqChatProcess03Governed -> VrRoute04SelectedTarget` | anchored | `execute -> run_vr_route_04_selected_target_entrypoint` |  | `hub.route_selection_bridge`<br/>Hub req-03 Rust bridge that seals virtual-router decisions into `VrRoute04SelectedTarget` |
+| req-04 | `VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic` | anchored | `execute -> run_hub_req_outbound_05_provider_semantic_entrypoint` |  | `hub.req_outbound_provider_semantic`<br/>Hub req-04 Rust bridge that applies `VrRoute04SelectedTarget` to `HubReqOutbound05ProviderSemantic` |
+| req-05 | `HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload` | anchored | `execute -> run_req_outbound_stage3_compat` |  | `responses.request_compat_normalization`<br/>Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only |
+
+## responses.direct_passthrough.mainline
+
+Responses same-protocol direct keeps the current request body as provider wire, uses Virtual Router only for target selection, and must not preflight, sanitize, repair, or replay historical tool shape in the server layer.
+
+Entry contract: `ServerReqInbound01ClientRaw` via `docs/architecture/wiki/responses-direct-relay-map.md`
+
+```mermaid
+flowchart LR
+  ProviderReqOutbound06WirePayload["ProviderReqOutbound06WirePayload"]
+  VrRoute04SelectedTarget["VrRoute04SelectedTarget"]
+  ServerReqInbound01ClientRaw["ServerReqInbound01ClientRaw"]
+  ServerReqInbound01ClientRaw -->|rdp-01| VrRoute04SelectedTarget
+  VrRoute04SelectedTarget -->|rdp-02| ProviderReqOutbound06WirePayload
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ServerReqInbound01ClientRaw anchored;
+  class VrRoute04SelectedTarget anchored;
+  class ProviderReqOutbound06WirePayload anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| rdp-01 | `ServerReqInbound01ClientRaw -> VrRoute04SelectedTarget` | anchored | `executeRouterDirectPipelineForPort -> route` |  | `responses.direct_tool_shape_contract`<br/>Responses direct passthrough must keep the current request body as provider wire; live direct does not validate, sanitize, replay raw metadata, or force relay for tool shape |
+| rdp-02 | `VrRoute04SelectedTarget -> ProviderReqOutbound06WirePayload` | anchored | `executeRouterDirectPipelineForPort -> executeRouterDirectPipeline` |  | `responses.direct_tool_shape_contract`<br/>Responses direct passthrough must keep the current request body as provider wire; live direct does not validate, sanitize, replay raw metadata, or force relay for tool shape |
+
+## direct.semantic_classification.mainline
+
+Explicit provider/model direct policy compiles to a closed semantic class, resolves only after Virtual Router selects a real target, and drives paired request/response projection plans without payload inference.
+
+Entry contract: `ConfigDirect01AuthoringPolicy` via `docs/design/direct-semantic-classification.md`
+
+```mermaid
+flowchart LR
+  DirectResp05ProjectionPlan["DirectResp05ProjectionPlan"]
+  DirectReq04ProjectionPlan["DirectReq04ProjectionPlan"]
+  VrDirect03ResolvedSemantics["VrDirect03ResolvedSemantics"]
+  ConfigDirect02ValidatedPolicy["ConfigDirect02ValidatedPolicy"]
+  ConfigDirect01AuthoringPolicy["ConfigDirect01AuthoringPolicy"]
+  ConfigDirect01AuthoringPolicy -->|dsc-01| ConfigDirect02ValidatedPolicy
+  ConfigDirect02ValidatedPolicy -->|dsc-02| VrDirect03ResolvedSemantics
+  VrDirect03ResolvedSemantics -->|dsc-03| DirectReq04ProjectionPlan
+  VrDirect03ResolvedSemantics -->|dsc-04| DirectResp05ProjectionPlan
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ConfigDirect01AuthoringPolicy anchored;
+  class ConfigDirect02ValidatedPolicy anchored;
+  class VrDirect03ResolvedSemantics anchored;
+  class DirectReq04ProjectionPlan anchored;
+  class DirectResp05ProjectionPlan anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| dsc-01 | `ConfigDirect01AuthoringPolicy -> ConfigDirect02ValidatedPolicy` | anchored | `normalize_model_direct_policy -> validate_config_direct_02` |  | `hub.direct_semantic_classification`<br/>Rust-owned provider/model direct semantic classification shared by Virtual Router real-target resolution and paired request/response projectors |
+| dsc-02 | `ConfigDirect02ValidatedPolicy -> VrDirect03ResolvedSemantics` | anchored | `resolve_direct_semantic_classification_json -> resolve_direct_semantic_classification` |  | `hub.direct_semantic_classification`<br/>Rust-owned provider/model direct semantic classification shared by Virtual Router real-target resolution and paired request/response projectors |
+| dsc-03 | `VrDirect03ResolvedSemantics -> DirectReq04ProjectionPlan` | anchored | `plan_request_hooks -> build_direct_req_04_projection_plan` |  | `hub.direct_semantic_classification`<br/>Rust-owned provider/model direct semantic classification shared by Virtual Router real-target resolution and paired request/response projectors |
+| dsc-04 | `VrDirect03ResolvedSemantics -> DirectResp05ProjectionPlan` | anchored | `plan_direct_route_response_action -> build_direct_resp_05_projection_plan` |  | `hub.direct_semantic_classification`<br/>Rust-owned provider/model direct semantic classification shared by Virtual Router real-target resolution and paired request/response projectors |
+
+## response.mainline
+
+Provider response enters Hub, gets governed, then projects to client protocol and server frame.
+
+Entry contract: `ProviderRespInbound01Raw` via `docs/design/pipeline-type-topology-and-module-boundaries.md`
+
+```mermaid
+flowchart LR
+  ServerRespOutbound05ClientFrame["ServerRespOutbound05ClientFrame"]
+  HubRespOutbound04ClientSemantic["HubRespOutbound04ClientSemantic"]
+  HubRespChatProcess03Governed["HubRespChatProcess03Governed"]
+  HubRespInbound02Parsed["HubRespInbound02Parsed"]
+  ProviderRespInbound01Raw["ProviderRespInbound01Raw"]
+  ProviderRespInbound01Raw -->|resp-01| HubRespInbound02Parsed
+  HubRespInbound02Parsed -->|resp-02| HubRespChatProcess03Governed
+  HubRespChatProcess03Governed -->|resp-03| HubRespOutbound04ClientSemantic
+  HubRespOutbound04ClientSemantic -->|resp-04| ServerRespOutbound05ClientFrame
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ProviderRespInbound01Raw anchored;
+  class HubRespInbound02Parsed anchored;
+  class HubRespChatProcess03Governed anchored;
+  class HubRespOutbound04ClientSemantic anchored;
+  class ServerRespOutbound05ClientFrame anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| resp-01 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `run_hub_resp_inbound_02_parsed_entrypoint -> parse_hub_resp_inbound_02_from_provider_resp_inbound_01` |  | `hub.response_provider_sse_materialization`<br/>Provider response SSE marker/bodyText materialization before Rust Hub response pipeline entry |
+| resp-02 | `HubRespInbound02Parsed -> HubRespChatProcess03Governed` | anchored | `run_hub_resp_chatprocess_03_governed_entrypoint -> build_hub_resp_chatprocess_03_from_hub_resp_inbound_02` |  | `hub.response_responses_chat_projection`<br/>OpenAI Responses provider payload to OpenAI Chat client semantic projection, including bridge response actions and Responses retention carriers |
+| resp-03 | `HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic` | anchored | `prepareResponsesJsonClientDispatchPlanForHttp -> projectResponsesClientPayloadForClientNative` |  | `hub.response_responses_client_projection`<br/>OpenAI Responses client-visible payload projection for JSON body and SSE frames after HubRespChatProcess03Governed normalization, including apply_patch freeform custom tool output plus client-visible model/reasoning restore |
+| resp-04 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `sendPipelineResponse -> sendSsePipelineResponse` |  | `server.responses_response_handler_bridge_surface`<br/>/v1/responses response dispatch is an opaque response projection/conversation facade for handler-local HTTP IO plus Rust/NAPI response projection; duplicate response bridge facade is deleted |
+
+## responses.continuation.mainline
+
+Responses continuation mainline is a Chat Process boundary block: request-side Responses restore runs after HubReqInbound02Standardized and before HubReqChatProcess03Governed; response-side save runs after HubRespChatProcess03Governed and before HubRespOutbound04ClientSemantic; SSE remains transport-only after semantic finalization.
+
+Entry contract: `ChatProcReqContinuation01EntryEvidence` via `docs/architecture/wiki/responses-continuation-mainline-source.md`
+
+```mermaid
+flowchart LR
+  ChatProcRespContinuation08Released["ChatProcRespContinuation08Released"]
+  ChatProcRespContinuation07CanonicalSaved["ChatProcRespContinuation07CanonicalSaved"]
+  ChatProcRespContinuation06ResponseGoverned["ChatProcRespContinuation06ResponseGoverned"]
+  ChatProcReqContinuation05Governed["ChatProcReqContinuation05Governed"]
+  ChatProcReqContinuation04HookRestored["ChatProcReqContinuation04HookRestored"]
+  ChatProcReqContinuation03CanonicalRestored["ChatProcReqContinuation03CanonicalRestored"]
+  ChatProcReqContinuation02OwnerResolved["ChatProcReqContinuation02OwnerResolved"]
+  ChatProcReqContinuation01EntryEvidence["ChatProcReqContinuation01EntryEvidence"]
+  ChatProcReqContinuation01EntryEvidence -->|rct-01| ChatProcReqContinuation02OwnerResolved
+  ChatProcReqContinuation02OwnerResolved -->|rct-02| ChatProcReqContinuation03CanonicalRestored
+  ChatProcReqContinuation03CanonicalRestored -->|rct-03| ChatProcReqContinuation04HookRestored
+  ChatProcReqContinuation04HookRestored -->|rct-04| ChatProcReqContinuation05Governed
+  ChatProcReqContinuation05Governed -->|rct-05| ChatProcRespContinuation06ResponseGoverned
+  ChatProcRespContinuation06ResponseGoverned -->|rct-06| ChatProcRespContinuation07CanonicalSaved
+  ChatProcRespContinuation07CanonicalSaved -->|rct-07| ChatProcRespContinuation08Released
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ChatProcReqContinuation01EntryEvidence anchored;
+  class ChatProcReqContinuation02OwnerResolved anchored;
+  class ChatProcReqContinuation03CanonicalRestored anchored;
+  class ChatProcReqContinuation04HookRestored anchored;
+  class ChatProcReqContinuation05Governed anchored;
+  class ChatProcRespContinuation06ResponseGoverned anchored;
+  class ChatProcRespContinuation07CanonicalSaved anchored;
+  class ChatProcRespContinuation08Released anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| rct-01 | `ChatProcReqContinuation01EntryEvidence -> ChatProcReqContinuation02OwnerResolved` | anchored | `prepareResponsesHandlerEntryForHttp -> planResponsesContinuationRequestAction` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
+| rct-02 | `ChatProcReqContinuation02OwnerResolved -> ChatProcReqContinuation03CanonicalRestored` | anchored | `buildResponsesRequestContextForHttp -> planResponsesRequestContext` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
+| rct-03 | `ChatProcReqContinuation03CanonicalRestored -> ChatProcReqContinuation04HookRestored` | anchored | `buildResponsesRequestContextForHttp -> captureReqInboundResponsesContextSnapshotJson` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
+| rct-04 | `ChatProcReqContinuation04HookRestored -> ChatProcReqContinuation05Governed` | anchored | `captureReqInboundResponsesContextSnapshotJson -> capture_req_inbound_responses_context_snapshot_json` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
+| rct-05 | `ChatProcReqContinuation05Governed -> ChatProcRespContinuation06ResponseGoverned` | anchored | `prepareResponsesJsonClientDispatchPlanForHttp -> planResponsesJsonClientDispatchNative` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
+| rct-06 | `ChatProcRespContinuation06ResponseGoverned -> ChatProcRespContinuation07CanonicalSaved` | anchored | `convertProviderResponse -> recordResponsesResponse` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
+| rct-07 | `ChatProcRespContinuation07CanonicalSaved -> ChatProcRespContinuation08Released` | anchored | `releaseMetadataCenterForHttpResponse -> releaseMetadataCenterForHttpResponse` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
+
+## debug.unified_surface.mainline
+
+Debug unified surface governance shell for diag artifacts, snapshots, logger rendering, harness/replay, and policy observation.
+
+Entry contract: `DebugObs01SurfaceRequested` via `docs/architecture/wiki/debug-unified-surface-mainline-source.md`
+
+```mermaid
+flowchart LR
+  DebugObs07ReplayedOrInspected["DebugObs07ReplayedOrInspected"]
+  DebugObs01SurfaceRequested["DebugObs01SurfaceRequested"]
+  DebugObs01SurfaceRequested -->|dbg-01| DebugObs07ReplayedOrInspected
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class DebugObs01SurfaceRequested anchored;
+  class DebugObs07ReplayedOrInspected anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| dbg-01 | `DebugObs01SurfaceRequested -> DebugObs07ReplayedOrInspected` | anchored | `createDebugToolkit -> createDebugToolkit` |  | `debug.unified_surface`<br/>debug/diag/snapshot/logger/harness/replay/policy migration must converge on one queryable authoring surface under src/debug with per-module closeout and explicit diagnostics taxonomy |
+
+## debug.pipeline_dry_run_loop.mainline
+
+Local-only request/response dry-run loop: real API requests stop at final provider HTTP request preparation, captured client samples replay through the same entrypoint, and captured provider responses reuse the existing response converter.
+
+Entry contract: `DebugDryRun01LocalRequest` via `docs/architecture/wiki/debug-unified-surface-mainline-source.md`
+
+```mermaid
+flowchart LR
+  DebugDryRun04CapturedProviderResponse["DebugDryRun04CapturedProviderResponse"]
+  HubRespOutbound04ClientSemantic["HubRespOutbound04ClientSemantic"]
+  DebugDryRun03CapturedRequestReplay["DebugDryRun03CapturedRequestReplay"]
+  ProviderReqOutbound07TransportRequest["ProviderReqOutbound07TransportRequest"]
+  DebugDryRun02InternalControlCarrier["DebugDryRun02InternalControlCarrier"]
+  DebugDryRun01LocalRequest["DebugDryRun01LocalRequest"]
+  DebugDryRun01LocalRequest -->|ddr-01| DebugDryRun02InternalControlCarrier
+  DebugDryRun02InternalControlCarrier -->|ddr-02| ProviderReqOutbound07TransportRequest
+  DebugDryRun02InternalControlCarrier -->|ddr-03| DebugDryRun03CapturedRequestReplay
+  ProviderReqOutbound07TransportRequest -->|ddr-02b| HubRespOutbound04ClientSemantic
+  DebugDryRun04CapturedProviderResponse -->|ddr-04| HubRespOutbound04ClientSemantic
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class DebugDryRun01LocalRequest anchored;
+  class DebugDryRun02InternalControlCarrier anchored;
+  class ProviderReqOutbound07TransportRequest anchored;
+  class DebugDryRun03CapturedRequestReplay anchored;
+  class HubRespOutbound04ClientSemantic anchored;
+  class DebugDryRun04CapturedProviderResponse anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| ddr-01 | `DebugDryRun01LocalRequest -> DebugDryRun02InternalControlCarrier` | anchored | `resolvePipelineDryRunForHandler -> resolvePipelineDryRunControlFromHeaders` |  | `debug.pipeline_dry_run_loop`<br/>local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay |
+| ddr-02 | `DebugDryRun02InternalControlCarrier -> ProviderReqOutbound07TransportRequest` | anchored | `executeHttpRequestOnce -> buildProviderRequestDryRunResponse` |  | `debug.pipeline_dry_run_loop`<br/>local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay |
+| ddr-03 | `DebugDryRun02InternalControlCarrier -> DebugDryRun03CapturedRequestReplay` | anchored | `main -> fetch` |  | `debug.pipeline_dry_run_loop`<br/>local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay |
+| ddr-02b | `ProviderReqOutbound07TransportRequest -> HubRespOutbound04ClientSemantic` | anchored | `processIncoming -> plan_provider_dry_run_terminal_action_json` |  | `debug.pipeline_dry_run_terminal_action_plan`<br/>Rust-owned terminal action that returns a marked provider-request dry-run response before provider response postprocessing |
+| ddr-04 | `DebugDryRun04CapturedProviderResponse -> HubRespOutbound04ClientSemantic` | anchored | `main -> convertProviderResponseIfNeeded` |  | `debug.pipeline_dry_run_loop`<br/>local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay |
+
+## internal_error_numbering.mainline
+
+RouteCodex-owned internal debug errors are assigned stable `500-1xx/2xx/3xx` codes, projected only to debug artifacts, linked to external errors without wrapping them, and guarded from default client/provider payload leakage.
+
+Entry contract: `IntErrNum01SourceObserved` via `docs/architecture/wiki/internal-error-numbering-mainline-source.md`
+
+```mermaid
+flowchart LR
+  IntErrNum07ClientBoundaryPreserved["IntErrNum07ClientBoundaryPreserved"]
+  IntErrNum06ExternalLinked["IntErrNum06ExternalLinked"]
+  IntErrNum05DebugArtifactProjected["IntErrNum05DebugArtifactProjected"]
+  IntErrNum04EnvelopeBuilt["IntErrNum04EnvelopeBuilt"]
+  IntErrNum03SubcodeAssigned["IntErrNum03SubcodeAssigned"]
+  IntErrNum02ModuleBlockResolved["IntErrNum02ModuleBlockResolved"]
+  IntErrNum01SourceObserved["IntErrNum01SourceObserved"]
+  IntErrNum01SourceObserved -->|ien-01| IntErrNum02ModuleBlockResolved
+  IntErrNum02ModuleBlockResolved -->|ien-02| IntErrNum03SubcodeAssigned
+  IntErrNum03SubcodeAssigned -->|ien-03| IntErrNum04EnvelopeBuilt
+  IntErrNum04EnvelopeBuilt -->|ien-04| IntErrNum05DebugArtifactProjected
+  IntErrNum05DebugArtifactProjected -->|ien-05| IntErrNum06ExternalLinked
+  IntErrNum06ExternalLinked -->|ien-06| IntErrNum07ClientBoundaryPreserved
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class IntErrNum01SourceObserved anchored;
+  class IntErrNum02ModuleBlockResolved anchored;
+  class IntErrNum03SubcodeAssigned anchored;
+  class IntErrNum04EnvelopeBuilt anchored;
+  class IntErrNum05DebugArtifactProjected anchored;
+  class IntErrNum06ExternalLinked anchored;
+  class IntErrNum07ClientBoundaryPreserved anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| ien-01 | `IntErrNum01SourceObserved -> IntErrNum02ModuleBlockResolved` | anchored | `observeInternalDebugErrorSource -> resolveInternalDebugErrorModuleBlock` |  | `debug.internal_error_numbering`<br/>Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped |
+| ien-02 | `IntErrNum02ModuleBlockResolved -> IntErrNum03SubcodeAssigned` | anchored | `resolveInternalDebugErrorModuleBlock -> assignInternalDebugErrorSubcode` |  | `debug.internal_error_numbering`<br/>Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped |
+| ien-03 | `IntErrNum03SubcodeAssigned -> IntErrNum04EnvelopeBuilt` | anchored | `assignInternalDebugErrorSubcode -> buildInternalDebugErrorEnvelope` |  | `debug.internal_error_numbering`<br/>Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped |
+| ien-04 | `IntErrNum04EnvelopeBuilt -> IntErrNum05DebugArtifactProjected` | anchored | `buildInternalDebugErrorEnvelope -> projectInternalDebugErrorToDebugArtifact` |  | `debug.internal_error_numbering`<br/>Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped |
+| ien-05 | `IntErrNum05DebugArtifactProjected -> IntErrNum06ExternalLinked` | anchored | `projectInternalDebugErrorToDebugArtifact -> linkExternalError` |  | `debug.internal_error_numbering`<br/>Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped |
+| ien-06 | `IntErrNum06ExternalLinked -> IntErrNum07ClientBoundaryPreserved` | anchored | `linkExternalError -> preserveInternalErrorClientBoundary` |  | `debug.internal_error_numbering`<br/>Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped |
+
+## error.provider_action_gate.mainline
+
+Typed ErrorErr05 provider actions enter the Rust process-shared isolated-1s/sustained-5s gate; this lifecycle ends at the atomic terminal generation commit. ErrorErr05 -> ErrorErr06 remains the separate error.mainline#err-05 projection edge.
+
+Entry contract: `ErrorErr05ExecutionDecision` via `docs/goals/direct-relay-cross-request-error-storm-control-plan.md`
+
+```mermaid
+flowchart LR
+  ProviderActionGateAbandoned["ProviderActionGateAbandoned"]
+  ProviderActionGateAbandonRequested["ProviderActionGateAbandonRequested"]
+  ProviderActionGateSuccessCommitted["ProviderActionGateSuccessCommitted"]
+  ProviderActionGateSuccessRequested["ProviderActionGateSuccessRequested"]
+  ProviderActionGateTerminalCommitted["ProviderActionGateTerminalCommitted"]
+  ProviderActionGateTerminalCommitRequested["ProviderActionGateTerminalCommitRequested"]
+  ProviderActionGateAdmission["ProviderActionGateAdmission"]
+  ProviderActionGateFailureRecorded["ProviderActionGateFailureRecorded"]
+  ErrorErr05ExecutionDecision["ErrorErr05ExecutionDecision"]
+  ErrorErr05ExecutionDecision -->|error-provider-action-gate-01| ProviderActionGateFailureRecorded
+  ProviderActionGateFailureRecorded -->|error-provider-action-gate-02| ProviderActionGateAdmission
+  ProviderActionGateAdmission -->|error-provider-action-gate-03| ProviderActionGateTerminalCommitRequested
+  ProviderActionGateTerminalCommitRequested -->|error-provider-action-gate-04| ProviderActionGateTerminalCommitted
+  ProviderActionGateAdmission -->|error-provider-action-gate-05| ProviderActionGateSuccessRequested
+  ProviderActionGateSuccessRequested -->|error-provider-action-gate-06| ProviderActionGateSuccessCommitted
+  ProviderActionGateAdmission -->|error-provider-action-gate-07| ProviderActionGateAbandonRequested
+  ProviderActionGateAbandonRequested -->|error-provider-action-gate-08| ProviderActionGateAbandoned
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ErrorErr05ExecutionDecision anchored;
+  class ProviderActionGateFailureRecorded anchored;
+  class ProviderActionGateAdmission anchored;
+  class ProviderActionGateTerminalCommitRequested anchored;
+  class ProviderActionGateTerminalCommitted anchored;
+  class ProviderActionGateSuccessRequested anchored;
+  class ProviderActionGateSuccessCommitted anchored;
+  class ProviderActionGateAbandonRequested anchored;
+  class ProviderActionGateAbandoned anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| error-provider-action-gate-01 | `ErrorErr05ExecutionDecision -> ProviderActionGateFailureRecorded` | anchored | `resolveRequestExecutorProviderFailurePlan -> recordErrorActionBackoff` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-02 | `ProviderActionGateFailureRecorded -> ProviderActionGateAdmission` | anchored | `resolveRequestExecutorProviderFailurePlan -> waitErrorActionBackoffWithGate` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-03 | `ProviderActionGateAdmission -> ProviderActionGateTerminalCommitRequested` | anchored | `waitErrorActionBackoffWithGate -> commitProviderActionTerminalNative` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-04 | `ProviderActionGateTerminalCommitRequested -> ProviderActionGateTerminalCommitted` | anchored | `commit_provider_action_terminal_json -> commit_terminal` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-05 | `ProviderActionGateAdmission -> ProviderActionGateSuccessRequested` | anchored | `recordErrorActionSuccessByLaneGroup -> recordProviderActionSuccessNative` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-06 | `ProviderActionGateSuccessRequested -> ProviderActionGateSuccessCommitted` | anchored | `record_provider_action_success_json -> record_success` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-07 | `ProviderActionGateAdmission -> ProviderActionGateAbandonRequested` | anchored | `waitErrorActionBackoffWithGate -> abandonProviderActionAdmissionNative` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-08 | `ProviderActionGateAbandonRequested -> ProviderActionGateAbandoned` | anchored | `abandon_provider_action_admission_json -> abandon_admission` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+
+## error.mainline
+
+Provider/runtime/direct failures enter unified ErrorErr chain; provider availability/cooldown truth stays provider/server-scoped and must not be rewritten into session-storm truth before client projection.
+
+Entry contract: `ErrorErr01SourceRaised` via `docs/design/pipeline-type-topology-and-module-boundaries.md`
+
+```mermaid
+flowchart LR
+  ErrorErr06ClientProjected["ErrorErr06ClientProjected"]
+  ErrorErr05ExecutionDecision["ErrorErr05ExecutionDecision"]
+  ErrorErr04RouterPolicyApplied["ErrorErr04RouterPolicyApplied"]
+  ErrorErr03RuntimeClassified["ErrorErr03RuntimeClassified"]
+  ErrorErr02HostCaptured["ErrorErr02HostCaptured"]
+  ErrorErr01SourceRaised["ErrorErr01SourceRaised"]
+  ErrorErr01SourceRaised -->|err-01| ErrorErr02HostCaptured
+  ErrorErr02HostCaptured -->|err-02| ErrorErr03RuntimeClassified
+  ErrorErr03RuntimeClassified -->|err-03| ErrorErr04RouterPolicyApplied
+  ErrorErr04RouterPolicyApplied -->|err-04| ErrorErr05ExecutionDecision
+  ErrorErr05ExecutionDecision -->|err-05| ErrorErr06ClientProjected
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ErrorErr01SourceRaised anchored;
+  class ErrorErr02HostCaptured anchored;
+  class ErrorErr03RuntimeClassified anchored;
+  class ErrorErr04RouterPolicyApplied anchored;
+  class ErrorErr05ExecutionDecision anchored;
+  class ErrorErr06ClientProjected anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| err-01 | `ErrorErr01SourceRaised -> ErrorErr02HostCaptured` | anchored | `reportProviderErrorToRouterPolicy -> reportProviderErrorToRouterPolicy` |  | `error.pipeline_contract`<br/>ErrorErr01-06 provider/runtime error chain contract and architecture gate |
+| err-02 | `ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified` | anchored | `resolveProviderFailureClassification -> classify_error_err02_host_captured` |  | `error.provider_failure_policy`<br/>provider/server error cataloging, runtime classification, router policy application, and availability/cooldown truth; session-local storm semantics are explicitly separate |
+| err-03 | `ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied` | anchored | `report_provider_error_to_router_policy_json_bridge -> report_provider_error` |  | `error.pipeline_contract`<br/>ErrorErr01-06 provider/runtime error chain contract and architecture gate |
+| err-04 | `ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision` | anchored | `resolveProviderRetryExecutionPlan -> resolve_error_err05_execution_decision` |  | `error.execution_decision_consumer`<br/>Thin RequestExecutor, Router Direct, and Provider Direct consumers of Rust-owned typed ErrorErr05 actions |
+| err-05 | `ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected` | anchored | `project_error_err_06_client_from_error_err_05_execution_decision -> mapErrorToHttp` |  | `error.client_projection`<br/>ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames |
+
+## vr.route_classifier.mainline
+
+V2 Virtual Router consumes the shared Rust current-turn/tool classifier before producing the single selected-route truth.
+
+Entry contract: `HubReqChatProcess03Governed` via `docs/goals/v3-v2-route-classifier-parity-test-design.md`
+
+```mermaid
+flowchart LR
+  VrRoute04SelectedTarget["VrRoute04SelectedTarget"]
+  VrRouteClassifier03Classified["VrRouteClassifier03Classified"]
+  VrRouteClassifier03ShellClassification["VrRouteClassifier03ShellClassification"]
+  VrRouteClassifier03ToolClassification["VrRouteClassifier03ToolClassification"]
+  VrRouteClassifier03ActiveTurnSignals["VrRouteClassifier03ActiveTurnSignals"]
+  HubReqChatProcess03Governed["HubReqChatProcess03Governed"]
+  HubReqChatProcess03Governed -->|vrc-01| VrRouteClassifier03ActiveTurnSignals
+  VrRouteClassifier03ActiveTurnSignals -->|vrc-02| VrRouteClassifier03ToolClassification
+  VrRouteClassifier03ToolClassification -->|vrc-03| VrRouteClassifier03ShellClassification
+  VrRouteClassifier03ActiveTurnSignals -->|vrc-04| VrRouteClassifier03Classified
+  VrRouteClassifier03Classified -->|vrc-05| VrRoute04SelectedTarget
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class HubReqChatProcess03Governed anchored;
+  class VrRouteClassifier03ActiveTurnSignals anchored;
+  class VrRouteClassifier03ToolClassification anchored;
+  class VrRouteClassifier03ShellClassification anchored;
+  class VrRouteClassifier03Classified anchored;
+  class VrRoute04SelectedTarget anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| vrc-01 | `HubReqChatProcess03Governed -> VrRouteClassifier03ActiveTurnSignals` | anchored | `build_routing_features -> extract_active_turn_signals` |  | `vr.route_classifier`<br/>shared V2/V3 current-turn route classification contract |
+| vrc-02 | `VrRouteClassifier03ActiveTurnSignals -> VrRouteClassifier03ToolClassification` | anchored | `classify_call_value -> classify_tool_call` |  | `vr.route_classifier`<br/>shared V2/V3 current-turn route classification contract |
+| vrc-03 | `VrRouteClassifier03ToolClassification -> VrRouteClassifier03ShellClassification` | anchored | `classify_tool_call -> classify_shell_command` |  | `vr.route_classifier`<br/>shared V2/V3 current-turn route classification contract |
+| vrc-04 | `VrRouteClassifier03ActiveTurnSignals -> VrRouteClassifier03Classified` | anchored | `classify -> classify_route` |  | `vr.route_classifier`<br/>shared V2/V3 current-turn route classification contract |
+| vrc-05 | `VrRouteClassifier03Classified -> VrRoute04SelectedTarget` | anchored | `route -> classify` |  | `vr.route_selection`<br/>virtual router route classification and selected target truth |
+
+## vr.route_token_estimation.mainline
+
+Virtual Router derives request token estimate with Rust tiktoken before route classification; image/video bytes do not inflate the estimate.
+
+Entry contract: `HubReqChatProcess03Governed` via `docs/goals/vr-rust-tiktoken-image-body-limit-test-design.md`
+
+```mermaid
+flowchart LR
+  VrRoute04SelectedTarget["VrRoute04SelectedTarget"]
+  VrRouteTokenEstimate03Derived["VrRouteTokenEstimate03Derived"]
+  HubReqChatProcess03Governed["HubReqChatProcess03Governed"]
+  HubReqChatProcess03Governed -->|vrt-01| VrRouteTokenEstimate03Derived
+  VrRouteTokenEstimate03Derived -->|vrt-02| VrRoute04SelectedTarget
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class HubReqChatProcess03Governed anchored;
+  class VrRouteTokenEstimate03Derived anchored;
+  class VrRoute04SelectedTarget anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| vrt-01 | `HubReqChatProcess03Governed -> VrRouteTokenEstimate03Derived` | anchored | `route -> build_routing_features` |  | `vr.route_token_estimation`<br/>Virtual Router request token counting uses the retired tiktoken semantics in Rust |
+| vrt-02 | `VrRouteTokenEstimate03Derived -> VrRoute04SelectedTarget` | anchored | `classify -> long_context_threshold_tokens` |  | `vr.route_selection`<br/>virtual router route classification and selected target truth |
+
+## vr.route_availability.mainline
+
+Virtual Router ordinary-route filtering, default-pool availability floor, and primary_exhausted planning remain Rust-owned; TS may only consume the floor/plan output and must not locally re-decide terminal no-provider.
+
+Entry contract: `VrAvail01RouteCandidates` via `docs/architecture/wiki/virtual-router-route-availability-mainline-source.md`
+
+```mermaid
+flowchart LR
+  ErrorErr05ExecutionDecision["ErrorErr05ExecutionDecision"]
+  VrAvail04PrimaryExhaustedPlanned["VrAvail04PrimaryExhaustedPlanned"]
+  VrAvail03DefaultFloorEvaluated["VrAvail03DefaultFloorEvaluated"]
+  VrAvail02PoolFiltered["VrAvail02PoolFiltered"]
+  VrAvail01RouteCandidates["VrAvail01RouteCandidates"]
+  VrAvail01RouteCandidates -->|vra-01| VrAvail02PoolFiltered
+  VrAvail02PoolFiltered -->|vra-02| VrAvail03DefaultFloorEvaluated
+  VrAvail03DefaultFloorEvaluated -->|vra-03| VrAvail04PrimaryExhaustedPlanned
+  VrAvail04PrimaryExhaustedPlanned -->|vra-04| ErrorErr05ExecutionDecision
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class VrAvail01RouteCandidates anchored;
+  class VrAvail02PoolFiltered anchored;
+  class VrAvail03DefaultFloorEvaluated anchored;
+  class VrAvail04PrimaryExhaustedPlanned anchored;
+  class ErrorErr05ExecutionDecision anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| vra-01 | `VrAvail01RouteCandidates -> VrAvail02PoolFiltered` | anchored | `resolve_forwarder_candidate_for_pool -> select` |  | `vr.provider_forwarder_runtime`<br/>ProviderForwarder config load, capability filtering, internal target selection, in-process health/cooldown truth, and runtime diagnostics stay in Rust Virtual Router |
+| vra-02 | `VrAvail02PoolFiltered -> VrAvail03DefaultFloorEvaluated` | anchored | `build_provider_not_available_error -> evaluate_singleton_route_pool_exhaustion` |  | `vr.route_availability_floor`<br/>route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice |
+| vra-03 | `VrAvail03DefaultFloorEvaluated -> VrAvail04PrimaryExhaustedPlanned` | anchored | `resolvePrimaryExhaustedPlan -> planPrimaryExhaustedToDefaultPoolNative` |  | `virtual_router.primary_exhausted_to_default_pool`<br/>primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only |
+| vra-04 | `VrAvail04PrimaryExhaustedPlanned -> ErrorErr05ExecutionDecision` | anchored | `executeRouterDirectPipelineForPort -> resolveErrorErr05RouteAvailabilityDecision` |  | `vr.route_availability_floor`<br/>route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice |
+
+## vr.online_diagnostics.mainline
+
+Virtual Router online diagnostics: HTTP/CLI thin shells call Rust VR status/dry-run contracts; Rust alone expands routes, forwarders, default-floor state, and unavailable-provider explanations.
+
+Entry contract: `VrDiag01StatusSnapshot` via `docs/goals/virtual-router-online-diagnostics-plan.md`
+
+```mermaid
+flowchart LR
+  ServerRespOutbound05ClientFrame["ServerRespOutbound05ClientFrame"]
+  VrDiag03DryRunDecision["VrDiag03DryRunDecision"]
+  VrDiag02DryRunInput["VrDiag02DryRunInput"]
+  VrDiag01StatusSnapshot["VrDiag01StatusSnapshot"]
+  VrDiag01StatusSnapshot -->|vrd-01| VrDiag02DryRunInput
+  VrDiag02DryRunInput -->|vrd-02| VrDiag03DryRunDecision
+  VrDiag03DryRunDecision -->|vrd-03| ServerRespOutbound05ClientFrame
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class VrDiag01StatusSnapshot anchored;
+  class VrDiag02DryRunInput anchored;
+  class VrDiag03DryRunDecision anchored;
+  class ServerRespOutbound05ClientFrame anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| vrd-01 | `VrDiag01StatusSnapshot -> VrDiag02DryRunInput` | anchored | `get_status -> diagnose_route` |  | `vr.online_diagnostics`<br/>Virtual Router online status and dry-run route diagnostics stay Rust-owned |
+| vrd-02 | `VrDiag02DryRunInput -> VrDiag03DryRunDecision` | anchored | `diagnose_route -> route` |  | `vr.online_diagnostics`<br/>Virtual Router online status and dry-run route diagnostics stay Rust-owned |
+| vrd-03 | `VrDiag03DryRunDecision -> ServerRespOutbound05ClientFrame` | anchored | `registerHttpRoutes -> registerHttpRoutes` |  | `vr.online_diagnostics`<br/>Virtual Router online status and dry-run route diagnostics stay Rust-owned |
+
+## vr.hit_log_projection.mainline
+
+Virtual Router hit-log diagnostics: host effects collect the route decision context, runtime host calls Rust/NAPI hit-log projection directly, and host emits the formatted diagnostic line without owning formatting or telemetry semantics.
+
+Entry contract: `VrHitLog01RouteDecision` via `docs/architecture/wiki/virtual-router-ownership-map.md`
+
+```mermaid
+flowchart LR
+  VrHitLog04TelemetryProjection["VrHitLog04TelemetryProjection"]
+  VrHitLog03HostEmission["VrHitLog03HostEmission"]
+  VrHitLog02NativeProjection["VrHitLog02NativeProjection"]
+  VrHitLog01RouteDecision["VrHitLog01RouteDecision"]
+  VrHitLog01RouteDecision -->|vrh-01| VrHitLog02NativeProjection
+  VrHitLog02NativeProjection -->|vrh-02| VrHitLog03HostEmission
+  VrHitLog02NativeProjection -->|vrh-03| VrHitLog04TelemetryProjection
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class VrHitLog01RouteDecision anchored;
+  class VrHitLog02NativeProjection anchored;
+  class VrHitLog03HostEmission anchored;
+  class VrHitLog04TelemetryProjection anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| vrh-01 | `VrHitLog01RouteDecision -> VrHitLog02NativeProjection` | anchored | `finalizeVirtualRouterRouteHostEffectsNative -> finalize_virtual_router_route_host_effects_json_bridge` |  | `vr.route_host_effects`<br/>Virtual Router route host effects plan/finalize stay Rust-owned before TS host emission |
+| vrh-02 | `VrHitLog02NativeProjection -> VrHitLog03HostEmission` | anchored | `finalize_virtual_router_route_host_effects_json -> format_virtual_router_hit_json` |  | `vr.route_host_effects`<br/>Virtual Router route host effects plan/finalize stay Rust-owned before TS host emission |
+| vrh-03 | `VrHitLog02NativeProjection -> VrHitLog04TelemetryProjection` | anchored | `to_virtual_router_hit_event_json_bridge -> to_virtual_router_hit_event_json` |  | `vr.hit_log_projection`<br/>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned |
+
+## runtime.lifecycle.mainline
+
+Managed server lifecycle: restart identity is one aggregate listener PID set across configured member ports; `ROUTECODEX_SESSION_DIR` is only the runtime workdir root, and tmux/request/conversation identities remain separate namespaces.
+
+Entry contract: `ServerPidCacheRecord` via `docs/design/server-runtime-lifecycle-ssot.md`
+
+```mermaid
+flowchart LR
+  PortRegistry["PortRegistry"]
+  PortScopedListenerRelease["PortScopedListenerRelease"]
+  StartRestartTakeoverGuard["StartRestartTakeoverGuard"]
+  StartShutdownHandler["StartShutdownHandler"]
+  DaemonRestartLoop["DaemonRestartLoop"]
+  DaemonSupervisorLoop["DaemonSupervisorLoop"]
+  RuntimeInstanceRecord["RuntimeInstanceRecord"]
+  RestartProcessSignal["RestartProcessSignal"]
+  RestartProcessHttpRequest["RestartProcessHttpRequest"]
+  ServerRestartCommand["ServerRestartCommand"]
+  StopIntentRecord["StopIntentRecord"]
+  ServerStopCommand["ServerStopCommand"]
+  ServerPidCacheRecord["ServerPidCacheRecord"]
+  ServerStartCommand["ServerStartCommand"]
+  ServerStartCommand -->|rtl-01| ServerPidCacheRecord
+  ServerStopCommand -->|rtl-03| StopIntentRecord
+  ServerStartCommand -->|rtl-04| StopIntentRecord
+  ServerRestartCommand -->|rtl-05| RestartProcessHttpRequest
+  ServerRestartCommand -->|rtl-06| RestartProcessSignal
+  ServerStartCommand -->|rtl-07| RuntimeInstanceRecord
+  DaemonSupervisorLoop -->|rtl-08| RuntimeInstanceRecord
+  DaemonRestartLoop -->|rtl-09| RuntimeInstanceRecord
+  ServerStartCommand -->|rtl-10| RuntimeInstanceRecord
+  StartShutdownHandler -->|rtl-11| RuntimeInstanceRecord
+  ServerStopCommand -->|rtl-12| RuntimeInstanceRecord
+  ServerStartCommand -->|rtl-13| StartRestartTakeoverGuard
+  ServerStartCommand -->|rtl-14| PortScopedListenerRelease
+  ServerStopCommand -->|rtl-15| PortScopedListenerRelease
+  PortScopedListenerRelease -->|rtl-16| PortRegistry
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ServerStartCommand anchored;
+  class ServerPidCacheRecord anchored;
+  class ServerStopCommand anchored;
+  class StopIntentRecord anchored;
+  class ServerRestartCommand anchored;
+  class RestartProcessHttpRequest anchored;
+  class RestartProcessSignal anchored;
+  class RuntimeInstanceRecord anchored;
+  class DaemonSupervisorLoop anchored;
+  class DaemonRestartLoop anchored;
+  class StartShutdownHandler anchored;
+  class StartRestartTakeoverGuard anchored;
+  class PortScopedListenerRelease anchored;
+  class PortRegistry anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| rtl-01 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> planRuntimePidCacheWrite` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
+| rtl-03 | `ServerStopCommand -> StopIntentRecord` | anchored | `writeDaemonStopIntent -> planRuntimeStopIntentWrite` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
+| rtl-04 | `ServerStartCommand -> StopIntentRecord` | anchored | `consumeDaemonStopIntent -> planRuntimeStopIntentConsume` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
+| rtl-05 | `ServerRestartCommand -> RestartProcessHttpRequest` | anchored | `planRestartTransport -> planRuntimeRestartRequest` |  | `runtime.lifecycle.restart_command`<br/>CLI restart locates one aggregate RouteCodex process and requests one in-session restart for all member ports |
+| rtl-06 | `ServerRestartCommand -> RestartProcessSignal` | anchored | `planRestartTransport -> planRuntimeRestartRequest` |  | `runtime.lifecycle.restart_command`<br/>CLI restart locates one aggregate RouteCodex process and requests one in-session restart for all member ports |
+| rtl-07 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> planRuntimeInstanceWrite` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-08 | `DaemonSupervisorLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> planRuntimeInstanceWrite` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-09 | `DaemonRestartLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> planRuntimeInstanceWrite` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-10 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> planRuntimeInstanceStatusUpdate` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-11 | `StartShutdownHandler -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> planRuntimeInstanceStatusUpdate` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-12 | `ServerStopCommand -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> planRuntimeInstanceStatusUpdate` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-13 | `ServerStartCommand -> StartRestartTakeoverGuard` | anchored | `createStartCommand -> planRuntimeStartRestartTakeoverGuard` |  | `runtime.lifecycle.start_command`<br/>CLI start owns server process launch and port takeover intent; occupied target ports are released before bind unless --no-restart forbids takeover |
+| rtl-14 | `ServerStartCommand -> PortScopedListenerRelease` | anchored | `createStartCommand -> ensurePortAvailableImpl` |  | `runtime.lifecycle.port_scoped_start_stop`<br/>V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process |
+| rtl-15 | `ServerStopCommand -> PortScopedListenerRelease` | anchored | `createStopCommand -> registerHttpRoutes` |  | `runtime.lifecycle.port_scoped_start_stop`<br/>V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process |
+| rtl-16 | `PortScopedListenerRelease -> PortRegistry` | anchored | `registerHttpRoutes -> removePort` |  | `runtime.lifecycle.port_scoped_start_stop`<br/>V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process |
+
+## stopless.session.mainline
+
+Stopless three-round contract inside Chat Process boundary: every managed relay request injects stopless system guidance plus exactly one provider-facing/model-visible internal reasoningStop tool, Round-1/2 missing or invalid stops project a client-visible no-input CLI, the next provider request receives only a StoplessCenter state-machine-selected complete non-persistent ordinary user continuation guideline plus the fresh tool contract, and guard terminal stops without another CLI projection.
+
+Entry contract: `StoplessResp01StopDetected` via `docs/architecture/wiki/stopless-session-mainline-source.md`
+
+```mermaid
+flowchart LR
+  VrRoute04SelectedTarget["VrRoute04SelectedTarget"]
+  StoplessReq09SchemaContractInjected["StoplessReq09SchemaContractInjected"]
+  StoplessReq08GuidanceRewritten["StoplessReq08GuidanceRewritten"]
+  StoplessReq07ContinuationRestored["StoplessReq07ContinuationRestored"]
+  StoplessCli06ClientExecuted["StoplessCli06ClientExecuted"]
+  StoplessCli04ProjectionPlanned["StoplessCli04ProjectionPlanned"]
+  StoplessState03RuntimeSnapshotResolved["StoplessState03RuntimeSnapshotResolved"]
+  StoplessResp02SchemaGateEvaluated["StoplessResp02SchemaGateEvaluated"]
+  StoplessResp01StopDetected["StoplessResp01StopDetected"]
+  StoplessResp01StopDetected -->|stl-01| StoplessResp02SchemaGateEvaluated
+  StoplessResp02SchemaGateEvaluated -->|stl-02| StoplessState03RuntimeSnapshotResolved
+  StoplessState03RuntimeSnapshotResolved -->|stl-03| StoplessCli04ProjectionPlanned
+  StoplessCli06ClientExecuted -->|stl-05| StoplessReq07ContinuationRestored
+  StoplessReq07ContinuationRestored -->|stl-06| StoplessReq08GuidanceRewritten
+  StoplessReq08GuidanceRewritten -->|stl-07| StoplessReq09SchemaContractInjected
+  StoplessReq09SchemaContractInjected -->|stl-08| VrRoute04SelectedTarget
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class StoplessResp01StopDetected anchored;
+  class StoplessResp02SchemaGateEvaluated anchored;
+  class StoplessState03RuntimeSnapshotResolved anchored;
+  class StoplessCli04ProjectionPlanned anchored;
+  class StoplessCli06ClientExecuted anchored;
+  class StoplessReq07ContinuationRestored anchored;
+  class StoplessReq08GuidanceRewritten anchored;
+  class StoplessReq09SchemaContractInjected anchored;
+  class VrRoute04SelectedTarget anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| stl-01 | `StoplessResp01StopDetected -> StoplessResp02SchemaGateEvaluated` | anchored | `run_stopless_response_hook -> run_stopless_auto_handler_runtime_json` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| stl-02 | `StoplessResp02SchemaGateEvaluated -> StoplessState03RuntimeSnapshotResolved` | anchored | `run_stopless_auto_handler_runtime_json -> plan_stopless_execution_json` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| stl-03 | `StoplessState03RuntimeSnapshotResolved -> StoplessCli04ProjectionPlanned` | anchored | `run_stopless_response_hook -> build_stopless_auto_cli_projection_from_engine_json` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| stl-05 | `StoplessCli06ClientExecuted -> StoplessReq07ContinuationRestored` | anchored | `apply_req_process_tool_governance -> latest_stopless_cli_output_from_resume` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| stl-06 | `StoplessReq07ContinuationRestored -> StoplessReq08GuidanceRewritten` | anchored | `normalize_responses_input_function_calls -> build_stop_hook_guidance_text_from_output` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| stl-07 | `StoplessReq08GuidanceRewritten -> StoplessReq09SchemaContractInjected` | anchored | `apply_req_process_tool_governance -> inject_stopless_system_instruction` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+| stl-08 | `StoplessReq09SchemaContractInjected -> VrRoute04SelectedTarget` | anchored | `classify -> classify` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
+
+## metadata.center.mainline
+
+single request-scoped metadata center mainline: one bound center flows across server -> Hub Pipeline -> provider/runtime -> response closeout; request truth is materialized once, continuation/runtime/provider observation attach as separate families, and later stages consume read-only projections before closeout release.
+
+Entry contract: `MetaReq01InboundSeeded` via `docs/architecture/wiki/metadata-center-mainline-source.md`
+
+```mermaid
+flowchart LR
+  MetaResp08CloseoutReleased["MetaResp08CloseoutReleased"]
+  MetaResp07BridgeMetadataBound["MetaResp07BridgeMetadataBound"]
+  MetaResp06ResponseObserved["MetaResp06ResponseObserved"]
+  MetaReq05ProviderObservationProjected["MetaReq05ProviderObservationProjected"]
+  MetaReq04RuntimeControlBound["MetaReq04RuntimeControlBound"]
+  MetaReq03ContinuationAttached["MetaReq03ContinuationAttached"]
+  MetaReq02TruthMaterialized["MetaReq02TruthMaterialized"]
+  MetaReq01InboundSeeded["MetaReq01InboundSeeded"]
+  MetaReq01InboundSeeded -->|mtc-01| MetaReq02TruthMaterialized
+  MetaReq02TruthMaterialized -->|mtc-02| MetaReq03ContinuationAttached
+  MetaReq03ContinuationAttached -->|mtc-03| MetaReq04RuntimeControlBound
+  MetaReq04RuntimeControlBound -->|mtc-04| MetaReq05ProviderObservationProjected
+  MetaReq05ProviderObservationProjected -->|mtc-05| MetaResp06ResponseObserved
+  MetaResp06ResponseObserved -->|mtc-06| MetaResp07BridgeMetadataBound
+  MetaResp07BridgeMetadataBound -->|mtc-07| MetaResp08CloseoutReleased
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class MetaReq01InboundSeeded anchored;
+  class MetaReq02TruthMaterialized anchored;
+  class MetaReq03ContinuationAttached anchored;
+  class MetaReq04RuntimeControlBound anchored;
+  class MetaReq05ProviderObservationProjected anchored;
+  class MetaResp06ResponseObserved anchored;
+  class MetaResp07BridgeMetadataBound anchored;
+  class MetaResp08CloseoutReleased anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| mtc-01 | `MetaReq01InboundSeeded -> MetaReq02TruthMaterialized` | anchored | `buildRequestMetadata -> writeRequestTruth` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
+| mtc-02 | `MetaReq02TruthMaterialized -> MetaReq03ContinuationAttached` | anchored | `buildResponsesPipelineMetadataForHttp -> writeContinuationContext` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
+| mtc-03 | `MetaReq03ContinuationAttached -> MetaReq04RuntimeControlBound` | anchored | `finalizeRequestExecutorAttemptMetadata -> finalizeRequestExecutorAttemptMetadata` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
+| mtc-04 | `MetaReq04RuntimeControlBound -> MetaReq05ProviderObservationProjected` | anchored | `resolveRequestExecutorPipelineAttempt -> resolveRequestExecutorPipelineAttempt` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
+| mtc-05 | `MetaReq05ProviderObservationProjected -> MetaResp06ResponseObserved` | anchored | `convertProviderResponse -> readRequestTruthFromBoundMetadataCenter` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
+| mtc-06 | `MetaResp06ResponseObserved -> MetaResp07BridgeMetadataBound` | anchored | `buildBridgeInvocationMetadata -> MetadataCenter.read` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
+| mtc-07 | `MetaResp07BridgeMetadataBound -> MetaResp08CloseoutReleased` | anchored | `releaseMetadataCenterForHttpResponse -> markReleased` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
+
+## sse.chat_stream_projection.mainline
+
+Chat JSON response projection into client-visible SSE frames and Chat provider SSE decode into final Chat JSON; malformed semantics fail fast instead of being synthesized into successful frames/responses.
+
+Entry contract: `HubRespOutbound04ClientSemantic` via `docs/design/pipeline-type-topology-and-module-boundaries.md`
+
+```mermaid
+flowchart LR
+  HubRespInbound02Parsed["HubRespInbound02Parsed"]
+  ProviderRespInbound01Raw["ProviderRespInbound01Raw"]
+  ServerRespOutbound05ClientFrame["ServerRespOutbound05ClientFrame"]
+  HubRespOutbound04ClientSemantic["HubRespOutbound04ClientSemantic"]
+  HubRespOutbound04ClientSemantic -->|chat-sse-01| ServerRespOutbound05ClientFrame
+  ProviderRespInbound01Raw -->|chat-sse-02| HubRespInbound02Parsed
+  HubRespOutbound04ClientSemantic -->|anthropic-sse-01| ServerRespOutbound05ClientFrame
+  ProviderRespInbound01Raw -->|anthropic-sse-02| HubRespInbound02Parsed
+  HubRespOutbound04ClientSemantic -->|gemini-sse-01| ServerRespOutbound05ClientFrame
+  ProviderRespInbound01Raw -->|gemini-sse-02| HubRespInbound02Parsed
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class HubRespOutbound04ClientSemantic anchored;
+  class ServerRespOutbound05ClientFrame anchored;
+  class ProviderRespInbound01Raw anchored;
+  class HubRespInbound02Parsed anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| chat-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `buildSseFramesFromJsonWithNative -> build_sse_frames_from_json_json` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
+| chat-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `buildJsonFromSseWithNative -> build_json_from_sse_json` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
+| anthropic-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `buildSseFramesFromJsonWithNative -> build_sse_frames_from_json_json` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
+| anthropic-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `buildJsonFromSseWithNative -> build_json_from_sse_json` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
+| gemini-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `buildSseFramesFromJsonWithNative -> build_sse_frames_from_json_json` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
+| gemini-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `buildJsonFromSseWithNative -> build_json_from_sse_json` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
+
+## stage_a.p0_rust_migration.mainline
+
+Stage A locks P0 Rust migration owner boundaries before implementation: servertool followup orchestration, Anthropic conversion, Responses continuation store, and request/response Chat Process tool governance.
+
+Entry contract: `StageAOwnerBoundary` via `docs/goal-prompts/2026-07-03-rust-hub-pipeline-migration.md`
+
+```mermaid
+flowchart LR
+  ResponsesRequestInbound["ResponsesRequestInbound"]
+  HubRespInbound02Parsed["HubRespInbound02Parsed"]
+  HubReqChatProcess03Governed["HubReqChatProcess03Governed"]
+  HubReqInbound02Standardized["HubReqInbound02Standardized"]
+  ResponsesContinuationStore["ResponsesContinuationStore"]
+  OpenAiChatCanonical["OpenAiChatCanonical"]
+  AnthropicChatInbound["AnthropicChatInbound"]
+  ServertoolOutcome["ServertoolOutcome"]
+  HubRespChatProcess03Governed["HubRespChatProcess03Governed"]
+  HubRespChatProcess03Governed -->|stage-a-p0-01| ServertoolOutcome
+  AnthropicChatInbound -->|stage-a-p0-02| OpenAiChatCanonical
+  HubRespChatProcess03Governed -->|stage-a-p0-03| ResponsesContinuationStore
+  HubReqInbound02Standardized -->|stage-a-p0-04| HubReqChatProcess03Governed
+  HubRespInbound02Parsed -->|stage-a-p0-05| HubRespChatProcess03Governed
+  ResponsesRequestInbound -->|stage-a-p0-06| OpenAiChatCanonical
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class HubRespChatProcess03Governed anchored;
+  class ServertoolOutcome anchored;
+  class AnthropicChatInbound anchored;
+  class OpenAiChatCanonical anchored;
+  class ResponsesContinuationStore anchored;
+  class HubReqInbound02Standardized anchored;
+  class HubReqChatProcess03Governed anchored;
+  class HubRespInbound02Parsed anchored;
+  class ResponsesRequestInbound anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| stage-a-p0-01 | `HubRespChatProcess03Governed -> ServertoolOutcome` | anchored | `run_servertool_response_stage_json -> plan_servertool_outcome_json` |  | `servertool.followup_orchestration`<br/>Orchestration logic for server-side tools followup |
+| stage-a-p0-02 | `AnthropicChatInbound -> OpenAiChatCanonical` | anchored | `build_openai_chat_from_anthropic_json -> map_chat_tools_to_anthropic_tools` |  | `conversion.shared.anthropic`<br/>Anthropic OpenAI chat protocol normalization and tool schema mapping |
+| stage-a-p0-03 | `HubRespChatProcess03Governed -> ResponsesContinuationStore` | anchored | `prepare_responses_conversation_entry_json -> restore_responses_continuation_payload` |  | `conversion.responses.store`<br/>Responses conversation store and continuation management |
+| stage-a-p0-04 | `HubReqInbound02Standardized -> HubReqChatProcess03Governed` | anchored | `apply_req_process_tool_governance -> apply_req_process_tool_governance_json` |  | `hub.req_chatprocess.tool_governance`<br/>Harvest text tool calls from request side and sanitize payloads |
+| stage-a-p0-05 | `HubRespInbound02Parsed -> HubRespChatProcess03Governed` | anchored | `govern_response_json -> strip_orphan_function_calls_tag_json` |  | `hub.resp_chatprocess.tool_governance`<br/>Harvest tool results, reverse apply_patch, strip internal tools |
+| stage-a-p0-06 | `ResponsesRequestInbound -> OpenAiChatCanonical` | anchored | `run_responses_openai_request_codec_json -> run_responses_openai_response_codec_json` |  | `conversion.shared.responses_openai`<br/>OpenAI Responses to OpenAI Chat protocol normalization and response projection |
+
+## sse.transport_core_shared.mainline
+
+Protocol-neutral streaming bytes move only through the shared Rust SSE transport topology; V2 and V3 adapters converge on the same encoder.
+
+Entry contract: `SseTransportIn01RawChunk` via `docs/goals/v3-sse-transport-core-extraction-plan.md`
+
+```mermaid
+flowchart LR
+  SseTransportOut04EncodedChunk["SseTransportOut04EncodedChunk"]
+  SseTransportIn03ValidatedFrameStream["SseTransportIn03ValidatedFrameStream"]
+  SseTransportIn02DecodedFrame["SseTransportIn02DecodedFrame"]
+  SseTransportIn01RawChunk["SseTransportIn01RawChunk"]
+  SseTransportIn01RawChunk -->|sse-transport-core-01| SseTransportIn02DecodedFrame
+  SseTransportIn02DecodedFrame -->|sse-transport-core-02| SseTransportIn03ValidatedFrameStream
+  SseTransportIn03ValidatedFrameStream -->|sse-transport-core-03-v2| SseTransportOut04EncodedChunk
+  SseTransportIn03ValidatedFrameStream -->|sse-transport-core-03-v3| SseTransportOut04EncodedChunk
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class SseTransportIn01RawChunk anchored;
+  class SseTransportIn02DecodedFrame anchored;
+  class SseTransportIn03ValidatedFrameStream anchored;
+  class SseTransportOut04EncodedChunk anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| sse-transport-core-01 | `SseTransportIn01RawChunk -> SseTransportIn02DecodedFrame` | anchored | `push -> build_sse_transport_in_02_from_sse_transport_in_01` |  | `sse.transport_core_shared`<br/>One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters |
+| sse-transport-core-02 | `SseTransportIn02DecodedFrame -> SseTransportIn03ValidatedFrameStream` | anchored | `push -> build_sse_transport_in_03_from_sse_transport_in_02` |  | `sse.transport_core_shared`<br/>One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters |
+| sse-transport-core-03-v2 | `SseTransportIn03ValidatedFrameStream -> SseTransportOut04EncodedChunk` | anchored | `parse_sse_stream_chunk_with_config -> build_sse_transport_out_04_from_sse_transport_in_03` |  | `sse.transport_core_shared`<br/>One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters |
+| sse-transport-core-03-v3 | `SseTransportIn03ValidatedFrameStream -> SseTransportOut04EncodedChunk` | anchored | `validated_sse_stream -> build_sse_transport_out_04_from_sse_transport_in_03` |  | `sse.transport_core_shared`<br/>One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters |
+
+## v3.console_human_readable_layering.mainline
+
+Runtime-owned Responses Direct/Relay observability, post-commit typed Error01, pre-commit Error06, listener startup, and debug-sink failures enter Server-owned typed layered console projections without rendered-text reparsing.
+
+Entry contract: `V3ConsoleObs01RuntimeObservability` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  V3ServerRespOutbound06ClientFrame["V3ServerRespOutbound06ClientFrame"]
+  V3RuntimeStreamObservation["V3RuntimeStreamObservation"]
+  V3SseTerminalFailureObservation["V3SseTerminalFailureObservation"]
+  V3ConsoleDebugFailure08HumanBlock["V3ConsoleDebugFailure08HumanBlock"]
+  V3DebugSink01WriteFailed["V3DebugSink01WriteFailed"]
+  V3ConsoleStartup07HumanBlock["V3ConsoleStartup07HumanBlock"]
+  V3ServerStartup01ListenerSetPreflight["V3ServerStartup01ListenerSetPreflight"]
+  V3ConsoleError06HumanBlock["V3ConsoleError06HumanBlock"]
+  V3Error06ClientProjected["V3Error06ClientProjected"]
+  V3ConsoleError01HumanBlock["V3ConsoleError01HumanBlock"]
+  V3Error01SourceRaised["V3Error01SourceRaised"]
+  V3ConsoleStopless05ExceptionalBlock["V3ConsoleStopless05ExceptionalBlock"]
+  V3ConsoleProvider04ExceptionalBlock["V3ConsoleProvider04ExceptionalBlock"]
+  V3ConsoleResp03HumanBlock["V3ConsoleResp03HumanBlock"]
+  V3ConsoleReq02HumanBlock["V3ConsoleReq02HumanBlock"]
+  V3ConsoleObs01RuntimeObservability["V3ConsoleObs01RuntimeObservability"]
+  V3ConsoleObs01RuntimeObservability -->|v3-console-01| V3ConsoleReq02HumanBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-02| V3ConsoleResp03HumanBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-03| V3ConsoleProvider04ExceptionalBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-04| V3ConsoleStopless05ExceptionalBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-05| V3ConsoleResp03HumanBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-06| V3ConsoleStopless05ExceptionalBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-07| V3ConsoleResp03HumanBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-08| V3ConsoleStopless05ExceptionalBlock
+  V3Error01SourceRaised -->|v3-console-09| V3ConsoleError01HumanBlock
+  V3Error01SourceRaised -->|v3-console-10| V3ConsoleError01HumanBlock
+  V3Error06ClientProjected -->|v3-console-11| V3ConsoleError06HumanBlock
+  V3Error06ClientProjected -->|v3-console-12| V3ConsoleError06HumanBlock
+  V3Error06ClientProjected -->|v3-console-13| V3ConsoleError06HumanBlock
+  V3Error06ClientProjected -->|v3-console-14| V3ConsoleError06HumanBlock
+  V3ServerStartup01ListenerSetPreflight -->|v3-console-15| V3ConsoleStartup07HumanBlock
+  V3DebugSink01WriteFailed -->|v3-console-16| V3ConsoleDebugFailure08HumanBlock
+  V3SseTerminalFailureObservation -->|v3-console-17| V3Error01SourceRaised
+  V3RuntimeStreamObservation -->|v3-console-18| V3Error01SourceRaised
+  V3Error06ClientProjected -->|v3-console-19| V3ConsoleError06HumanBlock
+  V3Error06ClientProjected -->|v3-console-20| V3ConsoleError06HumanBlock
+  V3ServerRespOutbound06ClientFrame -->|v3-console-21| V3RuntimeStreamObservation
+  V3ServerRespOutbound06ClientFrame -->|v3-console-22| V3RuntimeStreamObservation
+  V3RuntimeStreamObservation -->|v3-console-23| V3Error01SourceRaised
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class V3ConsoleObs01RuntimeObservability anchored;
+  class V3ConsoleReq02HumanBlock anchored;
+  class V3ConsoleResp03HumanBlock anchored;
+  class V3ConsoleProvider04ExceptionalBlock anchored;
+  class V3ConsoleStopless05ExceptionalBlock anchored;
+  class V3Error01SourceRaised anchored;
+  class V3ConsoleError01HumanBlock anchored;
+  class V3Error06ClientProjected anchored;
+  class V3ConsoleError06HumanBlock anchored;
+  class V3ServerStartup01ListenerSetPreflight anchored;
+  class V3ConsoleStartup07HumanBlock anchored;
+  class V3DebugSink01WriteFailed anchored;
+  class V3ConsoleDebugFailure08HumanBlock anchored;
+  class V3SseTerminalFailureObservation anchored;
+  class V3RuntimeStreamObservation anchored;
+  class V3ServerRespOutbound06ClientFrame anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| v3-console-01 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleReq02HumanBlock` | anchored | `emit_v3_observability_console_lines -> emit_v3_request_route_hit_console_line_for_observability` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-02 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleResp03HumanBlock` | anchored | `emit_v3_observability_console_lines -> emit_v3_request_complete_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-03 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleProvider04ExceptionalBlock` | anchored | `emit_v3_observability_console_lines -> emit_v3_provider_observability_console_lines` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-04 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleStopless05ExceptionalBlock` | anchored | `emit_v3_observability_console_lines -> emit_v3_stopless_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-05 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleResp03HumanBlock` | anchored | `emit_relay_sse_complete_console_lines -> emit_v3_request_complete_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-06 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleStopless05ExceptionalBlock` | anchored | `emit_relay_sse_complete_console_lines -> emit_v3_stopless_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-07 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleResp03HumanBlock` | anchored | `emit_direct_sse_complete_console_lines -> emit_v3_request_complete_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-08 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleStopless05ExceptionalBlock` | anchored | `emit_direct_sse_complete_console_lines -> emit_v3_stopless_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-09 | `V3Error01SourceRaised -> V3ConsoleError01HumanBlock` | anchored | `emit_relay_sse_failure_console_line -> emit_v3_post_commit_sse_source_console_line_for_context` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-10 | `V3Error01SourceRaised -> V3ConsoleError01HumanBlock` | anchored | `emit_direct_sse_failure_console_line -> emit_v3_post_commit_sse_source_console_line_for_context` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-11 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `emit_v3_direct_frame_console_lines -> emit_v3_frame_error_console_line_for_context` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-12 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `emit_v3_direct_frame_console_lines -> emit_v3_frame_error_console_line_for_state` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-13 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `record_and_emit_v3_error_projection -> emit_v3_error_console_line_for_state` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-14 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `allocate_v3_console_request_id -> emit_v3_error_console_line_for_state` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-15 | `V3ServerStartup01ListenerSetPreflight -> V3ConsoleStartup07HumanBlock` | anchored | `emit_v3_startup_console_line -> format_v3_startup_console_block` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-16 | `V3DebugSink01WriteFailed -> V3ConsoleDebugFailure08HumanBlock` | anchored | `append_v3_human_console_line -> emit_v3_debug_sink_console_failure` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-17 | `V3SseTerminalFailureObservation -> V3Error01SourceRaised` | anchored | `poll_next -> raise_v3_sse_provider_failure` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-18 | `V3RuntimeStreamObservation -> V3Error01SourceRaised` | anchored | `client_disconnected -> raise_v3_sse_client_disconnect` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-19 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `error_output_response_for_server_with_project_path -> emit_v3_frame_error_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-20 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `error_output_response_for_responses_request_with_project_path -> emit_v3_frame_error_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-21 | `V3ServerRespOutbound06ClientFrame -> V3RuntimeStreamObservation` | anchored | `wrap_v3_relay_sse_console_stream -> client_disconnected` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-22 | `V3ServerRespOutbound06ClientFrame -> V3RuntimeStreamObservation` | anchored | `wrap_v3_direct_sse_console_stream -> client_disconnected` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-23 | `V3RuntimeStreamObservation -> V3Error01SourceRaised` | anchored | `client_disconnected -> raise_v3_sse_client_disconnect` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+
+## v3.console_request_count_visibility.mainline
+
+One aggregate-owned request counter handle is shared by every listener, and one atomic V3 request identity allocation carries total and local-day counts into both human request and terminal response headlines.
+
+Entry contract: `V3RequestCounter01AggregateOwned` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  V3ConsoleResp03HumanBlock["V3ConsoleResp03HumanBlock"]
+  V3ConsoleReq02HumanBlock["V3ConsoleReq02HumanBlock"]
+  V3RequestIdentity03Allocated["V3RequestIdentity03Allocated"]
+  V3RequestCounter02ListenerShared["V3RequestCounter02ListenerShared"]
+  V3RequestCounter01AggregateOwned["V3RequestCounter01AggregateOwned"]
+  V3RequestCounter01AggregateOwned -->|v3-console-count-01| V3RequestCounter02ListenerShared
+  V3RequestCounter02ListenerShared -->|v3-console-count-02| V3RequestIdentity03Allocated
+  V3RequestIdentity03Allocated -->|v3-console-count-03| V3ConsoleReq02HumanBlock
+  V3RequestIdentity03Allocated -->|v3-console-count-04| V3ConsoleResp03HumanBlock
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class V3RequestCounter01AggregateOwned anchored;
+  class V3RequestCounter02ListenerShared anchored;
+  class V3RequestIdentity03Allocated anchored;
+  class V3ConsoleReq02HumanBlock anchored;
+  class V3ConsoleResp03HumanBlock anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| v3-console-count-01 | `V3RequestCounter01AggregateOwned -> V3RequestCounter02ListenerShared` | anchored | `spawn_v3_server_aggregate -> V3RequestIdCounter::new` |  | `v3.console_request_count_visibility`<br/>One aggregate-shared V3 request counter serializes every listener, and each atomic identity allocation carries total and local-day counts into both human request and response headlines. |
+| v3-console-count-02 | `V3RequestCounter02ListenerShared -> V3RequestIdentity03Allocated` | anchored | `next_v3_console_request_identity -> next_request_identity` |  | `v3.console_request_count_visibility`<br/>One aggregate-shared V3 request counter serializes every listener, and each atomic identity allocation carries total and local-day counts into both human request and response headlines. |
+| v3-console-count-03 | `V3RequestIdentity03Allocated -> V3ConsoleReq02HumanBlock` | anchored | `render_v3_request_console_block -> format_v3_console_request_count` |  | `v3.console_request_count_visibility`<br/>One aggregate-shared V3 request counter serializes every listener, and each atomic identity allocation carries total and local-day counts into both human request and response headlines. |
+| v3-console-count-04 | `V3RequestIdentity03Allocated -> V3ConsoleResp03HumanBlock` | anchored | `render_v3_response_console_block -> format_v3_console_request_count` |  | `v3.console_request_count_visibility`<br/>One aggregate-shared V3 request counter serializes every listener, and each atomic identity allocation carries total and local-day counts into both human request and response headlines. |
+
+## v3.runtime_timing_observability.mainline
+
+Responses Direct/Relay Runtime starts one monotonic state, accumulates every provider attempt, publishes only at governed terminal or Direct SSE clean EOF, and exposes a read-only Server projection.
+
+Entry contract: `V3RuntimeTimingStart` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  V3RuntimeTimingProtocolHandoff["V3RuntimeTimingProtocolHandoff"]
+  V3RuntimeTimingObservability["V3RuntimeTimingObservability"]
+  V3RuntimeTimingServerProjection["V3RuntimeTimingServerProjection"]
+  V3RuntimeTimingStreamObservation["V3RuntimeTimingStreamObservation"]
+  V3RuntimeTimingTerminal["V3RuntimeTimingTerminal"]
+  V3RuntimeTimingExternalComplete["V3RuntimeTimingExternalComplete"]
+  V3RuntimeTimingExternalAttempt["V3RuntimeTimingExternalAttempt"]
+  V3RuntimeTimingStart["V3RuntimeTimingStart"]
+  V3RuntimeTimingStart -->|v3-runtime-timing-01| V3RuntimeTimingExternalAttempt
+  V3RuntimeTimingExternalAttempt -->|v3-runtime-timing-02| V3RuntimeTimingExternalComplete
+  V3RuntimeTimingExternalComplete -->|v3-runtime-timing-03| V3RuntimeTimingExternalAttempt
+  V3RuntimeTimingExternalComplete -->|v3-runtime-timing-04| V3RuntimeTimingTerminal
+  V3RuntimeTimingTerminal -->|v3-runtime-timing-05| V3RuntimeTimingStreamObservation
+  V3RuntimeTimingStreamObservation -->|v3-runtime-timing-06| V3RuntimeTimingServerProjection
+  V3RuntimeTimingTerminal -->|v3-runtime-timing-07| V3RuntimeTimingObservability
+  V3RuntimeTimingObservability -->|v3-runtime-timing-08| V3RuntimeTimingServerProjection
+  V3RuntimeTimingStart -->|v3-runtime-timing-09| V3RuntimeTimingExternalAttempt
+  V3RuntimeTimingExternalAttempt -->|v3-runtime-timing-10| V3RuntimeTimingExternalComplete
+  V3RuntimeTimingExternalComplete -->|v3-runtime-timing-11| V3RuntimeTimingTerminal
+  V3RuntimeTimingTerminal -->|v3-runtime-timing-12| V3RuntimeTimingStreamObservation
+  V3RuntimeTimingExternalComplete -->|v3-runtime-timing-13| V3RuntimeTimingProtocolHandoff
+  V3RuntimeTimingProtocolHandoff -->|v3-runtime-timing-14| V3RuntimeTimingExternalAttempt
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class V3RuntimeTimingStart anchored;
+  class V3RuntimeTimingExternalAttempt anchored;
+  class V3RuntimeTimingExternalComplete anchored;
+  class V3RuntimeTimingTerminal anchored;
+  class V3RuntimeTimingStreamObservation anchored;
+  class V3RuntimeTimingServerProjection anchored;
+  class V3RuntimeTimingObservability anchored;
+  class V3RuntimeTimingProtocolHandoff anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| v3-runtime-timing-01 | `V3RuntimeTimingStart -> V3RuntimeTimingExternalAttempt` | anchored | `execute_v3_responses_relay_runtime_inner -> start_external` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-02 | `V3RuntimeTimingExternalAttempt -> V3RuntimeTimingExternalComplete` | anchored | `execute_v3_responses_relay_runtime_inner -> finish_external` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-03 | `V3RuntimeTimingExternalComplete -> V3RuntimeTimingExternalAttempt` | anchored | `execute_v3_responses_relay_runtime_inner -> start_external` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-04 | `V3RuntimeTimingExternalComplete -> V3RuntimeTimingTerminal` | anchored | `execute_v3_responses_relay_runtime_inner -> finish_runtime` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-05 | `V3RuntimeTimingTerminal -> V3RuntimeTimingStreamObservation` | anchored | `execute_v3_responses_relay_runtime_inner -> record_timing` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-06 | `V3RuntimeTimingStreamObservation -> V3RuntimeTimingServerProjection` | anchored | `complete_relay_sse -> merge_v3_runtime_stream_observation` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-07 | `V3RuntimeTimingTerminal -> V3RuntimeTimingObservability` | anchored | `execute_v3_responses_direct_runtime_kernel_core -> finish_runtime` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-08 | `V3RuntimeTimingObservability -> V3RuntimeTimingServerProjection` | anchored | `emit_relay_sse_complete_console_lines -> emit_v3_request_complete_console_line` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-09 | `V3RuntimeTimingStart -> V3RuntimeTimingExternalAttempt` | anchored | `execute_v3_responses_direct_runtime_kernel_core -> start_external` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-10 | `V3RuntimeTimingExternalAttempt -> V3RuntimeTimingExternalComplete` | anchored | `wrap_direct_sse_provider_event_json_observation_stream -> finish_external` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-11 | `V3RuntimeTimingExternalComplete -> V3RuntimeTimingTerminal` | anchored | `wrap_direct_sse_provider_outcome_stream -> finish_runtime` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-12 | `V3RuntimeTimingTerminal -> V3RuntimeTimingStreamObservation` | anchored | `wrap_direct_sse_provider_outcome_stream -> record_timing` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-13 | `V3RuntimeTimingExternalComplete -> V3RuntimeTimingProtocolHandoff` | anchored | `execute_v3_responses_direct_runtime_kernel_core -> with_additional_attempts` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-14 | `V3RuntimeTimingProtocolHandoff -> V3RuntimeTimingExternalAttempt` | anchored | `execute_responses_direct_server_outcome -> execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+
+## v3.codex_sample_retention_snap_scope
+
+Explicit CLI authorization is published through the managed manifest; Debug bounds diagnostic copies; Server alone persists and trims Codex samples.
+
+Entry contract: `V3CodexSample01CliAuthorization` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  V3ServerStartup01ListenerSetPreflight["V3ServerStartup01ListenerSetPreflight"]
+  V3CodexSample06RetentionEnforced["V3CodexSample06RetentionEnforced"]
+  V3CodexSample05FilesystemPersisted["V3CodexSample05FilesystemPersisted"]
+  V3CodexSample04PayloadBudgeted["V3CodexSample04PayloadBudgeted"]
+  V3CodexSample03AuthorizedCapture["V3CodexSample03AuthorizedCapture"]
+  V3CodexSample02ManifestAuthorizationPublished["V3CodexSample02ManifestAuthorizationPublished"]
+  V3CodexSample01CliAuthorization["V3CodexSample01CliAuthorization"]
+  V3CodexSample01CliAuthorization -->|v3-codex-sample-01| V3CodexSample02ManifestAuthorizationPublished
+  V3CodexSample02ManifestAuthorizationPublished -->|v3-codex-sample-02| V3CodexSample03AuthorizedCapture
+  V3CodexSample03AuthorizedCapture -->|v3-codex-sample-03| V3CodexSample04PayloadBudgeted
+  V3CodexSample04PayloadBudgeted -->|v3-codex-sample-04| V3CodexSample05FilesystemPersisted
+  V3CodexSample04PayloadBudgeted -->|v3-codex-sample-05| V3CodexSample05FilesystemPersisted
+  V3CodexSample05FilesystemPersisted -->|v3-codex-sample-06| V3CodexSample06RetentionEnforced
+  V3ServerStartup01ListenerSetPreflight -->|v3-codex-sample-07| V3CodexSample06RetentionEnforced
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class V3CodexSample01CliAuthorization anchored;
+  class V3CodexSample02ManifestAuthorizationPublished anchored;
+  class V3CodexSample03AuthorizedCapture anchored;
+  class V3CodexSample04PayloadBudgeted anchored;
+  class V3CodexSample05FilesystemPersisted anchored;
+  class V3CodexSample06RetentionEnforced anchored;
+  class V3ServerStartup01ListenerSetPreflight anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| v3-codex-sample-01 | `V3CodexSample01CliAuthorization -> V3CodexSample02ManifestAuthorizationPublished` | anchored | `configure_v3_snapshot_flags -> with_direct_snapshots_enabled` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+| v3-codex-sample-02 | `V3CodexSample02ManifestAuthorizationPublished -> V3CodexSample03AuthorizedCapture` | anchored | `declaration -> apply_snapshot_authorization_to_manifest` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+| v3-codex-sample-03 | `V3CodexSample03AuthorizedCapture -> V3CodexSample04PayloadBudgeted` | anchored | `capture_v3_live_raw_request -> project_payload_verbatim` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, verbatim diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+| v3-codex-sample-04 | `V3CodexSample04PayloadBudgeted -> V3CodexSample05FilesystemPersisted` | anchored | `capture_v3_responses_direct_response -> persist_v3_codex_sample_payload` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+| v3-codex-sample-05 | `V3CodexSample04PayloadBudgeted -> V3CodexSample05FilesystemPersisted` | anchored | `capture_v3_responses_relay_provider_snapshots -> persist_v3_codex_sample_payload` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+| v3-codex-sample-06 | `V3CodexSample05FilesystemPersisted -> V3CodexSample06RetentionEnforced` | anchored | `persist_v3_codex_sample_payload -> enforce_v3_codex_sample_request_retention` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+| v3-codex-sample-07 | `V3ServerStartup01ListenerSetPreflight -> V3CodexSample06RetentionEnforced` | anchored | `spawn_v3_server_aggregate -> enforce_v3_codex_sample_listener_retention` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+
+## Shared Multi-Reference Functions
+
+| function_id | symbol | owner | note |
+| --- | --- | --- | --- |
+| architecture.mainline_chain_manifest_projection | `buildMainlineChainManifest` | `architecture.mainline_chain_manifest_payload_copy_budget`<br/>mainline chain manifest generation reuses one authoritative projection without JSON round-trip cloning | Architecture review block: builds one per-chain manifest projection and passes it directly to YAML serialization without a JSON clone graph. |
+| native.responses_context_capture | `captureReqInboundResponsesContextSnapshotJson` | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse | Host/native wrapper; truth owner remains Rust hub_req_inbound_context_capture. |
+| native.responses_client_projection | `projectResponsesClientPayloadForClientNative` | `hub.response_responses_client_projection`<br/>OpenAI Responses client-visible payload projection for JSON body and SSE frames after HubRespChatProcess03Governed normalization, including apply_patch freeform custom tool output plus client-visible model/reasoning restore | Thin host/native facade; truth owner remains Rust. |
+| native.provider_response_metadata_sync_effect | `plan_provider_response_metadata_sync_effect_json` | `hub.provider_response_metadata_sync_effect_plan`<br/>Rust-owned provider-response MetadataCenter bind/merge/write effect plan | Rust selects provider-response MetadataCenter no-op/bind/write effects; TS executes only opaque center binding and returned writes. |
+| native.provider_response_stopless_runtime_control_effect | `plan_provider_response_stopless_runtime_control_effect_json` | `hub.provider_response_stopless_runtime_control_effect_plan`<br/>Rust-owned provider-response stopless runtime-control effect plan | Rust validates the direct stopless MetadataCenter write-plan shape and selects no-op/apply_runtime_control with the complete runtime-control projection; TS executes only returned MetadataCenter IO. |
+| native.provider_response_stream_pipe_effect | `plan_provider_response_stream_pipe_effect_json` | `hub.provider_response_stream_pipe_effect_plan`<br/>Rust-owned provider-response stream-pipe effect plan | Rust validates metadata-only streamPipe and selects no_pipe/use_pipe with canonical codec/requestId while rejecting effect-owned payload/body; TS reuses the top-level client semantic reference for Node stream IO. |
+| native.provider_response_diagnostic_alarm_effect | `plan_provider_response_diagnostic_alarm_effect_json` | `hub.provider_response_diagnostic_alarm_effect_plan`<br/>Rust-owned provider-response diagnostic alarm console effect plan | Rust selects diagnostic alarm entries and emits complete console message effects; TS executes console.warn IO only. |
+| native.provider_response_outbound_effect_materialization | `materialize_provider_response_outbound_effect_plan_json` | `hub.provider_response_outbound_effect_materialization`<br/>Rust-owned provider-response outbound payload/effect materialization; TS only executes request-local host IO | Rust validates the total response plan and returns payload, request/diagnostic projection, and normalized runtime effects; TS performs host IO only. |
+| native.provider_response_stage_recorder_effect | `plan_provider_response_stage_recorder_effect_json` | `hub.provider_response_stage_recorder_effect_plan`<br/>Rust-owned provider-response debug stage recorder effect plan; TS only executes recorder IO | Rust emits ordered response debug stage records; TS only executes recorder IO and does not own stage names or debug payload envelopes. |
+| error.execution_decision_consumer | `resolveProviderRetryExecutionPlan` | `error.execution_decision_consumer`<br/>Thin RequestExecutor, Router Direct, and Provider Direct consumers of Rust-owned typed ErrorErr05 actions | Thin executor host captures ErrorErr02 JSON, invokes Rust ErrorErr05 truth once, and applies request-local attempt/exclusion effects. |
+| runtime.lifecycle.pid_cache_writer | `writeServerPidCache` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state | Writes transient pid.cache JSON under runtime-lifecycle subdir; truth remains HTTP /health + listener identity. |
+| runtime.lifecycle.stop_intent_signal | `writeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL | Cross-process stop-intent signal; daemon-stop-intent.ts is a thin re-export facade. |
+| runtime.lifecycle.stop_intent_consumer | `consumeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL | Consumes and TTL-gates stop-intent.json; same owner truth as the writer. |
+| runtime.lifecycle.instance_registry_writer | `writeRuntimeInstance` | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json | Atomic write via temp file + rename; authoritative description of the instance, not the pid cache. |
+| runtime.lifecycle.instance_registry_status | `updateRuntimeInstanceStatus` | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json | Promotes instance.json status; caller must already have a record via writeRuntimeInstance. |
+| debug.surface_registry | `createDebugToolkit` | `debug.unified_surface`<br/>debug/diag/snapshot/logger/harness/replay/policy migration must converge on one queryable authoring surface under src/debug with per-module closeout and explicit diagnostics taxonomy | Canonical debug owner entrypoint. createDebugToolkit is the unified facade constructor for debug diag/snapshot/logger/harness replay surfaces. |
+| debug.harness_replay_input_clone | `cloneProviderReplayInput` | `debug.harness_replay_payload_copy_budget`<br/>Provider debug replay creates exactly one independent execution copy before provider mutation | M6 internal block: creates the single provider-mutation isolation graph for a captured replay input; it is diagnostic-only and releases with harness execution. |
+| debug.responses_provider_replay_chat_owner | `createReplayChatOwner` | `debug.responses_provider_replay_payload_copy_budget`<br/>Responses provider replay script prepares captured chat samples without JSON-cloning complete payloads | Debug script block: creates only a shallow top-level owner for captured chat replay mutation; nested payload branches remain borrowed and diagnostic-only. |
+| debug.replay_codex_sample_metadata_projection | `stripReplayOnlyClientHeadersFromBody` | `debug.replay_codex_sample_payload_copy_budget`<br/>Codex sample replay prepares diagnostic requests without JSON-cloning complete payloads | Debug replay block: strips replay-only metadata with path-local shallow owners while preserving unchanged nested request branches. |
+| debug.replay_codex_sample_provider_request_projection | `buildReplayInputFromProviderRequest` | `debug.replay_codex_sample_payload_copy_budget`<br/>Codex sample replay prepares diagnostic requests without JSON-cloning complete payloads | Debug replay block: projects captured provider request shape into a replayable Responses client request without cloning complete payload branches. |
+| debug.responses_fai_capture_variant_projection | `buildResponseProbeVariants` | `debug.responses_fai_capture_payload_copy_budget`<br/>Responses FAI capture probe lazily projects compatibility variants without deep-cloning complete payloads | Debug script block: lazily yields one Responses FAI compatibility variant at a time; unchanged nested payload branches remain borrowed and diagnostic-only. |
+| debug.responses_sse_capture_request_owner | `createResponsesCaptureRequestOwner` | `debug.responses_sse_capture_payload_copy_budget`<br/>Responses SSE capture script shallow-owns top-level capture overrides without deep-cloning complete requests | Debug script block: creates one shallow top-level owner for Responses SSE capture overrides; unchanged nested payload branches remain borrowed and diagnostic-only. |
+| debug.responses_sse_completed_response_projection | `convertEventsToResponsesJson` | `debug.responses_sse_utils_payload_copy_budget`<br/>Responses SSE golden-roundtrip borrows completed response objects without JSON-cloning full payloads | Debug script block: returns completed response event objects by reference for golden roundtrip; aggregation only synthesizes responses when no completed response exists. |
+| debug.cross_protocol_matrix_chat_projection | `canonicalizeChat` | `debug.cross_protocol_matrix_payload_copy_budget`<br/>Cross-protocol parity matrix canonicalizes chat samples without JSON-cloning complete payloads | Debug script block: canonicalizes chat parity samples with path-local owners while preserving source isolation and borrowed unchanged schema branches. |
+| debug.coverage_hub_standardized_parity_projection | `chatEnvelopeToStandardizedWithNative` | `debug.coverage_hub_standardized_payload_copy_budget`<br/>Hub standardized coverage helper compares TS/native projections without JSON round-trip object clones | Debug coverage block: compares TS/native standardized projections directly instead of materializing JSON-cloned comparison graphs. |
+| debug.coverage_hub_chat_projection_parity | `standardizedToChatEnvelopeWithNative` | `debug.coverage_hub_chat_projection_payload_copy_budget`<br/>Hub standardized-to-chat coverage helper compares TS/native projections without JSON round-trip object clones | Debug coverage block: compares TS/native standardized-to-chat projections directly instead of materializing JSON-cloned comparison graphs. |
+| debug.hub_chain_equivalence_sanitized_payload | `sanitizePayload` | `debug.hub_chain_equivalence_payload_copy_budget`<br/>Hub chain equivalence diagnostic sanitization removes debug-only fields without deep-cloning complete protocol payloads | Debug equivalence block: removes debug-only comparison fields with path-local owners while borrowing unchanged nested protocol payload branches. |
+| debug.lmstudio_compat_tools_projection | `applyLMStudioCompatibility` | `debug.lmstudio_compat_tools_payload_copy_budget`<br/>LM Studio compatibility debug projection owns only rewritten request parameters and tool wrappers | Debug compatibility block: creates a top-level/parameters projection and normalized tool wrappers while borrowing unchanged nested request branches. |
+| debug.anthropic_response_regression_projection | `buildAnthropicRegressionProjectionWithNative` | `debug.anthropic_response_regression_payload_copy_budget`<br/>Anthropic response regression binds the Rust native projection owner without cloning the sample payload | Debug regression block: serializes the tracked Anthropic sample once into the Rust native projection owner and validates the returned Hub shape without cloning the source graph. |
+| debug.provider_golden_capture_config_projection | `buildDerivedConfig` | `debug.provider_golden_capture_payload_copy_budget`<br/>Provider golden capture derives temporary configs with path-local owners instead of deep-cloning complete config graphs | Debug capture block: creates path-local temporary config owners while borrowing unchanged nested provider and config branches until artifact serialization. |
+| debug.outbound_regression_execution_copy | `cloneOutboundRegressionExecutionPayload` | `debug.outbound_regression_payload_copy_budget`<br/>Outbound provider regression keeps exactly one structured-clone execution graph without fallback cloning | Debug script block: creates the single provider-mutation isolation graph for one outbound regression attempt; JSON and original-object fallback paths are forbidden. |
+| error.err_04_router_policy_applied | `report_provider_error` | `error.pipeline_contract`<br/>ErrorErr01-06 provider/runtime error chain contract and architecture gate | Router policy applied between ErrorErr03 and ErrorErr05; Rust provider runtime ingress normalizes provider error events into ErrorErr04 policy truth. |
+| error.err_04_executor_envelope | `RequestExecutorErrorErr04RouterPolicyEnvelope` | `error.execution_decision_consumer`<br/>Thin RequestExecutor, Router Direct, and Provider Direct consumers of Rust-owned typed ErrorErr05 actions | Executor-side envelope alias for ErrorErr04RouterPolicyApplied; call map edge err-03 crosses from ErrorErr03 to ErrorErr05 per contract. |
+
+## Maintenance Rules
+
+- Do not invent symbols. Use binding_pending until concrete caller/callee is verified in code.
+- Each edge must bind one adjacent mainline transition only.
+- If a facade/wrapper is listed, also record the truth owner feature_id.
+- When a feature changes mainline entry/exit, update this file in the same change set.
+- If runtime orchestration and typed contract builders are different layers, record them in split_bindings instead of compressing them into one fake edge.

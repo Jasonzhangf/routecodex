@@ -1,0 +1,232 @@
+# 25 Protocol / SSE / Continuation Boundary
+
+## When To Use
+
+- `/v1/responses` continuation save/restore, direct/relay, submit_tool_outputs, or scope materialize.
+- JSON/SSE parity, handler-response-sse, responses-sse-bridge, response outbound, or request inbound changes.
+- Any bug where request/response history, tool calls, tool outputs, stopless guidance, or servertool state is lost between turns.
+
+## Core Rule
+
+SSE is transport-only in both V2 and V3. It never owns request/response
+semantics. It may encode/decode frames, preserve order, handle backpressure,
+timeouts, keepalive, closeout, and expose black-box evidence. Provider/client
+protocol codecs may parse the already-decoded `data` payloads, but that is not
+SSE ownership. SSE must not decide schema validity, tool governance,
+continuation save/restore, finish reason, stopless/servertool projection,
+response cleanup, retry/reroute policy, or any provider/client payload semantic
+repair.
+
+After the client HTTP 200/SSE headers are committed, a provider/runtime stream
+failure must still traverse the typed Error01-06 chain. The final client-frame
+owner projects exactly one standard entry-protocol `event: error` and then a
+clean EOF. Never surface an internal Rust/Hyper body `Err` to the client: that
+turns a classified runtime failure into an undecodable transport disconnect.
+Do not synthesize `response.completed`, `[DONE]`, or successful terminal truth.
+Responses Relay client stream errors must carry typed `V3Error01SourceRaised`,
+never `Err(String)` that asks Server to infer an error kind. Server consumes the
+typed source: provider/runtime sources enter the Error06 SSE error event, while
+`client_disconnect` remains transport-local.
+
+`client_disconnect` is the only transport-local exception because the client is
+already gone; it remains health-neutral and is not projected back onto the dead
+connection.
+
+## Malformed SSE Triage
+
+Do not treat the words `malformed SSE` in a log as owner proof. Split the failure before editing:
+
+- UTF-8, line/frame/buffer limit, unterminated frame, abort, timeout, upstream read, and downstream write are SSE transport failures.
+- Provider response body read failures are provider raw/body failures, even when the body kind is SSE.
+- Already-framed `data` JSON parse, event type, terminal event, choices/content/tool/reasoning schema, `[DONE]` ordering, and provider protocol aggregation are provider response event codec failures.
+- Retry, switch provider, default-floor retry, cooldown, and final client projection are Error01-06 / router policy failures, not SSE fixes.
+
+Fix action: move naming/error ownership to the nearest adjacent owner. Do not add provider-specific branches, payload repair, retry, continuation, or tool/history logic to the SSE crate, server SSE handler, response outbound, or WebSocket projection.
+
+JSON Schema fields inside protocol tool declarations are request data-plane semantics, not RouteCodex control fields. A debug redaction placeholder such as `[REDACTED]` in a registered schema position must be projected only by the adjacent target codec to the protocol-valid boolean schema `true`; never copy it verbatim to provider wire, move it into MetadataCenter, silently delete the tool/property, or turn it into a provider failure. Lock every supported target codec with a positive valid-sibling test and a red fixture that removes the projection call.
+
+Provider-returned item IDs are also protocol data. When a prior provider emits a function-call item ID outside the next Responses target's `fc_*` domain, the adjacent Responses outbound codec must deterministically project that item ID and its paired output ID together while preserving `call_id`. Do not reject the turn, rewrite history in continuation storage, or route the ID through control metadata.
+
+Continuation is only the `/v1/responses` protocol save/restore boundary, and its owner is Chat Process.
+
+It is not a history transformer, response repair layer, request converter, stopless hook owner, tool-governance owner, or SSE transport owner.
+
+Fixed placement:
+
+```text
+response chat process exit
+  -> save canonical continuation truth
+  -> immutable store interval
+  -> restore canonical continuation truth
+  -> request chat process entry
+```
+
+Between save and restore, no layer may convert, clean, patch, reorder, sanitize, collapse, or infer request/response history. If history is changed there, the next turn can lose tool context or replay poisoned shape.
+
+## Hard Lock: Immutable Interval
+
+This is the highest-priority rule for continuation bugs:
+
+- The only legal save point is **response Chat Process exit** after response-side tool harvest / stopless / servertool / semantic finalization.
+- The only legal restore point is **next request Chat Process entry** before request-side tool governance / hook restore / provider-facing request semantics.
+- The interval between those two points is immutable. It may carry bytes, ids, frames, and control metadata, but it must not interpret or rewrite semantic content.
+- `req_inbound` and `resp_outbound` are normalization/projection boundaries only. They do not own continuation logic.
+- SSE and server handlers are transport only. They do not own continuation logic or any request/response semantic logic.
+- Adapter/context/converter helpers may pass already-finalized values to the next owner, but may not rebuild context from stored response/request material.
+
+Forbidden in the immutable interval:
+
+- semantic conversion between protocols
+- context restore or history materialization
+- `function_call` / `tool_call` / `function_call_output` repair, reorder, collapse, or id rewrite
+- `required_action` inference or terminal-state judgment
+- stopless/servertool guidance injection
+- request rebuild from `entryOriginRequest`, `capturedChatRequest`, `requestSemantics`, response body, or session-only scope
+- payload cleanup/sanitize done to make a later stage pass
+
+If any of those operations appears outside Chat Process save/restore, treat it as an owner violation. Delete that logic and move the required behavior back to the Chat Process owner.
+
+## What Must Not Change
+
+- `req_inbound` must not restore history, patch tool results, inject stopless/servertool guidance, or rebuild continuation payload.
+- `resp_outbound` must not save continuation, repair required_action, rewrite tool calls, clean history, or prepare next-turn request data.
+- `handler-response-sse.ts` and `responses-sse-bridge.ts` must not inspect or decide `required_action`, terminal state, stopless schema, continuation owner, tool injection, or history repair.
+- Continuation store save/restore must not mutate stored response/request content to make later stages pass.
+- Handler/bridge code must not use session/conversation-only scope as continuation evidence.
+- Control semantics must not be written into request/response payload/history.
+- Provider response converters, adapter context builders, and server helper surfaces must not use `entryOriginRequest`, `capturedChatRequest`, `requestSemantics`, or response body content to restore continuation context after Chat Process save.
+
+## What May Change
+
+- `req_inbound` may perform non-destructive protocol entry normalization only: endpoint capture, request id, raw evidence capture, syntax/shape preservation, and scope binding.
+- `resp_outbound` may perform client protocol projection and frame/body handoff only for already-finalized semantic response truth.
+- SSE transport may write frames, keepalive comments, timeouts, closeout, backpressure, and already-finalized JSON-to-SSE framing only.
+- Chat Process request side may restore current-turn context, apply tool governance, stopless/servertool request hooks, and provider-facing request semantics after continuation restore.
+- Chat Process response side may perform tool harvest, stopless/schema judgment, servertool projection, and semantic response finalization before continuation save.
+- MetadataCenter may carry control state such as continuation owner, route/control pins, protocol owner, stream intent, request truth ids, and release status.
+
+## If Normalization Is Wrong
+
+Normalization bugs belong to the nearest canonical semantic owner, not transport:
+
+- Provider raw SSE/body parsing error: fix `ProviderRespInbound01Raw -> HubRespInbound02Parsed` Rust owner.
+- Client-visible JSON/SSE projection mismatch: fix Rust response projection owner before server frame writing.
+- Request entry shape capture error: fix req_inbound/native capture owner.
+- Route/control carrier mismatch: fix MetadataCenter/runtime-control owner, not payload/history.
+- Tool/history governance error: fix Chat Process request/response governance owner.
+
+Do not fix normalization by adding a second parser or patcher in handler, bridge, SSE, resp_outbound, or continuation store.
+
+## If Conversion Is Wrong
+
+Conversion bugs must be fixed where the adjacent semantic conversion is owned:
+
+- Entry protocol request -> Hub request: `ReqInbound`.
+- Hub governed request -> provider semantic/wire: `ReqOutbound` / provider runtime codec.
+- Provider raw response -> Hub parsed response: `RespInbound`.
+- Hub governed response -> client semantic body/SSE: `RespOutbound` Rust projection.
+- Continuation save/restore: only stores/restores canonical truth; it does not convert content.
+
+Protocol conversion here means one adjacent codec/builder doing semantic-equivalent shape mapping. Request shape may only change on the entry-protocol -> Chat Process codec path or the Chat Process -> target-protocol codec path. Response shape may only change on the provider/client raw -> Chat Process codec path or the Chat Process -> client/provider projection path. Server handlers, SSE transport, provider transport, continuation store, debug/sample writers, and non-owner hooks must not add, remove, lift, collapse, or rebuild normal payload fields.
+
+If the conversion requires business judgment, it belongs in Chat Process, not inbound/outbound, SSE, or handler code.
+
+## MetadataCenter Rule
+
+Control plane goes to MetadataCenter. Data plane stays in request/response/store truth.
+
+Any RouteCodex-created field that is not itself part of the client request protocol or provider/client response protocol is a control signal. It must live in the owning control center or side-channel resource, not in normal payload/history.
+
+Request protocol data stays data-plane. HTTP headers, request body protocol fields, `metadata`, `client_metadata`, and `x-*` / `x-codex-*` client fields are not RouteCodex control signals by default and must not be moved into MetadataCenter. They may be parsed only by the owning protocol/request stage, and they must not be used to rebuild RouteCodex control state.
+
+Allowed in MetadataCenter:
+
+- continuation owner and legal scope keys
+- request truth ids, port/group scope
+- runtime control such as provider protocol, route hint, retry/provider pin, stream intent
+- release/closeout status
+
+Forbidden in MetadataCenter:
+
+- full payload
+- response body
+- request context
+- normalized input
+- tool history mirror
+- provider/client body snapshots
+- "for later convenience" copies of data-plane objects
+
+## Protocol Handoff Data/Control Split
+
+- A protocol handoff carries routing decisions, retry/attempt state, and timing/observability only through typed Runtime side-channel resources. None of these fields may be copied into protocol metadata or normal request/response payload.
+- The handoff data plane is the governed Chat request projected by the immediately adjacent outbound codec. Server HTTP/WebSocket orchestration may move that opaque projected value, but must not restart from the original client payload or rebuild it from control state.
+- A fresh Responses request whose configured binding is `PendingNotImplemented` must remain pending. Server entry normalization may select the Relay orchestration shell only for an already executable Direct/Relay binding; it must not turn an unresolved binding into an executable route.
+- Responses reasoning `summary` is inbound payload truth and must normalize into Chat `reasoning_content`. Encrypted replay state is not normal Chat payload and must stay out of this projection.
+- Cumulative provider-send attempts and external timing span all Direct/Relay legs. The Runtime-owned accumulator crosses typed handoffs; Server transport must not recreate, merge, or infer it.
+
+## Review Checklist
+
+- Is the change before save, inside immutable store interval, or after restore?
+- Does it mutate request/response history between save and restore? If yes, reject.
+- Is the file a transport/handler/SSE/outbound surface? If yes, it cannot own business semantics.
+- Is the state control-plane or data-plane? Control goes MetadataCenter; data goes canonical request/response/store truth.
+- Is the bug normalization or conversion? Fix the owning adjacent node, not the symptom layer.
+- Does the test lock client/provider observable behavior without making SSE or handler the semantic owner?
+
+## Anti-Patterns
+
+- "SSE frame lacks required_action, so patch handler-response-sse."
+- "Next request lost tools, so restore them in req_inbound."
+- "Saved response is inconvenient, so clean it during store save."
+- "routeHint/providerKey is needed later, so put it into payload/history."
+- "Session has a recent response, so auto-continue without explicit current request evidence."
+- "Adapter has entryOriginRequest/requestSemantics, so use it to reconstruct next-turn context."
+- "Outbound sees required_action/tool_calls, so classify or repair continuation before sending."
+- "Inbound sees previous_response_id/sessionId, so materialize history before Chat Process."
+
+## Minimum Verification
+
+- Function map owner/gate still passes: `npm run verify:function-map-compile-gate`.
+- Mainline docs still parse/sync when changed: `npm run verify:architecture-review-surface-light`.
+- Focused request/response continuation tests for the affected edge.
+- For runtime-impacting changes, rebuild/install and replay a real `/v1/responses` sample before claiming live closure.
+
+## Remote Locator Pre-Module Boundary
+
+- An isolated remote-continuation contract/store codec may land before live Hub wiring, but it remains a source-only pre-module.
+- The locator must bind the exact entry protocol and endpoint, `continuationOwner=direct`, session, conversation, port, routing group, provider, model, auth handle, capability revision, commit time, and expiry.
+- Provider response IDs are opaque only within their provider binding; they are not globally unique storage keys. A remote locator identity must be the composite of raw response ID + typed entry/session/conversation/port/group scope + exact provider/model/auth pin. The same raw ID may coexist across different scopes or provider pins; only an exact duplicate composite binding is already committed.
+- Req03 lookup without an exact provider pin may resolve only when the typed scope contains one matching provider binding. Multiple provider bindings for the same raw ID and scope are ambiguous and must fail fast; never choose the first match or infer a pin from payload/client metadata.
+- Locator fields become immutable after construction. Commit must reject invalid expiry and an exact duplicate composite binding; load and release must reject every owner/scope/pin mismatch or ambiguity, expiry, and provider unavailability without cross-provider reselection or local-owner fallback.
+- The locator codec must deny unknown fields so `local_context`, `history`, `tool_state`, or equivalent local Chat Process truth cannot be silently persisted or restored.
+- Keep the remote-binding resource `binding_pending` until Resp04 commit, Req03 load/classification, and pinned Target execution edges are actually wired and verified. Passing isolated store/codec tests does not prove usable continuation runtime.
+
+## V3 Relay SSE Materialized Snapshot Rule
+
+For `/v1/responses` Relay, provider SSE is still transport framing until the provider event codec materializes it. The required owner path is:
+
+```text
+ProviderRespInbound01Raw SSE frames
+  -> provider/protocol event codec
+  -> Resp02 canonical terminal JSON
+  -> Resp03/Resp04 governed/finalized response
+  -> Resp05 client JSON/SSE projection
+```
+
+Debug/sample persistence must record both surfaces for SSE responses:
+
+- `rawSse`: transport evidence, captured incrementally and never used as semantic truth.
+- `materializedResponse`: Resp04-finalized JSON semantic truth used for client projection and auditing.
+
+Do not make server/SSE transport re-parse `rawSse` to prove semantic state. If a provider emits a `response.*` SSE event that the codec does not understand, fail fast in the provider event codec rather than silently discarding it or patching it in snapshot/server code.
+
+## Direct Current-Response Compatibility Rule
+
+Provider-profile response compatibility for Direct belongs on the adjacent
+`ProviderResp14Raw -> Direct provider projection` edge, never in request/history,
+Relay, continuation, handler, or SSE transport. If the compatibility depends on
+content split across SSE deltas, the owning projection must keep emitted lifecycle
+events and the terminal response aggregate semantically identical. Validate only
+the current response output surface: upstream may legitimately echo request fields
+such as `instructions` inside response envelopes, and those request-data fields must
+not be cleaned or rewritten.

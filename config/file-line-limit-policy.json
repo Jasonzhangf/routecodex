@@ -1,0 +1,23 @@
+{
+  "limit": 500,
+  "extensions": [
+    ".ts",
+    ".tsx",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".mts",
+    ".cts",
+    ".py",
+    ".sh"
+  ],
+  "excludeDirs": [
+    "dist/",
+    "coverage/",
+    "node_modules/",
+    ".beads/"
+  ],
+  "allowList": [
+    "scripts/tests/v3-provider-action-gate-red-fixtures.mjs"
+  ]
+}

@@ -1,0 +1,11 @@
+[package]
+name = "routecodex-v3-error"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+routecodex-v3-debug = { path = "../routecodex-v3-debug" }
+serde.workspace = true
+serde_json.workspace = true

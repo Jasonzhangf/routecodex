@@ -1,0 +1,108 @@
+lifecycle_id: error.mainline
+summary: Provider/runtime/direct failures enter unified ErrorErr chain; provider
+  availability/cooldown truth stays provider/server-scoped and must not be
+  rewritten into session-storm truth before client projection.
+owner_feature_id: error.pipeline_contract
+entrypoint:
+  node_id: ErrorErr01SourceRaised
+  wiki_page: docs/architecture/wiki/error-mainline-call-graph.md
+  call_map_chain_id: error.mainline
+node_ids:
+  - ErrorErr01SourceRaised
+  - ErrorErr02HostCaptured
+  - ErrorErr03RuntimeClassified
+  - ErrorErr04RouterPolicyApplied
+  - ErrorErr05ExecutionDecision
+  - ErrorErr06ClientProjected
+edges:
+  - step_id: err-01
+    from_node: ErrorErr01SourceRaised
+    to_node: ErrorErr02HostCaptured
+    status: anchored
+    owner_feature_id: error.pipeline_contract
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - provider_runtime.observation
+      produces:
+        - error.chain
+      side_channel_reads: []
+      side_channel_writes:
+        - error.chain
+  - step_id: err-02
+    from_node: ErrorErr02HostCaptured
+    to_node: ErrorErr03RuntimeClassified
+    status: anchored
+    owner_feature_id: error.provider_failure_policy
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - error.chain
+      produces:
+        - error.chain
+      side_channel_reads:
+        - error.chain
+        - provider_runtime.observation
+      side_channel_writes:
+        - error.chain
+  - step_id: err-03
+    from_node: ErrorErr03RuntimeClassified
+    to_node: ErrorErr04RouterPolicyApplied
+    status: anchored
+    owner_feature_id: error.pipeline_contract
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - error.chain
+        - provider_runtime.observation
+      produces:
+        - error.chain
+        - provider_runtime.observation
+      side_channel_reads:
+        - error.chain
+        - provider_runtime.observation
+      side_channel_writes:
+        - error.chain
+        - provider_runtime.observation
+  - step_id: err-04
+    from_node: ErrorErr04RouterPolicyApplied
+    to_node: ErrorErr05ExecutionDecision
+    status: anchored
+    owner_feature_id: error.execution_decision_consumer
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - error.chain
+        - provider_runtime.observation
+      produces:
+        - error.chain
+        - route.retry_exclusion_set
+      side_channel_reads:
+        - error.chain
+        - provider_runtime.observation
+      side_channel_writes:
+        - error.chain
+        - route.retry_exclusion_set
+  - step_id: err-05
+    from_node: ErrorErr05ExecutionDecision
+    to_node: ErrorErr06ClientProjected
+    status: anchored
+    owner_feature_id: error.client_projection
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - error.chain
+      produces:
+        - response.client_payload
+      side_channel_reads:
+        - error.chain
+      side_channel_writes: []
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

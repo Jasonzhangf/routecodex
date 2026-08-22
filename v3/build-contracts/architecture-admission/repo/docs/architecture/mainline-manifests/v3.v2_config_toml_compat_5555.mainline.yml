@@ -1,0 +1,29 @@
+lifecycle_id: v3.v2_config_toml_compat_5555.mainline
+summary: V3 config store detects explicit V2 root TOML and compiles it with provider config.v2.toml files into the V3 published manifest for 5555.
+owner_feature_id: v3.v2_config_toml_compat_5555
+owner_module: v3/crates/routecodex-v3-config/src/v2_compat.rs
+entrypoint:
+  node_id: V3Config01FileSource
+  wiki_page: docs/architecture/function-map.yml
+  call_map_chain_id: v3.v2_config_toml_compat_5555.mainline
+node_ids:
+  - V3Config01FileSource
+  - V3Config02AuthoringParsed
+  - V3Config05ManifestPublished
+step_ids:
+  - v3-v2-config-01
+  - v3-v2-config-02
+edge_status_counts:
+  anchored: 2
+  partial: 0
+  binding_pending: 0
+  total: 2
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: v3.v2_config_toml_compat_5555.mainline
+  min_function_feature: v3.v2_config_toml_compat_5555
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

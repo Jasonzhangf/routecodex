@@ -1,0 +1,122 @@
+version: 1
+status: active
+modules:
+  - module_id: v3-entry-protocol-config
+    owner_feature_id: v3.entry_protocol_registry_contract
+    owned_paths:
+      - v3/crates/routecodex-v3-config/src/defaults.rs
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+    allowed_dependencies:
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-runtime
+    forbidden_paths:
+      - ~/.rcc
+      - src
+      - sharedmodule
+    required_gates:
+      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config
+      - npm run verify:v3-entry-protocol-endpoint-binding
+      - npm run verify:v3-module-boundaries
+
+  - module_id: v3-global-binary-install
+    owner_feature_id: v3.global_binary_install
+    owned_paths:
+      - scripts/install-v3-cli.mjs
+      - scripts/ensure-cli-command-shim.mjs
+      - scripts/install-global.sh
+      - tests/scripts/v3-cli-distribution.spec.mjs
+      - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
+      - v3/crates/routecodex-v3-config/src/lib.rs
+      - package.json
+      - package-lock.json
+      - src/build-info.ts
+    allowed_dependencies:
+      - v3/crates/routecodex-v3-cli
+      - v3/dist/bin/rccv3
+      - ~/.local/bin/rccv3
+    forbidden_paths:
+      - sharedmodule
+      - ~/.rcc/install
+    required_gates:
+      - npm --prefix v3 run test:distribution
+      - npm --prefix v3 run test:install-cleanup
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+
+  - module_id: v3-build-test-artifact-budget
+    owner_feature_id: v3.build_test_artifact_budget
+    owned_paths:
+      - v3/.cargo/config.toml
+      - v3/Cargo.toml
+      - v3/scripts/run-v3-cargo-test.mjs
+      - v3/scripts/cargo-test-artifact-runner.mjs
+      - v3/scripts/architecture/verify-v3-build-test-artifact-budget.mjs
+      - v3/scripts/architecture/verify-v3-architecture-ci.mjs
+      - v3/tests/scripts/v3-build-test-artifact-budget-red-fixtures.mjs
+      - docs/goals/v3-build-test-artifact-budget-test-design.md
+      - docs/architecture/manifests/v3.build_test_artifact_budget.mainline.yml
+      - docs/architecture/wiki/v3-build-test-artifact-budget.md
+    allowed_dependencies:
+      - node:child_process
+      - node:fs
+      - node:path
+      - node:url
+    forbidden_paths:
+      - v3/crates
+      - src
+      - sharedmodule
+      - ~/.rcc
+    required_gates:
+      - npm --prefix v3 run verify:v3-build-test-artifact-budget
+      - npm --prefix v3 run test:v3-build-test-artifact-budget-red-fixtures
+
+  - module_id: v3-independent-build-domain
+    status: active
+    owner_feature_id: v3.build.independent_domain
+    owned_paths:
+      - docs/goals/v3-independent-build-isolation-plan.md
+      - docs/goals/v3-independent-build-isolation-test-design.md
+      - docs/architecture/manifests/v3.build.independent_domain.mainline.yml
+      - docs/architecture/v3-runtime-module-registry.yml
+      - docs/architecture/wiki/v3-independent-build-isolation.md
+      - docs/architecture/wiki/v3-independent-build-isolation.html
+      - scripts/architecture/compile-v3-build-admission.mjs
+      - scripts/install-global.sh
+      - scripts/install-release.sh
+      - scripts/architecture/v3-root-thin-dispatch-contract.mjs
+      - v3/package.json
+      - v3/package-lock.json
+      - v3/rust-toolchain.toml
+      - v3/.cargo/config.toml
+      - v3/scripts
+      - v3/tests
+      - v3/build-contracts
+    referenced_paths:
+      - v3/crates/provider-compat-core/**
+      - v3/crates/servertool-core/**
+      - v3/crates/stop-message-core/**
+    allowed_dependencies:
+      - node:child_process
+      - node:crypto
+      - node:fs
+      - node:path
+      - node:url
+      - yaml
+      - cargo
+      - rustc
+      - ~/.local/bin/rccv3
+    forbidden_paths:
+      - v4
+      - src
+      - ~/.rcc/install
+      - target
+      - dist
+      - artifacts
+      - sharedmodule/llmswitch-core/rust-core/target
+    required_gates:
+      - npm --prefix v3 run verify:isolation
+      - npm --prefix v3 run test:isolation:red
+      - npm --prefix v3 run verify:admission
+      - npm --prefix v3 run test:admission:red
+      - npm --prefix v3 run verify:ci

@@ -1,0 +1,445 @@
+// feature_id: hub.servertool_server_side_tool_entry_contract
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEntryPreflightInput {
+    pub has_base_object: bool,
+    pub adapter_client_disconnected: bool,
+    #[serde(default)]
+    pub chat_response: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServertoolEntryPreflightAction {
+    ReturnPassthroughNonObjectChat,
+    ThrowClientDisconnected,
+    ContinueToToolFlow,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEntryPreflightPlan {
+    pub action: ServertoolEntryPreflightAction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub passthrough_result: Option<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEntryPreflightApplicationInput {
+    pub entry_preflight: Value,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEntryPreflightApplicationPlan {
+    pub throw_error: bool,
+    pub return_result: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_plan: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_object: Option<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolRunEngineEntryPreflightApplicationInput {
+    pub entry_preflight: Value,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolRunEngineEntryPreflightApplicationPlan {
+    pub return_result: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_object: Option<Value>,
+}
+
+pub fn plan_servertool_entry_preflight(
+    input: ServertoolEntryPreflightInput,
+) -> ServertoolEntryPreflightPlan {
+    if !input.has_base_object {
+        return ServertoolEntryPreflightPlan {
+            action: ServertoolEntryPreflightAction::ReturnPassthroughNonObjectChat,
+            result_mode: Some("passthrough".to_string()),
+            passthrough_result: Some(serde_json::json!({
+                "mode": "passthrough",
+                "finalChatResponse": input.chat_response.unwrap_or(Value::Null)
+            })),
+        };
+    }
+    if input.adapter_client_disconnected {
+        return ServertoolEntryPreflightPlan {
+            action: ServertoolEntryPreflightAction::ThrowClientDisconnected,
+            result_mode: None,
+            passthrough_result: None,
+        };
+    }
+    ServertoolEntryPreflightPlan {
+        action: ServertoolEntryPreflightAction::ContinueToToolFlow,
+        result_mode: None,
+        passthrough_result: None,
+    }
+}
+
+pub fn plan_servertool_entry_preflight_application(
+    input: ServertoolEntryPreflightApplicationInput,
+) -> Result<ServertoolEntryPreflightApplicationPlan, String> {
+    let entry = input
+        .entry_preflight
+        .as_object()
+        .ok_or_else(|| "servertool entry preflight decision must be an object".to_string())?;
+    let action = entry
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "servertool entry preflight decision missing action".to_string())?;
+
+    match action {
+        "return_result" => {
+            let result = entry
+                .get("result")
+                .cloned()
+                .ok_or_else(|| "servertool entry preflight decision missing result".to_string())?;
+            Ok(ServertoolEntryPreflightApplicationPlan {
+                throw_error: false,
+                return_result: true,
+                error_plan: None,
+                result: Some(result),
+                base_object: None,
+            })
+        }
+        "throw_error" => {
+            let error_plan = entry.get("errorPlan").cloned().ok_or_else(|| {
+                "servertool entry preflight decision missing errorPlan".to_string()
+            })?;
+            Ok(ServertoolEntryPreflightApplicationPlan {
+                throw_error: true,
+                return_result: false,
+                error_plan: Some(error_plan),
+                result: None,
+                base_object: None,
+            })
+        }
+        "continue" => {
+            let base_object = entry.get("baseObject").cloned().ok_or_else(|| {
+                "servertool entry preflight decision missing baseObject".to_string()
+            })?;
+            Ok(ServertoolEntryPreflightApplicationPlan {
+                throw_error: false,
+                return_result: false,
+                error_plan: None,
+                result: None,
+                base_object: Some(base_object),
+            })
+        }
+        _ => Err(format!(
+            "invalid servertool entry preflight decision action: {action}"
+        )),
+    }
+}
+
+pub fn plan_servertool_run_engine_entry_preflight_application(
+    input: ServertoolRunEngineEntryPreflightApplicationInput,
+) -> Result<ServertoolRunEngineEntryPreflightApplicationPlan, String> {
+    let entry = input
+        .entry_preflight
+        .as_object()
+        .ok_or_else(|| "servertool run-engine entry preflight must be an object".to_string())?;
+    let action = entry
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "servertool run-engine entry preflight missing action".to_string())?;
+
+    match action {
+        "return_result" => {
+            let result = entry.get("result").cloned().ok_or_else(|| {
+                "servertool run-engine entry preflight missing result".to_string()
+            })?;
+            Ok(ServertoolRunEngineEntryPreflightApplicationPlan {
+                return_result: true,
+                result: Some(result),
+                base_object: None,
+            })
+        }
+        "continue" => {
+            let base_object = entry.get("baseObject").cloned().ok_or_else(|| {
+                "servertool run-engine entry preflight missing baseObject".to_string()
+            })?;
+            Ok(ServertoolRunEngineEntryPreflightApplicationPlan {
+                return_result: false,
+                result: None,
+                base_object: Some(base_object),
+            })
+        }
+        _ => Err(format!(
+            "invalid servertool run-engine entry preflight action: {action}"
+        )),
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEntryContextInput {
+    pub include_tool_call_handler_names: Option<Vec<Value>>,
+    pub exclude_tool_call_handler_names: Option<Vec<Value>>,
+    pub include_auto_hook_ids: Option<Vec<Value>>,
+    pub exclude_auto_hook_ids: Option<Vec<Value>>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEntryContextPlan {
+    pub include_tool_call_names: Option<Vec<String>>,
+    pub exclude_tool_call_names: Option<Vec<String>>,
+    pub include_auto_hook_ids: Option<Vec<String>>,
+    pub exclude_auto_hook_ids: Option<Vec<String>>,
+}
+
+pub fn plan_servertool_entry_context(
+    input: ServertoolEntryContextInput,
+) -> ServertoolEntryContextPlan {
+    ServertoolEntryContextPlan {
+        include_tool_call_names: normalize_filter_tokens(input.include_tool_call_handler_names),
+        exclude_tool_call_names: normalize_filter_tokens(input.exclude_tool_call_handler_names),
+        include_auto_hook_ids: normalize_filter_tokens(input.include_auto_hook_ids),
+        exclude_auto_hook_ids: normalize_filter_tokens(input.exclude_auto_hook_ids),
+    }
+}
+
+fn normalize_filter_tokens(values: Option<Vec<Value>>) -> Option<Vec<String>> {
+    let mut normalized = Vec::new();
+    for raw in values.unwrap_or_default() {
+        let Some(raw) = raw.as_str() else {
+            continue;
+        };
+        let value = raw.trim().to_lowercase();
+        if !value.is_empty() && !normalized.contains(&value) {
+            normalized.push(value);
+        }
+    }
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.into_iter().collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        plan_servertool_entry_context, plan_servertool_entry_preflight,
+        plan_servertool_entry_preflight_application,
+        plan_servertool_run_engine_entry_preflight_application, ServertoolEntryPreflightAction,
+        ServertoolEntryPreflightApplicationInput, ServertoolEntryPreflightInput,
+        ServertoolRunEngineEntryPreflightApplicationInput,
+    };
+    use serde_json::Value;
+
+    #[test]
+    fn returns_passthrough_when_chat_response_is_not_an_object() {
+        let plan = plan_servertool_entry_preflight(ServertoolEntryPreflightInput {
+            has_base_object: false,
+            adapter_client_disconnected: false,
+            chat_response: Some(Value::String("raw-chat".to_string())),
+        });
+        assert_eq!(
+            plan.action,
+            ServertoolEntryPreflightAction::ReturnPassthroughNonObjectChat
+        );
+        assert_eq!(plan.result_mode.as_deref(), Some("passthrough"));
+        assert_eq!(
+            plan.passthrough_result,
+            Some(serde_json::json!({
+                "mode": "passthrough",
+                "finalChatResponse": "raw-chat"
+            }))
+        );
+    }
+
+    #[test]
+    fn throws_client_disconnected_when_adapter_is_disconnected() {
+        let plan = plan_servertool_entry_preflight(ServertoolEntryPreflightInput {
+            has_base_object: true,
+            adapter_client_disconnected: true,
+            chat_response: Some(serde_json::json!({"id": "chat"})),
+        });
+        assert_eq!(
+            plan.action,
+            ServertoolEntryPreflightAction::ThrowClientDisconnected
+        );
+        assert_eq!(plan.result_mode, None);
+        assert_eq!(plan.passthrough_result, None);
+    }
+
+    #[test]
+    fn continues_when_base_object_exists_and_client_is_connected() {
+        let plan = plan_servertool_entry_preflight(ServertoolEntryPreflightInput {
+            has_base_object: true,
+            adapter_client_disconnected: false,
+            chat_response: Some(serde_json::json!({"id": "chat"})),
+        });
+        assert_eq!(
+            plan.action,
+            ServertoolEntryPreflightAction::ContinueToToolFlow
+        );
+        assert_eq!(plan.result_mode, None);
+        assert_eq!(plan.passthrough_result, None);
+    }
+
+    #[test]
+    fn normalizes_entry_context_filters_in_rust() {
+        let plan = plan_servertool_entry_context(super::ServertoolEntryContextInput {
+            include_tool_call_handler_names: Some(vec![
+                Value::String(" Web_Search ".to_string()),
+                Value::Null,
+                Value::String("".to_string()),
+                Value::String("web_search".to_string()),
+            ]),
+            exclude_tool_call_handler_names: Some(vec![Value::String(" Vision_Auto ".to_string())]),
+            include_auto_hook_ids: Some(vec![Value::String(" Stop_Message_Auto ".to_string())]),
+            exclude_auto_hook_ids: Some(vec![]),
+        });
+
+        assert_eq!(
+            plan,
+            super::ServertoolEntryContextPlan {
+                include_tool_call_names: Some(vec!["web_search".to_string()]),
+                exclude_tool_call_names: Some(vec!["vision_auto".to_string()]),
+                include_auto_hook_ids: Some(vec!["stop_message_auto".to_string()]),
+                exclude_auto_hook_ids: None,
+            }
+        );
+    }
+
+    #[test]
+    fn entry_preflight_application_returns_result() {
+        let result = serde_json::json!({
+            "mode": "passthrough",
+            "finalChatResponse": "raw-chat"
+        });
+        let plan =
+            plan_servertool_entry_preflight_application(ServertoolEntryPreflightApplicationInput {
+                entry_preflight: serde_json::json!({
+                    "action": "return_result",
+                    "result": result
+                }),
+            })
+            .expect("entry preflight application plan");
+
+        assert!(!plan.throw_error);
+        assert!(plan.return_result);
+        assert_eq!(plan.result, Some(result));
+        assert_eq!(plan.error_plan, None);
+        assert_eq!(plan.base_object, None);
+    }
+
+    #[test]
+    fn entry_preflight_application_throws_error() {
+        let error_plan = serde_json::json!({
+            "message": "client disconnected",
+            "code": "SERVERTOOL_CLIENT_DISCONNECTED"
+        });
+        let plan =
+            plan_servertool_entry_preflight_application(ServertoolEntryPreflightApplicationInput {
+                entry_preflight: serde_json::json!({
+                    "action": "throw_error",
+                    "errorPlan": error_plan
+                }),
+            })
+            .expect("entry preflight application plan");
+
+        assert!(plan.throw_error);
+        assert!(!plan.return_result);
+        assert_eq!(plan.error_plan, Some(error_plan));
+        assert_eq!(plan.result, None);
+        assert_eq!(plan.base_object, None);
+    }
+
+    #[test]
+    fn entry_preflight_application_continues_with_base_object() {
+        let base = serde_json::json!({ "id": "base" });
+        let plan =
+            plan_servertool_entry_preflight_application(ServertoolEntryPreflightApplicationInput {
+                entry_preflight: serde_json::json!({
+                    "action": "continue",
+                    "baseObject": base
+                }),
+            })
+            .expect("entry preflight application plan");
+
+        assert!(!plan.throw_error);
+        assert!(!plan.return_result);
+        assert_eq!(plan.base_object, Some(base));
+    }
+
+    #[test]
+    fn entry_preflight_application_rejects_unknown_action() {
+        let err =
+            plan_servertool_entry_preflight_application(ServertoolEntryPreflightApplicationInput {
+                entry_preflight: serde_json::json!({ "action": "unknown" }),
+            })
+            .expect_err("unknown action must fail");
+
+        assert!(err.contains("invalid servertool entry preflight decision action"));
+    }
+
+    #[test]
+    fn run_engine_entry_preflight_application_returns_result() {
+        let result = serde_json::json!({
+            "mode": "passthrough",
+            "finalChatResponse": { "id": "preflight" }
+        });
+        let plan = plan_servertool_run_engine_entry_preflight_application(
+            ServertoolRunEngineEntryPreflightApplicationInput {
+                entry_preflight: serde_json::json!({
+                    "action": "return_result",
+                    "result": result
+                }),
+            },
+        )
+        .expect("entry preflight application plan");
+
+        assert!(plan.return_result);
+        assert_eq!(plan.result, Some(result));
+        assert_eq!(plan.base_object, None);
+    }
+
+    #[test]
+    fn run_engine_entry_preflight_application_continues_with_base_object() {
+        let base = serde_json::json!({ "id": "base" });
+        let plan = plan_servertool_run_engine_entry_preflight_application(
+            ServertoolRunEngineEntryPreflightApplicationInput {
+                entry_preflight: serde_json::json!({
+                    "action": "continue",
+                    "baseObject": base
+                }),
+            },
+        )
+        .expect("entry preflight application plan");
+
+        assert!(!plan.return_result);
+        assert_eq!(plan.result, None);
+        assert_eq!(plan.base_object, Some(base));
+    }
+
+    #[test]
+    fn run_engine_entry_preflight_application_rejects_unknown_action() {
+        let err = plan_servertool_run_engine_entry_preflight_application(
+            ServertoolRunEngineEntryPreflightApplicationInput {
+                entry_preflight: serde_json::json!({ "action": "unknown" }),
+            },
+        )
+        .expect_err("unknown action must fail");
+
+        assert!(err.contains("invalid servertool run-engine entry preflight action"));
+    }
+}

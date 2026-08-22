@@ -1,0 +1,15 @@
+[package]
+name = "routecodex-v4-router"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+routecodex-v4-config = { path = "../routecodex-v4-config" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]

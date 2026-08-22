@@ -1,0 +1,233 @@
+{
+  "sourceProvider": "OpenAI/Anthropic",
+  "targetProvider": "Gemini",
+  "description": "Gemini Finish Reason 完整转换表",
+  "version": "1.0",
+
+  "finishReasonMappings": {
+    "openaiToGemini": {
+      "stop": {
+        "source": "stop",
+        "target": "STOP",
+        "description": "正常结束，模型完成响应"
+      },
+      "length": {
+        "source": "length",
+        "target": "MAX_TOKENS",
+        "description": "达到最大token限制"
+      },
+      "tool_calls": {
+        "source": "tool_calls",
+        "target": "STOP",
+        "description": "需要调用工具，Gemini在function call后也使用STOP"
+      },
+      "content_filter": {
+        "source": "content_filter",
+        "target": "SAFETY",
+        "description": "内容过滤导致停止"
+      }
+    },
+
+    "anthropicToGemini": {
+      "end_turn": {
+        "source": "end_turn",
+        "target": "STOP",
+        "description": "正常结束"
+      },
+      "max_tokens": {
+        "source": "max_tokens",
+        "target": "MAX_TOKENS",
+        "description": "达到最大token限制"
+      },
+      "stop_sequence": {
+        "source": "stop_sequence",
+        "target": "STOP",
+        "description": "遇到停止序列"
+      },
+      "tool_use": {
+        "source": "tool_use",
+        "target": "STOP",
+        "description": "需要调用工具"
+      }
+    },
+
+    "geminiToOpenai": {
+      "STOP": {
+        "source": "STOP",
+        "target": "stop",
+        "description": "正常结束",
+        "context": "需要根据是否有function call判断"
+      },
+      "MAX_TOKENS": {
+        "source": "MAX_TOKENS",
+        "target": "length",
+        "description": "达到最大token限制"
+      },
+      "SAFETY": {
+        "source": "SAFETY",
+        "target": "content_filter",
+        "description": "安全过滤"
+      },
+      "RECITATION": {
+        "source": "RECITATION",
+        "target": "content_filter",
+        "description": "引用被阻止"
+      },
+      "OTHER": {
+        "source": "OTHER",
+        "target": "stop",
+        "description": "其他原因"
+      }
+    },
+
+    "geminiToAnthropic": {
+      "STOP": {
+        "source": "STOP",
+        "target": "end_turn",
+        "description": "正常结束"
+      },
+      "MAX_TOKENS": {
+        "source": "MAX_TOKENS",
+        "target": "max_tokens",
+        "description": "达到最大token限制"
+      },
+      "SAFETY": {
+        "source": "SAFETY",
+        "target": "end_turn",
+        "description": "安全过滤，Anthropic无直接对应"
+      },
+      "RECITATION": {
+        "source": "RECITATION",
+        "target": "end_turn",
+        "description": "引用被阻止"
+      }
+    }
+  },
+
+  "geminiSpecificMappings": {
+    "candidateFinishReason": {
+      "location": "candidates[*].finishReason",
+      "type": "string",
+      "enum": ["STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "OTHER"]
+    },
+    "promptFeedback": {
+      "blockReason": {
+        "location": "promptFeedback.blockReason",
+        "type": "string",
+        "enum": ["SAFETY", "OTHER"],
+        "description": "提示被阻止的原因"
+      }
+    }
+  },
+
+  "toolExecutionFinishReasons": {
+    "functionCallInResponse": {
+      "gemini": {
+        "finishReason": "STOP",
+        "functionCalls": [
+          {
+            "name": "string",
+            "args": "object"
+          }
+        ]
+      },
+      "openai": {
+        "finishReason": "tool_calls",
+        "tool_calls": [
+          {
+            "id": "string",
+            "type": "function",
+            "function": {
+              "name": "string",
+              "arguments": "string"
+            }
+          }
+        ]
+      },
+      "anthropic": {
+        "stop_reason": "tool_use",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "string",
+            "name": "string",
+            "input": "object"
+          }
+        ]
+      }
+    },
+
+    "afterToolExecution": {
+      "gemini": {
+        "finishReason": "STOP",
+        "content": "基于工具结果的最终响应"
+      },
+      "openai": {
+        "finishReason": "stop",
+        "content": "基于工具结果的最终响应"
+      },
+      "anthropic": {
+        "stop_reason": "end_turn",
+        "content": "基于工具结果的最终响应"
+      }
+    }
+  },
+
+  "safetyFinishReasons": {
+    "geminiSafetyCategories": {
+      "HARM_CATEGORY_HARASSMENT": "骚扰",
+      "HARM_CATEGORY_HATE_SPEECH": "仇恨言论", 
+      "HARM_CATEGORY_SEXUALLY_EXPLICIT": "色情内容",
+      "HARM_CATEGORY_DANGEROUS_CONTENT": "危险内容"
+    },
+
+    "safetyThresholdMapping": {
+      "BLOCK_NONE": "不阻止",
+      "BLOCK_ONLY_HIGH": "仅阻止高风险",
+      "BLOCK_MEDIUM_AND_ABOVE": "阻止中等及以上风险",
+      "BLOCK_LOW_AND_ABOVE": "阻止低风险及以上"
+    }
+  },
+
+  "errorFinishReasons": {
+    "geminiErrors": {
+      "MALFORMED_FUNCTION_CALL": "函数调用格式错误",
+      "FUNCTION_CALLING_DISABLED": "函数调用被禁用",
+      "UNKNOWN": "未知错误"
+    },
+
+    "correspondingOpenaiErrors": {
+      "MALFORMED_FUNCTION_CALL": {
+        "finish_reason": "stop",
+        "error": {
+          "message": "函数调用格式错误",
+          "type": "invalid_request_error"
+        }
+      },
+      "FUNCTION_CALLING_DISABLED": {
+        "finish_reason": "stop", 
+        "error": {
+          "message": "函数调用被禁用",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+
+    "correspondingAnthropicErrors": {
+      "MALFORMED_FUNCTION_CALL": {
+        "stop_reason": "end_turn",
+        "error": {
+          "type": "invalid_request_error",
+          "message": "工具调用格式错误"
+        }
+      },
+      "FUNCTION_CALLING_DISABLED": {
+        "stop_reason": "end_turn",
+        "error": {
+          "type": "invalid_request_error", 
+          "message": "工具调用被禁用"
+        }
+      }
+    }
+  }
+}

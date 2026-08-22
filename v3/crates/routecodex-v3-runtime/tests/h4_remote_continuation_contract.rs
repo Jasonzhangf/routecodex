@@ -1,0 +1,461 @@
+use routecodex_v3_runtime::{
+    decode_v3_remote_continuation_locator, encode_v3_remote_continuation_locator,
+    V3RemoteContinuationCommitInput, V3RemoteContinuationEntryProtocol, V3RemoteContinuationError,
+    V3RemoteContinuationLoadRequest, V3RemoteContinuationLocator, V3RemoteContinuationOwner,
+    V3RemoteContinuationPin, V3RemoteContinuationScopeKey, V3RemoteContinuationStore,
+    V3RemoteProviderAvailability,
+};
+
+fn scope() -> V3RemoteContinuationScopeKey {
+    V3RemoteContinuationScopeKey::responses(
+        "/v1/responses",
+        "session-a",
+        "conversation-a",
+        5555,
+        "gateway-priority",
+    )
+}
+
+fn pin() -> V3RemoteContinuationPin {
+    V3RemoteContinuationPin::new("provider-a", "model-a", "auth-a")
+}
+
+fn locator() -> V3RemoteContinuationLocator {
+    V3RemoteContinuationLocator::new_direct(
+        "resp_remote",
+        scope(),
+        pin(),
+        "cap-rev-1",
+        1_000,
+        9_000,
+    )
+}
+
+fn load_request() -> V3RemoteContinuationLoadRequest {
+    V3RemoteContinuationLoadRequest::direct(
+        "resp_remote",
+        scope(),
+        pin(),
+        V3RemoteProviderAvailability::Available,
+        2_000,
+    )
+}
+
+#[test]
+fn direct_remote_locator_round_trips_for_same_entry_scope_and_pin() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+
+    let loaded = store.load(&load_request()).unwrap();
+    assert_eq!(loaded.remote_response_id(), "resp_remote");
+    assert_eq!(loaded.owner(), V3RemoteContinuationOwner::Direct);
+    assert_eq!(loaded.scope_key(), &scope());
+    assert_eq!(loaded.pin(), &pin());
+
+    let encoded = encode_v3_remote_continuation_locator(loaded).unwrap();
+    let decoded = decode_v3_remote_continuation_locator(&encoded).unwrap();
+    assert_eq!(decoded, *loaded);
+    assert!(!encoded.contains("history"));
+    assert!(!encoded.contains("tool_state"));
+    assert!(!encoded.contains("chat_process_context"));
+}
+
+#[test]
+fn chat_or_messages_entry_cannot_hit_responses_remote_locator() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+
+    for protocol in [
+        V3RemoteContinuationEntryProtocol::ChatCompletions,
+        V3RemoteContinuationEntryProtocol::Messages,
+    ] {
+        let request = V3RemoteContinuationLoadRequest::direct(
+            "resp_remote",
+            scope().with_entry_protocol(protocol),
+            pin(),
+            V3RemoteProviderAvailability::Available,
+            2_000,
+        );
+        assert!(matches!(
+            store.load(&request),
+            Err(V3RemoteContinuationError::EntryProtocolMismatch)
+        ));
+    }
+}
+
+#[test]
+fn relay_owner_cannot_load_direct_remote_locator() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+
+    let mut request = load_request();
+    request.owner = V3RemoteContinuationOwner::Relay;
+    assert!(matches!(
+        store.load(&request),
+        Err(V3RemoteContinuationError::OwnerMismatch)
+    ));
+}
+
+#[test]
+fn same_session_with_different_port_or_group_is_rejected() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+
+    let request = V3RemoteContinuationLoadRequest::direct(
+        "resp_remote",
+        scope().with_port_group(5520, "gateway-priority"),
+        pin(),
+        V3RemoteProviderAvailability::Available,
+        2_000,
+    );
+    assert!(matches!(
+        store.load(&request),
+        Err(V3RemoteContinuationError::ScopeMismatch { .. })
+    ));
+
+    let request = V3RemoteContinuationLoadRequest::direct(
+        "resp_remote",
+        scope().with_port_group(5555, "other-group"),
+        pin(),
+        V3RemoteProviderAvailability::Available,
+        2_000,
+    );
+    assert!(matches!(
+        store.load(&request),
+        Err(V3RemoteContinuationError::ScopeMismatch { .. })
+    ));
+}
+
+#[test]
+fn endpoint_session_or_conversation_scope_mismatch_is_rejected() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+
+    let mismatches = [
+        V3RemoteContinuationScopeKey::responses(
+            "/v1/responses/other",
+            "session-a",
+            "conversation-a",
+            5555,
+            "gateway-priority",
+        ),
+        V3RemoteContinuationScopeKey::responses(
+            "/v1/responses",
+            "session-b",
+            "conversation-a",
+            5555,
+            "gateway-priority",
+        ),
+        V3RemoteContinuationScopeKey::responses(
+            "/v1/responses",
+            "session-a",
+            "conversation-b",
+            5555,
+            "gateway-priority",
+        ),
+    ];
+    for mismatched_scope in mismatches {
+        let request = V3RemoteContinuationLoadRequest::direct(
+            "resp_remote",
+            mismatched_scope,
+            pin(),
+            V3RemoteProviderAvailability::Available,
+            2_000,
+        );
+        assert!(matches!(
+            store.load(&request),
+            Err(V3RemoteContinuationError::ScopeMismatch { .. })
+        ));
+    }
+}
+
+#[test]
+fn provider_model_or_auth_pin_mismatch_is_rejected() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+
+    for bad_pin in [
+        V3RemoteContinuationPin::new("provider-b", "model-a", "auth-a"),
+        V3RemoteContinuationPin::new("provider-a", "model-b", "auth-a"),
+        V3RemoteContinuationPin::new("provider-a", "model-a", "auth-b"),
+    ] {
+        let request = V3RemoteContinuationLoadRequest::direct(
+            "resp_remote",
+            scope(),
+            bad_pin,
+            V3RemoteProviderAvailability::Available,
+            2_000,
+        );
+        assert!(matches!(
+            store.load(&request),
+            Err(V3RemoteContinuationError::PinMismatch { .. })
+        ));
+    }
+}
+
+#[test]
+fn expired_locator_is_rejected_and_not_repaired() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+
+    let request = V3RemoteContinuationLoadRequest::direct(
+        "resp_remote",
+        scope(),
+        pin(),
+        V3RemoteProviderAvailability::Available,
+        9_000,
+    );
+    assert!(matches!(
+        store.load(&request),
+        Err(V3RemoteContinuationError::Expired { .. })
+    ));
+}
+
+#[test]
+fn req03_rejects_capability_revision_mismatch() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+
+    let loaded = store
+        .load_for_req03("resp_remote", &scope(), 2_000)
+        .unwrap();
+    assert!(matches!(
+        loaded.validate_capability_revision("cap-rev-2"),
+        Err(V3RemoteContinuationError::CapabilityRevisionMismatch { .. })
+    ));
+    assert_eq!(store.len(), 1, "failed load must not mutate locator truth");
+}
+
+#[test]
+fn failed_resp04_rebind_preserves_previous_locator_truth() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+    let conflicting = V3RemoteContinuationLocator::new_direct(
+        "resp_conflict",
+        scope(),
+        pin(),
+        "cap-rev-1",
+        1_100,
+        9_100,
+    );
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(
+            conflicting.clone(),
+        ))
+        .unwrap();
+
+    let replacement = V3RemoteContinuationLocator::new_direct(
+        "resp_conflict",
+        scope(),
+        pin(),
+        "cap-rev-1",
+        2_000,
+        10_000,
+    );
+    assert!(matches!(
+        store.rebind_for_resp04(
+            "resp_remote",
+            V3RemoteContinuationCommitInput::locator_only(replacement),
+        ),
+        Err(V3RemoteContinuationError::AlreadyCommitted { .. })
+    ));
+    assert_eq!(
+        store
+            .load_for_req03("resp_remote", &scope(), 2_000)
+            .unwrap()
+            .remote_response_id(),
+        "resp_remote",
+        "failed rebind must not delete the previous continuation truth"
+    );
+    assert_eq!(
+        store
+            .load_for_req03("resp_conflict", &scope(), 2_000)
+            .unwrap(),
+        &conflicting
+    );
+    assert_eq!(store.len(), 2);
+}
+
+#[test]
+fn provider_unavailable_fails_without_cross_provider_reselection() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+
+    let request = V3RemoteContinuationLoadRequest::direct(
+        "resp_remote",
+        scope(),
+        pin(),
+        V3RemoteProviderAvailability::Unavailable,
+        2_000,
+    );
+    assert!(matches!(
+        store.load(&request),
+        Err(V3RemoteContinuationError::ProviderUnavailable {
+            provider_id,
+            model_id
+        }) if provider_id == "provider-a" && model_id == "model-a"
+    ));
+}
+
+#[test]
+fn codec_rejects_local_context_history_or_tool_state_fields() {
+    let encoded = encode_v3_remote_continuation_locator(&locator()).unwrap();
+    for forbidden in ["local_context", "history", "tool_state"] {
+        let mut value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert(forbidden.into(), serde_json::json!({"must_not":"persist"}));
+        assert!(matches!(
+            decode_v3_remote_continuation_locator(&value.to_string()),
+            Err(V3RemoteContinuationError::Codec { .. })
+        ));
+    }
+}
+
+#[test]
+fn release_removes_only_the_remote_locator() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+    assert_eq!(store.len(), 1);
+    assert!(store.release_bound("resp_remote", &scope(), &pin()));
+    assert!(store.is_empty());
+    assert!(matches!(
+        store.load(&load_request()),
+        Err(V3RemoteContinuationError::NotFound { .. })
+    ));
+}
+
+#[test]
+fn duplicate_remote_response_id_cannot_overwrite_immutable_binding() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+    assert!(matches!(
+        store.commit(V3RemoteContinuationCommitInput::locator_only(locator())),
+        Err(V3RemoteContinuationError::AlreadyCommitted { .. })
+    ));
+    assert_eq!(store.len(), 1);
+    assert_eq!(store.load(&load_request()).unwrap().pin(), &pin());
+}
+
+#[test]
+fn same_opaque_response_id_is_isolated_by_session_scope() {
+    let mut store = V3RemoteContinuationStore::default();
+    let scope_b = V3RemoteContinuationScopeKey::responses(
+        "/v1/responses",
+        "session-b",
+        "conversation-b",
+        5555,
+        "gateway-priority",
+    );
+    let locator_b = V3RemoteContinuationLocator::new_direct(
+        "resp_remote",
+        scope_b.clone(),
+        pin(),
+        "cap-rev-1",
+        1_000,
+        9_000,
+    );
+
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator_b))
+        .expect("provider response IDs are opaque and may repeat across sessions");
+
+    assert_eq!(store.len(), 2);
+    assert_eq!(
+        store
+            .load_for_req03("resp_remote", &scope(), 2_000)
+            .unwrap()
+            .scope_key(),
+        &scope()
+    );
+    assert_eq!(
+        store
+            .load_for_req03("resp_remote", &scope_b, 2_000)
+            .unwrap()
+            .scope_key(),
+        &scope_b
+    );
+}
+
+#[test]
+fn same_opaque_response_id_is_isolated_by_provider_binding() {
+    let mut store = V3RemoteContinuationStore::default();
+    let pin_b = V3RemoteContinuationPin::new("provider-b", "model-b", "auth-b");
+    let locator_b = V3RemoteContinuationLocator::new_direct(
+        "resp_remote",
+        scope(),
+        pin_b.clone(),
+        "cap-rev-b",
+        1_000,
+        9_000,
+    );
+
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator_b))
+        .expect("provider response IDs are opaque and may repeat across provider bindings");
+
+    let request_a = load_request();
+    let request_b = V3RemoteContinuationLoadRequest::direct(
+        "resp_remote",
+        scope(),
+        pin_b.clone(),
+        V3RemoteProviderAvailability::Available,
+        2_000,
+    );
+    assert_eq!(store.load(&request_a).unwrap().pin(), &pin());
+    assert_eq!(store.load(&request_b).unwrap().pin(), &pin_b);
+    assert!(matches!(
+        store.load_for_req03("resp_remote", &scope(), 2_000),
+        Err(V3RemoteContinuationError::AmbiguousProviderBinding { .. })
+    ));
+    assert_eq!(store.len(), 2);
+}
+
+#[test]
+fn invalid_expiry_is_rejected_at_commit() {
+    let mut store = V3RemoteContinuationStore::default();
+    let invalid = V3RemoteContinuationLocator::new_direct(
+        "resp_invalid_expiry",
+        scope(),
+        pin(),
+        "cap-rev-1",
+        9_000,
+        9_000,
+    );
+    assert!(matches!(
+        store.commit(V3RemoteContinuationCommitInput::locator_only(invalid)),
+        Err(V3RemoteContinuationError::InvalidExpiry { .. })
+    ));
+    assert!(store.is_empty());
+}

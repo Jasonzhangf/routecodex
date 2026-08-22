@@ -1,0 +1,31 @@
+{
+  "artifact_hash": "sha256:a732f26f8e7b430e08f6d0caf6c8957ac4553e0b444260698da55ffece902642",
+  "base_commit": "ce50527af",
+  "change_reason_comment": "ErrorChain owns the fixed six-stage single-direction error mainline (source raised -> host captured -> runtime classified -> router policy applied -> execution decision -> client projected); ErrorCenter is intake/classify/audit-only and consumes the frozen base-node Scope through a declared Cargo dependency",
+  "change_set_id": "change-error-freeze-v1",
+  "compatibility_level": "compatible",
+  "created_at": "2026-08-14T11:49:18Z",
+  "design_id": "v4-error-chain-plan",
+  "evidence_ids": [
+    "evidence-error-v1"
+  ],
+  "experiment_id": "experiment-error-freeze-v1",
+  "issue_id": "routecodex-v4-foundation",
+  "module_id": "routecodex-v4-error",
+  "new_active_version": "active-v1",
+  "playground_cleanup_record_id": "cleanup-error-v1",
+  "previous_active_version": null,
+  "promotion_id": "promotion-error-v1",
+  "public_api_hash": "sha256:73b9d5a8b3018b6b76ba44f36e0a9ee1650deaab8d8bf3489599fa55d6a3e3b6",
+  "required_gate_results": [
+    {
+      "gate_id": "v4_error_l2_regression",
+      "producer": "cargo",
+      "result": "pass"
+    }
+  ],
+  "review_id": "review-error-v1",
+  "root_cause": "initial v4 control foundation split: ErrorChain + ErrorCenter became a separately compiled library consuming frozen BaseNode",
+  "scope_hash": "scope-error-v1",
+  "source_commit": "ce50527af"
+}

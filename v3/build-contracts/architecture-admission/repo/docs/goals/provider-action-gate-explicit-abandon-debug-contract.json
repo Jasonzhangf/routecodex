@@ -1,0 +1,162 @@
+{
+  "debug_id": "provider-action-gate-explicit-abandon-20260729",
+  "state": "edit_allowed",
+  "symptom": {
+    "observed": "A five-second admitted-generation timeout releases a second provider action while the first lazy SSE action is still active and has not produced terminal success, provider failure, or cancellation.",
+    "expected": "An admitted provider action remains the only in-flight action for its generation until an explicit success, failure, terminal commit, or cancellation/drop outcome advances the Rust-owned gate.",
+    "entry": [
+      "V3 OpenAI Chat Relay SSE",
+      "V3 Gemini Relay SSE",
+      "V3 Direct/Responses Relay provider-recovery action"
+    ],
+    "ids": [],
+    "raw_evidence": [
+      "The prior OpenAI Chat and Gemini tests used a fresh second request and became stale after the recovery-only gate correction.",
+      "provider_action_gate_contract::admitted_action_requires_explicit_drop_before_replacement_generation proves an owned action remains exclusive beyond five seconds."
+    ]
+  },
+  "sop_model_flow": {
+    "status": "known",
+    "flow_id": "v3.provider_action_gate.mainline",
+    "source_docs": [
+      "docs/goals/direct-relay-cross-request-error-storm-control-plan.md",
+      "docs/architecture/v3-function-map.yml",
+      "docs/architecture/v3-mainline-call-map.yml",
+      "docs/architecture/v3-verification-map.yml",
+      "docs/architecture/v3-resource-operation-map.yml",
+      "docs/architecture/manifests/v3.provider_action_gate.mainline.yml",
+      "docs/architecture/wiki/v3-provider-action-gate.md"
+    ],
+    "lifecycle_nodes": [
+      "V3Error05ExecutionDecision",
+      "V3ProviderActionGateAdmission",
+      "V3ExecutionRetryOrReselect",
+      "V3ProviderActionOutcome",
+      "V3ProviderActionGateSuccessFailureTerminalOrAbandon"
+    ],
+    "resource_edges": [
+      "v3.error.execution_decision -> v3.error.provider_action_gate",
+      "v3.error.provider_action_gate -> provider recovery action permit",
+      "provider recovery action outcome -> v3.error.provider_action_gate"
+    ],
+    "forbidden_edges": [
+      "wall-clock timeout -> inferred provider action cancellation",
+      "SSE transport -> retry/reroute policy",
+      "client_disconnect -> provider health failure"
+    ],
+    "owner_graph": [
+      "v3.provider_action_gate -> v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs",
+      "Direct/Relay callers own only permit lifetime wiring",
+      "SSE provider outcome wrappers own terminal/failure/drop observation, not gate policy"
+    ],
+    "gap_if_new": ""
+  },
+  "hypotheses": [
+    {
+      "id": "H1",
+      "cause": "The gate treats elapsed five-second wall-clock time as proof that an admitted action disappeared.",
+      "modules": [
+        "v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs"
+      ],
+      "supporting_evidence": "The historical V3 gate advanced admitted_generation solely from elapsed time. The current explicit-permit test locks the corrected behavior without treating a fresh request as a recovery waiter.",
+      "counter_evidence_or_gap": "Would be false if the second action stayed blocked until the first stream emitted terminal success or was dropped.",
+      "verification_action": "Run the corrected active-SSE tests and the active-admission-beyond-five-seconds gate contract against current source, then inspect the admitted-generation expiry branch.",
+      "confidence": 100
+    },
+    {
+      "id": "H2",
+      "cause": "Provider success is recorded too late or not recorded for terminal SSE.",
+      "modules": [
+        "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs",
+        "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs"
+      ],
+      "supporting_evidence": "The failing tests hold terminal success deliberately while another waiter is active.",
+      "counter_evidence_or_gap": "The second action is admitted before success is expected; success timing is correct and the timeout branch is already sufficient to explain the failure.",
+      "verification_action": "Confirm the tests intentionally delay terminal success beyond the synthetic lease deadline.",
+      "confidence": 10
+    },
+    {
+      "id": "H3",
+      "cause": "A retry/reselect action that fails enters terminal Error05 policy while its own V3ProviderActionPermit is still held by the caller stack, so terminal admission waits forever on the permit that cannot drop until the await returns.",
+      "modules": [
+        "v3/crates/routecodex-v3-runtime/src/kernel.rs",
+        "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
+        "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs",
+        "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs",
+        "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs"
+      ],
+      "supporting_evidence": "Isolated terminal provider-error tests hung beyond 60 seconds. Releasing the caller-owned permit before entering provider failure policy made Direct and all Relay terminal tests finish with the expected 1s/5s floors.",
+      "counter_evidence_or_gap": "Would be false if terminal Error05 completed while the admitted retry permit remained owned.",
+      "verification_action": "Run terminal provider-error tests for Direct, Responses Relay, OpenAI Chat Relay, Anthropic Relay, and Gemini Relay with bounded timeouts.",
+      "confidence": 100
+    }
+  ],
+  "active_hypothesis": "H3",
+  "confirmed_hypothesis": "H3",
+  "prior_confirmed_hypotheses": [
+    "H1"
+  ],
+  "first_divergence_node": "V3ProviderActionGateAdmission",
+  "root_cause_module": "Rust provider action gate admitted-generation lifecycle",
+  "unique_owner": [
+    "V3ProviderActionGate",
+    "V3ProviderActionPermit"
+  ],
+  "owner_graph_confirmed": true,
+  "allowed_paths": [
+    "v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs",
+    "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs",
+    "v3/crates/routecodex-v3-runtime/src/kernel.rs",
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs",
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs",
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs",
+    "v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs",
+    "v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs",
+    "v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs",
+    "v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs",
+    "v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs",
+    "docs/goals/direct-relay-cross-request-error-storm-control-plan.md",
+    "docs/goals/provider-action-gate-explicit-abandon-debug-contract.json",
+    "docs/architecture/**",
+    "scripts/architecture/verify-v3-provider-action-gate.mjs",
+    "scripts/tests/v3-provider-action-gate-red-fixtures.mjs",
+    "note.md",
+    "MEMORY.md",
+    ".agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md"
+  ],
+  "forbidden_paths": [
+    "v3/crates/routecodex-v3-sse/**",
+    "v3/crates/routecodex-v3-virtual-router/**",
+    "v3/crates/routecodex-v3-target/**",
+    "provider configuration and credentials",
+    "client/provider normal payload codecs unrelated to action ownership"
+  ],
+  "required_verification": [
+    "historical wall-clock-expiry red evidence remains recorded",
+    "active action remains exclusive beyond five seconds",
+    "explicit permit drop advances one sustained generation",
+    "abandon is health/failure-count neutral",
+    "FIFO waiter order is deterministic",
+    "fresh Direct and Relay requests bypass unrelated recovery lanes",
+    "current request retry/reselect still consumes its own gate",
+    "provider failure releases the current permit before terminal Error05 admission",
+    "pinned Direct continuation consumes an existing recovery lane while a fresh non-continuation request bypasses it",
+    "full provider-action gate tests and red fixtures",
+    "Direct and all Relay protocol regressions",
+    "Codex review semantic PASS",
+    "installed managed restart and controlled 429/burst/cancel/FIFO replay"
+  ],
+  "exact_replay": {
+    "source": "The exact state-machine regression proves an owned permit remains exclusive beyond five seconds and explicit drop starts a new sustained floor. Fresh-request regressions prove unrelated recovery lanes are bypassed. Installed live replay is still required.",
+    "commands": [
+      "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test provider_action_gate_contract admitted_action_requires_explicit_drop_before_replacement_generation -- --exact --nocapture",
+      "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration terminal_sse_recovery_does_not_block_a_fresh_request -- --exact --nocapture",
+      "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test gemini_relay_runtime_integration terminal_sse_recovery_does_not_block_a_fresh_request -- --exact --nocapture"
+      ,
+      "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_runtime_closeout responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery -- --exact --nocapture",
+      "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_remote_continuation_integration pinned_post_commit_stream_failure_preserves_pin_and_gates_the_same_provider_scope -- --exact --nocapture"
+    ]
+  },
+  "confidence": 100
+}

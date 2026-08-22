@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routecodex.local/agent-collab/evidence.schema.json",
+  "title": "RouteCodex Agent Collab Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "claim", "command_or_check", "result", "timestamp"],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 1 },
+    "claim": { "type": "string", "minLength": 1 },
+    "command_or_check": { "type": "string", "minLength": 1 },
+    "result": { "type": "string", "enum": ["pass", "fail", "blocked", "not_run"] },
+    "summary": { "type": ["string", "null"] },
+    "artifact": { "type": ["string", "null"] },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-cli-plugin",
+  "status": "contract_bound",
+  "owner_feature_id": "v4.plugin.cli_inspector",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-cli-plugin.md"
+  ],
+  "scope": "Read-only CLI projection of the registered V4 standard plugin library.",
+  "commands": [
+    "version",
+    "list-plugins",
+    "describe-plugin",
+    "list-resources",
+    "node-permissions",
+    "surface",
+    "categories"
+  ],
+  "boundary_rule": "The CLI may only read standard plugin descriptors and permission projections; it never starts a server, binds a port, reads or writes ~/.rcc, manages processes, or mutates runtime state.",
+  "error_rule": "Unknown plugin and node identifiers fail with a non-zero exit code; no fallback or partial projection is allowed.",
+  "determinism_rule": "List and projection outputs are deterministic and derived from routecodex-v4-standard-plugins without provider credentials or business payloads."
+}

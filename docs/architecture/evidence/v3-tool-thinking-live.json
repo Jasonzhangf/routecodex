@@ -1,0 +1,28 @@
+{
+  "feature_id": "v3.tool_thinking_hook_skeleton",
+  "verified_at": "2026-08-20",
+  "build_version": "0.90.4574",
+  "install": {"command": "npm run install:v3", "result": "pass"},
+  "restart": {
+    "command": "routecodex restart -c /Volumes/extension/.rcc/config.v3.toml",
+    "result": "pass",
+    "health_ports": [10000, 7777, 4444]
+  },
+  "dry_runs": {
+    "direct_responses_7777": {"result": "pass", "provider_request_captured": true, "toolreason_marker_count": 2},
+    "relay_anthropic_10000": {"result": "pass", "provider_request_captured": true, "toolreason_marker_count": 2}
+  },
+  "live": {
+    "direct_responses_7777": {
+      "result": "pass",
+      "http_status": 200,
+      "tool_call": "read_file",
+      "reasoning_content": "🟢 调用工具 read_file，因为 Inspect the requested file.",
+      "raw_toolreason_reached_client": false
+    }
+  },
+  "known_environment_blockers": [
+    "External compaction-routing worker changes remain outside this feature owner.",
+    "Existing module-boundary map duplicate key apply_request_compat blocks that unrelated gate."
+  ]
+}

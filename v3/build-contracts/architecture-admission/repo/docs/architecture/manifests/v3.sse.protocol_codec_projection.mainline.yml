@@ -1,0 +1,60 @@
+lifecycle_id: v3.sse.protocol_codec_projection.mainline
+owner_feature_id: v3.sse_protocol_codec_projection_boundary
+entrypoint:
+  node_id: V3SseTransportIn03ValidatedFrameStream
+  call_map_chain_id: v3.sse.protocol_codec_projection_boundary
+nodes:
+  - V3SseTransportIn03ValidatedFrameStream
+  - V3ProviderJsonCodec01ParsedEvent
+  - V3ProviderJsonSemanticOutcome02Typed
+  - V3HubRespInbound02Normalized
+  - V3HubRespOutbound05ClientSemantic
+edges:
+  - step_id: v3-sse-json-codec-01
+    from_node: V3SseTransportIn03ValidatedFrameStream
+    to_node: V3ProviderJsonCodec01ParsedEvent
+    owner_feature_id: v3.sse_protocol_codec_projection_boundary
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
+    owner_symbol: parse_v3_provider_sse_json_data
+    status: binding_pending
+  - step_id: v3-sse-json-codec-02
+    from_node: V3ProviderJsonCodec01ParsedEvent
+    to_node: V3ProviderJsonSemanticOutcome02Typed
+    owner_feature_id: v3.sse_protocol_codec_projection_boundary
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
+    owner_symbol: classify_v3_provider_responses_json_data
+    status: binding_pending
+  - step_id: v3-sse-json-codec-03
+    from_node: V3ProviderJsonSemanticOutcome02Typed
+    to_node: V3HubRespInbound02Normalized
+    owner_feature_id: v3.sse_protocol_codec_projection_boundary
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+    owner_symbol: observe_v3_runtime_responses_sse_transport_chunk
+    status: binding_pending
+  - step_id: v3-sse-json-codec-04
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3HubRespOutbound05ClientSemantic
+    owner_feature_id: v3.sse_protocol_codec_projection_boundary
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
+    owner_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload
+    status: binding_pending
+forbidden_semantics_in_transport:
+  - response.completed
+  - response.failed
+  - response.incomplete
+  - response.cancelled
+  - response.canceled
+  - required_action
+  - tool_call
+  - continuation
+  - retry
+  - reroute
+  - health
+  - availability
+verification_gates:
+  - npm run verify:sse-architecture-boundary
+  - npm run verify:v3-provider-action-gate
+  - npm run verify:v3-runtime-timing-observability
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check

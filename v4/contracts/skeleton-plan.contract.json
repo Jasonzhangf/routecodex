@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-skeleton-plan",
+  "status": "active",
+  "owner_feature_id": "v4.skeleton",
+  "skeleton_version": "v4-skeleton-1",
+  "binding": {
+    "required": true,
+    "fields": [
+      "skeleton_version",
+      "manifest_hash",
+      "plan_epoch",
+      "plan_hash"
+    ]
+  },
+  "manifest_hash": "sha256:pending-config-v2-manifest",
+  "plan_epoch": 1,
+  "plan_hash": "sha256:a8340466a8ae8e48c01745c51722b27be140f0e47185866b66d10a4d38391086",
+  "chains": [
+    {
+      "chain_id": "request",
+      "nodes": [
+        {"node_id": "V4ServerReqInbound01ClientRaw", "chain": "request", "position": 1, "role_id": "request_inbound", "terminal": false, "kernel": true, "plugins": [
+          {"plugin_id": "protocol_parse", "effects": ["semantic"]}
+        ]},
+        {"node_id": "V4ServerSseIn02FrameBoundary", "chain": "request", "position": 2, "role_id": "request_inbound", "terminal": false, "kernel": false, "plugins": []},
+        {"node_id": "V4HubReqInbound03Normalized", "chain": "request", "position": 3, "role_id": "request_inbound", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "normalize", "effects": ["semantic"]},
+          {"plugin_id": "input_validate", "effects": ["validation"]}
+        ]},
+        {"node_id": "V4HubReqChatProcess04Governed", "chain": "request", "position": 4, "role_id": "request_chat_process", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "continuation_classify", "effects": ["control"]},
+          {"plugin_id": "continuation_restore", "effects": ["control"]},
+          {"plugin_id": "governance", "effects": ["control"]},
+          {"plugin_id": "execution_plan", "effects": ["control"]}
+        ]},
+        {"node_id": "V4HubReqOutbound05ProviderSemantic", "chain": "request", "position": 5, "role_id": "request_outbound", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "semantic_projection", "effects": ["semantic"]}
+        ]},
+        {"node_id": "V4ProviderReqCompat06Compat", "chain": "request", "position": 6, "role_id": "request_outbound", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "wire_build", "effects": ["semantic"]}
+        ]},
+        {"node_id": "V4ProviderSseOut07WireBoundary", "chain": "request", "position": 7, "role_id": "request_outbound", "terminal": true, "kernel": false, "plugins": [
+          {"plugin_id": "output_validate", "effects": ["validation"]}
+        ]}
+      ],
+      "edges": [
+        {"from": "V4ServerReqInbound01ClientRaw", "to": "V4ServerSseIn02FrameBoundary", "direction": "forward"},
+        {"from": "V4ServerSseIn02FrameBoundary", "to": "V4HubReqInbound03Normalized", "direction": "forward"},
+        {"from": "V4HubReqInbound03Normalized", "to": "V4HubReqChatProcess04Governed", "direction": "forward"},
+        {"from": "V4HubReqChatProcess04Governed", "to": "V4HubReqOutbound05ProviderSemantic", "direction": "forward"},
+        {"from": "V4HubReqOutbound05ProviderSemantic", "to": "V4ProviderReqCompat06Compat", "direction": "forward"},
+        {"from": "V4ProviderReqCompat06Compat", "to": "V4ProviderSseOut07WireBoundary", "direction": "forward"}
+      ],
+      "checkpoints": [
+        {"node_id": "V4HubReqInbound03Normalized", "semantic": "normalized_request_identity_locked", "owner": "routecodex-v4-runtime::Normalize"},
+        {"node_id": "V4ReqContinuationClassified", "semantic": "continuation_scope_locked", "owner": "routecodex-v4-runtime::ContinuationClassify"},
+        {"node_id": "V4ChatProcess04ContinuationRestore", "semantic": "continuation_restored", "owner": "routecodex-v4-runtime::ContinuationRestore"},
+        {"node_id": "V4HubReqChatProcess04Governed", "semantic": "governed_request", "owner": "routecodex-v4-runtime::Governance"},
+        {"node_id": "V4ReqExecutionPlan04", "semantic": "immutable_plan", "owner": "routecodex-v4-runtime::ExecutionPlan"},
+        {"node_id": "V4Router05RequestClassified", "semantic": "route_facts", "owner": "routecodex-v4-runtime::ExecutionPlan"},
+        {"node_id": "V4Router06SelectionPlan", "semantic": "opaque_target_selection", "owner": "routecodex-v4-runtime::ExecutionPlan"},
+        {"node_id": "V4HubReqOutbound05ProviderSemantic", "semantic": "provider_semantic", "owner": "routecodex-v4-runtime::SemanticProjection"},
+        {"node_id": "V4ProviderReqCompat06Compat", "semantic": "provider_compat", "owner": "routecodex-v4-provider::V4ProviderReqCompat06Compat"},
+        {"node_id": "V4ProviderSseOut07WireBoundary", "semantic": "provider_wire", "owner": "routecodex-v4-runtime::WireBuild"}
+      ]
+    },
+    {
+      "chain_id": "response",
+      "nodes": [
+        {"node_id": "V4ProviderSseIn01FrameBoundary", "chain": "response", "position": 1, "role_id": "response_inbound", "terminal": false, "kernel": true, "plugins": [
+          {"plugin_id": "frame_parse", "effects": ["semantic"]},
+          {"plugin_id": "json_parse", "effects": ["semantic"]}
+        ]},
+        {"node_id": "V4HubRespInbound02Parsed", "chain": "response", "position": 2, "role_id": "response_inbound", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "protocol_decode", "effects": ["semantic"]}
+        ]},
+        {"node_id": "V4HubRespChatProcess03Governed", "chain": "response", "position": 3, "role_id": "response_chat_process", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "response_governance", "effects": ["control"]},
+          {"plugin_id": "tool_harvest", "effects": ["semantic"]},
+          {"plugin_id": "continuation_commit", "effects": ["control"]}
+        ]},
+        {"node_id": "V4HubRespOutbound04ClientSemantic", "chain": "response", "position": 4, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "client_semantic_projection", "effects": ["semantic"]}
+        ]},
+        {"node_id": "V4ServerSseOut05FrameBoundary", "chain": "response", "position": 5, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "sse_frame", "effects": ["semantic"]}
+        ]},
+        {"node_id": "V4ServerRespOutbound06ClientFrame", "chain": "response", "position": 6, "role_id": "response_outbound", "terminal": true, "kernel": false, "plugins": [
+          {"plugin_id": "frame_build", "effects": ["semantic"]}
+        ]}
+      ],
+      "edges": [
+        {"from": "V4ProviderSseIn01FrameBoundary", "to": "V4HubRespInbound02Parsed", "direction": "forward"},
+        {"from": "V4HubRespInbound02Parsed", "to": "V4HubRespChatProcess03Governed", "direction": "forward"},
+        {"from": "V4HubRespChatProcess03Governed", "to": "V4HubRespOutbound04ClientSemantic", "direction": "forward"},
+        {"from": "V4HubRespOutbound04ClientSemantic", "to": "V4ServerSseOut05FrameBoundary", "direction": "forward"},
+        {"from": "V4ServerSseOut05FrameBoundary", "to": "V4ServerRespOutbound06ClientFrame", "direction": "forward"}
+      ],
+      "checkpoints": [
+        {"node_id": "V4ProviderSseIn01FrameBoundary", "semantic": "provider_frame_json", "owner": "routecodex-v4-runtime::FrameParse"},
+        {"node_id": "V4HubRespInbound02Parsed", "semantic": "parsed_response", "owner": "routecodex-v4-runtime::ProtocolDecode"},
+        {"node_id": "V4HubRespChatProcess03Governed", "semantic": "governed_response_and_continuation_committed", "owner": "routecodex-v4-runtime::ResponseGovernance"},
+        {"node_id": "V4HubRespOutbound04ClientSemantic", "semantic": "client_semantic", "owner": "routecodex-v4-runtime::ClientSemanticProjection"},
+        {"node_id": "V4ServerSseOut05FrameBoundary", "semantic": "client_sse_frame", "owner": "routecodex-v4-server::V4ServerSseOut05FrameBoundary"},
+        {"node_id": "V4ServerRespOutbound06ClientFrame", "semantic": "client_frame", "owner": "routecodex-v4-runtime::FrameBuild"}
+      ]
+    },
+    {
+      "chain_id": "error",
+      "nodes": [
+        {"node_id": "V4Error01SourceRaised", "chain": "error", "position": 1, "role_id": "error_source", "terminal": false, "kernel": true, "plugins": [
+          {"plugin_id": "error_source_capture", "effects": ["control"]}
+        ]},
+        {"node_id": "V4Error02HostCaptured", "chain": "error", "position": 2, "role_id": "error_source", "terminal": false, "kernel": false, "plugins": []},
+        {"node_id": "V4Error03RuntimeClassified", "chain": "error", "position": 3, "role_id": "error_classify", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "error_classify", "effects": ["control"]}
+        ]},
+        {"node_id": "V4Error04RouterPolicyApplied", "chain": "error", "position": 4, "role_id": "error_policy", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "error_policy_apply", "effects": ["control"]}
+        ]},
+        {"node_id": "V4Error05ExecutionDecision", "chain": "error", "position": 5, "role_id": "error_decision", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "execution_decision", "effects": ["control"]}
+        ]},
+        {"node_id": "V4Error06ClientProjected", "chain": "error", "position": 6, "role_id": "error_projection", "terminal": true, "kernel": false, "plugins": [
+          {"plugin_id": "client_projection", "effects": ["control"]}
+        ]}
+      ],
+      "edges": [
+        {"from": "V4Error01SourceRaised", "to": "V4Error02HostCaptured", "direction": "forward"},
+        {"from": "V4Error02HostCaptured", "to": "V4Error03RuntimeClassified", "direction": "forward"},
+        {"from": "V4Error03RuntimeClassified", "to": "V4Error04RouterPolicyApplied", "direction": "forward"},
+        {"from": "V4Error04RouterPolicyApplied", "to": "V4Error05ExecutionDecision", "direction": "forward"},
+        {"from": "V4Error05ExecutionDecision", "to": "V4Error06ClientProjected", "direction": "forward"}
+      ],
+      "checkpoints": [
+        {"node_id": "V4Error01SourceRaised", "semantic": "source_fact", "owner": "routecodex-v4-error::ErrorChain::raise"},
+        {"node_id": "V4Error02HostCaptured", "semantic": "host_captured", "owner": "routecodex-v4-error::ErrorChain::capture"},
+        {"node_id": "V4Error03RuntimeClassified", "semantic": "classified_fact", "owner": "routecodex-v4-error::ErrorCenter::classify"},
+        {"node_id": "V4Error04RouterPolicyApplied", "semantic": "policy_applied", "owner": "routecodex-v4-error::ErrorChain::apply_policy"},
+        {"node_id": "V4Error05ExecutionDecision", "semantic": "execution_decision", "owner": "routecodex-v4-error::ErrorChain::decide"},
+        {"node_id": "V4Error06ClientProjected", "semantic": "client_projection", "owner": "routecodex-v4-error::ErrorChain::project"}
+      ]
+    },
+    {
+      "chain_id": "config",
+      "nodes": [
+        {"node_id": "V4Config01AuthoringFileSource", "chain": "config", "position": 1, "role_id": "config_authoring", "terminal": false, "kernel": true, "plugins": [
+          {"plugin_id": "config_parse", "effects": ["semantic"]}
+        ]},
+        {"node_id": "V4Config02AuthoringParsed", "chain": "config", "position": 2, "role_id": "config_authoring", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "config_validate", "effects": ["validation"]}
+        ]},
+        {"node_id": "V4Config03SchemaValidated", "chain": "config", "position": 3, "role_id": "config_authoring", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "registry_build", "effects": ["semantic"]}
+        ]},
+        {"node_id": "V4Config04ResourceRegistryBuilt", "chain": "config", "position": 4, "role_id": "config_registry", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "manifest_publish", "effects": ["semantic"]}
+        ]},
+        {"node_id": "V4Config05ManifestPublished", "chain": "config", "position": 5, "role_id": "config_manifest", "terminal": true, "kernel": false, "plugins": []}
+      ],
+      "edges": [
+        {"from": "V4Config01AuthoringFileSource", "to": "V4Config02AuthoringParsed", "direction": "forward"},
+        {"from": "V4Config02AuthoringParsed", "to": "V4Config03SchemaValidated", "direction": "forward"},
+        {"from": "V4Config03SchemaValidated", "to": "V4Config04ResourceRegistryBuilt", "direction": "forward"},
+        {"from": "V4Config04ResourceRegistryBuilt", "to": "V4Config05ManifestPublished", "direction": "forward"}
+      ],
+      "checkpoints": [
+        {"node_id": "V4Config01AuthoringFileSource", "semantic": "authoring_source", "owner": "routecodex-v4-config::V4Config01AuthoringFileSource"},
+        {"node_id": "V4Config02AuthoringParsed", "semantic": "parsed", "owner": "routecodex-v4-config::parse_v4_config_02_from_v4_config_01"},
+        {"node_id": "V4Config03SchemaValidated", "semantic": "validated", "owner": "routecodex-v4-config::validate_v4_config_03_from_v4_config_02"},
+        {"node_id": "V4Config04ResourceRegistryBuilt", "semantic": "registry_built", "owner": "routecodex-v4-config::build_v4_config_04_from_v4_config_03"},
+        {"node_id": "V4Config05ManifestPublished", "semantic": "manifest_published", "owner": "routecodex-v4-config::publish_v4_config_05_from_v4_config_04"}
+      ]
+    }
+  ]
+}

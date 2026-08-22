@@ -1,0 +1,19 @@
+{
+  "ai_confidence": 0.99,
+  "confidence_rationale": "whitebox intake and witness regressions, blackbox public API regression, compile-fail admission test, workspace regression, release build, focused clippy, and boundary audit all pass for active-v2",
+  "created_at": "2026-08-14T13:08:19Z",
+  "evidence_ids": [
+    "evidence-error-v2"
+  ],
+  "issue_id": "routecodex-v4-foundation",
+  "promotion_id": "promotion-error-v2",
+  "review_id": "review-error-v2",
+  "reviewed_artifact_hash": "sha256:23e7b9950ef2f0c2c6767c573371a1d29c82050f11ddbe6593932822fce45bb1",
+  "reviewed_commit": "dc52f4772",
+  "reviewed_scope_hash": "sha256:2e1550f5dc9af889e0079d96dfa7d50440dccfcfec82ef5ee72656d6fa858b34",
+  "reviewer": {
+    "adapter": "codex",
+    "identity": "codex::architecture-review"
+  },
+  "verdict": "pass"
+}

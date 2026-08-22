@@ -1,0 +1,2786 @@
+// feature_id: v3.v2_config_toml_compat_5555
+use routecodex_v3_config::{
+    compile_v3_config_05_manifest, default_v3_config_path, parse_v3_config_02_authoring,
+    resolve_v3_http_sse_keepalive_ms, V3ConfigStore, V3HubFixedNode, V3HubHookPhase,
+    V3HubHookProfile, V3HubHookRequirement, V3ProviderDispositionStepManifest,
+    V3ProviderErrorRetryMode, V3RouteTargetKind, V3SelectionStrategy,
+    V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS,
+};
+use std::fs;
+
+const FULL_CONFIG: &str = r#"
+version = 3
+
+[features]
+responses_direct = true
+debug_events = true
+
+[debug]
+log_console = true
+log_file = "/tmp/routecodex-v3.log"
+snapshots = true
+snapshot_stages = "client-request,provider-request"
+snapshot_direct = false
+dry_run = true
+retention = { raw_requests = 10, raw_responses = 10 }
+
+[error.policies.provider_unavailable]
+action = "target_local_reselect"
+cooldown_ms = 1000
+max_attempts = 3
+
+[[error.client_error_projection_policy]]
+policy_id = "provider_busy_code_only"
+
+[error.client_error_projection_policy.match]
+reason_code = "provider_diagnostic_zero_usage"
+
+[error.client_error_projection_policy.projection]
+public_code = "E_PROVIDER_TEMPORARILY_UNAVAILABLE"
+message_mode = "code_only"
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "primary"
+endpoints = ["responses"]
+
+[servers.secondary]
+bind = "127.0.0.1"
+port = 4445
+routing_group = "secondary"
+endpoints = ["responses"]
+
+[providers.cc]
+type = "responses"
+base_url = "https://api.anyint.ai/openai/v1"
+default_model = "gpt-5.5"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "CC_API_KEY" }] }
+responses = { process = "chat", streaming = "always" }
+concurrency = { max_in_flight = 8, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
+health = { enabled = true, failure_threshold = 3, cooldown_ms = 900000 }
+provider_request_cleanup = { historical_fields = ["reasoning.encrypted_content"] }
+
+[[providers.cc.semantic_error_policy]]
+policy_id = "cc_200_diagnostic_zero_usage"
+
+[providers.cc.semantic_error_policy.match]
+http_status = 200
+
+[providers.cc.semantic_error_policy.match.sse]
+finish_reason = "stop"
+usage_total_tokens = 0
+content_contains_any = ["provider diagnostic text"]
+
+[providers.cc.semantic_error_policy.action]
+kind = "periodic_recovery"
+reason_code = "provider_diagnostic_zero_usage"
+retry_mode = "reselect_before_client_projection"
+cooldown_ms = 300000
+disable_scope = "provider_model"
+
+[providers.cc.models."gpt-5.5"]
+wire_name = "gpt-5.5"
+aliases = ["cc-gpt-5.6"]
+capabilities = ["text", "reasoning", "tools"]
+supports_streaming = true
+supports_thinking = true
+thinking = "low"
+max_tokens = 64000
+max_context_tokens = 200000
+
+[providers.asxs]
+type = "responses"
+base_url = "https://api.asxs.top/v1"
+default_model = "gpt-5.5"
+auth = { type = "api_key", entries = [
+  { alias = "crsa", env = "ASXS_CRSA_API_KEY" },
+  { alias = "crsb", env = "ASXS_CRSB_API_KEY" }
+] }
+responses = { process = "chat", streaming = "always" }
+
+[providers.asxs.models."gpt-5.5"]
+wire_name = "gpt-5.5"
+aliases = ["asxs-gpt-5.6"]
+capabilities = ["text", "reasoning", "tools"]
+supports_streaming = true
+supports_thinking = true
+
+[forwarders."fwd.gpt-5.6"]
+model = "gpt-5.6"
+aliases = ["gpt-latest"]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "cc", model = "gpt-5.5", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "asxs", model = "gpt-5.5", key = "crsa", priority = 2 }
+]
+
+[forwarders."nested.gpt-5.6"]
+model = "gpt-5.6"
+selection = { strategy = "round_robin" }
+targets = [{ kind = "forwarder", id = "fwd.gpt-5.6" }]
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "fwd.gpt-5.6", priority = 1 }]
+
+[route_groups.primary.pools.search]
+selection = { strategy = "weighted" }
+match = { precedence = 10, entry_protocol = "responses", models = ["gpt-5.6"], required_capabilities = ["tools"], min_input_tokens = 1, max_input_tokens = 200000 }
+targets = [
+  { kind = "provider_model", provider = "cc", model = "gpt-5.5", weight = 70 },
+  { kind = "provider_model", provider = "asxs", model = "gpt-5.5", weight = 30 }
+]
+
+[route_groups.secondary.pools.default]
+selection = { strategy = "round_robin" }
+targets = [
+  { kind = "provider_model", provider = "cc", model = "gpt-5.5" },
+  { kind = "provider_model", provider = "asxs", model = "gpt-5.5" }
+]
+"#;
+
+#[test]
+fn omitted_server_endpoints_enable_all_hub_v1_entry_protocols() {
+    let parsed = parse_v3_config_02_authoring(
+        r#"
+version = 3
+[servers.default]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[route_groups.default.pools.default]
+targets = []
+"#,
+    )
+    .expect("minimal config with omitted endpoints must parse");
+    assert_eq!(
+        parsed.servers["default"].endpoints,
+        ["responses", "anthropic", "gemini", "openai_chat"]
+    );
+}
+
+#[test]
+fn zero_sse_first_frame_timeout_is_rejected_at_config_owner() {
+    let invalid = FULL_CONFIG.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\" }\nsse_first_frame_timeout_ms = 0",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("sse_first_frame_timeout_ms must be non-zero"));
+}
+
+#[test]
+fn http_sse_keepalive_config_defaults_when_canonical_environment_input_is_absent() {
+    assert_eq!(
+        resolve_v3_http_sse_keepalive_ms(None, None).unwrap(),
+        V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS
+    );
+}
+
+#[test]
+fn http_sse_keepalive_config_accepts_the_canonical_explicit_value() {
+    assert_eq!(
+        resolve_v3_http_sse_keepalive_ms(Some("25"), None).unwrap(),
+        25
+    );
+}
+
+#[test]
+fn http_sse_keepalive_config_rejects_empty_malformed_zero_and_legacy_values() {
+    for invalid in ["", " ", "abc", "0"] {
+        let error = resolve_v3_http_sse_keepalive_ms(Some(invalid), None).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS"),
+            "{error}"
+        );
+    }
+    for (primary, legacy) in [(None, Some("25")), (Some("25"), Some("25"))] {
+        let error = resolve_v3_http_sse_keepalive_ms(primary, legacy).unwrap_err();
+        assert!(error.to_string().contains("not supported"), "{error}");
+    }
+}
+
+#[test]
+fn parses_full_config_v3_without_interpreting_targets() {
+    let authoring = parse_v3_config_02_authoring(FULL_CONFIG).unwrap();
+    let manifest = compile_v3_config_05_manifest(authoring).unwrap();
+
+    assert_eq!(manifest.version, 3);
+    assert_eq!(manifest.features.get("stopless_center"), Some(&true));
+    assert_eq!(manifest.features.get("tool_thinking"), Some(&false));
+    assert_eq!(
+        manifest.features.get("responses_direct_stopless_center"),
+        None,
+        "Relay StoplessCenter default must not enable Direct stopless"
+    );
+    assert_eq!(manifest.servers.len(), 2);
+    assert_eq!(manifest.servers["primary"].port, 4444);
+    assert_eq!(manifest.servers["secondary"].port, 4445);
+    assert_eq!(manifest.providers.len(), 2);
+    assert_eq!(
+        manifest.providers["cc"].sse_first_frame_timeout_ms,
+        Some(30_000),
+        "omitted provider SSE timeout must compile to the documented 30s default"
+    );
+    assert_eq!(
+        manifest.providers["cc"].models["gpt-5.5"].wire_name,
+        "gpt-5.5"
+    );
+    assert_eq!(
+        manifest.providers["cc"].models["gpt-5.5"].aliases,
+        vec!["cc-gpt-5.6"]
+    );
+    assert_eq!(manifest.providers["asxs"].auth.entries.len(), 2);
+    assert_eq!(
+        manifest.providers["cc"]
+            .health
+            .as_ref()
+            .expect("health declaration")
+            .failure_threshold,
+        3
+    );
+    assert_eq!(
+        manifest.providers["cc"]
+            .provider_request_cleanup
+            .historical_fields,
+        vec!["reasoning.encrypted_content"]
+    );
+
+    let forwarder = &manifest.forwarders["fwd.gpt-5.6"];
+    assert_eq!(forwarder.selection.strategy, V3SelectionStrategy::Priority);
+    assert_eq!(forwarder.targets.len(), 2);
+    assert_eq!(forwarder.targets[0].provider.as_deref(), Some("cc"));
+    assert_eq!(
+        manifest.forwarders["nested.gpt-5.6"].targets[0]
+            .id
+            .as_deref(),
+        Some("fwd.gpt-5.6")
+    );
+    assert!(manifest.debug.dry_run);
+    assert_eq!(
+        manifest.debug.snapshot_stages.as_deref(),
+        Some("client-request,provider-request")
+    );
+    assert!(
+        !manifest.debug.snapshot_direct,
+        "explicit snapshot_direct=false must disable Direct sample persistence"
+    );
+    assert!(
+        !manifest.debug.codex_samples,
+        "Config compilation cannot authorize live Codex-sample persistence"
+    );
+    assert_eq!(
+        manifest.error.policies["provider_unavailable"].max_attempts,
+        Some(3)
+    );
+    let provider_error_policy = &manifest.error.provider_error_action_policy[0];
+    assert_eq!(
+        provider_error_policy.policy_id,
+        "cc_200_diagnostic_zero_usage"
+    );
+    assert_eq!(
+        provider_error_policy.scope.provider_id.as_deref(),
+        Some("cc")
+    );
+    assert_eq!(
+        provider_error_policy.scope.provider_type.as_deref(),
+        Some("responses")
+    );
+    assert_eq!(provider_error_policy.matcher.http_status, Some(200));
+    assert_eq!(
+        provider_error_policy.matcher.finish_reason.as_deref(),
+        Some("stop")
+    );
+    assert_eq!(provider_error_policy.matcher.usage_total_tokens, Some(0));
+    assert_eq!(
+        provider_error_policy.action.kind.as_str(),
+        "periodic_recovery"
+    );
+    assert_eq!(provider_error_policy.action.cooldown_ms, Some(300000));
+    assert_eq!(
+        manifest.error.client_error_projection_policy[0]
+            .projection
+            .public_code,
+        "E_PROVIDER_TEMPORARILY_UNAVAILABLE"
+    );
+
+    let route_target = &manifest.route_groups["primary"].pools["default"].targets[0];
+    assert_eq!(route_target.kind, V3RouteTargetKind::Forwarder);
+    assert_eq!(route_target.id.as_deref(), Some("fwd.gpt-5.6"));
+    assert!(
+        route_target.provider.is_none(),
+        "config compiler must not interpret a forwarder into a provider"
+    );
+    let pool_match = manifest.route_groups["primary"].pools["search"]
+        .match_rule
+        .as_ref()
+        .expect("typed pool match declaration");
+    assert_eq!(pool_match.models, vec!["gpt-5.6"]);
+    assert_eq!(pool_match.required_capabilities, vec!["tools"]);
+    assert_eq!(pool_match.precedence, 10);
+    assert_eq!(pool_match.entry_protocol.as_deref(), Some("responses"));
+}
+
+#[test]
+fn web_search_execution_mode_compiles_as_explicit_model_truth() {
+    let source = r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+
+[providers.native]
+type = "responses"
+base_url = "http://native.invalid/v1"
+default_model = "gpt-native"
+auth = { type = "api_key", entries = [{ alias = "key", env = "NATIVE_KEY" }] }
+[providers.native.models.gpt-native]
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "native_remote_search_tool_mix"
+
+[providers.local]
+type = "openai_chat"
+base_url = "http://local.invalid/v1"
+default_model = "local-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "LOCAL_KEY" }] }
+[providers.local.models.local-model]
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "servertool_search_backend"
+web_search_backend = "local.search"
+
+[providers.plain]
+type = "openai_chat"
+base_url = "http://plain.invalid/v1"
+default_model = "plain-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "PLAIN_KEY" }] }
+[providers.plain.models.plain-model]
+capabilities = ["text", "tools", "web_search"]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "native", model = "gpt-native", priority = 1 },
+  { kind = "provider_model", provider = "local", model = "local-model", priority = 2 },
+  { kind = "provider_model", provider = "plain", model = "plain-model", priority = 3 }
+]
+"#;
+
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect("explicit web-search execution modes must compile");
+
+    // server.test omits endpoints, so every registered entry protocol is enabled by default.
+    assert_eq!(
+        manifest.servers["test"].endpoints,
+        ["responses", "anthropic", "gemini", "openai_chat"]
+    );
+
+    assert_eq!(
+        manifest.servers["test"].endpoints,
+        ["responses", "anthropic", "gemini", "openai_chat"]
+    );
+
+    assert_eq!(
+        manifest.providers["native"].models["gpt-native"]
+            .web_search_execution_mode
+            .as_str(),
+        "native_remote_search_tool_mix"
+    );
+    assert_eq!(
+        manifest.providers["local"].models["local-model"]
+            .web_search_execution_mode
+            .as_str(),
+        "servertool_search_backend"
+    );
+    assert_eq!(
+        manifest.providers["local"].models["local-model"]
+            .web_search_backend_binding
+            .as_deref(),
+        Some("local.search"),
+        "Mode B must compile exactly one backend binding"
+    );
+    assert_eq!(
+        manifest.providers["plain"].models["plain-model"]
+            .web_search_execution_mode
+            .as_str(),
+        "none",
+        "web_search capability alone must not infer native or ServerTool execution"
+    );
+}
+
+#[test]
+fn context_token_estimate_scale_defaults_to_10000_and_rejects_out_of_range_values() {
+    let source = r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+
+[providers.default_scale]
+type = "responses"
+base_url = "http://default.invalid/v1"
+default_model = "default-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "DEFAULT_KEY" }] }
+[providers.default_scale.models.default-model]
+capabilities = ["text"]
+
+[providers.low_scale]
+type = "responses"
+base_url = "http://low.invalid/v1"
+default_model = "low-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "LOW_KEY" }] }
+[providers.low_scale.models.low-model]
+capabilities = ["text"]
+context_token_estimate_scale_bps = 10000
+
+[providers.high_scale]
+type = "responses"
+base_url = "http://high.invalid/v1"
+default_model = "high-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "HIGH_KEY" }] }
+[providers.high_scale.models.high-model]
+capabilities = ["text"]
+context_token_estimate_scale_bps = 100000
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "default_scale", model = "default-model", priority = 1 },
+  { kind = "provider_model", provider = "low_scale", model = "low-model", priority = 2 },
+  { kind = "provider_model", provider = "high_scale", model = "high-model", priority = 3 }
+]
+"#;
+
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect("valid scale and omitted default must compile");
+    assert_eq!(
+        manifest.providers["default_scale"].models["default-model"]
+            .context_token_estimate_scale_bps,
+        10_000
+    );
+    assert_eq!(
+        manifest.providers["low_scale"].models["low-model"].context_token_estimate_scale_bps,
+        10000
+    );
+
+    let low_only = source.replace(
+        "[providers.high_scale]\ntype = \"responses\"\nbase_url = \"http://high.invalid/v1\"\ndefault_model = \"high-model\"\nauth = { type = \"api_key\", entries = [{ alias = \"key\", env = \"HIGH_KEY\" }] }\n[providers.high_scale.models.high-model]\ncapabilities = [\"text\"]\ncontext_token_estimate_scale_bps = 100001\n",
+        "",
+    );
+    let low_only = low_only.replace(
+        "context_token_estimate_scale_bps = 10000",
+        "context_token_estimate_scale_bps = 9999",
+    );
+    let low_error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&low_only).unwrap())
+        .expect_err("scale below 10000 must fail config compilation");
+    assert!(
+        low_error
+            .to_string()
+            .contains("context_token_estimate_scale_bps must be between 10000 and 100000"),
+        "unexpected low-scale error: {low_error}"
+    );
+
+    let high_only = source.replace(
+        "[providers.low_scale]\ntype = \"responses\"\nbase_url = \"http://low.invalid/v1\"\ndefault_model = \"low-model\"\nauth = { type = \"api_key\", entries = [{ alias = \"key\", env = \"LOW_KEY\" }] }\n[providers.low_scale.models.low-model]\ncapabilities = [\"text\"]\ncontext_token_estimate_scale_bps = 9999\n",
+        "",
+    );
+    let high_only = high_only.replace(
+        "context_token_estimate_scale_bps = 100000",
+        "context_token_estimate_scale_bps = 100001",
+    );
+    let high_error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&high_only).unwrap())
+            .expect_err("scale above 100000 must fail config compilation");
+    assert!(
+        high_error
+            .to_string()
+            .contains("context_token_estimate_scale_bps must be between 10000 and 100000"),
+        "unexpected high-scale error: {high_error}"
+    );
+}
+
+#[test]
+fn metadata_center_local_search_requires_exactly_one_backend_binding() {
+    let source = r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+
+[providers.local]
+type = "openai_chat"
+base_url = "http://local.invalid/v1"
+default_model = "local-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "LOCAL_KEY" }] }
+[providers.local.models.local-model]
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "local", model = "local-model", priority = 1 }
+]
+"#;
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect_err("metadata_center_local_search without backend binding must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("requires exactly one web_search_backend binding"),
+        "unexpected error: {error}"
+    );
+
+    let source_with_backend = source.replace(
+        "web_search_execution_mode = \"metadata_center_local_search\"",
+        "web_search_execution_mode = \"metadata_center_local_search\"\nweb_search_backend = \"local.search\"",
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source_with_backend).unwrap())
+            .expect("metadata_center_local_search with backend binding must compile");
+    assert_eq!(
+        manifest.providers["local"].models["local-model"]
+            .web_search_backend_binding
+            .as_deref(),
+        Some("local.search")
+    );
+}
+
+#[test]
+fn same_model_name_across_providers_must_resolve_to_same_web_search_mode() {
+    // 红测：同名 model 在两个 provider 声明不同 web_search_execution_mode 时
+    // 编译期 fail-fast（Req04 Mode B 判定按请求 model 名解析，pool 直连扫描
+    // 按第一个命中——配置即真源，冲突必须在编译期暴露，禁止运行时按字典序
+    // 误命中与 VR 实际选择不一致）。
+    let source = r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+
+[providers.alpha]
+type = "openai_chat"
+base_url = "http://alpha.invalid/v1"
+default_model = "shared-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "ALPHA_KEY" }] }
+[providers.alpha.models.shared-model]
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "alpha.search"
+
+[providers.beta]
+type = "openai_chat"
+base_url = "http://beta.invalid/v1"
+default_model = "shared-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "BETA_KEY" }] }
+[providers.beta.models.shared-model]
+capabilities = ["text", "tools"]
+web_search_execution_mode = "native_remote_search_tool_mix"
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "alpha", model = "shared-model", priority = 1 },
+  { kind = "provider_model", provider = "beta", model = "shared-model", priority = 2 }
+]
+"#;
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect_err("same model name with conflicting web_search_execution_mode must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("conflicting web_search_execution_mode"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn omitted_snapshot_direct_preserves_config_compatibility() {
+    let source = FULL_CONFIG.replace("snapshot_direct = false\n", "");
+    let authoring = parse_v3_config_02_authoring(&source).unwrap();
+    let manifest = compile_v3_config_05_manifest(authoring).unwrap();
+
+    assert!(
+        manifest.debug.snapshot_direct,
+        "config authoring that omits snapshot_direct must preserve prior full-capture semantics"
+    );
+    assert!(
+        !manifest.debug.codex_samples,
+        "per-start CLI/lifecycle authorization must remain absent after Config compilation"
+    );
+}
+
+#[test]
+fn stopless_center_compiled_default_preserves_global_and_server_overrides() {
+    let explicit_global_false =
+        FULL_CONFIG.replace("[features]\n", "[features]\nstopless_center = false\n");
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&explicit_global_false).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest.features.get("stopless_center"), Some(&false));
+
+    let server_false = FULL_CONFIG.replace(
+        "[servers.primary]\n",
+        "[servers.primary]\nfeatures = { stopless_center = false }\n",
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&server_false).unwrap())
+            .unwrap();
+    assert_eq!(manifest.features.get("stopless_center"), Some(&true));
+    assert_eq!(
+        manifest.servers["primary"].features.get("stopless_center"),
+        Some(&false)
+    );
+
+    let server_true_over_global_false = explicit_global_false.replace(
+        "[servers.primary]\n",
+        "[servers.primary]\nfeatures = { stopless_center = true }\n",
+    );
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&server_true_over_global_false).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest.features.get("stopless_center"), Some(&false));
+    assert_eq!(
+        manifest.servers["primary"].features.get("stopless_center"),
+        Some(&true)
+    );
+}
+
+#[test]
+fn tool_thinking_compiled_feature_preserves_explicit_global_toggle() {
+    let enabled = FULL_CONFIG.replace(
+        "[features]\n",
+        "[features]\ntool_thinking = true\n",
+    );
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&enabled).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest.features.get("tool_thinking"), Some(&true));
+}
+
+#[test]
+fn compact_native_hub_v1_authoring_derives_closed_internal_defaults() {
+    let compact = FULL_CONFIG.replacen(
+        "version = 3\n",
+        "version = 3\n\n[pipelines.hub_v1]\nskeleton = \"hub_v1\"\n",
+        1,
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&compact).unwrap()).unwrap();
+
+    let hub_v1 = manifest
+        .hub_v1
+        .as_ref()
+        .expect("compact native V3 authoring must derive the closed Hub V1 pipeline");
+    assert_eq!(
+        hub_v1.hooks.len(),
+        V3HubFixedNode::ALL.len() * V3HubHookPhase::ALL.len()
+    );
+    assert_eq!(hub_v1.entry_protocol_bindings.len(), 4);
+    let responses = hub_v1
+        .entry_protocol_bindings
+        .iter()
+        .find(|binding| binding.entry_protocol == "responses")
+        .expect("responses binding");
+    assert_eq!(responses.execution_mode.as_str(), "direct");
+    assert_eq!(
+        responses.runtime_owner_symbol.as_deref(),
+        Some("execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation")
+    );
+
+    let execution = manifest.servers["primary"]
+        .execution
+        .as_ref()
+        .expect("compact native V3 authoring must derive closed server execution policy");
+    assert_eq!(execution.allowed_modes, vec!["direct", "relay"]);
+    assert_eq!(
+        execution.continuation.scope_keys,
+        vec!["entry_protocol", "server", "routing_group", "session"]
+    );
+}
+
+#[test]
+fn rejects_recursive_forwarder_cycle() {
+    let invalid = FULL_CONFIG.replace(
+        "targets = [{ kind = \"forwarder\", id = \"fwd.gpt-5.6\" }]",
+        "targets = [{ kind = \"forwarder\", id = \"nested.gpt-5.6\" }]",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(error.to_string().contains("contains cycle"));
+}
+
+#[test]
+fn rejects_unknown_auth_alias_and_ambiguous_model_alias() {
+    let bad_key = FULL_CONFIG.replace("key = \"key1\"", "key = \"missing\"");
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&bad_key).unwrap()).unwrap_err();
+    assert!(error.to_string().contains("unknown auth alias missing"));
+
+    let ambiguous = FULL_CONFIG.replace("aliases = [\"cc-gpt-5.6\"]", "aliases = [\"gpt-5.5\"]");
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&ambiguous).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("ambiguous model name gpt-5.5"));
+}
+
+#[test]
+fn published_manifest_is_declaration_only_and_deterministic() {
+    let first =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(FULL_CONFIG).unwrap()).unwrap();
+    let second =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(FULL_CONFIG).unwrap()).unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first.servers.len(), 2);
+}
+
+#[test]
+fn rejects_duplicate_listener_empty_default_and_no_enabled_server() {
+    let duplicate = FULL_CONFIG.replace("port = 4445", "port = 4444");
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&duplicate).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("share listen address"));
+
+    let empty_default = FULL_CONFIG.replace(
+        "targets = [{ kind = \"forwarder\", id = \"fwd.gpt-5.6\", priority = 1 }]",
+        "targets = []",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&empty_default).unwrap())
+            .unwrap_err();
+    assert!(error.to_string().contains("default pool is empty"));
+
+    let disabled = FULL_CONFIG
+        .replace(
+            "[servers.primary]\n",
+            "[servers.primary]\nenabled = false\n",
+        )
+        .replace(
+            "[servers.secondary]\n",
+            "[servers.secondary]\nenabled = false\n",
+        );
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&disabled).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("at least one enabled server"));
+}
+
+#[test]
+fn rejects_invalid_auth_handle_shapes_and_unknown_forwarder() {
+    let empty_env = FULL_CONFIG.replace("env = \"CC_API_KEY\"", "env = \"\"");
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&empty_env).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("secret handle name"));
+
+    let unknown = FULL_CONFIG.replace(
+        "id = \"fwd.gpt-5.6\", priority",
+        "id = \"missing.forwarder\", priority",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&unknown).unwrap()).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("unknown forwarder missing.forwarder"));
+}
+
+#[test]
+fn requires_default_pool_for_every_route_group() {
+    let invalid = FULL_CONFIG.replace(
+        "[route_groups.secondary.pools.default]",
+        "[route_groups.secondary.pools.coding]",
+    );
+    let authoring = parse_v3_config_02_authoring(&invalid).unwrap();
+    let error = compile_v3_config_05_manifest(authoring).unwrap_err();
+    assert!(error.to_string().contains("must define default pool"));
+}
+
+#[test]
+fn route_object_binding_compiles_and_compact_pool_stays_independent() {
+    let configured = FULL_CONFIG
+        .replace(
+            "[route_groups.primary.pools.default]\nselection",
+            "[route_groups.primary]\ncompact_route_object = \"compact-default\"\n\n[route_groups.primary.pools.default]\nselection",
+        )
+        .replace(
+            "[route_groups.primary.pools.search]\nselection",
+            "[route_groups.primary.pools.compact]\nroute_object = \"compact-default\"\nselection = { strategy = \"priority\" }\nmatch = { precedence = 5, entry_protocol = \"responses\" }\ntargets = [{ kind = \"provider_model\", provider = \"cc\", model = \"gpt-5.5\", priority = 1 }]\n\n[route_groups.primary.pools.search]\nselection",
+        )
+        .replace(
+            "[route_groups.secondary.pools.default]",
+            "[[route_groups.primary.route_policies]]\nid = \"compact-purpose\"\nprecedence = 10\ncondition = { kind = \"current_compaction\" }\naction = { select_route_pool = \"compact\" }\n\n[route_groups.secondary.pools.default]",
+        );
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&configured).unwrap())
+        .expect("compact route object must compile to the independent compact pool");
+    let group = &manifest.route_groups["primary"];
+    assert_eq!(group.compact_route_object.as_deref(), Some("compact-default"));
+    assert_eq!(
+        group.pools["compact"].route_object.as_deref(),
+        Some("compact-default")
+    );
+    assert_eq!(group.route_pool_for_object("compact-default"), Some("compact"));
+    assert_eq!(group.compact_route_pool(), Some("compact"));
+    assert_eq!(group.route_policies[0].id, "compact-purpose");
+    assert_eq!(
+        group.route_policies[0].action.select_route_pool,
+        "compact"
+    );
+}
+
+#[test]
+fn rejects_unknown_fields_and_secret_literals() {
+    let unknown = FULL_CONFIG.replace(
+        "routing_group = \"primary\"",
+        "routing_group = \"primary\"\nunknown_server_field = true",
+    );
+    assert!(parse_v3_config_02_authoring(&unknown).is_err());
+
+    let secret = FULL_CONFIG.replace("env = \"CC_API_KEY\"", "env = \"sk-secret-value\"");
+    let authoring = parse_v3_config_02_authoring(&secret).unwrap();
+    assert!(compile_v3_config_05_manifest(authoring).is_err());
+}
+
+#[test]
+fn validates_provider_error_policy_manifest_rules() {
+    let missing_scope = format!(
+        r#"{FULL_CONFIG}
+
+[[error.provider_error_action_policy]]
+policy_id = "global_unscoped_text_matcher"
+
+[error.provider_error_action_policy.match]
+content_contains_any = ["provider diagnostic text"]
+
+[error.provider_error_action_policy.action]
+kind = "recoverable_no_penalty"
+reason_code = "provider_diagnostic"
+retry_mode = "reselect_before_client_projection"
+"#
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&missing_scope).unwrap())
+            .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("text matcher requires provider-specific scope"),
+        "{error}"
+    );
+
+    let missing_cooldown = FULL_CONFIG.replace("cooldown_ms = 300000\n", "");
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&missing_cooldown).unwrap())
+            .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("periodic_recovery requires cooldown_ms"),
+        "{error}"
+    );
+
+    let secret_text = FULL_CONFIG.replace("provider diagnostic text", "sk-secret-value");
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&secret_text).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("content matcher"), "{error}");
+}
+
+#[test]
+fn compiles_manifest_disposition_path_and_rejects_invalid_step_order() {
+    let path_config = format!(
+        r#"{FULL_CONFIG}
+
+[[error.provider_error_action_policy]]
+policy_id = "subscription_invalid_global"
+
+[error.provider_error_action_policy.match]
+http_status = 401
+provider_code = "missing_token"
+
+[[error.provider_error_action_policy.path]]
+step = "wait_retry"
+retry_mode = "reselect_before_client_projection"
+max_attempts = 3
+backoff_ms = 100
+
+[[error.provider_error_action_policy.path]]
+step = "cooldown"
+scope = "provider_instance"
+duration_ms = 3600000
+provider_global_failure = true
+
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 502
+reason_code = "subscription_invalid_without_token"
+message_mode = "code_only"
+"#
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&path_config).unwrap()).unwrap();
+    let policy = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| policy.policy_id == "subscription_invalid_global")
+        .unwrap();
+    assert_eq!(policy.path.len(), 3);
+    assert!(policy.action.provider_global_failure);
+
+    let ambiguous = path_config.replacen(
+        "[[error.provider_error_action_policy.path]]",
+        "[error.provider_error_action_policy.action]\nkind = \"periodic_recovery\"\nreason_code = \"ambiguous\"\nretry_mode = \"none\"\ncooldown_ms = 3600000\n\n[[error.provider_error_action_policy.path]]",
+        1,
+    );
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&ambiguous).unwrap())
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("both action and path"),
+        "{error}"
+    );
+
+    let invalid = path_config.replace(
+        "step = \"cooldown\"\nscope = \"provider_instance\"\nduration_ms = 3600000\nprovider_global_failure = true",
+        "step = \"project\"\nstatus = 502\nreason_code = \"early_project\"\nmessage_mode = \"code_only\"",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(
+        error.to_string().contains("project must be the final step"),
+        "{error}"
+    );
+}
+
+#[test]
+fn rejects_duplicate_provider_error_policy_ids_across_provider_local_and_global_surfaces() {
+    let duplicate = format!(
+        r#"{FULL_CONFIG}
+
+[[error.provider_error_action_policy]]
+policy_id = "cc_200_diagnostic_zero_usage"
+
+[error.provider_error_action_policy.scope]
+provider_id = "cc"
+
+[error.provider_error_action_policy.match]
+http_status = 503
+
+[error.provider_error_action_policy.action]
+kind = "recoverable_no_penalty"
+reason_code = "provider_unavailable"
+retry_mode = "reselect_before_client_projection"
+"#
+    );
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&duplicate).unwrap())
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("duplicate provider error action policy cc_200_diagnostic_zero_usage"),
+        "{error}"
+    );
+}
+
+#[test]
+fn validates_provider_model_and_forwarder_references() {
+    let invalid = FULL_CONFIG.replace(
+        "provider = \"cc\", model = \"gpt-5.5\", key = \"key1\"",
+        "provider = \"cc\", model = \"alias-only\", key = \"key1\"",
+    );
+    let authoring = parse_v3_config_02_authoring(&invalid).unwrap();
+    let error = compile_v3_config_05_manifest(authoring).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("does not declare canonical model alias-only"));
+}
+
+#[test]
+fn responses_websocket_v2_transport_options_are_validated() {
+    let missing_endpoint = FULL_CONFIG.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\" }",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&missing_endpoint).unwrap())
+            .unwrap_err();
+    assert!(error.to_string().contains("websocket_v2_url is required"));
+
+    let contradictory_http = FULL_CONFIG.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\", websocket_v2_url = \"wss://provider.invalid/v1/responses\" }",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&contradictory_http).unwrap())
+            .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("HTTP transport cannot declare websocket_v2_url"));
+
+    let websocket = FULL_CONFIG.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\", websocket_v2_url = \"wss://provider.invalid/v1/responses\" }",
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&websocket).unwrap()).unwrap();
+    let responses = manifest.providers["cc"].responses.as_ref().unwrap();
+    assert_eq!(responses.transport.as_str(), "websocket_v2");
+    assert_eq!(
+        responses.websocket_v2_url.as_deref(),
+        Some("wss://provider.invalid/v1/responses")
+    );
+}
+
+#[test]
+fn continuation_labels_do_not_block_http_responses_config() {
+    let explicit_http = FULL_CONFIG.replace(
+        "capabilities = [\"text\", \"reasoning\", \"tools\"]",
+        "capabilities = [\"text\", \"reasoning\", \"tools\", \"remote_continuation\", \"tool_outputs\"]",
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&explicit_http).unwrap()).unwrap();
+
+    let websocket = explicit_http.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\", websocket_v2_url = \"wss://provider.invalid/v1/responses\" }",
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&websocket).unwrap()).unwrap();
+}
+
+#[test]
+fn gpt_responses_models_do_not_publish_continuation_as_implicit_capability() {
+    let websocket = FULL_CONFIG.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\", websocket_v2_url = \"wss://provider.invalid/v1/responses\" }",
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&websocket).unwrap()).unwrap();
+    let capabilities = &manifest.providers["cc"].models["gpt-5.5"].capabilities;
+    assert!(
+        !capabilities
+            .iter()
+            .any(|capability| capability == "remote_continuation"),
+        "continuation owner is resolved from previous_response_id records, not implicit model capability: {capabilities:?}"
+    );
+    assert!(
+        !capabilities
+            .iter()
+            .any(|capability| capability == "tool_outputs"),
+        "tool_outputs is request protocol data, not implicit model capability: {capabilities:?}"
+    );
+
+    let explicit_http = FULL_CONFIG.replace(
+        "capabilities = [\"text\", \"reasoning\", \"tools\"]",
+        "capabilities = [\"text\", \"reasoning\", \"tools\", \"remote_continuation\", \"tool_outputs\"]",
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&explicit_http).unwrap()).unwrap();
+
+    let non_responses = FULL_CONFIG.replacen("type = \"responses\"", "type = \"openai_chat\"", 1);
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&non_responses).unwrap())
+            .unwrap();
+    let capabilities = &manifest.providers["cc"].models["gpt-5.5"].capabilities;
+    assert!(
+        !capabilities
+            .iter()
+            .any(|capability| capability == "remote_continuation"),
+        "GPT model must not derive remote_continuation outside Responses protocol: {capabilities:?}"
+    );
+}
+
+#[test]
+fn config_store_is_the_single_read_write_interface() {
+    let root =
+        std::env::temp_dir().join(format!("routecodex-v3-config-store-{}", std::process::id()));
+    let path = root.join("config.v3.toml");
+    let store = V3ConfigStore::new(&path);
+    let authoring = parse_v3_config_02_authoring(FULL_CONFIG).unwrap();
+    let plan = store.plan_write(&authoring).unwrap();
+    store.commit_write_atomic(plan).unwrap();
+
+    let snapshot = store.load_snapshot().unwrap();
+    assert_eq!(snapshot.servers["primary"].port, 4444);
+    assert_eq!(store.path(), path);
+    assert!(!path
+        .with_extension(format!("toml.tmp-{}", std::process::id()))
+        .exists());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn config_source_identity_is_stable_sensitive_and_secret_free() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-config-source-identity-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("config.v3.toml");
+    fs::write(&path, FULL_CONFIG).unwrap();
+    let store = V3ConfigStore::new(&path);
+
+    let first = store.load_snapshot_with_source_identity().unwrap();
+    let repeated = store.load_snapshot_with_source_identity().unwrap();
+    assert_eq!(first.canonical_path, repeated.canonical_path);
+    assert_eq!(first.source_sha256, repeated.source_sha256);
+    assert_eq!(first.manifest.servers, repeated.manifest.servers);
+    assert_eq!(first.manifest.providers, repeated.manifest.providers);
+
+    fs::write(
+        &path,
+        format!("{FULL_CONFIG}\n# identity-only source change\n"),
+    )
+    .unwrap();
+    let changed = store.load_snapshot_with_source_identity().unwrap();
+    assert_ne!(changed.source_sha256, first.source_sha256);
+    assert_eq!(changed.manifest.servers, first.manifest.servers);
+    assert_eq!(changed.manifest.providers, first.manifest.providers);
+
+    let projection = format!("{first:?}{changed:?}");
+    assert!(!projection.contains("sk-secret-value"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn default_path_is_config_v3_toml() {
+    assert_eq!(
+        default_v3_config_path("/tmp/home"),
+        std::path::PathBuf::from("/tmp/home/.rcc/config.v3.toml")
+    );
+}
+
+#[test]
+fn compiles_hub_v1_declarations_without_request_branch_decisions() {
+    let raw = format!(
+        "{}\n{}\n{}",
+        FULL_CONFIG, HUB_V1_DECLARATION, HUB_V1_SERVER_EXECUTION
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap()).unwrap();
+    let hub = manifest.hub_v1.as_ref().expect("hub_v1 declaration");
+    assert_eq!(hub.skeleton, "hub_v1");
+    assert_eq!(
+        hub.entry_protocols,
+        vec!["responses", "anthropic", "gemini", "openai_chat"]
+    );
+    let bindings = &hub.entry_protocol_bindings;
+    assert_eq!(bindings.len(), 4);
+    let responses = bindings
+        .iter()
+        .find(|binding| binding.entry_protocol == "responses")
+        .expect("responses binding");
+    assert_eq!(
+        responses.endpoint_patterns,
+        vec!["/v1/responses", "/v1/responses/compact"]
+    );
+    assert_eq!(responses.execution_mode.as_str(), "direct");
+    assert!(responses.implemented);
+    assert_eq!(
+        responses.runtime_owner_symbol.as_deref(),
+        Some("execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation")
+    );
+    let gemini = bindings
+        .iter()
+        .find(|binding| binding.entry_protocol == "gemini")
+        .expect("gemini binding");
+    assert_eq!(
+        gemini.endpoint_patterns,
+        vec!["/v1beta/models/:model/generateContent"]
+    );
+    assert_eq!(gemini.execution_mode.as_str(), "relay");
+    assert!(gemini.implemented);
+    assert_eq!(
+        gemini.runtime_owner_symbol.as_deref(),
+        Some("execute_v3_gemini_relay_runtime_with_default_transport")
+    );
+    let gemini_lookup = hub
+        .entry_protocol_binding_for_endpoint("/v1beta/models/gemini-2.5-pro/generateContent")
+        .expect("gemini endpoint binding lookup");
+    assert_eq!(gemini_lookup.entry_protocol, "gemini");
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/unknown")
+        .is_none());
+    assert_eq!(hub.hooks.len(), 34);
+    assert_eq!(hub.resources.len(), 6);
+    assert!(hub
+        .resources
+        .values()
+        .all(|resource| !resource.may_enter_provider_body && !resource.may_enter_client_body));
+    for node in V3HubFixedNode::ALL {
+        for phase in V3HubHookPhase::ALL {
+            assert!(hub
+                .hooks
+                .iter()
+                .any(|hook| hook.node == node && hook.phase == phase));
+        }
+    }
+    let servertool = hub
+        .hooks
+        .iter()
+        .filter(|hook| hook.profile == Some(V3HubHookProfile::Servertool))
+        .collect::<Vec<_>>();
+    assert_eq!(servertool.len(), 2);
+    assert!(servertool.iter().all(|hook| matches!(
+        hook.node,
+        V3HubFixedNode::V3HubReqChatProcess04Governed
+            | V3HubFixedNode::V3HubRespChatProcess03Governed
+    )));
+    assert!(!format!("{hub:?}").contains("selected_target"));
+    assert!(!format!("{hub:?}").contains("selected_execution_mode"));
+}
+
+#[test]
+fn rejects_invalid_hub_v1_entry_protocol_bindings_fail_fast() {
+    let cases = [
+        (
+            HUB_V1_DECLARATION.replace("  { entry_protocol = \"gemini\", endpoint_patterns = [\"/v1beta/models/:model/generateContent\"], execution_mode = \"relay\", protocol_profile_owner = \"v3.gemini_relay_runtime_integration\", implemented = true, forbidden_reentry_behavior = \"Gemini endpoint must not fall through to pending or direct runtime.\", runtime_owner_symbol = \"execute_v3_gemini_relay_runtime_with_default_transport\", runtime_owner_path = \"v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs\" },\n", ""),
+            "entry protocol binding registry must declare all hub_v1 entry protocols",
+        ),
+        (
+            HUB_V1_DECLARATION.replace("endpoint_patterns = [\"/v1/messages\"]", "endpoint_patterns = []"),
+            "entry protocol binding anthropic endpoint_patterns is empty",
+        ),
+        (
+            HUB_V1_DECLARATION.replace("endpoint_patterns = [\"/v1/messages\"]", "endpoint_patterns = [\"/v1/responses\"]"),
+            "duplicate endpoint pattern /v1/responses",
+        ),
+        (
+            HUB_V1_DECLARATION.replace("entry_protocol = \"openai_chat\"", "entry_protocol = \"responses\""),
+            "duplicate entry protocol binding responses",
+        ),
+        (
+            HUB_V1_DECLARATION.replace("entry_protocol = \"openai_chat\"", "entry_protocol = \"legacy_chat\""),
+            "unknown entry protocol binding legacy_chat",
+        ),
+        (
+            HUB_V1_DECLARATION.replace("execution_mode = \"relay\", protocol_profile_owner = \"v3.gemini_relay_runtime_integration\"", "execution_mode = \"pending_not_implemented\", protocol_profile_owner = \"v3.gemini_relay_runtime_integration\""),
+            "gemini entry protocol must be direct or relay",
+        ),
+        (
+            HUB_V1_DECLARATION.replace("runtime_owner_symbol = \"execute_v3_anthropic_relay_runtime_with_default_transport\", runtime_owner_path = \"v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs\"", "runtime_owner_path = \"v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs\""),
+            "implemented entry protocol binding anthropic must declare runtime owner symbol and path",
+        ),
+        (
+            HUB_V1_DECLARATION.replace("runtime_owner_symbol = \"execute_v3_gemini_relay_runtime_with_default_transport\", runtime_owner_path = \"v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs\"", "runtime_owner_path = \"v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs\""),
+            "implemented entry protocol binding gemini must declare runtime owner symbol and path",
+        ),
+    ];
+    for (invalid, expected) in cases {
+        let raw = format!("{}\n{}\n{}", FULL_CONFIG, invalid, HUB_V1_SERVER_EXECUTION);
+        let error =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap()).unwrap_err();
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn rejects_invalid_hub_v1_declarations_fail_fast() {
+    for (invalid, expected) in [
+        (
+            HUB_V1_DECLARATION.replace("skeleton = \"hub_v1\"", "skeleton = \"hub_v2\""),
+            "skeleton must be hub_v1",
+        ),
+        (
+            HUB_V1_DECLARATION.replace(
+                "hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented",
+                "hub_v1.unknown",
+            ),
+            "unknown hook",
+        ),
+        (
+            HUB_V1_DECLARATION.replace("  { hook_id = \"hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented\", node = \"V3ServerRespOutbound06ClientFrame\", phase = \"exit\", requirement = \"required\", priority = 0, order = 33, allowed_resources = [], forbidden_resources = [] },\n", ""),
+            "missing required exit hook",
+        ),
+        (
+            HUB_V1_DECLARATION.replace(
+                "{ hook_id = \"hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented\", node = \"V3ServerRespOutbound06ClientFrame\", phase = \"exit\"",
+                "{ hook_id = \"hub_v1.V3ServerRespOutbound06ClientFrame.entry.not_implemented\", node = \"V3ServerRespOutbound06ClientFrame\", phase = \"entry\"",
+            ),
+            "duplicate hook",
+        ),
+        (
+            HUB_V1_DECLARATION.replace("\"responses\"", "\"unsupported\""),
+            "unknown entry protocol",
+        ),
+    ] {
+        let raw = format!("{}\n{}\n{}", FULL_CONFIG, invalid, HUB_V1_SERVER_EXECUTION);
+        let err =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap()).unwrap_err();
+        assert!(err.to_string().contains(expected), "{err}");
+    }
+}
+
+#[test]
+fn enforces_hook_resource_profile_and_optional_contracts() {
+    let implicit_permissions = HUB_V1_DECLARATION.replacen(
+        ", allowed_resources = [], forbidden_resources = []",
+        ", forbidden_resources = []",
+        1,
+    );
+    let raw = format!(
+        "{}\n{}\n{}",
+        FULL_CONFIG, implicit_permissions, HUB_V1_SERVER_EXECUTION
+    );
+    assert!(parse_v3_config_02_authoring(&raw).is_err());
+
+    let cases = [
+        (
+            HUB_V1_DECLARATION.replace(
+                "allowed_resources = [\"metadata_center\"]",
+                "allowed_resources = [\"unknown_resource\"]",
+            ),
+            "unknown resource",
+        ),
+        (
+            HUB_V1_DECLARATION.replace(
+                "allowed_resources = [\"metadata_center\"], forbidden_resources = []",
+                "allowed_resources = [\"metadata_center\"], forbidden_resources = [\"metadata_center\"]",
+            ),
+            "both allows and forbids",
+        ),
+        (
+            HUB_V1_DECLARATION.replace(
+                "node = \"V3HubReqInbound02Normalized\", phase = \"entry\", requirement = \"required\", priority",
+                "node = \"V3HubReqInbound02Normalized\", phase = \"entry\", requirement = \"required\", enabled = false, priority",
+            ),
+            "required hook",
+        ),
+        (
+            HUB_V1_DECLARATION.replace(
+                "forbidden_resources = [\"continuation_store\"]",
+                "forbidden_resources = [\"continuation_store\"], profile = \"servertool\"",
+            ),
+            "servertool profile is forbidden",
+        ),
+    ];
+    for (invalid, expected) in cases {
+        let raw = format!("{}\n{}\n{}", FULL_CONFIG, invalid, HUB_V1_SERVER_EXECUTION);
+        let error =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap()).unwrap_err();
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+
+    let raw = format!(
+        "{}\n{}\n{}",
+        FULL_CONFIG, HUB_V1_DECLARATION, HUB_V1_SERVER_EXECUTION
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap()).unwrap();
+    let hooks = &manifest.hub_v1.unwrap().hooks;
+    assert!(hooks.windows(2).all(|pair| {
+        (pair[0].priority, pair[0].order, pair[0].hook_id.as_str())
+            <= (pair[1].priority, pair[1].order, pair[1].hook_id.as_str())
+    }));
+    let optional = hooks
+        .iter()
+        .find(|hook| hook.requirement == V3HubHookRequirement::Optional)
+        .expect("typed optional hook");
+    assert!(!optional.enabled);
+}
+
+#[test]
+fn provider_response_error_policy_accepts_full_path_and_injects_provider_scope() {
+    let raw = FULL_CONFIG.replace(
+        "[[providers.cc.semantic_error_policy]]\npolicy_id = \"cc_200_diagnostic_zero_usage\"",
+        "[[providers.cc.response_error_policy]]\npolicy_id = \"cc_200_diagnostic_zero_usage\"",
+    )
+    .replace(
+        "[providers.cc.semantic_error_policy.match]",
+        "[providers.cc.response_error_policy.match]",
+    )
+    .replace(
+        "[providers.cc.semantic_error_policy.match.sse]",
+        "[providers.cc.response_error_policy.match.sse]",
+    )
+    .replace(
+        "[providers.cc.semantic_error_policy.action]\nkind = \"periodic_recovery\"\nreason_code = \"provider_diagnostic_zero_usage\"\nretry_mode = \"reselect_before_client_projection\"\ncooldown_ms = 300000\ndisable_scope = \"provider_model\"",
+        "[[providers.cc.response_error_policy.path]]\nstep = \"wait_retry\"\nretry_mode = \"retry_same\"\nmax_attempts = 3\nbackoff_ms = 1000\nbackoff_multiplier = 2\n\n[[providers.cc.response_error_policy.path]]\nstep = \"cooldown\"\nscope = \"provider_model\"\nduration_ms = 300000\n\n[[providers.cc.response_error_policy.path]]\nstep = \"project\"\nstatus = 503\nreason_code = \"provider_diagnostic_zero_usage\"\npublic_code = \"upstream_overloaded\"\nmessage_mode = \"code_only\"",
+    );
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap())
+        .expect("provider-local full path must compile");
+    let policy = &manifest.error.provider_error_action_policy[0];
+    assert_eq!(policy.scope.provider_id.as_deref(), Some("cc"));
+    assert_eq!(policy.scope.provider_type.as_deref(), Some("responses"));
+    assert!(matches!(
+        policy.path.first(),
+        Some(V3ProviderDispositionStepManifest::WaitRetry {
+            retry_mode: V3ProviderErrorRetryMode::RetrySame,
+            max_attempts: 3,
+            backoff_ms: 1000,
+            backoff_multiplier: Some(2),
+        })
+    ));
+    assert!(matches!(
+        policy.path.last(),
+        Some(V3ProviderDispositionStepManifest::Project {
+            status: 503,
+            public_code: Some(code),
+            ..
+        }) if code == "upstream_overloaded"
+    ));
+}
+
+#[test]
+fn rejects_unknown_hub_capability_and_execution_declarations() {
+    let unknown_capability = FULL_CONFIG.replace(
+        "capabilities = [\"text\", \"reasoning\", \"tools\"]",
+        "capabilities = [\"text\", \"unknown_hub_capability\"]",
+    );
+    let err =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&unknown_capability).unwrap())
+            .unwrap_err();
+    assert!(err.to_string().contains("unknown capability"));
+
+    let invalid_execution = HUB_V1_SERVER_EXECUTION.replace(
+        "allowed_modes = [\"direct\", \"relay\"]",
+        "allowed_modes = [\"direct\", \"automatic\"]",
+    );
+    let raw = format!(
+        "{}\n{}\n{}",
+        FULL_CONFIG, HUB_V1_DECLARATION, invalid_execution
+    );
+    let err =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap()).unwrap_err();
+    assert!(err.to_string().contains("hub_v1 server"));
+    assert!(err.to_string().contains("unknown value automatic"));
+}
+
+#[test]
+fn rejects_streaming_as_model_or_route_capability() {
+    let streaming_model_capability = FULL_CONFIG.replace(
+        "capabilities = [\"text\", \"reasoning\", \"tools\"]",
+        "capabilities = [\"text\", \"reasoning\", \"tools\", \"streaming\"]",
+    );
+    let err = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&streaming_model_capability).unwrap(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("streaming is a transport"));
+
+    let streaming_route_capability = FULL_CONFIG.replace(
+        "required_capabilities = [\"tools\"]",
+        "required_capabilities = [\"tools\", \"streaming\"]",
+    );
+    let err = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&streaming_route_capability).unwrap(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("streaming is a transport"));
+}
+
+#[test]
+fn rejects_invalid_pool_match_and_capability_combinations() {
+    let empty_match = FULL_CONFIG.replace(
+        "match = { precedence = 10, entry_protocol = \"responses\", models = [\"gpt-5.6\"], required_capabilities = [\"tools\"], min_input_tokens = 1, max_input_tokens = 200000 }",
+        "match = { precedence = 10 }",
+    );
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&empty_match).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("pool match has no criteria"));
+
+    let reversed_range = FULL_CONFIG.replace("min_input_tokens = 1", "min_input_tokens = 300000");
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&reversed_range).unwrap())
+            .unwrap_err();
+    assert!(error.to_string().contains("token range is invalid"));
+
+    let legacy_continuation_label = FULL_CONFIG.replace(
+        "capabilities = [\"text\", \"reasoning\", \"tools\"]",
+        "capabilities = [\"text\", \"remote_continuation\"]",
+    );
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&legacy_continuation_label).unwrap(),
+    )
+    .expect("legacy continuation labels are parsed for compatibility but no longer gate model capability");
+}
+
+#[test]
+fn rejects_longcontext_pool_without_min_input_tokens() {
+    let longcontext_without_threshold = FULL_CONFIG
+        .replace(
+            "[route_groups.primary.pools.search]",
+            "[route_groups.primary.pools.longcontext]",
+        )
+        .replace("min_input_tokens = 1, ", "");
+    let error = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&longcontext_without_threshold).unwrap(),
+    )
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("longcontext pool must declare min_input_tokens"));
+}
+
+#[test]
+fn enforces_default_and_non_default_pool_match_contracts() {
+    let default_match = FULL_CONFIG.replace(
+        "[route_groups.primary.pools.default]\nselection = { strategy = \"priority\" }",
+        "[route_groups.primary.pools.default]\nselection = { strategy = \"priority\" }\nmatch = { precedence = 1, entry_protocol = \"responses\" }",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&default_match).unwrap())
+            .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("default pool cannot declare match"));
+
+    let missing_match = FULL_CONFIG.replace(
+        "match = { precedence = 10, entry_protocol = \"responses\", models = [\"gpt-5.6\"], required_capabilities = [\"tools\"], min_input_tokens = 1, max_input_tokens = 200000 }\n",
+        "",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&missing_match).unwrap())
+            .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("non-default pool search must declare match"));
+}
+
+#[test]
+fn rejects_missing_precedence_and_unknown_entry_protocol() {
+    let missing_precedence = FULL_CONFIG.replace("precedence = 10, ", "");
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&missing_precedence).unwrap())
+            .unwrap_err();
+    assert!(error.to_string().contains("must declare precedence"));
+
+    let unknown_protocol = FULL_CONFIG.replace(
+        "entry_protocol = \"responses\"",
+        "entry_protocol = \"unknown\"",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&unknown_protocol).unwrap())
+            .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("pool match entry_protocol contains unknown value unknown"));
+}
+
+#[test]
+fn rejects_ambiguous_cross_provider_alias_invalid_health_and_unknown_endpoint() {
+    let ambiguous = FULL_CONFIG.replace("aliases = [\"gpt-latest\"]", "aliases = [\"cc-gpt-5.6\"]");
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&ambiguous).unwrap())
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ambiguous client alias cc-gpt-5.6"));
+
+    let invalid_health = FULL_CONFIG.replace("failure_threshold = 3", "failure_threshold = 0");
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid_health).unwrap())
+            .unwrap_err();
+    assert!(error.to_string().contains("health failure_threshold"));
+
+    let unknown_endpoint = FULL_CONFIG.replace(
+        "endpoints = [\"responses\"]",
+        "endpoints = [\"responses\", \"unknown_protocol\"]",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&unknown_endpoint).unwrap())
+            .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("unknown endpoint unknown_protocol"));
+}
+
+#[test]
+fn rejects_invalid_provider_request_cleanup_selectors() {
+    for (replacement, expected) in [
+        (
+            "provider_request_cleanup = { historical_fields = [\"\"] }",
+            "empty selector",
+        ),
+        (
+            "provider_request_cleanup = { historical_fields = [\"reasoning..encrypted_content\"] }",
+            "empty path segment",
+        ),
+        (
+            "provider_request_cleanup = { historical_fields = [\"reasoning.encrypted_content\", \" reasoning.encrypted_content \"] }",
+            "is duplicated",
+        ),
+        (
+            "provider_request_cleanup = { historical_fields = [\"reasoning.encrypted_content[]\"] }",
+            "unsupported selector characters",
+        ),
+    ] {
+        let invalid = FULL_CONFIG.replace(
+            "provider_request_cleanup = { historical_fields = [\"reasoning.encrypted_content\"] }",
+            replacement,
+        );
+        let error =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap())
+                .unwrap_err();
+        assert!(
+            error.to_string().contains(expected),
+            "expected {expected}, got {error}"
+        );
+    }
+}
+
+#[test]
+fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
+    let root = std::env::temp_dir().join(format!("routecodex-v3-v2-compat-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider(
+        &root,
+        "orangeai",
+        "openai",
+        "https://glm.invalid/v1",
+        "glm-5.2",
+        &["glm-5.2"],
+    );
+    write_v2_provider(
+        &root,
+        "minimax",
+        "anthropic",
+        "https://minimax.invalid/anthropic",
+        "MiniMax-M3",
+        &["MiniMax-M3"],
+    );
+    write_v2_provider(
+        &root,
+        "cc",
+        "responses",
+        "https://cc.invalid/openai/v1",
+        "gpt-5.5",
+        &["gpt-5.5"],
+    );
+    write_v2_provider(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+    );
+    write_v2_provider(
+        &root,
+        "asxs",
+        "responses",
+        "https://asxs.invalid/v1",
+        "gpt-5.5",
+        &["gpt-5.5", "gpt-5.4"],
+    );
+    write_v2_provider(
+        &root,
+        "1token",
+        "responses",
+        "https://one-token.invalid/v1",
+        "gpt-5.4",
+        &["gpt-5.5", "gpt-5.4"],
+    );
+    write_v2_provider(
+        &root,
+        "55ai",
+        "responses",
+        "https://55ai.invalid/v1",
+        "gpt-5.5",
+        &["gpt-5.5", "gpt-5.4"],
+    );
+
+    let path = root.join("config.toml");
+    fs::write(&path, V2_5555_CONFIG).unwrap();
+    let manifest = V3ConfigStore::new(&path).load_snapshot().unwrap();
+
+    assert_eq!(manifest.version, 3);
+    assert_eq!(manifest.servers["gateway_priority_5555"].port, 5555);
+    assert_eq!(
+        manifest.servers["gateway_priority_5555"].routing_group,
+        "gateway_priority_5555"
+    );
+    assert_eq!(
+        manifest.servers["gateway_priority_5555"].endpoints,
+        ["responses", "anthropic", "openai_chat"],
+        "v2 5555 projection must not enable Gemini without a Gemini provider target"
+    );
+    let hub = manifest
+        .hub_v1
+        .as_ref()
+        .expect("v2 root must publish hub_v1");
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/responses")
+        .is_some_and(|binding| binding.entry_protocol == "responses"
+            && binding.execution_mode.as_str() == "direct"
+            && binding.runtime_owner_symbol.as_deref()
+                == Some("execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation")));
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/responses/compact")
+        .is_some_and(|binding| binding.entry_protocol == "responses"
+            && binding.execution_mode.as_str() == "direct"));
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/chat/completions")
+        .is_some_and(|binding| binding.entry_protocol == "openai_chat"));
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/messages")
+        .is_some_and(|binding| binding.entry_protocol == "anthropic"));
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1beta/models/gemini-2.5-pro/generateContent")
+        .is_some_and(|binding| binding.entry_protocol == "gemini"));
+    let execution = manifest.servers["gateway_priority_5555"]
+        .execution
+        .as_ref()
+        .expect("v2 root hub_v1 server must declare execution policy");
+    assert_eq!(execution.allowed_modes, ["direct", "relay"]);
+    assert_eq!(
+        execution.allowed_invocation_sources,
+        ["client", "servertool_followup", "dry_run"]
+    );
+    assert_eq!(execution.allowed_transports, ["json", "sse"]);
+    assert_eq!(manifest.providers["orangeai"].provider_type, "openai_chat");
+    assert_eq!(manifest.providers["minimax"].provider_type, "anthropic");
+    assert_eq!(manifest.providers["cc"].provider_type, "responses");
+    assert_eq!(
+        manifest.providers["minimax"].compatibility_profile.as_deref(),
+        Some("chat:minimax"),
+        "V2 MiniMax provider must materialize the existing compatibility profile into the V3 manifest"
+    );
+    assert_eq!(
+        manifest.providers["orangeai"]
+            .compatibility_profile
+            .as_deref(),
+        None,
+        "providers without an existing V2 compatibility profile must not get a synthetic profile"
+    );
+    assert_eq!(
+        manifest.providers["orangeai"].auth.entries[0].api_key.as_deref(),
+        Some("secret-orangeai-key1"),
+        "V2 apiKey must remain the auth handle truth and must not be materialized into a V3-only token file"
+    );
+    assert!(manifest.providers["orangeai"].auth.entries[0].env.is_none());
+    assert!(manifest.providers["orangeai"].auth.entries[0]
+        .token_file
+        .is_none());
+    assert!(!format!("{manifest:?}").contains("secret-orangeai-key1"));
+    assert!(!format!("{manifest:?}").contains(".routecodex-v3-secret-handles"));
+
+    let group = &manifest.route_groups["gateway_priority_5555"];
+    assert_eq!(
+        group.pools["multimodal"]
+            .match_rule
+            .as_ref()
+            .unwrap()
+            .precedence,
+        10
+    );
+    assert_eq!(
+        group.pools["web_search"]
+            .match_rule
+            .as_ref()
+            .unwrap()
+            .precedence,
+        20
+    );
+    assert_eq!(
+        group.pools["longcontext"]
+            .match_rule
+            .as_ref()
+            .unwrap()
+            .precedence,
+        30
+    );
+    assert_eq!(
+        group.pools["longcontext"]
+            .match_rule
+            .as_ref()
+            .unwrap()
+            .min_input_tokens,
+        Some(123_456),
+        "V2 classifier longContextThresholdTokens must compile into the V3 longcontext pool match"
+    );
+    assert!(
+        group.pools["longcontext"]
+            .match_rule
+            .as_ref()
+            .unwrap()
+            .required_capabilities
+            .is_empty(),
+        "longcontext is token-threshold routing, not a declared capability"
+    );
+    assert_eq!(
+        group.pools["tools"].match_rule.as_ref().unwrap().precedence,
+        70
+    );
+    assert_route_targets(
+        group.pools["thinking"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &[
+            "fwd.glm.glm-5.2",
+            "fwd.free.gpt-5.5",
+            "fwd.free.gpt-5.6-sol",
+            "fwd.paid.gpt-5.5",
+        ],
+    );
+    assert_route_targets(
+        group.pools["coding"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &[
+            "fwd.glm.glm-5.2",
+            "fwd.free.gpt-5.5",
+            "fwd.free.gpt-5.6-sol",
+            "fwd.paid.gpt-5.5",
+        ],
+    );
+    assert_route_targets(
+        group.pools["longcontext"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &[
+            "fwd.glm.glm-5.2",
+            "fwd.free.gpt-5.5",
+            "fwd.free.gpt-5.6-sol",
+            "fwd.paid.gpt-5.5",
+        ],
+    );
+    assert_route_targets(
+        group.pools["tools"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &["fwd.minimax.MiniMax-M3", "fwd.glm.glm-5.2"],
+    );
+    assert_route_targets(
+        group.pools["search"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &["fwd.minimax.MiniMax-M3", "fwd.glm.glm-5.2"],
+    );
+    assert_route_targets(
+        group.pools["web_search"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &["fwd.minimax.MiniMax-M3", "fwd.glm.glm-5.2"],
+    );
+    assert_route_targets(
+        group.pools["multimodal"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &[
+            "fwd.minimax.MiniMax-M3",
+            "fwd.free.gpt-5.5",
+            "fwd.free.gpt-5.6-sol",
+            "fwd.paid.gpt-5.4",
+        ],
+    );
+    assert_route_targets(
+        group.pools["default"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &[
+            "fwd.glm.glm-5.2",
+            "fwd.free.gpt-5.5",
+            "fwd.free.gpt-5.6-sol",
+            "fwd.paid.gpt-5.5",
+            "fwd.minimax.MiniMax-M3",
+            "fwd.paid.gpt-5.4",
+        ],
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v2_compat_provider_auth_secret_file_expands_key_names_without_values() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-v2-auth-key-file-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+    );
+    let secret_file = root.join("opencode-go.conf");
+    fs::write(
+        &secret_file,
+        "cc-sol.key1 = first-secret\ncc-sol.key2 = second-secret\n",
+    )
+    .unwrap();
+    let provider_path = root.join("provider/cc-sol/config.v2.toml");
+    let provider_raw = fs::read_to_string(&provider_path).unwrap().replace(
+        "apiKey = \"secret-cc-sol-key1\"",
+        &format!("secretFile = \"{}\"", secret_file.display()),
+    );
+    fs::write(&provider_path, provider_raw).unwrap();
+    let config_path = root.join("config.toml");
+    fs::write(&config_path, V2_SINGLE_RESPONSES_CONFIG).unwrap();
+
+    let manifest = V3ConfigStore::new(&config_path).load_snapshot().unwrap();
+    let auth = &manifest.providers["cc-sol"].auth.entries;
+    assert_eq!(auth.len(), 2);
+    assert_eq!(auth[0].alias, "key1");
+    assert_eq!(auth[0].secret_file.as_deref(), secret_file.to_str());
+    assert_eq!(auth[0].secret_key.as_deref(), Some("cc-sol.key1"));
+    assert_eq!(auth[1].alias, "key2");
+    assert_eq!(auth[1].secret_key.as_deref(), Some("cc-sol.key2"));
+    assert!(auth.iter().all(|entry| entry.api_key.is_none()));
+    let debug = format!("{manifest:?}");
+    assert!(!debug.contains("first-secret"));
+    assert!(!debug.contains("second-secret"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v2_compat_keeps_responses_endpoint_for_minimax_only_5555() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-v2-minimax-only-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider(
+        &root,
+        "minimax",
+        "anthropic",
+        "https://minimax.invalid/anthropic",
+        "MiniMax-M3",
+        &["MiniMax-M3", "MiniMax-M2.7", "minimax-m3"],
+    );
+
+    let path = root.join("config.toml");
+    fs::write(&path, V2_5555_MINIMAX_ONLY_CONFIG).unwrap();
+    let manifest = V3ConfigStore::new(&path).load_snapshot().unwrap();
+    let server = &manifest.servers["gateway_priority_5555"];
+    assert_eq!(server.endpoints, ["responses", "anthropic"]);
+
+    let hub = manifest
+        .hub_v1
+        .as_ref()
+        .expect("v2 root must publish hub_v1");
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/responses")
+        .is_some_and(|binding| binding.entry_protocol == "responses"
+            && binding.execution_mode.as_str() == "direct"
+            && binding.runtime_owner_symbol.as_deref()
+                == Some("execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation")));
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/messages")
+        .is_some_and(|binding| binding.entry_protocol == "anthropic"));
+    assert!(
+        !server
+            .endpoints
+            .iter()
+            .any(|endpoint| endpoint == "openai_chat" || endpoint == "gemini"),
+        "minimax-only projection must not expose OpenAI Chat or Gemini endpoint protocols"
+    );
+
+    let provider = &manifest.providers["minimax"];
+    assert_eq!(provider.provider_type, "anthropic");
+    assert_eq!(
+        provider.models.keys().cloned().collect::<Vec<_>>(),
+        ["MiniMax-M3"],
+        "V2 projection must not expose provider-local models that no active 5555 route can select"
+    );
+
+    let group = &manifest.route_groups["gateway_priority_5555"];
+    for route in [
+        "thinking",
+        "coding",
+        "longcontext",
+        "tools",
+        "search",
+        "web_search",
+        "multimodal",
+        "default",
+    ] {
+        assert_route_targets(
+            group.pools[route]
+                .targets
+                .iter()
+                .map(|target| target.id.as_deref().unwrap())
+                .collect(),
+            &["fwd.minimax.MiniMax-M3"],
+        );
+    }
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v2_compat_projects_responses_websocket_v2_transport_without_implicit_continuation_capabilities()
+{
+    let root =
+        std::env::temp_dir().join(format!("routecodex-v3-v2-compat-ws-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider_with_options(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+        V2ProviderOptions {
+            responses_extra: r#"
+transport = "websocket_v2"
+websocket_v2_url = "wss://provider.invalid/openai/v1/responses"
+"#,
+            capabilities: &["text", "reasoning", "tools"],
+        },
+    );
+    let path = root.join("config.toml");
+    fs::write(&path, V2_SINGLE_RESPONSES_CONFIG).unwrap();
+
+    let manifest = V3ConfigStore::new(&path).load_snapshot().unwrap();
+    let provider = &manifest.providers["cc-sol"];
+    let responses = provider
+        .responses
+        .as_ref()
+        .expect("v2 responses provider must project responses transport config");
+    assert_eq!(responses.transport.as_str(), "websocket_v2");
+    assert_eq!(
+        responses.websocket_v2_url.as_deref(),
+        Some("wss://provider.invalid/openai/v1/responses")
+    );
+    assert_eq!(
+        provider.models["gpt-5.6-sol"].capabilities,
+        ["reasoning", "text", "tools"],
+        "websocket_v2 is transport config; continuation owner is resolved from previous_response_id records, not an implicit model capability"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v2_compat_projects_gpt_responses_remote_capabilities_without_websocket() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-v2-compat-http-gpt-remote-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider_with_options(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+        V2ProviderOptions {
+            responses_extra: "",
+            capabilities: &["text", "reasoning", "tools"],
+        },
+    );
+    let path = root.join("config.toml");
+    fs::write(&path, V2_SINGLE_RESPONSES_CONFIG).unwrap();
+
+    let manifest = V3ConfigStore::new(&path).load_snapshot().unwrap();
+    let provider = &manifest.providers["cc-sol"];
+    assert_eq!(
+        provider.responses.as_ref().unwrap().transport.as_str(),
+        "http"
+    );
+    let capabilities = &provider.models["gpt-5.6-sol"].capabilities;
+    assert_eq!(capabilities, &["reasoning", "text", "tools"]);
+    assert!(!capabilities
+        .iter()
+        .any(|capability| capability == "remote_continuation"));
+    assert!(!capabilities
+        .iter()
+        .any(|capability| capability == "tool_outputs"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v2_compat_rejects_websocket_v2_transport_without_endpoint() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-v2-compat-ws-no-endpoint-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider_with_options(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+        V2ProviderOptions {
+            responses_extra: r#"
+transport = "websocket_v2"
+"#,
+            capabilities: &[
+                "text",
+                "reasoning",
+                "tools",
+                "remote_continuation",
+                "tool_outputs",
+            ],
+        },
+    );
+    let path = root.join("config.toml");
+    fs::write(&path, V2_SINGLE_RESPONSES_CONFIG).unwrap();
+
+    let error = V3ConfigStore::new(&path).load_snapshot().unwrap_err();
+    assert!(error.to_string().contains("websocket_v2_url is required"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn assert_route_targets(actual: Vec<&str>, expected: &[&str]) {
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn v2_compat_maps_tier_load_balancing_to_pool_selection_and_weights() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-v2-load-balancing-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+    );
+
+    let path = root.join("config.toml");
+    fs::write(&path, V2_LOAD_BALANCED_CONFIG).unwrap();
+    let manifest = V3ConfigStore::new(&path).load_snapshot().unwrap();
+    let group = &manifest.route_groups["gateway_priority_5555"];
+
+    let tools = &group.pools["tools"];
+    assert_eq!(tools.selection.strategy, V3SelectionStrategy::Weighted);
+    let weights = tools
+        .targets
+        .iter()
+        .map(|target| (target.id.as_deref().unwrap(), target.weight.unwrap()))
+        .collect::<Vec<_>>();
+    assert_eq!(weights, [("fwd.a", 8), ("fwd.b", 3)]);
+
+    let default = &group.pools["default"];
+    assert_eq!(
+        default.selection.strategy,
+        V3SelectionStrategy::Priority,
+        "tiers without loadBalancing must keep priority selection"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+const V2_LOAD_BALANCED_CONFIG: &str = r#"
+version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+port = 5555
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+name = "gateway_priority_5555"
+port = 5555
+host = "0.0.0.0"
+mode = "router"
+routingPolicyGroup = "gateway_priority_5555"
+
+[virtualrouter]
+
+[virtualrouter.forwarders."fwd.a"]
+model = "gpt-5.6-sol"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.a".targets]]
+providerId = "cc-sol"
+priority = 1
+
+[virtualrouter.forwarders."fwd.b"]
+model = "gpt-5.6-sol"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.b".targets]]
+providerId = "cc-sol"
+priority = 1
+
+[virtualrouter.routingPolicyGroups."gateway_priority_5555"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.tools]]
+priority = 100
+targets = ["fwd.a", "fwd.b"]
+[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.tools.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.tools.loadBalancing.weights]
+"fwd.a" = 8
+"fwd.b" = 3
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.default]]
+priority = 100
+targets = ["fwd.a"]
+"#;
+
+fn write_v2_provider(
+    root: &std::path::Path,
+    id: &str,
+    provider_type: &str,
+    base_url: &str,
+    default_model: &str,
+    models: &[&str],
+) {
+    write_v2_provider_with_options(
+        root,
+        id,
+        provider_type,
+        base_url,
+        default_model,
+        models,
+        V2ProviderOptions {
+            responses_extra: "",
+            capabilities: &[
+                "text",
+                "reasoning",
+                "tools",
+                "web_search",
+                "multimodal",
+                "longcontext",
+            ],
+        },
+    );
+}
+
+struct V2ProviderOptions<'a> {
+    responses_extra: &'a str,
+    capabilities: &'a [&'a str],
+}
+
+fn write_v2_provider_with_options(
+    root: &std::path::Path,
+    id: &str,
+    provider_type: &str,
+    base_url: &str,
+    default_model: &str,
+    models: &[&str],
+    options: V2ProviderOptions<'_>,
+) {
+    let dir = root.join("provider").join(id);
+    fs::create_dir_all(&dir).unwrap();
+    let mut raw = format!(
+        r#"version = "2.0.0"
+providerId = "{id}"
+
+[provider]
+id = "{id}"
+enabled = true
+type = "{provider_type}"
+baseURL = "{base_url}"
+defaultModel = "{default_model}"
+
+[provider.auth]
+type = "apiKey"
+apiKey = "secret-{id}-key1"
+
+[provider.responses]
+process = "chat"
+streaming = "always"
+{responses_extra}
+
+[provider.concurrency]
+maxInFlight = 8
+acquireTimeoutMs = 60000
+staleLeaseMs = 300000
+"#,
+        responses_extra = options.responses_extra
+    );
+    for model in models {
+        raw.push_str(&format!(
+            r#"
+[provider.models."{model}"]
+supportsStreaming = true
+supportsThinking = true
+thinking = "low"
+maxTokens = 64000
+maxContext = 1048576
+capabilities = [{}]
+"#,
+            quoted_list(options.capabilities)
+        ));
+    }
+    fs::write(dir.join("config.v2.toml"), raw).unwrap();
+}
+
+fn quoted_list(values: &[&str]) -> String {
+    values
+        .iter()
+        .map(|value| format!("\"{value}\""))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+const V2_SINGLE_RESPONSES_CONFIG: &str = r#"
+version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+port = 5555
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+name = "gateway_priority_5555"
+port = 5555
+host = "0.0.0.0"
+mode = "router"
+routingPolicyGroup = "gateway_priority_5555"
+
+[virtualrouter]
+
+[virtualrouter.forwarders."fwd.free.gpt-5.6-sol"]
+model = "gpt-5.6-sol"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.free.gpt-5.6-sol".targets]]
+providerId = "cc-sol"
+priority = 1
+
+[virtualrouter.routingPolicyGroups."gateway_priority_5555"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.default]]
+priority = 100
+targets = ["fwd.free.gpt-5.6-sol"]
+"#;
+
+const V2_5555_MINIMAX_ONLY_CONFIG: &str = r#"
+version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+port = 5555
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+name = "gateway_priority_5555"
+port = 5555
+host = "0.0.0.0"
+mode = "router"
+routingPolicyGroup = "gateway_priority_5555"
+
+[virtualrouter]
+
+[virtualrouter.forwarders."fwd.minimax.MiniMax-M3"]
+protocol = "anthropic"
+model = "MiniMax-M3"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.minimax.MiniMax-M3".targets]]
+providerId = "minimax"
+priority = 1
+
+[virtualrouter.routingPolicyGroups."gateway_priority_5555"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.thinking]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.coding]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.longcontext]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.tools]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.search]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.web_search]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.multimodal]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.default]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+"#;
+
+const V2_5555_CONFIG: &str = r#"
+version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+port = 5555
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+name = "gateway_priority_5555"
+port = 5555
+host = "0.0.0.0"
+mode = "router"
+routingPolicyGroup = "gateway_priority_5555"
+
+[virtualrouter]
+
+[virtualrouter.classifier]
+longContextThresholdTokens = 123456
+
+[virtualrouter.forwarders."fwd.glm.glm-5.2"]
+protocol = "openai"
+model = "glm-5.2"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.glm.glm-5.2".targets]]
+providerId = "orangeai"
+priority = 1
+
+[virtualrouter.forwarders."fwd.minimax.MiniMax-M3"]
+protocol = "anthropic"
+model = "MiniMax-M3"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.minimax.MiniMax-M3".targets]]
+providerId = "minimax"
+priority = 1
+
+[virtualrouter.forwarders."fwd.free.gpt-5.5"]
+protocol = "openai"
+model = "gpt-5.5"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.free.gpt-5.5".targets]]
+providerId = "cc"
+priority = 1
+
+[virtualrouter.forwarders."fwd.free.gpt-5.6-sol"]
+protocol = "openai"
+model = "gpt-5.6-sol"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.free.gpt-5.6-sol".targets]]
+providerId = "cc-sol"
+priority = 1
+
+[virtualrouter.forwarders."fwd.paid.gpt-5.5"]
+protocol = "openai"
+model = "gpt-5.5"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.paid.gpt-5.5".targets]]
+providerId = "asxs"
+priority = 1
+[[virtualrouter.forwarders."fwd.paid.gpt-5.5".targets]]
+providerId = "1token"
+priority = 2
+[[virtualrouter.forwarders."fwd.paid.gpt-5.5".targets]]
+providerId = "55ai"
+priority = 3
+
+[virtualrouter.forwarders."fwd.paid.gpt-5.4"]
+protocol = "openai"
+model = "gpt-5.4"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.paid.gpt-5.4".targets]]
+providerId = "asxs"
+priority = 1
+[[virtualrouter.forwarders."fwd.paid.gpt-5.4".targets]]
+providerId = "1token"
+priority = 2
+[[virtualrouter.forwarders."fwd.paid.gpt-5.4".targets]]
+providerId = "55ai"
+priority = 3
+
+[virtualrouter.routingPolicyGroups."gateway_priority_5555"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.thinking]]
+priority = 300
+targets = ["fwd.glm.glm-5.2"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.thinking]]
+priority = 200
+targets = ["fwd.free.gpt-5.5", "fwd.free.gpt-5.6-sol"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.thinking]]
+priority = 100
+targets = ["fwd.paid.gpt-5.5"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.coding]]
+priority = 300
+targets = ["fwd.glm.glm-5.2"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.coding]]
+priority = 200
+targets = ["fwd.free.gpt-5.5", "fwd.free.gpt-5.6-sol"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.coding]]
+priority = 100
+targets = ["fwd.paid.gpt-5.5"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.longcontext]]
+priority = 300
+targets = ["fwd.glm.glm-5.2"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.longcontext]]
+priority = 200
+targets = ["fwd.free.gpt-5.5", "fwd.free.gpt-5.6-sol"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.longcontext]]
+priority = 100
+targets = ["fwd.paid.gpt-5.5"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.tools]]
+priority = 300
+targets = ["fwd.minimax.MiniMax-M3"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.tools]]
+priority = 200
+targets = ["fwd.glm.glm-5.2"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.search]]
+priority = 300
+targets = ["fwd.minimax.MiniMax-M3"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.search]]
+priority = 200
+targets = ["fwd.glm.glm-5.2"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.web_search]]
+priority = 300
+targets = ["fwd.minimax.MiniMax-M3"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.web_search]]
+priority = 200
+targets = ["fwd.glm.glm-5.2"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.multimodal]]
+priority = 300
+targets = ["fwd.minimax.MiniMax-M3"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.multimodal]]
+priority = 200
+targets = ["fwd.free.gpt-5.5", "fwd.free.gpt-5.6-sol"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.multimodal]]
+priority = 100
+targets = ["fwd.paid.gpt-5.4"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.default]]
+priority = 100
+targets = ["fwd.glm.glm-5.2", "fwd.free.gpt-5.5", "fwd.free.gpt-5.6-sol", "fwd.paid.gpt-5.5", "fwd.minimax.MiniMax-M3", "fwd.paid.gpt-5.4"]
+"#;
+
+const HUB_V1_DECLARATION: &str = r#"
+[pipelines.hub_v1]
+skeleton = "hub_v1"
+entry_protocols = ["responses", "anthropic", "gemini", "openai_chat"]
+hook_set_id = "hub_v1.default"
+entry_protocol_bindings = [
+  { entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" },
+  { entry_protocol = "anthropic", endpoint_patterns = ["/v1/messages"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Anthropic Messages endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_anthropic_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs" },
+  { entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" },
+  { entry_protocol = "gemini", endpoint_patterns = ["/v1beta/models/:model/generateContent"], execution_mode = "relay", protocol_profile_owner = "v3.gemini_relay_runtime_integration", implemented = true, forbidden_reentry_behavior = "Gemini endpoint must not fall through to pending or direct runtime.", runtime_owner_symbol = "execute_v3_gemini_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs" },
+]
+resources = { metadata_center = { kind = "control", scope = "request" }, continuation_store = { kind = "continuation", scope = "server" }, error_chain = { kind = "error", scope = "request" }, debug_artifact = { kind = "debug", scope = "debug" }, snapshot_buffer = { kind = "snapshot", scope = "debug" }, provider_health = { kind = "provider_health", scope = "provider" } }
+hooks = [
+  { hook_id = "hub_v1.V3HubReqInbound01ClientRaw.entry.not_implemented", node = "V3HubReqInbound01ClientRaw", phase = "entry", requirement = "required", priority = 0, order = 0, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqInbound01ClientRaw.exit.not_implemented", node = "V3HubReqInbound01ClientRaw", phase = "exit", requirement = "required", priority = 0, order = 1, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqInbound02Normalized.entry.not_implemented", node = "V3HubReqInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 2, allowed_resources = ["metadata_center"], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqInbound02Normalized.exit.not_implemented", node = "V3HubReqInbound02Normalized", phase = "exit", requirement = "optional", enabled = false, priority = 0, order = 3, allowed_resources = [], forbidden_resources = ["continuation_store"] },
+  { hook_id = "hub_v1.V3HubReqContinuation03Classified.entry.not_implemented", node = "V3HubReqContinuation03Classified", phase = "entry", requirement = "required", priority = 0, order = 4, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqContinuation03Classified.exit.not_implemented", node = "V3HubReqContinuation03Classified", phase = "exit", requirement = "required", priority = 0, order = 5, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.entry.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "entry", requirement = "required", priority = 0, order = 6, allowed_resources = ["continuation_store"], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.exit.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "exit", requirement = "required", priority = 0, order = 7, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqExecution05Planned.entry.not_implemented", node = "V3HubReqExecution05Planned", phase = "entry", requirement = "required", priority = 0, order = 8, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqExecution05Planned.exit.not_implemented", node = "V3HubReqExecution05Planned", phase = "exit", requirement = "required", priority = 0, order = 9, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqTarget06Resolved.entry.not_implemented", node = "V3HubReqTarget06Resolved", phase = "entry", requirement = "required", priority = 0, order = 10, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqTarget06Resolved.exit.not_implemented", node = "V3HubReqTarget06Resolved", phase = "exit", requirement = "required", priority = 0, order = 11, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.entry.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "entry", requirement = "required", priority = 0, order = 12, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.exit.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "exit", requirement = "required", priority = 0, order = 13, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderReqCompat06ProviderCompat.entry.not_implemented", node = "ProviderReqCompat06ProviderCompat", phase = "entry", requirement = "required", priority = 0, order = 14, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderReqCompat06ProviderCompat.exit.not_implemented", node = "ProviderReqCompat06ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 15, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.entry.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "entry", requirement = "required", priority = 0, order = 16, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.exit.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "exit", requirement = "required", priority = 0, order = 17, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.entry.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "entry", requirement = "required", priority = 0, order = 18, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.exit.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "exit", requirement = "required", priority = 0, order = 19, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.entry.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "entry", requirement = "required", priority = 0, order = 20, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.exit.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "exit", requirement = "required", priority = 0, order = 21, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.entry.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "entry", requirement = "required", priority = 0, order = 22, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.exit.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 23, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespInbound02Normalized.entry.not_implemented", node = "V3HubRespInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespInbound02Normalized.exit.not_implemented", node = "V3HubRespInbound02Normalized", phase = "exit", requirement = "required", priority = 0, order = 25, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 26, allowed_resources = ["continuation_store"], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.exit.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "exit", requirement = "required", priority = 0, order = 27, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespContinuation04Committed.entry.not_implemented", node = "V3HubRespContinuation04Committed", phase = "entry", requirement = "required", priority = 0, order = 28, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespContinuation04Committed.exit.not_implemented", node = "V3HubRespContinuation04Committed", phase = "exit", requirement = "required", priority = 0, order = 29, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.entry.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "entry", requirement = "required", priority = 0, order = 30, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.exit.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "exit", requirement = "required", priority = 0, order = 31, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.entry.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "entry", requirement = "required", priority = 0, order = 32, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "exit", requirement = "required", priority = 0, order = 33, allowed_resources = [], forbidden_resources = [] },
+]
+"#;
+
+const HUB_V1_SERVER_EXECUTION: &str = r#"
+[servers.primary.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[servers.secondary.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+"#;
+
+#[test]
+fn path_only_provider_error_policy_compiles_project_step_fields_into_action() {
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "__SCOPE__"
+endpoints = ["responses"]
+[providers.first]
+type = "responses"
+base_url = "http://first.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "FIRST_KEY" }] }
+[providers.first.models.gpt-test]
+wire_name = "gpt-test"
+capabilities = ["text", "tools"]
+[route_groups.__SCOPE__.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 1 }
+]
+[[error.provider_error_action_policy]]
+policy_id = "path_only"
+scope = { provider_type = "responses", model_id = "gpt-test" }
+match = { http_status = 429 }
+
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 429
+reason_code = "path_rate_limit"
+public_code = "E_PATH_RATE_LIMIT"
+message_mode = "code_only"
+"#
+    .replace("__SCOPE__", "path_only_policy");
+    let authoring = parse_v3_config_02_authoring(&source).unwrap();
+    let manifest = compile_v3_config_05_manifest(authoring).unwrap();
+    let policy = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| policy.policy_id == "path_only")
+        .expect("path-only policy must compile");
+    assert_eq!(policy.action.reason_code, "path_rate_limit");
+    let project = policy
+        .path
+        .iter()
+        .find_map(|step| match step {
+            routecodex_v3_config::V3ProviderDispositionStepManifest::Project {
+                status,
+                public_code,
+                message_mode,
+                ..
+            } => Some((*status, public_code.clone(), *message_mode)),
+            _ => None,
+        })
+        .expect("path must carry the project step");
+    assert_eq!(project.0, 429);
+    assert_eq!(project.1.as_deref(), Some("E_PATH_RATE_LIMIT"));
+    assert_eq!(
+        project.2,
+        routecodex_v3_config::V3ClientErrorProjectionMessageMode::CodeOnly
+    );
+}
+
+#[test]
+fn v3_native_inline_opencode_go_defaults_to_deepseek_console_go_compat_profile() {
+    // v3-native inline provider 与 v2 provider-directory 路径共享同一份
+    // compatibility profile 默认映射：opencode-go 未显式声明
+    // compatibilityProfile 时也必须解析到 responses:deepseek-console-go，
+    // wire 层按该契约激活交错工具段 reasoning 注入。
+    let source = r#"
+version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4556
+routing_group = "primary"
+endpoints = ["responses"]
+
+[providers.opencode-go]
+type = "responses"
+base_url = "https://opencode.invalid/v1"
+default_model = "deepseek-v4-flash"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "OPENCODE_GO_KEY" }] }
+responses = { process = "chat", streaming = "always" }
+
+[providers.opencode-go.models."deepseek-v4-flash"]
+wire_name = "deepseek-v4-flash"
+capabilities = ["text", "reasoning", "tools"]
+supports_streaming = true
+supports_thinking = true
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 1 }]
+"#;
+
+    let authoring = parse_v3_config_02_authoring(source).unwrap();
+    let manifest = compile_v3_config_05_manifest(authoring).unwrap();
+    assert_eq!(
+        manifest.providers["opencode-go"]
+            .compatibility_profile
+            .as_deref(),
+        Some("responses:deepseek-console-go")
+    );
+}
+
+#[test]
+fn v3_native_inline_other_provider_ids_do_not_inherit_v2_directory_defaults() {
+    // v3-native inline 路径的 compatibility profile 默认只允许已登记给
+    // v3-native 的条目（opencode-go -> responses:deepseek-console-go）；
+    // v2 provider-directory 表里的 cc/lmstudio/minimax 等默认不得静默注入
+    // 到 v3-native 配置（否则 [providers.cc] 这种既有配置会在未声明时
+    // 被改写成 responses:cc 的 wire 行为）。
+    let source = r#"
+version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4557
+routing_group = "primary"
+endpoints = ["responses"]
+
+[providers.cc]
+type = "responses"
+base_url = "https://cc.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "CC_KEY" }] }
+
+[providers.cc.models.gpt-test]
+capabilities = ["text"]
+supports_streaming = true
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "cc", model = "gpt-test", priority = 1 }]
+"#;
+
+    let authoring = parse_v3_config_02_authoring(source).unwrap();
+    let manifest = compile_v3_config_05_manifest(authoring).unwrap();
+    assert_eq!(
+        manifest.providers["cc"].compatibility_profile.as_deref(),
+        None,
+        "v3-native provider cc must stay passthrough unless it declares a profile explicitly"
+    );
+}

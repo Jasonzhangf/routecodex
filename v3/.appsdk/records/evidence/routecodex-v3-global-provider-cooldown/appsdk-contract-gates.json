@@ -1,0 +1,25 @@
+{
+  "evidence_id": "evidence-routecodex-v3-global-provider-cooldown-appsdk-contract-gates",
+  "issue_id": "routecodex-v3-global-provider-cooldown",
+  "experiment_id": "appsdk-contract-lock-20260817",
+  "phase": "baseline_reproduction",
+  "kind": "gate",
+  "source_commit": "ac45995482a82f07778715e239a0525735506afc",
+  "scope": {"module_id": "routecodex-v3-global-provider-cooldown", "feature_id": "v3.provider_global_cooldown_persistence"},
+  "producer": {"adapter": "local-shell", "identity": "appsdk-contract-gate-run-20260817"},
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "appsdk verify v3, v3 resource map, v3 module boundaries and function-map compile gate all passed before runtime implementation.",
+  "created_at": "2026-08-17T15:08:00Z",
+  "expires_at": "2026-08-24T15:08:00Z",
+  "input_hashes": [
+    "sha256:2d2caaddbff0ad7440590215ef58b2177872f2da52b604f27412565c7da982f8",
+    "sha256:f5100c4039dc528a1600de95b0f63c77d78a16ae9411918b41f0c55a5b76ac89",
+    "sha256:93a18993836d2f8c1756c68a491538e870c4b691e3536d15116c7f36b13883fd",
+    "sha256:0df0f46d933b1ed2ea3870c4ac8bbb13b7504c15cbad92a6ab8fe722eb2c2659",
+    "sha256:5b7189431288f6a072d1c5970ae5a6ae240bf02f19c907285b0626be96d13d53",
+    "sha256:51e8890c609286c02da94a999e3a7a664724be918d4166b992c380e31e947b25",
+    "sha256:94667b208f3aaa0e5344cc4c412e4c9f24d80fdde9289ca1c715d9571cbeffc4"
+  ],
+  "scope_hash": "sha256:93a18993836d2f8c1756c68a491538e870c4b691e3536d15116c7f36b13883fd"
+}

@@ -1,0 +1,1025 @@
+{
+  "schema_version": 1,
+  "lifecycle_id": "appsdk-governance",
+  "nodes": [
+    "clarify",
+    "playground",
+    "review",
+    "promotion",
+    "compile",
+    "active",
+    "protected",
+    "verify",
+    "V4RuntimeAdmission00CompiledManifest",
+    "V4ServerReqInbound01ClientRaw",
+    "V4HubReqInbound02Standardized",
+    "V4HubReqChatProcess03Governed",
+    "V4Router04SelectedTarget",
+    "V4HubReqOutbound05ProviderSemantic",
+    "V4ProviderReqOutbound06WirePayload",
+    "V4ProviderReqOutbound07TransportRequest",
+    "V4ProviderRespInbound01Raw",
+    "V4HubRespInbound02Parsed",
+    "V4HubRespChatProcess03Governed",
+    "V4HubRespOutbound04ClientSemantic",
+    "V4ServerRespOutbound05ClientFrame"
+  ],
+  "edges": [
+    {
+      "from": "clarify",
+      "to": "playground",
+      "owner": "appsdk::goal"
+    },
+    {
+      "from": "global_appsdk_binary",
+      "to": "sdk_bundle_resources",
+      "owner": "appsdk::init",
+      "edge_type": "governance_install",
+      "path": ".appsdk/sdk-resources.json",
+      "status": "active"
+    },
+    {
+      "from": "sdk_bundle_resources",
+      "to": "project_contract",
+      "owner": "appsdk::verify",
+      "edge_type": "governance_validation",
+      "path": ".appsdk/project.json",
+      "status": "active"
+    },
+    {
+      "from": "playground",
+      "to": "review",
+      "owner": "appsdk::lifecycle"
+    },
+    {
+      "from": "review",
+      "to": "promotion",
+      "owner": "appsdk::lifecycle"
+    },
+    {
+      "from": "promotion",
+      "to": "regression",
+      "owner": "appsdk::regression_gate"
+    },
+    {
+      "from": "regression",
+      "to": "compile",
+      "owner": "appsdk::compiler"
+    },
+    {
+      "from": "compile",
+      "to": "active",
+      "owner": "appsdk::publisher"
+    },
+    {
+      "from": "active",
+      "to": "protected",
+      "owner": "appsdk::freezer"
+    },
+    {
+      "from": "protected",
+      "to": "verify",
+      "owner": "appsdk::verifier"
+    },
+    {
+      "from": "verify",
+      "to": "playground",
+      "owner": "appsdk::workspace",
+      "return_path": true
+    },
+    {
+      "from": "routecodex-v4-edge",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-control",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-error",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-config",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-config",
+      "to": "routecodex-v4-edge",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-edge",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-edge::validate_edge",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "NodeIdentity",
+        "NodeRef::from_identity"
+      ],
+      "path": "crates/routecodex-v4-edge/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-control",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-control::metadata_center",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "Scope"
+      ],
+      "path": "crates/routecodex-v4-control/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-error",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-error::error_chain",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "Scope"
+      ],
+      "path": "crates/routecodex-v4-error/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-base-node",
+      "to": "appsdk::record_graph",
+      "owner": "routecodex-v4-base-node::BaseNode",
+      "edge_type": "record_writer",
+      "symbols": [
+        "control_in",
+        "control_out",
+        "report_error"
+      ],
+      "path": "crates/routecodex-v4-base-node/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-config",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-config::config_node",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "BaseNode",
+        "NodeIdentity"
+      ],
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-config",
+      "to": "routecodex-v4-edge",
+      "owner": "routecodex-v4-config::validate_edges",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "EdgeSpec::information_flow",
+        "validate_edge",
+        "ScopeRegistry::new"
+      ],
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4Config01AuthoringFileSource",
+      "to": "V4Config02AuthoringParsed",
+      "owner": "routecodex-v4-config::parse_v4_config_02_from_v4_config_01",
+      "edge_type": "information_flow",
+      "resource": "v4.config.authoring",
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4Config02AuthoringParsed",
+      "to": "V4Config03SchemaValidated",
+      "owner": "routecodex-v4-config::validate_v4_config_03_from_v4_config_02",
+      "edge_type": "information_flow",
+      "resource": "v4.config.schema_validated",
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4Config03SchemaValidated",
+      "to": "V4Config04ResourceRegistryBuilt",
+      "owner": "routecodex-v4-config::build_v4_config_04_from_v4_config_03",
+      "edge_type": "information_flow",
+      "resource": "v4.config.resource_registry",
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4Config04ResourceRegistryBuilt",
+      "to": "V4Config05ManifestPublished",
+      "owner": "routecodex-v4-config::publish_v4_config_05_from_v4_config_04",
+      "edge_type": "information_flow",
+      "resource": "v4.config.manifest",
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-error",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-control",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-control",
+      "owner": "routecodex-v4-runtime::ExecutionContext",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "MetadataCenter",
+        "MetadataCenter::new"
+      ],
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-runtime::NodePlugin",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "PluginKind"
+      ],
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-skeleton",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "workspace_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-debug",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-router",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-provider",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-server",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-skeleton",
+      "to": "routecodex-v4-runtime",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "plan_execution",
+      "symbols": [
+        "SkeletonPlan::from_contract_json",
+        "plan_hash"
+      ],
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-plugin-plan",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-plugin-plan::compile_node_plan",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "validate_descriptor",
+        "NodePluginDescriptor",
+        "ResourceRegistry",
+        "PluginEffect"
+      ],
+      "path": "crates/routecodex-v4-plugin-plan/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-plugin-catalog",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-plugin-catalog::register",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "DependencySpec"
+      ],
+      "path": "crates/routecodex-v4-plugin-catalog/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-cordis-bridge",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-cordis-bridge::compile_node",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "compile_node_plan",
+        "NodePluginPlan",
+        "AuthoringPlugin",
+        "PlanError"
+      ],
+      "path": "crates/routecodex-v4-cordis-bridge/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-cordis-bridge",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-cordis-bridge::execute_plan",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "PluginEffect",
+        "ResourceRegistry"
+      ],
+      "path": "crates/routecodex-v4-cordis-bridge/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4ServerReqInbound01ClientRaw",
+      "to": "V4ServerSseIn02FrameBoundary",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.request.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4ServerSseIn02FrameBoundary",
+      "to": "V4HubReqInbound03Normalized",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.request.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4HubReqInbound03Normalized",
+      "to": "V4HubReqChatProcess04Governed",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.request.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4HubReqChatProcess04Governed",
+      "to": "V4HubReqOutbound05ProviderSemantic",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.request.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4HubReqOutbound05ProviderSemantic",
+      "to": "V4ProviderReqCompat06Compat",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.request.provider_semantic",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4ProviderReqCompat06Compat",
+      "to": "V4ProviderSseOut07WireBoundary",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.request.provider_wire_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4ProviderSseIn01FrameBoundary",
+      "to": "V4HubRespInbound02Parsed",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.response.provider_raw",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4HubRespInbound02Parsed",
+      "to": "V4HubRespChatProcess03Governed",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.response.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4HubRespChatProcess03Governed",
+      "to": "V4HubRespOutbound04ClientSemantic",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.response.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4HubRespOutbound04ClientSemantic",
+      "to": "V4ServerSseOut05FrameBoundary",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.response.client_wire_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4ServerSseOut05FrameBoundary",
+      "to": "V4ServerRespOutbound06ClientFrame",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.response.client_frame",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "root_v4_dispatcher",
+      "to": "v4_build_verify_ci",
+      "owner": "appsdk::build_domain",
+      "edge_type": "dispatch",
+      "path": "../package.json,.github/workflows/test.yml",
+      "status": "active"
+    },
+    {
+      "from": "v4_build_verify_ci",
+      "to": "v4_build_verify_positive",
+      "owner": "appsdk::build_domain",
+      "edge_type": "verification_owner",
+      "path": "scripts/verify-ci.mjs",
+      "status": "active"
+    },
+    {
+      "from": "v4_build_verify_ci",
+      "to": "v4_build_verify_red",
+      "owner": "appsdk::build_domain",
+      "edge_type": "verification_owner",
+      "path": "scripts/verify-ci.mjs",
+      "status": "active"
+    },
+    {
+      "from": "v4_build_verify_positive",
+      "to": "v4_build_verify_isolation",
+      "owner": "appsdk::build_domain",
+      "edge_type": "verification_owner",
+      "path": "scripts/verify.mjs",
+      "status": "active"
+    },
+    {
+      "from": "v4_build_verify_positive",
+      "to": "routecodex-v4-governance",
+      "owner": "appsdk::build_domain",
+      "edge_type": "verification_owner",
+      "path": "scripts/verify.mjs",
+      "status": "active"
+    },
+    {
+      "from": "v4_build_verify_positive",
+      "to": "routecodex-v4-build-link",
+      "owner": "appsdk::build_domain",
+      "edge_type": "verification_owner",
+      "path": "scripts/verify.mjs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-build-link",
+      "to": "v4.build.active_artifact_index",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "artifact_link",
+      "path": "build-control/active-index.json",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-build-link",
+      "to": "v4.build.architecture_gates",
+      "owner": "appsdk::build_domain",
+      "edge_type": "verification_input",
+      "path": "scripts/architecture/**",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-admin",
+      "to": "routecodex-v4-plugin-manager",
+      "owner": "routecodex-v4-admin::execute",
+      "edge_type": "command_delegation",
+      "symbols": [
+        "PluginManager",
+        "AdminCommand"
+      ],
+      "path": "crates/routecodex-v4-admin/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-admin",
+      "to": "routecodex-v4-runtime-inspector",
+      "owner": "routecodex-v4-admin::query",
+      "edge_type": "readonly_projection",
+      "symbols": [
+        "snapshot",
+        "RuntimeSnapshot"
+      ],
+      "path": "crates/routecodex-v4-admin/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-inspector",
+      "to": "routecodex-v4-plugin-manager",
+      "owner": "routecodex-v4-runtime-inspector::snapshot",
+      "edge_type": "readonly_projection",
+      "symbols": [
+        "PluginManager",
+        "PluginCandidate",
+        "AuditRecord"
+      ],
+      "path": "crates/routecodex-v4-runtime-inspector/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-plugin-manager",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-plugin-manager::create_candidate",
+      "edge_type": "plan_binding",
+      "symbols": [
+        "NodePluginPlan"
+      ],
+      "path": "crates/routecodex-v4-plugin-manager/src/manager.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-plugin-manager",
+      "to": "routecodex-v4-plugin-catalog",
+      "owner": "routecodex-v4-plugin-manager",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-plugin-manager/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-plugin-manager",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-plugin-manager",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-plugin-manager/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-plugin-manager",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-plugin-manager",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-plugin-manager/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-inspector",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-runtime-inspector",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-runtime-inspector/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-inspector",
+      "to": "routecodex-v4-plugin-manager",
+      "owner": "routecodex-v4-runtime-inspector",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-runtime-inspector/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-inspector",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-runtime-inspector",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-runtime-inspector/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-admin",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-admin",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-admin/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-admin",
+      "to": "routecodex-v4-plugin-manager",
+      "owner": "routecodex-v4-admin",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-admin/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-admin",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-admin",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-admin/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-admin",
+      "to": "routecodex-v4-runtime-inspector",
+      "owner": "routecodex-v4-admin",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-admin/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-cordis-host",
+      "to": "routecodex-v4-node-container",
+      "owner": "routecodex-v4-cordis-host::CordisBoundNodeHost",
+      "edge_type": "lifecycle_port",
+      "caller_feature_id": "v4.cordis.host_binding",
+      "callee_feature_id": "v4.node_container.lifecycle_dispatch",
+      "caller_path": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "callee_path": "crates/routecodex-v4-node-container/src/bin/host_binding.rs",
+      "caller_symbols": [
+        "CordisBoundNodeHost",
+        "CordisBoundNodeHost::executeNode",
+        "RustNodeContainerPort",
+        "RustNodeContainerPort::executeNode"
+      ],
+      "callee_symbols": [
+        "HostBindingRuntime::handle",
+        "HostRequest"
+      ],
+      "symbols": [
+        "CordisBoundNodeHost",
+        "RustNodeContainerPort",
+        "HostBindingRuntime::handle",
+        "HostRequest",
+        "NodeContainer::declare",
+        "NodeContainer::context_created",
+        "NodeContainer::plugins_mounted",
+        "NodeContainer::publish",
+        "NodeContainer::execute",
+        "NodeContainer::execute_with_plan_hash",
+        "NodeContainer::enter_execution",
+        "NodeContainer::drain",
+        "NodeContainer::dispose"
+      ],
+      "path": "cordis/routecodex-v4-cordis-host/src/index.mjs,crates/routecodex-v4-node-container/src/bin/host_binding.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-node-container",
+      "to": "routecodex-v4-cordis-host",
+      "owner": "routecodex-v4-node-container::HostBindingRuntime",
+      "edge_type": "lifecycle_failure_projection",
+      "caller_feature_id": "v4.node_container.lifecycle_dispatch",
+      "callee_feature_id": "v4.cordis.host_binding",
+      "caller_path": "crates/routecodex-v4-node-container/src/bin/host_binding.rs",
+      "callee_path": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "caller_symbols": [
+        "HostBindingRuntime::handle",
+        "LifecycleFailureFact"
+      ],
+      "callee_symbols": [
+        "RustNodeContainerPort",
+        "CordisHostError"
+      ],
+      "symbols": [
+        "HostBindingRuntime",
+        "LifecycleFailureFact",
+        "RustNodeContainerPort",
+        "CordisHostError"
+      ],
+      "resource_id": "v4.node_container.lifecycle_failure",
+      "path": "crates/routecodex-v4-node-container/src/bin/host_binding.rs,cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-node-container",
+      "to": "routecodex-v4-cordis-host",
+      "owner": "routecodex-v4-node-container::HostBindingRuntime",
+      "edge_type": "execution_failure_projection",
+      "caller_feature_id": "v4.node_container.lifecycle_dispatch",
+      "callee_feature_id": "v4.cordis.host_binding",
+      "caller_path": "crates/routecodex-v4-node-container/src/bin/host_binding.rs",
+      "callee_path": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "caller_symbols": [
+        "HostBindingRuntime::handle",
+        "ExecutionFailureFact"
+      ],
+      "callee_symbols": [
+        "RustNodeContainerPort",
+        "CordisHostError"
+      ],
+      "symbols": [
+        "HostBindingRuntime",
+        "ExecutionFailureFact",
+        "RustNodeContainerPort",
+        "CordisHostError"
+      ],
+      "resource_id": "v4.node_container.execution_failure",
+      "path": "crates/routecodex-v4-node-container/src/bin/host_binding.rs,cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-node-container",
+      "to": "routecodex-v4-cordis-bridge",
+      "owner": "routecodex-v4-node-container::NodeContainer",
+      "edge_type": "typed_plan_execution",
+      "symbols": [
+        "execute_plan",
+        "execute_with_plan_hash",
+        "NodeExecutionInput",
+        "NodeExecutionOutput"
+      ],
+      "path": "crates/routecodex-v4-node-container/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-node-container",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-node-container::NodeContainer",
+      "edge_type": "plan_binding",
+      "symbols": [
+        "NodePluginPlan",
+        "NodePluginPlan::verify"
+      ],
+      "path": "crates/routecodex-v4-node-container/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-standard-plugins",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-standard-plugins::standard_descriptors",
+      "edge_type": "active_node_descriptor_binding",
+      "symbols": [
+        "NodePluginDescriptor",
+        "PluginKind",
+        "PluginEffect",
+        "PluginPhase",
+        "NodeSelector",
+        "ResourceRegistry",
+        "validate_descriptor"
+      ],
+      "path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-standard-plugins",
+      "to": "routecodex-v4-plugin-catalog",
+      "owner": "routecodex-v4-standard-plugins::register_standard_library",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "CatalogEntry",
+        "PluginCatalog::register",
+        "PluginCatalog::snapshot"
+      ],
+      "path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-standard-plugins",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-standard-plugins::compile_standard_plan",
+      "edge_type": "node_scoped_plan_compilation",
+      "symbols": [
+        "AuthoringPlugin",
+        "compile_node_plan",
+        "NodePluginPlan",
+        "PlanError",
+        "standard_node_allowed_reads",
+        "standard_node_allowed_writes"
+      ],
+      "path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-standard-plugins",
+      "to": "routecodex-v4-cordis-bridge",
+      "owner": "routecodex-v4-standard-plugins::StandardHandleRegistry",
+      "edge_type": "typed_handle_execution",
+      "symbols": [
+        "PluginHandle",
+        "HandleRegistry",
+        "ExecCtx",
+        "ExecCtx::read_control_resource",
+        "ExecCtx::write_control_resource"
+      ],
+      "path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-runtime",
+      "owner": "routecodex-v4-runtime::execute_mock_transport_slice",
+      "edge_type": "mock_transport_orchestration",
+      "caller_feature_id": "v4.runtime.real_pipeline_mock_transport",
+      "callee_feature_id": "v4.runtime.real_pipeline_mock_transport",
+      "caller_path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "callee_path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "caller_symbols": [
+        "execute_mock_transport_slice",
+        "MockTransportIdentityCounter::next_identity"
+      ],
+      "callee_symbols": [
+        "SkeletonRuntime::execute_request_fixture_scoped",
+        "SkeletonRuntime::execute_mock_response_scoped",
+        "MockTransportReport",
+        "MockTransportError"
+      ],
+      "resource_id": "v4.pipeline.mock_transport_report",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-error",
+      "owner": "routecodex-v4-runtime::project_runtime_fault",
+      "edge_type": "error_chain_projection",
+      "caller_feature_id": "v4.runtime.real_pipeline_mock_transport",
+      "callee_feature_id": "v4.error.mainline",
+      "caller_path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "callee_path": "crates/routecodex-v4-error/src/lib.rs",
+      "caller_symbols": [
+        "error_chain_client_projection_message",
+        "project_runtime_fault"
+      ],
+      "callee_symbols": [
+        "ErrorChain",
+        "ClientProjection"
+      ],
+      "resource_id": "v4.pipeline.mock_transport_error",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs,crates/routecodex-v4-error/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-cli-plugin",
+      "to": "routecodex-v4-standard-plugins",
+      "owner": "routecodex-v4-cli-plugin::run",
+      "edge_type": "readonly_projection",
+      "resource": "v4.cli.standard_library_projection",
+      "symbols": [
+        "standard_plugins",
+        "standard_resource_registry",
+        "standard_allowed_reads",
+        "standard_allowed_writes",
+        "standard_node_allowed_reads",
+        "standard_node_allowed_writes"
+      ],
+      "path": "crates/routecodex-v4-cli-plugin/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-server",
+      "owner": "routecodex-v4-runtime-bin::spawn_servers",
+      "edge_type": "configured_listener_dispatch",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-error",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-runtime",
+      "owner": "routecodex-v4-runtime-bin::PipelineHandler",
+      "edge_type": "typed_pipeline_execution",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-router",
+      "owner": "routecodex-v4-runtime-bin::handle_responses",
+      "edge_type": "typed_target_selection",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-provider",
+      "owner": "routecodex-v4-runtime-bin::handle_responses",
+      "edge_type": "provider_transport",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-cli",
+      "owner": "routecodex-v4-cli::V4CommandIntent",
+      "edge_type": "typed_command_parse",
+      "caller_feature_id": "v4.runtime.binary_cold_start",
+      "callee_feature_id": "v4.cli.command_dispatch",
+      "path": "crates/routecodex-v4-cli/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-config",
+      "owner": "routecodex-v4-config::compile_runtime_config",
+      "edge_type": "config_manifest_compile",
+      "caller_feature_id": "v4.runtime.binary_cold_start",
+      "callee_feature_id": "v4.config.runtime_manifest",
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-lifecycle",
+      "owner": "routecodex-v4-lifecycle::ManagedControlPlane",
+      "edge_type": "managed_lifecycle_dispatch",
+      "caller_feature_id": "v4.runtime.binary_cold_start",
+      "callee_feature_id": "v4.lifecycle.managed_instance",
+      "path": "crates/routecodex-v4-lifecycle/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-server",
+      "owner": "routecodex-v4-runtime-bin::run_managed_child",
+      "edge_type": "graceful_listener_control",
+      "caller_feature_id": "v4.lifecycle.managed_instance",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-servertool",
+      "owner": "routecodex-v4-runtime-bin::run_servertool",
+      "edge_type": "typed_servertool_cli_projection",
+      "caller_feature_id": "v4.runtime.binary_cold_start",
+      "callee_feature_id": "v4.servertool.cli_projection",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    }
+  ]
+}

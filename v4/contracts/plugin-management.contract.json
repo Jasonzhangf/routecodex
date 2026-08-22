@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-plugin-management",
+  "status": "contract_bound",
+  "owner_feature_id": "v4.plugin.manager",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-cordis-node-plugin-architecture.md",
+    "v4/docs/goals/v4-cordis-plugin-framework-and-webui-plan.md"
+  ],
+  "transaction_rule": "candidate change -> compile -> validate -> isolated mount smoke -> review diff -> explicit publish -> drain/dispose previous container; candidate failure never changes active",
+  "publish_rule": "publish is explicit and requires actor, base active hash, candidate hash, and required gates; stale base hash publish is rejected",
+  "rollback_rule": "published runtime failure enters ErrorChain; automatic rollback to the previous plugin chain is forbidden",
+  "audit_rule": "every install/enable/disable/configure/upgrade/publish/dispose is recorded in an immutable audit ledger without business payload",
+  "scope": "Track B plugin management/admin surface: PluginManager, RuntimeInspector, Admin execute/query; consumes LifecyclePort only",
+  "machine": {
+    "candidate_states": [
+      "draft",
+      "compiled",
+      "validated",
+      "smoke_passed",
+      "published",
+      "failed",
+      "discarded"
+    ],
+    "allowed_transitions": [
+      ["draft", "compiled"],
+      ["compiled", "validated"],
+      ["validated", "smoke_passed"],
+      ["smoke_passed", "published"],
+      ["draft", "failed"],
+      ["compiled", "failed"],
+      ["validated", "failed"],
+      ["smoke_passed", "failed"],
+      ["draft", "discarded"],
+      ["compiled", "discarded"],
+      ["validated", "discarded"],
+      ["smoke_passed", "discarded"],
+      ["failed", "discarded"]
+    ],
+    "publish_guards": [
+      "actor_required",
+      "expected_base_hash_required",
+      "candidate_hash_required",
+      "sequential_mount",
+      "mount_failure_inverse_drain",
+      "active_pointer_single_owner",
+      "concurrent_publish_rejected",
+      "published_terminal"
+    ],
+    "audit_fields": [
+      "actor",
+      "action",
+      "base_hash",
+      "candidate_id",
+      "result",
+      "message"
+    ]
+  }
+}

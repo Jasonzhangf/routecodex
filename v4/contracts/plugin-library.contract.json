@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-plugin-library",
+  "status": "contract_bound",
+  "owner_feature_id": "v4.plugin.standard_library",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-cordis-node-plugin-architecture.md",
+    "v4/docs/architecture/v4-standard-plugin-library.md",
+    "v4/docs/goals/v4-standard-plugin-library-test-design.md"
+  ],
+  "categories_rule": "the standard library ships typed descriptors and typed PluginHandle implementations for exactly the contracts, diagnostic, control, error, protocol, chat_process, routing and provider categories; every category is registered by immutable plugin id",
+  "immutable_registration_rule": "each standard plugin is registered in PluginCatalog by immutable plugin_id with owner routecodex-v4-standard-plugins and canonical sha256 artifact/contract hashes; same identity re-registration is idempotent and identity drift is rejected",
+  "descriptor_rule": "every standard descriptor declares an exact active node-graph node_id, role_id and position plus valid resource axis, effect, phase, order, owner and canonical hashes; unknown or mismatched node selectors are rejected before plan compilation",
+  "node_scoped_resource_rule": "standard plan compilation derives exact reads and writes from the descriptor-bound active node; callers cannot broaden permissions, non-adjacent resource transitions are rejected, and provider_semantic can only flow forward into provider_wire_payload",
+  "side_channel_rule": "control, error and diagnostic facts travel only in typed side channels (control carrier / diagnostics sink) and never enter normal data; payload must never reconstruct control state",
+  "keyless_rule": "the baseline remains keyless: request/provider mocks are deterministic, while response plugins perform schema-bound data-plane projection without credentials or provider-specific branches",
+  "no_fallback_rule": "plugin failure propagates as a typed error through the bridge; no fallback, silent strip, payload reconstruction, internal control metadata leakage, second runtime/kernel or cross-node dispatch",
+  "category_separation_rule": "control-only plugins never write normal data, diagnostic-only plugins never write data or control, and provider/client metadata never leaks into wire payload"
+}

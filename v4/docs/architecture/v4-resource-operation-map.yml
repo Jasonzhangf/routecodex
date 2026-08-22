@@ -1,0 +1,2678 @@
+version: 2
+status: active
+scope: routecodex-v4-foundation
+owner_feature_id: v4.resource_registry
+canonical_docs:
+- v4/docs/architecture/v4-data-control-plane-boundary.md
+- v4/contracts/data-control-boundary.contract.json
+- v4/docs/goals/v4-foundation-framework-plan.md
+- docs/architecture/v3-resource-operation-map.yml
+notes: '本注册表是 V4 真源资源图，binding_status 已按机器 gate
+
+  （v4_parity_gate_resource_binding）收敛：anchored 表示对应实现已落地、
+
+  机器 gate 绿且 .appsdk resource-map.json 双源 status=active；design 表示
+
+  计划 owner 尚未生效，不得作为真源引用。anchored 准入条件：对应 V4 实现、
+
+  机器 gate 与资源关系测试全部落地。
+
+  Phase 2 追加：每个 resource 必须声明 axis（data/control/information/
+
+  diagnostic 之一）与 verification_gate（v4/.appsdk/maps/verification-map.json
+
+  中的 gate_id 或 v4_parity_gate_* 系列）；存在 resource 但无 owner 或无 gate
+
+  视为注册表缺陷。binding_status 只在对应 gate 绿且实现落地后改为 anchored。
+
+  '
+resources:
+- resource_id: v4.request.normal_payload
+  axis: data
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  - v4_parity_gate_execution_binding
+  resource_kind: normal_payload
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4HubReqInbound03Normalized
+  owner_symbols:
+  - ProtocolParse
+  - Normalize
+  - InputValidate
+  - Governance
+  identity:
+  - requestId
+  - endpoint
+  allowed_writers:
+  - V4HubReqInbound03Normalized
+  - V4HubReqChatProcess04Governed
+  allowed_readers:
+  - V4HubReqChatProcess04Governed
+  - V4HubReqOutbound05ProviderSemantic
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4DebugSnapshotLedger
+  - V4HubRespOutbound04ClientSemantic
+  - V4ServerFrame
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.request.provider_semantic
+  axis: data
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: provider_semantic
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4HubReqOutbound05ProviderSemantic
+  owner_symbols:
+  - SemanticProjection
+  identity:
+  - requestId
+  - targetId
+  - providerId
+  - modelId
+  allowed_writers:
+  - V4HubReqOutbound05ProviderSemantic
+  allowed_readers:
+  - V4ProviderReqCompat06Compat
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4Router
+  - V4DebugSnapshotLedger
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.request.provider_wire_payload
+  axis: data
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: provider_wire
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4ProviderReqCompat06Compat
+  owner_symbols:
+  - WireBuild
+  identity:
+  - requestId
+  - providerId
+  - providerType
+  - modelId
+  semantic_contract:
+    control_fields_forbidden: true
+    provider_selection_forbidden: true
+    protocol_metadata_forbidden: true
+    secret_handle_only: true
+  allowed_writers:
+  - V4ProviderReqCompat06Compat
+  allowed_readers:
+  - V4ProviderSseOut07WireBoundary
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4HubReqChatProcess04Governed
+  - V4Router
+  - V4DebugSnapshotLedger
+  - V4ScopeRegistry
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.response.provider_raw
+  axis: data
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: provider_response
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4ProviderSseIn01FrameBoundary
+  owner_symbols:
+  - FrameParse
+  - JsonParse
+  identity:
+  - requestId
+  - providerId
+  - statusCode
+  allowed_writers:
+  - V4ProviderSseIn01FrameBoundary
+  allowed_readers:
+  - V4HubRespInbound02Parsed
+  - V4Error01SourceRaised
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4HubRespOutbound04ClientSemantic
+  - V4DebugSnapshotLedger
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.response.normal_payload
+  axis: data
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: normal_payload
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4HubRespInbound02Parsed
+  owner_symbols:
+  - ProtocolDecode
+  identity:
+  - requestId
+  - endpoint
+  allowed_writers:
+  - V4HubRespInbound02Parsed
+  - V4HubRespChatProcess03Governed
+  allowed_readers:
+  - V4HubRespChatProcess03Governed
+  - V4HubRespOutbound04ClientSemantic
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4DebugSnapshotLedger
+  - V4ProviderReqCompat06Compat
+  may_enter_provider_body: false
+  may_enter_client_body: true
+  binding_status: anchored
+- resource_id: v4.response.client_wire_payload
+  axis: data
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: client_wire
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4HubRespOutbound04ClientSemantic
+  owner_symbols:
+  - FrameBuild
+  identity:
+  - requestId
+  - endpoint
+  - streamIntent
+  semantic_contract:
+    control_fields_forbidden: true
+    error_projection_only: V4Error06ClientProjected
+  allowed_writers:
+  - V4HubRespOutbound04ClientSemantic
+  allowed_readers:
+  - V4ServerSseOut05FrameBoundary
+  - V4ServerRespOutbound06ClientFrame
+  - V4ServerFrame
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4DebugSnapshotLedger
+  - V4ProviderReqCompat06Compat
+  may_enter_provider_body: false
+  may_enter_client_body: true
+  binding_status: anchored
+- resource_id: v4.response.client_frame
+  axis: data
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  - v4_parity_gate_standard_plugins
+  resource_kind: client_frame
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4ServerRespOutbound06ClientFrame
+  owner_symbols:
+  - FrameBuild
+  identity:
+  - requestId
+  - endpoint
+  semantic_contract:
+    control_fields_forbidden: true
+    error_projection_only: V4Error06ClientProjected
+  allowed_writers:
+  - V4ServerRespOutbound06ClientFrame
+  allowed_readers:
+  - V4ServerSseOut05FrameBoundary
+  - V4ServerRespOutbound06ClientFrame
+  - V4ServerFrame
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4DebugSnapshotLedger
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: true
+  binding_status: anchored
+- resource_id: v4.response.client_object
+  axis: data
+  verification_gate:
+  - v4_parity_gate_standard_plugins
+  resource_kind: client_frame_object
+  lifecycle: v4.plugin.standard_library
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4ServerRespOutbound06ClientFrame
+  owner_symbols:
+  - frame_build
+  identity:
+  - requestId
+  semantic_contract:
+    control_fields_forbidden: true
+    error_projection_only: V4Error06ClientProjected
+  allowed_writers:
+  - V4ServerRespOutbound06ClientFrame
+  allowed_readers:
+  - V4ServerRespOutbound06ClientFrame
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4DebugSnapshotLedger
+  - V4ProviderReqCompat06Compat
+  may_enter_provider_body: false
+  may_enter_client_body: true
+  binding_status: anchored
+- resource_id: v4.control.side_channel
+  axis: control
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  - v4_control_l2_regression
+  resource_kind: control_carrier
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-control
+  owner_node: V4Control01ScopeBoundCarrier
+  owner_symbols:
+  - ControlSignal
+  - PayloadGate
+  identity:
+  - requestId
+  - pipelineId
+  - port
+  - sessionScope
+  semantic_contract:
+    carrier_fields:
+    - requestId
+    - pipelineId
+    - port
+    - sessionScope
+    never_normal_payload: true
+    never_provider_wire: true
+    never_client_wire: true
+  allowed_writers:
+  - V4Control01ScopeBoundCarrier
+  - V4ControlMetadataCenter
+  - V4Router
+  - V4ErrorChain
+  allowed_readers:
+  - V4HubReqChatProcess04Governed
+  - V4Router
+  - V4ErrorChain
+  - V4ScopeRegistry
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4ServerFrame
+  - V4DebugSnapshotLedger
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.metadata_center
+  axis: control
+  verification_gate:
+  - v4_control_l2_regression
+  - v4_parity_gate_plane_isolation
+  resource_kind: metadata_center_control_signal
+  lifecycle: v4.control.metadata_center
+  owner_crate: routecodex-v4-control
+  owner_node: V4MetadataCenter01ScopeRegistry
+  owner_symbols:
+  - MetadataCenter
+  - ControlSignal
+  identity:
+  - requestId
+  - pipelineId
+  - port
+  - sessionScope
+  - controlKey
+  state_machine_required: true
+  semantic_contract:
+    register_consume_release: required
+    scope_isolation: request/pipeline/port/session/conversation
+    control_signals_only: true
+    client_protocol_metadata_passthrough: true
+    cross_closed_loop_reuse: forbidden
+  allowed_writers:
+  - V4MetadataCenter01ScopeRegistry::register
+  - V4MetadataCenter01ScopeRegistry::consume
+  - V4MetadataCenter01ScopeRegistry::release
+  - V4HubReqChatProcess04Governed
+  - V4HubRespChatProcess03Governed
+  allowed_readers:
+  - V4HubReqChatProcess04Governed
+  - V4Router
+  - V4ErrorChain
+  - V4StoplessControlState
+  - V4ScopeRegistry
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4ServerFrame
+  - V4DebugSnapshotLedger
+  forbidden_readers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4DebugSnapshotRestore
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.route_facts
+  axis: control
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: control_contract
+  lifecycle: v4.router.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Router05RequestClassified
+  owner_symbols:
+  - ExecutionPlan
+  identity:
+  - serverId
+  - entryProtocol
+  - clientModel
+  - capabilities
+  - inputTokens
+  semantic_contract:
+    route_signals_only: true
+    payload_patch: forbidden
+    capability_mismatch_projection: forbidden
+  allowed_writers:
+  - V4Router05RequestClassified
+  allowed_readers:
+  - V4Router06SelectionPlan
+  forbidden_writers:
+  - V4HubReqChatProcess04Governed
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4DebugSnapshotLedger
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.target_selection
+  axis: control
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: control_contract
+  lifecycle: v4.router.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Router06SelectionPlan
+  owner_symbols:
+  - ExecutionPlan
+  identity:
+  - requestId
+  - serverId
+  - routeGroupId
+  - poolId
+  - orderedOpaqueTargets
+  semantic_contract:
+    opaque_target: true
+    health_mutation: forbidden
+    provider_specific_branch: forbidden
+  allowed_writers:
+  - V4Router06SelectionPlan
+  - V4Target07OpaqueTarget
+  allowed_readers:
+  - V4HubReqOutbound05ProviderSemantic
+  - V4Error04RouterPolicyApplied
+  forbidden_writers:
+  - V4HubReqChatProcess04Governed
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.route_exit
+  axis: control
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: control_contract
+  lifecycle: v4.router.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Router07RouteDecisionExit
+  owner_symbols:
+  - ExecutionPlan
+  identity:
+  - requestId
+  - serverId
+  - decision
+  - targetId
+  - poolId
+  - reason
+  semantic_contract:
+    vr_decision_owner_only: true
+    error_center_route_operation: forbidden
+    payload_patch: forbidden
+    original_payload_immutable: true
+    switch_cooldown_reroute_same_cycle: true
+  allowed_writers:
+  - V4Router07RouteDecisionExit
+  allowed_readers:
+  - V4HubReqOutbound05ProviderSemantic
+  - V4Error04RouterPolicyApplied
+  forbidden_writers:
+  - V4HubReqChatProcess04Governed
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.route_policy_live
+  axis: control
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: control_contract
+  lifecycle: v4.router.mainline
+  owner_crate: routecodex-v4-router
+  owner_node: V4Router08LivePolicyOverride
+  owner_symbols:
+  - V4Router08LivePolicyOverride
+  - LivePolicyOverride
+  - PolicyVersion
+  identity:
+  - serverId
+  - routeGroupId
+  - policyVersion
+  - scope
+  semantic_contract:
+    live_update_allowed: true
+    baseline_from_manifest: true
+    audit_required: true
+    payload_patch: forbidden
+    immutable_history: true
+  allowed_writers:
+  - V4Router08LivePolicyOverride
+  allowed_readers:
+  - V4Router06SelectionPlan
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4HubReqChatProcess04Governed
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.availability
+  axis: control
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: control_state
+  lifecycle: v4.provider.availability
+  owner_crate: routecodex-v4-provider
+  owner_node: V4Availability01SessionScoped
+  owner_symbols:
+  - V4Availability01SessionScoped
+  - AvailabilityRecord
+  - AvailabilityState
+  identity:
+  - serverId
+  - routingGroup
+  - sessionId
+  - providerRuntimeIdentity
+  semantic_contract:
+    session_scoped: true
+    process_global_cooldown_truth: forbidden
+    router_health_write: forbidden
+  allowed_writers:
+  - V4Availability01SessionScoped::record
+  allowed_readers:
+  - V4Target07OpaqueTarget
+  - V4Error04RouterPolicyApplied
+  forbidden_writers:
+  - V4Router
+  - V4HubReqChatProcess04Governed
+  - V4ServerFrame
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.error_chain
+  axis: control
+  verification_gate:
+  - v4_error_l2_regression
+  - v4_parity_gate_plane_isolation
+  resource_kind: side_channel
+  lifecycle: v4.error.mainline
+  owner_crate: routecodex-v4-error
+  owner_node: V4Error01SourceRaised
+  owner_symbols:
+  - ErrorChain
+  identity:
+  - requestId
+  - targetId
+  - providerId
+  - errorStage
+  chain:
+  - V4Error01SourceRaised
+  - V4Error02HostCaptured
+  - V4Error03RuntimeClassified
+  - V4Error04RouterPolicyApplied
+  - V4Error05ExecutionDecision
+  - V4Error06ClientProjected
+  semantic_contract:
+    single_direction: true
+    message_only_projection: forbidden
+    provider_local_retry_policy: forbidden
+    fallback: forbidden
+  allowed_writers:
+  - V4Error01SourceRaised
+  - V4Error02HostCaptured
+  - V4Error03RuntimeClassified
+  - V4Error04RouterPolicyApplied
+  - V4Error05ExecutionDecision
+  - V4Error06ClientProjected
+  allowed_readers:
+  - V4Target07OpaqueTarget
+  - V4ServerFrame
+  - V4Error06ClientProjected
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4HubReqChatProcess04Governed
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.error_center
+  axis: control
+  verification_gate:
+  - v4_error_l2_regression
+  - v4_error_compile_fail_regression
+  resource_kind: control_contract
+  lifecycle: v4.error.mainline
+  owner_crate: routecodex-v4-error
+  owner_node: V4ErrorCenter02ClassifyAudit
+  owner_symbols:
+  - ErrorCenter
+  identity:
+  - requestId
+  - pipelineId
+  - errorStage
+  - errorCode
+  semantic_contract:
+    intake_only: true
+    classify_and_audit: true
+    route_decision_owner: v4.control.route_exit
+    provider_local_retry_policy: forbidden
+    fallback: forbidden
+    original_payload_immutable: true
+    payload_hash_and_typed_context_only: true
+    intake_stage: V4Error02HostCaptured
+    intake_fields_non_empty:
+    - payload_hash
+    - typed_context
+    classification_witness: opaque_fact_lineage_bound_single_use
+  allowed_writers:
+  - V4Error01SourceRaised
+  - V4ErrorCenter02ClassifyAudit
+  allowed_readers:
+  - V4Router07RouteDecisionExit
+  - V4Error04RouterPolicyApplied
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4ServerFrame
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.lifecycle.payload_cycle
+  axis: control
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: control_contract
+  lifecycle: v4.pipeline.request_cycle
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4PayloadCycleRegistry
+  owner_symbols:
+  - PayloadCycleRegistry
+  - PayloadCycle
+  identity:
+  - requestId
+  - pipelineId
+  - originalRequestHash
+  semantic_contract:
+    cycle_start: request_sent
+    cycle_success_terminal: response_entered_client
+    cycle_success_terminal_boundary: next_request_sent
+    cycle_error_terminal: error_terminal_only
+    switch_cooldown_reroute: same_cycle_merged
+    original_payload_mutation: forbidden
+  allowed_writers:
+  - V4PayloadCycleRegistry::open
+  - V4PayloadCycleRegistry::merge_retry
+  - V4PayloadCycleRegistry::close_success
+  - V4PayloadCycleRegistry::close_error
+  allowed_readers:
+  - V4Router07RouteDecisionExit
+  - V4ErrorCenter02ClassifyAudit
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.pipeline.mainline
+  axis: control
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  - v4_parity_gate_execution_binding
+  resource_kind: runtime_execution_locus
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols:
+  - SkeletonRuntime
+  - ExecutionContext
+  - NodePluginPlan
+  identity:
+  - requestId
+  - pipelineId
+  - skeletonVersion
+  - planHash
+  semantic_contract:
+    live_runtime_input_only: true
+    debug_module_switch_input: forbidden
+    dry_run_input: forbidden
+    snapshot_replay_input: forbidden
+  allowed_writers:
+  - V4Runtime01MainlineKernel
+  allowed_readers:
+  - V4Runtime01MainlineKernel
+  forbidden_writers:
+  - V4Debug12ModuleSwitch
+  - V4Debug13DryRunChain
+  - V4Debug01SnapshotLedger
+  - V4Debug02BusSubscription
+  - V4Debug03SnapshotSubscription
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.error.client_projection
+  axis: control
+  verification_gate:
+  - v4_error_l2_regression
+  - v4_parity_gate_plane_isolation
+  resource_kind: side_channel
+  lifecycle: v4.error.mainline
+  owner_crate: routecodex-v4-error
+  owner_node: V4Error06ClientProjected
+  owner_symbols:
+  - ClientProjection
+  identity:
+  - status
+  - code
+  - message
+  semantic_contract:
+    client_visible_fields:
+    - code
+    - message
+    internal_control_fields: forbidden
+  allowed_writers:
+  - V4Error06ClientProjected
+  allowed_readers:
+  - V4ServerFrame
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: true
+  binding_status: anchored
+- resource_id: v4.control.retry_policy
+  axis: control
+  verification_gate:
+  - v4_error_l2_regression
+  resource_kind: control_contract
+  lifecycle: v4.error.mainline
+  owner_crate: routecodex-v4-error
+  owner_node: V4Error04RouterPolicyApplied
+  owner_symbols:
+  - RetryPolicy
+  identity:
+  - policyId
+  - providerScope
+  - matcher
+  - actionClass
+  - reasonCode
+  semantic_contract:
+    consumed_by_execution_decision_only: true
+    provider_local_retry: forbidden
+    cooldown_persistence: forbidden
+  allowed_writers:
+  - V4Error04RouterPolicyApplied
+  allowed_readers:
+  - V4Error05ExecutionDecision
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4HubReqChatProcess04Governed
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.scope.session
+  axis: control
+  verification_gate:
+  - v4_parity_gate_execution_binding
+  - v4_parity_gate_plane_isolation
+  resource_kind: control_scope
+  lifecycle: v4.control.scope
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4ScopeRegistry
+  owner_symbols:
+  - ScopeRegistry
+  identity:
+  - requestId
+  - pipelineId
+  - port
+  - sessionScope
+  - conversationScope
+  semantic_contract:
+    bind_release_required: true
+    cross_session_reuse: forbidden
+    entry_protocol_locked: true
+    continuation_owner_locked: true
+  allowed_writers:
+  - V4ScopeRegistry::bind
+  - V4ScopeRegistry::release
+  allowed_readers:
+  - V4Control01ScopeBoundCarrier
+  - V4ControlMetadataCenter
+  - V4StoplessControlState
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4ServerFrame
+  - V4DebugSnapshotLedger
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.stopless_state
+  axis: control
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  - v4_parity_gate_capability_isolation
+  resource_kind: metadata_center_control_signal
+  lifecycle: v4.control.stopless
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4StoplessControlState
+  owner_symbols:
+  - V4StoplessControlState
+  - StoplessFacts
+  - StoplessError
+  identity:
+  - entryEndpoint
+  - sessionId
+  - conversationId
+  - port
+  - routingGroup
+  state_machine_required: true
+  semantic_contract:
+    current_turn_protocol_projection:
+      req04_injection: allowed_registered_only
+      resp03_stripping: allowed_matching_provenance_only
+    history_mutation: forbidden
+    continuation_immutable_interval_semantics: forbidden
+  allowed_writers:
+  - V4StoplessControlState::store_for_scope
+  - V4StoplessControlState::clear_for_scope
+  allowed_readers:
+  - V4HubReqChatProcess04Governed
+  - V4HubRespChatProcess03Governed
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4ServerFrame
+  - V4DebugSnapshotLedger
+  forbidden_readers:
+  - V4HubRespOutbound04ClientSemantic
+  - V4ServerFrame
+  - V4DebugSnapshotRestore
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.config.authoring
+  axis: information
+  verification_gate:
+  - v4_config_l2_regression
+  resource_kind: config_authoring
+  lifecycle: v4.config.compile
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config01AuthoringFileSource
+  owner_symbols:
+  - V4Config01AuthoringFileSource
+  identity:
+  - configPath
+  - configVersion
+  allowed_writers:
+  - V4Config01AuthoringFileSource
+  allowed_readers:
+  - V4Config02AuthoringParsed
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  - routecodex-v4-router
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.config.parsed
+  axis: information
+  verification_gate:
+  - v4_config_l2_regression
+  resource_kind: config_information
+  lifecycle: v4.config.compile
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config02AuthoringParsed
+  owner_symbols:
+  - V4Config02AuthoringParsed
+  - parse_v4_config_02_from_v4_config_01
+  identity:
+  - configVersion
+  - sourceHash
+  allowed_writers:
+  - parse_v4_config_02_from_v4_config_01
+  allowed_readers:
+  - validate_v4_config_03_from_v4_config_02
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.config.schema_validated
+  axis: information
+  verification_gate:
+  - v4_config_l2_regression
+  resource_kind: config_information
+  lifecycle: v4.config.compile
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config03SchemaValidated
+  owner_symbols:
+  - V4Config03SchemaValidated
+  - validate_v4_config_03_from_v4_config_02
+  identity:
+  - configVersion
+  - scopeHash
+  allowed_writers:
+  - validate_v4_config_03_from_v4_config_02
+  allowed_readers:
+  - build_v4_config_04_from_v4_config_03
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.config.resource_registry
+  axis: information
+  verification_gate:
+  - v4_config_l2_regression
+  resource_kind: config_information
+  lifecycle: v4.config.compile
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config04ResourceRegistryBuilt
+  owner_symbols:
+  - V4Config04ResourceRegistryBuilt
+  - build_v4_config_04_from_v4_config_03
+  identity:
+  - configVersion
+  - resourceIds
+  allowed_writers:
+  - build_v4_config_04_from_v4_config_03
+  allowed_readers:
+  - publish_v4_config_05_from_v4_config_04
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.config.manifest
+  axis: information
+  verification_gate:
+  - v4_config_l2_regression
+  resource_kind: config_manifest
+  lifecycle: v4.config.compile
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config05ManifestPublished
+  owner_symbols:
+  - V4Config05ManifestPublished
+  - ConfigManifest
+  - publish_v4_config_05_from_v4_config_04
+  identity:
+  - manifestVersion
+  - serverIds
+  - providerIds
+  - routeGroupIds
+  semantic_contract:
+    runtime_only_input: true
+    authoring_directory_scan: forbidden
+    secret_in_manifest: forbidden
+    deterministic_output: required
+  allowed_writers:
+  - V4Config05ManifestPublished
+  allowed_readers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-router
+  - routecodex-v4-provider
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  - routecodex-v4-router
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.artifact.compiled_index
+  axis: information
+  verification_gate:
+  - v4_active_index_verify
+  resource_kind: generated_artifact
+  lifecycle: v4.config.compile
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config05ManifestPublished
+  owner_symbols:
+  - V4Config05ManifestPublished
+  - ConfigManifest
+  identity:
+  - manifestVersion
+  - sha256
+  semantic_contract:
+    compiler_generated_only: true
+    runtime_writable: forbidden
+    manual_edit: forbidden
+  allowed_writers:
+  - publish_v4_config_05_from_v4_config_04
+  allowed_readers:
+  - appsdk::compiler
+  - routecodex-v4-runtime
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.secret.provider_auth_handle
+  axis: information
+  verification_gate:
+  - v4_config_l2_regression
+  resource_kind: secret_handle
+  lifecycle: v4.config.compile
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config05ManifestPublished
+  owner_symbols:
+  - AuthHandle
+  identity:
+  - providerId
+  - authAlias
+  - envOrTokenFileHandle
+  allowed_writers:
+  - V4Config05ManifestPublished
+  allowed_readers:
+  - V4ProviderSseOut07WireBoundary
+  forbidden_writers:
+  - V4DebugSnapshotLedger
+  - V4Error06ClientProjected
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.snapshot_ledger
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  - v4_parity_gate_plane_isolation
+  resource_kind: diagnostic
+  lifecycle: v4.debug.side_channel
+  owner_crate: routecodex-v4-debug
+  owner_node: V4Debug01SnapshotLedger
+  owner_symbols:
+  - V4Debug01SnapshotLedger
+  - DebugSnapshotRecord
+  - DebugRuntime
+  identity:
+  - serverId
+  - requestId
+  - executionId
+  - kind
+  semantic_contract:
+    diagnostic_only: true
+    live_runtime_input: forbidden
+    payload_semantics_strip: forbidden
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4Debug01SnapshotLedger
+  allowed_readers:
+  - developer_diagnostics
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4ServerFrame
+  - V4HubReqChatProcess04Governed
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.module_switch
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  - v4_parity_gate_plane_isolation
+  resource_kind: diagnostic_control
+  lifecycle: v4.debug.module_switch
+  owner_crate: routecodex-v4-debug
+  owner_node: V4Debug12ModuleSwitch
+  owner_symbols:
+  - V4Debug12ModuleSwitch
+  - ModuleSwitchState
+  - DebugRuntime
+  identity:
+  - moduleId
+  - nodeId
+  - scope
+  - switchKind
+  semantic_contract:
+    dynamic_live_update: true
+    kinds:
+    - debug
+    - snapshot
+    - dry_run
+    - route_probe
+    default_from_manifest: true
+    decision_plane: forbidden
+    payload_carrier: forbidden
+    audit_required: true
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4Debug12ModuleSwitch::set
+  - V4Config05ManifestPublished
+  allowed_readers:
+  - V4Debug12ModuleSwitch::enabled_for_module
+  forbidden_writers:
+  - V4HubReqChatProcess04Governed
+  - V4Router
+  - V4ErrorChain
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.dry_run_chain
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  - v4_parity_gate_plane_isolation
+  resource_kind: diagnostic_control
+  lifecycle: v4.debug.dry_run
+  owner_crate: routecodex-v4-debug
+  owner_node: V4Debug13DryRunChain
+  owner_symbols:
+  - V4Debug13DryRunChain
+  - DryRunChainDefinition
+  - DebugRuntime
+  identity:
+  - chainId
+  - moduleId
+  - entryNode
+  - exitNode
+  - fixtureId
+  semantic_contract:
+    per_module: true
+    entry_exit_defined: optional
+    default_entry_exit: full_request_or_response_chain
+    input: correct_payload_fixture
+    no_network: true
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4Debug13DryRunChain::register_dry_run_chain
+  - V4Debug12ModuleSwitch
+  allowed_readers:
+  - V4Debug09DryRunNoNetworkTerminalEffect::execute
+  - developer_diagnostics
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.record_ledger
+  axis: control
+  verification_gate:
+  - v4_control_l2_regression
+  - v4_parity_gate_plane_isolation
+  resource_kind: control_record
+  lifecycle: v4.control.node_records
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Control02RecordLedger
+  owner_symbols:
+  - V4Control02RecordLedger
+  - ControlLedgerRecord
+  - ControlLedgerError
+  identity:
+  - recordId
+  - nodeId
+  - direction
+  - controlKey
+  - scope
+  semantic_contract:
+    immutable: true
+    every_control_in_out: required
+    cross_closed_loop_reuse: forbidden
+    payload_hash_only: true
+  allowed_writers:
+  - V4Control02RecordLedger::append
+  allowed_readers:
+  - developer_diagnostics
+  - V4ControlCenterAudit
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4HubReqChatProcess04Governed
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.bus_subscription
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic
+  lifecycle: v4.debug.bus
+  owner_crate: routecodex-v4-debug
+  owner_node: V4Debug02BusSubscription
+  owner_symbols:
+  - V4Debug02BusSubscription
+  - SubscriptionTopic
+  - DebugRuntime
+  identity:
+  - subscriberId
+  - topic
+  - scope
+  semantic_contract:
+    read_only: true
+    decision_plane: forbidden
+    payload_carrier: forbidden
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4Debug02BusSubscription::subscribe
+  allowed_readers:
+  - V4Debug02BusSubscription::observe
+  forbidden_writers:
+  - V4HubReqChatProcess04Governed
+  - V4Router
+  - V4ErrorChain
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.snapshot_subscription
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic
+  lifecycle: v4.debug.snapshot_subscription
+  owner_crate: routecodex-v4-debug
+  owner_node: V4Debug03SnapshotSubscription
+  owner_symbols:
+  - V4Debug03SnapshotSubscription
+  - SnapshotSubscription
+  - DebugRuntime
+  identity:
+  - subscriberId
+  - nodeId
+  - snapshotKind
+  - scope
+  semantic_contract:
+    diagnostic_only: true
+    live_runtime_input: forbidden
+    payload_reconstruction: forbidden
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4Debug03SnapshotSubscription::subscribe
+  allowed_readers:
+  - V4Debug03SnapshotSubscription::observe
+  - developer_diagnostics
+  forbidden_writers:
+  - V4HubReqChatProcess04Governed
+  - V4Router
+  - V4ErrorChain
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.node.statistics
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic_observability
+  lifecycle: v4.node.statistics
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Control03NodeStatistics
+  owner_symbols:
+  - V4Control03NodeStatistics
+  - NodeStatistic
+  - NodeStatisticsError
+  identity:
+  - nodeId
+  - operatorId
+  - scope
+  semantic_contract:
+    optional: true
+    observability_only: true
+    decision_plane: forbidden
+    payload_carrier: forbidden
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4Control03NodeStatistics::record
+  allowed_readers:
+  - developer_diagnostics
+  - V4Debug02BusSubscription
+  forbidden_writers:
+  - V4HubReqChatProcess04Governed
+  - V4Router
+  - V4ErrorChain
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.trace_context
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic
+  lifecycle: v4.debug.trace
+  owner_crate: routecodex-v4-debug
+  owner_node: V4Debug04TraceContextStarted
+  owner_symbols:
+  - V4Debug04TraceContextStarted
+  - TraceContext
+  - DebugRuntime
+  identity:
+  - serverId
+  - requestId
+  - executionId
+  v3_baseline: v3.debug.trace_context
+  semantic_contract:
+    derived_consumers:
+    - v4.debug.event_ledger
+    - v4.debug.raw_capture
+    - v4.debug.snapshot_session
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4DebugRuntime::start_trace
+  allowed_readers:
+  - v4.debug.event_ledger
+  - v4.debug.raw_capture
+  - v4.debug.snapshot_session
+  forbidden_writers:
+  - routecodex-v4-server
+  - routecodex-v4-error
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.event_ledger
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic
+  lifecycle: v4.debug.ledger
+  owner_crate: routecodex-v4-debug
+  owner_node: V4Debug05EventLedgerRecorded
+  owner_symbols:
+  - V4Debug05EventLedgerRecorded
+  - DebugEventRecord
+  - DebugRuntime
+  identity:
+  - sequence
+  - serverId
+  - requestId
+  - executionId
+  - nodeId
+  v3_baseline: v3.debug.event_ledger
+  semantic_contract:
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4DebugRuntime::record_node_event
+  allowed_readers:
+  - developer_diagnostics
+  forbidden_writers:
+  - routecodex-v4-server
+  - routecodex-v4-error
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.raw_capture
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic
+  lifecycle: v4.debug.raw_capture
+  owner_crate: routecodex-v4-debug
+  owner_node: V4Debug06RawCaptureStored
+  owner_symbols:
+  - V4Debug06RawCaptureStored
+  - RawCaptureRecord
+  - DebugRuntime
+  identity:
+  - sequence
+  - serverId
+  - requestId
+  - executionId
+  - kind
+  v3_baseline: v3.debug.raw_capture
+  semantic_contract:
+    verbatim_fidelity: true
+    payload_truth: forbidden
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4DebugRuntime::capture_raw_request
+  - V4DebugRuntime::capture_raw_response
+  allowed_readers:
+  - developer_diagnostics
+  forbidden_writers:
+  - routecodex-v4-server
+  - routecodex-v4-error
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.snapshot_session
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic
+  lifecycle: v4.debug.snapshot_lifecycle
+  owner_crate: routecodex-v4-debug
+  owner_node: V4Debug07SnapshotSessionRegistered
+  owner_symbols:
+  - V4Debug07SnapshotSessionRegistered
+  - SnapshotSession
+  - DebugRuntime
+  identity:
+  - sessionId
+  - serverId
+  - requestId
+  - executionId
+  v3_baseline: v3.debug.snapshot_session
+  semantic_contract:
+    lifecycle: start_record_release
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4DebugRuntime::start_snapshot_session
+  - V4DebugRuntime::record_snapshot
+  - V4DebugRuntime::release_snapshot_session
+  allowed_readers:
+  - developer_diagnostics
+  forbidden_writers:
+  - routecodex-v4-server
+  - routecodex-v4-error
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.dry_run_fixture
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic
+  lifecycle: v4.debug.dry_run
+  owner_crate: routecodex-v4-debug
+  owner_node: V4Debug08DryRunFixture
+  owner_symbols:
+  - V4Debug08DryRunFixture
+  - DryRunFixture
+  - DebugRuntime
+  identity:
+  - fixtureId
+  - serverId
+  - endpoint
+  v3_baseline: v3.debug.dry_run_fixture
+  semantic_contract:
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4DebugRuntime::register_dry_run_fixture
+  allowed_readers:
+  - V4DebugRuntime::build_dry_run_execution_plan
+  forbidden_writers:
+  - routecodex-v4-server
+  - routecodex-v4-error
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.dry_run_execution
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  - v4_parity_gate_plane_isolation
+  resource_kind: diagnostic
+  lifecycle: v4.debug.dry_run
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Debug09DryRunNoNetworkTerminalEffect
+  owner_symbols:
+  - V4Debug09DryRunNoNetworkTerminalEffect
+  - DryRunExecution
+  - DryRunExecutionError
+  identity:
+  - fixtureId
+  - serverId
+  - requestId
+  - executionId
+  v3_baseline: v3.debug.dry_run_execution
+  semantic_contract:
+    no_network_only: true
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4Debug09DryRunNoNetworkTerminalEffect::execute
+  allowed_readers:
+  - developer_diagnostics
+  forbidden_writers:
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.codex_sample_authorization
+  axis: diagnostic
+  verification_gate:
+  - v4_config_l2_regression
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic_control
+  lifecycle: v4.config.compile
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config05ManifestPublished
+  owner_symbols:
+  - V4Config05ManifestPublished
+  - CodexSampleAuthorization
+  identity:
+  - managedInstanceId
+  - codexSamplesEnabled
+  - directSnapshotsEnabled
+  - snapshotStages
+  v3_baseline: v3.debug.codex_sample_authorization
+  semantic_contract:
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4Config05ManifestPublished
+  allowed_readers:
+  - CodexSampleAuthorization::should_capture_snapshot_stage
+  - V4Config05ManifestPublished
+  - V4DebugRuntime::record_snapshot
+  - V4DebugRuntime::persist
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-provider
+  - V4ControlMetadataCenter
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.payload_budget
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic_side_channel
+  lifecycle: v4.debug.sample_retention
+  owner_crate: routecodex-v4-debug
+  owner_node: V4Debug10PayloadBudget
+  owner_symbols:
+  - V4Debug10PayloadBudget
+  - PayloadBudgetState
+  - DebugRuntime
+  identity:
+  - serverId
+  - requestId
+  - executionId
+  - artifactKind
+  v3_baseline: v3.debug.payload_budget
+  semantic_contract:
+    verbatim_fidelity: true
+    error_force_write: true
+    retention_cap: 200
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4DebugRuntime::project_payload_verbatim
+  - V4DebugRuntime::append_bounded_text
+  - V4DebugRuntime::persist
+  allowed_readers:
+  - developer_diagnostics
+  forbidden_writers:
+  - routecodex-v4-server
+  - routecodex-v4-error
+  - routecodex-v4-provider
+  - V4ControlMetadataCenter
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.codex_sample_filesystem
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: bounded_diagnostic_artifact
+  lifecycle: v4.debug.sample_retention
+  owner_crate: routecodex-v4-debug
+  owner_node: V4Debug11CodexSampleStore
+  owner_symbols:
+  - V4Debug11CodexSampleStore
+  - CodexSampleStore
+  - DebugRuntime
+  identity:
+  - entryProtocol
+  - endpoint
+  - port
+  - requestId
+  - artifactName
+  v3_baseline: v3.debug.codex_sample_filesystem
+  semantic_contract:
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4DebugRuntime::persist
+  - V4DebugRuntime::enforce_listener_retention
+  allowed_readers:
+  - developer_diagnostics
+  - replay_codex_sample
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-provider
+  - V4ControlMetadataCenter
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.observability
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic_side_channel
+  lifecycle: v4.debug.observability
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4RuntimeObservability
+  owner_symbols:
+  - V4RuntimeObservability
+  - V4RuntimeObservabilityAccumulator
+  identity:
+  - requestId
+  - entryProtocol
+  - executionMode
+  - routingGroupId
+  - providerId
+  - modelId
+  v3_baseline: v3.runtime.responses_observability
+  semantic_contract:
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4RuntimeObservabilityAccumulator
+  allowed_readers:
+  - v4.console.terminal_output
+  forbidden_writers:
+  - routecodex-v4-provider
+  - routecodex-v4-server
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.debug.timing_observability
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic_side_channel
+  lifecycle: v4.debug.timing
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4RuntimeTimingSummary
+  owner_symbols:
+  - V4RuntimeTimingSummary
+  - V4RuntimeTimingState
+  identity:
+  - requestId
+  - attempt
+  - timingPhase
+  v3_baseline: v3.runtime.responses_timing_observability
+  semantic_contract:
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4RuntimeTimingState
+  allowed_readers:
+  - v4.debug.observability
+  - v4.console.terminal_output
+  forbidden_writers:
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.console.terminal_output
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_capability_isolation
+  resource_kind: diagnostic
+  lifecycle: v4.console.projection
+  owner_crate: routecodex-v4-server
+  owner_node: V4ConsoleTerminalOutput
+  owner_symbols:
+  - V4ConsoleTerminalOutput
+  - ConsoleProjection
+  - ConsoleLine
+  identity:
+  - serverId
+  - requestId
+  - entryProtocol
+  - severity
+  v3_baseline: v3.console.terminal_output
+  semantic_contract:
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4ConsoleProjection
+  allowed_readers:
+  - developer_terminal
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4HubReqChatProcess04Governed
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.server.request_identity
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_execution_binding
+  resource_kind: runtime_identity_counter
+  lifecycle: v4.server.request_identity
+  owner_crate: routecodex-v4-server
+  owner_node: V4RequestIdCounter
+  owner_symbols:
+  - V4RequestIdCounter
+  - RequestIdentity
+  - RequestIdentityError
+  identity:
+  - serverId
+  - localDay
+  - sequence
+  - requestId
+  v3_baseline: v3.server.request_identity
+  semantic_contract:
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4RequestIdCounter::next_request_identity
+  allowed_readers:
+  - v4.console.terminal_output
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-provider
+  - V4HubReqChatProcess04Governed
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.error.raw_wire_evidence
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: failure_scoped_diagnostic_artifact
+  lifecycle: v4.error.raw_wire_evidence
+  owner_crate: routecodex-v4-server
+  owner_node: V4ErrorEvidenceFlushOnTerminalFailure
+  owner_symbols:
+  - V4ErrorEvidenceFlushOnTerminalFailure
+  - WireEvidenceRecord
+  - WireEvidenceError
+  identity:
+  - entryProtocol
+  - endpoint
+  - port
+  - requestId
+  - artifactName
+  v3_baseline: v3.error.raw_wire_evidence
+  semantic_contract:
+    failure_terminal_only: true
+    release_point: V4ServerRespOutbound06ClientFrameBodyEofErrorOrDrop
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4ErrorEvidenceFlushOnTerminalFailure
+  allowed_readers:
+  - developer_diagnostics
+  - incident_replay
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-provider
+  - V4ControlMetadataCenter
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.plugin_management.active_pointer
+  axis: control
+  verification_gate:
+  - v4_parity_gate_plugin_manager
+  - v4_plugin_manager_l2_regression
+  resource_kind: control
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-plugin-manager
+  owner_node: V4PluginManager
+  owner_symbols:
+  - ActiveChain
+  - PluginManager
+  identity:
+  - candidateId
+  - activeHash
+  allowed_writers:
+  - V4PluginManager
+  allowed_readers:
+  - V4RuntimeInspector
+  - V4Admin
+  forbidden_writers:
+  - V4AdminCommand
+  - V4NodeContainer
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.plugin_management.audit_ledger
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_plugin_manager
+  - v4_plugin_manager_l2_regression
+  resource_kind: audit
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-plugin-manager
+  owner_node: V4PluginManagerAudit
+  owner_symbols:
+  - AuditSink
+  - AuditRecord
+  identity:
+  - sequence
+  - actor
+  allowed_writers:
+  - V4PluginManagerAudit
+  allowed_readers:
+  - V4RuntimeInspector
+  - V4Admin
+  forbidden_writers:
+  - V4AdminCommand
+  - V4NodeContainer
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+  semantic_contract:
+    may_enter_metadata_center: false
+- resource_id: v4.plugin_management.candidate_store
+  axis: control
+  verification_gate:
+  - v4_parity_gate_plugin_manager
+  - v4_plugin_manager_l2_regression
+  resource_kind: control
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-plugin-manager
+  owner_node: V4PluginManager
+  owner_symbols:
+  - PluginManager
+  - PluginCandidate
+  identity:
+  - candidateId
+  allowed_writers:
+  - V4PluginManager
+  allowed_readers:
+  - V4RuntimeInspector
+  forbidden_writers:
+  - V4AdminCommand
+  - V4NodeContainer
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.admin.projection
+  axis: information
+  verification_gate:
+  - v4_parity_gate_runtime_inspector
+  - v4_runtime_inspector_l2_regression
+  - v4_admin_l2_regression
+  resource_kind: projection
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-runtime-inspector
+  owner_node: V4RuntimeInspector
+  owner_symbols:
+  - RuntimeSnapshot
+  - ActiveSummary
+  - FailedSummary
+  - ContainerLifecycle
+  identity:
+  - activeHash
+  allowed_writers:
+  - V4RuntimeInspector
+  allowed_readers:
+  - V4Admin
+  - V4WebUI
+  forbidden_writers:
+  - V4AdminCommand
+  - V4NodeContainer
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.cli.standard_library_projection
+  axis: information
+  verification_gate:
+  - v4_parity_gate_cli_plugin
+  resource_kind: readonly_projection
+  lifecycle: v4.plugin.cli_inspector
+  owner_crate: routecodex-v4-cli-plugin
+  owner_node: V4CliStandardLibraryProjection
+  owner_symbols:
+  - run
+  identity:
+  - plugin_id
+  - resource_id
+  - node_id
+  allowed_writers: []
+  allowed_readers:
+  - appsdk::verify
+  forbidden_writers:
+  - V4NodeContainer
+  - routecodex-v4-runtime
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.cordis.node_context
+  axis: control
+  verification_gate:
+  - v4_cordis_host_l3_regression
+  - v4_parity_gate_cordis_host
+  resource_kind: lifecycle
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-cordis-host
+  owner_node: V4CordisNodeHost
+  owner_symbols:
+  - CordisNodeHost
+  - createNodePlugin
+  identity:
+  - nodeId
+  allowed_writers:
+  - V4CordisNodeHost
+  allowed_readers:
+  - V4NodeContainer
+  forbidden_writers:
+  - V4AdminCommand
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.cordis.plugin_fibers
+  axis: control
+  verification_gate:
+  - v4_cordis_host_l3_regression
+  - v4_parity_gate_cordis_host
+  resource_kind: lifecycle
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-cordis-host
+  owner_node: V4CordisNodeHost
+  owner_symbols:
+  - CordisNodeHost
+  - createNodePlugin
+  identity:
+  - fiberId
+  allowed_writers:
+  - V4CordisNodeHost
+  allowed_readers:
+  - V4NodeContainer
+  forbidden_writers:
+  - V4AdminCommand
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.node_container.lifecycle
+  axis: control
+  verification_gate:
+  - v4_node_container_l2_regression
+  - v4_cordis_host_l3_regression
+  - v4_parity_gate_node_container
+  resource_kind: state_machine
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-node-container
+  owner_node: V4NodeContainer
+  owner_symbols:
+  - NodeContainer
+  - NodeContainerState
+  - NodeExecutionGuard
+  identity:
+  - nodeId
+  allowed_writers:
+  - V4NodeContainer
+  allowed_readers:
+  - V4CordisNodeHost
+  - V4RuntimeInspector
+  - V4Admin
+  forbidden_writers:
+  - V4AdminCommand
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.node_container.lifecycle_failure
+  axis: control
+  verification_gate:
+  - v4_node_container_l2_regression
+  - v4_cordis_host_l3_regression
+  - v4_parity_gate_node_container
+  - v4_parity_gate_cordis_host
+  resource_kind: lifecycle_failure_fact
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-node-container
+  owner_node: V4NodeContainer
+  owner_symbols:
+  - LifecycleFailureFact
+  identity:
+  - requestId
+  - nodeId
+  - operation
+  semantic_contract:
+    typed_fact_only: true
+    lifecycle_port_projection_only: true
+    product_error_chain_scope_fabrication: forbidden
+  allowed_writers:
+  - V4NodeContainer
+  allowed_readers:
+  - V4CordisNodeHost
+  forbidden_writers:
+  - V4AdminCommand
+  - V4ErrorChain
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.node_container.execution_failure
+  axis: control
+  verification_gate:
+  - v4_node_container_l2_regression
+  - v4_cordis_host_l3_regression
+  - v4_parity_gate_node_container
+  - v4_parity_gate_cordis_host
+  resource_kind: execution_failure_fact
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-node-container
+  owner_node: V4NodeContainer
+  owner_symbols:
+  - ExecutionFailureFact
+  identity:
+  - requestId
+  - nodeId
+  - operation
+  semantic_contract:
+    typed_fact_only: true
+    execution_port_projection_only: true
+    product_error_chain_scope_fabrication: forbidden
+  allowed_writers:
+  - V4NodeContainer
+  allowed_readers:
+  - V4CordisNodeHost
+  forbidden_writers:
+  - V4AdminCommand
+  - V4ErrorChain
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.node_container.plan_bindings
+  axis: control
+  verification_gate:
+  - v4_node_container_l2_regression
+  - v4_parity_gate_node_container
+  resource_kind: binding
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-node-container
+  owner_node: V4NodeContainer
+  owner_symbols:
+  - PlanBindings
+  - graph_hash
+  identity:
+  - planHash
+  allowed_writers:
+  - V4NodeContainer
+  allowed_readers:
+  - V4RuntimeInspector
+  - V4Admin
+  forbidden_writers:
+  - V4AdminCommand
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.pipeline.mock_transport_report
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_real_pipeline_mock_transport
+  resource_kind: mock_transport_report
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols:
+  - MockTransportReport
+  identity:
+  - requestId
+  - fixtureMethod
+  - fixturePath
+  - fixtureModel
+  - fixtureHeaders
+  semantic_contract:
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4Runtime01MainlineKernel
+  allowed_readers:
+  - V4RuntimeInspector
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4ErrorChain
+  - V4Control01ScopeBoundCarrier
+  - V4MetadataCenter01ScopeRegistry
+  - V4Router05RequestClassified
+  - V4Router06SelectionPlan
+  - V4Router07RouteDecisionExit
+  - V4Router08LivePolicyOverride
+  - V4Availability01SessionScoped
+  - V4Error01SourceRaised
+  - V4ErrorCenter02ClassifyAudit
+  - V4PayloadCycleRegistry
+  - V4Error04RouterPolicyApplied
+  - V4ScopeRegistry
+  - V4StoplessControlState
+  - V4Control02RecordLedger
+  - V4PluginManager
+  - V4CordisNodeHost
+  - V4NodeContainer
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.pipeline.mock_transport_error
+  axis: control
+  verification_gate:
+  - v4_parity_gate_real_pipeline_mock_transport
+  resource_kind: mock_transport_error_projection
+  lifecycle: v4.error.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Error06ClientProjected
+  owner_symbols:
+  - MockTransportError
+  identity:
+  - requestId
+  - faultCode
+  - nodeId
+  - clientProjectionMessage
+  semantic_contract:
+    client_visible_fields:
+    - code
+    - message
+    internal_control_fields: forbidden
+  allowed_writers:
+  - V4Error06ClientProjected
+  allowed_readers:
+  - V4RuntimeInspector
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4ErrorChain
+  - V4Control01ScopeBoundCarrier
+  - V4MetadataCenter01ScopeRegistry
+  - V4Router05RequestClassified
+  - V4Router06SelectionPlan
+  - V4Router07RouteDecisionExit
+  - V4Router08LivePolicyOverride
+  - V4Availability01SessionScoped
+  - V4Error01SourceRaised
+  - V4ErrorCenter02ClassifyAudit
+  - V4PayloadCycleRegistry
+  - V4Error04RouterPolicyApplied
+  - V4ScopeRegistry
+  - V4StoplessControlState
+  - V4Control02RecordLedger
+  - V4PluginManager
+  - V4CordisNodeHost
+  - V4NodeContainer
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.pipeline.mock_transport_identity
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_real_pipeline_mock_transport
+  resource_kind: runtime_identity_counter
+  lifecycle: v4.pipeline.mock_transport_identity
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols:
+  - MockTransportIdentityCounter
+  - MockTransportIdentity
+  identity:
+  - serverId
+  - localDay
+  - sequence
+  - requestId
+  semantic_contract:
+    may_enter_metadata_center: false
+  allowed_writers:
+  - V4Runtime01MainlineKernel
+  allowed_readers:
+  - V4RuntimeInspector
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.runtime.admission_manifest
+  axis: information
+  verification_gate:
+  - v4_parity_gate_real_runtime_admission
+  - v4_parity_gate_real_runtime_admission_red
+  resource_kind: admission_contract
+  lifecycle: v4.runtime.admission
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config05ManifestPublished
+  owner_symbols:
+  - RuntimeConfigManifest
+  - compile_runtime_config
+  identity:
+  - manifestId
+  - schemaVersion
+  - runtimeIdentity
+  semantic_contract:
+    status_design_until_live_evidence: true
+    secret_in_manifest: forbidden
+    v3_runtime_dependency: forbidden
+  allowed_writers:
+  - routecodex-v4-governance
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - V4HubReqInbound03Normalized
+  - V4ProviderSseOut07WireBoundary
+  - V4ServerRespOutbound06ClientFrame
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.runtime.compiled_manifest
+  axis: information
+  verification_gate:
+  - v4_real_runtime_compiled_manifest
+  resource_kind: compiled_manifest
+  lifecycle: v4.config.compile
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config05ManifestPublished
+  owner_symbols:
+  - RuntimeConfigManifest
+  - compile_runtime_config
+  identity:
+  - manifestId
+  - manifestDigest
+  semantic_contract:
+    deterministic: true
+    drift: fail_fast
+    secret_in_manifest: forbidden
+  allowed_writers:
+  - routecodex-v4-config
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - V4HubReqInbound03Normalized
+  - V4ProviderSseOut07WireBoundary
+  - V4ServerRespOutbound06ClientFrame
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.runtime.binary_identity
+  axis: diagnostic
+  verification_gate:
+  - v4_real_runtime_compiled_manifest
+  - v4_real_runtime_v3_isolation
+  resource_kind: runtime_identity
+  lifecycle: v4.runtime.admission
+  owner_crate: routecodex-v4-runtime-bin
+  owner_node: V4RuntimeBinary01Identity
+  owner_symbols:
+  - RCCV4_BINARY_IDENTITY
+  identity:
+  - runtimeIdentity
+  - binaryDigest
+  semantic_contract:
+    independent_from_v3: true
+    v3_install_mutation: forbidden
+    may_enter_metadata_center: false
+  allowed_writers:
+  - routecodex-v4-runtime-bin
+  allowed_readers:
+  - developer_diagnostics
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.provider.real_transport
+  axis: data
+  verification_gate:
+  - v4_real_runtime_provider_transport
+  resource_kind: provider_transport
+  lifecycle: v4.provider.mainline
+  owner_crate: routecodex-v4-provider
+  owner_node: V4ProviderSseOut07WireBoundary
+  owner_symbols:
+  - ProviderResponseStream
+  - ProviderRawResponse
+  - send_responses
+  - send_responses_streaming
+  identity:
+  - requestId
+  - providerId
+  - endpoint
+  - statusCode
+  semantic_contract:
+    auth_materialization_transport_only: true
+    request_response_bytes_preserved: true
+    internal_control_fields_forbidden: true
+  allowed_writers:
+  - V4ProviderSseOut07WireBoundary
+  - V4ProviderSseIn01FrameBoundary
+  allowed_readers:
+  - V4ProviderSseIn01FrameBoundary
+  - V4Error01SourceRaised
+  forbidden_writers:
+  - V4HubReqChatProcess04Governed
+  - V4ServerRespOutbound06ClientFrame
+  - V4Control01ScopeBoundCarrier
+  - V4MetadataCenter01ScopeRegistry
+  - V4Router05RequestClassified
+  - V4Router06SelectionPlan
+  - V4Router07RouteDecisionExit
+  - V4Router08LivePolicyOverride
+  - V4Availability01SessionScoped
+  - V4Error01SourceRaised
+  - V4ErrorCenter02ClassifyAudit
+  - V4PayloadCycleRegistry
+  - V4Runtime01MainlineKernel
+  - V4Error06ClientProjected
+  - V4Error04RouterPolicyApplied
+  - V4ScopeRegistry
+  - V4StoplessControlState
+  - V4Control02RecordLedger
+  - V4PluginManager
+  - V4CordisNodeHost
+  - V4NodeContainer
+  - V4ControlMetadataCenter
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.server.http_listener
+  axis: data
+  verification_gate:
+  - v4_real_runtime_server_http
+  resource_kind: http_listener
+  lifecycle: v4.server.mainline
+  owner_crate: routecodex-v4-server
+  owner_node: V4ServerReqInbound01ClientRaw
+  owner_symbols:
+  - V4HttpServer
+  - HttpRequest
+  - HttpResponse
+  identity:
+  - listenerAddress
+  - requestId
+  - endpoint
+  semantic_contract:
+    owns_client_framing: true
+    owns_provider_auth: false
+    control_payload_leak: forbidden
+  allowed_writers:
+  - V4ServerReqInbound01ClientRaw
+  - V4ServerRespOutbound06ClientFrame
+  allowed_readers:
+  - routecodex-v4-config
+  forbidden_writers:
+  - V4ProviderSseOut07WireBoundary
+  - V4Control01ScopeBoundCarrier
+  - V4MetadataCenter01ScopeRegistry
+  - V4Router05RequestClassified
+  - V4Router06SelectionPlan
+  - V4Router07RouteDecisionExit
+  - V4Router08LivePolicyOverride
+  - V4Availability01SessionScoped
+  - V4Error01SourceRaised
+  - V4ErrorCenter02ClassifyAudit
+  - V4PayloadCycleRegistry
+  - V4Runtime01MainlineKernel
+  - V4Error06ClientProjected
+  - V4Error04RouterPolicyApplied
+  - V4ScopeRegistry
+  - V4StoplessControlState
+  - V4Control02RecordLedger
+  - V4PluginManager
+  - V4CordisNodeHost
+  - V4NodeContainer
+  - V4ControlMetadataCenter
+  may_enter_provider_body: false
+  may_enter_client_body: true
+  binding_status: anchored
+- resource_id: v4.cli.command_intent
+  axis: control
+  verification_gate:
+  - v4_cli_l2_regression
+  - v4_infrastructure_contract
+  - v4_infrastructure_contract_red
+  resource_kind: typed_command_intent
+  lifecycle: v4.cli.dispatch
+  owner_crate: routecodex-v4-cli
+  owner_node: V4Cli01CommandIntent
+  owner_symbols:
+  - Cli
+  - V4CommandIntent
+  identity:
+  - commandKind
+  semantic_contract:
+    parse_and_dispatch_only: true
+    runtime_semantics: forbidden
+    payload_projection: forbidden
+  allowed_writers:
+  - routecodex-v4-cli
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-config
+  - routecodex-v4-lifecycle
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.lifecycle.instance_state
+  axis: control
+  verification_gate:
+  - v4_lifecycle_l2_regression
+  - v4_infrastructure_contract
+  resource_kind: managed_instance_state
+  lifecycle: v4.lifecycle.managed_instance
+  owner_crate: routecodex-v4-lifecycle
+  owner_node: V4Lifecycle02ManagedInstance
+  owner_symbols:
+  - V4LifecyclePaths
+  - ManagedInstanceRecord
+  identity:
+  - runtimeIdentity
+  - pid
+  - manifestDigest
+  semantic_contract:
+    v4_state_root_only: true
+    v3_state_access: forbidden
+    payload_projection: forbidden
+  allowed_writers:
+  - routecodex-v4-lifecycle
+  allowed_readers:
+  - routecodex-v4-lifecycle
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.lifecycle.control_socket
+  axis: control
+  verification_gate:
+  - v4_lifecycle_l2_regression
+  - v4_infrastructure_contract
+  resource_kind: managed_control_socket
+  lifecycle: v4.lifecycle.managed_instance
+  owner_crate: routecodex-v4-lifecycle
+  owner_node: V4Lifecycle03ControlSocket
+  owner_symbols:
+  - ManagedControlPlane
+  - exec_managed_restart
+  identity:
+  - runtimeIdentity
+  - socketPath
+  semantic_contract:
+    exact_instance_only: true
+    graceful_stop: true
+    exec_restart: true
+    broad_kill: forbidden
+  allowed_writers:
+  - routecodex-v4-lifecycle
+  allowed_readers:
+  - routecodex-v4-lifecycle
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.servertool.cli_projection
+  axis: data
+  verification_gate:
+  - v4_servertool_l2_regression
+  - v4_infrastructure_contract
+  resource_kind: local_cli_projection
+  lifecycle: v4.servertool.cli_projection
+  owner_crate: routecodex-v4-servertool
+  owner_node: V4Servertool01CliProjection
+  owner_symbols:
+  - ServertoolRunInput
+  - ServertoolRunOutput
+  - build_run_projection
+  identity:
+  - toolName
+  semantic_contract:
+    input_object_required: true
+    provider_transport: forbidden
+    control_payload_projection: forbidden
+  allowed_writers:
+  - routecodex-v4-servertool
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-provider
+  - routecodex-v4-server
+  - V4Control01ScopeBoundCarrier
+  - V4MetadataCenter01ScopeRegistry
+  - V4Router05RequestClassified
+  - V4Router06SelectionPlan
+  - V4Router07RouteDecisionExit
+  - V4Router08LivePolicyOverride
+  - V4Availability01SessionScoped
+  - V4Error01SourceRaised
+  - V4ErrorCenter02ClassifyAudit
+  - V4PayloadCycleRegistry
+  - V4Runtime01MainlineKernel
+  - V4Error06ClientProjected
+  - V4Error04RouterPolicyApplied
+  - V4ScopeRegistry
+  - V4StoplessControlState
+  - V4Control02RecordLedger
+  - V4PluginManager
+  - V4CordisNodeHost
+  - V4NodeContainer
+  - V4Cli01CommandIntent
+  - V4Lifecycle02ManagedInstance
+  - V4Lifecycle03ControlSocket
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.servertool.cli_control
+  axis: control
+  verification_gate:
+  - v4_servertool_l2_regression
+  - v4_infrastructure_contract
+  resource_kind: typed_cli_control_side_channel
+  lifecycle: v4.servertool.cli_projection
+  owner_crate: routecodex-v4-servertool
+  owner_node: V4Servertool01CliProjection
+  owner_symbols:
+  - ServertoolRunControl
+  - ServertoolRunProjection
+  - build_run_projection
+  identity:
+  - flowId
+  - sessionId
+  - requestId
+  semantic_contract:
+    typed_side_channel_only: true
+    provider_transport: forbidden
+    client_projection: forbidden
+  allowed_writers:
+  - routecodex-v4-servertool
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-provider
+  - routecodex-v4-server
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+forbidden_direct_edges:
+- from: v4.config.manifest
+  to: v4.request.normal_payload
+  reason: config fields must not leak into business payload
+- from: v4.config.manifest
+  to: v4.request.provider_wire_payload
+  reason: runtime consumes manifest through typed config resource, never through payload
+- from: v4.control.metadata_center
+  to: v4.request.provider_wire_payload
+  reason: control signals must never enter provider body
+- from: v4.control.metadata_center
+  to: v4.response.client_wire_payload
+  reason: control signals must never enter client body
+- from: v4.control.side_channel
+  to: v4.request.provider_wire_payload
+  reason: typed carrier must stay out of provider wire
+- from: v4.control.side_channel
+  to: v4.response.client_wire_payload
+  reason: typed carrier must stay out of client wire
+- from: v4.control.stopless_state
+  to: v4.response.client_wire_payload
+  reason: stopless control state must not project into normal client payload
+- from: v4.control.stopless_state
+  to: v4.request.provider_wire_payload
+  reason: only registered Req04 current-turn projection may carry stopless guidance
+    to provider
+- from: v4.scope.session
+  to: v4.request.provider_wire_payload
+  reason: scope keys must not become provider body fields
+- from: v4.scope.session
+  to: v4.response.client_wire_payload
+  reason: scope keys must not become client body fields
+- from: v4.control.route_facts
+  to: v4.request.normal_payload
+  reason: router must not patch or annotate payload
+- from: v4.control.target_selection
+  to: v4.request.normal_payload
+  reason: opaque target selection must not modify payload
+- from: v4.control.route_exit
+  to: v4.request.normal_payload
+  reason: route decision output must not modify payload
+- from: v4.control.route_exit
+  to: v4.request.provider_wire_payload
+  reason: route decision is a typed control resource, never a wire field
+- from: v4.control.route_exit
+  to: v4.response.client_wire_payload
+  reason: route decision must never project into client body
+- from: v4.control.route_policy_live
+  to: v4.request.normal_payload
+  reason: live route policy override must not patch payload
+- from: v4.control.route_policy_live
+  to: v4.request.provider_wire_payload
+  reason: live route policy is control-only
+- from: v4.control.route_policy_live
+  to: v4.response.client_wire_payload
+  reason: live route policy is control-only
+- from: v4.control.error_center
+  to: v4.request.normal_payload
+  reason: error center classifies and audits typed error facts; it must not rewrite
+    the original request payload
+- from: v4.control.error_center
+  to: v4.request.provider_wire_payload
+  reason: error center never writes provider wire
+- from: v4.control.error_center
+  to: v4.response.client_wire_payload
+  reason: only V4Error06ClientProjected code/message may reach client
+- from: v4.lifecycle.payload_cycle
+  to: v4.request.provider_wire_payload
+  reason: payload cycle state is control-only
+- from: v4.lifecycle.payload_cycle
+  to: v4.response.client_wire_payload
+  reason: payload cycle state is control-only
+- from: v4.debug.module_switch
+  to: v4.pipeline.mainline
+  reason: module debug switch controls diagnostics only; it must not become live runtime
+    input
+- from: v4.debug.dry_run_chain
+  to: v4.pipeline.mainline
+  reason: dry-run chain definitions are diagnostic-only; runtime never consumes them
+    as live input
+- from: v4.debug.dry_run_chain
+  to: v4.request.provider_wire_payload
+  reason: dry-run is no-network and never writes provider wire
+- from: v4.debug.dry_run_chain
+  to: v4.response.client_wire_payload
+  reason: dry-run never writes client wire
+- from: v4.request.normal_payload
+  to: v4.control.metadata_center
+  reason: payload must not reconstruct control state
+- from: v4.response.normal_payload
+  to: v4.control.metadata_center
+  reason: response payload must not reconstruct control state
+- from: v4.debug.snapshot_ledger
+  to: v4.pipeline.mainline
+  reason: debug snapshot must never become live runtime input
+- from: v4.control.error_chain
+  to: v4.request.provider_wire_payload
+  reason: error chain is control side-channel only
+- from: v4.control.error_chain
+  to: v4.response.client_wire_payload
+  reason: only V4Error06ClientProjected code/message may reach client
+- from: v4.node_container.lifecycle_failure
+  to: v4.request.provider_wire_payload
+  reason: lifecycle management failures are control-only facts
+- from: v4.node_container.lifecycle_failure
+  to: v4.response.client_wire_payload
+  reason: lifecycle management failures never enter product client payload
+- from: v4.node_container.execution_failure
+  to: v4.request.provider_wire_payload
+  reason: execution management failures are control-only facts
+- from: v4.node_container.execution_failure
+  to: v4.response.client_wire_payload
+  reason: execution management failures never enter product client payload
+- from: v4.control.record_ledger
+  to: v4.request.provider_wire_payload
+  reason: control records must never enter provider body
+- from: v4.control.record_ledger
+  to: v4.response.client_wire_payload
+  reason: control records must never enter client body
+- from: v4.debug.bus_subscription
+  to: v4.pipeline.mainline
+  reason: debug bus events must not become live runtime input
+- from: v4.debug.snapshot_subscription
+  to: v4.pipeline.mainline
+  reason: node snapshots must never become live runtime input
+- from: v4.node.statistics
+  to: v4.request.provider_wire_payload
+  reason: statistics must never enter provider body
+- from: v4.node.statistics
+  to: v4.response.client_wire_payload
+  reason: statistics must never enter client body
+- from: v4.pipeline.mock_transport_error
+  to: v4.request.provider_wire_payload
+  reason: mock transport error projection is control-only and must never enter provider wire
+- from: v4.pipeline.mock_transport_identity
+  to: v4.request.provider_wire_payload
+  reason: mock transport request identity is diagnostic control state, not provider payload
+- from: v4.cli.command_intent
+  to: v4.request.provider_wire_payload
+  reason: CLI command intent is control-only and must never enter provider payload
+- from: v4.cli.command_intent
+  to: v4.response.client_wire_payload
+  reason: CLI command intent is control-only and must never enter client payload
+- from: v4.lifecycle.instance_state
+  to: v4.request.provider_wire_payload
+  reason: managed instance state is control-only and V4-local
+- from: v4.lifecycle.instance_state
+  to: v4.response.client_wire_payload
+  reason: managed instance state must never enter client payload
+- from: v4.lifecycle.control_socket
+  to: v4.request.provider_wire_payload
+  reason: lifecycle control transport must never enter provider payload
+- from: v4.lifecycle.control_socket
+  to: v4.response.client_wire_payload
+  reason: lifecycle control transport must never enter client payload

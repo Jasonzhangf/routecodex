@@ -1,0 +1,40 @@
+version = 3
+
+[features]
+responses_direct = false
+debug_events = true
+
+[debug]
+log_console = true
+snapshots = true
+dry_run = true
+retention = { raw_requests = 4, raw_responses = 4, events = 64 }
+
+[error.policies.pending_endpoint]
+action = "project_client_error"
+
+[servers.p2_primary]
+bind = "127.0.0.1"
+port = 45444
+routing_group = "default"
+endpoints = ["responses", "anthropic", "openai_chat", "gemini"]
+
+[servers.p2_secondary]
+bind = "127.0.0.1"
+port = 45445
+routing_group = "default"
+endpoints = ["responses", "anthropic", "openai_chat", "gemini"]
+
+[providers.placeholder]
+enabled = false
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "placeholder"
+auth = { type = "api_key", entries = [{ alias = "placeholder", env = "ROUTECODEX_V3_PLACEHOLDER_KEY" }] }
+
+[providers.placeholder.models.placeholder]
+capabilities = ["text"]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "placeholder", model = "placeholder", key = "placeholder", priority = 1 }]

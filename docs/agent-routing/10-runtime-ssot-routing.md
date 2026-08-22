@@ -1,0 +1,158 @@
+# 运行时与真源边界路由
+
+## 索引概要
+- L1-L7 `scope`：覆盖范围。
+- L9-L18 `ssot`：核心真源与禁止事项。
+- L20-L27 `layer-responsibility`：三层职责。
+- L28-L31 `hubpipeline-judgment`：HubPipeline TS 违规三层判定（可执行判定标准）。
+- L33-L44 `hubpipeline-index`：HubPipeline TS 真源归属路径索引。
+- L46-L48 `authoritative-docs`：权威文档索引。
+
+## 覆盖范围
+适用于：路由语义、tool 治理、pipeline 编排、provider 传输层边界类改动。
+
+## 修改前硬性查询（写死）
+
+涉及运行时实现的任务，进入 10-runtime-ssot-routing 前必须先完成这组固定查询：
+
+1. `docs/agent-routing/05-foundation-contract.md`
+2. `docs/architecture/function-map.yml`（查 feature_id、owner module、allowed/forbidden paths）
+3. `docs/architecture/mainline-call-map.yml`（查主线边与 caller/callee）
+4. `docs/architecture/verification-map.yml`（查最小验证栈）
+5. `docs/architecture/wiki/mainline-call-graph.md`（查节点闭环）
+6. 对应主线实现源文件（`entrypoint` 与 `source_anchor` 指向路径）
+
+上述任意一步没拿到清晰唯一定位时，**不得**改实现；应先补齐 map/contract 再继续。
+
+## 真源与禁止事项
+1. 路由与工具语义真源：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/`。
+2. Host 仅做编排与桥接，不重写 llmswitch 语义。
+3. Provider 仅做 transport/auth/retry/compat，不解析业务语义。
+4. 禁止 fallback 兜底和“跨层补一版逻辑”。
+5. 执行期错误策略真源归 `Virtual Router policy`；禁止再保留独立 `error-handling center` / event bus 第二中心。`RequestExecutor` 与 `servertool engine` 只能消费 Router decision，不得各自重写 retry/reroute/backoff/fail 语义。
+6. 文本工具 harvest 必须容器优先：先识别并 mask wrapper/fence，再解析内部顶层工具壳；正文 prose/shell/patch body 只保留或透传，不得参与猜测式恢复。
+7. Provider-specific 提示词只允许调整“上游怎么吐”，不能在 Provider 层重写 harvest 语义；真正的收割边界仍在 chat-process Rust 真源。
+8. DeepSeek tools 的当前主路径真源仍是**文本 fence / 文本工具壳**；不要把“要求 upstream 直接输出原生标准 function call”当成主策略。允许客户端侧桥接成标准 `function_call`，但 provider upstream 仍按文本协议治理与验收。
+9. direct/provider-direct/router-direct 的唯一职责是 same-protocol provider passthrough + hooks：直接使用当前 request body 对象，不 clone，不从 `metadata.__raw_request_body`/snapshot/context 恢复，不调用 direct body builder / provider outbound sanitizer / runtime tool validator，不用 `providerPayload` 重建或覆盖 body。允许的最小覆盖只能作用当前 request/delta 顶层，禁止重写 `input/messages/history` 既有条目。Responses 历史合法性只能在 Hub/Responses conversation store owner 修复。
+10. relay/Responses continuation 只能在合法 persisted prefix 后追加当前 incoming delta；不得改 persisted prefix/basePayload，不得把 route/model 覆盖回写 cached history。非纯 delta、部分重放 prefix、已完成 call_id 重放必须显式拒绝/返回 null，禁止猜测修历史。
+
+## 修改前定位
+
+- 任何会改实现的任务，先查 `docs/architecture/function-map.yml`、`docs/architecture/mainline-call-map.yml`、`docs/architecture/verification-map.yml`。
+- 先锁唯一 owner、允许路径、禁止路径、主线 caller/callee、required gates，再进入代码。
+- 先读 mainline source，再动实现；不允许只靠 grep 末端报错补丁式修复。
+
+## 验证后 review
+
+- 验证通过后必须做架构 review。
+- 必查项：结果是否正确、实现层是否正确、是否用了 fallback、是否做了临时绕路、是否把补丁当根治、是否出现结果正确但架构错误。
+- 若架构 review 不过，不能把验证结果当成最终完成。
+
+## 三层职责（Block / App / UI）
+- Block：基础能力唯一真源。
+- App：只编排，不重写 Block 细节。
+- UI：只展示状态，不承载业务规则。
+
+
+## HubPipeline TS 违规三层判定
+
+### 判定顺序（依次，命中即停）
+
+**① 被 pipeline stage index.ts 直接调用的 TS 函数（非薄壳）→ 违规，必须在 Rust**
+
+pipeline stage 文件（`stages/req_inbound/.../index.ts`、`stages/req_process/.../index.ts`、`stages/resp_process/.../index.ts` 等）调用的 TS 函数，如果该函数自身包含：
+- 对 messages/payload/tool_calls 的遍历、过滤、归一、删除等语义变换
+- 不是仅做 JSON parse/serialize 包装
+- 不是仅做类型边界转换
+
+→ 违规。必须将语义迁入 Rust，TS 仅保留调用壳。
+
+**② 直接 transform request/response messages / tool_calls / payload 字段的 TS 代码 → 违规**
+
+即使该函数只被其他 TS 模块调用，不直接出现在 pipeline stage index，只要它：
+- 对 message.content / tool_calls / payload 字段做删除、过滤、归一、重写
+- 包含硬编码规则（如模板文本、字段名映射、空值判断）
+
+→ 违规。应审视调用链后迁 Rust。
+
+**③ 编排逻辑（选择/组合 native 调用 + 副作用调用） → 可接受，但需满足**
+
+- 纯调度：决定"哪个 native 函数在哪个条件分支被调用"
+- 无 payload 语义变换：不在编排层对消息内容做变换
+- 至少一层走 native：编排分支中必有 `*WithNative()` 调用
+- 有测试覆盖
+
+不满足以上三条的编排 TS 也应收缩。
+
+### Native Host Wrapper 允许特征
+以下形式均属可接受薄壳：
+```ts
+// 仅 JSON parse/serialize 包装
+export function fooWithNative(input: SomeType): OtherType {
+  return JSON.parse(nativeFoo(JSON.stringify(input))) as OtherType;
+}
+
+// 仅类型边界转换
+export function bar(input: UnknownInput): KnownOutput {
+  return nativeBar(input) as KnownOutput;
+}
+
+// 单行 return native 调用
+export function baz(opts: Opts) { return nativeBaz(opts); }
+```
+
+### HubPipeline TS 真源归属（路径索引）
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_response_compat.rs` → 消息过滤、空 assistant 过滤、mirror 检测、tool_call id 归一
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs` → req_process 工具治理主入口
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs` → resp_process 工具治理主入口
+- `src/modules/llmswitch/bridge/*.ts` → Host/N-API 调用薄壳，仅允许 IO、导入、参数打包和 fail-fast native 调用
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-*.ts` → 已退休 source-side native TS wrapper 面；不得恢复为 runtime 真源或测试入口
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/**` → VR runtime 唯一真源；former source-side VR TS runtime root 禁止复活
+
+## 权威文档索引
+- `docs/ARCHITECTURE.md`
+- `docs/error-handling-v2.md`
+- `docs/routing-instructions.md`
+
+## 架构索引与门禁
+- 关键功能定位先查 `docs/architecture/function-map.yml`
+- 主线 caller/callee 与 facade/runtime/typed-contract 分层先查 `docs/architecture/mainline-call-map.yml`
+- 最小验证栈先查 `docs/architecture/verification-map.yml`
+- 路径索引先查 `docs/architecture/wiki/README.md`
+- Mermaid review 面查 `docs/architecture/wiki/mainline-call-graph.md`
+- 架构规则先落模板，再升为门禁；至少保持以下验证栈可用：
+  - `npm run verify:architecture-ci`
+  - 逐项排查时再拆跑单项 gate：
+  - `npm run verify:architecture`
+  - `npm run verify:function-map-coverage`
+  - `npm run verify:function-map-paths`
+  - `npm run verify:function-map-boundary-mentions`
+  - `npm run verify:function-map-owner-uniqueness`
+  - `npm run verify:function-map-canonical-builder-definitions`
+  - `npm run verify:function-map-forbidden-mentions`
+  - `npm run verify:function-map-required-tests`
+  - `npm run verify:architecture-fallback-denylist`
+  - `npm run verify:architecture-feature-id-anchors`
+  - `npm run verify:architecture-nonadjacent-conversion`
+  - `npm run verify:architecture-feature-anchor-coverage`
+  - `npm run verify:architecture-duplicate-dto-patterns`
+    - `HubReq* / HubResp* / VrRoute* / ErrorErr*` 禁止 warning-only 重复；Rust truth、TS alias、本地 envelope 同名都直接失败
+  - `npm run verify:architecture-provider-specific-leaks`
+  - `npm run verify:architecture-thin-wrapper-only`
+  - `npm run verify:architecture-metadata-leak-boundary`
+  - `npm run verify:architecture-error-chain-bypass`
+  - `npm run verify:architecture-owner-queryability`
+  - `npm run verify:architecture-mainline-call-map`
+  - `npm run verify:architecture-mainline-mermaid-sync`
+  - `npm run verify:architecture-feature-map-growth-discipline`
+  - `npm run verify:architecture-forbidden-path-growth`
+  - `npm run verify:architecture-adjacent-builder-naming`
+  - `npm run verify:architecture-snapshot-stage-contract`
+- 相关真源：
+  - `docs/architecture/README.md`
+  - `docs/architecture/wiki/README.md`
+  - `docs/architecture/wiki/mainline-call-graph.md`
+  - `docs/architecture/function-map.yml`
+  - `docs/architecture/mainline-call-map.yml`
+  - `docs/architecture/verification-map.yml`
+  - `docs/architecture/snapshot-stage-contract.md`

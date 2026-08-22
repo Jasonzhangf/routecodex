@@ -1,0 +1,230 @@
+# RouteCodex Project AGENTS（入口与路由索引）
+
+## 核心架构概要（Project Essence — 先记忆，再路由）
+
+本项目本质是一个**多协议、多入口的代理网关（Proxy）**，核心原则：**保持原意，只做必要修改**。
+
+- **不重写历史**：对话历史不可显式扭曲/篡改——历史轮的任何修改在下一轮仍会原样重现，修改既无意义也有害；既有历史污染不可逆，不做清理。
+- **不在请求侧清洗**：几乎不清理请求内容；只做当前轮必要的归一化，请求侧 cleanup 是禁止项。
+- **在响应进入客户端前治理**：所有治理发生在响应进入客户端之前，让当前轮以正确形态进入历史；不在历史轮补修改。
+- **先归一化，再治理**：多协议（OpenAI Chat / Responses / Anthropic / Gemini / …）请求与响应先归一化为 Hub 规范形态；归一化前、后都不做任何语义处理，只在归一化后的 **Chat Process** 内做工具治理、响应治理、continuation、stopless/servertool。
+- **控制面与数据面物理隔离**：routing / switching / continuation / retry / health / error / scope / stopless 等控制语义只走 typed side-channel / 控制资源 / Error 链，绝不进入业务 payload；控制状态按 session/request 隔离，泄漏在 owning boundary fail-fast。
+
+## P0 Architecture Guard（先于路由、搜索和实现）
+- P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script 做跨文件/同一文件多位置语义批量替换；每个目标文件必须逐文件读取核实上下文，再用可审查的 apply_patch hunk 手工修改；formatter/canonical generator 仅可生成其声明的机械生成产物，不得语义改写。
+- P0 控制面与业务 payload 物理隔离：routing、switching、continuation、retry、provider selection、health、debug、snapshot、error、scope、Stopless/servertool 状态只能走 typed side-channel、MetadataCenter 控制资源或 Error 链；绝不能进入 payload；发现泄漏必须 fail-fast at owning boundary。
+- 禁止 silent strip、请求侧 cleanup、handler/SSE/outbound 补偿；payload 不得重建控制状态；Stopless 仅保留已登记的同轮 Req04 注入与 Resp03 provenance 剥离例外。
+- 模块定义、owner、allowed/forbidden paths、相邻调用边、资源关系和方案越界必须先审；写完检查实际 diff 越界，再做功能验证，最后才 code review。
+- 泄漏必须在 owning boundary fail-fast；禁止 silent strip 和请求侧 cleanup。
+
+## 全局硬护栏（Hard Guards）
+0. **P0 禁止脚本批量替换**：绝对禁止用 Python / Node / Perl / `sed` / `awk`、临时脚本、shell loop、正则替换命令、编辑器宏或生成式 transformation script，对跨文件或同一文件多位置执行语义批量替换。每个目标文件必须先读取并核实上下文，再用明确、可审查的 `apply_patch` hunk 手工修改。仅允许项目既有 formatter / canonical generator 生成其声明的机械或生成产物；不得借此做语义改写。此禁令先于任何 skill 路由、代码搜索和实现；下层规则只能收紧，不能覆盖。
+0. **P0 控制语义绝不进入业务 payload（路由前生效）**：routing / switching / continuation / retry / provider selection / health / debug / snapshot / error / scope / StoplessCenter 状态 / servertool 状态等 RouteCodex 控制语义只能存在于 typed carrier、MetadataCenter 控制资源或 Error 链，绝不能写入、镜像到或借协议 `metadata` 混入 provider/client 正常 request/response payload；业务 payload 也不得重建控制状态。**Stopless 当前轮协议投影不是误注入**：仅 Rust Chat Process Req04 可按同轮、同 scope、已登记的 Stopless 设计向当前轮 provider 请求注入透明 guidance/tool/action；仅 Resp03 可按同轮 provenance 剥离对应内部 action/result 并推进 MetadataCenter。该例外不允许控制状态字段进入 payload，不允许修改历史，不允许在 Resp04 save 到下一轮 Req04 restore 的不可变区执行 Stopless 语义，也不允许 handler/SSE/outbound/provider runtime 补偿。任何 worker 在查路由、读 map、搜索代码或修改前先执行本条；下层 skill/路由文档只能收紧，不能覆盖。
+0a. **P0 模块边界审查顺序（路由前生效）**：写代码前必须读取本次涉及模块在 `v3-resource-operation-map.yml`、`v3-function-map.yml`、`v3-mainline-call-map.yml`、module registry、`v3-verification-map.yml` 中的精确定义，列清 owner、`owned_paths` / allowed / forbidden paths、相邻 caller/callee 和允许/禁止资源边；先审查方案是否越界，未通过禁止实现。写完后先按同一定义做模块越界自检，再跑功能验证；运行时改动再完成全局安装、聚合重启和在线旧样本；最后才运行 code review。Review 必须逐模块检查越界，禁止用测试通过或 reviewer PASS 替代架构边界证据。
+1. **单一路径真源**：`HTTP server -> llmswitch-core Hub Pipeline -> Provider V2 -> upstream`，禁止旁路。
+2. **llmswitch-core 主导工具与路由**：Host/Provider 不得重建工具治理与路由语义。
+3. **Rust runtime 语义真源**：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/`。
+4. **Fail-fast + no fallback**：严禁一切 fallback/降级/兜底逻辑，错误必须显式暴露，禁止静默失败。
+5. **先验证后结论**：无文件/日志/测试证据，不得宣称完成。
+6. **非授权不破坏**：未获明确授权，不做删除/回滚/迁移/发布类破坏动作。
+7. **禁止进程杀戮命令**：禁用 `kill/pkill/killall/taskkill/lsof|xargs kill` 等。
+8. **llmswitch-core 禁止新增 TS 功能代码**：如有必要，一律转为 Rust 实现，TS 仅允许保留最小调用壳层。
+9. **Hub Pipeline / Chat Process 必须 Rust-only**：凡属 Hub Pipeline / chat process / req_chatprocess / resp_chatprocess / servertool followup orchestration 的语义、判定、修复、兼容、sanitize、tool list 注入与裁剪，唯一真源必须在 Rust，TS 收缩为薄壳转发。
+10. **只写必要代码，且必须最小合规**：新增/修改代码前，先证明它是完成当前需求所必需的；禁止加入用户未要求、问题未证明需要、或不影响验收的代码。实现必须保持最小合规面，能删则删，能不加就不加。
+ 11. **已移除 provider 禁止复活**：已物理删除的 provider 不得恢复其 runtime、contract、probe、harness、compat profile、fixture、script、test、doc 或 config 入口，除非 Jason 明确授权新 provider 设计。
+ 12. **错误处理硬骨架（2026-06-20 纠偏）**：所有 provider 错误一律可切（含 401/403/INVALID_API_KEY/INSUFFICIENT_QUOTA/ACCOUNT_DISABLED 等）。唯一停止条件：相关可选池 + default 池**同时**为空。`default 池永远不可空` 是配置/VR 真源硬约束（每个 routing group 必须有显式 default fallback tier）。禁止 `router-direct` / `provider-direct` / `RequestExecutor` / provider runtime / `http-error-mapper` 在 `candidateExhausted=false` 或 `defaultPoolAvailable=true` 时 rethrow 或投影 provider error。`client_disconnect` 仍是 health-neutral（不切、不投影 4xx），不属于本骨架覆盖。真源见 `docs/error-handling-v2.md` 与新 `docs/goals/provider-error-reroutable-until-pool-and-default-empty.md`。
+12. **Hub Pipeline / Virtual Router 禁止 provider 特例**：Hub Pipeline 与 Virtual Router 永远只承载协议、路由、工具治理的通用语义；禁止写入任何 provider-specific 分支、shape 修补、上下文补偿或已移除 provider 特例。provider 差异只能在对应 Provider runtime 内解决。
+13. **direct passthrough 禁止换壳转换**：router-direct/provider-direct 的唯一职责是 provider passthrough + hooks；禁止进入 HubPipeline response conversion/chat-process/servertool response orchestration，禁止新增 direct response 专用壳、SSE materialize/remap/canonicalize、fallback/patch/shape 修补；禁止 direct 5xx/转换错误通过 `routecodexSameProtocolDirectDisabled` 重入 executor/reroute。
+14. **Hub Pipeline 流水线锁定原则**：靠“类型不可接 + 运行时必拦 + 导出不可见 + 红测必红”锁住 `req_inbound -> req_chatprocess -> req_outbound -> resp_inbound -> resp_chatprocess -> resp_outbound`，禁止靠约定维护阶段边界；`req_inbound` 是唯一标准化入口，`req_chatprocess` 禁止协议转换，`req_outbound` 是唯一 provider wire build。
+15. **metadata 请求/响应闭环隔离**：metadata 只能作为单个 request/response 闭环内的无状态内部控制语义 carrier；provider 出站 body、provider SDK options、client response body、provider/runtime 持久状态均不得携带内部 metadata。闭环结束必须释放，不得跨 requestId / pipelineId / port(serverId) / sessionId / conversationId 复用或污染。禁止 `body.metadata -> provider options`、`rawBody.metadata -> SDK request`、`payload.metadata.context -> provider wire payload`、snapshot metadata 进入正常 live path。
+16. **全局流水线类型拓扑锁**：请求链、响应链、错误链、metadata carrier、Virtual Router、Provider Runtime、Server Runtime 的关键数据结构必须按“模块 + 阶段 + 节点序号 + 节点语义”唯一命名并唯一拥有；Hub 主链阶段固定为 `ReqInbound` / `ReqChatProcess` / `ReqOutbound` / `RespInbound` / `RespChatProcess` / `RespOutbound`。只允许相邻节点 builder/parser 转换，禁止跨节点 shortcut、同义 DTO、重复 shape、散落 `From` 转换、裸 `unknown`/`Record`/`Value` 承载关键语义。拓扑、命名、插节点规则真源见 `docs/design/pipeline-type-topology-and-module-boundaries.md`。
+17. **错误链唯一入口锁**：provider/runtime/direct/executor 错误必须单向进入 `ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected`；`router-direct` / `RequestExecutor` / provider runtime 只能作为 source/caller，不得本地实现 retry/reroute/cooldown/health policy，不得手拼 provider error event。Direct/Relay/HTTP handler 都必须先持有 typed ErrorErr05 决策再进入 ErrorErr06；禁止 `mapErrorToHttp` 缺失决策 fallback，禁止 `RouteErrorHub` 自行进行 ErrorErr06 HTTP 投影。
+18. **红测→绿化→旧样本在线复测锁**：每次开发新功能或修复缺陷，必须先固化最小 failing sample / red test 并确认当前为红，再修改唯一真源让其转绿；绿化后必须在线重放旧错误样本或同入口真实样本，证明不是只对单测修好的虚假修复。没有“先红”证据或没有旧样本在线复测证据，不得宣称闭环完成。
+19. **Responses continuation 三重隔离锁**：Responses continuation / submit_tool_outputs / scope materialize 必须同时按 `entry protocol(or endpoint)`、`continuationOwner(direct|relay)`、`session/conversation(+port/group)` 建立恢复隔离键。禁止普通 chat/messages 入口命中 responses continuation scope；禁止 direct continuation 续到 relay；禁止 relay continuation 伪装成 direct remote continuation；禁止仅凭 session/scope 命中历史自动续接。
+20. **Responses continuation 不可变区硬锁（高优先级）**：`/v1/responses` continuation 只允许在 **response Chat Process 出口 save**，只允许在 **下一轮 request Chat Process 入口 restore**。从 `resp_chatprocess save` 之后，到下一轮 `req_chatprocess restore` 之前，所有 `resp_outbound` / SSE / server handler / adapter / store transport / `req_inbound` 只能做语义等价归一化、投影、传输、scope 校验和释放；禁止做任何语义转换、上下文恢复、history/tool 修补、tool_call/tool_output 重排、stopless/servertool guidance 注入、required_action 推断、response repair、request rebuild、payload cleanup。这个区间内任何逻辑操作都会造成下一轮中间操作丢失，必须视为架构违规并物理删除。
+21. **live debug 样本/日志入口锁**：运行时排障先看 `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`，再看 `~/.rcc/logs/server-<port>.log`；`port-unknown`、根目录 `req_*`、裸 provider 目录都不是允许长期增长的主路径，验证 canonical `ports/<port>/` 后必须物理清理旧样本。
+22. **live 聚合重启/验证命令锁（用户硬规则，2026-08-11 强化）**：restart identity 是聚合 RouteCodex server instance/process，端口只是 locator 与健康检查入口。**重启只能使用全局安装版本 `routecodex restart`（exec 重启，在原来已经启动的位置原进程替换）**，同一 listener PID 集合只请求一次重启，随后验证配置中的全部成员端口 `/health`。**绝对禁止 `routecodex server stop` / `routecodex server start` / 手动 `start --foreground` / 任何起停组合**——理由：(a) 用户有一个观测窗口在观测 managed server 的实时打印，只有 restart 的 exec 重启保留该窗口；自己 start 的进程输出写到重定向文件，观测窗口看不到；(b) stop 之后 managed instance 状态丢失、在原位置起不来，会直接搞坏用户环境。禁止逐端口循环 restart，禁止把 repo-local `node dist/cli.js start ...`、`routecodex start ...` 或其他 start/node-dist 口径当作交付验证真相。
+23. **多 worker 协作协议入口**：RouteCodex 项目本地协作真源为 `.agent-collab/PROTOCOL.md`。代码/配置/长 gate/合并前先按该协议刷新 runs、claims、handoff、merge-queue 与 kill switch；细节留在协议和 `.agents/skills/rcc-dev-skills/SKILL.md`，不在本入口展开。
+24. **V2 样本/生成物退役锁**：`samples/` 不得作为版本化测试真源或 runtime 输入。迁移旧 golden/regression 时必须把必跑 fixture 放到 git 可跟踪的 `tests/resources/`（不得放入被 `**/fixtures/` 忽略的路径），gate 缺 fixture 或零样本必须 fail-fast；诊断扫描只读 `~/.routecodex/codex-samples` / `golden_samples`，禁止同步回 repo `samples/`。mainline/wiki/manifest 是 canonical generator 产物时，链级不变量必须在 generator owner 中生成；禁止手工修生成物后留下下一次 render 会复发的漂移。
+25. **占位/流水线修改续写式合规锁**：所有占位修改（如历史图片 `[Image]`）与请求/响应转换链修改，必须满足续写式转换要求——请求 N+1 渲染给 provider 的字节序列必须是 [请求 N 渲染字节] + [assistant 回复] + [新轮次] 的精确扩展；转换链必须确定性、同位置字节稳定、客户端回传的 assistant reasoning 必须原样透传 wire `reasoning_content` 不得裁剪。续写缓存验证必须带 reasoning 回传构造（不带回传的 miss 是测试构造错误）；ds4 缓存机制与验证清单见 `.agents/skills/rcc-dev-skills/references/97-continuation-cache-compliance.md`。
+
+## Metadata 生命周期硬边界（醒目）
+1. **入口可读**：req_inbound / adapter 可从当前请求读取 metadata，并绑定 requestId、pipelineId、port/serverId、session/conversation scope。
+2. **内部可用**：Hub Pipeline、Virtual Router、Provider Runtime 可通过 runtime carrier / context side-channel 读取 metadata 作为控制语义（routeHint、entryEndpoint、stream intent、servertool/web_search、snapshot 标签等）。
+3. **出站隔离**：provider HTTP body、SDK request/options、direct passthrough body、Responses/Anthropic/OpenAI/Gemini/Qwen/GLM provider body 不得出现内部 metadata；发现必须 fail-fast，禁止静默删除当作修复。
+4. **响应隔离**：resp_inbound/process/outbound 只能读取同一 requestId/pipelineId 的 metadata；不得把 metadata 注入 client response body。
+5. **闭环释放**：请求/响应闭环完成后 metadata 不得进入全局 singleton、provider health/quota、session cache、port-shared cache、snapshot replay normal path。
+6. **错误模式**：禁止从 `metadata.context` 补 provider payload；禁止从 `metadata.user_id/session_id/conversation_id` 生成上游 body/options；禁止跨端口或跨 session 复用 metadata 对象；禁止把 debug/snapshot metadata 当作 live runtime metadata。
+7. **Responses continuation 隔离模式**：禁止把 `/v1/responses` continuation state 当作普通 chat/messages 会话历史复用；禁止只靠 `sessionId` / `conversationId` 命中旧 continuation；恢复必须同时校验入口协议、continuation owner、port/group scope 与会话 scope。
+8. **Responses continuation 不可变区**：Chat Process 保存后的 continuation 真相到下一轮 Chat Process 恢复前不得被任何 handler/SSE/outbound/inbound/adapter/store transport 改写。这个区间只能传输、投影、释放和做非破坏性 scope/协议校验；不得用 metadata、entryOriginRequest、capturedChatRequest、requestSemantics、session scope 或 response body 去补 history/context/tool 状态。
+9. **请求协议数据与 MetadataCenter 分流**：HTTP headers、请求 body 的标准协议字段、`metadata`、`client_metadata`、`x-*` / `x-codex-*` 等客户端协议字段都属于请求数据面，默认按入口协议语义透传；不得搬入 MetadataCenter 当控制信号，也不得用 MetadataCenter 重建这些协议字段。MetadataCenter 只承载 RouteCodex 自己生成的内部控制信号（route/runtime/stopless/servertool/error/scope 等），且不得混入 provider/client normal payload。
+
+## 标准接口契约流水线图（醒目）
+
+```text
+                         Meta* carrier / ErrorErr* chain / Snapshot* carrier
+                                      (side-channel, never normal payload)
+                                                ^
+                                                |
+Client HTTP
+  |
+  v
+[ServerReqInbound01ClientRaw]
+  |  owner: server adapter / Express route
+  v
+[HubReqInbound02Standardized]
+  |  owner: req_inbound; parse entry protocol, capture context, bind metadata scope
+  v
+[HubReqChatProcess03Governed]
+  |  owner: req_chatprocess; Rust-only tools/reasoning/history governance
+  v
+[VrRoute04SelectedTarget]
+  |  owner: virtual_router; route classify/select only, no payload patch
+  v
+[HubReqOutbound05ProviderSemantic]
+  |  owner: req_outbound; provider semantic envelope only
+  v
+[ProviderReqOutbound06WirePayload]
+  |  owner: provider runtime/outbound codec; provider HTTP body, no internal metadata
+  v
+[ProviderReqOutbound07TransportRequest] ---> upstream provider
+  |                                           |
+  |                                           v
+  |                              [ProviderRespInbound01Raw]
+  |                                           |
+  |                                           v
+  |                              [HubRespInbound02Parsed]
+  |                                           |  owner: resp_inbound; parse provider raw only
+  |                                           v
+  |                              [HubRespChatProcess03Governed]
+  |                                           |  owner: resp_chatprocess; Rust-only tool harvest / servertool followup
+  |                                           v
+  |                              [HubRespOutbound04ClientSemantic]
+  |                                           |  owner: resp_outbound; client protocol projection only
+  |                                           v
+  +----------------------------> [ServerRespOutbound05ClientFrame] ---> Client HTTP/SSE
+```
+
+## 标准错误链契约图（醒目）
+
+```text
+provider/runtime/direct/executor throw
+  |
+  v
+[ErrorErr01SourceRaised]
+  |  owner: error source/caller; raw error + stage + runtime scope only
+  v
+[ErrorErr02HostCaptured]
+  |  owner: src/providers/core/utils/provider-error-reporter.ts
+  v
+[ErrorErr03RuntimeClassified]
+  |  owner: src/providers/core/runtime/provider-failure-policy-impl.ts
+  v
+[ErrorErr04RouterPolicyApplied]
+  |  owner: sharedmodule/llmswitch-core virtual_router_engine / provider-runtime-ingress
+  v
+[ErrorErr05ExecutionDecision]
+  |  owner: request/direct executor consumer; execute Router policy decision only
+  v
+[ErrorErr06ClientProjected]
+  |  owner: HTTP/server error projection only
+  v
+client-visible error
+```
+
+- direct provider 5xx/429/524 必须进入 `ErrorErr02HostCaptured -> ErrorErr04RouterPolicyApplied`；失败仍原样 fail-fast，不得 fallback 成成功。
+- `ErrorHandlingCenter` 只能属于 `ErrorErr06ClientProjected`，禁止进入 provider retry/reroute/cooldown policy。
+- metadata/debug/snapshot/error carrier 不得混入 provider normal request payload 或 client normal response body。
+
+- 图中每个 `[]` 都是唯一接口契约节点；只能相邻转换，禁止跨节点 shortcut。
+- metadata / error / snapshot 永远走图顶 side-channel carrier，不得混入 request/response normal payload。
+- `Virtual Router` 只能消费 `HubReqChatProcess03Governed`，只产出 `VrRoute04SelectedTarget`；不得修 payload、不得处理工具结果。
+- provider runtime 只能消费 `HubReqOutbound05ProviderSemantic` / `ProviderReqOutbound06WirePayload`，不得读取 `rawBody` 重建上下文。
+- direct passthrough 仍必须遵守 provider wire / hooks 边界，禁止重入 Hub response conversion 或 fallback reroute。
+
+## Hub Pipeline 节点职责硬边界（醒目）
+1. **req_inbound**：只做入口协议解析、上下文捕获、原始语义保留和非破坏性归一化；不得恢复 continuation/history/context，不得伪造工具结果，不得吞非法工具顺序，不得注入 stopless/servertool guidance。
+2. **req_chatprocess**：请求侧工具治理和 continuation restore 唯一入口；工具声明注入/裁剪、文本工具 harvest、apply_patch/servertool/MCP/native 工具治理、下一轮 Responses continuation 恢复必须 Rust-only。
+3. **virtual_router**：只做路由分类与目标选择；不得修补 payload、不得处理工具结果、不得读取别的端口或别的路由池状态。
+4. **req_outbound**：只把 Hub 规范语义编码成 provider 协议；不得把 `tool_calls` / `function_call_output` / servertool 语义降级为普通文本。
+5. **provider_runtime**：只做 transport/auth/provider 内部协议兼容；不得承担 Hub 工具治理，provider-specific 差异不得写入 Hub Pipeline。
+6. **resp_inbound**：只把 provider 原始响应解析回 Hub 规范响应；SSE/JSON 解析失败必须显式错误。
+7. **resp_chatprocess**：响应侧工具治理和 continuation save 唯一入口；文本工具收割、servertool followup、apply_patch 逆向转换、internal tool 剥离、Responses continuation 保存必须 Rust-only，且必须在进入 `resp_outbound` 前完成。
+8. **resp_outbound**：只把 Hub 响应投影回客户端入口协议；不得保存 continuation，不得恢复/修复请求侧历史污染，不得 provider 特例，不得 required_action/tool_call 语义判断，不得吞上游错误。
+9. **servertool_followup**：只能基于 origin snapshot 重建 followup；只能走 relay Hub Pipeline 单次复入；不得进入 router-direct/provider-direct 预跑或直通；不得从当前污染 payload 猜测补偿。servertool 只代客户端执行本地工具，不拥有专用响应出口；followup 响应必须按 provider/model -> `RespInbound` -> `HubRespChatProcess03Governed` -> `HubRespOutbound04ClientSemantic` -> client 的正常响应链返回。
+10. **审计真源**：完整执行文档见 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
+11. **Responses continuation owner**：`buildChatRequestFromResponses` 等 bridge 只负责已确认的 Responses continuation 协议转换，不负责 scope/owner 判定。entry/owner 隔离必须在 Chat Process continuation store / restore / materialize owner 层完成；桥层收到 owner 不匹配或缺失 `fullInput` 时必须 fail-fast。
+12. **Responses continuation 不可变区 owner**：`resp_chatprocess save -> immutable store interval -> req_chatprocess restore` 是唯一合法生命周期。`resp_outbound`、SSE、server handler、provider-response converter、adapter context、`req_inbound`、store transport 都不得在这个区间做语义转换或上下文恢复；发现 `entryOriginRequest` / `capturedChatRequest` / `requestSemantics` / session-only scope 被用作 continuation 恢复依据时，先按越界逻辑删除，再回 Chat Process owner 修正。
+
+## 全局流水线类型拓扑（醒目）
+1. **双向链条固定**：请求链必须从 `ServerReqInbound01ClientRaw` 单向进入 Hub/VR/Provider；响应链必须从模型/provider 端的 `ProviderRespInbound01Raw` 单向进入 Hub，再经 `HubRespOutbound04ClientSemantic` 出到 `ServerRespOutbound05ClientFrame`；`RespInbound/RespOutbound` 均以 Hub 为参照。错误链必须从发生点进入统一错误 pipeline，不得反向补请求 payload。
+2. **命名模板固定**：`<Module><Phase><NN><Node>`，例如 `HubReqInbound02Standardized`、`HubReqChatProcess03Governed`、`VrRoute04SelectedTarget`、`ProviderReqOutbound06WirePayload`、`ServerRespOutbound05ClientFrame`、`ErrorErr03RuntimeClassified`。
+3. **节点序号是位置**：序号表达拓扑位置，不表达版本；新增中间节点默认禁止。确需新增时必须先更新 `docs/design/pipeline-type-topology-and-module-boundaries.md`，优先归入既有节点内部 block / carrier；禁止重编号既有节点，禁止 `03b` / `03_1` / `03.5` 临时编号。
+4. **唯一 builder/parser**：每个节点类型只能有一个 owning builder/parser；转换函数必须写明相邻来源和目标，如 `build_hub_req_chatprocess_03_from_hub_req_inbound_02`。
+5. **禁止跨链污染**：metadata、error、debug/snapshot、provider runtime state 都不能伪装成 req/resp 正常 payload；进入下一链路前必须经对应 carrier 类型或错误类型显式投影。
+6. **红测锁边界**：所有关键链路必须有红测扫描非相邻转换、内部字段泄漏、重复 DTO、旧 TS 语义壳复活；红测路径和禁止模式写入拓扑文档。
+
+## 分类路由（按需跳转）
+1. 入口总览：`docs/agent-routing/00-entry-routing.md`
+2. 运行时与架构真源：`docs/agent-routing/10-runtime-ssot-routing.md`
+3. 构建/验证/发布：`docs/agent-routing/20-build-test-release-routing.md`
+4. servertool / stopMessage / stopless followup：`docs/agent-routing/30-servertool-lifecycle-routing.md`
+5. 任务跟踪与记忆：`docs/agent-routing/40-task-memory-routing.md`
+6. 权威细节文档：
+   - `docs/ARCHITECTURE.md`
+   - `docs/error-handling-v2.md`
+   - `docs/routing-instructions.md`
+   - `docs/stop-message-auto.md`
+   - `docs/design/servertool-stopmessage-lifecycle.md`
+   - `docs/design/pipeline-type-topology-and-module-boundaries.md`
+
+## Debug 优先级（强制）
+1. 任何 debug / 设计 / 生命周期问题，先读 `.agents/skills/rcc-dev-skills/SKILL.md`。
+2. 若涉及 `servertool / stopless / continuation / reasoningStop / tool governance / hook restore / schema gate`，必须按优先级继续读：
+   - `references/95-v3-stopless-sop.md`
+   - `references/25-protocol-sse-continuation-boundary.md`
+   - `references/24-node-contract-debug-method.md`
+   - `references/22-servertool-hook-skeleton-workflow.md`
+   - `references/23-servertool-hook-dev-debug-flow.md`
+3. 先查 `function map + owner registry + verification map`，确认唯一 owner、允许路径、required gates。
+4. 再查 `mainline source + wiki + manifest`，先判断生命周期、节点合同、正常/错误/超预期路径是否逻辑闭环。
+5. 只有在合同闭环正确后，才允许查实现、补白盒/黑盒、改代码。
+6. 若 `function map` / `mainline` / `wiki` 无法在 1-2 次查询内定位唯一 owner 或唯一调用边，先补 map/contract，再改代码。
+7. 禁止跳过上述顺序直接 grep 后改实现；这种改法视为违规捷径。
+
+## 标准执行顺序
+1. 读本文件（项目入口 + 护栏）。
+2. 读 `docs/agent-routing/05-foundation-contract.md`，先锁完成合同与证据门槛。
+3. 读 `docs/agent-routing/00-entry-routing.md` 选路。
+4. 如属 debug / 生命周期 / 架构问题，先进入 `.agents/skills/rcc-dev-skills/SKILL.md`，再按其路由表选引用文件。
+5. 打开对应路由文档与相关 skill 文档执行。
+6. 任何会改实现的任务，先查 `function map` / `mainline call map` / `verification map` / `mainline source` / `wiki`，锁唯一 owner 与边界，再动手。
+7. 验证结束后做 architecture review，检查是否正确但架构错误、是否 fallback、是否临时绕路、是否补丁式修复。
+8. 执行后先检查相关 skills 是否已经覆盖这次用到的流程和经验；缺少则按项目 skill 规则沉淀，再回报。
+9. 执行后用证据回报：变更、验证、剩余缺口、下一步。
+
+## 维护原则
+- 本文件保持短小：只保留入口、护栏、路径。
+- 细节写到 `docs/agent-routing/*` 或技能文档，不回灌本文件。
+
+## 当日事实更新（2026-05-27）
+1. 5555 主备问题当前已证实：Rust Virtual Router 的 priority 选路语义正常；“主 provider 未命中”优先排查 health/quota/runtime init 状态，不先改 selection。
+2. provider health/cooldown 持久化已废弃：`__http_503_daily_cooldown__`、`provider-health.json`、`providerCooldowns` 不得作为启动或路由真相；重启必须无条件清空 provider cooldown，真实请求失败后只写进程内健康状态。
+3. 启动排障必须区分：`checkHealth=false`、`VR success hook 不可用`、`success 后再次失败重写冷却` 三个分支；不得混为“路由器错误”。
+4. 本项目该类问题调试先看 `.agents/skills/rcc-dev-skills/references/91-lessons-2026-05.md` 的 `L91-01` 与 `L91-06`，再执行改动。
+5. 错误处理主链真相：provider/local error 先归一到 `src/providers/core/runtime/provider-error-catalog.ts`，再进入 `provider-failure-policy-impl.ts` 分类；`request-retry-helpers` / `request-executor-retry-decision` / `request-executor-session-storm-backoff` / `retry-engine` 只消费统一码与分类结果，禁止新增 message-only 分叉。
+6. Provider 模型名双轨契约（2026-06-12）：`provider.models.<modelId>` 的 key 即唯一 upstream/provider wire model 名；`aliases` 仅供客户端可见模型名和客户端入口匹配使用。`/v1/models` 可以展示 alias（无 alias 时展示 `modelId`），但 provider 出站请求里的 `body.model` 必须始终回写为 `modelId`，禁止把 alias 直接发给上游。
+7. Responses continuation 契约（2026-06-12）：remote/upstream-owned `responseId/previous_response_id` 必须记 `continuationOwner=direct` 并沿 same-protocol direct 续接；本地 relay/materialize 生成的 continuation id 必须记 `continuationOwner=relay` 并只走 relay。`store:false` 不得阻止同一 response 的 tool continuation 持久化；response 侧若仍有 pending tool call，必须以 response 真相将 `allowContinuation=true`。`providerKey` 只能存在于 runtime/meta carrier 做 direct pin，禁止写回 resumed/materialized provider payload。
+8. 2026-06-26 `~/.rcc` 5555 多服务器恢复事实：`forwarder.targets[].modelId/model` 只能作为与 `forwarder.model` 一致的别名校验位，不能替代 forwarder.model；恢复多服务器时先修 config 真值，再用真实启动验证，不要把不存在的 `cc` provider 目录当成有效 target。
+8. Responses continuation 隔离补充（2026-06-13）：continuation 恢复键必须同时锁 `entry protocol/endpoint + continuationOwner + session/conversation(+port/group)`；不能只靠 session scope materialize。普通 `/v1/chat/completions` / `/v1/messages` 入口命中到 Responses continuation 时必须显式拒绝，而不是桥接补偿；`buildChatRequestFromResponses` 只消费已确认属于 Responses owner 的 `fullInput`。
+9. Codex 模型能力真源补充（2026-06-21）：`/v1/models` 不是可选展示面，而是 Codex 的模型目录与模型级能力真源。对 `/v1/responses` 路径，Codex 会从 `/v1/models` 的 `ModelInfo` 读取 `supports_reasoning_summaries`、`support_verbosity`、`supports_parallel_tool_calls`、`context_window/max_context_window`、`supports_search_tool`、`use_responses_lite`、`tool_mode`、`input_modalities` 等字段来构造 runtime 请求；`modelProvider/capabilities/read` 只返回 provider 级布尔值（`namespace_tools/image_generation/web_search`），不能替代 `/v1/models`。因此若要让 Codex 对某模型（如 `gpt-5.5`）获得完整能力，`/v1/models` 必须稳定列出该模型并返回完整 `ModelInfo`；否则只会落到 fallback metadata，不能视为“完整能力可用”。
+
+## 2026-06-05 硬编码 + Fallback 架构收口引用
+
+- 本规则的 **执行规范、门禁、白名单** 由 `docs/goals/hardcode-fallback-arch-audit-plan.md` 细化；SSOT 迁移 (constants / 错误码 / provider key 抽象) 必须按 plan §7 阶段顺序推进。
+- 物理删除铁律 (项目级): 迁出后旧 Set / 旧 `if` 块 / 旧常量字符串必须删除；保留必须经 `silent-failure-audit.mjs` + `hardcode-audit.mjs` 报警并写理由；不得用"不接入 / 不调用 / 注释掉 / 闲置"代替删除。
+- Provider 特例唯一允许位置: Provider runtime。Hub Pipeline / Virtual Router / RequestExecutor 禁 provider key 字符串前缀特判；改用 `providerFamily` / runtime identity 抽象。
+- Rust runtime: 不得用 provider key 前缀特判 persisted 503 family cleanup；必须使用通用 provider-family cleanup 语义。
+- 红测先行: 每个 Phase 必须有红测先红后绿；TS 端参考 `tests/server/runtime/http-server/phase3-provider-family-abstraction.red.spec.ts`；Rust 端用 provider-family cleanup 双向 fixture 锁住不串台。
+- 完成标准 5 验证: `pnpm run verify:hardcode` 必须 PASS; `silent-failure-audit.mjs` 命中数 < 488 (基线) 且 < 后续 Phase 4 后的新基线。
+- SSE / transport 日志只能当证据，不能当语义 owner；与更高层 regression 重叠的日志型测试应优先物理删除，避免在 handler/outbound 再补第二套“日志即真相”的断言。

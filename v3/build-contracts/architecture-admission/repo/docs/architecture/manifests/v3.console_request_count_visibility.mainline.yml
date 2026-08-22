@@ -1,0 +1,78 @@
+lifecycle_id: v3.console_request_count_visibility.mainline
+summary: One aggregate-owned request counter handle is shared by every listener,
+  and one atomic V3 request identity allocation carries total and local-day
+  counts into both human request and terminal response headlines.
+owner_feature_id: v3.console_request_count_visibility
+entrypoint:
+  node_id: V3RequestCounter01AggregateOwned
+  wiki_page: null
+  call_map_chain_id: v3.console_request_count_visibility.mainline
+node_ids:
+  - V3ConsoleReq02HumanBlock
+  - V3ConsoleResp03HumanBlock
+  - V3RequestCounter01AggregateOwned
+  - V3RequestCounter02ListenerShared
+  - V3RequestIdentity03Allocated
+edges:
+  - step_id: v3-console-count-01
+    from_node: V3RequestCounter01AggregateOwned
+    to_node: V3RequestCounter02ListenerShared
+    status: anchored
+    owner_feature_id: v3.console_request_count_visibility
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes: []
+      produces:
+        - v3.server.request_identity
+      side_channel_reads: []
+      side_channel_writes:
+        - v3.server.request_identity
+  - step_id: v3-console-count-02
+    from_node: V3RequestCounter02ListenerShared
+    to_node: V3RequestIdentity03Allocated
+    status: anchored
+    owner_feature_id: v3.console_request_count_visibility
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.server.request_identity
+      produces:
+        - v3.server.request_identity
+      side_channel_reads:
+        - v3.server.request_identity
+      side_channel_writes:
+        - v3.server.request_identity
+  - step_id: v3-console-count-03
+    from_node: V3RequestIdentity03Allocated
+    to_node: V3ConsoleReq02HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_request_count_visibility
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.server.request_identity
+      produces: []
+      side_channel_reads:
+        - v3.server.request_identity
+      side_channel_writes: []
+  - step_id: v3-console-count-04
+    from_node: V3RequestIdentity03Allocated
+    to_node: V3ConsoleResp03HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_request_count_visibility
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.server.request_identity
+      produces: []
+      side_channel_reads:
+        - v3.server.request_identity
+      side_channel_writes: []
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

@@ -1,0 +1,1506 @@
+// feature_id: v3.v2_config_toml_compat_5555
+use crate::{
+    provider_directory::{V3Config02AuthoringResolved, V3ProviderDirectorySource},
+    validation, V3Config02AuthoringParsed, V3ConfigError, V3ForwarderAuthoringConfig,
+    V3ForwarderTargetAuthoringConfig, V3PipelinesAuthoringConfig, V3ProviderAuthAuthoringConfig,
+    V3ProviderAuthEntryAuthoringConfig, V3ProviderAuthType, V3ProviderAuthoringConfig,
+    V3ProviderConcurrencyAuthoringConfig, V3ProviderHealthAuthoringConfig,
+    V3ProviderModelAuthoringConfig, V3ProviderRequestCleanupAuthoringConfig,
+    V3ProviderResponsesAuthoringConfig, V3ProviderSemanticErrorPolicyAuthoringConfig,
+    V3ResponsesTransportKind, V3RouteGroupAuthoringConfig, V3RoutePoolAuthoringConfig,
+    V3RoutePoolMatchAuthoringConfig, V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind,
+    V3SelectionPolicy, V3SelectionStrategy, V3ServerAuthoringConfig, V3StreamingPolicy,
+    V3WebSearchExecutionMode,
+};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::Path;
+use std::sync::LazyLock;
+
+/// provider per-request 总超时默认值（毫秒）：300s。
+pub(crate) const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 300_000;
+
+pub(crate) fn compile_v2_config_02_authoring_from_file(
+    config_path: &Path,
+    raw: &str,
+) -> Result<Option<V3Config02AuthoringResolved>, V3ConfigError> {
+    if !looks_like_v2_root(raw) {
+        return Ok(None);
+    }
+    let root: V2RootConfig = toml::from_str(raw)?;
+    if root.version.trim() != "2.0.0" {
+        return Err(validation(format!(
+            "v2 config root version {} is unsupported",
+            root.version
+        )));
+    }
+    if root.virtualrouter_mode.as_deref() != Some("v2") {
+        return Err(validation(
+            "v2 config root must declare virtualrouterMode = \"v2\"",
+        ));
+    }
+    let config_dir = config_path.parent().ok_or_else(|| {
+        validation(format!(
+            "v2 config path {} has no parent directory",
+            config_path.display()
+        ))
+    })?;
+    compile_v2_root(config_dir, root).map(Some)
+}
+
+fn looks_like_v2_root(raw: &str) -> bool {
+    raw.contains("version = \"2.0.0\"")
+        || raw.contains("version='2.0.0'")
+        || raw.contains("virtualrouterMode = \"v2\"")
+        || raw.contains("virtualrouterMode='v2'")
+        || raw.contains("[httpserver]")
+        || raw.contains("[virtualrouter]")
+}
+
+fn compile_v2_root(
+    config_dir: &Path,
+    root: V2RootConfig,
+) -> Result<V3Config02AuthoringResolved, V3ConfigError> {
+    let router_ports = root
+        .httpserver
+        .ports
+        .into_iter()
+        .filter(|port| port.mode.as_deref().unwrap_or("router") == "router")
+        .collect::<Vec<_>>();
+    if router_ports.is_empty() {
+        return Err(validation("v2 config has no router httpserver.ports"));
+    }
+
+    let mut referenced_forwarders = BTreeSet::new();
+    for port in &router_ports {
+        let group_id = port.routing_policy_group.as_deref().ok_or_else(|| {
+            validation(format!(
+                "v2 router port {} missing routingPolicyGroup",
+                port.port
+            ))
+        })?;
+        let group = root
+            .virtualrouter
+            .routing_policy_groups
+            .get(group_id)
+            .ok_or_else(|| {
+                validation(format!(
+                    "v2 router port {} references unknown routingPolicyGroup {group_id}",
+                    port.port
+                ))
+            })?;
+        for routes in group.routing.values() {
+            for route in routes {
+                for target in &route.targets {
+                    referenced_forwarders.insert(target.clone());
+                }
+            }
+        }
+    }
+
+    let forwarders = compile_v2_forwarders(&root.virtualrouter.forwarders, &referenced_forwarders)?;
+    let (providers, provider_sources) = compile_v2_providers(config_dir, &forwarders)?;
+    let available_protocols = available_entry_protocols(&providers);
+    let servers = compile_v2_servers(router_ports, &available_protocols)?;
+    let long_context_threshold_tokens = root
+        .virtualrouter
+        .classifier
+        .as_ref()
+        .and_then(|classifier| classifier.long_context_threshold_tokens)
+        .unwrap_or(180_000);
+    let route_groups = compile_v2_route_groups(
+        root.virtualrouter.routing_policy_groups,
+        long_context_threshold_tokens,
+    )?;
+
+    Ok(V3Config02AuthoringResolved {
+        authoring: V3Config02AuthoringParsed {
+            version: 3,
+            pipelines: V3PipelinesAuthoringConfig {
+                hub_v1: Some(crate::defaults::default_hub_v1_authoring()),
+            },
+            servers,
+            providers,
+            forwarders,
+            route_groups,
+            features: BTreeMap::from([
+                ("responses_direct".to_string(), true),
+                ("debug_events".to_string(), true),
+            ]),
+            debug: Default::default(),
+            error: Default::default(),
+        },
+        provider_sources,
+    })
+}
+
+fn compile_v2_servers(
+    ports: Vec<V2HttpServerPort>,
+    available_protocols: &BTreeSet<String>,
+) -> Result<BTreeMap<String, V3ServerAuthoringConfig>, V3ConfigError> {
+    ports
+        .into_iter()
+        .map(|port| {
+            let group = port.routing_policy_group.ok_or_else(|| {
+                validation(format!(
+                    "v2 router port {} missing routingPolicyGroup",
+                    port.port
+                ))
+            })?;
+            let id = port
+                .name
+                .unwrap_or_else(|| format!("v2_router_{}", port.port));
+            let endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
+                .into_iter()
+                .filter(|protocol| available_protocols.contains(*protocol))
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            if endpoints.is_empty() {
+                return Err(validation(format!(
+                    "v2 router port {} has no enabled protocol providers",
+                    port.port
+                )));
+            }
+            Ok((
+                id,
+                V3ServerAuthoringConfig {
+                    enabled: true,
+                    bind: port.host.unwrap_or_else(|| "0.0.0.0".to_string()),
+                    port: port.port,
+                    routing_group: group,
+                    endpoints,
+                    features: BTreeMap::new(),
+                    execution: Some(crate::defaults::default_server_execution()),
+                    expose_models: Vec::new(),
+                },
+            ))
+        })
+        .collect()
+}
+
+fn available_entry_protocols(
+    providers: &BTreeMap<String, V3ProviderAuthoringConfig>,
+) -> BTreeSet<String> {
+    let mut protocols = BTreeSet::new();
+    for provider in providers.values().filter(|provider| provider.enabled) {
+        match provider.provider_type.as_str() {
+            "anthropic" => {
+                protocols.insert("anthropic".to_string());
+                protocols.insert("responses".to_string());
+            }
+            "openai_chat" => {
+                protocols.insert("openai_chat".to_string());
+                protocols.insert("responses".to_string());
+            }
+            "responses" => {
+                protocols.insert("responses".to_string());
+            }
+            "gemini" => {
+                protocols.insert("gemini".to_string());
+            }
+            value => {
+                protocols.insert(value.to_string());
+            }
+        }
+    }
+    protocols
+}
+
+fn compile_v2_forwarders(
+    forwarders: &BTreeMap<String, V2ForwarderConfig>,
+    referenced_forwarders: &BTreeSet<String>,
+) -> Result<BTreeMap<String, V3ForwarderAuthoringConfig>, V3ConfigError> {
+    referenced_forwarders
+        .iter()
+        .map(|id| {
+            let forwarder = forwarders
+                .get(id)
+                .ok_or_else(|| validation(format!("v2 route references unknown forwarder {id}")))?;
+            let strategy = selection_strategy(forwarder.strategy.as_deref());
+            let targets = forwarder
+                .targets
+                .iter()
+                .filter(|target| !target.disabled.unwrap_or(false))
+                .enumerate()
+                .map(|(index, target)| V3ForwarderTargetAuthoringConfig {
+                    kind: V3RouteTargetKind::ProviderModel,
+                    id: None,
+                    provider: Some(target.provider_id.clone()),
+                    model: Some(forwarder.model.clone()),
+                    key: target.alias.clone(),
+                    priority: Some(target.priority.unwrap_or((index + 1) as i32)),
+                    weight: Some(target.weight.unwrap_or(1)),
+                })
+                .collect::<Vec<_>>();
+            if targets.is_empty() {
+                return Err(validation(format!(
+                    "v2 forwarder {id} has no enabled targets"
+                )));
+            }
+            Ok((
+                id.clone(),
+                V3ForwarderAuthoringConfig {
+                    enabled: true,
+                    model: forwarder.model.clone(),
+                    aliases: Vec::new(),
+                    selection: V3SelectionPolicy { strategy },
+                    targets,
+                    features: BTreeMap::new(),
+                },
+            ))
+        })
+        .collect()
+}
+
+fn compile_v2_route_groups(
+    groups: BTreeMap<String, V2RoutingPolicyGroup>,
+    long_context_threshold_tokens: u64,
+) -> Result<BTreeMap<String, V3RouteGroupAuthoringConfig>, V3ConfigError> {
+    groups
+        .into_iter()
+        .map(|(group_id, group)| {
+            let mut pools = BTreeMap::new();
+            for (route_id, mut routes) in group.routing {
+                routes.sort_by_key(|route| std::cmp::Reverse(route.priority.unwrap_or(0)));
+                // v2 declares loadBalancing per tier; v3 pools have one policy,
+                // so the highest-priority tier that declares one wins.
+                let load_balancing = routes
+                    .iter()
+                    .find_map(|route| route.load_balancing.as_ref());
+                let strategy = load_balancing
+                    .map(|policy| selection_strategy(policy.strategy.as_deref()))
+                    .unwrap_or(V3SelectionStrategy::Priority);
+                let tier_weights = load_balancing
+                    .map(|policy| policy.weights.clone())
+                    .unwrap_or_default();
+                let mut targets = Vec::new();
+                let mut next_priority = 1_i32;
+                for route in &routes {
+                    for target_id in &route.targets {
+                        let weight = tier_weights
+                            .get(target_id)
+                            .map(|value| (value.round().max(1.0)) as u32)
+                            .unwrap_or(1);
+                        targets.push(V3RoutePoolTargetAuthoringConfig {
+                            kind: V3RouteTargetKind::Forwarder,
+                            id: Some(target_id.clone()),
+                            provider: None,
+                            model: None,
+                            key: None,
+                            priority: Some(next_priority),
+                            weight: Some(weight),
+                        });
+                        next_priority += 1;
+                    }
+                }
+                if targets.is_empty() {
+                    return Err(validation(format!(
+                        "v2 route group {group_id} route {route_id} has no targets"
+                    )));
+                }
+                let match_rule = if route_id == "default" {
+                    None
+                } else {
+                    let is_long_context = route_id == "longcontext";
+                    Some(V3RoutePoolMatchAuthoringConfig {
+                        precedence: Some(route_precedence(&route_id)),
+                        entry_protocol: None,
+                        models: Vec::new(),
+                        required_capabilities: if is_long_context {
+                            Vec::new()
+                        } else {
+                            vec![route_id.clone()]
+                        },
+                        min_input_tokens: is_long_context.then_some(long_context_threshold_tokens),
+                        max_input_tokens: None,
+                    })
+                };
+                pools.insert(
+                    route_id.clone(),
+                    V3RoutePoolAuthoringConfig {
+                        selection: V3SelectionPolicy { strategy },
+                        route_object: None,
+                        match_rule,
+                        targets,
+                        features: BTreeMap::new(),
+                    },
+                );
+            }
+            if !pools.contains_key("default") {
+                return Err(validation(format!(
+                    "v2 route group {group_id} must declare routing.default"
+                )));
+            }
+            Ok((
+                group_id.clone(),
+                V3RouteGroupAuthoringConfig {
+                    pools,
+                    compact_route_object: None,
+                    route_policies: Vec::new(),
+                    features: BTreeMap::new(),
+                },
+            ))
+        })
+        .collect()
+}
+
+fn route_precedence(route_id: &str) -> i32 {
+    match route_id {
+        "multimodal" | "vision" => 10,
+        "web_search" => 20,
+        "longcontext" => 30,
+        "thinking" => 40,
+        "coding" => 50,
+        "search" => 60,
+        "tools" => 70,
+        _ => 100,
+    }
+}
+
+fn compile_v2_providers(
+    config_dir: &Path,
+    forwarders: &BTreeMap<String, V3ForwarderAuthoringConfig>,
+) -> Result<
+    (
+        BTreeMap<String, V3ProviderAuthoringConfig>,
+        Vec<V3ProviderDirectorySource>,
+    ),
+    V3ConfigError,
+> {
+    let mut referenced_models = BTreeMap::<String, BTreeSet<String>>::new();
+    for forwarder in forwarders.values() {
+        for target in &forwarder.targets {
+            if let Some(provider) = &target.provider {
+                let models = referenced_models.entry(provider.clone()).or_default();
+                if let Some(model) = &target.model {
+                    models.insert(model.clone());
+                }
+            }
+        }
+    }
+    compile_v2_provider_directory(config_dir, &referenced_models)
+}
+
+pub(crate) fn compile_v2_provider_directory(
+    config_dir: &Path,
+    referenced_models: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<
+    (
+        BTreeMap<String, V3ProviderAuthoringConfig>,
+        Vec<V3ProviderDirectorySource>,
+    ),
+    V3ConfigError,
+> {
+    let mut providers = BTreeMap::new();
+    let mut provider_sources = Vec::new();
+    for (provider_id, selected_models) in referenced_models {
+        let path = config_dir
+            .join("provider")
+            .join(provider_id)
+            .join("config.v2.toml");
+        let raw = fs::read_to_string(&path).map_err(|error| {
+            validation(format!(
+                "v3 referenced provider config {} read failed: {error}",
+                path.display()
+            ))
+        })?;
+        let canonical_path = fs::canonicalize(&path)?;
+        let source_hash = format!("{:x}", Sha256::digest(raw.as_bytes()));
+        let parsed: V2ProviderConfigFile = toml::from_str(&raw)?;
+        let provider = parsed.provider;
+        let provider_id_from_file = parsed.provider_id.unwrap_or_else(|| provider.id.clone());
+        if provider_id_from_file != *provider_id || provider.id != *provider_id {
+            return Err(validation(format!(
+                "v2 provider config {} identity mismatch for {provider_id}",
+                path.display()
+            )));
+        }
+        let auth = compile_v2_auth(config_dir, provider_id, source_hash, provider.auth)?;
+        let provider_type = match provider.provider_type.as_str() {
+            "openai" | "openai-standard" | "openai_chat" => "openai_chat",
+            "responses" => "responses",
+            "anthropic" => "anthropic",
+            "gemini" => "gemini",
+            value => {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} declares unknown type {value}"
+                )))
+            }
+        }
+        .to_string();
+        let v2_responses = provider.responses.as_ref();
+        let compatibility_profile = provider
+            .compatibility_profile
+            .or_else(|| resolve_v2_provider_default_compatibility_profile(provider_id));
+        let responses = if provider_type == "responses" {
+            Some(V3ProviderResponsesAuthoringConfig {
+                process: v2_responses
+                    .map(|responses| responses.process.clone())
+                    .unwrap_or_else(|| "chat".to_string()),
+                streaming: v2_responses
+                    .and_then(|responses| streaming_policy(responses.streaming.as_deref()))
+                    .unwrap_or(V3StreamingPolicy::Always),
+                transport: v2_responses
+                    .and_then(|responses| responses.transport)
+                    .unwrap_or(V3ResponsesTransportKind::Http),
+                websocket_v2_url: v2_responses
+                    .and_then(|responses| responses.websocket_v2_url.clone()),
+            })
+        } else {
+            None
+        };
+        let v3 = provider.v3.unwrap_or_default();
+        let models = compile_v2_provider_models(provider.models, Some(selected_models));
+        providers.insert(
+            provider_id.clone(),
+            V3ProviderAuthoringConfig {
+                enabled: provider.enabled.unwrap_or(true),
+                provider_type,
+                base_url: provider.base_url,
+                default_model: provider.default_model,
+                auth,
+                models,
+                responses,
+                concurrency: provider.concurrency.map(|concurrency| {
+                    V3ProviderConcurrencyAuthoringConfig {
+                        max_in_flight: concurrency.max_in_flight.unwrap_or(8),
+                        acquire_timeout_ms: concurrency.acquire_timeout_ms.unwrap_or(60000),
+                        stale_lease_ms: concurrency.stale_lease_ms.unwrap_or(300000),
+                    }
+                }),
+                health: v3.health,
+                semantic_error_policy: v3.semantic_error_policy,
+                provider_request_cleanup: v3.provider_request_cleanup,
+                compatibility_profile,
+                features: v3.features,
+                request_timeout_ms: provider
+                    .timeout
+                    .unwrap_or(DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS),
+                sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
+            },
+        );
+        provider_sources.push(V3ProviderDirectorySource {
+            provider_id: provider_id.clone(),
+            canonical_path,
+            raw_toml: raw,
+        });
+    }
+    Ok((providers, provider_sources))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2ProviderResolutionConfig {
+    #[serde(default)]
+    compatibility_profile_blocks: Vec<V2CompatibilityProfileBlock>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2CompatibilityProfileBlock {
+    provider_id: String,
+    compatibility_profile: String,
+}
+
+pub(crate) fn resolve_v2_provider_default_compatibility_profile(
+    provider_id: &str,
+) -> Option<String> {
+    static PROVIDER_RESOLUTION_CONFIG: LazyLock<V2ProviderResolutionConfig> = LazyLock::new(|| {
+        serde_json::from_str(include_str!("v2_provider_compatibility_defaults.json"))
+            .expect("V3-local V2 provider compatibility defaults must parse")
+    });
+
+    PROVIDER_RESOLUTION_CONFIG
+        .compatibility_profile_blocks
+        .iter()
+        .find(|block| block.provider_id.eq_ignore_ascii_case(provider_id.trim()))
+        .map(|block| block.compatibility_profile.trim().to_string())
+        .filter(|profile| !profile.is_empty())
+}
+
+fn compile_v2_auth(
+    _config_dir: &Path,
+    provider_id: &str,
+    _source_hash: String,
+    auth: V2ProviderAuthConfig,
+) -> Result<V3ProviderAuthAuthoringConfig, V3ConfigError> {
+    let V2ProviderAuthConfig {
+        api_key,
+        env,
+        token_file,
+        secret_file,
+        entries,
+        selection,
+    } = auth;
+    let inline_handle_count = usize::from(api_key.is_some())
+        + usize::from(env.is_some())
+        + usize::from(token_file.is_some());
+    let entries = match (entries, secret_file) {
+        (Some(_), Some(_)) => {
+            return Err(validation(format!(
+                "v2 provider {provider_id} auth cannot combine entries with secretFile auto discovery"
+            )));
+        }
+        (Some(entries), None) => {
+            if inline_handle_count != 0 {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth cannot combine entries with apiKey, env, or tokenFile"
+                )));
+            }
+            entries
+        }
+        (None, Some(secret_file)) => {
+            if inline_handle_count != 0 {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth secretFile cannot combine with apiKey, env, or tokenFile"
+                )));
+            }
+            let secret_file = secret_file.trim();
+            if secret_file.is_empty() {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth secretFile is empty"
+                )));
+            }
+            let content = fs::read_to_string(secret_file).map_err(|error| {
+                validation(format!(
+                    "v2 provider {provider_id} auth secretFile {secret_file} is unreadable: {error}"
+                ))
+            })?;
+            crate::discover_v3_secret_file_auth_handles(&content, provider_id)
+                .map_err(|error| {
+                    validation(format!(
+                        "v2 provider {provider_id} auth secretFile discovery failed: {error}"
+                    ))
+                })?
+                .into_iter()
+                .map(|(alias, secret_key)| V2ProviderAuthEntry {
+                    alias: Some(alias),
+                    api_key: None,
+                    env: None,
+                    token_file: None,
+                    secret_file: Some(secret_file.to_string()),
+                    secret_key: Some(secret_key),
+                })
+                .collect()
+        }
+        (None, None) => vec![V2ProviderAuthEntry {
+            alias: Some("key1".to_string()),
+            api_key,
+            env,
+            token_file,
+            secret_file: None,
+            secret_key: None,
+        }],
+    };
+    let mut v3_entries = Vec::new();
+    for entry in entries {
+        let alias = entry.alias.unwrap_or_else(|| "key1".to_string());
+        let handle_count = usize::from(entry.env.is_some())
+            + usize::from(entry.token_file.is_some())
+            + usize::from(entry.secret_file.is_some())
+            + usize::from(entry.api_key.is_some());
+        if handle_count != 1 {
+            return Err(validation(format!(
+                "v2 provider {provider_id} auth {alias} must declare exactly one of apiKey, env, tokenFile, or secretFile"
+            )));
+        }
+        if entry.secret_file.is_some() != entry.secret_key.is_some() {
+            return Err(validation(format!(
+                "v2 provider {provider_id} auth {alias} secretFile and secretKey must be declared together"
+            )));
+        }
+        if let Some(env) = entry.env {
+            v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
+                alias,
+                priority: None,
+                weight: None,
+                env: Some(env),
+                token_file: None,
+                api_key: None,
+                secret_file: None,
+                secret_key: None,
+            });
+            continue;
+        }
+        if let Some(secret_file) = entry.secret_file {
+            let secret_key = entry.secret_key.ok_or_else(|| {
+                validation(format!(
+                    "v2 provider {provider_id} auth {alias} secretFile requires secretKey"
+                ))
+            })?;
+            let secret_file = secret_file.trim();
+            if secret_file.is_empty() {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth {alias} secretFile is empty"
+                )));
+            }
+            let secret_key = secret_key.trim();
+            if secret_key.is_empty() {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth {alias} secretKey is empty"
+                )));
+            }
+            v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
+                alias,
+                priority: None,
+                weight: None,
+                env: None,
+                token_file: None,
+                api_key: None,
+                secret_file: Some(secret_file.to_string()),
+                secret_key: Some(secret_key.to_string()),
+            });
+            continue;
+        }
+        if let Some(token_file) = entry.token_file {
+            let token_file = token_file.trim();
+            if token_file.is_empty() {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth {alias} tokenFile is empty"
+                )));
+            }
+            v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
+                alias,
+                priority: None,
+                weight: None,
+                env: None,
+                token_file: Some(token_file.to_string()),
+                api_key: None,
+                secret_file: None,
+                secret_key: None,
+            });
+            continue;
+        }
+        let api_key = entry.api_key.ok_or_else(|| {
+            validation(format!(
+                "v2 provider {provider_id} auth {alias} missing apiKey, env, or tokenFile"
+            ))
+        })?;
+        if api_key.trim().is_empty() {
+            return Err(validation(format!(
+                "v2 provider {provider_id} auth {alias} apiKey is empty"
+            )));
+        }
+        v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
+            alias,
+            priority: None,
+            weight: None,
+            env: None,
+            token_file: None,
+            api_key: Some(api_key),
+            secret_file: None,
+            secret_key: None,
+        });
+    }
+    Ok(V3ProviderAuthAuthoringConfig {
+        auth_type: V3ProviderAuthType::ApiKey,
+        selection: selection.unwrap_or_default(),
+        entries: v3_entries,
+    })
+}
+
+fn compile_v2_provider_models(
+    models: BTreeMap<String, V2ProviderModelConfig>,
+    referenced_models: Option<&BTreeSet<String>>,
+) -> BTreeMap<String, V3ProviderModelAuthoringConfig> {
+    models
+        .into_iter()
+        .filter(|(id, _)| {
+            referenced_models.is_none_or(|referenced_models| referenced_models.contains(id))
+        })
+        .map(|(id, model)| {
+            let web_search_execution_mode = model.web_search_execution_mode();
+            (
+                id.clone(),
+                V3ProviderModelAuthoringConfig {
+                    wire_name: model.wire_name.or(Some(id)),
+                    aliases: model.aliases,
+                    capabilities: normalize_v2_capabilities(model.capabilities),
+                    web_search_execution_mode,
+                    web_search_backend: model.web_search_backend,
+                    supports_streaming: model.supports_streaming.unwrap_or(false),
+                    supports_thinking: model.supports_thinking.unwrap_or(false),
+                    thinking: model.thinking,
+                    max_tokens: model.max_tokens,
+                    max_context_tokens: model
+                        .max_context_tokens
+                        .or(model.context_window)
+                        .or(model.max_context),
+                    context_token_estimate_scale_bps: 10_000,
+                    features: model.features,
+                },
+            )
+        })
+        .collect()
+}
+
+fn normalize_v2_capabilities(capabilities: Vec<String>) -> Vec<String> {
+    let mut result = BTreeSet::new();
+    for capability in capabilities {
+        let mapped = match capability.as_str() {
+            "thinking" => "reasoning",
+            "web_search_direct" => "web_search",
+            value => value,
+        };
+        result.insert(mapped.to_string());
+    }
+    result.into_iter().collect()
+}
+
+fn selection_strategy(value: Option<&str>) -> V3SelectionStrategy {
+    match value {
+        Some("weighted") => V3SelectionStrategy::Weighted,
+        Some("round-robin") | Some("round_robin") => V3SelectionStrategy::RoundRobin,
+        _ => V3SelectionStrategy::Priority,
+    }
+}
+
+fn streaming_policy(value: Option<&str>) -> Option<V3StreamingPolicy> {
+    match value {
+        Some("always") => Some(V3StreamingPolicy::Always),
+        Some("client") => Some(V3StreamingPolicy::Client),
+        Some("never") => Some(V3StreamingPolicy::Never),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2RootConfig {
+    version: String,
+    virtualrouter_mode: Option<String>,
+    httpserver: V2HttpServer,
+    virtualrouter: V2VirtualRouter,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2HttpServer {
+    #[serde(default)]
+    ports: Vec<V2HttpServerPort>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2HttpServerPort {
+    name: Option<String>,
+    port: u16,
+    host: Option<String>,
+    mode: Option<String>,
+    routing_policy_group: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2VirtualRouter {
+    classifier: Option<V2ClassifierConfig>,
+    #[serde(default)]
+    forwarders: BTreeMap<String, V2ForwarderConfig>,
+    #[serde(default)]
+    routing_policy_groups: BTreeMap<String, V2RoutingPolicyGroup>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2ClassifierConfig {
+    long_context_threshold_tokens: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2ForwarderConfig {
+    model: String,
+    strategy: Option<String>,
+    #[serde(default)]
+    targets: Vec<V2ForwarderTarget>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2ForwarderTarget {
+    provider_id: String,
+    alias: Option<String>,
+    priority: Option<i32>,
+    weight: Option<u32>,
+    disabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2RoutingPolicyGroup {
+    #[serde(default)]
+    routing: BTreeMap<String, Vec<V2RouteTier>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2RouteTier {
+    priority: Option<i32>,
+    #[serde(default)]
+    targets: Vec<String>,
+    load_balancing: Option<V2LoadBalancing>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2LoadBalancing {
+    strategy: Option<String>,
+    #[serde(default)]
+    weights: BTreeMap<String, f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct V2ProviderConfigFile {
+    #[serde(default)]
+    pub version: Option<String>,
+    pub provider_id: Option<String>,
+    pub provider: V2ProviderConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct V2ProviderConfig {
+    pub id: String,
+    pub enabled: Option<bool>,
+    #[serde(rename = "type")]
+    pub provider_type: String,
+    #[serde(rename = "baseURL")]
+    pub base_url: String,
+    pub default_model: String,
+    pub auth: V2ProviderAuthConfig,
+    pub responses: Option<V2ProviderResponsesConfig>,
+    pub concurrency: Option<V2ProviderConcurrencyConfig>,
+    #[serde(default, alias = "compatibilityProfile")]
+    pub compatibility_profile: Option<String>,
+    #[serde(default)]
+    pub models: BTreeMap<String, V2ProviderModelConfig>,
+    #[serde(default)]
+    pub v3: Option<V2ProviderV3Config>,
+    /// per-request 总超时（毫秒）；默认 300_000（300s）。覆盖连接、响应头等待与 body 读取。
+    #[serde(default)]
+    pub timeout: Option<u64>,
+    /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30s。本地慢部署按 provider 放宽。
+    #[serde(default, alias = "sse_first_frame_timeout_ms")]
+    pub sse_first_frame_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct V2ProviderV3Config {
+    #[serde(default)]
+    pub health: Option<V3ProviderHealthAuthoringConfig>,
+    #[serde(default, alias = "semantic_error_policy")]
+    pub semantic_error_policy: Vec<V3ProviderSemanticErrorPolicyAuthoringConfig>,
+    #[serde(default, alias = "provider_request_cleanup")]
+    pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
+    #[serde(default)]
+    pub features: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct V2ProviderAuthConfig {
+    pub api_key: Option<String>,
+    pub env: Option<String>,
+    pub token_file: Option<String>,
+    pub secret_file: Option<String>,
+    pub entries: Option<Vec<V2ProviderAuthEntry>>,
+    #[serde(default)]
+    pub selection: Option<crate::types::V3SelectionPolicy>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct V2ProviderAuthEntry {
+    pub alias: Option<String>,
+    pub api_key: Option<String>,
+    pub env: Option<String>,
+    pub token_file: Option<String>,
+    pub secret_file: Option<String>,
+    pub secret_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct V2ProviderResponsesConfig {
+    pub process: String,
+    pub streaming: Option<String>,
+    #[serde(default)]
+    pub transport: Option<V3ResponsesTransportKind>,
+    #[serde(default, alias = "websocket_v2_url", alias = "websocketV2URL")]
+    pub websocket_v2_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct V2ProviderConcurrencyConfig {
+    pub max_in_flight: Option<u32>,
+    pub acquire_timeout_ms: Option<u64>,
+    pub stale_lease_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct V2ProviderModelConfig {
+    #[serde(default)]
+    pub wire_name: Option<String>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    pub supports_streaming: Option<bool>,
+    pub supports_thinking: Option<bool>,
+    pub thinking: Option<String>,
+    pub max_tokens: Option<u64>,
+    pub max_context: Option<u64>,
+    pub max_context_tokens: Option<u64>,
+    pub context_window: Option<u64>,
+    #[serde(default = "default_context_token_estimate_scale_bps")]
+    pub context_token_estimate_scale_bps: u64,
+    /// Mode B 显式声明（v2 配置可选；缺省时按 `web_search_direct`
+    /// capability 兼容推断 Mode A）。生产 v2 配置通过此字段启用
+    /// `metadata_center_local_search` 与编译期 backend binding。
+    ///
+    /// 兼容两种写法：`rename_all = "camelCase"` 的 `webSearchExecutionMode`
+    /// 与生产 v2 配置实际使用的 `web_search_execution_mode`（snake_case）。
+    #[serde(default, alias = "web_search_execution_mode")]
+    pub web_search_execution_mode: Option<V3WebSearchExecutionMode>,
+    #[serde(default, alias = "web_search_backend")]
+    pub web_search_backend: Option<String>,
+    #[serde(default)]
+    pub features: BTreeMap<String, bool>,
+}
+
+fn default_context_token_estimate_scale_bps() -> u64 {
+    10_000
+}
+
+impl V2ProviderModelConfig {
+    fn web_search_execution_mode(&self) -> V3WebSearchExecutionMode {
+        self.web_search_execution_mode.unwrap_or_else(|| {
+            if self
+                .capabilities
+                .iter()
+                .any(|capability| capability == "web_search_direct")
+            {
+                V3WebSearchExecutionMode::NativeRemoteSearchToolMix
+            } else {
+                V3WebSearchExecutionMode::None
+            }
+        })
+    }
+}
+
+pub fn parse_v2_provider_config_file(raw: &str) -> Result<V2ProviderConfigFile, V3ConfigError> {
+    toml::from_str(raw)
+        .map_err(|error| validation(format!("provider config file parse failed: {error}")))
+}
+
+pub fn generate_v2_provider_config_file(
+    config: &V2ProviderConfigFile,
+) -> Result<String, V3ConfigError> {
+    toml::to_string_pretty(config)
+        .map_err(|error| validation(format!("provider config file serialize failed: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snake_case_web_search_mode_parses_via_alias() {
+        let parsed: V2ProviderModelConfig = toml::from_str(
+            r#"
+wireName = "MiniMax-M3"
+capabilities = ["web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "MiniMax-M3"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            parsed.web_search_execution_mode().as_str(),
+            "metadata_center_local_search",
+            "snake_case web_search_execution_mode must parse (found {:?})",
+            parsed.web_search_execution_mode()
+        );
+        assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
+    }
+
+    #[test]
+    fn camel_case_web_search_mode_still_parses() {
+        let parsed: V2ProviderModelConfig = toml::from_str(
+            r#"
+wireName = "MiniMax-M3"
+webSearchExecutionMode = "metadata_center_local_search"
+webSearchBackend = "MiniMax-M3"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            parsed.web_search_execution_mode().as_str(),
+            "metadata_center_local_search"
+        );
+        assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
+    }
+
+    #[test]
+    fn context_token_estimate_scale_parses_explicit_and_defaults() {
+        let explicit: V2ProviderModelConfig = toml::from_str(
+            r#"
+contextTokenEstimateScaleBps = 17000
+"#,
+        )
+        .expect("explicit scale must parse");
+        assert_eq!(explicit.context_token_estimate_scale_bps, 17_000);
+
+        let defaulted: V2ProviderModelConfig =
+            toml::from_str("").expect("omitted scale must use the V2 compatibility default");
+        assert_eq!(defaulted.context_token_estimate_scale_bps, 10_000);
+    }
+
+    #[test]
+    fn provider_timeout_parses_into_manifest_request_timeout_ms() {
+        // 端到端：v2 provider 文件 `[provider].timeout` 经 V2→V3 兼容层必须写入
+        // `V3ProviderAuthoringConfig.request_timeout_ms`（曾因 serde 静默丢弃
+        // snake_case 字段导致 9 分钟超时永远不生效）。
+        // 三层验证：(1) V2 schema 解析 (2) compile_v2_provider_directory 端到点
+        // 写入 (3) 缺省字段 → DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS fallback。
+        use std::io::Write;
+
+        // (1) V2 schema 解析层：snake_case timeout 必须被接受
+        let parsed: V2ProviderConfigFile = toml::from_str(
+            r#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+timeout = 900000
+defaultModel = "model"
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            parsed.provider.timeout,
+            Some(900_000),
+            "snake_case timeout must parse"
+        );
+
+        // (2) 端到点：临时 provider 目录 → compile_v2_provider_directory →
+        //      manifest request_timeout_ms == 900_000
+        let tmp = std::env::temp_dir().join(format!(
+            "rccv3-timeout-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let provider_dir = tmp.join("provider").join("test-provider");
+        std::fs::create_dir_all(&provider_dir).expect("create provider dir");
+        let mut file = std::fs::File::create(provider_dir.join("config.v2.toml")).expect("file");
+        file.write_all(
+            br#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+timeout = 900000
+defaultModel = "model"
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+"#,
+        )
+        .expect("write");
+
+        let mut referenced_models: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        referenced_models.insert("test-provider".to_string(), BTreeSet::new());
+        let (providers, _sources) = compile_v2_provider_directory(&tmp, &referenced_models)
+            .expect("compile v2 provider dir");
+        let authoring = providers.get("test-provider").expect("provider compiled");
+        assert_eq!(
+            authoring.request_timeout_ms, 900_000,
+            "V2→V3 end-to-end: timeout=900_000 must land in request_timeout_ms (was silently dropped)"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+
+        // (2c) sse_first_frame_timeout_ms 端到点：provider 配置的 SSE 首帧
+        //      超时必须写入 authoring（本地慢部署按 provider 放宽）。
+        let tmp_sse = std::env::temp_dir().join(format!(
+            "rccv3-sse-timeout-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let provider_dir_sse = tmp_sse.join("provider").join("test-provider");
+        std::fs::create_dir_all(&provider_dir_sse).expect("create provider dir");
+        let mut file_sse =
+            std::fs::File::create(provider_dir_sse.join("config.v2.toml")).expect("file");
+        file_sse
+            .write_all(
+                br#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "model"
+sse_first_frame_timeout_ms = 600000
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+"#,
+            )
+            .expect("write");
+        let (providers_sse, _) =
+            compile_v2_provider_directory(&tmp_sse, &referenced_models).expect("compile");
+        assert_eq!(
+            providers_sse
+                .get("test-provider")
+                .expect("provider compiled")
+                .sse_first_frame_timeout_ms,
+            Some(600_000),
+            "V2→V3 end-to-end: sse_first_frame_timeout_ms=600000 must land in authoring"
+        );
+        std::fs::remove_dir_all(&tmp_sse).ok();
+
+        // (2b) 缺省字段端到点：无 timeout 时，V2→V3 fallback 必须等于
+        //      DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS（300_000），不能为 0/默认
+        //      隐藏 bug。
+        let tmp_default = std::env::temp_dir().join(format!(
+            "rccv3-timeout-default-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let provider_dir_default = tmp_default.join("provider").join("test-provider");
+        std::fs::create_dir_all(&provider_dir_default).expect("create provider dir");
+        let mut file_default =
+            std::fs::File::create(provider_dir_default.join("config.v2.toml")).expect("file");
+        file_default
+            .write_all(
+                br#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "model"
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+"#,
+            )
+            .expect("write");
+        let (providers_default, _sources_default) =
+            compile_v2_provider_directory(&tmp_default, &referenced_models)
+                .expect("compile v2 provider dir (absent timeout)");
+        let authoring_default = providers_default
+            .get("test-provider")
+            .expect("provider compiled");
+        assert_eq!(
+            authoring_default.request_timeout_ms, DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+            "absent timeout must fall back to DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS (300_000)"
+        );
+        std::fs::remove_dir_all(&tmp_default).ok();
+
+        // (3) V2 schema 解析层：snake_case timeout 必须被接受；缺省字段 → None
+        let parsed: V2ProviderConfigFile = toml::from_str(
+            r#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+timeout = 900000
+defaultModel = "model"
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            parsed.provider.timeout,
+            Some(900_000),
+            "snake_case timeout must parse"
+        );
+
+        let absent: V2ProviderConfigFile = toml::from_str(
+            r#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "model"
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            absent.provider.timeout, None,
+            "absent timeout must be None (default applies later)"
+        );
+    }
+
+    #[test]
+    fn provider_auth_root_secret_file_roundtrip_preserves_authoring() {
+        let parsed = parse_v2_provider_config_file(
+            r#"
+version = "2.0.0"
+providerId = "secret-provider"
+
+[provider]
+id = "secret-provider"
+type = "responses"
+baseURL = "https://example.com/v1"
+defaultModel = "model-a"
+
+[provider.auth]
+secretFile = "/tmp/secret-provider.conf"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            parsed.provider.auth.secret_file.as_deref(),
+            Some("/tmp/secret-provider.conf")
+        );
+
+        let generated = generate_v2_provider_config_file(&parsed).expect("generate");
+        let reparsed = parse_v2_provider_config_file(&generated).expect("reparse");
+        assert_eq!(
+            reparsed.provider.auth.secret_file.as_deref(),
+            Some("/tmp/secret-provider.conf")
+        );
+    }
+
+    #[test]
+    fn provider_config_file_roundtrip_via_parse_and_generate() {
+        let raw = r#"
+version = "2.0.0"
+providerId = "roundtrip-provider"
+
+[provider]
+id = "roundtrip-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "model-a"
+timeout = 120000
+sse_first_frame_timeout_ms = 600000
+
+[provider.auth]
+env = "ROUNDTRIP_KEY"
+
+[provider.concurrency]
+maxInFlight = 4
+
+[provider.models."model-a"]
+supportsStreaming = true
+supportsThinking = true
+maxTokens = 8192
+maxContext = 262144
+capabilities = ["text", "reasoning", "tools"]
+"#;
+        let parsed = parse_v2_provider_config_file(raw).expect("parse");
+        assert_eq!(parsed.version.as_deref(), Some("2.0.0"));
+        assert_eq!(parsed.provider_id.as_deref(), Some("roundtrip-provider"));
+        assert_eq!(parsed.provider.provider_type, "openai");
+        assert_eq!(parsed.provider.base_url, "http://127.0.0.1:9999/v1");
+        assert_eq!(parsed.provider.default_model, "model-a");
+        assert_eq!(parsed.provider.timeout, Some(120000));
+        assert_eq!(parsed.provider.sse_first_frame_timeout_ms, Some(600000));
+        assert_eq!(parsed.provider.auth.env.as_deref(), Some("ROUNDTRIP_KEY"));
+
+        let generated = generate_v2_provider_config_file(&parsed).expect("generate");
+        let reparsed = parse_v2_provider_config_file(&generated).expect("reparse");
+        assert_eq!(reparsed.provider_id, parsed.provider_id);
+        assert_eq!(reparsed.provider.id, parsed.provider.id);
+        assert_eq!(reparsed.provider.provider_type, "openai");
+        assert_eq!(reparsed.provider.base_url, parsed.provider.base_url);
+        assert_eq!(reparsed.provider.default_model, "model-a");
+        assert_eq!(reparsed.provider.timeout, Some(120000));
+        assert_eq!(reparsed.provider.sse_first_frame_timeout_ms, Some(600000));
+        assert_eq!(reparsed.provider.auth.env.as_deref(), Some("ROUNDTRIP_KEY"));
+        let model = reparsed
+            .provider
+            .models
+            .get("model-a")
+            .expect("model-a present");
+        assert_eq!(model.supports_streaming, Some(true));
+        assert_eq!(model.max_tokens, Some(8192));
+        assert!(generated.contains("sseFirstFrameTimeoutMs = 600000"), "generated toml must serialize the sse timeout key in a runtime-parseable form: {generated}");
+    }
+
+    #[test]
+    fn generate_v2_provider_config_file_writes_camel_case_keys() {
+        let config = V2ProviderConfigFile {
+            version: Some("2.0.0".into()),
+            provider_id: Some("gen-provider".into()),
+            provider: V2ProviderConfig {
+                id: "gen-provider".into(),
+                enabled: Some(true),
+                provider_type: "anthropic".into(),
+                base_url: "https://api.example.com/v1".into(),
+                default_model: "model-x".into(),
+                auth: V2ProviderAuthConfig {
+                    api_key: None,
+                    env: Some("GEN_PROVIDER_KEY".into()),
+                    token_file: None,
+                    secret_file: None,
+                    entries: None,
+                    selection: None,
+                },
+                responses: None,
+                concurrency: Some(V2ProviderConcurrencyConfig {
+                    max_in_flight: Some(2),
+                    acquire_timeout_ms: None,
+                    stale_lease_ms: None,
+                }),
+                compatibility_profile: None,
+                models: BTreeMap::new(),
+                v3: None,
+                timeout: None,
+                sse_first_frame_timeout_ms: None,
+            },
+        };
+        let generated = generate_v2_provider_config_file(&config).expect("generate");
+        assert!(
+            generated.contains("providerId = \"gen-provider\""),
+            "{generated}"
+        );
+        assert!(
+            generated.contains("baseURL = \"https://api.example.com/v1\""),
+            "{generated}"
+        );
+        assert!(generated.contains("type = \"anthropic\""), "{generated}");
+        assert!(generated.contains("maxInFlight = 2"), "{generated}");
+        assert!(
+            generated.contains("env = \"GEN_PROVIDER_KEY\""),
+            "{generated}"
+        );
+    }
+
+    #[test]
+    fn provider_auth_secret_file_auto_discovers_single_or_multiple_handles() {
+        let tmp = std::env::temp_dir().join(format!(
+            "rccv3-auth-key-file-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let key_file = tmp.join("opencode-go.conf");
+        std::fs::write(
+            &key_file,
+            "opencode-go.key1 = first-secret\nopencode-go.key2 = second-secret\n",
+        )
+        .expect("write key file");
+        let key_file = key_file.to_string_lossy().into_owned();
+        let compiled = compile_v2_auth(
+            &tmp,
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some(key_file.clone()),
+                entries: None,
+                selection: None,
+            },
+        )
+        .expect("auto discover key file");
+        assert_eq!(compiled.entries.len(), 2);
+        assert_eq!(compiled.entries[0].alias, "key1");
+        assert_eq!(
+            compiled.entries[0].secret_file.as_deref(),
+            Some(key_file.as_str())
+        );
+        assert_eq!(
+            compiled.entries[0].secret_key.as_deref(),
+            Some("opencode-go.key1")
+        );
+        assert_eq!(compiled.entries[1].alias, "key2");
+        assert_eq!(
+            compiled.entries[1].secret_key.as_deref(),
+            Some("opencode-go.key2")
+        );
+        assert!(compiled.entries.iter().all(|entry| entry.api_key.is_none()));
+
+        std::fs::write(&key_file, "opencode-go = single-secret\n").expect("write single key");
+        let single = compile_v2_auth(
+            &tmp,
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some(key_file.clone()),
+                entries: None,
+                selection: None,
+            },
+        )
+        .expect("auto discover single key");
+        assert_eq!(single.entries.len(), 1);
+        assert_eq!(single.entries[0].alias, "key1");
+        assert_eq!(single.entries[0].secret_key.as_deref(), Some("opencode-go"));
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn provider_auth_secret_file_auto_discovery_rejects_mixed_authoring() {
+        let error = compile_v2_auth(
+            Path::new("."),
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some("keys.conf".to_string()),
+                entries: Some(Vec::new()),
+                selection: None,
+            },
+        )
+        .expect_err("entries plus secretFile must fail");
+        assert!(error
+            .to_string()
+            .contains("cannot combine entries with secretFile"));
+    }
+}

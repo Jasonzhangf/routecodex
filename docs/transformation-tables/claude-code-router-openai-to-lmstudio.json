@@ -1,0 +1,182 @@
+{
+  "sourceProvider": "OpenAI",
+  "targetProvider": "LMStudio",
+  "description": "Transformation table for converting OpenAI API format to LMStudio compatible format",
+  "version": "1.0",
+  "endpointMappings": {
+    "chatCompletions": {
+      "sourceEndpoint": "/v1/chat/completions",
+      "targetEndpoint": "/v1/chat/completions",
+      "method": "POST"
+    },
+    "models": {
+      "sourceEndpoint": "/v1/models",
+      "targetEndpoint": "/v1/models",
+      "method": "GET"
+    },
+    "completions": {
+      "sourceEndpoint": "/v1/completions",
+      "targetEndpoint": "/v1/completions",
+      "method": "POST"
+    }
+  },
+  "requestMappings": {
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping",
+      "description": "LMStudio uses the same model parameter format as OpenAI"
+    },
+    "messages": {
+      "sourcePath": "messages",
+      "targetPath": "messages",
+      "transform": "directMapping",
+      "description": "LMStudio uses the same message structure as OpenAI"
+    },
+    "maxTokens": {
+      "sourcePath": "max_tokens",
+      "targetPath": "max_tokens",
+      "transform": "directMapping"
+    },
+    "temperature": {
+      "sourcePath": "temperature",
+      "targetPath": "temperature",
+      "transform": "directMapping"
+    },
+    "topP": {
+      "sourcePath": "top_p",
+      "targetPath": "top_p",
+      "transform": "directMapping"
+    },
+    "frequencyPenalty": {
+      "sourcePath": "frequency_penalty",
+      "targetPath": "frequency_penalty",
+      "transform": "directMapping"
+    },
+    "presencePenalty": {
+      "sourcePath": "presence_penalty",
+      "targetPath": "presence_penalty",
+      "transform": "directMapping"
+    },
+    "stop": {
+      "sourcePath": "stop",
+      "targetPath": "stop",
+      "transform": "directMapping"
+    },
+    "stream": {
+      "sourcePath": "stream",
+      "targetPath": "stream",
+      "transform": "directMapping"
+    },
+    "tools": {
+      "sourcePath": "tools",
+      "targetPath": "tools",
+      "transform": "directMapping",
+      "description": "LMStudio supports OpenAI-compatible tool calling"
+    },
+    "toolChoice": {
+      "sourcePath": "tool_choice",
+      "targetPath": "tool_choice",
+      "transform": "directMapping"
+    }
+  },
+  "responseMappings": {
+    "id": {
+      "sourcePath": "id",
+      "targetPath": "id",
+      "transform": "directMapping"
+    },
+    "object": {
+      "sourcePath": "object",
+      "targetPath": "object",
+      "transform": "directMapping"
+    },
+    "created": {
+      "sourcePath": "created",
+      "targetPath": "created",
+      "transform": "directMapping"
+    },
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping"
+    },
+    "choices": {
+      "sourcePath": "choices",
+      "targetPath": "choices",
+      "transform": "directMapping"
+    },
+    "usage": {
+      "sourcePath": "usage",
+      "targetPath": "usage",
+      "transform": "directMapping"
+    }
+  },
+  "streamMappings": {
+    "chunkFormat": {
+      "sourceFormat": "data: {JSON}",
+      "targetFormat": "data: {JSON}",
+      "transform": "directMapping"
+    },
+    "eventTypes": {
+      "message_start": "message_start",
+      "message_delta": "message_delta",
+      "message_stop": "message_stop",
+      "content_block_start": "content_block_start",
+      "content_block_delta": "content_block_delta",
+      "content_block_stop": "content_block_stop"
+    }
+  },
+  "authentication": {
+    "apiKey": {
+      "sourceHeader": "Authorization: Bearer {token}",
+      "targetHeader": "Authorization: Bearer {token}",
+      "transform": "directMapping"
+    }
+  },
+  "headers": {
+    "contentType": {
+      "sourceHeader": "Content-Type: application/json",
+      "targetHeader": "Content-Type: application/json",
+      "transform": "directMapping"
+    },
+    "userAgent": {
+      "sourceHeader": "User-Agent: {client}",
+      "targetHeader": "User-Agent: {client}",
+      "transform": "directMapping"
+    }
+  },
+  "errorMappings": {
+    "errorResponse": {
+      "sourceFormat": {
+        "error": {
+          "message": "string",
+          "type": "string",
+          "code": "string"
+        }
+      },
+      "targetFormat": {
+        "error": {
+          "message": "string",
+          "type": "string",
+          "code": "string"
+        }
+      },
+      "transform": "directMapping"
+    }
+  },
+  "specialFeatures": {
+    "modelLoading": {
+      "description": "LMStudio dynamically loads models based on the model parameter",
+      "handling": "Pass model name directly, LMStudio handles loading"
+    },
+    "localModels": {
+      "description": "LMStudio runs local models",
+      "handling": "No special transformation needed"
+    },
+    "webUI": {
+      "description": "LMStudio provides web interface",
+      "handling": "Not relevant for API conversion"
+    }
+  }
+}

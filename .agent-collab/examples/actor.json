@@ -1,0 +1,11 @@
+{
+  "run_id": "20260712T080000Z-routecodex-12345-a1b2",
+  "worker_id": null,
+  "task_id": "agent-collab-protocol",
+  "host": "routecodex",
+  "pid": 12345,
+  "cwd": "/repo/routecodex",
+  "git_worktree": "/repo/routecodex",
+  "branch": "main",
+  "created_at": "2026-07-12T08:00:00Z"
+}

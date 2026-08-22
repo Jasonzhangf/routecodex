@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routecodex.local/agent-collab/actor.schema.json",
+  "title": "RouteCodex Agent Collab Actor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "cwd", "git_worktree", "created_at"],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 1 },
+    "worker_id": { "type": ["string", "null"] },
+    "task_id": { "type": ["string", "null"] },
+    "host": { "type": "string" },
+    "pid": { "type": "integer" },
+    "cwd": { "type": "string", "minLength": 1 },
+    "git_worktree": { "type": "string", "minLength": 1 },
+    "branch": { "type": ["string", "null"] },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

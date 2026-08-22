@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routecodex.local/schemas/v3-anthropic-relay-controlled-replay-evidence.schema.json",
+  "title": "V3 Anthropic Relay controlled replay evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "harness_id",
+    "status",
+    "fixture_digest",
+    "cases",
+    "missing_adjacent_edges",
+    "diagnostic"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "harness_id": { "const": "v3.anthropic_relay_controlled_replay" },
+    "status": { "enum": ["passed", "failed", "wiring_missing"] },
+    "fixture_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["case_id", "status", "provider_capture_count", "diagnostic"],
+        "properties": {
+          "case_id": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["passed", "failed", "not_run"] },
+          "provider_capture_count": { "type": "integer", "minimum": 0 },
+          "diagnostic": { "type": "string" }
+        }
+      }
+    },
+    "missing_adjacent_edges": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "diagnostic": { "type": "string", "minLength": 1 }
+  }
+}

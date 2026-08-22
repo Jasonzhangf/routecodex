@@ -1,0 +1,295 @@
+{
+  "sourceProvider": "OpenAI",
+  "targetProvider": "Text Generation WebUI",
+  "description": "Transformation table for converting OpenAI API format to Text Generation WebUI compatible format",
+  "version": "1.0",
+  "endpointMappings": {
+    "chatCompletions": {
+      "sourceEndpoint": "/v1/chat/completions",
+      "targetEndpoint": "/v1/chat/completions",
+      "method": "POST"
+    },
+    "completions": {
+      "sourceEndpoint": "/v1/completions",
+      "targetEndpoint": "/v1/completions",
+      "method": "POST"
+    },
+    "models": {
+      "sourceEndpoint": "/v1/models",
+      "targetEndpoint": "/v1/models",
+      "method": "GET"
+    },
+    "embeddings": {
+      "sourceEndpoint": "/v1/embeddings",
+      "targetEndpoint": "/v1/embeddings",
+      "method": "POST"
+    }
+  },
+  "requestMappings": {
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping",
+      "description": "Text Generation WebUI uses the same model parameter format"
+    },
+    "messages": {
+      "sourcePath": "messages",
+      "targetPath": "messages",
+      "transform": "directMapping",
+      "description": "Text Generation WebUI uses the same message structure"
+    },
+    "maxTokens": {
+      "sourcePath": "max_tokens",
+      "targetPath": "max_tokens",
+      "transform": "directMapping"
+    },
+    "temperature": {
+      "sourcePath": "temperature",
+      "targetPath": "temperature",
+      "transform": "directMapping"
+    },
+    "topP": {
+      "sourcePath": "top_p",
+      "targetPath": "top_p",
+      "transform": "directMapping"
+    },
+    "frequencyPenalty": {
+      "sourcePath": "frequency_penalty",
+      "targetPath": "frequency_penalty",
+      "transform": "directMapping"
+    },
+    "presencePenalty": {
+      "sourcePath": "presence_penalty",
+      "targetPath": "presence_penalty",
+      "transform": "directMapping"
+    },
+    "stop": {
+      "sourcePath": "stop",
+      "targetPath": "stop",
+      "transform": "directMapping"
+    },
+    "stream": {
+      "sourcePath": "stream",
+      "targetPath": "stream",
+      "transform": "directMapping"
+    },
+    "tools": {
+      "sourcePath": "tools",
+      "targetPath": "tools",
+      "transform": "directMapping",
+      "description": "Text Generation WebUI supports OpenAI-compatible tool calling"
+    },
+    "toolChoice": {
+      "sourcePath": "tool_choice",
+      "targetPath": "tool_choice",
+      "transform": "directMapping"
+    }
+  },
+  "responseMappings": {
+    "id": {
+      "sourcePath": "id",
+      "targetPath": "id",
+      "transform": "directMapping"
+    },
+    "object": {
+      "sourcePath": "object",
+      "targetPath": "object",
+      "transform": "directMapping"
+    },
+    "created": {
+      "sourcePath": "created",
+      "targetPath": "created",
+      "transform": "directMapping"
+    },
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping"
+    },
+    "choices": {
+      "sourcePath": "choices",
+      "targetPath": "choices",
+      "transform": "directMapping"
+    },
+    "usage": {
+      "sourcePath": "usage",
+      "targetPath": "usage",
+      "transform": "directMapping"
+    }
+  },
+  "completionMappings": {
+    "prompt": {
+      "sourcePath": "prompt",
+      "targetPath": "prompt",
+      "transform": "directMapping"
+    },
+    "suffix": {
+      "sourcePath": "suffix",
+      "targetPath": "suffix",
+      "transform": "directMapping"
+    },
+    "bestOf": {
+      "sourcePath": "best_of",
+      "targetPath": "best_of",
+      "transform": "directMapping"
+    },
+    "echo": {
+      "sourcePath": "echo",
+      "targetPath": "echo",
+      "transform": "directMapping"
+    },
+    "logProbs": {
+      "sourcePath": "logprobs",
+      "targetPath": "logprobs",
+      "transform": "directMapping"
+    },
+    "logitBias": {
+      "sourcePath": "logit_bias",
+      "targetPath": "logit_bias",
+      "transform": "directMapping"
+    }
+  },
+  "embeddingMappings": {
+    "input": {
+      "sourcePath": "input",
+      "targetPath": "input",
+      "transform": "directMapping"
+    },
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping"
+    },
+    "encodingFormat": {
+      "sourcePath": "encoding_format",
+      "targetPath": "encoding_format",
+      "transform": "directMapping"
+    },
+    "dimensions": {
+      "sourcePath": "dimensions",
+      "targetPath": "dimensions",
+      "transform": "directMapping"
+    }
+  },
+  "generationParameters": {
+    "doSample": {
+      "sourcePath": "do_sample",
+      "targetPath": "do_sample",
+      "transform": "directMapping"
+    },
+    "earlyStopping": {
+      "sourcePath": "early_stopping",
+      "targetPath": "early_stopping",
+      "transform": "directMapping"
+    },
+    "numBeams": {
+      "sourcePath": "num_beams",
+      "targetPath": "num_beams",
+      "transform": "directMapping"
+    },
+    "noRepeatNgramSize": {
+      "sourcePath": "no_repeat_ngram_size",
+      "targetPath": "no_repeat_ngram_size",
+      "transform": "directMapping"
+    },
+    "minLength": {
+      "sourcePath": "min_length",
+      "targetPath": "min_length",
+      "transform": "directMapping"
+    },
+    "repetitionPenalty": {
+      "sourcePath": "repetition_penalty",
+      "targetPath": "repetition_penalty",
+      "transform": "directMapping"
+    },
+    "lengthPenalty": {
+      "sourcePath": "length_penalty",
+      "targetPath": "length_penalty",
+      "transform": "directMapping"
+    },
+    "badWordsIds": {
+      "sourcePath": "bad_words_ids",
+      "targetPath": "bad_words_ids",
+      "transform": "directMapping"
+    },
+    "bosTokenId": {
+      "sourcePath": "bos_token_id",
+      "targetPath": "bos_token_id",
+      "transform": "directMapping"
+    },
+    "eosTokenId": {
+      "sourcePath": "eos_token_id",
+      "targetPath": "eos_token_id",
+      "transform": "directMapping"
+    },
+    "padTokenId": {
+      "sourcePath": "pad_token_id",
+      "targetPath": "pad_token_id",
+      "transform": "directMapping"
+    },
+    "decoderStartTokenId": {
+      "sourcePath": "decoder_start_token_id",
+      "targetPath": "decoder_start_token_id",
+      "transform": "directMapping"
+    }
+  },
+  "streamMappings": {
+    "chunkFormat": {
+      "sourceFormat": "data: {JSON}",
+      "targetFormat": "data: {JSON}",
+      "transform": "directMapping"
+    },
+    "eventTypes": {
+      "message_start": "message_start",
+      "message_delta": "message_delta",
+      "message_stop": "message_stop"
+    }
+  },
+  "authentication": {
+    "apiKey": {
+      "sourceHeader": "Authorization: Bearer {token}",
+      "targetHeader": "Authorization: Bearer {token}",
+      "transform": "directMapping"
+    }
+  },
+  "headers": {
+    "contentType": {
+      "sourceHeader": "Content-Type: application/json",
+      "targetHeader": "Content-Type: application/json",
+      "transform": "directMapping"
+    }
+  },
+  "errorMappings": {
+    "errorResponse": {
+      "sourceFormat": {
+        "error": {
+          "message": "string",
+          "type": "string",
+          "code": "string"
+        }
+      },
+      "targetFormat": {
+        "error": {
+          "message": "string",
+          "type": "string",
+          "code": "string"
+        }
+      },
+      "transform": "directMapping"
+    }
+  },
+  "specialFeatures": {
+    "multipleModels": {
+      "description": "Text Generation WebUI supports multiple model backends",
+      "handling": "Model selection handled through UI, API uses OpenAI format"
+    },
+    "extensions": {
+      "description": "Text Generation WebUI supports various extensions",
+      "handling": "Extensions provide additional features not in standard API"
+    },
+    "webInterface": {
+      "description": "Text Generation WebUI provides comprehensive web interface",
+      "handling": "Not relevant for API conversion"
+    }
+  }
+}

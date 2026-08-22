@@ -1,0 +1,388 @@
+---
+name: rcc-dev-skills
+description: 证据优先：任何归因必须由同一 requestId 的 raw request、provider-bound request、raw response、client projection 和 live replay 证明，禁止把 provider/context/model 当默认锅；先定位唯一 owner 和数据形状，再改唯一真源。P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script 做跨文件或同一文件多位置语义批量替换；逐文件读取核实上下文后用 apply_patch hunk，formatter/canonical generator 只生成声明的机械产物，不得语义改写。P0 Architecture Guard：typed carrier / MetadataCenter 控制资源绝不能进入 payload，payload must not reconstruct control，必须 fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound 补偿。模块定义、owner、allowed/forbidden paths、相邻调用边、资源关系和方案越界审查先行，写完审 diff 越界，功能验证后最后 code review。
+---
+
+# RCC Dev Skills
+
+## 概要硬规则（Agent 列表阶段也必须看到）
+
+- **请求形状优先归因（最高优先级）**：一个请求的响应错误，很大概率首先是请求形状问题，禁止先规避 provider、改路由或把错误归因给 provider/key。必须先完成两步证据：**(1) 失败请求可复现；(2) 同入口的最简请求正常**。确认后，必须从最近一次失败请求逐步回退：先去掉最近一轮请求，验证是否由该轮引起；再按字段做最小差分，定位第一个触发错误的字段/组合。修复必须回到生成该 provider-bound request 的唯一 owner，解决请求根因；禁止用改配置绕行、降低路由优先级、排除 provider、静默裁剪字段、fallback 或错误投影掩盖问题。最终必须用同一入口、同一真实样本在线重放证明原错误消失，并保留“完整失败、最简成功、最近一轮差分、字段差分”的证据链。
+
+- P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script，对跨文件或同一文件多位置做语义批量替换；逐文件读取核实上下文后，只能用明确、可审查的 `apply_patch` hunk 手工修改。formatter/canonical generator 只可生成其声明的机械产物，不得语义改写。
+- P0 控制面与业务 payload 物理隔离：routing、switching、continuation、retry、provider selection、health、debug、snapshot、error、scope、Stopless/servertool 状态只能走 typed carrier / MetadataCenter 控制资源 / Error 链，绝不能进入 request/response payload；payload 不得重建控制状态；发现泄漏必须 fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound/transport 补偿。
+- 模块边界流程不可跳过：先读模块定义、allowed/forbidden paths、相邻调用边、资源关系并审方案越界；写完后审实际 diff 越界，再做功能验证，最后才允许安装/重启/在线样本和 code review。
+- P0 Architecture Guard：typed side-channel / MetadataCenter 控制资源只能承载控制面，绝不能进入 payload；payload must not reconstruct control；泄漏必须 fail-fast。禁止 silent strip、请求侧 cleanup、handler/SSE/outbound/transport 补偿。
+- 客户端接入失败必须修当前 canonical protocol path：Chat Completions 失败就修 Chat/SSE 唯一 owner，禁止改走 Responses、加静态 scope header 或换 endpoint 掩盖坏链路。
+
+- 任何 RouteCodex 开发/调试/审计任务，先读本 skill 和 `.agents/skills/rcc-v3-architecture/SKILL.md`；不要只靠 grep、记忆或聊天摘要改代码。
+- 写代码前必须查 `v3-resource-operation-map.yml`、`v3-function-map.yml`、`v3-mainline-call-map.yml`、module registry、`v3-verification-map.yml`，锁定唯一 owner、允许路径、禁止路径、相邻边和必跑 gate。
+- 控制状态与业务 payload 物理隔离：routing/switching/continuation/retry/provider selection/health/debug/snapshot/error/scope/StoplessCenter/servertool 状态只能走 typed side-channel / MetadataCenter 控制资源 / Error 链。Stopless 当前轮协议投影是唯一登记例外：Req04 可注入当前轮透明 guidance/tool/action，Resp03 可按同轮 provenance 剥离对应内部动作；控制状态字段仍不得进入 normal payload 或协议 `metadata`，历史和 continuation 不可变区不得修改。
+- 每个阶段必须保持协议形态：Direct 同协议直连；Relay 只在相邻 inbound/outbound codec 做静态投影；Chat Process 不决定 provider wire shape。
+- 禁止静默丢弃、请求侧 cleanup、handler/SSE/outbound 补偿、fallback/降级、未登记近似投影；错误回唯一 owner 修。
+- 绝对禁止脚本批量替换；跨文件或同文件多位置语义修改只能逐文件读取后用明确、可审查的手工 hunk 修改。
+- AppSDK lifecycle record alignment 也属于 tracked semantic edit：`source_commit` / `reviewed_commit` / `base_commit` / freeze binding 必须逐文件用 `apply_patch` 明确修改。即使字段值相同，也禁止用 Python/Node/shell loop/JSON rewrite 跨记录同步；SDK 自身 canonical record writer 只可生成它声明的 freeze hashes，不豁免手工 source-commit 对齐。
+
+## P0 架构阻断（先于任何路由）
+
+- 禁止脚本批量替换：严禁用 Python / Node / Perl / `sed` / `awk`、临时脚本、shell loop、正则替换命令、编辑器宏或生成式 transformation script，对跨文件或同一文件多位置做语义批量替换。必须逐文件读取并核实上下文，再用明确、可审查的 `apply_patch` hunk 手工修改。既有 formatter / canonical generator 仅可生成其声明的机械或生成产物，绝不能用于语义改写。
+- RouteCodex 控制状态只能走 typed carrier / MetadataCenter 控制资源 / Error 链，绝不能进入、镜像到或借协议 `metadata` 混入 provider/client 正常 payload。不要把登记的 Stopless 当前轮 Req04 注入/Resp03 剥离误判成控制状态泄漏。
+- normal payload 也不得重建 routing、switching、continuation、retry、provider selection、health、debug、snapshot、error、scope、stopless/servertool 状态。
+- 命中泄漏必须在 owning boundary fail-fast；禁止 silent strip，禁止请求侧 cleanup，禁止 handler/SSE/outbound 补偿。先执行本块，再查 map、路由或实现。
+- 强制顺序：读涉及模块定义 -> 审查方案是否越界 -> 写代码 -> 审实际 diff 是否越界 -> 验证功能 -> 运行时安装/重启/在线旧样本 -> code review。前一步未通过禁止进入下一步；review 必须逐模块检查 owner、owned/allowed/forbidden paths、相邻边和资源关系。
+
+## 何时用
+- RouteCodex / llmswitch-core 请求链调试
+- Hub Pipeline / Virtual Router / Provider Runtime owner 定位
+- `feature_id` / gate / owner 查询
+- `~/.rcc` / provider 配置排障
+- note.md → MEMORY.md → skill 沉淀
+
+## 先读
+1. 项目 `AGENTS.md`
+2. `docs/agent-routing/05-foundation-contract.md`
+3. V3 架构/调试/开发先读 `.agents/skills/rcc-v3-architecture/SKILL.md`
+4. `docs/agent-routing/00-entry-routing.md`
+5. `docs/agent-routing/40-task-memory-routing.md`
+6. `references/24-node-contract-debug-method.md`
+7. 本 skill 路由表对应的小文件
+
+## 先查（硬性）
+
+任何会改实现的任务，先执行且不能跳过：
+
+0. 先用 MemPalace 查项目记忆与旧结论；snippet 只当 locator，必须打开返回源文件再判断。
+   - 例外：Rustification L1 / source-doc-only 审计 / 生成物排除类任务，不得用
+     MemPalace、`.mempalace`、`.local-index`、`dist`、`target`、`coverage`
+     或其他生成物作为当前代码状态证据；文件发现必须从 `git ls-files`
+     加源码/文档 allowlist 和生成物 denylist 开始。
+1. 定位 feature_id（有时来自问题描述关键词）
+2. 在 `docs/architecture/function-map.yml` 查 `feature_id` 的 owner、allowed / forbidden paths。
+3. 在 `docs/architecture/mainline-call-map.yml` 查 `feature_id`、`caller`、`callee`。
+4. 在 `docs/architecture/verification-map.yml` 查必跑验证栈。
+5. 在 `docs/architecture/wiki/mainline-call-graph.md`（或功能 wiki）核对节点闭环。
+6. 若相关 skill 已覆盖现成流程/经验，优先复用；如果没有，任务结束时必须回查并沉淀到对应 skill。
+
+## 模块边界审查（实现前后各一次）
+
+1. 实现前：列出所有涉及模块及其 registry/module id、唯一 owner、`owned_paths`、allowed/forbidden paths、相邻 caller/callee、读写资源和禁止直连资源。
+2. 方案审查：逐项证明拟修改文件、调用边、数据流和资源操作都落在允许边界；任一项无法证明即停止实现，先补 map/contract 或调整方案。
+3. 实现后：对实际 diff 重新做同一清单，不以“方案原本合规”代替 diff 审查；检查新增 helper、import、payload 字段和调用边是否产生越界。
+4. 只有越界自检通过后才跑功能验证；运行时任务在线闭环后才允许 Codex review。Reviewer 必须收到模块定义和实际 diff，并将模块越界列为 P0/P1。
+
+## 多 worker 协作（RouteCodex 本地协议）
+
+- 项目协作真源是 `.agent-collab/PROTOCOL.md`；不要假设共享控制面、共享 worker 内存、可靠实时消息或可见工具状态。
+- 代码/配置编辑、长 gate、提交、合并前，先刷新 `.agent-collab/` 视图：`runs/*/heartbeat.json`、`claims/*/owner.json`、最近 `events.jsonl`、`handoff/`、`merge-queue/`、`KILL_SWITCH`。
+- 写入前 claim 语义 owner，不 claim 裸文件路径；优先 `feature_id`、`resource_id`、`mainline_node_id`、`gate_id`，用 `mkdir .agent-collab/claims/<semantic_id>` 作为本地原子占用。
+- 保留并行 worker 的无关 dirty worktree；禁止用 checkout/reset/broad cleanup 清理他人改动。
+- 心跳 stale 不等于接管授权；生产写入、删除、迁移、发布、鉴权、密钥、global install、live runtime 变更仍需明确授权或 checked handoff。
+- 可修复 blocker 不等于等待：如果目标被 map/source anchor、gate wiring、review surface drift、窄测试 fixture drift 等非破坏性问题挡住，且当前 source truth 可验证，应主动做 forward fix。先记录 evidence；有空 claim 就 claim 后修；若 active claim 正占用同语义，先写 handoff，再对低风险 forward-only 一致性修复做最小 patch，不用 reset/checkout/blocked 代替修复。
+- 其他 worker 的无关 claim / handoff / dirty diff 不是当前任务的 blanket blocker。只要目标修改能用定向 patch 保留现有 diff，且没有真实同一语义冲突，就继续自己的 feature/gate；只在同一代码区域出现无法安全合并的直接冲突时停。
+- 未关闭 claim 不等于仍有 worker 在做。判断 active/冲突必须同时看 `owner.json`、对应 `runs/<run_id>/heartbeat.json` 更新时间、`events/evidence`、handoff/merge-queue，以及当前 live agents/实际进程；heartbeat stale 且无 live agent 时按 stale claim 处理，不要把 owner.json 的 `status=active` 字面值当 blocker。
+- 完成声明必须有 `evidence.jsonl`；跨 worker 集成默认走 `handoff/` 或 `merge-queue/`，checker 读取证据后再合并。
+
+## Debug 首选顺序（强制）
+0. V3 任务先打开 `.agents/skills/rcc-v3-architecture/SKILL.md`，并用 `npm run render:v3-mainline-caller-flow` 生成/查看 `docs/architecture/wiki/html/v3-mainline-caller-flow.html` 的主骨架和相关分支图。
+1. 先查 `function map / owner registry / verification map`
+- 锁唯一 owner、允许路径、required gates。
+2. 再查 `mainline source / wiki / manifest`
+- 先判断生命周期、节点合同、正常/错误/超预期路径是否逻辑闭环。
+3. 再设计测试
+- 先白盒节点测试，再 provider/client 两端黑盒。
+4. 最后才查实现并改代码
+- 合同没锁清楚时，禁止直接 grep 后改实现。
+- 1-2 次查询内找不到唯一 owner 或唯一主线边，先补 map/contract。
+- 数据/控制分流先验：如果数据字段能从原始请求/响应负载直接拿到，就不要从 `MetadataCenter`、上下文 carrier、日志投影、matchedPort/localPort 之类中间语义里再取一遍；`MetadataCenter` 只用于控制语义，不能当数据面第二真源。
+- Outbound 字段硬锁不得跨 continuation owner：`previous_response_id` 必须先在 Req03 判定 remote/direct 或 local/relay，并在下一轮 request Chat Process 恢复本地状态；不得把它当普通 Relay provider-wire 字段补进 allowlist。`resp_chatprocess save -> next req_chatprocess restore` 区间禁止清理、重建或恢复语义；合规清理优先放响应侧相邻 owner。同协议默认 Direct，只有配置显式 force-Relay（当前 `provider.responses.process=chat`）才进入 Relay。
+- Provider 错误调试高优先级：先修请求侧 provider-bound 字段生成链，目标是让原始请求不再生成/发出会触发上游或 codec 错误的字段；禁止把焦点放到错误投影、错误显示、事后包裹、静默清理、无契约依据的空对象兼容或绕过错误。闭环证据必须是同一真实样本重新生成的 provider request / live replay 不再发生原错误。
+- Provider 返回 HTTP 200 但 SSE/JSON 内容是诊断文本、零 usage 或 provider 特征错误时，归类为 provider semantic error：先在 `config.v3.toml` 的 `error.provider_error_action_policy` / `error.client_error_projection_policy` 配置并经 V3 config manifest 编译，再让 Resp03 前的 runtime 消费 manifest 进入 provider failure/reselect；禁止把 provider-specific 短语硬编码到 SSE crate、server handler、RespOutbound 或 Error06 显示层。
+- SSE 错误调试高优先级：先分 transport / provider body / provider event codec / error policy owner；`malformed SSE` 文案不是 owner 证据。SSE crate/server handler 只能 opaque framing/backpressure/closeout，禁止补 provider payload、tool、reasoning、continuation、retry 语义。
+- `/v1/responses` Direct 遇到 `provider_response_sse_empty` 且命中 `openai_chat` / `anthropic` 等非 Responses provider protocol 时，先查是否缺少 `entry_protocol x selected_provider_protocol` execution-decision edge。正确修复必须先锁 SOP/review 面，再在 VR/Target concrete selection 后做协议决策；禁止在 Server entry binding 扫 candidate set 预切 Relay，也禁止在 SSE transport/server handler 补假事件、吞 EOF、改 provider config 或失败后 fallback 到 Relay。
+- 请求协议字段先验：HTTP headers、body 标准字段、`metadata`、`client_metadata`、`x-*` / `x-codex-*` 都是请求协议数据面，默认透传；不要搬进 `MetadataCenter`，不要因为名字含 metadata 就判成 RouteCodex 控制信号。`MetadataCenter` 只写 RouteCodex 内部控制信号。
+- 反模式：同一字段多次派生、多处 fallback、先从 payload 再从 metadata 回读、用上下文零散字段拼接原始数据。
+- 直通路径特例：provider-direct / same-protocol direct 若绕过 request-executor，必须在实际送给 provider 前把 `clientConnectionState` 生成的 `abortSignal` 写进 provider runtime metadata；只保留 state 不够，direct provider 会继续跑到自然结束。
+
+### 请求构造与 provider 归因诊断（强制）
+
+不要凭“线上没有字段”“模型没遵循”“上下文太长”把责任甩给 provider、模型或上下文。归因必须由同一 `requestId` 的实际字节和可重放样本证明；代码里“有注入函数”不等于本次请求真的注入。
+
+固定按以下顺序排查：
+
+1. 锁定同一请求的 `entry protocol`、`direct|relay`、provider、model、port、`requestId`，读取 canonical provider request、provider raw response、client projection；不要先看 console 摘要下结论。
+2. 在 provider-bound request 上检查真实形状：`messages`/content 数量和 role 顺序、system 数量及位置、当前轮边界 `current_payload_start`、工具数量、目标工具 schema、required 字段、guidance 实际落点。参数若只被校验却没有参与落点计算，直接标为请求构造缺陷。
+3. 对同一 provider/model/schema 做三组黑盒对照：
+   - A：最小直连 provider 请求；
+   - B：把 RouteCodex 生成的完整 provider request 原样直连同一 provider；
+   - C：同入口经过 RouteCodex 的真实在线请求。
+   A 成功、B 失败：请求历史、role、序列化或 guidance 位置是本地构造问题；A/B 成功、C 失败：传输、解析或客户端投影问题；A 失败：才可调查 provider/key/model/endpoint。
+4. 响应侧修改前先确认 raw provider response 是否已有目标字段。raw 有而 client 无，是 `RespInbound -> RespChatProcess -> RespOutbound` 的解析/投影 owner 问题；raw 没有，回到请求构造和 A/B 对照，禁止在响应端猜测、补值或 fallback。
+5. Direct 和 Relay 必须分别追 Req04 hook 到 provider-bound 输出，并分别验证；不能因为 Relay 命中就推断 Direct 命中，也不能因为 provider 名相同就跳过路径验证。
+6. 当前轮 guidance 只能写入当前 provider-facing slice；多 system message 禁止无条件 `.find()` 第一个 system。历史 system/tool/assistant 必须保持不变，并用“多历史 system + 当前边界”fixture 锁住这一点。
+
+归因记录至少写出：请求/响应实际形状、对照 A/B/C 结果、唯一 owner、排除的假设、下一步验证。缺任一证据，只能报告“尚未定位”，不能报告“provider 问题”或“已修复”。禁止 fallback、静默清洗、响应端补偿；原生 tool call 必须保持可执行，字段缺失必须作为可观测失败返回。
+
+本轮已确认的反模式：`current_payload_start` 曾经传入但只做边界校验，注入函数仍在全部 history 中寻找第一个 system，导致 guidance 落到历史位置；最小直连成功而完整 provider request 重放失败，证明不能归因 provider 能力。以后必须用上述 A/B/C 对照和边界 fixture 阻断回归。
+
+### Virtual Router 在线诊查优先
+
+- 遇到路由命中错误、端口路由组错配、longcontext 优先级、provider 切换/兜底、`PROVIDER_NOT_AVAILABLE`、default floor 或 route pool availability 问题时，优先建议并执行 live VR diagnostics。
+- 先查 `/_routecodex/diagnostics/virtual-router/status` 或 `routecodex port status <port> --json`，确认 `localPort`、`routingPolicyGroup`、route prefix、pool、forwarder、availableTargets。
+- 再用 `/_routecodex/diagnostics/virtual-router/dry-run` 或 `routecodex port dry-run <port> ... --json` 重放最小样本；短样本和 longcontext 大样本分开验证。
+- 禁止只凭日志、短请求或 config 片段判断 VR 问题；线上能查时，必须用在线 status + dry-run 作为第一证据。
+- default pool 最后目标不可被排空；不要用排除 default singleton 制造 `PROVIDER_NOT_AVAILABLE`，应解释为 default floor 保护。
+
+## 修改前 / 验证后 必做
+
+- 修改前：必须同时看 `function map` 和 `mainline source`，确认模块边界、允许路径、禁止路径、主线 caller/callee。
+- V3 Hub v1 node-file topology：每个 contract node 的 struct 和相邻 builder/parser 必须在对应 `v3/crates/routecodex-v3-runtime/src/hub_v1/<node>.rs` split owner file；`hub_v1.rs` 只允许 `mod` / `pub use` / `#[cfg(test)] mod tests` 根聚合面。改 V3 Hub v1 map/source/gate 前先跑或补 `verify:v3-hub-v1-node-file-topology`，禁止把 node 实现、map owner 或红测 fixture 指回 root aggregator。
+- 配置/loader/VR/Hub/Pipeline 接线前：必须先完成未接线状态下的模块黑盒与旧配置样本对比，证明新实现能读取/等价处理现有用户配置；黑盒未绿禁止接线、禁止启动/重启 live server。
+- 禁止为绕过代码缺陷去修改 `~/.rcc` 或用户真实配置文件。若现有配置暴露兼容失败，必须回代码唯一 owner 修正；需要清理/迁移用户配置文件时必须先获得 Jason 明确授权。
+- 验证后：必须做 architecture review，判断结果是否正确、架构是否正确、是否用了 fallback / 临时绕路 / 补丁式修复、是否存在“结果对了但架构错了”。
+- Review finding 不是协议事实：修 reviewer finding 前必须回 canonical protocol/design 和真实样本证明该序列合法、可达且属于本 owner。未证明合法的假序列不得驱动 runtime 分支、fail-fast 特判或测试；若 finding 与 canonical design 冲突，保留设计真源并在复审 prompt 中列出精确条款和合法生命周期。
+- 验证通过不等于闭环完成；架构 review 不过，仍视为未完成。
+- RouteCodex 结案汇报必须短但完整：问题来源、验证根因、唯一 owner/节点、解决了什么、为什么符合 V3 架构、source gate、install/restart/live 证据、剩余风险。禁止只报“测试通过/已修复”。
+
+## 全局安装 / release 验证硬规则
+
+- 交付顺序固定：定向测试 -> 编译构建 -> 全局安装 -> 聚合重启 -> 全部成员 health -> 真实旧样本/同入口在线 replay -> Codex review -> 精准 commit/push。禁止在全局安装和在线验证前运行交付 review；review 后若代码、测试、构建或运行配置发生变化，旧 PASS 作废，必须从受影响验证重新跑到在线 replay，再重新 review。
+- Codex review 不能替代自验证，也不能与 source/live gate 并行抢跑；只有当前工作树对应产物已完成上述 install/restart/同入口 replay 并留下证据后，才允许启动 review。review 请求、旧 PASS、源码静态判断都不能豁免前置验证。
+- 所有交付级 RouteCodex 测试必须使用全局安装版本。单元测试、编译、repo-local build 只能作为前置 gate，不能作为“已修复/已启动/已可用”的最终证据。
+- Hub Pipeline / runtime rustification 的每个实现轮次必须按顺序完成：定向测试 -> native/build -> release/global install -> `routecodex restart --port <locator-port>` 聚合重启一次 -> 配置全部成员端口 `/health.version` 一致 -> 检查目标 server log/样本目录错误 -> 修复发现的问题。缺任一项只能声明 source gate 通过，不能声明本轮完成。
+- 实验测试和 live closeout 使用 `routecodex` 安装面执行：先安装目标产物，再用全局 `routecodex --version` 确认版本，用任一成员端口作为 locator 执行一次 `routecodex restart --port <locator-port>`，然后验证该 aggregate instance 的全部配置成员端口。禁止逐端口循环 restart。
+- Jason 未明确要求时，不得覆盖或改写 `rcc` 的 release 安装、Homebrew/global shim、或正在工作的 release runtime。需要动 `rcc` release install 时，先确认这是本轮目标。
+- 禁止用 `rcc start`、repo-local `node dist/...`、手工 snapshot、或临时 shim 代替标准 release/global 安装验证；这些只能作为定位证据，不能作为交付闭环。
+- V3 5555 live lifecycle 纠偏：Jason 要求用 restart 就只能用 restart。`start` / `server start` / 手工 `run-managed-child` 会留下错误 identity、stale socket/lock、foreground child 和不可用证据；如果 `restart` 失败，先查 lifecycle owner、instance declaration、exact PID/socket/lock，不准用 start 兜底恢复。
+- V3 native/rccv3 lifecycle 纠偏：当目标是 `config.v3.toml` 管理的 4444/5555 V3 实例时，交付级动作必须用 `RUSTUP_TOOLCHAIN=stable npm run install:v3` 编译安装，再用 `rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml` 和 `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml` 重启该 V3 instance；不要用 V2/legacy `routecodex restart --port <port>` 当作 rccv3 live 证据。重启后验证 4444/5555 `/health`、installed rccv3 hash、provider-request dry-run 和真实样本 replay。
+- V3 server 入口锁：生产、dev、launcher、npm start 与安装产物只能执行 `dist/bin/rccv3 server start [--foreground]`；`src/index.ts`、`dist/index.js`、`RouteCodexHttpServer`、`resolveServerEntryPath()` 和 `serverBin -> nodeBin` fallback 均不得作为 server 入口。入口迁移完成后必须物理删除 `src/index.ts`，并运行 `npm run verify:v3-rust-only-server-entry`。
+- 版本真相必须三点一致：命令入口版本、`~/.rcc/install/current/package.json`、目标端口 `/health.version`。不一致时先修安装/入口，不继续判断业务功能。
+- 区分测试与生命周期动作：`npm run test:webui` 这类 Jest/UI 单测不得启动、停止、重启 live server；若测试前后 server 变化，必须用 `~/.rcc/logs/server-<port>.log` 的 `signal_received` / `self_termination` / `restart_signal_received` 追真正 stop owner，禁止把 install/restart/HTTP shutdown 误归因给 UI 单测。
+- 如果 Jason 说某次执行导致 live server 停止，并且已经手动恢复，立刻接受现场事实；停止争辩和重复复现。后续命令先按 side-effect 分级：禁止再跑 install/restart/start/stop/HTTP shutdown/foreground server/可能退出会话的 browser probe，除非 Jason 明确要求。
+- 调试 `rcc start`/`routecodex start` 当前行为时，必须同时检查 source、repo `dist`、以及 `~/.rcc/install/current/dist`。start takeover lock 分支禁止用 health OK 直接成功；running 只能说明端口被占，默认/--restart 必须进入 port-scoped stop + safe PID fallback，只有 `--no-restart` 或 live lock still active 可拒绝。
+- **更新运行中 Mach-O 二进制禁止 `cp` 覆盖**（2026-08-09 事故）：`cp` 覆盖 `~/.local/bin/rccv3` 会使 macOS 代码签名失效，进程启动即 `SIGKILL (Code Signature Invalid)`（`config check` / `start` 全部 Killed:9），`codesign --verify` 可能仍报 valid，以崩溃报告 `~/Library/Logs/DiagnosticReports/rccv3-*.ips` 的 `namespace=CODESIGNING` 为准。正确流程：`cargo build --release` 产出 `target/release/rccv3` -> 确认目标进程已停止 -> 安装到目标路径 -> `codesign -s - -f ~/.local/bin/rccv3` 重签 -> `rccv3 config check` + `rccv3 --help` 验证可运行 -> 再启动 daemon。
+- **重启/杀掉协议永远不变**（Jason 2026-08-09）：RouteCodex 的 stop/restart/kill 只走固定协议，禁止每次探索新方式。CLI managed instance（`routecodex restart`）与用户手动在 ttys023 启动的 daemon 是两套 managed lifecycle：CLI 的 stop/restart 对后者会被 SIGKILL 且不生效，必须先停目标进程（或用户在其终端停），再走 `routecodex restart --port <locator>` 聚合重启并验证全部成员端口 `/health`。禁止用 CLI stop 杀用户手动 daemon、禁止 start 兜底恢复。
+
+## 路由表
+
+| 主题 | 文件 | 用途 |
+| --- | --- | --- |
+| 架构总览 | `references/00-architecture-map.md` | 单一路径、分层职责、关键文件 |
+| PipeDebug 流程 | `references/10-pipedebug-flow.md` | 按阶段切段定位 |
+| 改动落点 | `references/20-change-index.md` | 功能改动先改哪 |
+| 改动流程 | `references/21-change-workflow.md` | 功能变更先看什么、怎么锁唯一修改点 |
+| servertool hook 骨架 | `references/22-servertool-hook-skeleton-workflow.md` | servertool/stopless CLI lifecycle + hook-governed 请求/响应骨架、测试闭环 |
+| servertool 开发/调试流 | `references/23-servertool-hook-dev-debug-flow.md` | servertool hook skeleton 的实施顺序、debug 切段、证据链与删 TS 前置条件 |
+| 节点合同调试法 | `references/24-node-contract-debug-method.md` | 高优先级方法：先生命周期/节点合同，再设计白盒与两端黑盒，最后才 debug/改代码 |
+| 协议/SSE/continuation 边界 | `references/25-protocol-sse-continuation-boundary.md` | `/v1/responses` continuation Chat Process save/restore 不可变区、SSE transport-only、inbound/outbound 只归一化 |
+| 唯一功能块 | `references/30-unique-block-index.md` | 快速锁唯一功能块 |
+| owner / feature / gate | `references/40-owner-registry.md` | function map / verification map / source anchor |
+| `~/.rcc` / provider 配置 | `references/50-rcc-config-ssot.md` | runtime 配置真源、schema、排障命令 |
+| note / MEMORY / skill | `references/60-note-memory-flow.md` | note→MEMORY→skill 提炼 |
+| gate 反查 | `references/70-gate-discovery.md` | feature_id → required_gates |
+| skill 写法 | `references/80-skill-routing-convention.md` | 主 skill 保持短入口 |
+| 2026-05 lessons | `references/91-lessons-2026-05.md` | 5 月沉淀 |
+| 2026-06 lessons | `references/92-lessons-2026-06.md` | 6 月沉淀 |
+| 2026-07 lessons | `references/93-lessons-2026-07.md` | 7 月沉淀 |
+| V3 stopless SOP | `references/95-v3-stopless-sop.md` | V3 stopless 三轮合同、节点检查、provider/client 黑盒、live closeout |
+| 续写式转换合规 | `references/97-continuation-cache-compliance.md` | 占位/流水线修改必须续写式合规：字节稳定、reasoning 回传透传、ds4 缓存机制与验证清单 |
+
+## 最小使用法
+
+### 1. 先判类
+- 架构 / 节点 / 责任 → `00` / `30`
+- 调试流程 → `10`
+- 改动落点 / 修改顺序 → `20` / `21`
+- owner / gate / feature → `40` / `70`
+- servertool / stopless / hook run / followup / reenter → `22` / `23` + `40` / `70`
+- 运行时配置 / provider → `50`
+- note / memory / skill 沉淀 → `60`
+
+### 生命周期/合同类问题的最小执行序
+1. `24`：锁生命周期、节点合同、白盒/黑盒设计方法
+2. `40` + `70`：锁 owner、feature、gate
+3. `22` / `23`：锁 servertool 主线、落点、切段法、验证顺序
+4. 再回真实实现
+
+### servertool 专项必经流
+- 只要任务涉及 `servertool / stopless / reasoning_stop / hook run / followup / reenter / schema validation / tool injection`，必须先读 `22` 再读 `23`。
+- 只要任务涉及 `/v1/responses` continuation、SSE、req_inbound/resp_outbound、history/tool loss、JSON/SSE parity，必须先读 `25`，再回 function map/mainline 锁 owner。
+- **Continuation 不可变区高优先级**：`resp_chatprocess save -> immutable store interval -> req_chatprocess restore` 之间禁止任何语义转换、上下文恢复、history/tool 修补、required_action 推断、stopless/servertool guidance 注入。`req_inbound` / `resp_outbound` / SSE / handler / adapter / store transport 只能做语义等价归一化、投影、传输、scope 校验和释放。
+- **Responses split tool output 判定**：同一 custom tool `call_id` 的 `custom_tool_call_output` chunk 属于 req-inbound 语义等价归一化，即使中间穿插独立 `wait` 等 function call/output，也只能在 Rust req-inbound context capture 按 custom-call owner 合并；无匹配 custom call 的真实 orphan 仍必须 fail-fast。禁止把该规则泛化到普通 function output，也不要在 handler、resp_outbound、store transport、provider runtime 或 TS bridge 补 history / continuation / tool_result。
+- **历史 stopless no-op pair 判定**：Codex 历史 session 可能回放动态 `call_id` 的 internal `routecodex hook run reasoningStop` call/output pair。只能在 Rust stopless Req04 owner 识别“紧邻 call + output、exact call_id 相同、call 是 `exec_command`、arguments 是单字段 JSON 且 `cmd` 精确等于 CLI 命令”的 pair 并物理清除；不得接受任意 orphan output、raw command string、extra state fields、substring-only mention，不得在 SSE/handler/outbound/MetadataCenter 补偿，也不得把该控制 pair 写入 provider/client normal payload。
+- 如果看到 `entryOriginRequest` / `capturedChatRequest` / `requestSemantics` / session-only scope 在保存后到恢复前被用来补上下文或 history，先判定为越界 owner shortcut；修复方式是删除该逻辑并回 Chat Process continuation owner，而不是在 inbound/outbound/handler 再补一层。
+- `22` 锁目标骨架、主线顺序、case matrix、黑盒闭环。
+- `23` 锁实施顺序、debug 切段、证据链、删 TS 准入条件。
+- `24` 锁高优先级方法：任何复杂 debug/设计先画生命周期，逐节点定义输入/输出/正常/错误/超预期，再补白盒节点测试和 provider/client 两端黑盒，最后才允许改代码。
+- 对 servertool hook skeleton，整个开发和 debug 流程本身也属于 repo 资产：稳定后的执行步骤、切段法、验证顺序、删 TS 准入条件，必须沉淀进 `23` 或 lessons，不能只留在 wiki、`note.md`、goal 或聊天。
+- `23` 也是 servertool 开发 + debug 的执行真源：每轮新增的稳定 slice 顺序、串行验证顺序、黑盒口径、删 TS 前置条件，都必须回写到 `23` 或当月 lessons，不能只留在聊天或 `note.md`。
+- servertool 相关开发/调试一旦形成稳定动作序列、切段法、反模式或验证口径，必须同步回写 `23` 或当月 lessons；禁止只留在 `note.md` 或聊天上下文里。
+- 若 `mainline-call-map` 仍是 `binding pending`，只能宣称“目标/骨架已锁定”，不能宣称 runtime 已 Rust-only 落地。
+- 发现 inbound/outbound 里混入逻辑时，先查真源 owner 是否应上移到 Chat Process；尤其 continuation save/restore 只能在 Chat Process 响应出口/请求入口。修复后必须物理删除错误 helper / 重复实现，禁止在 outbound/inbound/handler 留第二套语义补丁。
+- SSE / transport 日志只可作为证据，不可作为语义 owner；当日志类测试与更高层 regression 重叠时，优先删重复断言，不要在 handler/outbound 里再补一套“日志即真相”的测试语义。
+- architecture review 发现 fallback、补丁式修复、临时绕路、错层实现时，必须回到唯一 owner 修正，而不是把结果正确误记为完成。
+
+### 2. 再做三问
+1. 失败在哪一段？
+2. 这一段唯一 owner 是谁？
+3. 最小 gate 和 live probe 是什么？
+
+### 3. 最后闭环
+1. red test / failing sample
+2. 改唯一 owner
+3. green gate
+4. request dry-run：真实入口或 codex sample 走 `x-routecodex-dry-run: provider-request`，确认返回 `routecodex.pipeline_dry_run`、最终 `providerRequest` 和 `stoppedBeforeProviderSend=true`；若返回普通 provider response，先修 dry-run loop
+5. response dry-run：相关 `provider-response*.json` 走 `npm run dry-run:codex-response -- --sample <file>`，确认现有 response converter 输出；未 materialize 的 live `sseStream` 样本不能当离线响应证据
+6. live replay old sample
+7. note → MEMORY → lessons
+
+## 高优先级 debug 纠偏
+
+- Provider 报错先查 provider-bound request 是否已被上游治理成合法形状。若错误源是 malformed/misordered request fields，修复目标是“错误请求不再生成/不再发出”，不是 provider codec 兜底、错误投影绕过、日志显示美化或兼容空对象。
+- 对 `function_call.arguments`、tool output 顺序、schema、stream intent 等 provider-bound 字段，先用真实样本定位第一个制造坏字段的节点；协议转换规则错误回 provider-wire builder/codec，对话治理错误回 ReqChatProcess/RespChatProcess。
+- Provider codec 只做协议转换和契约校验；V2 已明确的转换规则必须在 codec 对齐。例如普通 `function_call.arguments` 无法解析为 JSON 时，Anthropic provider request 转成合法 `tool_use.input={}`，同时保留原 call/output 对，禁止删掉模型纠错反馈。
+- 修 `~/.rcc/config.toml` / `/Volumes/extension/.rcc/config.toml` 时禁止整文件恢复旧备份。先定位当前污染块，再用最新可信样本只补丁目标 port/group/forwarder；多端口 `[[httpserver.ports]]` 语义必须保留。5520 这类生产端口要验证 routing group、forwarder targets、provider registry 三层一致，禁止把旧 `fwd.temp` / GLM / MiniMax / stale provider 误恢复进目标组。
+- Server test fixture 里如果需要临时 HOME/STATE，必须让 helper 自己持有独占 state 路径；不要依赖进程全局 `HOME` 再靠别的测试锁来兜底。否则并行测试会把无关 tmpdir 误删成 EINVAL，表面看像业务失败，实际是 fixture 污染。
+- 结构化 test slicer 不要假设 `#[tokio::test]` 一定缩进四空格。抽离测试模块后，切片边界应同时兼容顶层 `\n#[tokio::test]` 和嵌套 `\n    #[tokio::test]`，否则 red-fixture 可能误判为 PASS。
+
+## 硬护栏
+- 单一路径：`HTTP -> Hub Pipeline -> VR -> Provider Runtime -> Upstream`
+- Rust 真源优先：Hub Pipeline / Chat Process / 路由 / servertool 语义默认查 Rust
+- 禁止 fallback / 静默吞错
+- `feature_id` 改动必须同步 map + verification + source anchor
+- `~/.rcc` 是运行时配置真源
+- server handler 不得长出第二套协议解析
+- gate 只是门禁；完成必须有 live/runtime 证据
+- Release/global install copy scope 包含 `v3/` 是预期：V3 bin/tests 必须可全局安装验证。不得把一起 copy V3 当 bug；应验证目标 install surface。
+- 资源收拢先建 map/gate：先落 `resource-operation-map`、function-map `resource_bindings`、mainline `resource_flow`，再按资源改 runtime；禁止先写全局 request/response manager。
+- 资源第一层补缺边界：先补 `request.mainline` / `response.mainline` / `responses.continuation.mainline` / `servertool.hook_skeleton.mainline` / `error.mainline` / `vr.route_availability.mainline` / `metadata.center.mainline` 的相邻 `resource_flow` 与 owner `resource_bindings`；config/WebUI/runtime lifecycle/debug/internal-error/VR diagnostics 需先扩展资源分类再补。
+- 资源第二层补缺边界：config/WebUI/runtime lifecycle/debug/internal-error/VR diagnostics/hit-log 必须先使用独立资源（如 `config.runtime_projection`、`runtime.instance_record`、`debug.internal_error_envelope`、`vr.diagnostic_decision`），禁止借用 request/response/route.selection/debug snapshot 资源凑 coverage；剩余 stopless/SSE/stage_a 属下一层 backlog。
+- 资源第三层补缺边界：补 stopless/SSE/stage_a 时必须使用 `stopless.*`、`sse.protocol_stream_projection` / `sse.provider_stream_aggregate`、`stage_a.*` 资源；主线 edge 可全闭合到 `108/108`，但 feature-level `resource_bindings` backlog 仍需按 owner surfaces 分层处理，禁止为数字把非主线 owner 绑定到不相邻资源。
+- 资源第四层补缺边界：mainline `resource_flow` 已 `108/108` 后，只补 feature-level `resource_bindings`。servertool engine 子功能使用 plan/state/projection/policy 资源族（如 `servertool.engine_action_plan`、`servertool.execution_contract_plan`、`servertool.registry_projection`），不新增假 mainline flow，不把非相邻 owner 绑到 request/response/route 资源凑数。
+- 资源 host/runtime 补缺边界：server/host/CLI surface 要用 entry/handle/transport/projection 资源（如 `runtime.hub_pipeline_handle`、`runtime.http_entry_dispatch`、`server.handler_transport_envelope`、`models.capability_catalog`、`cli.command_dispatch_intent`），不要把 shell/handler owner 硬绑到 request/response/route truth 凑 coverage。
+- 资源 protocol/conversion 补缺边界：provider-wire compat 与协议转换要用 owner-specific `protocol.*` 资源；相邻但不同 feature 的 schema 修补必须拆资源（如 Responses function tool schema 与 tool parameters schema），禁止合并成一个多 writer 模糊资源凑覆盖。`protocol.*` side_channel 只读控制面，禁止进 provider/client body。
+- 资源 config codec/path 补缺边界：path resolution、TOML codec、user/provider text codec、provider coercion 要用下层 `config.*_plan` / `config.*_codec` 资源；不要把 codec/path owner 绑定到 `config.runtime_projection` / provider profile projection 这类高层 materialization 资源凑数。
+- 资源 residual 补缺边界：error/VR/contract/snapshot/debug/manager/daemon/SSE residual feature 也必须用 owner-specific 资源收口；禁止为完成覆盖率把它们塞进 request/response/route 主线真相。第四层 `119/119` 只代表 map/doc/gate 闭合，不代表 runtime refactor 已完成。
+- 资源 source-binding gate 边界：第四层 `119/119` 后，runtime refactor 前必须先跑 `verify:resource-source-bindings` 和红测 fixture；资源 owner 必须能经 function-map `owner_module` / `allowed_paths` 找到真实 `feature_id:` source anchor，查不到只能标 `binding pending`，禁止伪造 symbol/resource/edge。source-binding 绿门禁必须留在 `verify:architecture-review-surface-light`，红测 fixture 必须留在 `verify:architecture-ci-longtail` 并由 `verify:function-map-build-wiring` 锁住。
+- 首个 runtime slice 准入：先用 `.agent-collab` claim 精确 `feature_id` / `resource_id` / `mainline_node_id`，再证明 owner/source/map/gate 可查；对 dry-run 相关 slice，runtime 改动前必须先有 request dry-run 最终 provider request 样本和 response dry-run converter 黑盒结果，后续修复先加失败 dry-run 样本再改唯一 owner。
+- Dry-run 黑盒门禁：请求构造问题先用 request dry-run 固化 final `providerRequest`，响应处理问题先用 response dry-run 固化 `convertProviderResponseIfNeeded` 黑盒输出；serialized live `sseStream` 没有 `bodyText/raw/text` 不是离线 replay 证据，必须重新 capture。`test:pipeline-dry-run-blackbox-fixtures` 是 dry-run runtime refactor 前置门禁，不是事后补测。
+- Host bridge 收敛先收调用面：先把 broad `native-exports.ts` 外部调用点收敛到 owner-specific narrow host，再删除零引用 facade；禁止为了删桥让 handler/executor 直接接更多 native helper。
+- Host bridge 测试收敛分型：白盒 host wiring / mocked native-call tests 必须 mock owner-specific host（如 `routing-native-host.ts`、`runtime-lifecycle-host.ts`），不能 mock broad `native-exports.ts`；只有纯 Rust/NAPI 输出证据测试才迁到 `tests/sharedmodule/helpers/*direct-native*`。
+- Responses conversation store 状态断言若验证 host capture/record 后的 pending entries，必须走 `responses-conversation-store-host.ts` 的同一 host store binding；pending request 未有 response id 前不会持久化，direct-native 单独 binding 只适合纯 Rust 输出证据。
+- Monitored handler/executor 白盒测试也不能 import `tests/providers/helpers/llmswitch-native-exports-fake.ts`；需要 handler 专属行为时放到 owner-specific fake（如 `responses-handler-host-fakes.ts`）。
+- Responses request-bridge host wiring 测试使用 `tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts` 这类 owner-specific fake；禁止回到 `llmswitch-native-exports-fake` / broad `native-exports.ts` mock。
+- Host split 后 gate/source-map 必须跟随真实 helper owner：例如 provider-response converter 拆出 `provider-response-native-calls.ts` / `provider-response-effects.ts` / `provider-response-metadata-effects.ts` 后，gate 检查这些 helper 的 shared invoker / fail-fast / MetadataCenter 证据，禁止为了旧 gate 把 helper 逻辑搬回主 host。
+- Provider-response direct prebuilt SSE passthrough 判定属于 Rust owner：`provider-response-shared-pure-blocks.ts` 只能调用 `shouldAllowDirectResponsesPrebuiltSsePassthroughJson` 的 native shell，禁止在 TS 重新写 `/v1/responses` + `openai-responses` + `continuationOwner=direct` 本地谓词。
+- Provider-response `choices array` bridge debug details 属于 Rust owner：`provider-response-converter.ts` 只能调用 `buildChoicesArrayBridgeDebugDetailsJson` 的 native shell，禁止在 TS 重新写 `choices array` message 判断、bridge seed/payload key probe 或 `bridgePayloadHasDataChoices` 本地投影。
+- Provider-response timing breakdown projection 属于 Rust owner：`provider-response-converter.ts` 只能调用 `buildProviderResponseTimingBreakdownJson` 的 native shell，禁止在 TS 重新写 `clientInjectWaitMs` / `hubResponseExcludedMs` 投影。若响应对象含 live `sseStream`，TS wrapper 必须先从 native JSON 入参剥离并在返回后按原引用恢复，禁止把 stream 对象送进 native JSON serialization。
+- Hub Pipeline Rust 残留引用 gate：先跑 `verify:hub-pipeline-native-reference-gate` 和 red fixture，区分 private loader、owner-specific host、white-box mock、direct-native evidence、doc stale owner；runtime 禁 import direct-native helper，docs/wiki 禁把 broad `native-exports.ts` 写成语义 owner。
+- Thin-wrapper closeout 不能以空扫描为证据：`verify:architecture-thin-wrapper-only` 必须覆盖根仓 bridge/handler/converter/executor host 面并在 `rootHostCheckedFiles=0` 时失败；red fixture 要分别锁 second writer、TS ErrorErr 分类、flat metadata fallback、semantic payload fallback、malformed Rust plan downgrade 和 broad/dead facade 复活。
+- V3 Relay hook/resource 声明面：Config 只发布 Manifest 声明，Runtime 只消费 `V3Config05ManifestPublished` 并借用资源/Hook 声明；禁止 runtime 读 config 文件/目录、动态发现/加载 hook、把 side-channel resource 写进 provider/client body，或为了 hook 规划 retain/full clone/JSON round-trip/SSE materialize/snapshot-copy 当前节点业务 payload。
+- V3 compact Hub config live closeout: after `v3.config.compact_hub_v1_defaults` is locked, real `~/.rcc/config.v3.toml` and `/Volumes/extension/.rcc/config.v3.toml` must contain only `[pipelines.hub_v1] skeleton = "hub_v1"` for Hub internals; remove expanded entry/hook/resource/server execution blocks, run `rccv3 config check`, scan for expanded fields, then use only `routecodex restart --port 5555` and provider-request dry-run for live evidence.
+
+## 快查命令
+- 查 owner：
+  - `rg -n 'feature_id: <id>' docs/architecture/function-map.yml`
+- 查资源 owner：
+  - `rg -n 'resource_id: <id>|<id>@' docs/architecture/resource-operation-map.yml docs/architecture/function-map.yml docs/architecture/mainline-call-map.yml`
+- 查全项目资源覆盖：
+  - `npm run audit:resource-global-coverage`
+  - `sed -n '1,120p' docs/architecture/resource-global-coverage-report.json`
+- 查资源 gate：
+  - `npm run verify:resource-operation-map`
+  - `npm run verify:resource-owner-uniqueness`
+  - `npm run verify:resource-mainline-bindings`
+  - `npm run verify:resource-forbidden-writes`
+  - `npm run verify:resource-side-channel-isolation`
+  - `npm run verify:resource-source-bindings`
+  - `npm run test:resource-source-bindings-red-fixtures`
+  - `npm run verify:architecture-review-surface-light`
+- 查 gate：
+  - `rg -n 'feature_id: <id>' docs/architecture/verification-map.yml`
+- 查源码锚点：
+  - `rg -n 'feature_id: <id>|<id>' sharedmodule src tests`
+- 查运行时 provider：
+  - `ls ~/.rcc/provider/<id>/ && cat ~/.rcc/provider/<id>/config.v2.toml`
+
+## 维护规则
+- 主 `SKILL.md` 只做入口，不回填大段细节
+- 新主题新增 `references/<nn>-<topic>.md`
+- 单文件尽量 ≤ 200 行；超过继续拆
+- lesson 用 card，不写流水账
+
+## 相关规则
+- RouteCodex V3 Rust Responses direct MVP：`references/94-v3-rust-responses-direct-mvp.md`
+- note.md append-only：顶部 consolidation index，正文不删 raw
+- MEMORY.md append-only：只追加 dated correction
+- 同主题冲突：最新已验证时间戳胜出
+
+## V3 Provider-Request Dry-Run Guard
+- Trigger: `x-routecodex-dry-run: provider-request`, `/v1/responses`, `/v1/messages`, provider request evidence, or Jason reports dry-run/live mismatch.
+- Interpret dry-run as a real route/outbound/provider-request chain only up to the no-network transport cutpoint. The authoritative evidence is `providerRequest` / `dry_run.provider_request`; `dry_run.response_payload` is a fake protocol-shaped terminal response and must not be used as provider behavior truth.
+- If `providerRequestCaptured=false`, debug the pre-transport owner: route manifest, target selection, provider wire protocol compatibility, or outbound codec. Do not blame provider network or SSE.
+- Anthropic entry dry-run must select an Anthropic provider wire target. If it selects OpenAI Chat, fix the loaded route manifest or target protocol filtering before touching Anthropic codec, SSE, or error projection.
+
+## V3 protocol-stage validation order invariant
+- Trigger: a field is valid on inbound or in Chat canonical form but fails, or unexpectedly bypasses validation, after cross-protocol/provider-wire projection.
+- Ownership: inbound validators inspect only the inbound protocol node; Chat validators inspect only canonical Chat semantics/extensions; outbound validators inspect the completed selected target-protocol payload.
+- Required outbound order: `source/canonical projection -> complete target payload -> target protocol validation -> wire build/transport`. Never validate a source DTO, temporarily remove a field to pass validation, then project it into the target afterward.
+- Required lock: positive inbound preservation plus negative post-projection target validation, a static order assertion, and a red mutation that swaps projection and validation. Do not repair in MetadataCenter, provider transport, SSE, handler, or by truncation/silent strip.
+
+## V3 final route/usage diagnosis guard
+- Trigger: console shows a lower-priority provider/model in `[virtual-router-hit]` or `[usage]`, or usage says `usage=unreported` for a streaming OpenAI Chat provider.
+- First inspect `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/provider-request.json` and `provider-response.json`. `attempts[]` is the routing truth; the human `[virtual-router-hit]` line may show only the final successful provider after retry/switch.
+- If an earlier priority candidate has `streamError` or malformed/incomplete raw SSE, debug provider response event codec / provider stream completeness before changing route priority. SSE transport is only framing; missing terminal `finish_reason`, `[DONE]`, or Anthropic `message_stop` is provider event-codec/response-owner evidence.
+- For OpenAI Chat streaming usage, verify provider-bound `stream_options.include_usage=true` and raw final chunks. If requests omit `stream_options`, upstream may emit `usage:null`, causing console `usage=unreported`; fix provider-standard request formatting, not server console fallback.
+
+## V3 provider-cache transcript diagnosis guard
+- Trigger: local OpenAI-compatible provider reports `cached_tokens=0`, `usage_cache=0`, `token-mismatch`, or a high-common-prefix cache miss after a Responses tool-call continuation.
+- First compare provider-bound raw Chat messages against the provider-rendered prompt/trace. A single assistant provider turn with visible text and tool calls must remain one Chat message containing both `content` and `tool_calls`; splitting it into adjacent assistant messages lets Chat renderers insert an EOS before tool-call markup and breaks prefix cache.
+- Correct owner for split local continuation is Resp04 local continuation canonical context, then Req04 restore consumes that saved context. Do not fix by changing usage projection, console output, SSE, provider transport, DS4 cache policy, or by stripping/reordering payload at request send time.
+- Required proof: byte-level trace showing the first mismatch, a red/green Resp04 coalescing test, local continuation integration, and a live replay only after the matching V3 binary is installed/restarted from an isolated or approved worktree.
+
+## V3 provider-error console prefix invariant
+- 触发信号：human console line prefix `route:provider.model` 和同一行 `provider=...` 不一致，尤其是 switch 后显示 next provider 但错误来自 previous provider。
+- 关键判断：route/started 行使用 selected target observability；`[provider-error]` / `[provider-switch]` 是 Error05 event 投影，必须使用 `V3RuntimeProviderFailureObservation` 的 failed provider 生成 prefix。切换事件字段顺序固定为 `[switch to:<next>] [switch from:<failed>] result` 在前，`causeStatus/type/message` 等原因在后；没有 next target 的 terminal error 保留 `target/result/next=-`，禁止伪装成 switch。
+- 可复用动作：先用 live log 按 request id 对比 route -> provider-error -> switch -> completion；再用 focused server console 正反测试锁 switching 与 terminal 两种投影；最后安装重启后扫描 switching provider-error 是否满足 `switch to -> switch from -> causeStatus`，且 terminal error 不含 switch 标签。
+- 反模式/边界：不要改 VR、provider wire、Error05 policy 或 provider health 来修显示；这是 server console projection side-channel，不得影响 request/response payload 或 reroute 语义。
+
+## V3 provider action recovery lane scope invariant
+- Trigger: `ProviderHealth("provider action recovery ticket references a lane that is absent")` appears only in full/parallel relay suites while the focused provider failure retry test passes.
+- Diagnosis: check whether Error05 provider action failure record, recovery witness, recovery wait, and success release use the same `V3ProviderFailureSessionScope`. `routing_group` as session id is a contract bug; it lets same group/provider success from another request clear the lane.
+- Correct owner: `provider_action_gate.rs` and `provider_failure_runtime_policy.rs`. Fix the typed lane key/witness source; do not repair by serializing tests, adding fallback lanes, weakening session identity, or moving logic into SSE/Server/Error06 projection.
+- Required proof: run provider action contract tests, session isolation contract, protocol parity, `verify:architecture-review-surface-light`, and P0 architecture gates.
+
+## V3 Cargo test artifact budget invariant
+- Canonical V3 Cargo tests must use `scripts/run-v3-cargo-test.mjs`; package scripts and CI must not add direct `cargo test --manifest-path v3/Cargo.toml` entries.
+- Keep `[profile.test] debug = 0`, `incremental = false`, and bounded `codegen-units`; every terminal test outcome must release only invocation-owned test executables, dep-info, symbol bundles, and filename-matched `*.rcgu.o` while retaining reusable `*.rlib`, `*.rmeta`, proc-macro, fingerprint, and build-script artifacts. Never infer object ownership from mtime because another Cargo invocation may be compiling in the same target directory.
+- Measure the allocated size of the effective V3 target directory after cleanup. At or below 2 GiB, retain dependencies; above 2 GiB, run Cargo test-profile cleanup only when no other V3 Cargo/rustc builder is active, otherwise fail explicitly rather than racing another build.
+- Required proof pairs a real passing test with a real Cargo failure, confirms cleanup on both paths, proves a warm dependency-cache rerun, verifies `*.rcgu.o = 0`, and runs `verify:v3-build-test-artifact-budget`, its red fixtures, and `verify:v3-architecture-ci`.
+
+## V3 direct global binary install invariant
+- Canonical installed executable is `~/.local/bin/rccv3`; `routecodex` and `rcc` are same-directory aliases. `~/.rcc` contains config, provider, secret, state, log, session, and bounded debug resources only.
+- `~/.rcc/install/current`, `~/.rcc/install/releases`, release snapshots, adjacent runtime `package.json`, npm-global fallback, and repo-build fallback are forbidden V3 runtime paths. Installation must atomically replace the one binary and verify its hash.
+- The RouteCodex build version must be embedded during Cargo build through `ROUTECODEX_BUILD_VERSION`; runtime health and `--version` may not depend on a release directory.
+- Canonical restart is `routecodex restart -c ~/.rcc/config.v3.toml`. The removed `restart --port` syntax must not appear in V3 install or verification instructions.
+- Required proof: distribution test, owned Cargo target cleanup test, resource/module gates, direct installed path/hash/version, aggregate restart, every configured listener health, and physical absence of `~/.rcc/install`.
+
+## V3 provider key health closeout card
+
+- 触发：审查 provider key score、failure streak、cooldown、probe 或同 priority 调度；单测/源码通过不能作为完成证据。
+- 唯一 owner：Error 分类生成 typed failure action；`routecodex-v3-provider-responses` key health 修改 score/streak/cooldown/probe/persistence；Target 只读 scheduling projection；VR 不修改 health。
+- identity 不变量：key health identity 固定为 `provider_id + auth_alias + model_id`。同 model 跨 session 共享状态；同 provider/key 的不同 model 必须隔离 score、streak、cooldown、probe。持久化 schema v3 迁移只能从 `probe_model_id` 恢复单一 model，缺失必须 fail-fast，禁止扩散到全部 model。
+- 分类不变量：recoverable 默认第 3 次才 key cooldown，AuthKey/不可恢复进入 global cooldown；Session/recoverable probe=15m，AuthKey probe=60m；probe failure 继续 blocked，probe success 才恢复且保留 recovery floor。
+- 强制动作：先查 resource/function/mainline/verification map；定向正反测试与 map gate 通过后，精确 release build/install，比较 repo/global hash 与版本，执行唯一 managed aggregate `routecodex restart -c <config> --timeout-ms ...`，检查全部成员 `/health`，再做真实旧样本 failure/probe/scheduling replay；最后才 DSH Review。
+- 反模式：把 `provider.health` 配置硬编码进 runtime、用 bool 替代 typed scope、只改 function map 不改 mainline/verification、把旧日志或源码静态阅读冒充 installed/live evidence、触碰共享 dirty worktree。
+- Installer preflight is scoped to this owner: distribution, resource map, module boundaries, and Cargo build. Full V3 architecture CI remains a build/release gate and must not make direct binary publication depend on unrelated in-progress feature claims.
+
+## V3 unified error-path invariant
+- Trigger: auditing or changing any direct/relay/provider/server error route.
+- Required path: source raise -> host capture -> runtime classification -> router policy -> execution decision -> client projection. Direct and relay must both carry the typed ErrorErr01-06 chain; a handler, SSE layer, or HTTP mapper may not create a projection when ErrorErr05 is absent.
+- Error reporting and client projection are separate operations but have one owner boundary: the reporting hub records the chain, while only the typed ErrorErr05 consumer may produce ErrorErr06. Never use `mapErrorToHttp` as an absent-decision fallback.
+- Required static locks: no direct Error06 builder use outside `routecodex-v3-error`; no `RouteErrorHub` HTTP mapping; no generic runtime wrapper that discards source stage/kind before ErrorErr01 capture. Add a red fixture before changing the owner.
+- Verification: run the error-chain bypass and pipeline-contract gates, direct/relay focused tests, and the real installed direct and relay error samples. A pre-existing unrelated runtime test failure must be reported with its exact test and output; do not weaken the test or add fallback behavior.
+
+## V2 sample and generated-contract retirement invariant
+- Repo `samples/` is not a V3 test or runtime truth source. When retiring repo golden/sync scripts, move required deterministic regressions into tracked `tests/resources/`; do not place required fixtures under ignored `tests/fixtures/` or another `**/fixtures/` path.
+- Verification gates must fail when the required resource root is missing or empty. Missing fixture directories may not silently skip. Diagnostic scanners may read user-owned `~/.routecodex/codex-samples`, `errorsamples`, or `golden_samples`, but may not copy/sync data back into repo `samples/`.
+- After a mainline edge is physically retired, remove the same step from resource flows, binding budgets, generated manifests, wiki declarations, and gate matrices. If a generated manifest carries chain-specific invariants, add them to the canonical generator owner before rendering; never hand-edit only the generated artifact.
+- Required proof: zero repo `samples/` references for the retired surface, tracked regression resources, positive gate execution with a nonzero sample count, missing/empty resource fail-fast behavior, function/resource/mainline/wiki gates, and `git diff --check`.

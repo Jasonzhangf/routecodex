@@ -1,0 +1,35 @@
+{
+  "artifact_hash": "sha256:a732f26f8e7b430e08f6d0caf6c8957ac4553e0b444260698da55ffece902642",
+  "command": {
+    "args": [
+      "test",
+      "-p",
+      "routecodex-v4-error",
+      "--test",
+      "l2_error"
+    ],
+    "program": "cargo",
+    "working_directory": "."
+  },
+  "created_at": "2026-08-14T11:49:18Z",
+  "failed": 0,
+  "input_hash": "sha256:a732f26f8e7b430e08f6d0caf6c8957ac4553e0b444260698da55ffece902642",
+  "module_id": "routecodex-v4-error",
+  "passed": 18,
+  "producer": {
+    "adapter": "cargo",
+    "identity": "appsdk-regression-gate"
+  },
+  "public_api_hash": "sha256:73b9d5a8b3018b6b76ba44f36e0a9ee1650deaab8d8bf3489599fa55d6a3e3b6",
+  "regression_report_id": "regression-error-v1",
+  "result": "pass",
+  "scope_hash": "scope-error-v1",
+  "skipped": 0,
+  "source_commit": "ce50527af",
+  "suite_id": "v4-error-l2-regression",
+  "test_characteristics": {
+    "blackbox": true,
+    "whitebox": true
+  },
+  "test_count": 18
+}

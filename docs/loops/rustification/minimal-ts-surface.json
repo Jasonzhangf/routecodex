@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "scope": "V3 non-native production TypeScript surface; runtime ownership is under v3/",
+  "classificationContract": {
+    "native_shell_ok": "TypeScript is a fail-fast native facade or type projection over Rust truth.",
+    "type_shell_ok": "TypeScript is compile-time/public API shape only and owns no runtime decision.",
+    "ts_io_shell_ok": "TypeScript owns unavoidable Node host IO, timers, filesystem, process, Map storage, or diagnostics emission only.",
+    "parser_io_ok": "TypeScript parses native JSON strings and type-projects Rust-owned output only.",
+    "diagnostic_io_ok": "TypeScript records or emits diagnostic observations only; no request/response/route/tool policy.",
+    "hardStopRule": "Any file not listed here, or any listed file with an empty cannotShrinkFurtherBecause reason, is rustification debt."
+  },
+  "entries": []
+}

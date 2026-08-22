@@ -1,0 +1,171 @@
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct V3CurrentTurnRouteFacts {
+    /// Typed facts are the only input to route classification. This type must
+    /// not expose request/response payload or metadata carriers.
+    pub reached_long_context: bool,
+    pub is_compaction: bool,
+    pub has_image_attachment: bool,
+    pub latest_message_from_user: bool,
+    pub stopless_followup: bool,
+    pub has_current_turn_tool_output: bool,
+    pub has_current_turn_tool_execution_error: bool,
+    pub has_current_turn_web_search: bool,
+    pub last_assistant_tool_category: Option<String>,
+    pub has_background_keyword: bool,
+}
+
+pub type RouteClassifierInput = V3CurrentTurnRouteFacts;
+
+pub const DEFAULT_ROUTE: &str = "default";
+
+pub const ROUTE_PRIORITY: [&str; 9] = [
+    "compact",
+    "multimodal",
+    "longcontext",
+    "thinking",
+    "coding",
+    "web_search",
+    "search",
+    "tools",
+    DEFAULT_ROUTE,
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteClassification {
+    pub route_name: String,
+    pub reasoning: String,
+    pub candidates: Vec<String>,
+    pub required_capabilities: Vec<String>,
+}
+
+impl Default for RouteClassification {
+    fn default() -> Self {
+        Self {
+            route_name: DEFAULT_ROUTE.to_string(),
+            reasoning: "default:route-selected".to_string(),
+            candidates: vec![DEFAULT_ROUTE.to_string()],
+            required_capabilities: Vec::new(),
+        }
+    }
+}
+
+pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
+    let last_tool_category = if input.latest_message_from_user {
+        ""
+    } else {
+        input
+            .last_assistant_tool_category
+            .as_deref()
+            .unwrap_or_default()
+    };
+    let thinking_from_user = input.latest_message_from_user || input.stopless_followup;
+    let continuation = !input.latest_message_from_user && input.has_current_turn_tool_output;
+    let thinking_continuation = continuation && last_tool_category == "thinking";
+    let coding_continuation = continuation && last_tool_category == "coding";
+    let search_continuation = continuation && last_tool_category == "search";
+    let web_search_tool_intent = continuation && last_tool_category == "websearch";
+    let other_tool_continuation = continuation && last_tool_category == "other";
+    let unknown_tool_continuation = continuation && last_tool_category.is_empty();
+    let web_search = web_search_tool_intent || input.has_current_turn_web_search;
+
+    let evaluation = vec![
+        ("compact", input.is_compaction, "compact:registered-ingress"),
+        (
+            "compact",
+            input.is_compaction,
+            "compact:request-purpose",
+        ),
+        (
+            "multimodal",
+            input.has_image_attachment,
+            "multimodal:metadata-attachment",
+        ),
+        (
+            "longcontext",
+            input.reached_long_context,
+            "longcontext:token-threshold",
+        ),
+        (
+            "web_search",
+            web_search,
+            if web_search_tool_intent {
+                "web_search:tool-intent"
+            } else {
+                "web_search:explicit-or-intent"
+            },
+        ),
+        (
+            "thinking",
+            (thinking_from_user || thinking_continuation)
+                && !input.reached_long_context
+                && !web_search,
+            if thinking_continuation {
+                "thinking:last-tool-thinking"
+            } else {
+                "thinking:user-input"
+            },
+        ),
+        ("coding", coding_continuation, "coding:last-tool-coding"),
+        ("search", search_continuation, "search:last-tool-search"),
+        (
+            "tools",
+            other_tool_continuation || unknown_tool_continuation,
+            if other_tool_continuation {
+                "tools:last-tool-other"
+            } else {
+                "tools:tool-request-detected"
+            },
+        ),
+    ];
+
+    let (route_name, primary_reason) = ROUTE_PRIORITY
+        .iter()
+        .find_map(|route| {
+            evaluation
+                .iter()
+                .find(|(name, triggered, _)| name == route && *triggered)
+                .map(|(_, _, reason)| ((*route).to_string(), (*reason).to_string()))
+        })
+        .unwrap_or_else(|| {
+            (
+                DEFAULT_ROUTE.to_string(),
+                "default:route-selected".to_string(),
+            )
+        });
+
+    let mut reasoning = vec![primary_reason.clone()];
+    for (_, triggered, reason) in &evaluation {
+        if *triggered && *reason != primary_reason && !reasoning.iter().any(|item| item == reason) {
+            reasoning.push((*reason).to_string());
+        }
+    }
+    let mut required_capabilities = Vec::new();
+    if web_search && !input.is_compaction {
+        required_capabilities.push("web_search".to_string());
+    }
+
+    let mut candidates = vec![route_name.clone()];
+    if route_name != "compact"
+        && route_name != "longcontext"
+        && input.reached_long_context
+        && !candidates.iter().any(|route| route == "longcontext")
+    {
+        candidates.push("longcontext".to_string());
+    }
+    // Search route must cascade to tools when the search pool is empty: VR walks
+    // candidates in order, so listing tools (and default) after search lets the
+    // request still serve when no search-capable upstream is available.
+    if route_name == "search" && !candidates.iter().any(|route| route == "tools") {
+        candidates.push("tools".to_string());
+    }
+    if !candidates.iter().any(|route| route == DEFAULT_ROUTE) {
+        candidates.push(DEFAULT_ROUTE.to_string());
+    }
+
+    RouteClassification {
+        route_name,
+        reasoning: reasoning.join("|"),
+        candidates,
+        required_capabilities,
+    }
+}

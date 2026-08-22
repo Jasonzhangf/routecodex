@@ -1,0 +1,32 @@
+{
+  "artifact_hash": "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593",
+  "artifact_paths": [
+    "libroutecodex_v4_edge.rlib"
+  ],
+  "artifact_schema": 1,
+  "artifacts": [
+    {
+      "hash": "sha256:b4c4e00b1e48cbfa4bc54f1cdfa106dbbb72d89a5cf90df100a0f5cf2e5798b1",
+      "path": "libroutecodex_v4_edge.rlib"
+    }
+  ],
+  "build": {
+    "args": [
+      "-c",
+      "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-edge --deps routecodex-v4-base-node --out generated/modules/routecodex-v4-edge/lib/libroutecodex_v4_edge.rlib"
+    ],
+    "program": "sh",
+    "working_directory": "."
+  },
+  "contract_hash": "sha256:8f126cdb7f261e3cc2642d56900b8074b65e106ceb332ae406a030790a5b9454",
+  "dependency_hashes": [
+    {
+      "artifact_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
+      "module_id": "routecodex-v4-base-node"
+    }
+  ],
+  "module_id": "routecodex-v4-edge",
+  "public_api_hash": "sha256:08718796c61aac004f5b95ca3046d7123be2791fe0ad3c7d8d5c8dfa59deb7c6",
+  "source_hash": "sha256:944d045b1a1744c2878fa49920a8fae551da912df597979229ee26783bc10279",
+  "stage": "frozen"
+}

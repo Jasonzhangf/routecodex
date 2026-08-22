@@ -1,0 +1,25 @@
+lifecycle_id: v3.responses_provider_event_terminal_merge
+owner_feature_id: v3.hub_relay_runtime_closeout
+summary: Responses provider-event terminal merge resolves call-bearing identity and backfills stream-only fields without overwriting response.completed truth.
+entrypoint:
+  node_id: V3ProviderResponsesEventCodec
+return_path:
+  node_id: V3ProviderResponsesTerminalOrFailureObserved
+call_map_chain_id: v3.responses_provider_event.terminal_merge
+node_ids:
+  - V3ProviderResponsesEventCodec
+  - V3ProviderResponsesTerminalOrFailureObserved
+edges:
+  - step_id: v3-responses-provider-event-terminal-merge-01
+    from_node: V3ProviderResponsesEventCodec
+    to_node: V3ProviderResponsesTerminalOrFailureObserved
+    status: anchored
+    owner_feature_id: v3.hub_relay_runtime_closeout
+    caller_symbol: apply_v3_runtime_responses_semantic_event
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+    callee_symbol: merge_v3_runtime_responses_stream_output_items_into_terminal_response
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+verification_gates:
+  - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime terminal_merge --lib -- --nocapture
+canonical_docs:
+  - docs/goals/v3-5520-duplicate-response-tool-identity-not-rerouted-test-design.md

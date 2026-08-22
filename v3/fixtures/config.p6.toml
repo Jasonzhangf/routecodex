@@ -1,0 +1,108 @@
+version = 3
+
+[features]
+responses_direct = true
+debug_events = true
+
+[debug]
+log_console = true
+snapshots = true
+dry_run = true
+retention = { raw_requests = 16, raw_responses = 16, events = 256 }
+
+[error.policies.target_pool_exhausted]
+action = "project_client_error"
+
+[servers.p6_success]
+bind = "127.0.0.1"
+port = 45464
+routing_group = "p6_success"
+endpoints = ["responses"]
+
+[servers.p6_reselect]
+bind = "127.0.0.1"
+port = 45465
+routing_group = "p6_reselect"
+endpoints = ["responses"]
+
+[servers.p6_exhausted]
+bind = "127.0.0.1"
+port = 45466
+routing_group = "p6_exhausted"
+endpoints = ["responses"]
+
+[providers.success]
+type = "responses"
+base_url = "http://127.0.0.1:45467/v1"
+default_model = "gpt-p6"
+auth = { type = "api_key", entries = [{ alias = "success", env = "ROUTECODEX_V3_P6_SUCCESS_KEY" }] }
+
+[providers.success.models.gpt-p6]
+wire_name = "wire-success"
+aliases = ["client-p6"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = true
+thinking = "optional"
+max_tokens = 4096
+max_context_tokens = 128000
+
+[providers.failure]
+type = "responses"
+base_url = "http://127.0.0.1:45468/v1"
+default_model = "gpt-p6"
+auth = { type = "api_key", entries = [{ alias = "failure", env = "ROUTECODEX_V3_P6_FAILURE_KEY" }] }
+
+[providers.failure.models.gpt-p6]
+wire_name = "wire-failure"
+capabilities = ["text"]
+supports_streaming = true
+
+[providers.unreachable]
+type = "responses"
+base_url = "http://127.0.0.1:45469/v1"
+default_model = "gpt-p6"
+auth = { type = "api_key", entries = [{ alias = "unreachable", env = "ROUTECODEX_V3_P6_UNREACHABLE_KEY" }] }
+
+[providers.unreachable.models.gpt-p6]
+wire_name = "wire-unreachable"
+capabilities = ["text"]
+supports_streaming = true
+
+[forwarders.p6_success]
+model = "gpt-p6"
+aliases = ["client-p6"]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "success", model = "gpt-p6", key = "success", priority = 1 }
+]
+
+[forwarders.p6_reselect]
+model = "gpt-p6"
+aliases = ["client-p6"]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "failure", model = "gpt-p6", key = "failure", priority = 1 },
+  { kind = "provider_model", provider = "success", model = "gpt-p6", key = "success", priority = 2 }
+]
+
+[forwarders.p6_exhausted]
+model = "gpt-p6"
+aliases = ["client-p6"]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "failure", model = "gpt-p6", key = "failure", priority = 1 },
+  { kind = "provider_model", provider = "unreachable", model = "gpt-p6", key = "unreachable", priority = 2 }
+]
+
+[route_groups.p6_success.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "p6_success", priority = 1 }]
+
+[route_groups.p6_reselect.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "p6_reselect", priority = 1 }]
+
+[route_groups.p6_exhausted.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "p6_exhausted", priority = 1 }]

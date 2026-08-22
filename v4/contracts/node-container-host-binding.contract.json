@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-node-container-host-binding",
+  "status": "active",
+  "owner_feature_ids": {
+    "caller": "v4.cordis.host_binding",
+    "callee": "v4.node_container.lifecycle_dispatch"
+  },
+  "host_module": "routecodex-v4-cordis-host",
+  "container_module": "routecodex-v4-node-container",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-cordis-node-plugin-architecture.md"
+  ],
+  "lifecycle": [
+    "CordisBoundNodeHost.mount -> NodeContainer.declare -> context_created -> plugins_mounted -> publish",
+    "CordisBoundNodeHost.beginExecution -> NodeContainer.enter_execution",
+    "execution release -> NodeExecutionGuard drop",
+    "CordisBoundNodeHost.executeNode -> verify real Cordis fibers ACTIVE -> plan hash match -> NodeContainer.execute_with_plan_hash -> typed NodeExecutionOutput",
+    "CordisBoundNodeHost.drain -> NodeContainer.drain when measured in_flight is zero",
+    "CordisBoundNodeHost.dispose -> verify Rust state is draining or failed -> reverse Cordis Fiber disposal -> NodeContainer.dispose",
+    "mount failure -> NodeContainer.fail -> reverse Cordis Fiber disposal -> NodeContainer.dispose"
+  ],
+  "graph_binding_rule": "the actual mounted Cordis plugin plan entries must equal the immutable NodePluginPlan entries; graph_hash, manifest_hash, loaded_plan_hash and plan.hash must be the same verified hash before Rust declaration",
+  "in_flight_rule": "Rust NodeContainer exclusively owns the atomic in-flight count; the JS host consumes typed status without storing a second counter; drain rejects when the Rust count is non-zero",
+  "transport_rule": "the host port is a persistent line-delimited typed operation channel; the JS encoder exposes only declared lifecycle/execute methods and the Rust decoder rejects every field outside that operation's schema; lifecycle messages carry only lifecycle status or v4.node_container.lifecycle_failure facts; execute messages carry only typed data/control input, plan hash, typed data/control/diagnostics output or v4.node_container.execution_failure facts; never carry business payload, protocol metadata, MetadataCenter state or product Error01-06 state",
+  "execution_rule": "real Cordis plugin fibers must be mounted and ACTIVE and their planEntry list must equal the immutable NodePluginPlan entries before execute; execute sends only the active plan hash plus typed NodeExecutionInput; Rust NodeContainer.execute_with_plan_hash rejects plan hash drift, invalid state and unregistered/effect-violating handles; NodeExecutionOutput keeps data, control and diagnostics as separate typed fields",
+  "execution_response_rule": "JS port #settle dispatches the response schema by pending op: lifecycle success must NOT project output; execute_node success carries only {ok, request_id, state, in_flight, output} where output is the typed NodeExecutionOutput; execute_node failure is a v4.node_container.execution_failure fact; the two decoders never accept the other's fields",
+  "failure_rule": "NodeContainer lifecycle failures are recorded by the lifecycle-dispatch owner as typed v4.node_container.lifecycle_failure facts and projected on the same lifecycle port; they do not enter v4.control.error_chain because this management channel has no product request/session/target scope and must not fabricate one",
+  "execution_failure_rule": "NodeContainer execution failures are recorded by the execution-dispatch owner as typed v4.node_container.execution_failure facts and projected on the same host port; they do not enter v4.control.error_chain because this management channel has no product request/session/target scope and must not fabricate one",
+  "execution_failure_codes": [
+    "plan_hash_mismatch",
+    "invalid_state",
+    "unregistered_handle",
+    "handle_error",
+    "effect_violation",
+    "resource_access_violation",
+    "bridge_error",
+    "protocol_error"
+  ],
+  "forbidden": [
+    "hard-coded inFlight=0",
+    "binding pending edge",
+    "Cordis-like Rust container",
+    "generic operation plus arbitrary fields encoder",
+    "unknown lifecycle request fields silently discarded",
+    "generic metadata execution bridge",
+    "execution input/output fields merged into a single control/data blob",
+    "control/debug/error fields in provider or client business payload"
+  ],
+  "required_tests": [
+    "real Cordis mount drives Rust state to accepting",
+    "in-flight execution rejects drain and leaves state accepting",
+    "release makes drain succeed",
+    "accepting-state disposal rejects before either lifecycle owner is mutated",
+    "Cordis graph/plan drift rejects before Rust declaration",
+    "Cordis mount failure drives Rust candidate through failed to disposed",
+    "real Cordis fibers drive ordered Rust NodePluginPlan execution",
+    "execution plan hash mismatch fails before Rust handles run",
+    "unregistered plugin handle fails fast with typed execution failure",
+    "resource access violation retains its typed execution failure code",
+    "JS and Rust reject undeclared execution fields",
+    "execute after drain rejects invalid_state",
+    "JS execution response decoder rejects malformed output",
+    "Rust rejects metadata and business fields outside the selected lifecycle operation schema",
+    "JS rejects undeclared lifecycle fields before writing to the port",
+    "lifecycle failure projection retains resource id, request id, node id, operation, typed code and message"
+  ]
+}

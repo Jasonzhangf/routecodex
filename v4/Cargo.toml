@@ -1,0 +1,29 @@
+[workspace]
+members = [
+  "crates/routecodex-v4-base-node",
+  "crates/routecodex-v4-build-link",
+  "crates/routecodex-v4-cli",
+  "crates/routecodex-v4-cordis-bridge",
+  "crates/routecodex-v4-lifecycle",
+  "crates/routecodex-v4-node-container",
+  "crates/routecodex-v4-plugin-catalog",
+  "crates/routecodex-v4-plugin-contract",
+  "crates/routecodex-v4-plugin-plan",
+  "crates/routecodex-v4-plugin-manager",
+  "crates/routecodex-v4-runtime-inspector",
+  "crates/routecodex-v4-admin",
+  "crates/routecodex-v4-skeleton",
+  "crates/routecodex-v4-cli-plugin",
+  "crates/routecodex-v4-servertool",
+  "crates/routecodex-v4-standard-plugins",
+]
+resolver = "2"
+
+[workspace.dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serde_json = "1"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+publish = false

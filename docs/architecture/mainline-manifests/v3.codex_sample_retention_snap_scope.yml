@@ -1,0 +1,38 @@
+lifecycle_id: v3.codex_sample_retention_snap_scope
+summary: Explicit CLI authorization is published through the managed manifest; Debug bounds diagnostic copies; Server alone persists and trims Codex samples.
+owner_feature_id: v3.codex_sample_retention_snap_scope
+owner_module: v3/crates/routecodex-v3-server/src/lib.rs
+entrypoint:
+  node_id: V3CodexSample01CliAuthorization
+  wiki_page: docs/architecture/function-map.yml
+  call_map_chain_id: v3.codex_sample_retention_snap_scope
+node_ids:
+  - V3CodexSample01CliAuthorization
+  - V3CodexSample02ManifestAuthorizationPublished
+  - V3CodexSample03AuthorizedCapture
+  - V3CodexSample04PayloadBudgeted
+  - V3CodexSample05FilesystemPersisted
+  - V3CodexSample06RetentionEnforced
+  - V3ServerStartup01ListenerSetPreflight
+step_ids:
+  - v3-codex-sample-01
+  - v3-codex-sample-02
+  - v3-codex-sample-03
+  - v3-codex-sample-04
+  - v3-codex-sample-05
+  - v3-codex-sample-06
+  - v3-codex-sample-07
+edge_status_counts:
+  anchored: 7
+  partial: 0
+  binding_pending: 0
+  total: 7
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: v3.codex_sample_retention_snap_scope
+  min_function_feature: v3.codex_sample_retention_snap_scope
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

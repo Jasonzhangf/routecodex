@@ -1,0 +1,262 @@
+version: 1
+description: >
+  Budget lock for mainline call-map debt. Existing partial/binding-pending edges
+  are explicitly acknowledged per chain, but any growth must fail fast until the
+  chain is re-budgeted with review.
+chains:
+  - chain_id: architecture.repository_filesystem.mainline
+    expected_total_edges: 1
+    min_anchored_edges: 1
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: Repository filesystem authoring policy is fully anchored to the required sanity gate.
+  - chain_id: config.user_config_materialization.mainline
+    expected_total_edges: 10
+    min_anchored_edges: 10
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Config materialization is fully anchored: TS public shell calls the native
+      Rust loader, Rust owns TOML/provider/runtime manifest materialization, and
+      server runtime consumes only the Rust-produced VR/Hub runtime artifacts.
+  - chain_id: v3.v2_config_toml_compat_5555.mainline
+    expected_total_edges: 2
+    min_anchored_edges: 2
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      V3 V2-config compatibility for 5555 is fully anchored in routecodex-v3-config:
+      store detection enters the V2 TOML compiler, then normal V3 schema validation
+      publishes the manifest consumed by CLI/server/runtime.
+  - chain_id: servertool.hook_skeleton.mainline
+    expected_total_edges: 11
+    min_anchored_edges: 11
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Servertool hook skeleton is anchored after retiring the server-side
+      followup/reenter runtime-action edges; CLI projection and next-turn restore
+      remain the only business execution path.
+  - chain_id: request.mainline
+    expected_total_edges: 6
+    min_anchored_edges: 6
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Request mainline is fully anchored through provider wire compatibility;
+      req_outbound stage3 compat is Rust-owned and TS remains a native bridge.
+  - chain_id: responses.direct_passthrough.mainline
+    expected_total_edges: 2
+    min_anchored_edges: 2
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Responses same-protocol direct is fully anchored: server route selection
+      and provider direct dispatch must keep the current request body as the
+      provider wire payload without provider-wire preflight, repair, sanitize,
+      raw replay, or forced relay.
+  - chain_id: direct.semantic_classification.mainline
+    expected_total_edges: 4
+    min_anchored_edges: 0
+    max_partial_edges: 0
+    max_binding_pending_edges: 4
+    note: >
+      Design-only budget for config validation, VR real-target classification,
+      request projection, and response projection. All four edges must remain
+      binding pending until Rust types/builders and paired positive/negative
+      tests land; no fifth edge or host/provider/forwarder shortcut is allowed.
+  - chain_id: response.mainline
+    expected_total_edges: 4
+    min_anchored_edges: 4
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: Fully anchored response mainline must not regress.
+  - chain_id: responses.continuation.mainline
+    expected_total_edges: 7
+    min_anchored_edges: 1
+    max_partial_edges: 5
+    max_binding_pending_edges: 1
+    note: >
+      Responses continuation Chat Process boundary is intentionally split while
+      restore/save owner closure is still being completed; do not grow debt
+      without rebudgeting.
+  - chain_id: debug.unified_surface.mainline
+    expected_total_edges: 1
+    min_anchored_edges: 0
+    max_partial_edges: 0
+    max_binding_pending_edges: 1
+    note: >
+      Debug unified surface is still an M0/M1 governance shell; one pending
+      edge is intentionally budgeted until deeper runtime/module splits land.
+  - chain_id: debug.pipeline_dry_run_loop.mainline
+    expected_total_edges: 5
+    min_anchored_edges: 5
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Pipeline dry-run loop is fully anchored: provider-request dry-run stops at
+      final transport request construction, captured request replay re-enters
+      the same API route, and captured provider responses reuse the existing
+      response converter; Rust terminates marked provider-request dry-run results
+      before provider response postprocessing.
+  - chain_id: internal_error_numbering.mainline
+    expected_total_edges: 6
+    min_anchored_edges: 6
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Internal error numbering is a debug-only side-channel owner. Its registry,
+      envelope, external linking, debug projection, and client-boundary guard
+      must stay fully anchored and must not become ErrorErr policy truth.
+  - chain_id: error.mainline
+    expected_total_edges: 5
+    min_anchored_edges: 5
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: Error mainline is fully anchored through explicit ErrorErr04 router-policy application and ErrorErr05 executor consumption.
+  - chain_id: metadata.center.mainline
+    expected_total_edges: 7
+    min_anchored_edges: 7
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: Metadata center runtime-control family is fully anchored after the obsolete servertool-context projection edge was removed; remaining mtc-01..mtc-07 stay locked.
+  - chain_id: runtime.lifecycle.mainline
+    expected_total_edges: 15
+    min_anchored_edges: 15
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Runtime lifecycle chain is fully anchored and locked after removing the
+      deleted `src/index.ts` duplicate pid-cache edge, including
+      restart-process HTTP, SIGUSR2 in-session restart, the start takeover
+      guard, port-scoped listener release for start/stop, and the final
+      PortRegistry removal edge.
+  - chain_id: stopless.session.mainline
+    expected_total_edges: 7
+    min_anchored_edges: 7
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: Stopless session chain is fully anchored after retiring the deleted TS CLI/servertool binary execution edge.
+  - chain_id: error.provider_action_gate.mainline
+    expected_total_edges: 8
+    min_anchored_edges: 8
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      V2 provider-action admission is anchored from typed ErrorErr05 through
+      failure record, admission, and action-scope-owned terminal, success, and
+      abandon outcomes. ErrorErr06 remains the separate error.mainline#err-05
+      projection edge.
+  - chain_id: vr.route_classifier.mainline
+    expected_total_edges: 5
+    min_anchored_edges: 5
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Virtual Router route classification is fully anchored through the shared
+      Rust V2/V3 classifier; web_search/search and multimodal/vision are
+      capability filters only and must not become route pool reasons.
+  - chain_id: vr.route_token_estimation.mainline
+    expected_total_edges: 2
+    min_anchored_edges: 2
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Virtual Router route-token estimation is fully anchored: Rust derives the
+      tiktoken estimate from the governed request and the classifier only
+      consumes that estimate for longcontext selection.
+  - chain_id: vr.route_availability.mainline
+    expected_total_edges: 4
+    min_anchored_edges: 3
+    max_partial_edges: 1
+    max_binding_pending_edges: 0
+    note: >
+      Virtual Router route-availability floor chain keeps one TS consumer edge
+      while the ErrorErr05 execution-decision consumer remains split.
+  - chain_id: vr.online_diagnostics.mainline
+    expected_total_edges: 3
+    min_anchored_edges: 3
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Virtual Router online diagnostics is fully anchored: HTTP/CLI shells
+      project Rust-produced status and dry-run diagnostics without route
+      recomputation.
+  - chain_id: vr.hit_log_projection.mainline
+    expected_total_edges: 3
+    min_anchored_edges: 3
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Virtual Router hit-log projection is fully anchored: TS may only call
+      Rust hit-log projection and emit the returned line/event without owning
+      formatting, color, provider-label, route-summary, or telemetry semantics.
+  - chain_id: v3.console_request_count_visibility.mainline
+    expected_total_edges: 4
+    min_anchored_edges: 4
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      V3 console request count visibility is fully anchored to server-owned
+      request/response headline rendering and the shared request-count formatter.
+      It is presentation-only and must not own request identity allocation.
+  - chain_id: v3.runtime_timing_observability.mainline
+    expected_total_edges: 14
+    min_anchored_edges: 14
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      V3 runtime timing observability is fully anchored to runtime timing state,
+      stream observation, and server console projection. It must remain a
+      side-channel observability resource and must not affect provider routing,
+      retries, or request/response payload semantics.
+  - chain_id: v3.console_human_readable_layering.mainline
+    expected_total_edges: 23
+    min_anchored_edges: 23
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      V3 console human-readable layering is fully anchored to the server-owned
+      observability projection functions. It is debug presentation only and must
+      not mutate request, response, routing, provider health, or error truth.
+  - chain_id: v3.codex_sample_retention_snap_scope
+    expected_total_edges: 7
+    min_anchored_edges: 7
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      V3 Codex sample retention and snap scope is fully anchored to explicit
+      CLI authorization, manifest publication, debug payload budgeting,
+      filesystem persistence, and listener/request retention enforcement.
+      It is diagnostic side-channel only and must not mutate provider or
+      client payload semantics.
+  - chain_id: sse.chat_stream_projection.mainline
+    expected_total_edges: 6
+    min_anchored_edges: 6
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Chat JSON-to-SSE, Chat SSE-to-JSON, Anthropic JSON-to-SSE, Anthropic
+      SSE-to-JSON, Gemini JSON-to-SSE, and Gemini SSE-to-JSON projection edges
+      are anchored to native/Rust owners; malformed semantics must fail fast
+      and must not synthesize fallback error frames.
+  - chain_id: sse.transport_core_shared.mainline
+    expected_total_edges: 4
+    min_anchored_edges: 4
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Shared Rust SSE transport is fully anchored from raw chunk through
+      decoded and validated frames to the V2 and V3 encoded adapter exits.
+      Transport remains protocol-neutral and may not own business termination,
+      continuation, tool, or servertool semantics.
+  - chain_id: stage_a.p0_rust_migration.mainline
+    expected_total_edges: 6
+    min_anchored_edges: 6
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Stage A P0 Rust migration owner-boundary chain is fully anchored to the
+      Rust/native owners for servertool outcome planning, Anthropic conversion,
+      Responses continuation storage, Responses/OpenAI conversion, and
+      request/response Chat Process tool governance.

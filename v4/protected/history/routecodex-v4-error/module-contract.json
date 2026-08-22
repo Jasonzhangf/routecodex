@@ -1,0 +1,77 @@
+{
+  "active_artifact": "active/lib/routecodex-v4-error/**",
+  "artifact_paths": [
+    "libroutecodex_v4_error.rlib"
+  ],
+  "build": {
+    "args": [
+      "-c",
+      "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-error --deps routecodex-v4-base-node --out generated/modules/routecodex-v4-error/lib/libroutecodex_v4_error.rlib"
+    ],
+    "program": "sh",
+    "working_directory": "."
+  },
+  "contract_paths": [
+    "contracts/node-graph.contract.json",
+    "contracts/pipeline-abstraction.contract.json",
+    "contracts/debug-subscription.contract.json",
+    "contracts/test-layers.contract.json",
+    "contracts/data-control-boundary.contract.json",
+    "contracts/records/**"
+  ],
+  "dependency_modules": [
+    "routecodex-v4-base-node"
+  ],
+  "generated_outputs": [
+    "generated/error/**"
+  ],
+  "module_id": "routecodex-v4-error",
+  "owned_paths": [
+    "crates/routecodex-v4-error/**"
+  ],
+  "regression": {
+    "allow_skipped": false,
+    "command": {
+      "args": [
+        "run",
+        "--quiet",
+        "--release",
+        "-p",
+        "routecodex-v4-build-link",
+        "--",
+        "test-consumer",
+        "--root",
+        ".",
+        "--consumer",
+        "routecodex-v4-error",
+        "--deps",
+        "routecodex-v4-base-node"
+      ],
+      "program": "cargo",
+      "working_directory": "."
+    },
+    "input_paths": [
+      "crates/routecodex-v4-error/src/lib.rs",
+      "crates/routecodex-v4-error/tests/l2_error.rs"
+    ],
+    "minimum_test_count": 23,
+    "ordinary_mode_after_freeze": "disabled",
+    "reenable_on": [
+      "source_change",
+      "contract_change",
+      "public_api_change",
+      "artifact_change",
+      "dependency_change"
+    ],
+    "required_before_freeze": true,
+    "suite_id": "v4-error-l2-regression"
+  },
+  "source_owner": "routecodex-v4-error",
+  "stage": "frozen",
+  "version_base": {
+    "base_artifact_hash": "sha256:c26ccfc3ee6c847b1b4b2f812b72071a20df81f98fe40e60d457c41b3aed5d3f",
+    "base_source_commit": "389bd3cf0",
+    "new_active_version": "active-v4",
+    "previous_active_version": "active-v3"
+  }
+}

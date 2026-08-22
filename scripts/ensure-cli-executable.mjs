@@ -1,0 +1,63 @@
+#!/usr/bin/env node
+import fs from 'node:fs';
+import path from 'node:path';
+import { execSync } from 'node:child_process';
+
+if (process.platform === 'win32') {
+  process.exit(0);
+}
+
+function ensureExecutable(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return;
+  }
+  try {
+    const stat = fs.statSync(filePath);
+    const nextMode = stat.mode | 0o111;
+    fs.chmodSync(filePath, nextMode);
+  } catch {
+    // ignore best-effort chmod failures
+  }
+}
+
+function getCommandOutput(command) {
+  try {
+    return execSync(command, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {
+    return '';
+  }
+}
+
+function ensureLocalCli() {
+  ensureExecutable(path.join(process.cwd(), 'dist', 'bin', 'rccv3'));
+}
+
+function ensureGlobalBinTarget(binName) {
+  const prefix = getCommandOutput('npm config get prefix');
+  if (!prefix) {
+    return;
+  }
+
+  const binPath = path.join(prefix, 'bin', binName);
+  if (fs.existsSync(binPath)) {
+    try {
+      const realTarget = fs.realpathSync(binPath);
+      ensureExecutable(realTarget);
+    } catch {
+      ensureExecutable(binPath);
+    }
+  }
+
+  const globalRoot = getCommandOutput('npm root -g');
+  if (!globalRoot) {
+    return;
+  }
+
+  const packageName = 'routecodex';
+  ensureExecutable(path.join(globalRoot, packageName, 'dist', 'bin', 'rccv3'));
+}
+
+ensureLocalCli();
+ensureGlobalBinTarget('routecodex');
+ensureGlobalBinTarget('rccv3');
+ensureGlobalBinTarget('rcc');

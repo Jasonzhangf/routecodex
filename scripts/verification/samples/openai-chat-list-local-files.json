@@ -1,0 +1,54 @@
+{
+  "name": "install-verify-chat-shell-ls",
+  "source": "synthetic",
+  "endpoint": "/v1/chat/completions",
+  "payload": {
+    "model": "glm-4.7",
+    "temperature": 0,
+    "stream": false,
+    "tool_choice": {
+      "type": "function",
+      "function": {
+        "name": "shell"
+      }
+    },
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a safety-checked coding assistant whose tools only include a sandboxed shell. Whenever the user requests a directory listing you MUST call the `shell` tool with the exact command `ls -la`. After the tool finishes, summarize the first few entries in plain Chinese."
+      },
+      {
+        "role": "user",
+        "content": "请调用 shell 工具运行 `ls -la` 查看工作目录，然后把前几行告诉我。"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "shell",
+          "description": "执行安全的 shell 命令，只允许类似 ls 的只读操作。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "要执行的命令数组，例如 [\"bash\", \"-lc\", \"ls -la\"]"
+              },
+              "workdir": {
+                "type": "string",
+                "description": "可选工作目录"
+              }
+            },
+            "required": [
+              "command"
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

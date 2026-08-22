@@ -1,0 +1,193 @@
+{
+  "description": "Provider conversion reference table extracted from claude-code-router",
+  "version": "1.0",
+  "architecture": "agent-based",
+  "notes": "Shows how OpenAI-compatible requests are transformed to various provider formats",
+  "baseFormat": "OpenAI",
+  "providers": {
+    "openai": {
+      "name": "OpenAI",
+      "compatibility": "native",
+      "endpointMapping": {
+        "chat": "https://api.openai.com/v1/chat/completions",
+        "embeddings": "https://api.openai.com/v1/embeddings",
+        "models": "https://api.openai.com/v1/models"
+      },
+      "modelMapping": {
+        "direct": true,
+        "notes": "No model mapping needed - native OpenAI format"
+      },
+      "parameterMapping": {
+        "temperature": "temperature",
+        "max_tokens": "max_tokens",
+        "top_p": "top_p",
+        "frequency_penalty": "frequency_penalty",
+        "presence_penalty": "presence_penalty",
+        "stop": "stop",
+        "stream": "stream",
+        "tools": "tools",
+        "tool_choice": "tool_choice"
+      }
+    },
+    "anthropic": {
+      "name": "Anthropic Claude",
+      "compatibility": "transformed",
+      "endpointMapping": {
+        "chat": "https://api.anthropic.com/v1/messages",
+        "messages": "https://api.anthropic.com/v1/messages"
+      },
+      "modelMapping": {
+        "gpt-4o": "claude-3-5-sonnet-20241022",
+        "gpt-4o-mini": "claude-3-5-haiku-20241022",
+        "gpt-4-turbo": "claude-3-opus-20240229",
+        "gpt-4": "claude-3-sonnet-20240229",
+        "gpt-3.5-turbo": "claude-3-haiku-20240307"
+      },
+      "parameterMapping": {
+        "max_tokens": "max_tokens",
+        "temperature": "temperature",
+        "top_p": "top_p",
+        "stop": "stop_sequences",
+        "stream": "stream",
+        "tools": "tools",
+        "tool_choice": "tool_choice"
+      },
+      "differences": {
+        "messageStructure": "Uses content blocks instead of simple message array",
+        "toolFormat": "Uses tool_use/tool_result blocks instead of function calls",
+        "streaming": "Different event structure for streaming responses",
+        "usage": "Different usage reporting format"
+      }
+    },
+    "gemini": {
+      "name": "Google Gemini",
+      "compatibility": "transformed",
+      "endpointMapping": {
+        "chat": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        "stream": "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent"
+      },
+      "modelMapping": {
+        "gpt-4o": "gemini-1.5-pro",
+        "gpt-4o-mini": "gemini-1.5-flash",
+        "gpt-4-turbo": "gemini-1.0-pro",
+        "gpt-4": "gemini-1.0-pro",
+        "gpt-3.5-turbo": "gemini-1.0-pro-latest"
+      },
+      "parameterMapping": {
+        "temperature": "generationConfig.temperature",
+        "max_tokens": "generationConfig.maxOutputTokens",
+        "top_p": "generationConfig.topP",
+        "top_k": "generationConfig.topK",
+        "stop": "generationConfig.stopSequences",
+        "stream": "stream",
+        "tools": "tools",
+        "tool_choice": "toolConfig"
+      },
+      "differences": {
+        "messageStructure": "Uses contents with parts array",
+        "roles": "Different role names (user/model/function)",
+        "toolFormat": "Uses functionCall/functionResponse parts",
+        "safety": "Built-in safety filtering with configurable thresholds",
+        "usage": "Usage metadata structure different"
+      }
+    },
+    "deepseek": {
+      "name": "DeepSeek",
+      "compatibility": "openai-compatible",
+      "endpointMapping": {
+        "chat": "https://api.deepseek.com/v1/chat/completions",
+        "models": "https://api.deepseek.com/v1/models"
+      },
+      "modelMapping": {
+        "gpt-4o": "deepseek-chat",
+        "gpt-4o-mini": "deepseek-chat",
+        "gpt-4-turbo": "deepseek-chat",
+        "gpt-4": "deepseek-chat",
+        "gpt-3.5-turbo": "deepseek-coder"
+      },
+      "parameterMapping": {
+        "temperature": "temperature",
+        "max_tokens": "max_tokens",
+        "top_p": "top_p",
+        "frequency_penalty": "frequency_penalty",
+        "presence_penalty": "presence_penalty",
+        "stop": "stop",
+        "stream": "stream",
+        "tools": "tools",
+        "tool_choice": "tool_choice"
+      },
+      "differences": {
+        "modelAvailability": "Limited model selection",
+        "features": "Some advanced features may not be supported",
+        "pricing": "Different pricing structure"
+      }
+    },
+    "openrouter": {
+      "name": "OpenRouter",
+      "compatibility": "openai-compatible",
+      "endpointMapping": {
+        "chat": "https://openrouter.ai/api/v1/chat/completions",
+        "models": "https://openrouter.ai/api/v1/models"
+      },
+      "modelMapping": {
+        "gpt-4o": "openai/gpt-4o",
+        "gpt-4o-mini": "openai/gpt-4o-mini",
+        "gpt-4-turbo": "openai/gpt-4-turbo",
+        "gpt-4": "openai/gpt-4",
+        "gpt-3.5-turbo": "openai/gpt-3.5-turbo"
+      },
+      "parameterMapping": {
+        "temperature": "temperature",
+        "max_tokens": "max_tokens",
+        "top_p": "top_p",
+        "frequency_penalty": "frequency_penalty",
+        "presence_penalty": "presence_penalty",
+        "stop": "stop",
+        "stream": "stream",
+        "tools": "tools",
+        "tool_choice": "tool_choice"
+      },
+      "differences": {
+        "routing": "Routes to multiple providers based on availability",
+        "models": "Access to multiple provider models through single API",
+        "pricing": "Unified pricing across providers",
+        "features": "Provider-specific feature support varies"
+      }
+    }
+  },
+  "commonTransformations": {
+    "authentication": {
+      "openai": "Bearer token in Authorization header",
+      "anthropic": "x-api-key header + anthropic-version",
+      "gemini": "API key as query parameter",
+      "deepseek": "Bearer token in Authorization header",
+      "openrouter": "Bearer token in Authorization header"
+    },
+    "errorHandling": {
+      "format": "Standardized error response format",
+      "codes": "HTTP status codes with provider-specific details",
+      "retry": "Exponential backoff for rate limits"
+    },
+    "streaming": {
+      "format": "Server-Sent Events (SSE)",
+      "chunking": "Different chunk structures per provider",
+      "encoding": "UTF-8 text encoding"
+    }
+  },
+  "usagePatterns": {
+    "tokenCounting": {
+      "openai": "Detailed token breakdown",
+      "anthropic": "Input/output token counts",
+      "gemini": "Prompt/candidate/total token counts",
+      "deepseek": "Similar to OpenAI format",
+      "openrouter": "Varies by underlying provider"
+    },
+    "rateLimiting": {
+      "openai": "Requests per minute + tokens per minute",
+      "anthropic": "Requests per minute + tokens per minute",
+      "gemini": "Requests per minute + tokens per minute",
+      "deepseek": "Requests per minute + tokens per minute",
+      "openrouter": "Varies by underlying provider"
+    }
+  }
+}

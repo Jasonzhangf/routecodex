@@ -1,0 +1,11 @@
+{
+  "table_id": "field_map",
+  "kind": "bidi_field_map",
+  "protocols": ["openai_chat", "responses"],
+  "description": "hub 字段与协议字段互逆等价对。数据来源：request_outbound_format.rs:1224-1228（responses_item_id->id 等）与 responses_openai_codec.rs:981-985（严格互逆）。",
+  "entries": [
+    { "hub_field": "responses_item_id", "protocol": "openai_chat", "protocol_field": "id" },
+    { "hub_field": "responses_status", "protocol": "openai_chat", "protocol_field": "status" },
+    { "hub_field": "responses_execution", "protocol": "openai_chat", "protocol_field": "execution" }
+  ]
+}

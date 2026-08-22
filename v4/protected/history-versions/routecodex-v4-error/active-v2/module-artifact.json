@@ -1,0 +1,32 @@
+{
+  "artifact_hash": "sha256:23e7b9950ef2f0c2c6767c573371a1d29c82050f11ddbe6593932822fce45bb1",
+  "artifact_paths": [
+    "libroutecodex_v4_error.rlib"
+  ],
+  "artifact_schema": 1,
+  "artifacts": [
+    {
+      "hash": "sha256:2ba38a6fed8ed3484ed762dd1ebf1da40d1632f09852bc895ffbf178dd9e00b7",
+      "path": "libroutecodex_v4_error.rlib"
+    }
+  ],
+  "build": {
+    "args": [
+      "-c",
+      "cargo build --release -p routecodex-v4-error && mkdir -p generated/modules/routecodex-v4-error/lib && cp target/release/deps/libroutecodex_v4_error-*.rlib generated/modules/routecodex-v4-error/lib/libroutecodex_v4_error.rlib"
+    ],
+    "program": "sh",
+    "working_directory": "."
+  },
+  "contract_hash": "sha256:8f126cdb7f261e3cc2642d56900b8074b65e106ceb332ae406a030790a5b9454",
+  "dependency_hashes": [
+    {
+      "artifact_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
+      "module_id": "routecodex-v4-base-node"
+    }
+  ],
+  "module_id": "routecodex-v4-error",
+  "public_api_hash": "sha256:161e6ca746410fd1a7d9fb38fa6eecd1f8d518ee85492eb90ca369757dfeac6f",
+  "source_hash": "sha256:2e1550f5dc9af889e0079d96dfa7d50440dccfcfec82ef5ee72656d6fa858b34",
+  "stage": "frozen"
+}

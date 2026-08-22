@@ -1,0 +1,67 @@
+{
+  "active_artifact": "active/lib/routecodex-v4-control/**",
+  "artifact_paths": [
+    "libroutecodex_v4_control.rlib"
+  ],
+  "build": {
+    "args": [
+      "-c",
+      "cargo build --release -p routecodex-v4-control && mkdir -p generated/modules/routecodex-v4-control/lib && cp target/release/deps/libroutecodex_v4_control-*.rlib generated/modules/routecodex-v4-control/lib/libroutecodex_v4_control.rlib"
+    ],
+    "program": "sh",
+    "working_directory": "."
+  },
+  "contract_paths": [
+    "contracts/node-graph.contract.json",
+    "contracts/pipeline-abstraction.contract.json",
+    "contracts/debug-subscription.contract.json",
+    "contracts/test-layers.contract.json",
+    "contracts/data-control-boundary.contract.json",
+    "contracts/records/**"
+  ],
+  "dependency_modules": [
+    "routecodex-v4-base-node"
+  ],
+  "generated_outputs": [
+    "generated/control/**"
+  ],
+  "module_id": "routecodex-v4-control",
+  "owned_paths": [
+    "crates/routecodex-v4-control/**"
+  ],
+  "regression": {
+    "allow_skipped": false,
+    "command": {
+      "args": [
+        "test",
+        "-p",
+        "routecodex-v4-control",
+        "--test",
+        "l2_control"
+      ],
+      "program": "cargo",
+      "working_directory": "."
+    },
+    "input_paths": [
+      "crates/routecodex-v4-control/src/lib.rs",
+      "crates/routecodex-v4-control/tests/l2_control.rs",
+      "contracts/node-graph.contract.json",
+      "contracts/pipeline-abstraction.contract.json",
+      "contracts/test-layers.contract.json",
+      "contracts/data-control-boundary.contract.json"
+    ],
+    "minimum_test_count": 15,
+    "ordinary_mode_after_freeze": "disabled",
+    "reenable_on": [
+      "source_change",
+      "contract_change",
+      "public_api_change",
+      "artifact_change",
+      "dependency_change"
+    ],
+    "required_before_freeze": true,
+    "suite_id": "v4-control-l2-regression"
+  },
+  "source_owner": "routecodex-v4-control",
+  "stage": "frozen"
+}

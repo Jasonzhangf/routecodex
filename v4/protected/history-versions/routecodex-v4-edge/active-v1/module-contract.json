@@ -1,0 +1,66 @@
+{
+  "active_artifact": "active/lib/routecodex-v4-edge/**",
+  "artifact_paths": [
+    "libroutecodex_v4_edge.rlib"
+  ],
+  "build": {
+    "args": [
+      "-c",
+      "cargo build --release -p routecodex-v4-edge && mkdir -p generated/modules/routecodex-v4-edge/lib && cp target/release/deps/libroutecodex_v4_edge-*.rlib generated/modules/routecodex-v4-edge/lib/libroutecodex_v4_edge.rlib"
+    ],
+    "program": "sh",
+    "working_directory": "."
+  },
+  "contract_paths": [
+    "contracts/node-graph.contract.json",
+    "contracts/pipeline-abstraction.contract.json",
+    "contracts/debug-subscription.contract.json",
+    "contracts/test-layers.contract.json",
+    "contracts/data-control-boundary.contract.json",
+    "contracts/records/**"
+  ],
+  "dependency_modules": [
+    "routecodex-v4-base-node"
+  ],
+  "generated_outputs": [
+    "generated/edge/**"
+  ],
+  "module_id": "routecodex-v4-edge",
+  "owned_paths": [
+    "crates/routecodex-v4-edge/**"
+  ],
+  "regression": {
+    "allow_skipped": false,
+    "command": {
+      "args": [
+        "test",
+        "-p",
+        "routecodex-v4-edge",
+        "--test",
+        "l1_edge"
+      ],
+      "program": "cargo",
+      "working_directory": "."
+    },
+    "input_paths": [
+      "crates/routecodex-v4-edge/src/lib.rs",
+      "crates/routecodex-v4-edge/tests/l1_edge.rs",
+      "contracts/node-graph.contract.json",
+      "contracts/pipeline-abstraction.contract.json",
+      "contracts/test-layers.contract.json"
+    ],
+    "minimum_test_count": 11,
+    "ordinary_mode_after_freeze": "disabled",
+    "reenable_on": [
+      "source_change",
+      "contract_change",
+      "public_api_change",
+      "artifact_change",
+      "dependency_change"
+    ],
+    "required_before_freeze": true,
+    "suite_id": "v4-edge-l1-regression"
+  },
+  "source_owner": "routecodex-v4-edge",
+  "stage": "frozen"
+}

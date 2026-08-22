@@ -1,0 +1,21 @@
+[package]
+name = "routecodex-v4-runtime-bin"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "rccv4"
+path = "src/main.rs"
+
+[dependencies]
+routecodex-v4-cli = { path = "../routecodex-v4-cli" }
+routecodex-v4-config = { path = "../routecodex-v4-config" }
+routecodex-v4-lifecycle = { path = "../routecodex-v4-lifecycle" }
+routecodex-v4-provider = { path = "../routecodex-v4-provider" }
+routecodex-v4-router = { path = "../routecodex-v4-router" }
+routecodex-v4-runtime = { path = "../routecodex-v4-runtime" }
+routecodex-v4-server = { path = "../routecodex-v4-server" }
+routecodex-v4-servertool = { path = "../routecodex-v4-servertool" }
+serde_json = "1"
