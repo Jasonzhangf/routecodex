@@ -186,6 +186,7 @@ fn test_v3_listener_state_with_debug(
         )),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
+        request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
         webui_observability: V3WebuiObservability::new(),
     })
 }
@@ -1454,14 +1455,34 @@ fn provider_failure_scope_uses_existing_session_header() {
 }
 
 #[test]
-fn provider_failure_scope_uses_internal_request_id_without_client_session_header() {
+fn provider_failure_scope_uses_codex_turn_metadata_session_id() {
+    let log_file = test_v3_console_log_file("provider-failure-codex-turn-metadata");
+    let state = test_v3_listener_state(&log_file, 5555);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-codex-turn-metadata",
+        HeaderValue::from_static(r#"{"session_id":"dsh-session-id","thread_id":"dsh-session-id"}"#),
+    );
+    let scope = build_v3_provider_failure_session_scope_for_request(&state.server, &headers)
+        .expect("Codex turn metadata session_id must construct the control scope");
+
+    assert_eq!(scope.session_id(), "dsh-session-id");
+    let _ = fs::remove_file(log_file);
+}
+
+#[test]
+fn provider_failure_scope_rejects_missing_client_session_identity() {
     let log_file = test_v3_console_log_file("provider-failure-session-header-missing");
     let state = test_v3_listener_state(&log_file, 5555);
-    let scope =
-        get_failure_session_scope(&state.server, &HeaderMap::new(), "responses", "request-123")
-            .expect("ordinary requests do not require a client session header");
+    let scope = get_failure_session_scope(
+        &state.server,
+        &HeaderMap::new(),
+        "responses",
+        "request-123",
+    )
+    .expect_err("missing client session identity must be explicit");
 
-    assert_eq!(scope.session_id(), "request-local-request-123");
+    assert!(scope.contains("canonical client session id"), "{scope}");
     let _ = fs::remove_file(log_file);
 }
 
@@ -3122,6 +3143,7 @@ fn error_projection_appends_human_console_failure_line() {
         )),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
+        request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
         webui_observability: V3WebuiObservability::new(),
     };
     let trace_scope = state
@@ -3433,10 +3455,20 @@ async fn relay_sse_accept_stream_error_projects_post_commit_provider_failure_not
         Ok(b"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"x\"},\"finish_reason\":null,\"index\":0}]}\n\n".to_vec()),
         Err("OpenAI Chat SSE ended without terminal finish_reason".to_string()),
     ]));
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(8);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<
+        Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>,
+    >(8);
     drain_v3_openai_chat_relay_sse_stream_to_client(stream, &tx, Some(finalizer)).await;
     drop(tx);
-    while rx.recv().await.is_some() {}
+    let mut stream_error = None;
+    while let Some(item) = rx.recv().await {
+        if let Err(error) = item {
+            stream_error = Some(error);
+        }
+    }
+    let stream_error = stream_error.expect("provider SSE failure must remain typed");
+    assert_eq!(stream_error.source_stage, "V3ProviderRespInbound01Raw");
+    assert_eq!(stream_error.code, "provider_response_sse_stream");
 
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
     assert!(
@@ -3536,7 +3568,7 @@ async fn responses_sse_relay_provider_stream_error_projects_standard_error_then_
     let provider = futures_util::stream::iter(vec![Err::<Vec<u8>, V3Error01SourceRaised>(
         raise_v3_sse_provider_failure("provider_response_sse_stream", "controlled error"),
     )]);
-    let body = v3_relay_client_sse_body(Box::pin(provider), Some(Duration::from_millis(10)));
+    let body = v3_client_sse_body(Box::pin(provider), Some(Duration::from_millis(10)));
     let mut client = body.into_data_stream();
 
     assert_eq!(
@@ -3548,10 +3580,7 @@ async fn responses_sse_relay_provider_stream_error_projects_standard_error_then_
     assert!(error.starts_with("event: error\n"), "{error}");
     assert!(error.contains("provider_response_sse_stream"), "{error}");
     assert!(error.contains("controlled error"), "{error}");
-    assert!(
-        !error.contains("\"status\":"),
-        "post-commit SSE event must not contradict the committed HTTP 200: {error}"
-    );
+    assert!(!error.contains("\"status\":"), "post-commit SSE event must not contradict the committed HTTP 200: {error}");
     assert!(
         tokio::time::timeout(Duration::from_millis(50), client.next())
             .await
@@ -3584,14 +3613,8 @@ async fn responses_sse_direct_runtime_error_projects_standard_error_then_clean_e
     let error = std::str::from_utf8(&error).unwrap();
     assert!(error.starts_with("event: error\n"), "{error}");
     assert!(error.contains("v3_route_target_runtime_failure"), "{error}");
-    assert!(
-        error.contains("remote continuation binding failed"),
-        "{error}"
-    );
-    assert!(
-        !error.contains("\"status\":"),
-        "post-commit SSE event must not contradict the committed HTTP 200: {error}"
-    );
+    assert!(error.contains("remote continuation binding failed"), "{error}");
+    assert!(!error.contains("\"status\":"), "post-commit SSE event must not contradict the committed HTTP 200: {error}");
     assert!(client.next().await.is_none());
 }
 
