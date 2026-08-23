@@ -534,7 +534,9 @@ where
                             ),
                         ));
                     }
-                    Some(Err(error)) if handoff_budget.is_none_or(|budget| budget > 0) => {
+                    Some(Err(error))
+                        if !handoff_emitted_frame
+                            && handoff_budget.is_none_or(|budget| budget > 0) => {
                         let Some(next) = handoff.clone()(error.message.clone()).await else {
                             return Some((
                                 Err(error),
@@ -587,7 +589,8 @@ where
                                 "provider handoff stream ended without a frame"
                             },
                         );
-                        if handoff_budget.is_none_or(|budget| budget > 0) {
+                        if !handoff_emitted_frame
+                            && handoff_budget.is_none_or(|budget| budget > 0) {
                             let Some(next) = handoff.clone()(error.message.clone()).await else {
                                 return Some((
                                     Err(error),

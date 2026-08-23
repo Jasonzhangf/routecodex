@@ -977,9 +977,9 @@ async fn direct_sse_handoff_empty_stream_is_not_silent_eof() {
     let error = wrapped
         .next()
         .await
-        .expect("empty handoff must be an error")
-        .expect_err("empty handoff must not become EOF");
-    assert_eq!(error.code, "provider_sse_handoff_empty_stream");
+        .expect("post-commit provider failure must be explicit")
+        .expect_err("post-commit provider failure must not hand off");
+    assert_eq!(error.code, "provider_response_sse_stream");
     assert!(wrapped.next().await.is_none());
 }
 
@@ -1001,14 +1001,12 @@ async fn direct_sse_handoff_reselects_when_first_attempt_eof_lacks_terminal() {
         );
 
     assert!(wrapped.next().await.expect("first frame").is_ok());
-    let recovered = wrapped
+    let error = wrapped
         .next()
         .await
-        .expect("first-attempt EOF must hand off")
-        .expect("handoff frame must be forwarded");
-    assert!(String::from_utf8(recovered)
-        .unwrap()
-        .contains("data: recovered"));
+        .expect("post-commit missing terminal must be explicit")
+        .expect_err("post-commit missing terminal must not hand off");
+    assert_eq!(error.code, "provider_sse_terminal_missing");
     assert!(wrapped.next().await.is_none());
 }
 
@@ -1036,17 +1034,12 @@ async fn direct_sse_handoff_partial_stream_without_terminal_is_not_silent_eof() 
         );
 
     assert!(wrapped.next().await.expect("first frame").is_ok());
-    assert!(wrapped
-        .next()
-        .await
-        .expect("recovered partial frame")
-        .is_ok());
     let error = wrapped
         .next()
         .await
-        .expect("partial handoff EOF must be an error")
-        .expect_err("partial handoff EOF must not become normal EOF");
-    assert_eq!(error.code, "provider_sse_terminal_missing");
+        .expect("post-commit provider failure must be explicit")
+        .expect_err("post-commit provider failure must not hand off");
+    assert_eq!(error.code, "provider_response_sse_stream");
 }
 
 #[tokio::test]
