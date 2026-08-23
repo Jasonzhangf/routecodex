@@ -56,7 +56,11 @@ const ANTHROPIC_PROVIDER_HEADER_NAMES: &[&str] = &[
     "x-stainless-retry-count",
     "x-stainless-timeout",
 ];
-const V3_PROVIDER_HTTP_READ_TIMEOUT_SECS: u64 = 300;
+// Keep the client-level idle read guard at the maximum supported local cold-start
+// budget. Per-request `RequestBuilder::timeout` and the protocol-specific SSE
+// semantic guards remain the authoritative shorter deadlines for providers that
+// configure them; this guard must not truncate a 15-minute local provider start.
+const V3_PROVIDER_HTTP_READ_TIMEOUT_SECS: u64 = 900;
 const V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 30;
 const V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS: u64 = 30;
 const V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER: &str =
