@@ -199,29 +199,6 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
     route_policy_terminal_commit: Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>,
     handoff: Option<V3DirectSseProviderHandoff>,
 ) -> V3ClientSseStream {
-    fn direct_sse_frame_has_terminal_marker(
-        frame: &[u8],
-        provider_protocol: V3HubProviderWireProtocol,
-    ) -> bool {
-        let text = String::from_utf8_lossy(frame);
-        match provider_protocol {
-            V3HubProviderWireProtocol::Responses => {
-                text.contains("response.completed")
-                    || text.contains("response.incomplete")
-                    || text.contains("response.failed")
-            }
-            V3HubProviderWireProtocol::Anthropic => {
-                text.contains("message_stop")
-            }
-            V3HubProviderWireProtocol::OpenAiChat => {
-                text.contains("\"finish_reason\":\"")
-            }
-            V3HubProviderWireProtocol::Gemini => {
-                text.contains("turn_complete")
-            }
-        }
-    }
-
     struct StreamState {
         source: V3ClientSseStream,
         decoder: SseIncrementalDecoder,
@@ -232,7 +209,6 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
         handoff: Option<V3DirectSseProviderHandoff>,
         handoff_active: bool,
         handoff_emitted_frame: bool,
-        handoff_terminal_seen: bool,
         source_exhausted: bool,
         client_committed: bool,
         done: bool,
@@ -249,7 +225,6 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
             handoff,
             handoff_active: false,
             handoff_emitted_frame: false,
-            handoff_terminal_seen: false,
             source_exhausted: false,
             client_committed: false,
             done: false,
@@ -275,12 +250,6 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                     if state.handoff_active {
                         state.client_committed |= direct_sse_frame_commits_client_stream(&chunk);
                         state.handoff_emitted_frame = true;
-                        if direct_sse_frame_has_terminal_marker(
-                            &chunk,
-                            state.provider_outcome.provider_protocol,
-                        ) {
-                            state.handoff_terminal_seen = true;
-                        }
                         return Some((Ok(chunk), state));
                     }
                     return match state
@@ -309,7 +278,6 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                                     state.source = next_stream;
                                     state.handoff_active = true;
                                     state.handoff_emitted_frame = false;
-                                    state.handoff_terminal_seen = false;
                                     state.source_exhausted = false;
                                     continue;
                                 }
@@ -336,7 +304,6 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                             state.source = next_stream;
                             state.handoff_active = true;
                             state.handoff_emitted_frame = false;
-                            state.handoff_terminal_seen = false;
                             state.source_exhausted = false;
                             continue;
                         }
@@ -359,16 +326,6 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                         ));
                     }
                     if state.handoff_active {
-                        if !state.handoff_terminal_seen {
-                            let source = build_v3_error_01_source_raised(
-                                V3ErrorSourceKind::ProviderFailure,
-                                "V3ProviderResp14Raw",
-                                "provider_sse_terminal_missing",
-                                "provider handoff stream ended without a terminal event",
-                            );
-                            state.done = true;
-                            return Some((Err(source), state));
-                        }
                         state.done = true;
                         return None;
                     }
@@ -409,7 +366,6 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                                 state.source = next_stream;
                                 state.handoff_active = true;
                                 state.handoff_emitted_frame = false;
-                                state.handoff_terminal_seen = false;
                                 state.source_exhausted = false;
                                 continue;
                             }
@@ -516,25 +472,16 @@ where
     F: Fn(String) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Option<V3ClientSseStream>> + Send + 'static,
 {
-    fn direct_sse_frame_has_terminal_marker(frame: &[u8]) -> bool {
-        let text = String::from_utf8_lossy(frame);
-        text.contains("response.completed")
-            || text.contains("message_stop")
-            || text.contains("turn_complete")
-            || text.contains("\"finish_reason\":\"")
-    }
-
     Box::pin(stream::unfold(
         // The first provider attempt is already part of the handoff contract:
         // an EOF without a terminal event must be treated as a provider
         // failure and offered to the next attempt, never as client success.
-        (source, handoff, handoff_budget, true, false, false, false),
+        (source, handoff, handoff_budget, true, false, false),
         |(
             mut source,
             handoff,
             mut handoff_budget,
             mut handoff_active,
-            mut handoff_terminal_seen,
             mut handoff_emitted_frame,
             mut handoff_client_committed,
         )| async move {
@@ -545,9 +492,6 @@ where
                             handoff_emitted_frame = true;
                             handoff_client_committed |=
                                 direct_sse_frame_commits_client_stream(&frame);
-                            if direct_sse_frame_has_terminal_marker(&frame) {
-                                handoff_terminal_seen = true;
-                            }
                         }
                         return Some((
                             Ok(frame),
@@ -556,7 +500,6 @@ where
                                 handoff,
                                 handoff_budget,
                                 handoff_active,
-                                handoff_terminal_seen,
                                 handoff_emitted_frame,
                                 handoff_client_committed,
                             ),
@@ -573,7 +516,6 @@ where
                                     handoff,
                                     Some(0),
                                     false,
-                                    handoff_terminal_seen,
                                     handoff_emitted_frame,
                                     handoff_client_committed,
                                 ),
@@ -584,7 +526,6 @@ where
                             *budget = budget.saturating_sub(1);
                         }
                         handoff_active = true;
-                        handoff_terminal_seen = false;
                         handoff_emitted_frame = false;
                         handoff_client_committed = false;
                     }
@@ -596,53 +537,12 @@ where
                                 handoff,
                                 Some(0),
                                 false,
-                                handoff_terminal_seen,
                                 handoff_emitted_frame,
                                 handoff_client_committed,
                             ),
                         ));
                     }
-                    None if handoff_active => {
-                        if handoff_terminal_seen {
-                            return None;
-                        }
-                        let error = build_v3_error_01_source_raised(
-                            V3ErrorSourceKind::ProviderFailure,
-                            "V3ProviderResp14Raw",
-                            if handoff_emitted_frame {
-                                "provider_sse_terminal_missing"
-                            } else {
-                                "provider_sse_handoff_empty_stream"
-                            },
-                            if handoff_emitted_frame {
-                                "provider handoff stream ended without a terminal event"
-                            } else {
-                                "provider handoff stream ended without a frame"
-                            },
-                        );
-                        if !handoff_client_committed
-                            && handoff_budget.is_none_or(|budget| budget > 0) {
-                            let Some(next) = handoff.clone()(error.message.clone()).await else {
-                                return Some((
-                                    Err(error),
-                                    (source, handoff, Some(0), false, false, false, false),
-                                ));
-                            };
-                            source = next;
-                            if let Some(budget) = handoff_budget.as_mut() {
-                                *budget = budget.saturating_sub(1);
-                            }
-                            handoff_active = true;
-                            handoff_terminal_seen = false;
-                            handoff_emitted_frame = false;
-                            handoff_client_committed = false;
-                            continue;
-                        }
-                        return Some((
-                            Err(error),
-                            (source, handoff, Some(0), false, false, false, false),
-                        ));
-                    }
+                    None if handoff_active => return None,
                     None => return None,
                 }
             }

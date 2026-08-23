@@ -927,7 +927,12 @@ async fn direct_sse_handoff_partial_stream_is_not_silent_eof() {
                 Some(Box::pin(stream::iter(vec![Ok(
                     b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"
                         .to_vec(),
-                )])) as V3ClientSseStream)
+                ), Err(build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "provider_response_sse_stream",
+                    "partial handoff failed",
+                ))])) as V3ClientSseStream)
             })
         });
     let mut governed = wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
@@ -948,9 +953,9 @@ async fn direct_sse_handoff_partial_stream_is_not_silent_eof() {
     let error = governed
         .next()
         .await
-        .expect("partial handoff EOF must be an error")
+        .expect("partial handoff failure must be explicit")
         .expect_err("partial handoff must not become normal EOF");
-    assert_eq!(error.code, "provider_sse_terminal_missing");
+    assert_eq!(error.code, "provider_response_sse_stream");
 }
 
 #[tokio::test]
@@ -985,13 +990,19 @@ async fn direct_sse_handoff_empty_stream_is_not_silent_eof() {
 
 #[tokio::test]
 async fn direct_sse_handoff_reselects_when_first_attempt_eof_lacks_terminal() {
-    let source: V3ClientSseStream = Box::pin(stream::iter(vec![Ok(
-        b"data: {\"type\":\"response.created\"}\n\ndata: [DONE]\n\n".to_vec(),
-    )]));
+    let source: V3ClientSseStream = Box::pin(stream::iter(vec![
+        Ok(b"data: {\"type\":\"response.created\"}\n\ndata: [DONE]\n\n".to_vec()),
+        Err(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_stream",
+            "lifecycle-only provider failed before semantic output",
+        )),
+    ]));
     let handoff = |_reason: String| {
         Box::pin(async {
             Some(Box::pin(stream::iter(vec![Ok(
-                b"data: recovered\ndata: [DONE]\n\n".to_vec(),
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n".to_vec(),
             )])) as V3ClientSseStream)
         })
     };
@@ -1008,13 +1019,8 @@ async fn direct_sse_handoff_reselects_when_first_attempt_eof_lacks_terminal() {
         .expect("handoff frame must be forwarded");
     assert!(String::from_utf8(recovered)
         .unwrap()
-        .contains("data: recovered"));
-    let error = wrapped
-        .next()
-        .await
-        .expect("recovered attempt missing terminal must be explicit")
-        .expect_err("[DONE] alone must not become terminal success");
-    assert_eq!(error.code, "provider_sse_terminal_missing");
+        .contains("recovered"));
+    assert!(wrapped.next().await.is_none());
 }
 
 #[tokio::test]
