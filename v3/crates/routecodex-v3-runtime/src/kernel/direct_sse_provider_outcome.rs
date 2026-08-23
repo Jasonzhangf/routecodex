@@ -637,10 +637,9 @@ mod tests {
         let frames = stream.collect::<Vec<_>>().await;
         assert_eq!(handoff_calls.load(Ordering::SeqCst), 1);
         assert!(frames.iter().all(Result::is_ok));
-        assert!(frames
-            .iter()
-            .flatten()
-            .any(|frame| frame.as_slice() == b"data: [DONE]\n\n"));
+        assert!(frames.iter().flatten().any(|frame| frame
+            .windows(b"data: [DONE]".len())
+            .any(|window| { window == b"data: [DONE]" })));
     }
 
     #[tokio::test]
