@@ -14,6 +14,16 @@ pub(super) type V3DirectSseProviderHandoff = Arc<
         + Send
         + Sync,
 >;
+
+fn direct_sse_frame_commits_client_stream(frame: &[u8]) -> bool {
+    let compact: String = String::from_utf8_lossy(frame)
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
+    !compact.contains("\"type\":\"response.created\"")
+        && !compact.contains("\"type\":\"response.in_progress\"")
+        && !compact.contains("\"type\":\"message_start\"")
+}
 pub(super) struct V3DirectSseProviderOutcome {
     pub(super) provider_health: V3ProviderFailureRuntimeHealth,
     pub(super) failure_session_scope: V3ProviderFailureSessionScope,
@@ -248,7 +258,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                 match next {
                 Some(Ok(chunk)) => {
                     if state.handoff_active {
-                        state.client_committed = true;
+                        state.client_committed = direct_sse_frame_commits_client_stream(&chunk);
                         state.handoff_emitted_frame = true;
                         if direct_sse_frame_has_terminal_marker(
                             &chunk,
@@ -263,7 +273,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                         .observe_chunk(&chunk, &mut state.decoder)
                     {
                         Ok(()) => {
-                            state.client_committed = true;
+                            state.client_committed |= direct_sse_frame_commits_client_stream(&chunk);
                             Some((Ok(chunk), state))
                         }
                         Err(source) => {
@@ -504,7 +514,7 @@ where
         // The first provider attempt is already part of the handoff contract:
         // an EOF without a terminal event must be treated as a provider
         // failure and offered to the next attempt, never as client success.
-        (source, handoff, handoff_budget, true, false, false),
+        (source, handoff, handoff_budget, true, false, false, false),
         |(
             mut source,
             handoff,
@@ -512,12 +522,15 @@ where
             mut handoff_active,
             mut handoff_terminal_seen,
             mut handoff_emitted_frame,
+            mut handoff_client_committed,
         )| async move {
             loop {
                 match source.next().await {
                     Some(Ok(frame)) => {
                         if handoff_active {
                             handoff_emitted_frame = true;
+                            handoff_client_committed |=
+                                direct_sse_frame_commits_client_stream(&frame);
                             if direct_sse_frame_has_terminal_marker(&frame) {
                                 handoff_terminal_seen = true;
                             }
@@ -531,11 +544,12 @@ where
                                 handoff_active,
                                 handoff_terminal_seen,
                                 handoff_emitted_frame,
+                                handoff_client_committed,
                             ),
                         ));
                     }
                     Some(Err(error))
-                        if !handoff_emitted_frame
+                        if !handoff_client_committed
                             && handoff_budget.is_none_or(|budget| budget > 0) => {
                         let Some(next) = handoff.clone()(error.message.clone()).await else {
                             return Some((
@@ -547,6 +561,7 @@ where
                                     false,
                                     handoff_terminal_seen,
                                     handoff_emitted_frame,
+                                    handoff_client_committed,
                                 ),
                             ));
                         };
@@ -557,6 +572,7 @@ where
                         handoff_active = true;
                         handoff_terminal_seen = false;
                         handoff_emitted_frame = false;
+                        handoff_client_committed = false;
                     }
                     Some(Err(error)) => {
                         return Some((
@@ -568,6 +584,7 @@ where
                                 false,
                                 handoff_terminal_seen,
                                 handoff_emitted_frame,
+                                handoff_client_committed,
                             ),
                         ));
                     }
@@ -589,12 +606,12 @@ where
                                 "provider handoff stream ended without a frame"
                             },
                         );
-                        if !handoff_emitted_frame
+                        if !handoff_client_committed
                             && handoff_budget.is_none_or(|budget| budget > 0) {
                             let Some(next) = handoff.clone()(error.message.clone()).await else {
                                 return Some((
                                     Err(error),
-                                    (source, handoff, Some(0), false, false, false),
+                                    (source, handoff, Some(0), false, false, false, false),
                                 ));
                             };
                             source = next;
@@ -604,11 +621,12 @@ where
                             handoff_active = true;
                             handoff_terminal_seen = false;
                             handoff_emitted_frame = false;
+                            handoff_client_committed = false;
                             continue;
                         }
                         return Some((
                             Err(error),
-                            (source, handoff, Some(0), false, false, false),
+                            (source, handoff, Some(0), false, false, false, false),
                         ));
                     }
                     None => return None,
