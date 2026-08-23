@@ -220,6 +220,13 @@ impl V3DirectSseAcceptSkeleton {
         Response::builder()
             .status(axum::http::StatusCode::OK)
             .header("content-type", "text/event-stream")
+            // The Front broker owns the client connection.  These headers are
+            // part of that transport contract: an intermediary must not buffer
+            // semantic frames or turn the broker's keepalive stream into an
+            // idle/closed response while the provider side is still running.
+            .header("cache-control", "no-cache, no-transform")
+            .header("connection", "keep-alive")
+            .header("x-accel-buffering", "no")
             .body(body)
             .expect("Direct SSE accept response")
     }
