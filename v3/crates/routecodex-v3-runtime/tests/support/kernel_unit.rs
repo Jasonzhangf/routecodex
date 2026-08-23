@@ -31,6 +31,8 @@ fn test_failure_session_scope_for(
 ) -> V3ProviderFailureSessionScope {
     V3ProviderFailureSessionScope::new("test", routing_group, session_id)
         .expect("test failure session scope")
+        .with_transport_handoff_scope(format!("test-pipeline:{session_id}"), 7777, 1)
+        .expect("test provider transport handoff scope")
 }
 
 struct CaptureTransport;
@@ -90,7 +92,11 @@ async fn runtime_executes_adjacent_responses_direct_chain() {
         V3ClientBody::Json(value) => {
             assert_eq!(value, json!({"id":"resp_test","output_text":"ok"}));
         }
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
+        V3ClientBody::Bytes(_)
+        | V3ClientBody::ProviderSse(_)
+        | V3ClientBody::RelayProviderSse(_)
+        | V3ClientBody::Sse(_)
+        | V3ClientBody::CommittedSse(_) => {
             panic!("direct JSON response must remain JSON")
         }
     }
@@ -152,8 +158,8 @@ fn test_plan_http_request(
 ) -> V3Server03HttpRequestRaw {
     V3Server03HttpRequestRaw {
         request_purpose: V3RequestPurpose::Conversation,
-        port: None,
-        pipeline_id: None,
+        port: Some(7777),
+        pipeline_id: Some(format!("test-pipeline:{request_id}")),
         server_id: "test".to_string(),
         failure_session_scope: test_failure_session_scope(routing_group),
         request_id: request_id.to_string(),
@@ -172,8 +178,8 @@ fn test_responses_raw(
 ) -> V3Server03HttpRequestRaw {
     V3Server03HttpRequestRaw {
         request_purpose: V3RequestPurpose::Conversation,
-        port: None,
-        pipeline_id: None,
+        port: Some(7777),
+        pipeline_id: Some(format!("test-pipeline:{request_id}")),
         server_id: "test".to_string(),
         failure_session_scope: test_failure_session_scope(routing_group),
         request_id: request_id.to_string(),
@@ -219,7 +225,6 @@ fn test_direct_sse_provider_outcome(routing_group: &str) -> V3DirectSseProviderO
 #[tokio::test]
 async fn direct_sse_runtime_timing_publishes_only_after_clean_eof() {
     let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
     let observation = V3RuntimeStreamObservation::default();
     let source = Box::pin(stream::iter(vec![Ok(
         b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
@@ -278,7 +283,11 @@ async fn direct_sse_keepalive_text_frames_do_not_fail_the_stream() {
         observation.clone(),
     );
 
-    while governed.next().await.is_some() {}
+    while let Some(item) = governed.next().await {
+        if let Err(error) = item {
+            panic!("keepalive stream unexpectedly failed: {error:?}");
+        }
+    }
 
     let snapshot = observation.snapshot().unwrap();
     assert_eq!(
@@ -442,6 +451,29 @@ async fn direct_sse_terminal_event_before_eof_does_not_publish_runtime_timing() 
     );
     drop(governed);
     assert!(observation.snapshot().unwrap().timing.is_none());
+}
+
+#[tokio::test]
+async fn direct_sse_terminal_event_without_provider_done_projects_done_before_eof() {
+    let runtime_timing = V3RuntimeTimingState::start();
+    let observation = V3RuntimeStreamObservation::default();
+    let source = Box::pin(stream::iter(vec![Ok(
+        b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
+            .to_vec(),
+    )]));
+    let mut governed = wrap_direct_sse_provider_outcome_stream(
+        source,
+        test_direct_sse_provider_outcome("direct_sse_terminal_without_done"),
+        runtime_timing,
+        observation,
+    );
+
+    let first = governed.next().await.unwrap().unwrap();
+    assert!(first.windows(18).any(|window| window == b"response.completed"));
+    let done = governed.next().await.unwrap().unwrap();
+    assert!(done.windows(12).any(|window| window == b"data: [DONE]"));
+    let terminal = governed.next().await;
+    assert!(terminal.is_none(), "unexpected post-DONE item: {terminal:?}");
 }
 
 #[tokio::test]
@@ -826,6 +858,158 @@ async fn direct_sse_failure_after_client_commit_does_not_reselect_current_reques
     );
 }
 
+#[tokio::test]
+async fn direct_sse_failure_after_client_commit_handoffs_before_error_projection() {
+    use std::sync::Arc;
+
+    let runtime_timing = V3RuntimeTimingState::start();
+    runtime_timing.start_external().unwrap();
+    let observation = V3RuntimeStreamObservation::default();
+    let source = Box::pin(stream::iter(vec![
+        Ok(b"event: provider-label\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\n".to_vec()),
+        Ok(b"event: provider-label\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"after commit\"}}}\n\n".to_vec()),
+    ]));
+    let handoff: crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderHandoff =
+        Arc::new(move |_reason| {
+            Box::pin(async move {
+                let fallback: crate::V3ClientSseStream = Box::pin(stream::iter(vec![Ok(
+                    b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
+                        .to_vec(),
+                )]));
+                Some(fallback)
+            })
+        });
+    let mut governed = wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
+        source,
+        test_direct_sse_provider_outcome("direct_sse_failure_after_commit_handoff"),
+        runtime_timing,
+        observation,
+        None,
+        Some(handoff),
+    );
+
+    let mut frames = Vec::new();
+    while let Some(result) = governed.next().await {
+        frames.push(result.expect("provider failure must be consumed by handoff"));
+    }
+    let body = String::from_utf8(frames.concat()).expect("UTF-8 SSE fixture");
+    assert!(body.contains("response.output_text.delta"));
+    assert!(body.contains("response.completed"));
+    assert!(body.contains("[DONE]"));
+}
+
+#[tokio::test]
+async fn direct_sse_handoff_partial_stream_is_not_silent_eof() {
+    use std::sync::Arc;
+
+    let runtime_timing = V3RuntimeTimingState::start();
+    runtime_timing.start_external().unwrap();
+    let observation = V3RuntimeStreamObservation::default();
+    let source = Box::pin(stream::iter(vec![Err(build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_response_sse_stream",
+        "provider stream failed",
+    ))]));
+    let handoff: crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderHandoff =
+        Arc::new(move |_reason| {
+            Box::pin(async move {
+                Some(Box::pin(stream::iter(vec![Ok(
+                    b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"
+                        .to_vec(),
+                )])) as V3ClientSseStream)
+            })
+        });
+    let mut governed = wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
+        source,
+        test_direct_sse_provider_outcome("direct_sse_partial_handoff"),
+        runtime_timing,
+        observation,
+        None,
+        Some(handoff),
+    );
+
+    let frame = governed
+        .next()
+        .await
+        .expect("partial handoff frame")
+        .expect("partial handoff frame must be forwarded");
+    assert!(String::from_utf8(frame).unwrap().contains("partial"));
+    let error = governed
+        .next()
+        .await
+        .expect("partial handoff EOF must be an error")
+        .expect_err("partial handoff must not become normal EOF");
+    assert_eq!(error.code, "provider_sse_terminal_missing");
+}
+
+#[tokio::test]
+async fn direct_sse_handoff_empty_stream_is_not_silent_eof() {
+    use futures_util::StreamExt;
+
+    let source: V3ClientSseStream = Box::pin(stream::iter(vec![
+        Ok(b"data: first\n\n".to_vec()),
+        Err(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_stream",
+            "provider stream failed",
+        )),
+    ]));
+    let handoff = |_reason: String| {
+        Box::pin(async { Some(Box::pin(stream::empty()) as V3ClientSseStream) })
+    };
+    let mut wrapped = crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
+        source, handoff, 1,
+    );
+
+    assert!(wrapped.next().await.expect("first frame").is_ok());
+    let error = wrapped
+        .next()
+        .await
+        .expect("empty handoff must be an error")
+        .expect_err("empty handoff must not become EOF");
+    assert_eq!(error.code, "provider_sse_handoff_empty_stream");
+    assert!(wrapped.next().await.is_none());
+}
+
+#[tokio::test]
+async fn direct_sse_handoff_partial_stream_without_terminal_is_not_silent_eof() {
+    let source: V3ClientSseStream = Box::pin(stream::iter(vec![
+        Ok(b"data: first\n\n".to_vec()),
+        Err(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_stream",
+            "provider stream failed",
+        )),
+    ]));
+    let handoff = |_reason: String| {
+        Box::pin(async {
+            Some(Box::pin(stream::iter(vec![Ok(
+                b"data: recovered-partial\n\n".to_vec(),
+            )])) as V3ClientSseStream)
+        })
+    };
+    let mut wrapped =
+        crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
+            source, handoff, 1,
+        );
+
+    assert!(wrapped.next().await.expect("first frame").is_ok());
+    assert!(wrapped
+        .next()
+        .await
+        .expect("recovered partial frame")
+        .is_ok());
+    let error = wrapped
+        .next()
+        .await
+        .expect("partial handoff EOF must be an error")
+        .expect_err("partial handoff EOF must not become normal EOF");
+    assert_eq!(error.code, "provider_sse_terminal_missing");
+}
+
 pub(super) async fn run_normal_direct_request_does_not_consume_unrelated_provider_failure_gate() {
     let routing_group = "normal_direct_bypasses_provider_action_gate";
     let manifest = scoped_test_manifest(test_manifest(), routing_group);
@@ -929,7 +1113,10 @@ async fn provider_error_enters_error_chain_not_success() {
             assert!(body["error"]["message"].as_str().unwrap().contains("boom"))
         }
         V3ClientBody::Bytes(_) => panic!("error response must be JSON"),
-        V3ClientBody::Sse(_) => panic!("error response must be JSON"),
+        V3ClientBody::ProviderSse(_)
+        | V3ClientBody::RelayProviderSse(_)
+        | V3ClientBody::Sse(_)
+        | V3ClientBody::CommittedSse(_) => panic!("error response must be JSON"),
     }
 }
 
@@ -1024,7 +1211,7 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
     )
     .await;
 
-    assert_eq!(output.client_payload.status, 500);
+    assert_eq!(output.client_payload.status, 598);
     assert!(output.node_trace.contains(&"V3Req04StandardizedResponses"));
     assert!(!output
         .node_trace
@@ -1036,7 +1223,11 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
                 .expect("error message")
                 .contains("metadataCenter"));
         }
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => panic!("error response must be JSON"),
+        V3ClientBody::Bytes(_)
+        | V3ClientBody::ProviderSse(_)
+        | V3ClientBody::RelayProviderSse(_)
+        | V3ClientBody::Sse(_)
+        | V3ClientBody::CommittedSse(_) => panic!("error response must be JSON"),
     }
 }
 
@@ -1095,7 +1286,11 @@ async fn direct_runtime_rejects_invalid_current_data_image_before_provider_send(
                 .expect("error message")
                 .contains("invalid data:image/png payload"));
         }
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => panic!("error response must be JSON"),
+        V3ClientBody::Bytes(_)
+        | V3ClientBody::ProviderSse(_)
+        | V3ClientBody::RelayProviderSse(_)
+        | V3ClientBody::Sse(_)
+        | V3ClientBody::CommittedSse(_) => panic!("error response must be JSON"),
     }
 }
 
@@ -1640,7 +1835,11 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
     );
     match output.client_payload.body {
         V3ClientBody::Json(value) => assert_eq!(value["id"], "resp_second"),
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
+        V3ClientBody::Bytes(_)
+        | V3ClientBody::ProviderSse(_)
+        | V3ClientBody::RelayProviderSse(_)
+        | V3ClientBody::Sse(_)
+        | V3ClientBody::CommittedSse(_) => {
             panic!("provider SSE failure must be reselected before client stream starts")
         }
     }
@@ -1693,16 +1892,115 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
     )
     .await;
 
+    assert_eq!(output.client_payload.status, 200);
+    assert!(output.error_chain.is_none());
     let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
-        panic!("expected direct SSE response");
+        panic!("a committed direct provider stream must remain a client SSE stream");
     };
-    assert!(stream.next().await.expect("partial frame").is_ok());
+    assert!(stream.next().await.unwrap().is_ok());
     let error = stream
         .next()
         .await
-        .expect("provider EOF must emit a typed error")
-        .expect_err("provider EOF without response.completed must not be clean EOF");
-    assert_eq!(error.code, "provider_response_sse_terminal_missing");
+        .expect("missing terminal must be explicit after the first client frame")
+        .expect_err("missing terminal must not become a silent EOF");
+    assert_eq!(error.code, "provider_response_sse_stream");
+}
+
+#[tokio::test]
+async fn responses_direct_debug_entrypoint_handoffs_after_first_provider_frame() {
+    use futures_util::StreamExt;
+    use std::sync::{Arc, Mutex};
+
+    struct PostCommitResponsesTransport {
+        calls: Arc<Mutex<usize>>,
+    }
+
+    #[async_trait]
+    impl ResponsesTransport for PostCommitResponsesTransport {
+        fn handoff_handle(&self) -> Option<Arc<dyn ResponsesTransport>> {
+            Some(Arc::new(Self {
+                calls: Arc::clone(&self.calls),
+            }))
+        }
+
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            let mut calls = self.calls.lock().unwrap();
+            *calls += 1;
+            if *calls == 1 {
+                return Ok(V3ProviderResp14Raw::from_sse(
+                    request.request_id().to_string(),
+                    request.provider_id().to_string(),
+                    200,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"text/event-stream".to_vec(),
+                    }],
+                    Box::pin(stream::iter([
+                        Ok::<Vec<u8>, V3ProviderError>(
+                            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec(),
+                        ),
+                        Err(V3ProviderError::ResponseBody {
+                            request_id: request.request_id().to_string(),
+                            provider_id: request.provider_id().to_string(),
+                            reason: "post-first-frame failure".to_string(),
+                        }),
+                    ])),
+                ));
+            }
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream::iter([Ok::<Vec<u8>, V3ProviderError>(
+                    b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_recovered\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_recovered\",\"status\":\"completed\",\"output\":[]}}\n\n".to_vec(),
+                )])),
+            ))
+        }
+    }
+
+    let routing_group = "responses_direct_debug_handoff";
+    let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req-responses-direct-debug-handoff",
+        "exec",
+        json!({"model":"client-model","input":"hello","stream":true}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let debug = V3DebugRuntime::new(Default::default()).unwrap();
+    let output = execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &PostCommitResponsesTransport {
+            calls: Arc::new(Mutex::new(0)),
+        },
+        &debug,
+    )
+    .await;
+
+    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
+        panic!("expected direct SSE client body: {output:?}");
+    };
+    let mut body = Vec::new();
+    while let Some(frame) = stream.next().await {
+        body.extend(frame.expect("provider failure must be consumed by runtime handoff"));
+    }
+    let body = String::from_utf8(body).unwrap();
+    assert!(body.contains("partial"), "first provider frame was lost: {body}");
+    assert!(body.contains("resp_recovered"), "handoff response was lost: {body}");
+    assert!(body.contains("[DONE]"), "handoff stream stopped without terminal: {body}");
 }
 
 #[tokio::test]
@@ -2032,7 +2330,11 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     let value = match output.client_payload.body {
         V3ClientBody::Json(value) => value,
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
+        V3ClientBody::Bytes(_)
+        | V3ClientBody::ProviderSse(_)
+        | V3ClientBody::RelayProviderSse(_)
+        | V3ClientBody::Sse(_)
+        | V3ClientBody::CommittedSse(_) => {
             panic!("direct JSON response must remain JSON")
         }
     };
