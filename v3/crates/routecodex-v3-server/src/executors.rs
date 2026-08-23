@@ -2,10 +2,11 @@ use crate::*;
 use axum::body::Body;
 use axum::extract::Request;
 use axum::http::{HeaderMap, Response, StatusCode};
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use routecodex_v3_error::{build_v3_error_01_source_raised, V3ErrorSourceKind};
 use routecodex_v3_runtime::V3OpenAiChatRelayRuntimeError;
 use serde_json::{json, Value};
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -377,6 +378,8 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
     >(32);
     let keepalive_ms = state.server.http_sse_keepalive_ms.max(1000);
     tokio::spawn(async move {
+        let panic_tx = tx.clone();
+        let worker = async move {
         // 标准 SSE 心跳帧（注释行，连接保持、不塞任何语义）；完整链执行期间定期
         // 发送，客户端不会因 provider 慢/挂起判定连接断。
         let heartbeat: Vec<u8> = b": keepalive\n\n".to_vec();
@@ -495,6 +498,19 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                     }
                 }
             }
+        }
+        };
+        if let Err(payload) = AssertUnwindSafe(worker).catch_unwind().await {
+            let message = payload
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("OpenAI Chat Relay SSE worker panicked");
+            let _ = panic_tx
+                .send(Ok(crate::endpoint_handlers::v3_front_sse_worker_panic_frame(
+                    message,
+                )))
+                .await;
         }
     });
     // 客户端 SSE 连接由 proxy（routecodex）独立管理：立即回 200 + text/event-stream，

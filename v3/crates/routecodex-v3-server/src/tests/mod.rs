@@ -2833,6 +2833,37 @@ async fn committed_sse_empty_eof_is_not_silent() {
 }
 
 #[tokio::test]
+async fn committed_sse_stream_panic_is_not_silent() {
+    let stream: V3ClientSseStream = Box::pin(futures_util::stream::once(async {
+        panic!("synthetic committed SSE panic");
+        #[allow(unreachable_code)]
+        Ok::<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>(Vec::new())
+    }));
+    let body = to_bytes(
+        v3_client_sse_body(commit_v3_client_sse_stream(stream), None),
+        usize::MAX,
+    )
+    .await
+    .expect("Front must project a stream panic instead of silently ending");
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("front_sse_stream_panicked"));
+    assert!(text.ends_with("data: [DONE]\n\n"));
+}
+
+#[tokio::test]
+async fn front_io_sse_error_is_not_silent_without_keepalive() {
+    let stream: V3IoSseStream = Box::pin(stream::iter(vec![Err::<Vec<u8>, _>(
+        std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "synthetic front IO failure"),
+    )]));
+    let body = to_bytes(v3_io_sse_body(stream, None), usize::MAX)
+        .await
+        .expect("Front must project an IO failure instead of closing the SSE silently");
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("front_sse_io_stream_failed"));
+    assert!(text.ends_with("data: [DONE]\n\n"));
+}
+
+#[tokio::test]
 async fn direct_sse_front_rejects_uncommitted_crlf_terminal_failure() {
     use routecodex_v3_error::{build_v3_error_01_source_raised, V3ErrorSourceKind};
 

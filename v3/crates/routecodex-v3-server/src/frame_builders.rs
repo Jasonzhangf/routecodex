@@ -2,7 +2,7 @@ use crate::*;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, Response, StatusCode};
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
@@ -286,7 +286,38 @@ pub(crate) fn commit_v3_client_sse_stream(stream: V3ClientSseStream) -> V3Commit
     Box::pin(futures_util::stream::unfold(
         (stream, false, false),
         |(mut stream, mut emitted_frame, mut closeout_emitted)| async move {
-            match stream.next().await {
+            let next = match std::panic::AssertUnwindSafe(stream.next())
+                .catch_unwind()
+                .await
+            {
+                Ok(next) => next,
+                Err(payload) => {
+                    closeout_emitted = true;
+                    stream = Box::pin(futures_util::stream::empty());
+                    let message = payload
+                        .downcast_ref::<&str>()
+                        .copied()
+                        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                        .unwrap_or("Front committed SSE stream panicked");
+                    let projected = project_v3_server_runtime_failure(
+                        "V3ServerRespOutbound05ClientFrame",
+                        "front_sse_stream_panicked",
+                        message,
+                        599,
+                    );
+                    let body = serde_json::to_vec(&projected)
+                        .expect("typed Front stream panic Error06 projection");
+                    let mut frame = Vec::with_capacity(body.len() + 32);
+                    frame.extend_from_slice(b"data: ");
+                    frame.extend_from_slice(&body);
+                    frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
+                    return Some((
+                        frame,
+                        (stream, emitted_frame, closeout_emitted),
+                    ));
+                }
+            };
+            match next {
                 Some(Ok(frame)) => {
                     emitted_frame = true;
                     Some((frame, (stream, emitted_frame, closeout_emitted)))
@@ -501,7 +532,53 @@ pub(crate) fn wrap_v3_sse_client_dump_stream(
 
 pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<Duration>) -> Body {
     let Some(keepalive_interval) = keepalive_interval else {
-        return Body::from_stream(stream);
+        return Body::from_stream(stream::unfold((stream, false), |(mut stream, done)| async move {
+            if done {
+                return None;
+            }
+            match std::panic::AssertUnwindSafe(stream.next())
+                .catch_unwind()
+                .await
+            {
+                Ok(Some(Ok(bytes))) => Some((Ok::<Vec<u8>, io::Error>(bytes), (stream, false))),
+                Ok(Some(Err(error))) => {
+                    let projected = project_v3_server_runtime_failure(
+                        "V3ServerRespOutbound05ClientFrame",
+                        "front_sse_io_stream_failed",
+                        error.to_string(),
+                        599,
+                    );
+                    let body = serde_json::to_vec(&projected)
+                        .expect("typed Front SSE IO failure Error06 projection");
+                    let mut frame = Vec::with_capacity(body.len() + 32);
+                    frame.extend_from_slice(b"data: ");
+                    frame.extend_from_slice(&body);
+                    frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
+                    Some((Ok(frame), (Box::pin(stream::empty()), true)))
+                }
+                Ok(None) => None,
+                Err(payload) => {
+                    let message = payload
+                        .downcast_ref::<&str>()
+                        .copied()
+                        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                        .unwrap_or("Front SSE IO stream panicked");
+                    let projected = project_v3_server_runtime_failure(
+                        "V3ServerRespOutbound05ClientFrame",
+                        "front_sse_io_stream_panicked",
+                        message,
+                        599,
+                    );
+                    let body = serde_json::to_vec(&projected)
+                        .expect("typed Front SSE panic Error06 projection");
+                    let mut frame = Vec::with_capacity(body.len() + 32);
+                    frame.extend_from_slice(b"data: ");
+                    frame.extend_from_slice(&body);
+                    frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
+                    Some((Ok(frame), (Box::pin(stream::empty()), true)))
+                }
+            }
+        }));
     };
     let keepalive_chunk =
         build_v3_sse_transport_out_04_keepalive_comment(" keepalive").into_bytes();
@@ -519,15 +596,42 @@ pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<D
                     (stream, interval, false, keepalive_chunk),
                 ));
             }
-            tokio::select! {
+            let next = tokio::select! {
                 biased;
                 item = stream.next() => item.map(|item| {
-                    (item, (stream, interval, false, keepalive_chunk))
+                    (item, (stream, interval, false, keepalive_chunk.clone()))
                 }),
                 _ = interval.tick() => Some((
                     Ok::<Vec<u8>, io::Error>(keepalive_chunk.clone()),
-                    (stream, interval, false, keepalive_chunk),
+                    (stream, interval, false, keepalive_chunk.clone()),
                 )),
+            };
+            match next {
+                Some((Ok(bytes), state)) => Some((Ok(bytes), state)),
+                Some((Err(error), (stream, interval, _, keepalive_chunk))) => {
+                    let projected = project_v3_server_runtime_failure(
+                        "V3ServerRespOutbound05ClientFrame",
+                        "front_sse_io_stream_failed",
+                        error.to_string(),
+                        599,
+                    );
+                    let body = serde_json::to_vec(&projected)
+                        .expect("typed Front SSE IO failure Error06 projection");
+                    let mut frame = Vec::with_capacity(body.len() + 32);
+                    frame.extend_from_slice(b"data: ");
+                    frame.extend_from_slice(&body);
+                    frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
+                    Some((
+                        Ok(frame),
+                        (
+                            Box::pin(stream::empty()),
+                            interval,
+                            false,
+                            keepalive_chunk,
+                        ),
+                    ))
+                }
+                None => None,
             }
         },
     ))
