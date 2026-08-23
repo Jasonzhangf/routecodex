@@ -1458,7 +1458,11 @@ fn provider_failure_scope_uses_existing_session_header() {
         "session-id",
         HeaderValue::from_static("existing-session-id"),
     );
-    let scope = build_v3_provider_failure_session_scope_for_request(&state.server, &headers)
+    let scope = build_v3_provider_failure_session_scope_for_request(
+        &state.server,
+        &headers,
+        &serde_json::json!({}),
+    )
         .expect("existing session header must construct the control scope");
 
     assert_eq!(scope.session_id(), "existing-session-id");
@@ -1474,7 +1478,13 @@ fn provider_failure_scope_reads_canonical_session_from_codex_turn_metadata() {
         "x-codex-turn-metadata",
         HeaderValue::from_static(r#"{"session_id":"dsh-session-id","thread_id":"dsh-session-id"}"#),
     );
-    let scope = get_failure_session_scope(&state.server, &headers, "responses", "request-123")
+    let scope = get_failure_session_scope(
+        &state.server,
+        &headers,
+        &serde_json::json!({}),
+        "responses",
+        "request-123",
+    )
         .expect("canonical session in codex turn metadata must construct the control scope");
 
     assert_eq!(scope.session_id(), "dsh-session-id");
@@ -1482,14 +1492,42 @@ fn provider_failure_scope_reads_canonical_session_from_codex_turn_metadata() {
 }
 
 #[test]
-fn provider_failure_scope_rejects_missing_canonical_session_identity() {
+fn provider_failure_scope_accepts_dsh_body_session_identity() {
     let log_file = test_v3_console_log_file("provider-failure-session-header-missing");
     let state = test_v3_listener_state(&log_file, 5555);
-    let error =
-        get_failure_session_scope(&state.server, &HeaderMap::new(), "responses", "request-123")
-            .expect_err("missing canonical session identity must fail instead of synthesizing one");
+    let payload = serde_json::json!({
+        "client_metadata": {
+            "session_id": "dsh-body-session",
+            "x-codex-turn-metadata": "{\"session_id\":\"dsh-turn-session\",\"turn_id\":\"dsh-turn-id\"}"
+        }
+    });
+    let scope = get_failure_session_scope(
+        &state.server,
+        &HeaderMap::new(),
+        &payload,
+        "responses",
+        "request-123",
+    )
+    .expect("registered DSH body session identity must be accepted");
 
-    assert!(error.contains("canonical session"));
+    assert_eq!(scope.session_id(), "dsh-body-session");
+    let _ = fs::remove_file(log_file);
+}
+
+#[test]
+fn provider_failure_scope_never_rejects_missing_session_identity() {
+    let log_file = test_v3_console_log_file("provider-failure-session-missing-local");
+    let state = test_v3_listener_state(&log_file, 5555);
+    let scope = get_failure_session_scope(
+        &state.server,
+        &HeaderMap::new(),
+        &serde_json::json!({}),
+        "responses",
+        "request-123",
+    )
+    .expect("ordinary requests must remain admissible without a session header");
+
+    assert_eq!(scope.session_id(), "request-local-request-123");
     let _ = fs::remove_file(log_file);
 }
 

@@ -287,7 +287,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
         }
     };
     let provider_failure_session_scope =
-        get_failure_session_scope(&state.server, headers, "responses", &request_id)
+        get_failure_session_scope(&state.server, headers, &payload, "responses", &request_id)
             .expect("responses requests must have session-id for failure isolation");
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(duration) => duration.as_millis() as u64,

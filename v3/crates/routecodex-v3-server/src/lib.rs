@@ -1034,8 +1034,9 @@ fn v3_responses_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool 
 fn build_v3_provider_failure_session_scope_for_request(
     server: &V3ServerManifest,
     headers: &HeaderMap,
+    payload: &Value,
 ) -> Option<V3ProviderFailureSessionScope> {
-    provider_failure_session_id_from_request_headers(headers)
+    provider_failure_session_id_from_request(headers, payload)
         .ok()
         .flatten()
         .and_then(|session_id| {
@@ -1052,10 +1053,11 @@ fn build_v3_provider_failure_session_scope_for_request(
 fn get_failure_session_scope(
     server: &V3ServerManifest,
     headers: &HeaderMap,
+    payload: &Value,
     _entry_protocol: &str,
     request_id: &str,
 ) -> Result<V3ProviderFailureSessionScope, String> {
-    if let Some(scope) = build_v3_provider_failure_session_scope_for_request(server, headers) {
+    if let Some(scope) = build_v3_provider_failure_session_scope_for_request(server, headers, payload) {
         return Ok(scope);
     }
     V3ProviderFailureSessionScope::new(
@@ -1065,10 +1067,11 @@ fn get_failure_session_scope(
     )
 }
 
-fn provider_failure_session_id_from_request_headers(
+fn provider_failure_session_id_from_request(
     headers: &HeaderMap,
+    payload: &Value,
 ) -> Result<Option<String>, String> {
-    first_header_text(
+    let header_session_id = first_header_text(
         headers,
         &[
             "session-id",
@@ -1076,7 +1079,25 @@ fn provider_failure_session_id_from_request_headers(
             "x-session-id",
             "x-rcc-session-id",
         ],
-    )
+    )?;
+    if header_session_id.is_some() {
+        return Ok(header_session_id);
+    }
+    let body_session_id = read_first_scope_value(Some(payload), BODY_SESSION_PATHS);
+    if body_session_id.is_some() {
+        return Ok(body_session_id);
+    }
+    let turn_metadata = payload
+        .get("client_metadata")
+        .and_then(|metadata| metadata.get("x-codex-turn-metadata"))
+        .and_then(Value::as_str)
+        .map(serde_json::from_str::<Value>)
+        .transpose()
+        .map_err(|error| format!("client_metadata.x-codex-turn-metadata is not valid JSON: {error}"))?;
+    Ok(read_first_scope_value(
+        turn_metadata.as_ref(),
+        TURN_METADATA_SESSION_PATHS,
+    ))
 }
 
 #[cfg(test)]

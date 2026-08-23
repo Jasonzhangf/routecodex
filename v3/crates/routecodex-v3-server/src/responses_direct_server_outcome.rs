@@ -89,7 +89,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
         }
     };
     let provider_failure_session_scope =
-        get_failure_session_scope(&state.server, request_headers, "responses", &request_id)
+        get_failure_session_scope(&state.server, request_headers, &payload, "responses", &request_id)
             .expect("responses continuation requires session-id for failure scope");
     let pipeline_id = match pipeline_id {
         Some(pipeline_id) if !pipeline_id.trim().is_empty() => pipeline_id,

@@ -390,6 +390,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     let provider_failure_session_scope = match get_failure_session_scope(
         &state.server,
         &request_headers,
+        &payload,
         &entry_protocol,
         &request_id,
     ) {
