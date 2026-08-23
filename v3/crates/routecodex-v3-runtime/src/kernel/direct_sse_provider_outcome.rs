@@ -471,7 +471,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
 pub(super) fn wrap_direct_sse_provider_handoff_stream<F, Fut>(
     source: V3ClientSseStream,
     handoff: F,
-    remaining_handoffs: usize,
+    handoff_budget: Option<usize>,
 ) -> V3ClientSseStream
 where
     F: Fn(String) -> Fut + Clone + Send + Sync + 'static,
@@ -490,11 +490,11 @@ where
         // The first provider attempt is already part of the handoff contract:
         // an EOF without a terminal event must be treated as a provider
         // failure and offered to the next attempt, never as client success.
-        (source, handoff, remaining_handoffs, true, false, false),
+        (source, handoff, handoff_budget, true, false, false),
         |(
             mut source,
             handoff,
-            mut remaining_handoffs,
+            mut handoff_budget,
             mut handoff_active,
             mut handoff_terminal_seen,
             mut handoff_emitted_frame,
@@ -513,29 +513,31 @@ where
                             (
                                 source,
                                 handoff,
-                                remaining_handoffs,
+                                handoff_budget,
                                 handoff_active,
                                 handoff_terminal_seen,
                                 handoff_emitted_frame,
                             ),
                         ));
                     }
-                    Some(Err(error)) if remaining_handoffs > 0 => {
+                    Some(Err(error)) if handoff_budget.is_none_or(|budget| budget > 0) => {
                         let Some(next) = handoff.clone()(error.message.clone()).await else {
                             return Some((
                                 Err(error),
                                 (
-                                    source,
+                                    Box::pin(stream::empty()),
                                     handoff,
-                                    0,
-                                    handoff_active,
+                                    Some(0),
+                                    false,
                                     handoff_terminal_seen,
                                     handoff_emitted_frame,
                                 ),
                             ));
                         };
                         source = next;
-                        remaining_handoffs = remaining_handoffs.saturating_sub(1);
+                        if let Some(budget) = handoff_budget.as_mut() {
+                            *budget = budget.saturating_sub(1);
+                        }
                         handoff_active = true;
                         handoff_terminal_seen = false;
                         handoff_emitted_frame = false;
@@ -544,10 +546,10 @@ where
                         return Some((
                             Err(error),
                             (
-                                source,
+                                Box::pin(stream::empty()),
                                 handoff,
-                                0,
-                                handoff_active,
+                                Some(0),
+                                false,
                                 handoff_terminal_seen,
                                 handoff_emitted_frame,
                             ),
@@ -571,15 +573,17 @@ where
                                 "provider handoff stream ended without a frame"
                             },
                         );
-                        if remaining_handoffs > 0 {
+                        if handoff_budget.is_none_or(|budget| budget > 0) {
                             let Some(next) = handoff.clone()(error.message.clone()).await else {
                                 return Some((
                                     Err(error),
-                                    (source, handoff, 0, false, false, false),
+                                    (source, handoff, Some(0), false, false, false),
                                 ));
                             };
                             source = next;
-                            remaining_handoffs = remaining_handoffs.saturating_sub(1);
+                            if let Some(budget) = handoff_budget.as_mut() {
+                                *budget = budget.saturating_sub(1);
+                            }
                             handoff_active = true;
                             handoff_terminal_seen = false;
                             handoff_emitted_frame = false;
@@ -587,7 +591,7 @@ where
                         }
                         return Some((
                             Err(error),
-                            (source, handoff, 0, false, false, false),
+                            (source, handoff, Some(0), false, false, false),
                         ));
                     }
                     None => return None,
@@ -595,4 +599,66 @@ where
             }
         },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrap_direct_sse_provider_handoff_stream;
+    use crate::nodes::V3ClientSseStream;
+    use futures_util::StreamExt;
+    use routecodex_v3_error::{build_v3_error_01_source_raised, V3ErrorSourceKind};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    fn provider_failure() -> routecodex_v3_error::V3Error01SourceRaised {
+        build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_stream",
+            "provider stream failed after the response was admitted",
+        )
+    }
+
+    #[tokio::test]
+    async fn provider_failure_before_terminal_is_handed_off_without_client_error() {
+        let handoff_calls = Arc::new(AtomicUsize::new(0));
+        let calls = handoff_calls.clone();
+        let source: V3ClientSseStream = Box::pin(futures_util::stream::iter(vec![
+            Ok(b"data: {\"type\":\"response.created\"}\n\n".to_vec()),
+            Err(provider_failure()),
+        ]));
+        let stream = wrap_direct_sse_provider_handoff_stream(source, move |_message| {
+            let calls = calls.clone();
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Some(Box::pin(futures_util::stream::iter(vec![Ok(
+                    b"data: [DONE]\n\n".to_vec(),
+                )])) as V3ClientSseStream)
+            }
+        }, None);
+
+        let frames = stream.collect::<Vec<_>>().await;
+        assert_eq!(handoff_calls.load(Ordering::SeqCst), 1);
+        assert!(frames.iter().all(Result::is_ok));
+        assert!(frames
+            .iter()
+            .flatten()
+            .any(|frame| frame.as_slice() == b"data: [DONE]\n\n"));
+    }
+
+    #[tokio::test]
+    async fn provider_failure_after_handoff_is_exposed_only_when_handoff_is_exhausted() {
+        let source: V3ClientSseStream = Box::pin(futures_util::stream::iter(vec![
+            Err(provider_failure()),
+        ]));
+        let stream = wrap_direct_sse_provider_handoff_stream(
+            source,
+            |_message| async { None::<V3ClientSseStream> },
+            None,
+        );
+
+        let frames = stream.collect::<Vec<_>>().await;
+        assert_eq!(frames.len(), 1);
+        assert!(frames[0].is_err());
+    }
 }

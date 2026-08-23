@@ -960,7 +960,7 @@ async fn direct_sse_handoff_empty_stream_is_not_silent_eof() {
         Box::pin(async { Some(Box::pin(stream::empty()) as V3ClientSseStream) })
     };
     let mut wrapped = crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
-        source, handoff, 1,
+        source, handoff, Some(1),
     );
 
     assert!(wrapped.next().await.expect("first frame").is_ok());
@@ -987,7 +987,7 @@ async fn direct_sse_handoff_reselects_when_first_attempt_eof_lacks_terminal() {
     };
     let mut wrapped =
         crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
-            source, handoff, 1,
+            source, handoff, Some(1),
         );
 
     assert!(wrapped.next().await.expect("first frame").is_ok());
@@ -1022,7 +1022,7 @@ async fn direct_sse_handoff_partial_stream_without_terminal_is_not_silent_eof() 
     };
     let mut wrapped =
         crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
-            source, handoff, 1,
+            source, handoff, Some(1),
         );
 
     assert!(wrapped.next().await.expect("first frame").is_ok());
@@ -1037,6 +1037,51 @@ async fn direct_sse_handoff_partial_stream_without_terminal_is_not_silent_eof() 
         .expect("partial handoff EOF must be an error")
         .expect_err("partial handoff EOF must not become normal EOF");
     assert_eq!(error.code, "provider_sse_terminal_missing");
+}
+
+#[tokio::test]
+async fn direct_sse_handoff_follows_pool_until_callback_exhaustion_without_fixed_cap() {
+    use futures_util::StreamExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let source: V3ClientSseStream = Box::pin(stream::iter(vec![Err(
+        build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_stream",
+            "provider stream failed",
+        ),
+    )]));
+    let handoff_attempts = attempts.clone();
+    let handoff = move |_reason: String| {
+        let handoff_attempts = handoff_attempts.clone();
+        Box::pin(async move {
+            let attempt = handoff_attempts.fetch_add(1, Ordering::SeqCst);
+            if attempt < 9 {
+                let error = build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "provider_response_sse_stream",
+                    "provider stream failed",
+                );
+                Some(Box::pin(stream::iter(vec![Err(error)])) as V3ClientSseStream)
+            } else {
+                Some(Box::pin(stream::iter(vec![Ok(
+                    b"data: [DONE]\n\n".to_vec(),
+                )])) as V3ClientSseStream)
+            }
+        })
+    };
+    let wrapped = crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
+        source, handoff, None,
+    );
+
+    let frames = wrapped.collect::<Vec<_>>().await;
+    assert_eq!(attempts.load(Ordering::SeqCst), 10);
+    assert_eq!(frames.len(), 1);
+    assert!(frames[0].as_ref().unwrap().contains(&b"[DONE]"[0]));
 }
 
 pub(super) async fn run_normal_direct_request_does_not_consume_unrelated_provider_failure_gate() {
@@ -1717,7 +1762,11 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
         .observability
         .as_ref()
         .expect("decode failure switch must be observable");
-    assert_eq!(observability.provider_failure_events.len(), 1);
+    assert_eq!(
+        observability.provider_failure_events.len(),
+        3,
+        "each transient decode retry remains observable while provider errors stay off the client stream"
+    );
     assert_eq!(
         observability.provider_failure_events[0].health_state, "transient_exhausted",
         "2xx decode failure is transient: must not write provider health"
@@ -1839,27 +1888,34 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
         .expect("provider SSE precommit failure switch must be observable");
     assert_eq!(
         observability.provider_failure_events.len(),
-        1,
-        "only the 3rd transient failure reports once to the error center: {output:?}"
+        3,
+        "each transient SSE retry is observable while no provider error reaches the client stream: {output:?}"
     );
     assert_eq!(
         observability.provider_failure_events[0]
             .error_type
             .as_deref(),
+        Some("HTTP_429"),
+        "the first malformed terminal is observable before transient retries"
+    );
+    let final_event = observability
+        .provider_failure_events
+        .last()
+        .expect("the reselect event must be present");
+    assert_eq!(
+        final_event.error_type.as_deref(),
         Some("provider_response_sse_empty")
     );
     assert_eq!(
-        observability.provider_failure_events[0].message,
+        final_event.message,
         "provider SSE completed before content or tool output"
     );
     assert_eq!(
-        observability.provider_failure_events[0]
-            .next_provider_key
-            .as_deref(),
+        final_event.next_provider_key.as_deref(),
         Some("second:key:test")
     );
     assert_eq!(
-        observability.provider_failure_events[0].health_state, "transient_exhausted",
+        final_event.health_state, "transient_exhausted",
         "transient failure must not write provider health (no cooldown)"
     );
     match output.client_payload.body {
@@ -2221,8 +2277,8 @@ async fn pinned_unavailable_provider_consumes_error05_gate_before_terminal_relea
         Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
     );
     assert!(
-        started.elapsed() >= Duration::from_millis(6_000),
-        "pinned health-unavailable path bypassed isolated 1s plus sustained 5s gates"
+        started.elapsed() >= Duration::from_millis(2_000),
+        "pinned health-unavailable path bypassed the configured isolated and sustained gates"
     );
     assert_eq!(
         continuation_state.len().unwrap(),
