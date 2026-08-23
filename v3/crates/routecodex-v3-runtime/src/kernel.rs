@@ -54,12 +54,15 @@ use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
 
 mod direct_sse_provider_outcome;
 use direct_sse_provider_outcome::{
     wrap_direct_sse_provider_outcome_stream,
-    wrap_direct_sse_provider_outcome_stream_with_terminal_commit, V3DirectSseProviderOutcome,
+    wrap_direct_sse_provider_outcome_stream_with_terminal_commit, V3DirectSseProviderHandoff,
+    V3DirectSseProviderOutcome,
 };
 pub mod direct_request_key_hooks;
 mod direct_runtime_helpers_stream;
@@ -104,8 +107,8 @@ pub fn restore_default_provider_transport_handoff_checkpoints(
 }
 include!("kernel/direct_kernel_entrypoints.rs");
 include!("kernel/direct_state.rs");
-async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
-    state: V3ResponsesDirectRuntimeCoreState<'_>,
+async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport + ?Sized>(
+    state: V3ResponsesDirectRuntimeCoreState,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
     hook_registry: V3HookRegistry,
@@ -134,6 +137,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         allow_exhaustion_rescue_probe,
         provider_failure_event_sink,
         route_selection_event_sink,
+        direct_sse_handoff,
         observability_accumulator: _,
     } = state;
 
@@ -164,7 +168,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
     );
     let pinned = match (
         &previous_response_id,
-        continuation_state,
+        continuation_state.as_ref(),
         continuation_scope.as_ref(),
     ) {
         (Some(_), _, _) if continuation_disabled => {
@@ -264,7 +268,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     locator.pin(),
                     continuation_scope.as_ref(),
                     previous_response_id.as_deref(),
-                    continuation_state,
+                    continuation_state.as_deref(),
                     error.to_string(),
                     trace,
                     &hook_registry,
@@ -740,7 +744,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 }
                 V3Error05ExecutionAction::ProjectTerminal => {
                     if let Err(error) = release_terminal_failure_locator(
-                        continuation_state,
+                        continuation_state.as_deref(),
                         continuation_scope.as_ref(),
                         previous_response_id.as_deref(),
                         &selected_pin,
@@ -802,7 +806,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             if let Err(source) = clear_v3_responses_direct_stopless_control_on_pre_resp03_terminal(
                 manifest,
                 &standardized.protocol_context.server_id,
-                stopless_control,
+                stopless_control.as_deref(),
                 stopless_scope.as_ref(),
                 direct_stopless_request_state.as_ref(),
             ) {
@@ -834,7 +838,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             match prepare_v3_responses_direct_stopless_control_request(
                 manifest,
                 &standardized.protocol_context.server_id,
-                stopless_control,
+                stopless_control.as_deref(),
                 stopless_scope.as_ref(),
                 &mut standardized.body,
                 &standardized.protocol_context.request_id,
@@ -851,7 +855,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             // 决策（Mode B 本地化 + 激活登记）与下一轮配对收尾。
             match prepare_v3_responses_direct_web_search_control_request(
                 manifest,
-                stopless_control,
+                stopless_control.as_deref(),
                 stopless_scope.as_ref(),
                 &mut standardized.body,
                 &mut trace,
@@ -860,7 +864,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 Err(source) => return error_output(source, trace, &hook_registry),
             }
             if let Err(source) = apply_v3_responses_direct_web_search_control_completion(
-                stopless_control,
+                stopless_control.as_deref(),
                 stopless_scope.as_ref(),
                 &standardized.body,
                 &mut trace,
@@ -905,7 +909,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             Ok(value) => value,
             Err(source) => {
                 if let Err(error) = release_terminal_failure_locator(
-                    continuation_state,
+                    continuation_state.as_deref(),
                     continuation_scope.as_ref(),
                     previous_response_id.as_deref(),
                     &selected_pin,
@@ -928,7 +932,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             Ok(value) => value,
             Err(source) => {
                 if let Err(error) = release_terminal_failure_locator(
-                    continuation_state,
+                    continuation_state.as_deref(),
                     continuation_scope.as_ref(),
                     previous_response_id.as_deref(),
                     &selected_pin,
@@ -1101,7 +1105,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     }
                     V3Error05ExecutionAction::ProjectTerminal => {
                         if let Err(release_error) = release_terminal_failure_locator(
-                            continuation_state,
+                            continuation_state.as_deref(),
                             continuation_scope.as_ref(),
                             previous_response_id.as_deref(),
                             &selected_pin,
@@ -1209,7 +1213,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 }
                 if !matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
                     if let Err(error) = release_terminal_failure_locator(
-                        continuation_state,
+                        continuation_state.as_deref(),
                         continuation_scope.as_ref(),
                         previous_response_id.as_deref(),
                         &selected_pin,
@@ -1284,7 +1288,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     }
                     V3Error05ExecutionAction::ProjectTerminal => {
                         if let Err(error) = release_terminal_failure_locator(
-                            continuation_state,
+                            continuation_state.as_deref(),
                             continuation_scope.as_ref(),
                             previous_response_id.as_deref(),
                             &selected_pin,
@@ -1351,7 +1355,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 )
             })
             .unwrap_or(false);
-        let direct_web_search_request_state = match (stopless_control, stopless_scope.as_ref()) {
+        let direct_web_search_request_state = match (stopless_control.as_deref(), stopless_scope.as_ref()) {
             (Some(control), Some(scope)) => match control.web_search_load_for_scope(scope) {
                 Ok(state) => state,
                 Err(error) => {
@@ -1386,7 +1390,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     V3ResponsesDirectStoplessJsonResponseControlInput {
                         manifest,
                         server_id: &standardized.protocol_context.server_id,
-                        stopless_control,
+                        stopless_control: stopless_control.as_deref(),
                         stopless_scope: stopless_scope.as_ref(),
                         request_stopless_state: direct_stopless_request_state.as_ref(),
                         request_web_search_state: direct_web_search_request_state.as_ref(),
@@ -1414,7 +1418,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 }
             } else {
                 match apply_v3_responses_direct_web_search_json_response_control(
-                    stopless_control,
+                    stopless_control.as_deref(),
                     stopless_scope.as_ref(),
                     body,
                     &mut trace,
@@ -1511,9 +1515,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         if let V3RemoteContinuationObservation::Streaming { state } =
             &response_projection.remote_continuation
         {
-            // Resp14 projection now materializes the complete provider attempt
-            // before commit, so retain its observation (including usage) instead
-            // of replacing it with a fresh, empty state.
+            // Resp14 projection has already passed the first-business-frame
+            // precommit gate; retain its observation (including usage) while
+            // forwarding the committed stream without materializing the tail.
             let stream_observation = response_projection
                 .stream_observation
                 .clone()
@@ -1523,7 +1527,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 V3ClientBody::Bytes(Vec::new()),
             );
             response_projection.client_payload.body = match body {
-                V3ClientBody::Sse(stream) => {
+                V3ClientBody::ProviderSse(stream) => {
                     let stream = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
                         stream,
                         stream_observation.clone(),
@@ -1552,7 +1556,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         Some(standardized.protocol_context.request_id.clone()),
                         true,
                     );
-                    V3ClientBody::Sse(stream)
+                    V3ClientBody::ProviderSse(stream)
                 }
                 other => other,
             };
@@ -1562,7 +1566,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 if !continuation_disabled {
                     wrap_v3_direct_sse_remote_stream_for_outcome(
                         &mut response_projection.client_payload.body,
-                        continuation_state.clone(),
+                        continuation_state.as_ref().clone(),
                         scope,
                         previous_response_id.clone(),
                         selected_pin.clone(),
@@ -1582,7 +1586,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 runtime_timing.clone(),
                 stream_observation.clone(),
                 Some(Arc::clone(&route_policy_terminal_commit)),
+                direct_sse_handoff.clone(),
             );
+            let attempt = std::mem::replace(
+                &mut response_projection.client_payload.body,
+                V3ClientBody::Bytes(Vec::new()),
+            );
+            response_projection.client_payload.body = match attempt {
+                V3ClientBody::ProviderSse(stream) => V3ClientBody::Sse(stream),
+                other => other,
+            };
             return finalize_v3_direct_resp15_streaming_output(
                 &policy,
                 provider_status,
@@ -1597,11 +1610,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         }
         if let (false, Some(_state), Some(scope)) = (
             continuation_disabled,
-            continuation_state,
+            continuation_state.as_ref(),
             continuation_scope.as_ref(),
         ) {
             if let Err(projected) = commit_or_release_v3_direct_continuation(
-                continuation_state,
+                continuation_state.as_deref(),
                 scope,
                 &response_projection.remote_continuation,
                 previous_response_id.as_deref(),

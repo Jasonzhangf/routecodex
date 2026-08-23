@@ -211,11 +211,26 @@ pub struct V3Execution11ProtocolDecision {
 
 pub type V3ClientSseStream =
     Pin<Box<dyn Stream<Item = Result<Vec<u8>, V3Error01SourceRaised>> + Send>>;
+pub type V3RelayProviderSseStream = V3ClientSseStream;
+pub type V3CommittedClientSseStream = Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
 
 pub enum V3ClientBody {
     Json(Value),
     Bytes(Vec<u8>),
+    /// Provider/Broker attempt stream. This variant is consumed before Resp15
+    /// and must never be projected by the Server/Front response builder.
+    ProviderSse(V3ClientSseStream),
+    /// Relay provider-attempt stream. Its String error must be consumed by
+    /// the Front/Broker finalization boundary before it becomes client SSE.
+    RelayProviderSse(V3RelayProviderSseStream),
+    /// Final client stream. The first semantic frame commits the client
+    /// response; any later source error remains typed until the final server
+    /// SSE adapter projects it through Error06. Errors before this variant is
+    /// constructed stay in the provider retry/reselect path.
     Sse(V3ClientSseStream),
+    /// Front-owned committed client stream. Provider/Broker errors have
+    /// already been resolved before this boundary; only bytes may escape.
+    CommittedSse(V3CommittedClientSseStream),
 }
 
 impl fmt::Debug for V3ClientBody {
@@ -226,7 +241,10 @@ impl fmt::Debug for V3ClientBody {
                 .debug_struct("Bytes")
                 .field("byte_len", &bytes.len())
                 .finish(),
+            Self::ProviderSse(_) => formatter.write_str("ProviderSse(<attempt-stream>)"),
+            Self::RelayProviderSse(_) => formatter.write_str("RelayProviderSse(<attempt-stream>)"),
             Self::Sse(_) => formatter.write_str("Sse(<client-event-stream>)"),
+            Self::CommittedSse(_) => formatter.write_str("CommittedSse(<front-event-stream>)"),
         }
     }
 }
@@ -327,7 +345,10 @@ pub fn build_v3_router_request_facts_from_v3_req_04_chat(
             &standardized.protocol_context.server_id,
         ),
         false,
-        standardized.protocol_context.request_purpose.is_compaction()
+        standardized
+            .protocol_context
+            .request_purpose
+            .is_compaction()
             || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
         Some(manifest),
     )
@@ -345,11 +366,17 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
             &standardized.protocol_context.server_id,
         ),
         false,
-        standardized.protocol_context.request_purpose.is_compaction()
-        || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
+        standardized
+            .protocol_context
+            .request_purpose
+            .is_compaction()
+            || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
         Some(manifest),
     );
-    if standardized.protocol_context.request_purpose.is_compaction()
+    if standardized
+        .protocol_context
+        .request_purpose
+        .is_compaction()
         || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint)
     {
         facts.client_model = None;
@@ -427,7 +454,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
     entry_protocol: &str,
     longcontext_threshold_tokens: Option<u64>,
     stopless_followup: bool,
-        is_compaction: bool,
+    is_compaction: bool,
     manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
@@ -446,8 +473,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
         latest_message_from_user: active_turn.latest_message_from_user,
         stopless_followup,
         has_current_turn_tool_output: active_turn.has_current_turn_tool_output,
-        has_current_turn_tool_execution_error: active_turn
-            .has_current_turn_tool_execution_error,
+        has_current_turn_tool_execution_error: active_turn.has_current_turn_tool_execution_error,
         has_current_turn_web_search: active_turn.has_current_turn_web_search
             || declares_web_search_tool,
         last_assistant_tool_category: active_turn
@@ -789,8 +815,7 @@ mod tests {
         build_v3_req_04_standardized_responses_from_v3_server_03,
         build_v3_router_request_facts_for_entry,
         build_v3_router_request_facts_for_entry_with_control,
-        build_v3_router_request_facts_from_v3_req_04_chat,
-        build_v3_server_03_http_request_raw,
+        build_v3_router_request_facts_from_v3_req_04_chat, build_v3_server_03_http_request_raw,
         build_v3_server_03_http_request_raw_with_purpose,
         build_v3_server_03_http_request_raw_with_purpose_and_scope, V3RequestPurpose,
     };
