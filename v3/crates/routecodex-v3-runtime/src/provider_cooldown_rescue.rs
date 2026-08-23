@@ -134,7 +134,7 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
 ) -> V3TargetSelectionAfterRescue {
     let target = V3TargetInterpreter::default();
     let session_availability = provider_health.session_bound_availability(failure_session_scope);
-    let initial_exhaustion = match select_v3_target_with_session_then_global(
+    let initial_selection = select_v3_target_with_session_then_global(
         &target,
         expanded.clone(),
         &session_availability,
@@ -142,8 +142,81 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         request_local_excluded_candidates,
         now_ms,
         0,
-    ) {
-        Ok(selected) => return V3TargetSelectionAfterRescue::Selected(selected),
+    );
+    let initial_exhaustion = match initial_selection {
+        Ok(selected) => {
+            // Probe the already-cooled members before the final currently
+            // available member is allowed to fail and empty the pool.  This
+            // is deliberately owned by target selection: provider failure
+            // callers do not each grow a second cooldown/probe path.
+            let selected_key = v3_relay_provider_candidate_key(&selected.candidate);
+            let available_count = expanded
+                .candidates
+                .iter()
+                .filter(|candidate| {
+                    let key = v3_relay_provider_candidate_key(candidate);
+                    !request_local_excluded_candidates.contains(&key)
+                        && provider_health
+                            .availability(
+                                &candidate.provider_id,
+                                Some(&candidate.auth_alias),
+                                Some(&candidate.model_id),
+                                now_ms,
+                            )
+                            .available
+                })
+                .count();
+            let cooled_peer_exists = expanded.candidates.iter().any(|candidate| {
+                let key = v3_relay_provider_candidate_key(candidate);
+                key != selected_key
+                    && !request_local_excluded_candidates.contains(&key)
+                    && provider_health
+                        .availability(
+                            &candidate.provider_id,
+                            Some(&candidate.auth_alias),
+                            Some(&candidate.model_id),
+                            now_ms,
+                        )
+                        .blocked_scopes
+                        .iter()
+                        .any(|scope| scope.contains("cooldown"))
+            });
+            if allow_exhaustion_rescue_probe && available_count == 1 && cooled_peer_exists {
+                if let Err(error) = provider_health
+                    .run_exhaustion_rescue_probes(manifest, &expanded)
+                    .await
+                {
+                    return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                        "V3ProviderCooldownRescueProbe",
+                        "target_pre_exhaustion_rescue_probe_failed",
+                        error,
+                    ));
+                }
+                let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
+                    Ok(now_ms) => now_ms,
+                    Err(error) => {
+                        return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                            "V3ProviderCooldownRescueProbe",
+                            "target_pre_exhaustion_rescue_clock_failed",
+                            error,
+                        ))
+                    }
+                };
+                return match select_v3_target_with_session_then_global(
+                    &target,
+                    expanded,
+                    &provider_health.session_bound_availability(failure_session_scope),
+                    provider_health,
+                    request_local_excluded_candidates,
+                    retry_now_ms,
+                    deterministic_sample,
+                ) {
+                    Ok(selected) => V3TargetSelectionAfterRescue::Selected(selected),
+                    Err(exhausted) => V3TargetSelectionAfterRescue::Exhausted(exhausted),
+                };
+            }
+            return V3TargetSelectionAfterRescue::Selected(selected);
+        }
         Err(exhausted) => exhausted,
     };
     if !allow_exhaustion_rescue_probe {
