@@ -10,7 +10,7 @@
 
 pub async fn execute_v3_direct_runtime_kernel_core<
     C: V3DirectProtocolCodec,
-    T: ResponsesTransport,
+    T: ResponsesTransport + ?Sized,
 >(
     mut control: C::Control,
     manifest: &V3Config05ManifestPublished,
@@ -21,10 +21,20 @@ pub async fn execute_v3_direct_runtime_kernel_core<
     allow_exhaustion_rescue_probe: bool,
     provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
-) -> V3ResponsesDirectRuntimeOutput {
+) -> V3ResponsesDirectRuntimeOutput
+where
+    C::Control: Clone + Send + Sync + 'static,
+    C::Standardized: Send,
+    C::Policy: Send,
+{
     let request_key_catalog =
         crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog();
-    execute_v3_direct_runtime_kernel_core_with_key_catalog::<C, T>(
+    let raw_for_handoff = raw.clone();
+    let control_for_handoff = control.clone();
+    let provider_health_for_handoff = provider_health.clone();
+    let provider_failure_event_sink_for_handoff = provider_failure_event_sink.cloned();
+    let route_selection_event_sink_for_handoff = route_selection_event_sink.cloned();
+    let output = execute_v3_direct_runtime_kernel_core_with_key_catalog::<C, T>(
         control,
         manifest,
         raw,
@@ -36,12 +46,85 @@ pub async fn execute_v3_direct_runtime_kernel_core<
         route_selection_event_sink,
         &request_key_catalog,
     )
-    .await
+    .await;
+    attach_v3_direct_sse_handoff::<C>(
+        output,
+        transport.handoff_handle(),
+        manifest.clone(),
+        raw_for_handoff,
+        control_for_handoff,
+        provider_health_for_handoff,
+        now_epoch_ms,
+        allow_exhaustion_rescue_probe,
+        provider_failure_event_sink_for_handoff,
+        route_selection_event_sink_for_handoff,
+    )
+}
+
+fn attach_v3_direct_sse_handoff<C: V3DirectProtocolCodec>(
+    mut output: V3ResponsesDirectRuntimeOutput,
+    transport: Option<Arc<dyn ResponsesTransport>>,
+    manifest: V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    control: C::Control,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    now_epoch_ms: u64,
+    allow_exhaustion_rescue_probe: bool,
+    provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
+    route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+) -> V3ResponsesDirectRuntimeOutput
+where
+    C::Control: Clone + Send + Sync + 'static,
+    C::Standardized: Send,
+    C::Policy: Send,
+{
+    let Some(transport) = transport else {
+        return output;
+    };
+    let V3ClientBody::Sse(stream) = output.client_payload.body else {
+        return output;
+    };
+    let handoff = move |_failure: String| -> Pin<Box<dyn Future<Output = Option<V3ClientSseStream>> + Send>> {
+        let manifest = manifest.clone();
+        let raw = raw.clone();
+        let control = control.clone();
+        let transport = transport.clone();
+        let provider_health = provider_health.clone();
+        let provider_failure_event_sink = provider_failure_event_sink.clone();
+        let route_selection_event_sink = route_selection_event_sink.clone();
+        Box::pin(async move {
+            let next = execute_v3_direct_runtime_kernel_core::<C, dyn ResponsesTransport>(
+                control,
+                &manifest,
+                raw,
+                transport.as_ref(),
+                provider_health,
+                now_epoch_ms,
+                allow_exhaustion_rescue_probe,
+                provider_failure_event_sink.as_ref(),
+                route_selection_event_sink.as_ref(),
+            )
+            .await;
+            match next.client_payload.body {
+                V3ClientBody::Sse(stream) | V3ClientBody::ProviderSse(stream) => Some(stream),
+                V3ClientBody::Json(_)
+                | V3ClientBody::Bytes(_)
+                | V3ClientBody::RelayProviderSse(_)
+                | V3ClientBody::CommittedSse(_) => None,
+            }
+        })
+    };
+    output.client_payload.body = V3ClientBody::Sse(
+        crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
+            stream, handoff, 8,
+        ),
+    );
+    output
 }
 
 pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
     C: V3DirectProtocolCodec,
-    T: ResponsesTransport,
+    T: ResponsesTransport + ?Sized,
 >(
     mut control: C::Control,
     manifest: &V3Config05ManifestPublished,
@@ -701,7 +784,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
         };
         let response_projection_context =
             response_projection_context.with_runtime_timing(runtime_timing.clone());
-        let response_projection = match C::run_response_projection(
+        let mut response_projection = match C::run_response_projection(
             provider_raw,
             response_projection_context,
         )
@@ -817,6 +900,52 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
                     }
                 }
             };
+        let body = std::mem::replace(
+            &mut response_projection.client_payload.body,
+            V3ClientBody::Bytes(Vec::new()),
+        );
+        response_projection.client_payload.body = match body {
+            V3ClientBody::ProviderSse(stream) => {
+                let stream_observation = response_projection
+                    .stream_observation
+                    .clone()
+                    .unwrap_or_default();
+                let provider_protocol = match crate::hub_v1::provider_wire_protocol_for_selected_candidate(
+                    &C::policy_target(&policy).candidate,
+                ) {
+                    Ok(protocol) => protocol,
+                    Err(error) => {
+                        return error_output(
+                            runtime_source("V3DirectResp14ProviderCompat", error),
+                            trace,
+                            &crate::hooks::register_responses_direct_hooks(),
+                        )
+                    }
+                };
+                let stream = crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
+                    stream,
+                    crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderOutcome {
+                        provider_health: provider_health.clone(),
+                        failure_session_scope: direct_failure_session_scope.clone(),
+                        provider_id: C::policy_target(&policy).candidate.provider_id.clone(),
+                        auth_alias: C::policy_target(&policy).candidate.auth_alias.clone(),
+                        model_id: C::policy_target(&policy).candidate.model_id.clone(),
+                        provider_protocol,
+                        terminal: false,
+                        seen_done: false,
+                        recorded: false,
+                        provider_health_neutral: false,
+                        _provider_action_permit: provider_action_permit.take(),
+                    },
+                    runtime_timing.clone(),
+                    stream_observation,
+                    None,
+                    None,
+                );
+                V3ClientBody::Sse(stream)
+            }
+            other => other,
+        };
         if let Err(commit_error) = C::commit_after_response(
             &control,
             manifest,

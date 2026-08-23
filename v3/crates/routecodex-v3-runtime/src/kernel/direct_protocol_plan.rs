@@ -245,13 +245,49 @@ fn protocol_plan_failure(
 async fn execute_v3_responses_direct_runtime_kernel_with_transport_debug_core<
     T: ResponsesTransport,
 >(
-    state: V3ResponsesDirectRuntimeCoreState<'_>,
+    mut state: V3ResponsesDirectRuntimeCoreState,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
     hook_registry: V3HookRegistry,
     transport: &T,
     debug: &V3DebugRuntime,
 ) -> V3ResponsesDirectRuntimeOutput {
+    if state.direct_sse_handoff.is_none() {
+        if let Some(transport_handle) = transport.handoff_handle() {
+            let mut handoff_state = state.clone();
+            handoff_state.direct_sse_handoff = None;
+            let handoff_manifest = manifest.clone();
+            let handoff_raw = raw.clone();
+            let handoff_hooks = hook_registry.clone();
+            let handoff: V3DirectSseProviderHandoff = Arc::new(move |_failure| {
+                let state = handoff_state.clone();
+                let manifest = handoff_manifest.clone();
+                let raw = handoff_raw.clone();
+                let hooks = handoff_hooks.clone();
+                let transport = transport_handle.clone();
+                Box::pin(async move {
+                    let output = execute_v3_responses_direct_runtime_kernel_core(
+                        state,
+                        &manifest,
+                        raw,
+                        hooks,
+                        transport.as_ref(),
+                    )
+                    .await;
+                    match output.client_payload.body {
+                        V3ClientBody::ProviderSse(stream) | V3ClientBody::Sse(stream) => {
+                            Some(stream)
+                        }
+                        V3ClientBody::Json(_)
+                        | V3ClientBody::Bytes(_)
+                        | V3ClientBody::RelayProviderSse(_)
+                        | V3ClientBody::CommittedSse(_) => None,
+                    }
+                }) as Pin<Box<dyn Future<Output = Option<V3ClientSseStream>> + Send>>
+            });
+            state.direct_sse_handoff = Some(handoff);
+        }
+    }
     let scope = match debug.start_trace(&raw.server_id, &raw.request_id, &raw.execution_id) {
         Ok(scope) => scope,
         Err(error) => {
