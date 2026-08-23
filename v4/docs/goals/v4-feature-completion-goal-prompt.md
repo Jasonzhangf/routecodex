@@ -1,4 +1,34 @@
+# 当前可执行短提示词
+
+```text
 /goal
+目标：以云端 `main@ef3899f` 为基线，一次性完成 V4 当前生产执行层全部独立组件，全部 source-green 后再由单一 integration owner 接线，关闭 M1 + M2 P0 的生产 NodeContainer 断点。
+
+说明：本任务不需要再写新的提示词，直接按实现文档第 28 章执行。
+
+实现文档：
+v4/docs/goals/v4-feature-completion-plan.md#28-runtime-007-后的分层批量开发与接线计划
+
+执行规范：
+- 基线必须是 `ef3899f` 或其后继；缺对象只同步，禁止重做 `V4-RUNTIME-007`。同步后先重放 R007 证据，并完成 `V4-RUNTIME-002` closure audit：证明同一 epoch owner 已覆盖其合同；有缺口则登记 epoch-owner lane 并纳入 source-green barrier，只补确证缺口。
+- 先锁 P0 plugin ABI/immutable IDs 与 typed interfaces/owner，完成 `RUNTIME-003A/004A`、`PLUGIN-001..008`、`RUNTIME-005A/006A`、parity/harness/gates 全部独立红绿验证；同层未全绿禁止 production wiring。
+- 接线只由一个 integration owner 完成 `003B/004B/005B/006B`，并显式分开 request、success response、Error Skeleton、client-drop terminal；禁止 fallback、重复 owner、V3 修改及控制面进入 payload。
+- 不做逐 lane 交付 review；clean worktree 全绿后把 exact candidate 合入主 tree，完成 build/install/live/differential，再进入一个 batch-scoped DSH review loop。Review 不阻止无依赖独立开发或主树验证；FAIL 只回唯一 owner 修复并复验复审，未 PASS 禁止 final commit/push/promotion/freeze/完成声明。
+
+验证：
+- 定向正反测试、layer/production-path gates、R007 epoch 并发回归、V4 verify:ci 与 AppSDK admission。
+- 仅安装 `rccv4` canary；验证 Responses/Chat JSON/SSE、并发 publish/drain/restart、错误/断线和 12 类差分 fixture。
+
+完成标准：
+- 同层独立任务 100% source-green 后才接线；production NodeContainer coverage=100%，`runtime-bin` direct business helper=0，mock/fallback production path=0，unexplained_diff=0；不得误删合法 Direct 同协议路径或尚未到 Layer 4 替换的唯一 canary transport。
+- exact integration candidate 完成主树 live 证据、DSH PASS、定向 commit/push 及 clean-main 复验；不触达 V3。
+```
+
+## 历史展开版提示词（封存，不可执行）
+
+以下长版只保留为历史范围说明，禁止作为 `/goal`、执行合同或状态真源；当前唯一可执行合同是上述短提示词和总计划第 28 章。
+
+ARCHIVED_GOAL_DO_NOT_EXECUTE
 
 目标：按照 `v4/docs/goals/v4-feature-completion-plan.md` 完成 RouteCodex V4 的全部产品功能闭环，使 V4 在保留新架构的前提下对齐当前选定的 V3 冻结行为基线，并达到可灰度接管、可发布、可回滚的生产准入状态。
 

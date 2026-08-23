@@ -8,6 +8,8 @@
 目标版本：`V4.0 feature-complete / production-admissible`
 配套执行提示词：[`v4-feature-completion-goal-prompt.md`](v4-feature-completion-goal-prompt.md)
 
+当前执行续篇：以 Jason 提供的云端 `main@ef3899f` 为调度基线，执行顺序、批次边界和 review 解耦规则见 [第 28 章](#28-runtime-007-后的分层批量开发与接线计划)。第 28 章覆盖本文件第 4.1 节中“`V4-RUNTIME-007` 缺失”的旧本地快照、第 23/24 节逐任务串行 review 的旧执行顺序，并细化第 7 节的 M1/M2 依赖：只解除 M2 P0 插件的 source-development dependency，M2 production integration/status promotion 仍依赖 M1；未被第 28 章覆盖的产品范围和最终完成定义继续有效。
+
 ## 0. 文档定位与真源关系
 
 本文件是 V4 从当前 canary/foundation 状态推进到“功能对齐 V3、生产执行路径完全采用新架构、可灰度接管”的总执行计划。它不替代已经冻结的底层合同，也不授权修改 V3。
@@ -113,13 +115,13 @@ mapped
 
 ## 4. 当前基线判断
 
-### 4.1 2026-08-23 执行快照
+### 4.1 2026-08-23 本地历史快照（已被第 28 章覆盖）
 
 - 本地主 tree 和全部本地 worktree 的 `v4/` 均无未提交改动；`origin/main..main` 的 9 个领先提交都是 V3 SSE/transport 修复，对 `v4/` 的 diff 为空。
 - `V4-RUNTIME-001` 已有 typed `ExecutionBinding` 实现和正向/binding-drift 测试；它只能证明 immutable binding slice，不能证明 M1 完成。
-- `ActiveExecutionEpoch` / `V4-RUNTIME-002` 及其 publish、in-flight pin、drain、dispose 生命周期尚未落地；当前 runtime 只有 `ExecutionBinding.plan_epoch` 字段。
-- `V4-RUNTIME-007` 的云端提交 `ef3899f` 未推送到本仓库且本地对象不可达；合同、gate、测试和 runtime 代码在当前基线中不存在，因此必须按缺失任务从当前 main 重做。
-- M1 第一轮必须包含 `V4-RUNTIME-007`：M1 退出条件要求 in-flight epoch 安全 drain 和 restart identity，缺少该任务时 `RUNTIME-002..006` 不能被判定为生产执行平面闭环。
+- 该本地快照采集时，`ActiveExecutionEpoch` / `V4-RUNTIME-002` 及其 publish、in-flight pin、drain、dispose 生命周期尚未落地；当前 runtime 只有 `ExecutionBinding.plan_epoch` 字段。
+- 该本地快照采集时，云端提交 `ef3899f` 的 Git object 不可达，因此曾把 `V4-RUNTIME-007` 误列为待重做；Jason 后续已确认云端 `main@ef3899f` 完成该任务，本条旧判断作废。
+- 当前调度必须按第 28 章从 `ef3899f` 或其后继开始：同步并重放 R007 证据，审计其对 R002 合同的覆盖，禁止从旧本地 main 重做 epoch owner。
 
 | 领域 | 当前基线 | V4.0 目标 |
 | --- | --- | --- |
@@ -292,7 +294,7 @@ begin-version
 | --- | --- | --- | --- |
 | M0 | 产品真值、parity ledger、V3 baseline supersession | P0 | 当前基线 |
 | M1 | 关闭生产执行平面断点 | P0 | M0 合同最小闭环 |
-| M2 | 真实 Standard Plugin 迁移与 runtime 拆解 | P0 | M1 |
+| M2 | 真实 Standard Plugin 迁移与 runtime 拆解 | P0 | M1（production integration/status promotion）；source development 可按第 28 章在 M1 wiring 前独立完成 |
 | M3 | V3/V4 产品差分 harness | P0/P1，可与 M1/M2 部分并行 | M0 |
 | M4 | 生产 transport、协议和 Provider 完整迁移 | P1 | M1/M2/M3 |
 | M5 | Router、Target、Health、Error Action | P1 | M1/M3/M4 基础 |
@@ -1532,3 +1534,354 @@ dsh_review.p1 == 0
 ```
 
 切换 V3、覆盖默认命令、停止 V3 服务、迁移真实用户配置和 secret 均不属于本计划自动动作，必须由 Jason 单独授权。
+
+---
+
+# 28. `RUNTIME-007` 后的分层批量开发与接线计划
+
+状态：`current_execution_plan`
+
+调度基线：Jason 于 2026-08-23 提供的云端 `main@ef3899f`。该提交已完成 `V4-RUNTIME-007` epoch 并发与生命周期；当前本地 checkout 不含该 Git object，因此本章把它作为用户确认的调度事实，不冒充本机源码复验。任何执行 worker 必须从 `ef3899f` 或其后继提交开始；对象不可达时只做同步/交接，不得重写 `V4-RUNTIME-007`。
+
+## 28.1 目标与验收标准
+
+主目标：从 `V4-RUNTIME-007` 已完成的 epoch 基线继续，一次性完成当前生产执行层的全部独立组件，再由一个 integration owner 做唯一一次主线接线，关闭 `M1 + M2 P0` 的生产 NodeContainer 断点。
+
+验收标准：
+
+1. `V4-RUNTIME-007` 不重复实现；其 gate、48 个 runtime L2 测试和 evidence 在同步后的基线上可重放。
+2. `V4-RUNTIME-002` 不另起重复 epoch 实现；先审计 `RUNTIME-007` 是否已覆盖其 ActiveExecutionEpoch、publish、pin、drain、dispose 合同，缺口只回 epoch owner 补齐。
+3. 同层独立任务全部达到 `source_green` 后才允许 production wiring；任一任务未完成，integration gate 必红。
+4. `V4-RUNTIME-003A/004A`、`V4-PLUGIN-001..008`、request/response typed ports、parity ledger/harness、production-path gate 均能在未接生产 mainline 时独立编译、独立红绿测试、独立产出 evidence；`RUNTIME-003B` exact artifact binding 留到单一 integration owner。
+5. 接线只由一个 integration owner 执行：`Config Manifest -> Cordis mount -> ActiveExecutionEpoch -> request -> provider -> response/error terminal`。
+6. 接线完成后 `/v1/responses` 与 `/v1/chat/completions` 的 JSON/SSE 均只走 `Skeleton -> NodeContainer -> NodePluginPlan`；`runtime-bin` direct business helper 数量为零、mock/fallback production path 数量为零。合法 Direct 同协议路径保留，唯一 canary transport 留到 Layer 4 替换。
+7. 同 fixture 产品差分 `unexplained_diff=0`；epoch publish/drain/restart identity、并发 admission、错误和 client-drop 路径通过。
+8. Review 不成为同层开发串行依赖；最终 integration 的 promotion/freeze/交付仍需完整验证后的 DSH PASS。
+
+## 28.2 范围与边界
+
+### In scope
+
+- 云端基线同步与完成状态对账；
+- M0 最小产品 ledger、baseline delta 和状态提升 gate；
+- `V4-RUNTIME-002` 合同覆盖审计；
+- `V4-RUNTIME-003A` Config/Manifest compiler candidate，以及集成期 `V4-RUNTIME-003B` exact artifact binding；
+- `V4-RUNTIME-004A` Cordis mount、plan/hash 校验和 Rust publication candidate；
+- `V4-PLUGIN-001..008` 全组真实 P0 插件语义；
+- `V4-RUNTIME-005A/006A` 未接线 typed request/response/error ports；
+- product differential harness 第一版；
+- layer barrier 与 production-path 正反 gate；
+- 所有独立组件完成后的单次 `RUNTIME-003B/004B/005B/006B` 集成接线；
+- V4 build/install/canary/live/differential/review 闭环。
+
+### Out of scope
+
+- Anthropic/Gemini/WebSocket 的完整产品迁移；
+- Router/Health/Continuation/Tool/Admin/WebUI 的后续层接线；
+- 修改、安装、重启、停止或替换 V3；
+- 修改真实用户配置、provider secret 或默认 `routecodex`/`rccv3` 入口；
+- HMR、第三方插件市场、正式生产切流；
+- 为 review、环境或 provider 不可用添加 fallback、跳过验证或伪造 PASS。
+
+## 28.3 核心执行原则
+
+### LAYER-01：先完成同层独立开发
+
+每个独立 lane 只拥有自己的 module、contract、tests 和 evidence，不得编辑 production wiring、`runtime-bin` 业务 dispatch、Active pointer 或其他 lane 的 source owner。允许使用 contract fixture 和 typed fake port，禁止用第二业务实现或 production mock success path。
+
+本章中的 `003A/003B`、`004A/004B`、`005A/005B`、`006A/006B` 只是原 feature 内的 source/integration 执行切片标签，不是新 `feature_id`，也不是 pipeline 节点编号；machine registry 仍以 `V4-RUNTIME-003..006` 为唯一功能身份，禁止生成 `03a` 一类拓扑节点。
+
+独立层开放接线的唯一条件：
+
+```text
+all(layer.tasks[].implementation_status == source_green)
+&& all(layer.tasks[].red_gate == pass)
+&& all(layer.tasks[].boundary_audit == pass)
+&& all(layer.tasks[].evidence_complete == true)
+&& duplicate_semantic_owner_count == 0
+```
+
+### LAYER-02：接线只有一个 owner
+
+同层全部完成后，创建一个新的 clean integration worktree。integration owner 只消费已验证 candidate，不在接线阶段重新实现业务语义。冲突返回原 lane 修；禁止在 integration worktree 临时补第二实现。
+
+### LAYER-03：Review 后置但不绕过
+
+- 不对每个独立 lane 启动交付级 DSH review；lane 结束条件是 exact candidate 的 red/green、边界、自测和 evidence 完整。
+- 所有同层 lane 可持续推进，不等待 sibling review，也不因 review 服务不可用停止独立开发。
+- 只在 batch 接线、build/install/live/differential 全部完成后，进入一个 batch-scoped DSH review loop；每个 unchanged candidate 只 review 一次，修复后必须复验并以新 candidate 重新进入该 loop。
+- Review FAIL 只回 finding 的唯一 owner 修复；无关独立 lane 继续。Review unavailable 时记录 `review_pending`，可继续不依赖该候选的独立开发，也可保留已经进入主 tree 的 exact validation change set，但不得 final commit/push/promote/freeze/宣布 batch 完成。
+- Review PASS 后若改任何代码、测试、构建或运行配置，旧 PASS 失效，重跑受影响验证和 review。
+
+### LAYER-04：数据、控制和错误继续物理隔离
+
+epoch、manifest、route、health、retry、continuation、scope、debug、secret、failure count 和 execution identity 只走 typed carrier/resource/ErrorChain；不得写入或由业务 payload 重建。泄漏在 owner boundary fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound/transport 补偿。
+
+## 28.4 基线完成度与剩余任务
+
+| Task | 调度状态 | 下一动作 |
+| --- | --- | --- |
+| `V4-RUNTIME-001` | `implemented` | 保留 immutable binding 证据；纳入 integration 回归 |
+| `V4-RUNTIME-007` | `cloud_complete@ef3899f` | 同步后重放 gate/evidence；禁止重做 |
+| `V4-RUNTIME-002` | `closure_audit` | 证明其合同已被 R007 epoch owner 覆盖；只补确证缺口 |
+| `V4-RUNTIME-003` | `remaining_split` | 独立完成 003A compiler candidate；集成时执行 003B exact artifact binding |
+| `V4-RUNTIME-004` | `remaining_split` | 先完成 004A mount/publication candidate；集成时执行 004B epoch publish wiring |
+| `V4-RUNTIME-005` | `remaining_split` | 先完成 005A request typed port；集成时执行 005B production request wiring |
+| `V4-RUNTIME-006` | `remaining_split` | 先完成 006A response/error typed port；集成时执行 006B production terminal wiring |
+| `V4-PLUGIN-001..008` | `remaining_product_semantics` | 八项作为一个完整同层集合全部完成；禁止只做部分后接线 |
+| `V4-GATE-001` | `remaining` | 先完成 gate 与 red self-test；接线后目标源码从预期红转绿 |
+| `V4-PARITY-001..003` | `remaining` | 建 ledger、baseline delta、状态提升 gate |
+| `V4-PARITY-HARNESS-001` | `remaining` | 建首批 12 类 fixture runner；接线前可独立完成 runner/contract |
+
+现有 keyless descriptor、mock handle、局部 request/response plugin 和 canary helper 只能作为迁移输入，不能自动计为上述任务完成。必须按唯一 owner、真实产品语义、production handle 和差分 evidence 重新判定。
+
+## 28.5 Layer 0：同步、真值和 owner 冻结
+
+此层先完成，随后所有 Layer 1 lane 可并行/连续独立开发。
+
+1. 同步并确认 `ef3899f` 或其后继：核对 commit、tree、R007 contract/gate/evidence、48 个 L2 测试；本地缺对象时停止产品写入，只做精确同步。
+2. 在接口冻结前完成 `V4-RUNTIME-002` closure audit：逐项核对 active containers、plan epoch、graph/manifest hash、immutable execution identity、publish、in-flight pin、drain/dispose、passive failure record 和 restart rebuild。完全覆盖则记录 `epoch_closure_lane=not_needed_by_evidence`；存在缺口则只向同一 epoch owner 登记 conditional Lane H，禁止另建 epoch 实现。
+3. 更新产品 ledger：`RUNTIME-007=implemented/live_not_required`；`RUNTIME-002=closure_audit_pass|closure_gap_registered`；不得把 R007 重列为 backlog。
+4. 冻结本批 typed interfaces：ExecutionEpochSnapshot、immutable execution identity、NodePluginPlan input/output、request admission port、provider handoff、response/error terminal port；若 R002 有缺口，先把确证缺口纳入同一 epoch contract。同步冻结 P0 plugin ABI、immutable plugin IDs、descriptor/capability schema、selection group/order、contract/artifact identity 规则，使 compiler 与 plugin lanes 可分别 source-green。
+5. 建立 machine-readable batch manifest 与 barrier gate：
+
+```text
+v4/contracts/feature-completion-layer-batches.manifest.json
+v4/scripts/architecture/verify-v4-feature-layer-batches.mjs
+v4/scripts/tests/v4-feature-layer-batches-red-fixtures.mjs
+```
+
+6. 在 function/module/mainline/verification/resource maps 中登记每个 lane 的唯一 owner、owned/allowed/forbidden paths、相邻边和 required gates。
+7. 完成 AppSDK 0.1.5 governance preflight：从 Protected/Active 真源解决 index/dependency lifecycle，不手改 generated/Active/Protected。该问题只阻止 compile/publish/freeze，不阻止 owner 已锁定的独立 source lane。
+8. 若多个 lane 仍会修改同一语义文件，先做 owner decomposition；拆成稳定业务域 module 后再开放并行，禁止多个 worker 共同编辑一个 registry/monolith。
+9. 按 `.agent-collab/PROTOCOL.md` 为每个 lane 建独立 semantic claim、clean worktree 和 evidence/handoff；shared maps、batch manifest、npm gate matrix 只由 batch registry owner 写入，lane 只提交自身可验证的符号/路径/evidence 变更请求。
+
+Layer 0 退出：R002 closure audit 已完成，基线、接口、owners、batch manifest、gate、AppSDK publish 前置条件均可查；尚无 production wiring。
+
+## 28.6 Layer 1：一次性完成全部独立组件
+
+### Lane A：产品真值与差分框架
+
+- 完成 `V4-PARITY-001/002/003`；
+- 完成 differential runner、normalization contract 和首批 12 类 fixtures；
+- runner 可分别驱动 V3 frozen observation 与未接线 V4 component entry；接线前不宣称 product diff PASS。
+
+### Lane B：Config/Manifest compiler candidate
+
+- 完成 `V4-RUNTIME-003A`；
+- 基于 Layer 0 冻结的 P0 descriptor/ABI contract 与 contract fixtures，输出每个 active node 的 plugin entries、顺序、selection decision、capabilities、plan hash 和 artifact set hash；
+- 本 lane 证明 compiler/validator/hash owner 正确；真实 Layer 1 artifact 的 exact identity 绑定属于 `V4-RUNTIME-003B`，只能由 integration owner 完成；
+- 无 runtime loader、无 Active pointer write、无 provider/control/payload 语义；
+- unknown、tie、cycle、hash drift、secret material 全部 fail-fast。
+
+### Lane C：Cordis mount/publication candidate
+
+- 完成 `V4-RUNTIME-004A`；
+- 用 Layer 0 冻结的 Manifest contract fixture 独立驱动真实 Cordis Context/Fiber/Effect mount；Layer 1 barrier 再验证其与 `RUNTIME-003A` exact compiler candidate 的合同兼容，不建立跨 lane source dependency；
+- Cordis graph、Manifest、loaded plan hash 全等；
+- Rust NodeContainer declaration/publication candidate 独立黑盒通过；
+- 此阶段不修改 ActiveEpochStore，不接 production handler。
+
+### Lane D：全部 request-side P0 plugins
+
+- 一次性完成 `V4-PLUGIN-001/002/003/004/005`；
+- Responses parse/normalize、Chat→Responses、request/tool governance、provider-neutral semantic projection、Responses request wire codec/build 各有唯一 owner；`PLUGIN-005` 固定属于 `RequestOutboundNode`，不得进入 response chain；
+- 真实语义进入稳定 domain module；`routecodex-v4-standard-plugins` 只保留 catalog/bundle/descriptor owner，不复制业务实现；
+- 每项具备白盒、NodeContainer 黑盒、非法 shape/资源越权/控制泄漏红测。
+
+### Lane E：全部 response-side P0 plugins
+
+- 一次性完成 `V4-PLUGIN-006/007/008`；
+- raw JSON/SSE decode、response governance/tool harvest/client projection、frame/terminal/typed fault intake 全部独立闭环；
+- JSON/SSE 共享相邻语义 owner，SSE 只负责 framing/lifecycle；
+- provider error、malformed frame、duplicate/missing terminal、partial commit 均进入 typed path，不补偿成成功；`PLUGIN-008` 只拥有 typed fault intake，不拥有 Error Skeleton 的 classify/policy/decision。
+
+### Lane F：未接线 request/response/error ports
+
+- 完成 `V4-RUNTIME-005A` 与 `V4-RUNTIME-006A`；
+- request port 一次获取 epoch lease 和 immutable ExecutionBinding；
+- response/error port 必须消费同一 binding/lease，不能重新读取 active epoch；
+- ports 用 contract fixtures 独立测试，不注册进 production listener/runtime-bin。
+
+### Lane G：门禁
+
+- 完成 `V4-GATE-001` 与 `V4-LAYER-GATE-001` 正向/红测；
+- `V4-GATE-001` 在未接线源码上允许报告“target still red”，但 gate 自身 mutation self-test 必须全绿；
+- layer gate 必须拒绝“一个插件完成就提前接线”、缺 evidence、重复 owner、跨 lane import 和 review 状态被误作 source completion 条件。
+
+### Lane H（条件启用）：Epoch closure
+
+- 仅当 Layer 0 的 `V4-RUNTIME-002` closure audit 找到确证缺口时启用；只由 R007 的同一 epoch owner 补齐 exact contract/test/gate/evidence，不得另建 ActiveEpochStore 或重复 lifecycle owner；
+- audit 已证明完整覆盖时，不写代码，machine status 固定为 `not_needed_by_evidence`；
+- barrier 要求 `runtime_002.closure_audit=pass` 且 `epoch_closure_lane in {source_green, not_needed_by_evidence}`。
+
+Layer 1 退出：A–G 全部 `source_green`，且 conditional H 为 `source_green` 或 `not_needed_by_evidence`。任何必需 lane 未绿，禁止进入 Layer 2；review 状态不参与 `source_green` 判定。
+
+## 28.7 Layer 2：单一 integration owner 接线
+
+严格顺序：
+
+```text
+RUNTIME-003B exact manifest/artifact binding
+  -> RUNTIME-004B Cordis mount + epoch candidate validation/publish
+  -> RUNTIME-005B request admission obtains one epoch lease/binding
+  -> request plugins 001..003
+  -> existing Execution/Target NodeContainers
+  -> request-outbound plugins 004..005
+  -> existing provider transport
+  -> success response plugins 006..008
+  -> RUNTIME-006B success terminal
+
+orthogonal exits from any admission/request/execution/target/transport/response stage:
+  source failure at owning boundary
+    -> Error Skeleton SourceRaised -> HostCaptured -> RuntimeClassified
+    -> RouterPolicyApplied -> ExecutionDecision -> ClientProjected
+    -> RUNTIME-006B error terminal
+
+client disconnect/cancel at admission/transport/SSE emission
+  -> registered lifecycle/client-drop path
+  -> RUNTIME-006B client-drop terminal
+
+PLUGIN-008 owns typed fault intake only at its response/frame boundary;
+it never classifies or decides failures from other stages.
+
+each legal terminal after lease acquisition -> release the same epoch lease exactly once
+pre-admission client drop -> no epoch lease exists and no release is synthesized
+```
+
+接线动作：
+
+1. 从 Layer 1 全部 exact candidates 构建一个 integration candidate，并由 `RUNTIME-003B` 把真实 plugin artifact identities 绑定进 exact Manifest；不从聊天摘要或未验证 worktree 复制代码。
+2. `runtime-bin` 只装载 Manifest/epoch、监听和 typed dispatch；业务 helper 移出 binary owner。
+3. `/v1/responses`、`/v1/chat/completions` JSON/SSE 四条 production entry 全部切到同一 NodeContainer 主线。
+4. request/response/error 共享同一 ExecutionBinding；跨阶段 identity/hash 漂移 fail-fast。
+5. `runtime-bin` 旧 direct business helper、mock/fallback production path 和重复 plugin implementation 经依赖证明后物理删除；不得误删合法 Direct 同协议路径，也不在本批提前删除 Layer 4 才替换的唯一 canary transport。
+6. `V4-GATE-001` 从 target-red 转绿；layer gate 仅在 A–G 全绿且 conditional H 为 `source_green` 或 `not_needed_by_evidence` 后记录 wiring opened。
+7. 对 actual integration diff 做 module/resource/edge 越界自检，先于功能验证。
+
+## 28.8 Layer 3：验证、review、合并
+
+验证顺序：
+
+1. 定向 crate/L2/compile-fail/NodeContainer blackbox；
+2. 所有新增 architecture gates 与 red fixtures；
+3. R007 epoch concurrency/lifecycle gate 与 48-test baseline；
+4. `npm --prefix v4 run test`、`verify`、`verify:red`、`verify:ci`；
+5. `appsdk verify v4`、admission、Active gen/verify index；
+6. build + 只安装 `rccv4` canary；不触达 V3；
+7. `/health`、`/v1/models`、Responses/Chat JSON/SSE；
+8. publish 时 in-flight pin、candidate reject、drain/dispose、restart identity、execution failure 不切 active；
+9. provider success/4xx/429/5xx、malformed SSE、EOF、client disconnect、timeout/cancel；
+10. 12 类 differential fixtures，要求 `unexplained_diff=0`；
+11. clean integration worktree 全绿后写 handoff/merge-queue，把 exact change set 精确合入主 tree；
+12. 在主 tree 重跑受影响验证、build、只安装 `rccv4`、在线真实样本和 differential；
+13. 对该 unchanged main-tree candidate 进入 batch-scoped DSH review loop；FAIL 修复后先重跑受影响的主树验证，再以新 unchanged candidate 复审；
+14. PASS 后定向 commit/push，并证明待推送 commit、本地 HEAD、已验证 candidate 三者一致；最后做 clean-main 复验。
+
+Rustfmt 旧债不能用来批量改写无关大文件，也不能被忽略为永久缺口：本批只要求 changed hunks 符合格式、`git diff --check` 通过，并单独记录 repository-wide canonicalization debt；不得把数百行无关 formatter diff 混入语义批次。
+
+## 28.9 后续剩余层次
+
+每层重复“全部独立完成 -> 单一接线 -> 全量验证/review”，禁止逐 feature 边写边接：
+
+| 后续层 | 独立开发集合 | 接线闸 |
+| --- | --- | --- |
+| Layer 4：Protocol/Provider | Rust async transport；沿用本批唯一 codec owners 增加 Anthropic/Gemini/必要 WS 变体；补齐 provider config/auth/capability，不重做 Responses/Chat 已完成语义 | 全部新增协议/transport 组件 source-green 后一次接 provider/server mainline；删除 `curl` canary |
+| Layer 5：Routing/Control | route facts、pool/priority/SWRR、target、health/probe、Error action、continuation、session admission、SSE lifecycle | 全部 typed state machines source-green 后接 executor；Router 只读 availability |
+| Layer 6：Tool Runtime | 沿用 `PLUGIN-003/007` 唯一 tool-governance owners，增加 servertool、stopless、web search backend/registry/state machine，不复制本批 request/response governance | 全部新增 registry/state machine/backend contracts source-green 后接 Chat Process；多轮差分收口 |
+| Layer 7：Management/Release | diagnostics、admin、WebUI read/write phases、config migration、managed lifecycle、release | 只读面先完整，变更面全部独立验证后一次接 publish/rollback；UI 永不成为真源 |
+| Layer 8：Production Closeout | performance budget、canary、rollback、artifact freeze、runbook | 全 feature differential/live pass 后 freeze；切换 V3 仍需 Jason 独立授权 |
+
+M3 parity harness 是所有层的横向验证基础，不作为最后补测阶段；每层新增 feature 时同步扩 fixture/report，但只有接线后的 production entry 结果可提升为 `differential_pass`/`live_pass`。
+
+## 28.10 文件清单
+
+现有真源：
+
+```text
+v4/docs/goals/v4-feature-completion-plan.md
+v4/docs/goals/v4-feature-completion-goal-prompt.md
+v4/docs/architecture/v4-cordis-node-plugin-architecture.md
+v4/docs/architecture/v4-standard-nodes-and-node-graph.md
+v4/docs/architecture/v4-data-control-plane-boundary.md
+v4/docs/architecture/v4-resource-operation-map.yml
+v4/docs/architecture/maps/{resource-map,function-map,mainline-call-map,module-registry,verification-map}.json
+v4/crates/routecodex-v4-{config,cordis-bridge,node-container,runtime,standard-plugins,runtime-bin,server,provider,router}/**
+v4/cordis/routecodex-v4-cordis-host/**
+```
+
+计划新增/扩展：
+
+```text
+v4/contracts/feature-completion-layer-batches.manifest.json
+v4/contracts/v3-product-parity-ledger.schema.json
+v4/docs/architecture/v3-v4-product-parity-ledger.yml
+v4/scripts/architecture/verify-v4-feature-layer-batches.mjs
+v4/scripts/tests/v4-feature-layer-batches-red-fixtures.mjs
+v4/scripts/architecture/verify-v4-product-parity-ledger.mjs
+v4/scripts/architecture/verify-v4-product-parity-status.mjs
+v4/crates/routecodex-v4-parity-harness/**
+v4/tests/parity-corpus/**
+v4/docs/evidence/feature-completion/M1/**
+```
+
+具体 plugin domain crate 在 Layer 0 owner decomposition 中登记；名称沿第 10.1 节稳定业务域，不为每个微插件建 crate，也不把真实业务长期留在 `runtime-bin` 或 catalog bundle。
+
+## 28.11 风险与规避
+
+| 风险 | 规避 |
+| --- | --- |
+| 本地缺 `ef3899f` 后重复实现 | 基线 identity gate；不可达只同步，不写 R007 owner |
+| 现有文档状态互相冲突 | 产品 ledger + newer snapshot；源码/contract/evidence 决定状态，不靠标题 |
+| 多 lane 共同改 monolith/registry | Layer 0 先拆 owner；每 lane 独占语义和 worktree |
+| keyless/mock 被当真实插件 | production handle + entrypoint + differential evidence 才能提升状态 |
+| 一个插件完成就提前接线 | machine layer barrier；A–G 与 conditional H 未满足时 wiring 必红 |
+| review unavailable 停止全部开发 | review 后置；只阻止 final commit/push/promotion/freeze，不阻止无依赖独立 lane 或 exact candidate 的主树验证 |
+| review finding 迫使集成层补丁 | finding 回唯一 owner；integration 不新增业务修补 |
+| AppSDK index/dependency drift | Protected/Active 真源恢复；禁止手改 immutable/generated |
+| runtime-bin 再长业务 | production path deny gate + direct helper physical removal |
+| control/error/debug 泄漏 payload | typed carrier + paired positive/negative leak tests |
+| formatter 产生巨大无关 diff | 只格式化/修正本批 changed hunks；旧债单独任务 |
+
+## 28.12 Definition of Done
+
+当前 batch 只有全部成立才完成：
+
+```text
+baseline.commit_is_ef3899f_or_descendant == true
+runtime_007.replayed == pass
+runtime_002.closure_audit == pass
+epoch_closure_lane.status in {source_green, not_needed_by_evidence}
+layer1.independent_tasks.source_green == 100%
+layer1.duplicate_semantic_owners == 0
+layer2.wiring_started_after_layer1_complete == true
+runtime_003.exact_artifact_binding == pass
+production_entrypoints.nodecontainer_coverage == 100%
+runtime_bin.direct_business_helper_paths == 0
+mock_or_fallback_production_paths == 0
+execution_binding.request_response_error_identity_drift == 0
+error_skeleton.all_stage_source_coverage == pass
+acquired_epoch_lease.release_exactly_once == pass
+epoch.concurrent_publish_drain_restart == pass
+product_differential.unexplained_diff == 0
+v4.verify_ci == pass
+appsdk.admission == pass
+rccv4.live_matrix == pass
+v3.calls_restarts_modifications == 0
+dsh_review == PASS
+clean_main_replay == pass
+```
+
+Review 未完成时状态只能是 `integration_verified_review_pending`，不是失败，也不是完成；继续推进不依赖该 integration contract 的独立候选，但不得发布、冻结或宣称本批闭环。
+
+## 28.13 当前收敛状态
+
+状态：`alignment_required`
+
+2026-08-23 本地存在两条必须按序收敛的 V4 治理候选：
+
+1. Product-map cutover 候选先把 resource/function/mainline-call/module-registry/verification 产品真源放入 `v4/docs/architecture/maps/`，并保留 `.appsdk/maps/` 作为 AppSDK skeleton。该候选已通过 foundation、isolation 和 contract admission；合并前还必须刷新已过期 lifecycle evidence，并在最终提交上重绑 governance candidate identity。
+2. Feature-layer batch gate 候选必须基于 Product-map cutover 重放。禁止把 `V4-LAYER-GATE-001` 的 owner/resource/gate 绑定写回 `.appsdk/maps/` skeleton；对应绑定只能进入产品 maps。其 definition/admission/build-guard 在 `guard_commit` 与 guarded surface scope hashes 绑定前都必须保持红。
+3. `V4-RUNTIME-007` 调度锚点仍是 `ef3899f` 或其后继。本地对象不可达时只允许同步和证据重放，不允许从旧基线重做 epoch owner。
+
+只有 Product-map cutover 合入主 tree、active 与 lifecycle evidence 全部同步、并修复 governance 收窄与 plugin-contract pre-review head 后，batch gate 候选才允许重新绑定 `guard_commit` / guarded surface scope hashes 并打开接线闸。
