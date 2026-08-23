@@ -4237,6 +4237,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+  - v3/crates/routecodex-v3-server/src/tests/mod.rs
   owner_scope: Runtime owns route/provider-failure observability event truth; Server
     owns human console projection, terminal output, and request-scoped realtime dedupe.
   resource_bindings:
@@ -4263,6 +4265,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+  - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-resource-operation-map.yml
@@ -4277,6 +4281,8 @@ features:
   - src
   required_gates:
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server realtime_provider_failure_sink_prints_before_final_and_final_dedupes
+    --lib -- --nocapture
+  - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_lines
     --lib -- --nocapture
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_failure_reselects_without_router_reentry
     --lib -- --nocapture
