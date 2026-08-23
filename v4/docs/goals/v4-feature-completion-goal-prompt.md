@@ -2,7 +2,7 @@
 
 目标：按照 `v4/docs/goals/v4-feature-completion-plan.md` 完成 RouteCodex V4 的全部产品功能闭环，使 V4 在保留新架构的前提下对齐当前选定的 V3 冻结行为基线，并达到可灰度接管、可发布、可回滚的生产准入状态。
 
-当前审计基线：`main@53e22d2a6ce0fefddb77e4c57010cdb4f6479ff1`。开始执行时必须先读取当前 HEAD；若 HEAD 已变化，不得假设本提示词中的完成度仍然准确，先完成 baseline drift 审计并把差异写入产品 parity ledger 和 plan-deviation evidence，再继续执行。
+当前审计基线：`main@2fda3f049190620511f2d2c6069a7bec0dd2871f`。开始执行时必须先读取当前 HEAD；若 HEAD 已变化，不得假设本提示词中的完成度仍然准确，先完成 baseline drift 审计并把差异写入产品 parity ledger 和 plan-deviation evidence，再继续执行。
 
 本 goal 是长线分阶段目标，不是单个 slice，也不是要求一次提交完成。每个 milestone、每个任务必须独立计划、独立红测、独立实现、独立验证、独立 review、独立提交。前一 milestone 的硬退出条件未通过，不进入依赖它的后续 milestone。M3 fixture 提取可与 M1/M2 部分并行，但只有 production NodeContainer 路径接通后的 V4 差分结果才能作为产品完成证据。
 
@@ -354,9 +354,11 @@ M0 退出：
 12. JSON terminal；
 13. SSE terminal；
 14. in-flight/drain/dispose；
-15. production path gate；
-16. 删除 direct helper fallback；
-17. 移除全局串行 runtime mutex。
+15. epoch 并发与被动 failure 记录；
+16. restart identity / manifest digest stability；
+17. production path gate；
+18. 删除 direct helper fallback；
+19. 移除全局串行 runtime mutex。
 
 M1 必须证明：
 
@@ -933,14 +935,15 @@ H. Close
 6. `V4-RUNTIME-004`
 7. `V4-RUNTIME-005`
 8. `V4-RUNTIME-006`
-9. `V4-GATE-001`
-10. `V4-PLUGIN-001`
-11. `V4-PLUGIN-002`
-12. `V4-PLUGIN-005`
-13. `V4-PLUGIN-006`
-14. `V4-PLUGIN-007`
-15. `V4-PLUGIN-008`
-16. 第一版 product differential harness
+9. `V4-RUNTIME-007`
+10. `V4-GATE-001`
+11. `V4-PLUGIN-001`
+12. `V4-PLUGIN-002`
+13. `V4-PLUGIN-005`
+14. `V4-PLUGIN-006`
+15. `V4-PLUGIN-007`
+16. `V4-PLUGIN-008`
+17. 第一版 product differential harness
 
 每个任务单独提交。完成后汇总 M0/M1/M2 第一切片状态，再进入 M4。
 

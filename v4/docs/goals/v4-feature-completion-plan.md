@@ -3,7 +3,7 @@
 状态：`proposed_canonical`
 执行状态：`ready_for_review_and_execution`
 文档 ID：`V4-FEATURE-COMPLETION-20260822`
-审计基线：`main@53e22d2a6ce0fefddb77e4c57010cdb4f6479ff1`
+审计基线：`main@2fda3f049190620511f2d2c6069a7bec0dd2871f`
 行为基线：V3 当前生产实现；V4 日常构建只读取经审核冻结的 V3 baseline
 目标版本：`V4.0 feature-complete / production-admissible`
 配套执行提示词：[`v4-feature-completion-goal-prompt.md`](v4-feature-completion-goal-prompt.md)
@@ -112,6 +112,14 @@ mapped
 - 用 handler/SSE/outbound 补偿掩盖节点缺失。
 
 ## 4. 当前基线判断
+
+### 4.1 2026-08-23 执行快照
+
+- 本地主 tree 和全部本地 worktree 的 `v4/` 均无未提交改动；`origin/main..main` 的 9 个领先提交都是 V3 SSE/transport 修复，对 `v4/` 的 diff 为空。
+- `V4-RUNTIME-001` 已有 typed `ExecutionBinding` 实现和正向/binding-drift 测试；它只能证明 immutable binding slice，不能证明 M1 完成。
+- `ActiveExecutionEpoch` / `V4-RUNTIME-002` 及其 publish、in-flight pin、drain、dispose 生命周期尚未落地；当前 runtime 只有 `ExecutionBinding.plan_epoch` 字段。
+- `V4-RUNTIME-007` 的云端提交 `ef3899f` 未推送到本仓库且本地对象不可达；合同、gate、测试和 runtime 代码在当前基线中不存在，因此必须按缺失任务从当前 main 重做。
+- M1 第一轮必须包含 `V4-RUNTIME-007`：M1 退出条件要求 in-flight epoch 安全 drain 和 restart identity，缺少该任务时 `RUNTIME-002..006` 不能被判定为生产执行平面闭环。
 
 | 领域 | 当前基线 | V4.0 目标 |
 | --- | --- | --- |
@@ -1429,10 +1437,11 @@ v4/docs/evidence/feature-completion/<milestone>/<task-id>/
 6. `V4-RUNTIME-004` Cordis plan 发布 NodeContainer；
 7. `V4-RUNTIME-005` production request path 接入；
 8. `V4-RUNTIME-006` production response/error path 接入；
-9. `V4-GATE-001` 禁止 runtime-bin 直连业务 helper；
-10. `V4-PLUGIN-001/002` request normalize + Chat→Responses 插件化；
-11. `V4-PLUGIN-005/006/007/008` wire/decode/projection/terminal 插件化；
-12. `V4-PARITY-HARNESS-001` 第一版 12 类 fixture 差分。
+9. `V4-RUNTIME-007` epoch 并发和生命周期；
+10. `V4-GATE-001` 禁止 runtime-bin 直连业务 helper；
+11. `V4-PLUGIN-001/002` request normalize + Chat→Responses 插件化；
+12. `V4-PLUGIN-005/006/007/008` wire/decode/projection/terminal 插件化；
+13. `V4-PARITY-HARNESS-001` 第一版 12 类 fixture 差分。
 
 完成这批后，V4 才进入“可持续迁移 V3 产品功能”的状态。
 
