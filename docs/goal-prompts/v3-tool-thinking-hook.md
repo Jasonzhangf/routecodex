@@ -1,38 +1,16 @@
 /goal
 
-目标：按 [v3-tool-thinking-hook-plan.md](../goals/v3-tool-thinking-hook-plan.md) 实现 V3 `tool-thinking` Hook Skeleton；先完成 Phase 1 visible `reasoning_content`，完成真实响应质量验证后再评估 Phase 2 private projection。
+目标：按 [v3-tool-thinking-hook-plan.md](../goals/v3-tool-thinking-hook-plan.md) 完成 `tool_thinking_json_v2` 设计迁移后的实现；辅助字段进入非 Gemini 工具参数 schema，模型输出后由 Resp03 剥离。
 
-说明：本任务不需要再写新的提示词，直接按实现文档执行。
+执行顺序：
 
-实现文档：
+- 以 `docs/goals/v3-tool-thinking-hook-plan.md` 为唯一合同真源；工具参数 JSON 增加 `reason`、`goal_alignment_confidence`、`model_id`，不再把 fence 当主合同。
+- 先同步 function map、mainline call map、verification map、fixtures 和本提示词，清理旧 fence 主合同；保留 fence 仅作明确的 legacy compatibility fixture。
+- 设计 gate 通过后，才写 Req04 JSON guidance、共享 Resp03 JSON extractor/stripper、one-turn aggregator、reasoning_content projector。
+- 原始工具名、call id 和普通 arguments/input/args 字段必须保持不变；缺失、错位、错误类型不阻断工具调用，不制造 400/502。
+- Direct 和 Relay 使用同一语义 extractor；SSE/handler/provider codec 不得成为 tool-reason owner。
+- 先 red fixture，再定向 Rust 测试、架构 gates、构建、全局安装、managed restart、真实 Codex samples 和 provider raw snapshots；无在线证据不得宣称完成。
 
-`docs/goals/v3-tool-thinking-hook-plan.md`
+验收：每个真实工具调用必须有 `JSON OK/MISSING/INVALID/MISPLACED` 之一；客户端投影单独有 `PROJECTED` 证据；每个 turn 最多一个 synthesized `reasoning_content`；客户端不见辅助字段、旧 fence、内部状态；不破坏原始工具调用。
 
-执行规范：
-
-- 先查 MemoryPalace、resource/function/mainline/module/verification maps，锁唯一 owner、固定 Req04/Resp03/Resp04 hook 边界，再改代码。
-- 请求侧只在最终 provider-facing 工具列表的合法 description 字段注入文档中的完整 `<toolreason>` 格式合同；禁止改 tool parameters、arguments、metadata、handler、SSE 或 provider codec。
-- 响应侧重点处理不完美模型输出：先 canonical normalize，再 collect、associate、recover、normalize、redact；无论恢复成功与否，raw `<toolreason>` 不得到达客户端；不得猜测、复制或从 tool arguments/tool output 反推理由。
-- Phase 1 只映射为可见 `reasoning_content`，供客户端监测；不得提前实现或宣称 private reasoning content。
-- Stopless、reasoningStop、stop_schema、routing、retry、health、continuation control 与 tool-thinking 分离；禁止 fallback、静默吞错、请求侧 cleanup、outbound 补偿。
-- 先写 red fixtures，再实现唯一 owner；改后执行定向测试、架构/resource/module gates、构建、安装、聚合重启、provider-request dry-run、旧样本/真实入口 replay；证据不足不得宣称完成。
-- 本任务不再生成新的 `/goal` prompt；直接按实现文档推进并在结束时给出变更、验证、剩余风险、下一步。
-
-验证：
-
-- 配置/manifest/hook owner 与 payload-boundary gate。
-- Req04 exact injection/idempotence tests。
-- Resp03 complete、missing-close、empty、nested、duplicate、multi-tool、unbound、wrong-source recovery tests。
-- Client JSON/SSE raw-marker redaction tests与 provider-facing request dry-run。
-- Phase 1 visible `reasoning_content` end-to-end replay。
-- 构建、全局安装、managed restart、全部 listener health、旧样本/真实入口 replay。
-- 完成运行时验证后才启动 DSH Review；review 失败按 finding 修复并重跑受影响闭环。
-
-完成标准：
-
-- `tool-thinking` 可配置开关；关闭时 payload 行为不变。
-- 开启时只修改工具 description 注入提示，不改变工具接口。
-- Resp03 对不完美响应有确定性恢复和硬剥离；raw marker、内部 parser 状态、hook 身份不泄漏。
-- Phase 1 `reasoning_content` 对客户端可见且内容格式为 `调用工具 <tool_name>，因为 <reason>`。
-- 原工具调用语义、Stopless 生命周期、主线节点边界不变。
-- 所有必跑验证和 live evidence 完成；Phase 2 private projection 仅记录为后续独立阶段，不冒充已完成。
+禁止：继续新增 fence prompt/parser/metric；请求侧清洗；改变普通命令参数语义；按 console `OK` 冒充客户端已投影；在 provider 或 SSE 层补第二套解析。

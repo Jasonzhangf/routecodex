@@ -1,10 +1,12 @@
 use super::*;
 use super::{provider_compat_boundary_source, V3ProviderCompatErrorClassification};
+use crate::nodes::{V3ClientBody, V3Resp15ClientPayload};
 use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
     v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
     V3RelayProviderFailureRetryPolicy,
 };
+use futures_util::StreamExt;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
@@ -21,17 +23,24 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub type V3GeminiRelayClientStream =
-    Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
+pub type V3GeminiRelayClientStream = V3RelayProjectedSseStream;
+pub type V3GeminiRelayCommittedStream = V3RelayCommittedSseStream;
 
 pub enum V3GeminiRelayClientBody {
     Json(Value),
-    Sse(V3GeminiRelayClientStream),
+    Sse(V3GeminiRelayCommittedStream),
 }
 
 impl V3GeminiRelayClientBody {
     pub fn is_sse(&self) -> bool {
         matches!(self, Self::Sse(_))
+    }
+
+    pub fn into_v3_client_body(self) -> V3ClientBody {
+        match self {
+            Self::Json(value) => V3ClientBody::Json(value),
+            Self::Sse(stream) => V3ClientBody::CommittedSse(stream),
+        }
     }
 }
 
@@ -57,6 +66,25 @@ pub struct V3GeminiRelayRuntimeOutput {
     pub error_chain: Option<Vec<&'static str>>,
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
+    pub provider_snapshots: Option<V3RelayProviderSnapshots>,
+}
+
+impl V3GeminiRelayRuntimeOutput {
+    pub fn into_v3_resp_15_client_payload(self) -> V3Resp15ClientPayload {
+        let content_type = if self.client_body.is_sse() {
+            "text/event-stream"
+        } else {
+            "application/json"
+        };
+        V3Resp15ClientPayload {
+            status: self.status,
+            headers: std::collections::BTreeMap::from([(
+                "content-type".to_string(),
+                content_type.to_string(),
+            )]),
+            body: self.client_body.into_v3_client_body(),
+        }
+    }
 }
 
 impl std::fmt::Debug for V3GeminiRelayRuntimeOutput {
@@ -183,6 +211,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
         input.failure_session_scope.clone(),
         &input.request_id,
         &input.endpoint_path,
+        V3HubExecutionMode::Relay,
         input.payload,
         transport,
         provider_health,
@@ -211,7 +240,6 @@ pub struct V3GeminiRelayCodec;
 
 impl V3RelayProtocolCodec for V3GeminiRelayCodec {
     type Output = V3GeminiRelayRuntimeOutput;
-    type SseStream = V3GeminiRelayClientStream;
     type SseOutcome = V3GeminiSseProviderOutcome;
 
     const ENTRY_PROTOCOL: V3HubEntryProtocol = V3HubEntryProtocol::Gemini;
@@ -280,6 +308,8 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
     }
 
     fn project_json_response(
+        _request_id: &str,
+        _session_id: &str,
         provider_value: Value,
         _provider_wire_protocol: V3HubProviderWireProtocol,
         _chat_request: &Value,
@@ -323,6 +353,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
     }
 
     fn project_sse(
+        _request_id: &str,
         provider: V3ProviderSseStream,
         _provider_wire_protocol: V3HubProviderWireProtocol,
         compatibility_profile: Option<String>,
@@ -332,7 +363,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         tool_thinking_enabled: bool,
         _stream_observation: V3RuntimeStreamObservation,
         outcome: V3GeminiSseProviderOutcome,
-    ) -> Result<V3GeminiRelayClientStream, V3RelayCoreError> {
+    ) -> Result<V3RelayProjectedSseStream, V3RelayCoreError> {
         Ok(project_sse_stream(
             provider,
             compatibility_profile,
@@ -346,6 +377,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         client_response: Value,
         trace: Vec<&'static str>,
         observability: V3RuntimeObservability,
+        provider_snapshots: V3RelayProviderSnapshots,
     ) -> V3GeminiRelayRuntimeOutput {
         V3GeminiRelayRuntimeOutput {
             status: 200,
@@ -354,14 +386,16 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             error_chain: None,
             observability: Some(observability),
             stream_observation: None,
+            provider_snapshots: Some(provider_snapshots),
         }
     }
 
     fn assemble_sse_output(
-        sse: V3RelayClientSseStream,
+        sse: V3RelayCommittedSseStream,
         trace: Vec<&'static str>,
         observability: V3RuntimeObservability,
         stream_observation: V3RuntimeStreamObservation,
+        provider_snapshots: V3RelayProviderSnapshots,
     ) -> V3GeminiRelayRuntimeOutput {
         V3GeminiRelayRuntimeOutput {
             status: 200,
@@ -370,13 +404,8 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             error_chain: None,
             observability: Some(observability),
             stream_observation: Some(stream_observation),
+            provider_snapshots: Some(provider_snapshots),
         }
-    }
-
-    fn sse_from_collected(collected: Vec<Vec<u8>>) -> Self::SseStream {
-        let stream: V3GeminiRelayClientStream =
-            Box::pin(futures_util::stream::iter(collected.into_iter().map(Ok)));
-        stream
     }
 
     fn assemble_failure_output(
@@ -461,6 +490,7 @@ pub fn project_v3_gemini_relay_runtime_failure(
         error_chain: Some(projected.chain.to_vec()),
         observability: None,
         stream_observation: None,
+        provider_snapshots: None,
     }
 }
 
@@ -539,14 +569,19 @@ impl V3GeminiSseProviderOutcome {
             return Ok(());
         }
         drop(self._provider_action_permit.take());
+        let source = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_stream",
+            reason,
+        );
         self.provider_health
-            .record_post_commit_provider_stream_failure(
+            .record_post_commit_provider_stream_failure_from_source(
                 &self.failure_session_scope,
                 &self.provider_id,
                 Some(&self.auth_alias),
                 Some(&self.model_id),
-                "provider_response_protocol",
-                reason,
+                &source,
             )?;
         self.recorded = true;
         Ok(())
@@ -575,7 +610,7 @@ fn project_sse_stream(
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
     provider_outcome: V3GeminiSseProviderOutcome,
-) -> V3GeminiRelayClientStream {
+) -> V3RelayProjectedSseStream {
     use futures_util::StreamExt;
     let state = V3GeminiSseState {
         provider,
@@ -649,7 +684,7 @@ fn project_sse_stream(
                     state.done = true;
                     let result = state
                         .provider_outcome
-                        .record_failure(&error)
+                        .record_failure(&error.to_string())
                         .await
                         .map(|()| error)
                         .and_then(Err);
@@ -668,23 +703,35 @@ fn enqueue_sse_client_chunks(
         if state.terminal {
             return Err("Gemini SSE emitted a frame after terminal finishReason".into());
         }
-        let mut data = None;
-        for field in frame.frame().fields() {
-            if let routecodex_v3_sse::SseField::Named { name, value } = field {
-                if name == "data" {
-                    data = Some(value.clone());
-                }
+        let data = crate::hub_v1::normalize_v3_provider_sse_json_data_for_event_name(
+            V3HubProviderWireProtocol::Gemini,
+            frame.frame().fields(),
+        )?;
+        let Some(outcome) = crate::hub_v1::classify_v3_provider_sse_json_data(
+            V3HubProviderWireProtocol::Gemini,
+            &data,
+        )?
+        else {
+            continue;
+        };
+        let terminal = match outcome {
+            V3ProviderResponsesJsonFrameOutcome::Failure { code, message } => {
+                return Err(format!("{code}: {message}"));
             }
-        }
-        let Some(data) = data else { continue };
-        let payload: Value = serde_json::from_str(&data).map_err(|error| error.to_string())?;
+            V3ProviderResponsesJsonFrameOutcome::Terminal
+            | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput => true,
+            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
+            | V3ProviderResponsesJsonFrameOutcome::StartClientStream => false,
+        };
+        let payload = crate::hub_v1::parse_v3_provider_sse_json_data(&data)?
+            .ok_or_else(|| "provider Gemini SSE semantic frame is empty".to_string())?;
         let client_payload = project_sse_event_payload(
             payload,
             state.compatibility_profile.as_deref(),
             state.retain_response_cipher,
             state.tool_thinking_enabled,
         )?;
-        state.terminal = gemini_payload_has_terminal_finish_reason(&client_payload)?;
+        state.terminal = terminal;
         state
             .pending
             .push_back(Ok(format!("data: {client_payload}\n\n").into_bytes()));
@@ -708,21 +755,6 @@ fn project_sse_event_payload(
         tool_thinking_enabled,
     )
     .map_err(|error| error.to_string())
-}
-
-fn gemini_payload_has_terminal_finish_reason(payload: &Value) -> Result<bool, String> {
-    let terminal = payload
-        .get("candidates")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|candidate| candidate.get("finishReason"))
-        .try_fold(false, |terminal, finish_reason| match finish_reason {
-            Value::Null => Ok(terminal),
-            Value::String(value) if !value.trim().is_empty() => Ok(true),
-            _ => Err("Gemini SSE finishReason must be null or a non-empty string".to_string()),
-        })?;
-    Ok(terminal)
 }
 
 fn server_routing_group<'a>(
@@ -751,6 +783,7 @@ fn provider_failure_output(
         error_chain: Some(projected.chain.to_vec()),
         observability: None,
         stream_observation: None,
+        provider_snapshots: None,
     }
 }
 

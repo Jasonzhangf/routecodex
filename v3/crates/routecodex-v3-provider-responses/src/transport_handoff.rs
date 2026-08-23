@@ -141,16 +141,37 @@ impl V3ProviderTransportAttemptBroker {
         let current = attempt.checkpoint.state;
         let allowed = matches!(
             (current, state),
-            (V3ProviderTransportAttemptState::Connecting, V3ProviderTransportAttemptState::Streaming)
-                | (V3ProviderTransportAttemptState::Connecting, V3ProviderTransportAttemptState::Detached)
-                | (V3ProviderTransportAttemptState::Connecting, V3ProviderTransportAttemptState::Terminal)
-                | (V3ProviderTransportAttemptState::Connecting, V3ProviderTransportAttemptState::Failed)
-                | (V3ProviderTransportAttemptState::Streaming, V3ProviderTransportAttemptState::Detached)
-                | (V3ProviderTransportAttemptState::Streaming, V3ProviderTransportAttemptState::Terminal)
-                | (V3ProviderTransportAttemptState::Streaming, V3ProviderTransportAttemptState::Failed)
-                | (V3ProviderTransportAttemptState::Detached, V3ProviderTransportAttemptState::Streaming)
-                | (V3ProviderTransportAttemptState::Detached, V3ProviderTransportAttemptState::Terminal)
-                | (V3ProviderTransportAttemptState::Detached, V3ProviderTransportAttemptState::Failed)
+            (
+                V3ProviderTransportAttemptState::Connecting,
+                V3ProviderTransportAttemptState::Streaming
+            ) | (
+                V3ProviderTransportAttemptState::Connecting,
+                V3ProviderTransportAttemptState::Detached
+            ) | (
+                V3ProviderTransportAttemptState::Connecting,
+                V3ProviderTransportAttemptState::Terminal
+            ) | (
+                V3ProviderTransportAttemptState::Connecting,
+                V3ProviderTransportAttemptState::Failed
+            ) | (
+                V3ProviderTransportAttemptState::Streaming,
+                V3ProviderTransportAttemptState::Detached
+            ) | (
+                V3ProviderTransportAttemptState::Streaming,
+                V3ProviderTransportAttemptState::Terminal
+            ) | (
+                V3ProviderTransportAttemptState::Streaming,
+                V3ProviderTransportAttemptState::Failed
+            ) | (
+                V3ProviderTransportAttemptState::Detached,
+                V3ProviderTransportAttemptState::Streaming
+            ) | (
+                V3ProviderTransportAttemptState::Detached,
+                V3ProviderTransportAttemptState::Terminal
+            ) | (
+                V3ProviderTransportAttemptState::Detached,
+                V3ProviderTransportAttemptState::Failed
+            )
         );
         if !allowed {
             return Err(format!(
@@ -241,7 +262,9 @@ impl V3ProviderTransportAttemptBroker {
             *next_id = (*next_id).max(restored.key.attempt_id.saturating_add(1));
             attempts.insert(
                 restored.key.clone(),
-                V3ProviderTransportAttempt { checkpoint: restored },
+                V3ProviderTransportAttempt {
+                    checkpoint: restored,
+                },
             );
         }
         drop(attempts);

@@ -32,6 +32,39 @@ fn responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids() {
 }
 
 #[test]
+fn responses_wire_wraps_apply_patch_custom_tool_with_toolreason_schema() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "patch"}],
+        "tools": [{
+            "type": "custom",
+            "name": "apply_patch",
+            "description": "Apply a patch",
+            "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}
+        }]
+    });
+
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Responses wire must wrap custom apply_patch as a function schema");
+    let tool = &request["tools"][0];
+    assert_eq!(tool["type"], "function");
+    assert_eq!(tool["function"]["name"], "apply_patch");
+    assert_eq!(
+        tool["function"]["parameters"]["required"],
+        json!(["input", "reason", "goal_alignment_confidence", "model_id"])
+    );
+    assert!(tool["function"]["parameters"]["properties"]
+        .get("reason")
+        .is_some());
+    assert!(tool["function"]["parameters"]["properties"]
+        .get("goal_alignment_confidence")
+        .is_some());
+    assert!(tool["function"]["parameters"]["properties"]
+        .get("model_id")
+        .is_some());
+}
+
+#[test]
 fn responses_wire_normalizes_system_text_parts_to_input_text() {
     let payload = json!({
         "model": "gpt-test",
@@ -495,8 +528,13 @@ fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
         tools[1]["function"]["parameters"],
         json!({
             "type":"object",
-            "properties":{"input":{"type":"string","description":"Raw free-form tool input."}},
-            "required":["input"],
+            "properties":{
+                "input":{"type":"string","description":"Raw free-form tool input."},
+                "reason":{"type":"string","description":"当前工具调用的唯一直接动机，只说动机，简短"},
+                "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100,"description":"当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"},
+                "model_id":{"type":"string","description":"本次响应实际使用的模型 ID"}
+            },
+            "required":["input","reason","goal_alignment_confidence","model_id"],
             "additionalProperties":false
         })
     );
@@ -530,8 +568,13 @@ fn openai_chat_wire_repairs_preflattened_apply_patch_function_schema() {
         request["tools"][0]["function"]["parameters"],
         json!({
             "type":"object",
-            "properties":{"input":{"type":"string","description":"Raw free-form tool input."}},
-            "required":["input"],
+            "properties":{
+                "input":{"type":"string","description":"Raw free-form tool input."},
+                "reason":{"type":"string","description":"当前工具调用的唯一直接动机，只说动机，简短"},
+                "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100,"description":"当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"},
+                "model_id":{"type":"string","description":"本次响应实际使用的模型 ID"}
+            },
+            "required":["input","reason","goal_alignment_confidence","model_id"],
             "additionalProperties":false
         })
     );

@@ -30,8 +30,8 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
     let manifest = scoped_test_manifest(mixed_protocol_reselection_manifest(), routing_group);
     let raw = V3Server03HttpRequestRaw {
         request_purpose: V3RequestPurpose::Conversation,
-        port: None,
-        pipeline_id: None,
+        port: Some(7777),
+        pipeline_id: Some("test-pipeline:test-session:cross_protocol_reselection".to_string()),
         server_id: "test".to_string(),
         failure_session_scope: test_failure_session_scope(routing_group),
         request_id: "req".to_string(),

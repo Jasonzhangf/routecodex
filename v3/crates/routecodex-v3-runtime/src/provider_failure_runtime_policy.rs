@@ -1,3 +1,4 @@
+use futures_util::future::join_all;
 use routecodex_v3_config::internal::classify_v3_internal_provider_error;
 use routecodex_v3_config::internal::v3_internal_error_handling;
 use routecodex_v3_config::{
@@ -35,7 +36,6 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use futures_util::future::join_all;
 
 static TEST_PROVIDER_STATE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -562,7 +562,8 @@ impl V3ProviderFailureRuntimeHealth {
             let auth_alias = permit.auth_alias().map(str::to_string);
             let model_id = permit.model_id().map(str::to_string);
             async move {
-                let result = (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
+                let result =
+                    (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
                 (permit, provider_id, auth_alias, model_id, result)
             }
         }))
@@ -633,7 +634,8 @@ impl V3ProviderFailureRuntimeHealth {
             let auth_alias = permit.auth_alias().map(str::to_string);
             let model_id = permit.model_id().map(str::to_string);
             async move {
-                let result = (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
+                let result =
+                    (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
                 (permit, provider_id, auth_alias, model_id, result)
             }
         }))
@@ -711,17 +713,22 @@ impl V3ProviderFailureRuntimeHealth {
             let auth_alias = permit.auth_alias().to_string();
             let model_id = permit.model_id().to_string();
             async move {
-                let result = (&probe)(
-                    provider_id.clone(),
-                    auth_alias.clone(),
-                    model_id.clone(),
+                let result =
+                    (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
+                (
+                    permit,
+                    provider_id,
+                    auth_alias,
+                    model_id,
+                    expected_generation,
+                    result,
                 )
-                .await;
-                (permit, provider_id, auth_alias, model_id, expected_generation, result)
             }
         }))
         .await;
-        for (permit, provider_id, auth_alias, model_id, expected_generation, result) in probe_results {
+        for (permit, provider_id, auth_alias, model_id, expected_generation, result) in
+            probe_results
+        {
             match result {
                 Ok(()) => self
                     .key_health
@@ -1332,6 +1339,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     let reason = (!message.trim().is_empty()).then_some(message.as_str());
     let is_request_local_compat_failure = source_stage == "ProviderReqCompat06ProviderCompat"
         || error_type.as_deref() == Some("provider_request_compat_error")
+        // Provider semantic invalid-request responses describe this request,
+        // not provider health.  Relay may surface them as a runtime 502 after
+        // decoding an HTTP-200 SSE error event, so status alone is insufficient.
+        || error_type.as_deref() == Some("invalid_request_error")
         // HTTP 400 is a request/provider-compatibility rejection (for example
         // context-window or wire-shape limits), not an account-health signal.
         // Keep it health-neutral so all keys do not enter cooldown for the
@@ -1380,6 +1391,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         && health_record.state != "cooldown"
         && retries_done < configured_same_candidate_retries
         && status != 400
+        // HTTP 503 is an upstream availability signal.  Do not spend a
+        // same-candidate retry budget on it; mark this candidate failed and
+        // reselect immediately.
+        && status != 503
     {
         state
             .same_candidate_retries

@@ -198,7 +198,9 @@ pub(crate) fn process_sse_object_frame<C: SseObjectConsumer>(
         .map_err(|error| SseObjectError::Consumer {
             message: error.to_string(),
         })?;
-    Ok(build_sse_transport_out_04_from_sse_transport_in_03(&rewritten))
+    Ok(build_sse_transport_out_04_from_sse_transport_in_03(
+        &rewritten,
+    ))
 }
 
 pub(crate) fn process_sse_object_json<C: SseObjectConsumer>(
@@ -223,7 +225,7 @@ pub(crate) fn project_sse_frame_json(
         .map(|data| data.into_bytes())
         .ok_or_else(|| SseObjectError::Consumer {
             message: "object has no JSON data".to_owned(),
-    })
+        })
 }
 
 #[cfg(test)]

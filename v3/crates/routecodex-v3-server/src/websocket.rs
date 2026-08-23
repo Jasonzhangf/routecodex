@@ -149,14 +149,15 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             return Err(());
         }
     };
-    let request_id = match next_v3_console_request_identity(state, "/v1/responses", Some(&payload))
-    {
-        Ok(identity) => identity.request_id,
-        Err(message) => {
-            let _ = send_responses_websocket_error(socket, "runtime_error", message).await;
-            return Err(());
-        }
-    };
+    let request_identity =
+        match next_v3_console_request_identity(state, "/v1/responses", Some(&payload)) {
+            Ok(identity) => identity,
+            Err(message) => {
+                let _ = send_responses_websocket_error(socket, "runtime_error", message).await;
+                return Err(());
+            }
+        };
+    let request_id = request_identity.request_id.clone();
     let execution_id = state.debug.next_execution_id(&state.server.id);
     let entry_facts = V3ResponsesContinuationEntryFacts::project(&payload);
     let protocol_plan = None;
@@ -210,6 +211,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                 "WEBSOCKET".to_string(),
                 "/v1/responses".to_string(),
                 request_id,
+                Some(request_identity.pipeline_id.clone()),
                 execution_id,
                 payload,
                 protocol_plan.as_ref(),
@@ -233,6 +235,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                 state,
                 headers,
                 request_id,
+                request_identity.pipeline_id.clone(),
                 execution_id,
                 payload,
                 protocol_plan.as_ref(),
@@ -265,6 +268,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
     state: &Arc<V3ListenerState>,
     headers: &HeaderMap,
     request_id: String,
+    pipeline_id: String,
     execution_id: String,
     payload: Value,
     protocol_plan: Option<&V3ResponsesProtocolExecutionPlan>,
@@ -287,7 +291,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
         }
     };
     let provider_failure_session_scope =
-        get_failure_session_scope(&state.server, headers, "responses", &request_id)
+        get_failure_session_scope(&state.server, headers, &payload, "responses", &request_id)
             .expect("responses requests must have session-id for failure isolation");
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(duration) => duration.as_millis() as u64,
@@ -356,6 +360,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             "WEBSOCKET".to_string(),
             "/v1/responses".to_string(),
             request_id,
+            Some(pipeline_id),
             execution_id,
             handoff.request_payload.clone(),
             Some(&handoff.plan),
@@ -423,7 +428,7 @@ pub(crate) async fn send_responses_websocket_frame(
                 .unwrap_or("V3 Responses runtime error")
                 .to_string(),
             V3Server16Body::Bytes(bytes) => String::from_utf8_lossy(&bytes).to_string(),
-            V3Server16Body::Sse(_) => "V3 Responses runtime stream error".to_string(),
+            V3Server16Body::CommittedSse(_) => "V3 Responses runtime stream error".to_string(),
         };
         return send_responses_websocket_error(socket, "runtime_error", message).await;
     }
@@ -447,13 +452,15 @@ pub(crate) async fn send_responses_websocket_frame(
             let event = json!({"type": "response.completed", "response": value});
             send_responses_websocket_json(socket, &event).await
         }
-        V3Server16Body::Sse(stream) => send_responses_websocket_sse_stream(socket, stream).await,
+        V3Server16Body::CommittedSse(stream) => {
+            send_responses_websocket_committed_sse_stream(socket, stream).await
+        }
     }
 }
 
-pub(crate) async fn send_responses_websocket_sse_stream(
+pub(crate) async fn send_responses_websocket_committed_sse_stream(
     socket: &mut WebSocket,
-    mut stream: V3ClientSseStream,
+    mut stream: V3CommittedClientSseStream,
 ) -> Result<(), ()> {
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     loop {
@@ -483,25 +490,13 @@ pub(crate) async fn send_responses_websocket_sse_stream(
         let Some(chunk) = next_chunk else {
             break;
         };
-        let chunk = match chunk {
-            Ok(chunk) => chunk,
-            Err(error) if is_v3_client_disconnect_source(&error) => return Err(()),
-            Err(error) => {
-                return send_responses_websocket_error(
-                    socket,
-                    "runtime_stream_error",
-                    format!("{}: {}", error.code, error.message),
-                )
-                .await;
-            }
-        };
         let frames = match decoder.push(build_v3_sse_transport_in_01_raw_chunk(&chunk)) {
             Ok(frames) => frames,
             Err(error) => {
                 return send_responses_websocket_error(
                     socket,
                     "runtime_stream_error",
-                    format!("runtime SSE decode failed: {error}"),
+                    error.to_string(),
                 )
                 .await;
             }
@@ -593,18 +588,6 @@ pub(crate) async fn send_responses_relay_websocket_sse_stream(
         };
         let Some(chunk) = next_chunk else {
             break;
-        };
-        let chunk = match chunk {
-            Ok(chunk) => chunk,
-            Err(error) if is_v3_client_disconnect_source(&error) => return Err(()),
-            Err(error) => {
-                return send_responses_websocket_error(
-                    socket,
-                    "runtime_stream_error",
-                    error.message,
-                )
-                .await;
-            }
         };
         let frames = match decoder.push(build_v3_sse_transport_in_01_raw_chunk(&chunk)) {
             Ok(frames) => frames,

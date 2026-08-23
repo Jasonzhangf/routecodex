@@ -97,6 +97,7 @@ fn provider_failure_output(
         servertool_followup_required: false,
         observability: None,
         stream_observation: None,
+        provider_snapshots: None,
     }
 }
 
@@ -115,6 +116,7 @@ fn error_output(
         servertool_followup_required: false,
         observability: None,
         stream_observation: None,
+        provider_snapshots: None,
     }
 }
 
@@ -147,6 +149,40 @@ fn extract_v3_anthropic_relay_usage_summary(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod anthropic_client_sse_projection_tests {
+    use super::*;
+
+    #[test]
+    fn invalid_client_sse_event_is_rejected_before_stream_creation() {
+        let error = match project_v3_anthropic_client_sse_stream(json!({
+            "events": [
+                {"event": "message_delta"},
+                {
+                    "event": "message_stop",
+                    "data": {"type": "message_stop"}
+                }
+            ]
+        })) {
+            Ok(_) => panic!("invalid Anthropic event must fail before client stream creation"),
+            Err(error) => error,
+        };
+        assert!(error.contains("missing event or data"), "{error}");
+    }
+
+    #[test]
+    fn valid_client_sse_events_create_only_success_frames() {
+        let stream = project_v3_anthropic_client_sse_stream(json!({
+            "events": [{
+                "event": "message_stop",
+                "data": {"type": "message_stop"}
+            }]
+        }))
+        .expect("valid Anthropic event must build");
+        let _ = stream;
+    }
 }
 
 /// Anthropic client 响应 finish_reason 归一化提取：JSON 路径 client_response 是

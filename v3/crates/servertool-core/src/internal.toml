@@ -1,0 +1,5 @@
+[stopless_defaults]
+max_repeats = 10
+budget_max_repeats = 3
+text = "继续执行"
+reasoning_text = "继续。"

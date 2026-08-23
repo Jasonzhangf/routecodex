@@ -709,6 +709,61 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
 }
 
 #[tokio::test]
+async fn provider_invalid_request_error_is_health_neutral_even_when_wrapped_as_502() {
+    let manifest = target_resolution_manifest("invalid_request_health_neutral");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let selected = match resolve_target(
+        &manifest,
+        "invalid_request_health_neutral",
+        &BTreeSet::new(),
+        &health,
+    ) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select a provider"),
+    };
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: None,
+        failure_session_scope: test_provider_failure_scope(
+            "invalid_request_health_neutral",
+            "invalid_request_health_neutral",
+            "session-invalid-request",
+        )
+        .expect("test failure session scope"),
+        provider_health: &health,
+        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+    let mut state = V3RelayProviderFailurePolicyState {
+        failed_candidates: &mut failed_candidates,
+        same_candidate_retries: &mut same_candidate_retries,
+        trace: &mut trace,
+    };
+
+    let result = run_v3_relay_provider_failure_policy(
+        &context,
+        selected,
+        "V3ProviderRespInbound01Raw",
+        502,
+        Some("invalid_request_error".to_string()),
+        "provider response event: prompt is too long".to_string(),
+        None,
+        &mut state,
+    )
+    .await
+    .expect("invalid request must be handled without provider health mutation");
+
+    assert_eq!(result.event.health_record.state, "request_local_provider_compat");
+    assert_eq!(result.event.health_record.failure_count, 0);
+    assert_eq!(result.event.health_record.cooldown_until_ms, None);
+    assert!(result.retry_selected.is_none());
+    assert!(state.same_candidate_retries.is_empty());
+}
+
+#[tokio::test]
 async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429() {
     let mut manifest = target_resolution_manifest("resolution_policy");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -775,7 +830,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
     let projection = result
         .terminal_projection
         .expect("non-provider target-resolution failure is terminal");
-    assert_eq!(projection.status, 500);
+    assert_eq!(projection.status, 598);
     assert_ne!(projection.status, 429);
     assert_eq!(
         projection.body["error"]["code"],

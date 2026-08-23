@@ -76,11 +76,11 @@ pub fn resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
         }),
     }
     .map_err(|error| match error {
-        crate::remote_continuation::V3RemoteContinuationError::AmbiguousProviderBinding { .. } => {
-            V3ResponsesPreviousResponseOwnerResolutionError::Ambiguous {
-                response_id: response_id.clone(),
-            }
-        }
+        crate::remote_continuation::V3RemoteContinuationError::AmbiguousProviderBinding {
+            ..
+        } => V3ResponsesPreviousResponseOwnerResolutionError::Ambiguous {
+            response_id: response_id.clone(),
+        },
         error => V3ResponsesPreviousResponseOwnerResolutionError::DirectState {
             message: error.to_string(),
         },

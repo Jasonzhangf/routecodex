@@ -5,7 +5,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 200;
+/// Error snapshots are retained by request-id directory.  A request may have
+/// client request/response plus provider request/response files, but those four
+/// files are one evidence record and must consume one retention slot.
+pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 100;
 
 pub struct V3CodexSampleStore {
     enabled: bool,
@@ -87,9 +90,6 @@ impl V3CodexSampleStore {
     }
 
     pub fn enforce_retention(&self) -> Result<(), String> {
-        if !self.enabled {
-            return Ok(());
-        }
         let samples_root = resolve_v3_codex_samples_root()?;
         if !samples_root.exists() {
             return Ok(());
@@ -432,8 +432,8 @@ mod tests {
     #[test]
     fn retention_caps_samples_at_configured_limit() {
         with_test_home(|home_base| {
-            let store = V3CodexSampleStore::new(true, 200, false);
-            for index in 0..201 {
+            let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
+            for index in 0..=V3_CODEX_SAMPLE_REQUEST_RETENTION {
                 store
                     .persist(
                         10000,
@@ -448,15 +448,15 @@ mod tests {
                     .unwrap();
             }
             let dirs = fs::read_dir(sample_dir(home_base)).unwrap().count();
-            assert_eq!(dirs, 200);
+            assert_eq!(dirs, V3_CODEX_SAMPLE_REQUEST_RETENTION);
         });
     }
 
     #[test]
     fn retention_caps_samples_across_endpoints_and_ports() {
         with_test_home(|home_base| {
-            let store = V3CodexSampleStore::new(true, 200, false);
-            for index in 0..201 {
+            let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
+            for index in 0..=V3_CODEX_SAMPLE_REQUEST_RETENTION {
                 let (protocol, endpoint, port) = if index % 2 == 0 {
                     ("responses", "/v1/responses", 10000)
                 } else {
@@ -486,7 +486,7 @@ mod tests {
                         .collect::<Vec<_>>()
                 })
                 .count();
-            assert_eq!(total_dirs, 200);
+            assert_eq!(total_dirs, V3_CODEX_SAMPLE_REQUEST_RETENTION);
         });
     }
 

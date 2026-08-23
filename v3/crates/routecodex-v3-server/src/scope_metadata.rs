@@ -173,6 +173,7 @@ pub(crate) fn responses_control_scope_headers(
             "session-id",
             "session_id",
             "x-session-id",
+            "x-routecodex-session-id",
             "x-rcc-session-id",
         ],
     )?;

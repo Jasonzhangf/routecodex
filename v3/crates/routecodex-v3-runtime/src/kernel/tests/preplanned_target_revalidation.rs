@@ -39,8 +39,8 @@ async fn direct_kernel_revalidates_preplanned_target_against_session_alternative
         &manifest,
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::Conversation,
-            port: None,
-            pipeline_id: None,
+            port: Some(7777),
+            pipeline_id: Some("test-pipeline:session-race".to_string()),
             server_id: "test".to_string(),
             failure_session_scope: session.clone(),
             request_id: "req-preplanned-race".to_string(),
@@ -79,8 +79,8 @@ async fn direct_kernel_revalidates_preplanned_target_against_session_alternative
         &manifest,
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::Conversation,
-            port: None,
-            pipeline_id: None,
+            port: Some(7777),
+            pipeline_id: Some("test-pipeline:session-race".to_string()),
             server_id: "test".to_string(),
             failure_session_scope: session,
             request_id: "req-preplanned-race".to_string(),

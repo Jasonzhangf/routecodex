@@ -1,7 +1,7 @@
-use crate::*;
 use crate::webui_observability::{
     build_v3_obs_request_key, V3ObsEventType, V3ObsRequestMeta, V3ObsScope,
 };
+use crate::*;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
@@ -54,7 +54,10 @@ fn build_v3_webui_meta_for_context(
     V3ObsRequestMeta {
         request_id: context.request_identity.request_id.clone(),
         endpoint: context.endpoint.clone(),
-        model: observability.model_id.clone().or_else(|| observability.wire_model.clone()),
+        model: observability
+            .model_id
+            .clone()
+            .or_else(|| observability.wire_model.clone()),
         route: Some(resolve_v3_console_route_projection(observability).label),
         provider: observability
             .provider_key
@@ -85,8 +88,10 @@ pub(crate) fn record_v3_webui_event_for_context(
     event_type: V3ObsEventType,
     observability: &V3RuntimeObservability,
 ) -> Result<u64, String> {
-    let request_key =
-        build_v3_obs_request_key(context.state.server.port, &context.request_identity.request_id);
+    let request_key = build_v3_obs_request_key(
+        context.state.server.port,
+        &context.request_identity.request_id,
+    );
     let scope = V3ObsScope {
         port: context.state.server.port,
         workdir: context.identity.project_path.clone(),
@@ -101,11 +106,11 @@ pub(crate) fn record_v3_webui_event_for_context(
 
 // Started projection: uses only scope + identity (route/model/provider unknown
 // until routing). Same typed side-channel as the rest of the projection.
-fn record_v3_webui_started_for_context(
-    context: &V3ConsoleEmissionContext,
-) -> Result<u64, String> {
-    let request_key =
-        build_v3_obs_request_key(context.state.server.port, &context.request_identity.request_id);
+fn record_v3_webui_started_for_context(context: &V3ConsoleEmissionContext) -> Result<u64, String> {
+    let request_key = build_v3_obs_request_key(
+        context.state.server.port,
+        &context.request_identity.request_id,
+    );
     let scope = V3ObsScope {
         port: context.state.server.port,
         workdir: context.identity.project_path.clone(),
@@ -878,18 +883,17 @@ pub(crate) fn emit_v3_direct_frame_console_lines(
         );
     }
     let observability = observability?;
-    let is_sse = matches!(frame.body, V3Server16Body::Sse(_));
+    let is_sse = matches!(frame.body, V3Server16Body::CommittedSse(_));
     // Typed WebUI projection: terminal for non-SSE frames (Completed/Failed).
     // SSE streams defer terminal ownership to their console finalizer so the
     // final outcome (Completed/Failed/Cancelled) reflects stream closeout.
     if !is_sse {
-        let has_provider_failure = !observability.provider_failure_events.is_empty();
         let is_error_status = frame.status >= 400
             || matches!(
                 observability.response_status.as_deref(),
                 Some("error" | "failed" | "incomplete")
             );
-        let terminal = if is_error_status || has_provider_failure {
+        let terminal = if is_error_status {
             V3ObsEventType::Failed
         } else {
             V3ObsEventType::Completed
@@ -923,7 +927,7 @@ pub(crate) fn enrich_v3_direct_observability_from_frame(
     observability.transport = match &frame.body {
         V3Server16Body::Json(_) => "json",
         V3Server16Body::Bytes(_) => "bytes",
-        V3Server16Body::Sse(_) => "sse",
+        V3Server16Body::CommittedSse(_) => "sse",
     }
     .to_string();
     observability.provider_status = observability.provider_status.or(Some(frame.status));
@@ -988,32 +992,20 @@ pub(crate) struct V3DirectSseConsoleFinalizer {
     pub(crate) started_at: Instant,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum V3SseConsoleStreamTerminal {
-    Completed,
-    Dropped,
-    Failed(String),
-}
 impl V3SseConsoleFinalizer {
     pub(crate) fn complete_relay_sse(mut self) {
         if let Err(error) = merge_v3_runtime_stream_observation(
             &mut self.observability,
             Some(&self.stream_observation),
         ) {
-            self.provider_stream_failed(&error);
+            emit_v3_runtime_observability_contract_failure(
+                &self.context,
+                &self.observability,
+                error,
+            );
             return;
         }
-        if let Some(status) = self.observability.response_status.clone() {
-            if is_v3_sse_terminal_success_status(&status) {
-                self.emit_relay_sse_complete_console_lines();
-                return;
-            }
-            if is_v3_sse_terminal_failure_status(&status) {
-                self.provider_stream_terminal_failed(&status);
-                return;
-            }
-        }
-        self.provider_stream_missing_terminal();
+        self.emit_relay_sse_complete_console_lines();
     }
 
     pub(crate) fn emit_relay_sse_complete_console_lines(self) {
@@ -1042,60 +1034,16 @@ impl V3SseConsoleFinalizer {
         }
     }
 
-    pub(crate) fn provider_stream_failed(self, error: &str) {
-        // Typed WebUI projection: SSE stream failed.
-        if let Err(error) = record_v3_webui_event_for_context(
-            &self.context,
-            V3ObsEventType::Failed,
-            &self.observability,
-        ) {
-            emit_v3_webui_projection_failure(&self.context, &error);
-        }
-        self.emit_relay_sse_failure_console_line(
-            502,
-            raise_v3_sse_provider_failure("provider_response_sse_stream", error),
-        );
-    }
-
-    pub(crate) fn provider_stream_missing_terminal(self) {
-        self.provider_stream_failed("provider response SSE stream ended before terminal event");
-    }
-
-    pub(crate) fn provider_stream_terminal_failed(self, status: &str) {
-        // Typed WebUI projection: SSE stream ended in terminal failure.
-        if let Err(error) = record_v3_webui_event_for_context(
-            &self.context,
-            V3ObsEventType::Failed,
-            &self.observability,
-        ) {
-            emit_v3_webui_projection_failure(&self.context, &error);
-        }
-        self.emit_relay_sse_failure_console_line(
-            502,
-            raise_v3_sse_provider_failure(
-                "provider_response_sse_terminal_failure",
-                format!("response SSE stream ended with terminal status {status}"),
-            ),
-        );
-    }
-
     pub(crate) fn client_disconnected(mut self) {
         if let Err(error) = merge_v3_runtime_stream_observation(
             &mut self.observability,
             Some(&self.stream_observation),
         ) {
-            self.provider_stream_failed(&error);
-            return;
-        }
-        if let Some(status) = self.observability.response_status.clone() {
-            if is_v3_sse_terminal_success_status(&status) {
-                self.emit_relay_sse_complete_console_lines();
-                return;
-            }
-            if is_v3_sse_terminal_failure_status(&status) {
-                self.provider_stream_terminal_failed(&status);
-                return;
-            }
+            emit_v3_runtime_observability_contract_failure(
+                &self.context,
+                &self.observability,
+                error,
+            );
         }
         // Typed WebUI projection: client disconnect => Cancelled.
         if let Err(error) = record_v3_webui_event_for_context(
@@ -1125,20 +1073,14 @@ impl V3SseConsoleFinalizer {
 impl V3DirectSseConsoleFinalizer {
     pub(crate) fn complete(mut self) {
         if let Err(error) = self.merge_stream_observation() {
-            self.provider_stream_failed(&error);
+            emit_v3_runtime_observability_contract_failure(
+                &self.context,
+                &self.observability,
+                error,
+            );
             return;
         }
-        if let Some(status) = self.observability.response_status.clone() {
-            if is_v3_sse_terminal_success_status(&status) {
-                self.emit_direct_sse_complete_console_lines();
-                return;
-            }
-            if is_v3_sse_terminal_failure_status(&status) {
-                self.provider_stream_terminal_failed(&status);
-                return;
-            }
-        }
-        self.provider_stream_missing_terminal();
+        self.emit_direct_sse_complete_console_lines();
     }
 
     pub(crate) fn emit_direct_sse_complete_console_lines(self) {
@@ -1169,60 +1111,13 @@ impl V3DirectSseConsoleFinalizer {
         }
     }
 
-    pub(crate) fn provider_stream_failed(self, error: &str) {
-        // Typed WebUI projection: SSE stream failed.
-        if let Err(error) = record_v3_webui_event_for_context(
-            &self.context,
-            V3ObsEventType::Failed,
-            &self.observability,
-        ) {
-            emit_v3_webui_projection_failure(&self.context, &error);
-        }
-        self.emit_direct_sse_failure_console_line(
-            502,
-            raise_v3_sse_provider_failure("provider_response_sse_stream", error),
-        );
-    }
-
-    pub(crate) fn provider_stream_missing_terminal(self) {
-        self.provider_stream_failed("provider response SSE stream ended before terminal event");
-    }
-
-    pub(crate) fn provider_stream_terminal_failed(self, status: &str) {
-        // Typed WebUI projection: SSE stream ended in terminal failure.
-        if let Err(error) = record_v3_webui_event_for_context(
-            &self.context,
-            V3ObsEventType::Failed,
-            &self.observability,
-        ) {
-            emit_v3_webui_projection_failure(&self.context, &error);
-        }
-        self.emit_direct_sse_failure_console_line(
-            502,
-            raise_v3_sse_provider_failure(
-                "provider_response_sse_terminal_failure",
-                format!("response SSE stream ended with terminal status {status}"),
-            ),
-        );
-    }
-
     pub(crate) fn client_disconnected(mut self) {
         if let Err(error) = self.merge_stream_observation() {
-            self.provider_stream_failed(&error);
-            return;
-        }
-        if let Some(status) = self.observability.response_status.clone() {
-            if is_v3_sse_terminal_success_status(&status) {
-                if self.observability.timing.is_none() {
-                    return;
-                }
-                self.emit_direct_sse_complete_console_lines();
-                return;
-            }
-            if is_v3_sse_terminal_failure_status(&status) {
-                self.provider_stream_terminal_failed(&status);
-                return;
-            }
+            emit_v3_runtime_observability_contract_failure(
+                &self.context,
+                &self.observability,
+                error,
+            );
         }
         // Typed WebUI projection: client disconnect => Cancelled.
         if let Err(error) = record_v3_webui_event_for_context(
@@ -1292,20 +1187,6 @@ pub(crate) fn merge_v3_runtime_stream_observation(
         }
     }
     Ok(())
-}
-
-pub(crate) fn is_v3_sse_terminal_success_status(status: &str) -> bool {
-    // incomplete 是 Responses 协议合法终态（max_output_tokens / content_filter），
-    // 客户端按协议接收部分输出；只有流自身缺终帧（status 仍为 streaming）才是
-    // provider 流失败。
-    matches!(
-        status.trim(),
-        "completed" | "requires_action" | "done" | "incomplete"
-    )
-}
-
-pub(crate) fn is_v3_sse_terminal_failure_status(status: &str) -> bool {
-    matches!(status.trim(), "failed" | "cancelled" | "canceled" | "error")
 }
 
 #[derive(Debug, Clone)]

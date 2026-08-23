@@ -36,7 +36,7 @@ use std::pin::Pin;
 /// 错误 body 形状是协议 wire 差异（gemini `error.code`、anthropic `error.type`），
 /// 通过 `error_type_fn` / `error_message_fn` 提取函数指针表达；构造函数（协议本地）
 /// 负责填协议形状的 body 与对应提取函数。
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct V3RelayProviderFailure {
     pub status: u16,
     pub client_response: Value,
@@ -236,6 +236,12 @@ pub fn provider_http_failure(
 ) -> V3RelayProviderFailure {
     let body = match serde_json::from_slice::<Value>(body) {
         Ok(value) => value,
+        Err(_) if body.is_empty() => json!({
+            "error": {
+                "code": "provider_http_status",
+                "message": format!("provider returned HTTP {status}")
+            }
+        }),
         Err(error) => json!({
             "error": {
                 "code": "provider_error_body_malformed",
@@ -275,6 +281,13 @@ pub fn provider_runtime_failure(
     error: V3ProviderError,
     provider_id: &str,
 ) -> V3RelayProviderFailure {
+    let error_code = match &error {
+        // SSE 已经完成 provider response inbound 的协议判定；把这个语义错误码
+        // 保留下游，健康策略才能把它和 transport hang 区分开。不能降成通用
+        // provider_error，否则 relay 会按 transient 同 provider 重试后直接投影给客户端。
+        V3ProviderError::MalformedSse { .. } => "provider_response_sse_event_invalid",
+        _ => "provider_error",
+    };
     let terminal_projection =
         matches!(&error, V3ProviderError::ClientDisconnect { .. }).then(|| {
             project_v3_client_disconnect(
@@ -289,7 +302,7 @@ pub fn provider_runtime_failure(
         } else {
             502
         },
-        client_response: json!({"error":{"code":"provider_error","message":error.to_string()}}),
+        client_response: json!({"error":{"code":error_code,"message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),
         terminal_projection,
         error_type_fn: extract_error_code_style,
@@ -378,28 +391,15 @@ pub(crate) fn build_v3_relay_observability(
     }
 }
 
-/// Chat / Gemini relay 客户端 SSE 流类型（两协议 client stream 是同一个底层
-/// boxed stream 类型；这里用本地别名避免 runtime 模块间循环依赖）。
+/// Chat / Gemini relay 客户端 SSE 流类型。
 pub(crate) type V3RelayClientSseStream =
     Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
-
-/// Consume one complete provider SSE attempt before it crosses the Front.
-///
-/// A relay attempt is transactional: codec/EOF/terminal failures are provider
-/// failures and must return to the relay Error01->05 loop.  Returning the
-/// projected stream after the first frame leaks a later provider failure into
-/// the client connection and makes reselect impossible.  This helper keeps
-/// that boundary in the shared relay owner; it never rewrites or truncates
-/// business bytes.
-pub(crate) async fn collect_v3_relay_sse_attempt(
-    mut stream: V3RelayClientSseStream,
-) -> Result<Vec<Vec<u8>>, String> {
-    let mut collected = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        collected.push(chunk?);
-    }
-    Ok(collected)
-}
+pub(crate) type V3RelayProjectedSseStream = V3RelayClientSseStream;
+/// A provider attempt may cross the Broker -> Front boundary only after its
+/// complete projected stream has been validated.  The committed stream is
+/// therefore infallible: provider failures remain in Error01 -> Error05 and
+/// cannot be observed as a client SSE item or EOF.
+pub(crate) type V3RelayCommittedSseStream = crate::nodes::V3CommittedClientSseStream;
 
 /// 客户端 SSE usage 观测包装：逐帧解码客户端协议 wire（openai_chat chunk /
 /// gemini chunk），把 usage / finish_reason 写入 typed stream observation；
@@ -489,14 +489,14 @@ fn observe_relay_client_sse_usage_chunk(
         let Some(event) = object.data_value() else {
             continue;
         };
+        if !event.is_object() {
+            continue;
+        }
         match protocol {
             V3HubEntryProtocol::Responses => {
                 let semantic = crate::hub_v1::classify_v3_responses_sse_event(event)
                     .map_err(|error| error.to_string())?;
-                observation.record_typed_object_type(
-                    "responses",
-                    &semantic.protocol.event_type,
-                )?;
+                observation.record_typed_object_type("responses", &semantic.protocol.event_type)?;
                 observation.record_provider_event_json(&semantic.to_normalized_value())?;
             }
             V3HubEntryProtocol::OpenAiChat => {
@@ -528,12 +528,7 @@ mod tests {
     ) -> Result<(), String> {
         let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
         let chunk = format!("data: {data}\n\n");
-        observe_relay_client_sse_usage_chunk(
-            chunk.as_bytes(),
-            protocol,
-            &mut decoder,
-            observation,
-        )
+        observe_relay_client_sse_usage_chunk(chunk.as_bytes(), protocol, &mut decoder, observation)
     }
 
     #[test]
@@ -567,10 +562,23 @@ mod tests {
     }
 
     #[test]
+    fn relay_stream_observation_retains_provider_raw_sse_side_channel() {
+        let observation = V3RuntimeStreamObservation::default();
+        observation
+            .record_provider_raw_sse_chunk(b"event: response.output_text.delta\n\n")
+            .unwrap();
+        let snapshot = observation.snapshot().unwrap();
+        assert_eq!(
+            snapshot.provider_raw_sse,
+            "event: response.output_text.delta\n\n"
+        );
+    }
+
+    #[test]
     fn relay_client_observation_rejects_malformed_typed_payload() {
         let observation = V3RuntimeStreamObservation::default();
-        let error = observe_one(V3HubEntryProtocol::Responses, "not-json", &observation)
-            .unwrap_err();
+        let error =
+            observe_one(V3HubEntryProtocol::Responses, "not-json", &observation).unwrap_err();
         assert!(error.contains("not valid JSON"));
     }
 

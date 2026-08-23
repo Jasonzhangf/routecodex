@@ -515,7 +515,7 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failu
             use futures_util::StreamExt;
             let mut forwarded = Vec::new();
             while let Some(chunk) = stream.next().await {
-                forwarded.extend(chunk.expect("projected retry success SSE chunk"));
+                forwarded.extend(chunk);
             }
             let text = String::from_utf8(forwarded).unwrap();
             assert!(text.contains("OK after retry"));
@@ -1000,7 +1000,7 @@ async fn responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_co
             use futures_util::StreamExt;
             let mut forwarded = Vec::new();
             while let Some(chunk) = stream.next().await {
-                forwarded.extend(chunk.expect("projected Anthropic provider SSE chunk"));
+                forwarded.extend(chunk);
             }
             let text = String::from_utf8(forwarded).unwrap();
             assert!(

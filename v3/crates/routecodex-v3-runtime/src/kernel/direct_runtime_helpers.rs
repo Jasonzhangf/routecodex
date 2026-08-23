@@ -464,23 +464,38 @@ async fn run_v3_direct_transient_failure_policy<R: V3ProviderAvailabilityReader>
     )
     .map_err(|error| runtime_source("V3Error05RecoveryAdmissionWitness", error))?;
     if retries_done < V3_TRANSIENT_RETRY_BUDGET {
-        // 前 2 次失败：静默重试同一 provider，不写 health、不产生事件。
+        // 瞬态失败仍保持 request-local health-neutral，但不能静默：
+        // 每一次重试都通过 typed observability/error consumer 发布，客户端
+        // 仍不会收到 provider frame 或 provider error。
         state
             .same_candidate_retries
             .insert(failed_key.clone(), retries_done + 1);
         state.trace.push("V3DirectTransientRetrySame");
         let decision = (context.run_error)(
-            source,
+            source.clone(),
             provider_scope,
             remaining,
             false,
             true,
             Some(recovery),
         );
+        let health_record = build_v3_transient_failure_record(
+            &failed_key,
+            (retries_done + 1) as u32,
+            Some(&source.message),
+        );
         return Ok(V3DirectProviderFailurePolicyResult {
             decision,
             retry_selected: Some(Box::new(selected.clone())),
-            event: None,
+            event: Some(build_v3_direct_provider_failure_observation(
+                selected,
+                status,
+                &source,
+                &health_record,
+                "policy_retry_same",
+                Some(failed_key),
+                Some(1),
+            )),
             retryable_transient: true,
         });
     }
@@ -653,7 +668,7 @@ fn v3_direct_client_transport_label(payload: &V3Resp15ClientPayload) -> &str {
     match &payload.body {
         V3ClientBody::Json(_) => "json",
         V3ClientBody::Bytes(_) => "bytes",
-        V3ClientBody::Sse(_) => "sse",
+        V3ClientBody::CommittedSse(_) => "sse",
     }
 }
 

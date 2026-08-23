@@ -85,7 +85,10 @@ fn compaction_is_a_typed_route_signal() {
     };
     let classification = classify_route(&facts);
     assert_eq!(classification.route_name, "compact");
-    assert_eq!(classification.candidates.first().map(String::as_str), Some("compact"));
+    assert_eq!(
+        classification.candidates.first().map(String::as_str),
+        Some("compact")
+    );
 }
 
 #[test]
@@ -369,7 +372,10 @@ fn request_user_input_current_turn_routes_to_thinking_but_unknown_tool_stays_too
     });
     let thinking_signals = build_v3_current_turn_route_facts(&thinking_request);
     assert_eq!(
-        thinking_signals.last_assistant_tool.as_ref().map(|tool| tool.category.as_str()),
+        thinking_signals
+            .last_assistant_tool
+            .as_ref()
+            .map(|tool| tool.category.as_str()),
         Some("thinking")
     );
     assert_eq!(
@@ -390,7 +396,10 @@ fn request_user_input_current_turn_routes_to_thinking_but_unknown_tool_stays_too
     });
     let tools_signals = build_v3_current_turn_route_facts(&tools_request);
     assert_eq!(
-        tools_signals.last_assistant_tool.as_ref().map(|tool| tool.category.as_str()),
+        tools_signals
+            .last_assistant_tool
+            .as_ref()
+            .map(|tool| tool.category.as_str()),
         Some("other")
     );
     assert_eq!(

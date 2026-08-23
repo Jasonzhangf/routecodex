@@ -479,8 +479,30 @@ impl V3ManagedLifecycle {
         validate_auth_handles(&manifest)?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
+        if let Ok(status) = self.query_live(&declaration).await {
+            if matches!(
+                status.state,
+                V3ManagedRunState::Starting | V3ManagedRunState::Running
+            ) {
+                return Ok(());
+            }
+        }
         {
-            let _lock = acquire_operation_lock(&instance_dir, "start")?;
+            let _lock = match acquire_operation_lock(&instance_dir, "start") {
+                Ok(lock) => lock,
+                Err(error @ V3LifecycleError::OperationLocked(_)) => {
+                    if let Ok(status) = self.query_live(&declaration).await {
+                        if matches!(
+                            status.state,
+                            V3ManagedRunState::Starting | V3ManagedRunState::Running
+                        ) {
+                            return Ok(());
+                        }
+                    }
+                    return Err(error);
+                }
+                Err(error) => return Err(error),
+            };
             release_listener_set_for_start(&self.state_root, &instance_dir, &declaration).await?;
             reap_inactive_runtime_files(&instance_dir, &declaration)?;
             write_json_atomic(&instance_dir.join("instance.json"), &declaration)?;

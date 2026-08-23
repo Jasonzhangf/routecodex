@@ -1,4 +1,13 @@
 use super::*;
+
+#[test]
+fn provider_default_http_read_timeout_matches_fifteen_minute_local_budget() {
+    assert_eq!(
+        super::V3_PROVIDER_HTTP_READ_TIMEOUT_SECS,
+        900,
+        "the provider client read timeout must not truncate a configured 15-minute local cold start"
+    );
+}
 use crate::wire::{
     build_v3_provider_12_responses_compact_wire_payload,
     build_v3_provider_12_responses_wire_payload, V3ProviderAuthSecretHandle,

@@ -1110,7 +1110,7 @@ fn openai_chat_function_tool_call_with_custom_declared_name_round_trips_as_custo
                         "type": "function",
                         "function": {
                             "name": "apply_patch",
-                            "arguments": "{\"patch\":\"*** Begin Patch\\n*** End Patch\"}"
+                            "arguments": "{\"input\":\"*** Begin Patch\\n*** End Patch\",\"reason\":\"修改目标文件\",\"goal_alignment_confidence\":100,\"model_id\":\"gpt-test\"}"
                         }
                     }]
                 },
@@ -1128,7 +1128,7 @@ fn openai_chat_function_tool_call_with_custom_declared_name_round_trips_as_custo
     assert_eq!(response["output"][0]["name"], "apply_patch");
     assert_eq!(
         response["output"][0]["input"],
-        "{\"patch\":\"*** Begin Patch\\n*** End Patch\"}"
+        "*** Begin Patch\n*** End Patch"
     );
 }
 

@@ -44,7 +44,7 @@ fn non_target_runtime_failure_remains_runtime_error() {
         V3ResponsesRelayRuntimeError::StaticRegistry("registry unavailable".to_string()),
     );
 
-    assert_eq!(output.status, 500);
+    assert_eq!(output.status, 598);
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => panic!("runtime failure must project as JSON"),
@@ -105,7 +105,7 @@ fn provider_response_projection_failure_is_not_client_invalid_request() {
         ),
     );
 
-    assert_eq!(output.status, 500);
+    assert_eq!(output.status, 598);
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => {
@@ -124,7 +124,7 @@ fn internal_web_search_canonicalization_failure_is_not_client_invalid_request() 
         ),
     );
 
-    assert_eq!(output.status, 500);
+    assert_eq!(output.status, 598);
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => {
@@ -414,15 +414,60 @@ async fn runtime_provider_snap_captures_sse_response_without_consuming_stream() 
 }
 
 async fn collect_projected_sse(
-    stream: V3ResponsesRelayClientStream,
+    stream: Result<V3ResponsesRelayClientStream, String>,
 ) -> Vec<Result<String, String>> {
+    let stream = stream.expect("Responses client projection must be valid before stream creation");
     stream
-        .map(|item| {
-            item.map_err(|error| error.message)
-                .and_then(|bytes| String::from_utf8(bytes).map_err(|error| error.to_string()))
-        })
+        .map(|item| String::from_utf8(item).map_err(|error| error.to_string()))
         .collect()
         .await
+}
+
+#[tokio::test]
+async fn client_sse_projects_toolreason_as_one_reasoning_item_lifecycle() {
+    let projected = collect_projected_sse(
+        build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
+            "id": "resp_toolreason_projection",
+            "status": "requires_action",
+            "output": [
+                {
+                    "id": "rcc_reason_tool_call",
+                    "type": "reasoning",
+                    "status": "completed",
+                    "summary": [{"type": "summary_text", "text": "调用工具 cat：读取目标文件"}]
+                },
+                {
+                    "id": "fc_1",
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "cat",
+                    "arguments": "{\"cmd\":\"cat README.md\"}"
+                }
+            ]
+        })),
+    )
+    .await
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .expect("toolreason projection must not fail");
+    let text = projected.join("\n");
+    assert_eq!(text.matches("event: response.output_item.added").count(), 2);
+    assert_eq!(
+        text.matches("event: response.reasoning_summary_text.delta")
+            .count(),
+        1
+    );
+    assert!(text.contains("event: response.reasoning_summary_part.added"));
+    assert!(text.contains("event: response.reasoning_summary_text.done"));
+    assert!(text.contains("event: response.reasoning_summary_part.done"));
+    assert!(text.contains("调用工具 cat：读取目标文件"));
+    assert!(!text.contains("<toolreason") && !text.contains("</toolreason>"));
+    let reasoning_added = text.find("event: response.output_item.added").unwrap();
+    let reasoning_done = text.find("event: response.output_item.done").unwrap();
+    let function_added = text
+        .find("\"type\":\"function_call\"")
+        .expect("function call must remain in client projection");
+    assert!(reasoning_added < reasoning_done && reasoning_done < function_added);
 }
 
 #[tokio::test]
@@ -592,22 +637,19 @@ async fn provider_sse_requires_action_without_completed_is_terminal_missing() {
 
 #[tokio::test]
 async fn client_sse_function_call_projection_missing_call_id_fails_explicitly() {
-    let projected = collect_projected_sse(
-        build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
-            "id": "resp_bad_call_id",
-            "status": "requires_action",
-            "output": [{
-                "type": "function_call",
-                "name": "exec_command",
-                "arguments": "{\"cmd\":\"pwd\"}"
-            }]
-        })),
-    )
-    .await;
-    let error = projected
-        .into_iter()
-        .find_map(Result::err)
-        .expect("missing call_id must fail before terminal success");
+    let result = build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
+        "id": "resp_bad_call_id",
+        "status": "requires_action",
+        "output": [{
+            "type": "function_call",
+            "name": "exec_command",
+            "arguments": "{\"cmd\":\"pwd\"}"
+        }]
+    }));
+    let error = match result {
+        Ok(_) => panic!("missing call_id must fail before stream creation"),
+        Err(error) => error,
+    };
 
     assert!(
         error.contains("missing call_id"),
@@ -616,10 +658,10 @@ async fn client_sse_function_call_projection_missing_call_id_fails_explicitly() 
 }
 
 #[tokio::test]
-async fn client_sse_function_call_projection_missing_arguments_fails_explicitly() {
+async fn client_sse_function_call_projection_preserves_missing_arguments_without_502() {
     let projected = collect_projected_sse(
         build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
-            "id": "resp_bad_arguments",
+            "id": "resp_missing_arguments",
             "status": "requires_action",
             "output": [{
                 "type": "function_call",
@@ -629,15 +671,40 @@ async fn client_sse_function_call_projection_missing_arguments_fails_explicitly(
         })),
     )
     .await;
-    let error = projected
+    let frames = projected
         .into_iter()
-        .find_map(Result::err)
-        .expect("missing arguments must fail before terminal success");
+        .collect::<Result<Vec<_>, _>>()
+        .expect("missing arguments must not turn a native tool call into 502");
+    let text = frames.join("\n");
+    assert!(text.contains("\"call_id\":\"call_missing_args\""));
+    assert!(text.contains("\"arguments\":\"\""));
+    assert!(text.contains("response.function_call_arguments.done"));
+    assert!(text.contains("response.completed"));
+}
 
-    assert!(
-        error.contains("missing string arguments"),
-        "missing function_call arguments must be an explicit SSE projection error: {error}"
-    );
+#[tokio::test]
+async fn client_sse_function_call_projection_serializes_structured_arguments_without_changing_values(
+) {
+    let projected = collect_projected_sse(
+        build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
+            "id": "resp_structured_arguments",
+            "status": "requires_action",
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_structured_args",
+                "name": "exec_command",
+                "arguments": {"cmd": "pwd", "path": "."}
+            }]
+        })),
+    )
+    .await;
+    let frames = projected
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("structured arguments must remain a valid client tool call");
+    let text = frames.join("\n");
+    assert!(text.contains("\\\"cmd\\\":\\\"pwd\\\""));
+    assert!(text.contains("\\\"path\\\":\\\".\\\""));
 }
 
 #[tokio::test]

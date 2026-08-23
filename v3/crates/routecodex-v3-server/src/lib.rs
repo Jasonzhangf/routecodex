@@ -7,14 +7,13 @@ mod live_snapshot;
 mod metadata_center;
 mod models_catalog;
 mod request_id;
-mod restart_handoff;
 mod responses_direct_server_outcome;
+mod restart_handoff;
 mod scope_metadata;
 mod session_admission;
 mod websocket;
 mod webui_observability;
 
-use webui_observability::V3WebuiObservability;
 use compaction_request::classify_v3_request_purpose;
 use console::*;
 use endpoint_handlers::{
@@ -34,12 +33,11 @@ use request_id::{
     format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
     V3RequestIdCounter,
 };
-pub(crate) use scope_metadata::*;
 pub use restart_handoff::*;
 pub(crate) use routecodex_v3_runtime::V3RequestPurpose;
-use websocket::{
-    responses_websocket_endpoint, responses_websocket_session, send_responses_websocket_sse_stream,
-};
+pub(crate) use scope_metadata::*;
+use websocket::{responses_websocket_endpoint, responses_websocket_session};
+use webui_observability::V3WebuiObservability;
 
 use axum::body::{to_bytes, Body};
 use axum::extract::{
@@ -66,12 +64,11 @@ use routecodex_v3_debug::{
 };
 use routecodex_v3_error::{
     is_v3_client_disconnect_source, project_v3_http_boundary_error,
-    project_v3_post_commit_sse_source,
-    project_v3_server_invalid_request, project_v3_server_runtime_failure,
-    project_v3_server_websocket_error, raise_v3_debug_artifact_failure,
-    raise_v3_runtime_observability_contract_failure, raise_v3_sse_client_disconnect,
-    raise_v3_sse_provider_failure, V3Error01SourceRaised, V3HttpBoundaryErrorKind,
-    V3ProviderFailureSessionScope,
+    project_v3_post_commit_sse_source, project_v3_server_invalid_request,
+    project_v3_server_runtime_failure, project_v3_server_websocket_error,
+    raise_v3_debug_artifact_failure, raise_v3_runtime_observability_contract_failure,
+    raise_v3_sse_client_disconnect, raise_v3_sse_provider_failure, V3Error01SourceRaised,
+    V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
     build_v3_provider_global_probe_target, build_v3_server_03_http_request_raw,
@@ -86,6 +83,7 @@ use routecodex_v3_runtime::{
     execute_v3_gemini_relay_runtime_with_default_transport_provider_health,
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health,
+    execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
@@ -97,29 +95,28 @@ use routecodex_v3_runtime::{
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target,
-    probe_v3_provider_global_target, project_v3_anthropic_relay_runtime_failure,
-    project_v3_debug_failure, project_v3_gemini_relay_runtime_failure,
-    project_v3_openai_chat_relay_runtime_failure,
+    plan_v3_responses_protocol_execution_with_provider_health, probe_v3_provider_global_target,
+    project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
+    project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
     project_v3_protocol_execution_plan_failure,
     project_v3_responses_previous_response_owner_resolution_error,
     project_v3_responses_relay_runtime_failure, project_v3_virtual_router_dry_run,
     project_v3_virtual_router_status, register_responses_direct_hooks,
-    plan_v3_responses_protocol_execution_with_provider_health,
     resolve_v3_responses_previous_response_owner_execution_mode_at_req03,
     V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
-    V3ChatDirectCodec, V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput,
-    V3FoundationRuntimeOutput, V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput,
-    V3GeminiRelayRuntimeOutput, V3OpenAiChatClientStream, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
-    V3Resp15ClientPayload,
-    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlState,
-    V3Execution11ProtocolDecisionMode, V3ResponsesProtocolExecutionPlan,
-    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
-    V3ResponsesRelayDryRunOutcome, V3ResponsesRelayLocalContinuationScope,
-    V3ResponsesRelayLocalContinuationState, V3ResponsesRelayLocalStoplessControlInput,
-    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
-    V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
+    V3ChatDirectCodec, V3ClientBody, V3CommittedClientSseStream, V3CommittedSseTerminal,
+    V3Execution11ProtocolDecisionMode, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
+    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
+    V3HubExecutionMode, V3OpenAiChatClientStream, V3OpenAiChatCommittedStream,
+    V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
+    V3RelayProviderSnapshots, V3Resp15ClientPayload, V3ResponsesDirectContinuationScope,
+    V3ResponsesDirectContinuationState, V3ResponsesDirectRuntimeSharedState,
+    V3ResponsesDirectStoplessControlState, V3ResponsesProtocolExecutionPlan,
+    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
+    V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
+    V3ResponsesRelayLocalStoplessControlInput, V3ResponsesRelayProviderHealthHandle,
+    V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
+    V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
     V3ResponsesRelayStoplessControlState, V3RuntimeObservability,
     V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
@@ -206,7 +203,7 @@ pub struct V3Server16HttpFrame {
 pub enum V3Server16Body {
     Json(serde_json::Value),
     Bytes(Vec<u8>),
-    Sse(V3ClientSseStream),
+    CommittedSse(V3CommittedClientSseStream),
 }
 
 impl fmt::Debug for V3Server16Body {
@@ -217,7 +214,7 @@ impl fmt::Debug for V3Server16Body {
                 .debug_struct("Bytes")
                 .field("byte_len", &bytes.len())
                 .finish(),
-            Self::Sse(_) => formatter.write_str("Sse(<server-event-stream>)"),
+            Self::CommittedSse(_) => formatter.write_str("CommittedSse(<runtime-sealed-replay>)"),
         }
     }
 }
@@ -364,7 +361,10 @@ pub async fn spawn_v3_server_aggregate(
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
     let webui_observability = V3WebuiObservability::new();
     let request_activity_gate = Arc::new(V3ServerRequestActivityGate::default());
-    let front_transport_broker = V3FrontTransportBroker::new(0);
+    // Generation zero is reserved for an uninitialized handoff carrier. A
+    // listener may accept requests as soon as it binds, so the normal startup
+    // broker must already carry a valid positive runtime generation.
+    let front_transport_broker = V3FrontTransportBroker::new(1);
     let mut listeners = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
@@ -452,18 +452,23 @@ pub async fn spawn_v3_server_aggregate(
                 return;
             }
         };
-        let startup_result = probe_health.run_due_global_subscription_probes(startup_now_ms, move |provider_id, auth_alias, model_id| {
-            let startup_manifest = Arc::clone(&startup_manifest);
-            async move {
-                let target = build_v3_provider_global_probe_target(
-                    &startup_manifest,
-                    &provider_id,
-                    auth_alias.as_deref(),
-                    model_id.as_deref(),
-                )?;
-                probe_v3_provider_global_target(target).await
-            }
-        }).await;
+        let startup_result = probe_health
+            .run_due_global_subscription_probes(
+                startup_now_ms,
+                move |provider_id, auth_alias, model_id| {
+                    let startup_manifest = Arc::clone(&startup_manifest);
+                    async move {
+                        let target = build_v3_provider_global_probe_target(
+                            &startup_manifest,
+                            &provider_id,
+                            auth_alias.as_deref(),
+                            model_id.as_deref(),
+                        )?;
+                        probe_v3_provider_global_target(target).await
+                    }
+                },
+            )
+            .await;
         if let Err(error) = startup_result {
             eprintln!("provider persistent startup probe cycle failed: {error}");
         }
@@ -888,7 +893,7 @@ async fn pending_endpoint(
                     error_chain: &frame.error_chain,
                     body: match &frame.body {
                         V3Server16Body::Json(value) => Some(value),
-                        V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+                        V3Server16Body::Bytes(_) | V3Server16Body::CommittedSse(_) => None,
                     },
                     project_path: resolve_v3_console_project_path(&request_headers, &Value::Null)
                         .as_deref(),
@@ -908,7 +913,8 @@ async fn pending_endpoint(
         }
     };
     let admission_permit = if entry_protocol == "responses" {
-        match admit_v3_responses_session_after_json_parse(&state, &path, &request_headers, &payload).await
+        match admit_v3_responses_session_after_json_parse(&state, &path, &request_headers, &payload)
+            .await
         {
             Ok(permit) => permit,
             Err(response) => return response,
@@ -1031,11 +1037,16 @@ fn v3_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool {
     payload.get("stream").and_then(Value::as_bool) == Some(true) || request_accepts_sse(headers)
 }
 
+fn v3_entry_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool {
+    payload.get("stream").and_then(Value::as_bool) == Some(true) || request_accepts_sse(headers)
+}
+
 fn build_v3_provider_failure_session_scope_for_request(
     server: &V3ServerManifest,
     headers: &HeaderMap,
+    payload: &Value,
 ) -> Option<V3ProviderFailureSessionScope> {
-    provider_failure_session_id_from_request_headers(headers)
+    provider_failure_session_id_from_request(headers, payload)
         .ok()
         .flatten()
         .and_then(|session_id| {
@@ -1045,17 +1056,20 @@ fn build_v3_provider_failure_session_scope_for_request(
 
 /// Get the provider-failure control scope without changing the client request.
 ///
-/// A client session header is optional request data. It is useful when present,
-/// but it is not a prerequisite for an ordinary request and must never be
-/// synthesized into headers or payload. Requests without one use their already
-/// allocated internal request id as a request-local control-scope key.
+/// A client session header or registered body session is optional request data.
+/// It is useful when present, but it is not a prerequisite for an ordinary
+/// request. Requests without one use their already allocated internal request
+/// id as a request-local control-scope key.
 fn get_failure_session_scope(
     server: &V3ServerManifest,
     headers: &HeaderMap,
+    payload: &Value,
     _entry_protocol: &str,
     request_id: &str,
 ) -> Result<V3ProviderFailureSessionScope, String> {
-    if let Some(scope) = build_v3_provider_failure_session_scope_for_request(server, headers) {
+    if let Some(scope) =
+        build_v3_provider_failure_session_scope_for_request(server, headers, payload)
+    {
         return Ok(scope);
     }
     V3ProviderFailureSessionScope::new(
@@ -1065,18 +1079,32 @@ fn get_failure_session_scope(
     )
 }
 
-fn provider_failure_session_id_from_request_headers(
+fn provider_failure_session_id_from_request(
     headers: &HeaderMap,
+    payload: &Value,
 ) -> Result<Option<String>, String> {
-    first_header_text(
-        headers,
-        &[
-            "session-id",
-            "session_id",
-            "x-session-id",
-            "x-rcc-session-id",
-        ],
-    )
+    let header_session_id = responses_control_scope_headers(headers)
+        .map(|(session_id, _conversation_id)| session_id)?;
+    if header_session_id.is_some() {
+        return Ok(header_session_id);
+    }
+    let body_session_id = read_first_scope_value(Some(payload), BODY_SESSION_PATHS);
+    if body_session_id.is_some() {
+        return Ok(body_session_id);
+    }
+    let turn_metadata = payload
+        .get("client_metadata")
+        .and_then(|metadata| metadata.get("x-codex-turn-metadata"))
+        .and_then(Value::as_str)
+        .map(serde_json::from_str::<Value>)
+        .transpose()
+        .map_err(|error| {
+            format!("client_metadata.x-codex-turn-metadata is not valid JSON: {error}")
+        })?;
+    Ok(read_first_scope_value(
+        turn_metadata.as_ref(),
+        TURN_METADATA_SESSION_PATHS,
+    ))
 }
 
 #[cfg(test)]

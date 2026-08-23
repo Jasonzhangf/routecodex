@@ -10,14 +10,15 @@ use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw as build_v3_server_03_http_request_raw_with_scope,
     execute_v3_responses_direct_runtime_kernel_with_continuation,
     execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control,
-    register_responses_direct_hooks, V3ClientBody, V3ResponsesDirectContinuationScope,
-    V3ResponsesDirectContinuationState, V3ResponsesDirectStoplessControlScope,
-    V3ResponsesDirectStoplessControlState, V3RuntimeUsageSummary, V3ServerToolCenterWriteOrigin,
-    V3StoplessCenterState, V3StoplessCenterSteering,
+    register_responses_direct_hooks, V3ClientBody, V3CommittedClientSseStream,
+    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3ResponsesDirectStoplessControlScope, V3ResponsesDirectStoplessControlState,
+    V3RuntimeUsageSummary, V3ServerToolCenterWriteOrigin, V3StoplessCenterState,
+    V3StoplessCenterSteering,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 fn build_v3_server_03_http_request_raw(
     server_id: String,
@@ -32,8 +33,10 @@ fn build_v3_server_03_http_request_raw(
         "test-group",
         format!("test-session:{request_id}"),
     )
-    .expect("test provider failure session scope");
-    build_v3_server_03_http_request_raw_with_scope(
+    .expect("test provider failure session scope")
+    .with_transport_handoff_scope("test-pipeline", 5555, 1)
+    .expect("test provider transport handoff scope");
+    let mut raw = build_v3_server_03_http_request_raw_with_scope(
         server_id,
         failure_session_scope,
         request_id,
@@ -41,7 +44,10 @@ fn build_v3_server_03_http_request_raw(
         method,
         path,
         body,
-    )
+    );
+    raw.port = Some(5555);
+    raw.pipeline_id = Some("test-pipeline".to_string());
+    raw
 }
 
 #[derive(Default)]
@@ -225,7 +231,10 @@ async fn direct_sse_completed_without_summary_passes_through_without_synthetic_s
     )
     .await;
     assert_eq!(first.client_payload.status, 200, "{:#?}", first);
-    assert!(matches!(&first.client_payload.body, V3ClientBody::Sse(_)));
+    assert!(matches!(
+        &first.client_payload.body,
+        V3ClientBody::CommittedSse(_)
+    ));
     assert_eq!(
         state.len().unwrap(),
         0,
@@ -636,7 +645,10 @@ async fn direct_sse_stopless_metadata_center_projects_terminal_frames_without_ss
     )
     .await;
     assert_eq!(first.client_payload.status, 200, "{first:#?}");
-    assert!(matches!(&first.client_payload.body, V3ClientBody::Sse(_)));
+    assert!(matches!(
+        &first.client_payload.body,
+        V3ClientBody::CommittedSse(_)
+    ));
     let first_body = collect_sse_body_text(first.client_payload.body).await;
     assert!(first_body.contains("response.completed"), "{first_body}");
     assert!(first_body.contains("response.done"), "{first_body}");
@@ -944,20 +956,20 @@ struct PendingThenSseStreamFailureTransport {
 }
 
 #[derive(Default)]
-struct PendingThenPostCommitSseFailureThenSuccessTransport {
+struct PendingThenFailedSseAttemptThenSuccessTransport {
     requests: Mutex<Vec<Value>>,
 }
 
-struct DirectPostCommitMalformedSseTransport;
+struct DirectMalformedSseAttemptTransport;
 
-struct DirectPostCommitFailedEventTransport;
+struct DirectFailedTerminalSseAttemptTransport;
 
 struct DirectTerminalSseTransport;
 
 struct DirectCompletedJsonTransport;
 
 #[async_trait]
-impl ResponsesTransport for DirectPostCommitMalformedSseTransport {
+impl ResponsesTransport for DirectMalformedSseAttemptTransport {
     async fn send(
         &self,
         request: V3Transport13ResponsesHttpRequest,
@@ -973,7 +985,7 @@ impl ResponsesTransport for DirectPostCommitMalformedSseTransport {
             Box::pin(stream::iter(vec![
                 Ok(concat!(
                     "event: response.output_text.delta\n",
-                    "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_post_commit\",\"delta\":\"partial\"}\n\n",
+                    "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_failed_attempt_malformed\",\"delta\":\"partial\"}\n\n",
                 )
                 .as_bytes()
                 .to_vec()),
@@ -984,7 +996,7 @@ impl ResponsesTransport for DirectPostCommitMalformedSseTransport {
 }
 
 #[async_trait]
-impl ResponsesTransport for DirectPostCommitFailedEventTransport {
+impl ResponsesTransport for DirectFailedTerminalSseAttemptTransport {
     async fn send(
         &self,
         request: V3Transport13ResponsesHttpRequest,
@@ -1000,13 +1012,13 @@ impl ResponsesTransport for DirectPostCommitFailedEventTransport {
             Box::pin(stream::iter(vec![
                 Ok(concat!(
                     "event: response.output_text.delta\n",
-                    "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_post_commit_failed\",\"delta\":\"partial\"}\n\n",
+                    "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_failed_attempt_event\",\"delta\":\"partial\"}\n\n",
                 )
                 .as_bytes()
                 .to_vec()),
                 Ok(concat!(
                     "event: response.failed\n",
-                    "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_post_commit_failed\",\"status\":\"failed\",\"error\":{\"code\":\"HTTP_503\",\"message\":\"provider failed after delta\"}}}\n\n",
+                    "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed_attempt_event\",\"status\":\"failed\",\"error\":{\"code\":\"HTTP_503\",\"message\":\"provider failed after delta\"}}}\n\n",
                 )
                 .as_bytes()
                 .to_vec()),
@@ -1025,7 +1037,7 @@ impl ResponsesTransport for DirectCompletedJsonTransport {
             &request,
             200,
             json!({
-                "id":"resp_after_post_commit_failure",
+                "id":"resp_after_failed_attempt",
                 "status":"completed",
                 "output":[{"type":"output_text","text":"recovered"}]
             }),
@@ -1116,7 +1128,7 @@ impl ResponsesTransport for PendingThenSseStreamFailureTransport {
 }
 
 #[async_trait]
-impl ResponsesTransport for PendingThenPostCommitSseFailureThenSuccessTransport {
+impl ResponsesTransport for PendingThenFailedSseAttemptThenSuccessTransport {
     async fn send(
         &self,
         request: V3Transport13ResponsesHttpRequest,
@@ -1128,7 +1140,7 @@ impl ResponsesTransport for PendingThenPostCommitSseFailureThenSuccessTransport 
                 &request,
                 200,
                 json!({
-                    "id":"resp_pinned_post_commit",
+                    "id":"resp_pinned_attempt",
                     "status":"requires_action",
                     "output":[{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}]
                 }),
@@ -1144,13 +1156,13 @@ impl ResponsesTransport for PendingThenPostCommitSseFailureThenSuccessTransport 
                 Box::pin(stream::iter(vec![
                     Ok(concat!(
                         "event: response.output_text.delta\n",
-                        "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_pinned_post_commit\",\"delta\":\"partial\"}\n\n",
+                        "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_pinned_attempt\",\"delta\":\"partial\"}\n\n",
                     )
                     .as_bytes()
                     .to_vec()),
                     Ok(concat!(
                         "event: response.failed\n",
-                        "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_pinned_post_commit\",\"status\":\"failed\",\"error\":{\"code\":\"HTTP_502\",\"message\":\"pinned provider failed after delta\"}}}\n\n",
+                        "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_pinned_attempt\",\"status\":\"failed\",\"error\":{\"code\":\"HTTP_502\",\"message\":\"pinned provider failed after delta\"}}}\n\n",
                     )
                     .as_bytes()
                     .to_vec()),
@@ -1555,22 +1567,15 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
     .await;
     assert_eq!(first.client_payload.status, 200);
     assert_eq!(count(&first.node_trace, "V3Router07OpaqueTargetHitOnce"), 1);
-    assert_eq!(state.len().unwrap(), 0);
-    let V3ClientBody::Sse(mut first_stream) = first.client_payload.body else {
-        panic!("SSE response must remain stream")
-    };
-    let first_chunk = first_stream
-        .next()
-        .await
-        .expect("first SSE chunk must be forwarded before provider terminal")
-        .expect("first SSE chunk must be successful");
-    let first_chunk_text = String::from_utf8(first_chunk).unwrap();
-    assert!(first_chunk_text.contains("resp_sse_1"));
-    assert!(!first_chunk_text.contains("[DONE]"));
-    assert_eq!(state.len().unwrap(), 0);
-    let first_remainder = collect_sse_text(first_stream).await;
-    assert!(first_remainder.contains("call_sse_1"));
-    assert!(first_remainder.contains("[DONE]"));
+    assert_eq!(
+        state.len().unwrap(),
+        1,
+        "Runtime must validate the complete provider attempt before returning the committed carrier"
+    );
+    let first_body = collect_sse_body_text(first.client_payload.body).await;
+    assert!(first_body.contains("resp_sse_1"));
+    assert!(first_body.contains("call_sse_1"));
+    assert!(first_body.contains("[DONE]"));
     assert_eq!(state.len().unwrap(), 1);
 
     let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
@@ -1897,20 +1902,15 @@ async fn http_only_sse_function_call_uses_v2_direct_http_continuation_without_re
     )
     .await;
     assert_eq!(first.client_payload.status, 200);
-    let V3ClientBody::Sse(mut stream) = first.client_payload.body else {
-        panic!("SSE pending response must stay a stream until observed")
-    };
-    let first_chunk = stream
-        .next()
-        .await
-        .expect("response.created chunk must be yielded")
-        .expect("response.created must not be treated as pending continuation");
-    assert!(String::from_utf8(first_chunk)
-        .unwrap()
-        .contains("resp_http_sse_pending"));
-    let remainder = collect_sse_text(stream).await;
-    assert!(remainder.contains("call_http_sse_pending"));
-    assert!(remainder.contains("[DONE]"));
+    assert_eq!(
+        state.len().unwrap(),
+        1,
+        "Runtime must commit continuation truth before exposing the sealed replay"
+    );
+    let first_body = collect_sse_body_text(first.client_payload.body).await;
+    assert!(first_body.contains("resp_http_sse_pending"));
+    assert!(first_body.contains("call_http_sse_pending"));
+    assert!(first_body.contains("[DONE]"));
     assert_eq!(state.len().unwrap(), 1);
 
     let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
@@ -1982,10 +1982,14 @@ async fn continuation_disabled_keeps_repeated_sse_response_ids_out_of_remote_sto
         )
         .await;
         assert_eq!(output.client_payload.status, 200, "{output:?}");
-        let stream_observation = output
-            .stream_observation
-            .clone()
-            .expect("disabled continuation SSE must retain runtime observation");
+        assert!(
+            output
+                .observability
+                .as_ref()
+                .and_then(|observation| observation.timing.as_ref())
+                .is_some(),
+            "Runtime/Broker must finish provider SSE timing before sealing the committed carrier"
+        );
         let body = collect_sse_body_text(output.client_payload.body).await;
         assert!(body.contains("resp_http_sse_pending"));
         assert!(body.contains("call_http_sse_pending"));
@@ -1995,24 +1999,20 @@ async fn continuation_disabled_keeps_repeated_sse_response_ids_out_of_remote_sto
             0,
             "disabled continuation must not observe or commit provider response IDs"
         );
-        assert!(
-            stream_observation.snapshot().unwrap().timing.is_some(),
-            "disabled continuation must not disable provider SSE timing closeout"
-        );
     }
 }
 
 async fn collect_sse_body_text(body: V3ClientBody) -> String {
-    let V3ClientBody::Sse(stream) = body else {
-        panic!("SSE response must remain stream")
+    let V3ClientBody::CommittedSse(stream) = body else {
+        panic!("successful SSE response must use the Runtime-sealed committed carrier")
     };
-    collect_sse_text(stream).await
+    collect_committed_sse_text(stream).await
 }
 
-async fn collect_sse_text(mut stream: routecodex_v3_runtime::V3ClientSseStream) -> String {
+async fn collect_committed_sse_text(mut stream: V3CommittedClientSseStream) -> String {
     let mut bytes = Vec::new();
     while let Some(chunk) = stream.next().await {
-        bytes.extend_from_slice(&chunk.expect("SSE stream chunk must be successful"));
+        bytes.extend_from_slice(&chunk);
     }
     String::from_utf8(bytes).expect("controlled SSE must remain UTF-8")
 }
@@ -2230,45 +2230,39 @@ async fn duplicate_commit_and_already_terminal_are_explicit_errors_not_success_t
 }
 
 #[tokio::test]
-async fn direct_post_commit_malformed_sse_records_failure_but_fresh_request_bypasses_recovery() {
-    let routing_group = "direct_post_commit_malformed";
+async fn malformed_sse_attempt_never_commits_partial_bytes_and_fresh_request_remains_independent() {
+    let routing_group = "direct_malformed_attempt";
     let manifest = http_only_manifest_without_remote_continuation_for_group(routing_group);
     let state = V3ResponsesDirectContinuationState::default();
     let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &state,
         &manifest,
         request(
-            "req-direct-post-commit-malformed",
+            "req-direct-malformed-attempt",
             json!({"model":"gpt-5.5","stream":true,"input":"stream"}),
         ),
         scope_for_group(routing_group),
         register_responses_direct_hooks(),
-        &DirectPostCommitMalformedSseTransport,
+        &DirectMalformedSseAttemptTransport,
         1_000,
     )
     .await;
-    assert_eq!(first.client_payload.status, 200, "{first:?}");
-    let V3ClientBody::Sse(mut stream) = first.client_payload.body else {
-        panic!("first provider delta must keep Direct response lazy")
+    assert_error_chain(&first);
+    let V3ClientBody::Json(body) = first.client_payload.body else {
+        panic!("malformed provider event must not escape as committed client SSE")
     };
-    let first_chunk = stream
-        .next()
-        .await
-        .expect("first delta")
-        .expect("first delta must pass through");
-    assert!(String::from_utf8(first_chunk).unwrap().contains("partial"));
-    let error = stream
-        .next()
-        .await
-        .expect("malformed provider event must close the current stream")
-        .expect_err("malformed provider event must not reach the client as success");
-    assert!(error.message.contains("key must be a string"), "{error:?}");
+    let body_text = body.to_string();
+    assert!(body_text.contains("key must be a string"), "{body:?}");
+    assert!(
+        !body_text.contains("partial"),
+        "failed-attempt bytes must remain inside Runtime/Broker: {body_text}"
+    );
 
     let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &state,
         &manifest,
         request(
-            "req-direct-after-post-commit-malformed",
+            "req-direct-after-malformed-attempt",
             json!({"model":"gpt-5.5","input":"next"}),
         ),
         scope_for_group(routing_group),
@@ -2281,40 +2275,38 @@ async fn direct_post_commit_malformed_sse_records_failure_but_fresh_request_bypa
 }
 
 #[tokio::test]
-async fn direct_post_commit_response_failed_records_failure_but_fresh_request_bypasses_recovery() {
-    let routing_group = "direct_post_commit_failed";
+async fn failed_terminal_sse_attempt_never_commits_partial_bytes_and_exhausts_to_error06() {
+    let routing_group = "direct_failed_terminal_attempt";
     let manifest = http_only_manifest_without_remote_continuation_for_group(routing_group);
     let state = V3ResponsesDirectContinuationState::default();
     let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &state,
         &manifest,
         request(
-            "req-direct-post-commit-response-failed",
+            "req-direct-failed-terminal-attempt",
             json!({"model":"gpt-5.5","stream":true,"input":"stream"}),
         ),
         scope_for_group(routing_group),
         register_responses_direct_hooks(),
-        &DirectPostCommitFailedEventTransport,
+        &DirectFailedTerminalSseAttemptTransport,
         1_000,
     )
     .await;
-    let V3ClientBody::Sse(mut stream) = first.client_payload.body else {
-        panic!("first provider delta must keep Direct response lazy")
+    assert_error_chain(&first);
+    let V3ClientBody::Json(body) = first.client_payload.body else {
+        panic!("response.failed must not escape as committed client SSE")
     };
-    assert!(stream.next().await.unwrap().is_ok());
-    let error = stream
-        .next()
-        .await
-        .expect("response.failed must close the current stream")
-        .expect_err("response.failed must not pass through as client success");
-    assert_eq!(error.code, "HTTP_503");
-    assert!(error.message.contains("provider failed after delta"));
+    let body_text = body.to_string();
+    assert!(
+        !body_text.contains("partial"),
+        "failed-attempt bytes must remain inside Runtime/Broker: {body_text}"
+    );
 
     let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &state,
         &manifest,
         request(
-            "req-direct-after-post-commit-response-failed",
+            "req-direct-after-failed-terminal-attempt",
             json!({"model":"gpt-5.5","input":"next"}),
         ),
         scope_for_group(routing_group),
@@ -2327,7 +2319,7 @@ async fn direct_post_commit_response_failed_records_failure_but_fresh_request_by
 }
 
 #[tokio::test]
-async fn direct_terminal_sse_recovery_does_not_block_a_fresh_request() {
+async fn terminal_sse_success_seals_replay_without_blocking_a_fresh_request() {
     let routing_group = "direct_terminal_recovery";
     let manifest = http_only_manifest_without_remote_continuation_for_group(routing_group);
     let state = V3ResponsesDirectContinuationState::default();
@@ -2340,18 +2332,15 @@ async fn direct_terminal_sse_recovery_does_not_block_a_fresh_request() {
         ),
         scope_for_group(routing_group),
         register_responses_direct_hooks(),
-        &DirectPostCommitMalformedSseTransport,
+        &DirectMalformedSseAttemptTransport,
         1_000,
     )
     .await;
-    let V3ClientBody::Sse(failed_stream) = failed.client_payload.body else {
-        panic!("failing Direct response must be lazy")
+    assert_error_chain(&failed);
+    let V3ClientBody::Json(failed_body) = failed.client_payload.body else {
+        panic!("failed provider attempt must project only the terminal Error06 body")
     };
-    assert!(failed_stream
-        .collect::<Vec<_>>()
-        .await
-        .iter()
-        .any(Result::is_err));
+    assert!(!failed_body.to_string().contains("partial"));
 
     let terminal = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &state,
@@ -2366,8 +2355,8 @@ async fn direct_terminal_sse_recovery_does_not_block_a_fresh_request() {
         2_000,
     )
     .await;
-    let V3ClientBody::Sse(terminal_stream) = terminal.client_payload.body else {
-        panic!("terminal Direct response must stay lazy")
+    let V3ClientBody::CommittedSse(terminal_stream) = terminal.client_payload.body else {
+        panic!("validated terminal Direct response must use the committed carrier")
     };
 
     let waiting_manifest = manifest.clone();
@@ -2394,11 +2383,12 @@ async fn direct_terminal_sse_recovery_does_not_block_a_fresh_request() {
     );
     let fresh = waiter.await.expect("fresh Direct request task panicked");
     assert_eq!(fresh.client_payload.status, 200, "{fresh:?}");
-    let terminal_items = terminal_stream.collect::<Vec<_>>().await;
+    let terminal_text = collect_committed_sse_text(terminal_stream).await;
     assert!(
-        terminal_items.iter().all(Result::is_ok),
-        "{terminal_items:?}"
+        terminal_text.contains("response.completed"),
+        "{terminal_text}"
     );
+    assert!(terminal_text.contains("[DONE]"), "{terminal_text}");
 }
 
 #[tokio::test]
@@ -2479,70 +2469,50 @@ async fn sse_stream_error_after_restore_releases_locator_after_terminal_error05(
 }
 
 #[tokio::test]
-async fn pinned_post_commit_stream_failure_preserves_pin_and_gates_the_same_provider_scope() {
-    let routing_group = "direct_pinned_post_commit";
+async fn pinned_failed_sse_attempt_retries_same_exact_provider_without_front_leak() {
+    let routing_group = "direct_pinned_failed_attempt";
     let manifest = manifest_for_group(routing_group);
     let state = V3ResponsesDirectContinuationState::default();
-    let transport = PendingThenPostCommitSseFailureThenSuccessTransport::default();
+    let transport = PendingThenFailedSseAttemptThenSuccessTransport::default();
     prime_pending_with_id(
         &state,
         &manifest,
         scope_for_group(routing_group),
         &transport,
         1_000,
-        "req-pinned-post-commit-prime",
+        "req-pinned-failed-attempt-prime",
     )
     .await;
-    let failed = continuation_turn(
-        &state,
-        &manifest,
-        scope_for_group(routing_group),
-        &transport,
-        "resp_pinned_post_commit",
-        "req-pinned-post-commit-failure",
-        2_000,
-    )
-    .await;
-    let V3ClientBody::Sse(mut stream) = failed.client_payload.body else {
-        panic!("pinned post-commit failure must remain lazy until the failed event")
-    };
-    assert!(stream.next().await.unwrap().is_ok());
-    let error = stream
-        .next()
-        .await
-        .unwrap()
-        .expect_err("expected failed event");
-    assert_eq!(error.code, "HTTP_502");
-    assert_eq!(
-        state.len().unwrap(),
-        1,
-        "post-commit failure must not release the pinned continuation before terminal Error05"
-    );
-
-    let started = Instant::now();
     let recovered = continuation_turn(
         &state,
         &manifest,
         scope_for_group(routing_group),
         &transport,
-        "resp_pinned_post_commit",
-        "req-pinned-post-commit-retry",
-        3_000,
+        "resp_pinned_attempt",
+        "req-pinned-failed-attempt-recovery",
+        2_000,
     )
     .await;
     assert_eq!(recovered.client_payload.status, 200, "{recovered:?}");
-    assert!(started.elapsed() >= Duration::from_millis(1_000));
     assert_eq!(
         count(&recovered.node_trace, "V3Router07OpaqueTargetHitOnce"),
         0,
-        "pinned retry must not re-enter or scan the Router"
+        "pinned provider-attempt retry must not re-enter or scan the Router"
     );
+    assert_eq!(count(&recovered.node_trace, "V3TargetLocalReselected"), 0);
+    let V3ClientBody::Json(body) = recovered.client_payload.body else {
+        panic!("the successful replayable attempt must project the recovered JSON response")
+    };
+    let body_text = body.to_string();
+    assert!(body_text.contains("recovered"), "{body_text}");
+    assert!(
+        !body_text.contains("partial"),
+        "the failed pinned attempt must remain inside Runtime/Broker: {body_text}"
+    );
+    assert_eq!(state.len().unwrap(), 0);
     let requests = transport.requests.lock().unwrap();
     assert_eq!(requests.len(), 3);
-    assert_eq!(
-        requests[2]["previous_response_id"],
-        "resp_pinned_post_commit"
-    );
+    assert_eq!(requests[2]["previous_response_id"], "resp_pinned_attempt");
 }
 
 #[tokio::test]

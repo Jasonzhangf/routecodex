@@ -4,13 +4,14 @@
 // to the former inline `mod tests`.
 
 use super::*;
+use crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request;
 use crate::hub_v1::stopless_injection::{
     inject_v3_stopless_provider_contract, tool_is_reasoning_stop,
 };
 use serde_json::json;
 
 #[test]
-fn req04_tool_thinking_injects_detailed_guidance_into_system_instructions() {
+fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
     let mut payload = json!({
         "tools": [
             {"type":"function","name":"exec","description":"run command","parameters":{"type":"object"}},
@@ -20,18 +21,256 @@ fn req04_tool_thinking_injects_detailed_guidance_into_system_instructions() {
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject");
-    let instructions = payload["instructions"].as_str().unwrap();
-    assert!(instructions.contains("工具调用时必须先输出原因标签"));
-    assert!(instructions.contains("当前工具接口的结构化调用能力"));
-    assert!(instructions.contains("这一轮唯一 JSON"));
-    assert!(instructions.contains("在这一轮第一个结构化工具调用之前"));
-    assert!(instructions.contains("goal_alignment_confidence"));
-    assert!(instructions.contains("{\"reason\":\"真实、简短的直接动机\",\"goal_alignment_confidence\":85}"));
-    assert!(instructions.contains("确认当前工作目录"));
-    assert!(instructions.contains("加号"));
-    assert!(!payload["tools"][0]["description"].as_str().unwrap().contains("toolreason"));
+    let guidance = payload["tools"][0]["description"].as_str().unwrap();
+    assert!(guidance.contains("工具调用协议（只适用于本轮工具调用"));
+    assert!(guidance.contains("工具参数 JSON 对象本层"));
+    assert!(guidance.contains("Anthropic 的 `input`、Responses/Chat 的 `arguments`"));
+    assert!(guidance.contains("goal_alignment_confidence"));
+    assert!(guidance.contains("model_id"));
+    assert!(guidance.contains("不要省略字段，也不要用占位值"));
     assert_eq!(payload["tools"][1]["description"], "internal");
-    assert!(instructions.starts_with("client instructions"));
+}
+
+#[test]
+fn req04_tool_thinking_guidance_reaches_each_external_tool_but_not_internal_tools() {
+    let mut payload = json!({
+        "tools": [
+            {"type":"function","name":"first","description":"first"},
+            {"type":"function","name":"second","description":"second"},
+            {"type":"function","name":"reasoningStop","description":"internal"},
+            {"type":"function","name":"noop","description":"internal"}
+        ]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject");
+    assert!(payload["tools"][0]["description"]
+        .as_str()
+        .unwrap()
+        .contains("工具调用协议"));
+    assert!(payload["tools"][1]["description"]
+        .as_str()
+        .unwrap()
+        .contains("工具调用协议"));
+    assert_eq!(payload["tools"][2]["description"], "internal");
+    assert_eq!(payload["tools"][3]["description"], "internal");
+}
+
+#[test]
+fn req04_tool_thinking_guidance_is_not_injected_twice() {
+    let mut payload = json!({"instructions":"client instructions"});
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject");
+    let once = payload.clone();
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("repeated hook must remain idempotent");
+    assert_eq!(payload, once);
+}
+
+#[test]
+fn req04_tool_thinking_injects_into_canonical_chat_system_message() {
+    let mut payload = json!({
+        "messages": [
+            {"role":"system","content":"Anthropic system instructions"},
+            {"role":"user","content":"Call a tool"}
+        ],
+        "tools": [{"type":"function","name":"exec","description":"run"}]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject into canonical chat system");
+    let content = payload["tools"][0]["description"].as_str().unwrap();
+    assert!(content.contains("工具调用协议（只适用于本轮工具调用"));
+    assert_eq!(payload["messages"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn req04_tool_thinking_does_not_require_system_message() {
+    let mut payload = json!({
+        "messages": [{"role":"user","content":"Call a tool"}],
+        "tools": [{"type":"function","name":"exec","description":"run"}]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("tool-list guidance must not require a system surface");
+    assert!(payload["tools"][0]["description"]
+        .as_str()
+        .unwrap()
+        .contains("工具调用协议"));
+}
+
+#[test]
+fn req04_tool_thinking_injects_only_current_system_message() {
+    let mut payload = json!({
+        "messages": [
+            {"role":"system","content":"historical system"},
+            {"role":"user","content":"historical user"},
+            {"role":"system","content":"current system"},
+            {"role":"user","content":"Call a tool"}
+        ],
+        "tools": [{
+            "type":"function",
+            "name":"exec",
+            "parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}
+        }]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 2, true)
+        .expect("current-turn tool-thinking guidance must inject");
+    assert!(payload["tools"][0]["description"]
+        .as_str()
+        .unwrap()
+        .contains("工具调用协议"));
+    assert!(!payload["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("工具调用协议"));
+    assert!(!payload["messages"][2]["content"]
+        .as_str()
+        .unwrap()
+        .contains("工具调用协议"));
+}
+
+#[test]
+fn req04_tool_thinking_prefers_responses_instructions_over_input_surface() {
+    let mut payload = json!({
+        "instructions": "original instructions",
+        "input": [
+            {"type": "message", "role": "system", "content": [{"type": "input_text", "text": "history system"}]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "old turn"}]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "current turn"}]}
+        ],
+        "tools": [{"type":"function","name":"exec","description":"run"}]
+    });
+    let start = current_v3_tool_thinking_payload_start(&payload).expect("current Responses user");
+    assert_eq!(start, 2);
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, start, true)
+        .expect("enabled tool-thinking must inject");
+    assert_eq!(payload["input"][0]["content"][0]["text"], "history system");
+    assert_eq!(payload["input"].as_array().unwrap().len(), 3);
+    assert!(payload["tools"][0]["description"]
+        .as_str()
+        .unwrap()
+        .contains("工具调用协议"));
+}
+
+#[test]
+fn req04_tool_thinking_does_not_require_responses_instructions() {
+    let mut payload = json!({
+        "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "current turn"}]}
+        ],
+        "tools": [{"type":"function","name":"exec","description":"run"}]
+    });
+    let start = current_v3_tool_thinking_payload_start(&payload).expect("current Responses user");
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, start, true)
+        .expect("tool-list guidance must not require Responses instructions");
+}
+
+#[test]
+fn req04_tool_thinking_reaches_anthropic_wire_system_field() {
+    let mut payload = json!({
+        "model": "glm-5.2",
+        "messages": [
+            {"role":"system","content":"Anthropic system instructions"},
+            {"role":"user","content":"Call a tool"}
+        ],
+        "tools": [{"name":"pwd","description":"show cwd","input_schema":{"type":"object"}}]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject before Anthropic encoding");
+
+    let wire = encode_v3_responses_semantic_as_anthropic_request(payload)
+        .expect("canonical Chat payload must encode as Anthropic request");
+    let tool_description = wire["tools"][0]["description"].to_string();
+    assert!(
+        tool_description.contains("工具调用协议（只适用于本轮工具调用"),
+        "wire: {wire}"
+    );
+    assert!(
+        tool_description.contains("goal_alignment_confidence"),
+        "wire: {wire}"
+    );
+    assert!(tool_description.contains("model_id"), "wire: {wire}");
+    assert!(!wire.to_string().contains("<toolreason>"));
+}
+
+#[test]
+fn req04_tool_thinking_injects_anthropic_tool_list_and_parameter_schema() {
+    let mut payload = json!({
+        "model": "MiniMax-M3",
+        "system": "client system",
+        "messages": [{"role":"user","content":"Call a tool"}],
+        "tools": [{"name":"probe_tool","input_schema":{"type":"object"}}]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject into Anthropic system");
+    assert!(payload["tools"][0]["description"]
+        .as_str()
+        .unwrap()
+        .contains("goal_alignment_confidence"));
+    assert!(payload["tools"][0]["description"]
+        .as_str()
+        .unwrap()
+        .contains("model_id"));
+    assert!(payload["tools"][0]["input_schema"]["properties"]["reason"].is_object());
+    assert!(
+        payload["tools"][0]["input_schema"]["properties"]["goal_alignment_confidence"].is_object()
+    );
+    assert!(payload["tools"][0]["input_schema"]["properties"]["model_id"].is_object());
+    for field in ["reason", "goal_alignment_confidence", "model_id"] {
+        assert!(payload["tools"][0]["input_schema"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value.as_str() == Some(field)));
+    }
+}
+
+#[test]
+fn req04_tool_thinking_injects_every_present_native_schema_shape() {
+    let mut payload = json!({
+        "tools": [{
+            "name": "probe_tool",
+            "input_schema": {"type":"object"},
+            "parameters": {"type":"object"},
+            "function": {"parameters": {"type":"object"}}
+        }]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must cover every native schema container");
+    for schema in [
+        &payload["tools"][0]["input_schema"],
+        &payload["tools"][0]["parameters"],
+        &payload["tools"][0]["function"]["parameters"],
+    ] {
+        for field in ["reason", "goal_alignment_confidence", "model_id"] {
+            assert!(schema["properties"][field].is_object(), "schema={schema}");
+            assert!(
+                schema["required"]
+                    .as_array()
+                    .is_some_and(|required| required
+                        .iter()
+                        .any(|value| value.as_str() == Some(field))),
+                "schema={schema} field={field}"
+            );
+        }
+    }
+}
+
+#[test]
+fn req04_tool_thinking_custom_tool_keeps_freeform_input_and_adds_auxiliary_schema() {
+    let mut payload = json!({
+        "tools": [{
+            "type": "custom",
+            "name": "apply_patch",
+            "description": "raw patch",
+            "format": {"type":"text"}
+        }]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("custom tool guidance must inject");
+    assert!(payload["tools"][0]["description"]
+        .as_str()
+        .unwrap()
+        .contains("工具调用协议"));
+    assert!(payload["tools"][0].get("parameters").is_none());
 }
 
 #[test]
@@ -48,13 +287,10 @@ fn req04_tool_thinking_does_not_modify_tool_declarations() {
     let mut payload = json!({
         "tools":[{"function_declarations":[{"name":"lookup","description":"find data"}]}]
     });
+    let before = payload.clone();
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
-        .expect("enabled tool-thinking must cover Gemini declarations");
-    assert!(!payload["tools"][0]["function_declarations"][0]["description"]
-        .as_str()
-        .unwrap()
-        .contains("<toolreason>"));
-    assert!(payload["instructions"].as_str().unwrap().contains("<toolreason>"));
+        .expect("Gemini request must remain valid when JSON guidance is excluded");
+    assert_eq!(payload, before);
 }
 
 const CMD_ARGS: &str = "{\"cmd\":\"routecodex hook run reasoningStop\"}";

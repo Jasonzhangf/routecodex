@@ -1,10 +1,12 @@
 use super::*;
 use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
+use crate::nodes::{V3ClientBody, V3Resp15ClientPayload};
 use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
     v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
     V3RelayProviderFailureRetryPolicy,
 };
+use futures_util::StreamExt;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
@@ -18,17 +20,24 @@ use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::pin::Pin;
 
-pub type V3OpenAiChatClientStream =
-    Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
+pub type V3OpenAiChatClientStream = V3RelayProjectedSseStream;
+pub type V3OpenAiChatCommittedStream = V3RelayCommittedSseStream;
 
 pub enum V3OpenAiChatRelayClientBody {
     Json(Value),
-    Sse(V3OpenAiChatClientStream),
+    Sse(V3OpenAiChatCommittedStream),
 }
 
 impl V3OpenAiChatRelayClientBody {
     pub fn is_sse(&self) -> bool {
         matches!(self, Self::Sse(_))
+    }
+
+    pub fn into_v3_client_body(self) -> V3ClientBody {
+        match self {
+            Self::Json(value) => V3ClientBody::Json(value),
+            Self::Sse(stream) => V3ClientBody::CommittedSse(stream),
+        }
     }
 }
 
@@ -53,6 +62,25 @@ pub struct V3OpenAiChatRelayRuntimeOutput {
     pub error_chain: Option<Vec<&'static str>>,
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
+    pub provider_snapshots: Option<V3RelayProviderSnapshots>,
+}
+
+impl V3OpenAiChatRelayRuntimeOutput {
+    pub fn into_v3_resp_15_client_payload(self) -> V3Resp15ClientPayload {
+        let content_type = if self.client_body.is_sse() {
+            "text/event-stream"
+        } else {
+            "application/json"
+        };
+        V3Resp15ClientPayload {
+            status: self.status,
+            headers: std::collections::BTreeMap::from([(
+                "content-type".to_string(),
+                content_type.to_string(),
+            )]),
+            body: self.client_body.into_v3_client_body(),
+        }
+    }
 }
 
 impl std::fmt::Debug for V3OpenAiChatRelayRuntimeOutput {
@@ -71,6 +99,10 @@ impl std::fmt::Debug for V3OpenAiChatRelayRuntimeOutput {
             .field("error_chain", &self.error_chain)
             .field("observability", &self.observability)
             .field("stream_observation", &self.stream_observation)
+            .field(
+                "provider_snapshots",
+                &self.provider_snapshots.as_ref().map(|_| "present"),
+            )
             .finish()
     }
 }
@@ -117,11 +149,27 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
     input: V3OpenAiChatRelayRuntimeInput,
     provider_health: V3ProviderFailureRuntimeHealth,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
-    execute_v3_openai_chat_relay_runtime_with_provider_health(
+    execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(
+        manifest,
+        input,
+        provider_health,
+        V3HubExecutionMode::Relay,
+    )
+    .await
+}
+
+pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(
+    manifest: &V3Config05ManifestPublished,
+    input: V3OpenAiChatRelayRuntimeInput,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    execution_mode: V3HubExecutionMode,
+) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
+    execute_v3_openai_chat_relay_runtime_with_provider_health_and_execution_mode(
         manifest,
         input,
         crate::default_responses_transport(),
         provider_health,
+        execution_mode,
     )
     .await
 }
@@ -146,12 +194,32 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health<T: Respon
     transport: &T,
     provider_health: V3ProviderFailureRuntimeHealth,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
+    execute_v3_openai_chat_relay_runtime_with_provider_health_and_execution_mode(
+        manifest,
+        input,
+        transport,
+        provider_health,
+        V3HubExecutionMode::Relay,
+    )
+    .await
+}
+
+pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health_and_execution_mode<
+    T: ResponsesTransport,
+>(
+    manifest: &V3Config05ManifestPublished,
+    input: V3OpenAiChatRelayRuntimeInput,
+    transport: &T,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    execution_mode: V3HubExecutionMode,
+) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     execute_v3_openai_chat_relay_runtime_inner(
         manifest,
         input,
         transport,
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        execution_mode,
     )
     .await
 }
@@ -162,6 +230,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     transport: &T,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
+    execution_mode: V3HubExecutionMode,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3OpenAiChatRelayCodec。
@@ -183,6 +252,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         input.failure_session_scope.clone(),
         &input.request_id,
         "/v1/chat/completions",
+        execution_mode,
         input.payload,
         transport,
         provider_health,
@@ -240,6 +310,8 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
 }
 
 fn project_json_response(
+    request_id: Option<&str>,
+    session_id: Option<&str>,
     provider_value: Value,
     provider_protocol: V3HubProviderWireProtocol,
     chat_request: &Value,
@@ -325,7 +397,18 @@ fn project_json_response(
     let mut response_profile = V3HubRelayResponseHookProfile::empty()
         .with_web_search_execution_mode(web_search_execution_mode)
         .with_retain_response_cipher(retain_response_cipher)
-        .with_tool_thinking_enabled(tool_thinking_enabled);
+        .with_tool_thinking_enabled(tool_thinking_enabled)
+        // JSON projection is also used after a provider SSE has been
+        // materialized for a non-streaming client response.  Observation must
+        // remain enabled there; the live SSE path does not invoke this
+        // Resp03 profile, so disabling it here silently loses MISSING logs.
+        .with_toolreason_observation_enabled(true);
+    if let Some(request_id) = request_id {
+        response_profile = response_profile.with_toolreason_observation_request_id(request_id);
+    }
+    if let Some(session_id) = session_id {
+        response_profile = response_profile.with_toolreason_observation_session_id(session_id);
+    }
     if let Some(state) = web_search_center_state {
         response_profile = response_profile.with_web_search_center_state(state.clone());
     }
@@ -384,6 +467,8 @@ impl V3OpenAiChatSseSemanticHook for V3OpenAiChatRelayTypedSemanticHook<'_> {
 }
 
 struct V3OpenAiChatSseState {
+    request_id: String,
+    session_id: String,
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     decoder: routecodex_v3_sse::SseIncrementalDecoder,
     pending: VecDeque<Result<Vec<u8>, String>>,
@@ -400,6 +485,10 @@ struct V3OpenAiChatSseState {
     /// 控制面决策，不是 provider 流错误，禁止写 provider-health。
     governance_rejected: bool,
     tool_thinking_enabled: bool,
+    tool_names: Vec<String>,
+    pending_toolreasons: Vec<Option<String>>,
+    toolreason_argument_buffers: Vec<String>,
+    toolreason_emitted: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 }
 
@@ -419,14 +508,19 @@ impl V3OpenAiChatSseProviderOutcome {
             return Ok(());
         }
         drop(self._provider_action_permit.take());
+        let source = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_stream",
+            reason,
+        );
         self.provider_health
-            .record_post_commit_provider_stream_failure(
+            .record_post_commit_provider_stream_failure_from_source(
                 &self.failure_session_scope,
                 &self.provider_id,
                 Some(&self.auth_alias),
                 Some(&self.model_id),
-                "provider_response_protocol",
-                reason,
+                &source,
             )?;
         self.recorded = true;
         Ok(())
@@ -450,6 +544,8 @@ impl V3OpenAiChatSseProviderOutcome {
 }
 
 fn project_sse_stream(
+    request_id: String,
+    session_id: String,
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     compatibility_profile: Option<String>,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
@@ -458,9 +554,11 @@ fn project_sse_stream(
     tool_thinking_enabled: bool,
     stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
-) -> V3OpenAiChatClientStream {
+) -> V3RelayProjectedSseStream {
     use futures_util::StreamExt;
     let state = V3OpenAiChatSseState {
+        request_id,
+        session_id,
         provider,
         decoder: routecodex_v3_sse::SseIncrementalDecoder::new(
             routecodex_v3_sse::SseTransportLimits::default(),
@@ -477,6 +575,10 @@ fn project_sse_stream(
         stream_observation,
         governance_rejected: false,
         provider_outcome,
+        tool_names: Vec::new(),
+        pending_toolreasons: Vec::new(),
+        toolreason_argument_buffers: Vec::new(),
+        toolreason_emitted: false,
     };
     Box::pin(futures_util::stream::unfold(
         state,
@@ -517,6 +619,15 @@ fn project_sse_stream(
                             .and_then(Err);
                         return Some((result, state));
                     }
+                    crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
+                        &state.tool_names,
+                        &mut state.pending_toolreasons,
+                        &mut state.toolreason_emitted,
+                        crate::hub_v1::V3ToolreasonObservationContext {
+                            session_id: Some(&state.session_id),
+                            request_id: Some(&state.request_id),
+                        },
+                    );
                     // provider 可在 [DONE] 前关闭流；客户端协议仍必须收到终止帧。
                     if !state.seen_done {
                         state.seen_done = true;
@@ -548,7 +659,7 @@ fn project_sse_stream(
                     }
                     let result = state
                         .provider_outcome
-                        .record_failure(&error)
+                        .record_failure(&error.to_string())
                         .await
                         .map(|()| error)
                         .and_then(Err);
@@ -612,7 +723,14 @@ fn enqueue_sse_client_chunks(
                 .normalized_data_json()
                 .as_deref()
                 .is_some_and(is_v3_openai_chat_settlement_tail_frame);
-            if !object.has_data() || is_tail {
+            if !object.has_data() {
+                if object.event_name().is_some() {
+                    return Err("OpenAI Chat SSE emitted an event frame after [DONE]".into());
+                }
+                // Comment-only keep-alive frames after [DONE] are benign.
+                continue;
+            }
+            if is_tail {
                 // Comment-only keep-alive frames and non-semantic settlement
                 // frames (e.g. `{"choices":[],"cost":"0"}`) after [DONE] are
                 // benign protocol tails, not stream corruption.
@@ -632,9 +750,29 @@ fn enqueue_sse_client_chunks(
         if object.has_data() && !object.is_json_valid() {
             return Err("OpenAI Chat SSE data is not valid JSON".into());
         }
-        let Some(payload) = object.data_value().cloned() else {
+        let Some(mut payload) = object.data_value().cloned() else {
             continue;
         };
+        if !payload.is_object() {
+            continue;
+        }
+        if state.tool_thinking_enabled {
+            crate::hub_v1::collect_v3_responses_sse_tool_name_at_resp03(
+                &payload,
+                &mut state.tool_names,
+            );
+            crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
+                &mut payload,
+                true,
+                &state.tool_names,
+                &mut state.pending_toolreasons,
+                &mut state.toolreason_emitted,
+                true,
+                Some(&state.session_id),
+                Some(state.request_id.as_str()),
+                Some(&mut state.toolreason_argument_buffers),
+            );
+        }
         let transport_object = V3OpenAiChatSseTransportObject::new(
             object.event_name().map(ToOwned::to_owned),
             payload.clone(),
@@ -657,12 +795,13 @@ fn enqueue_sse_client_chunks(
         .map_err(|error| error.to_string())?;
         let projected_payload = project_v3_openai_chat_sse_chunk_json(&semantic);
         let client_payload = project_sse_event_payload(
+            state.request_id.as_str(),
+            Some(state.session_id.as_str()),
             projected_payload,
             state.compatibility_profile.as_deref(),
             state.web_search_execution_mode,
             state.web_search_center_state.as_ref(),
             state.retain_response_cipher,
-            state.tool_thinking_enabled,
         )
         .map_err(|error| match error {
             // 治理层拒绝（web_search Mode B 无投影路径）：不是 provider 流
@@ -705,6 +844,8 @@ fn enqueue_sse_client_chunks(
 /// type 帧，见 `is_v3_responses_settlement_tail_frame`），语义帧仍 fail-fast。
 /// 字节级证据见 ~/.rcc/sse-dumps（--sse-dump 开启）。
 fn project_responses_sse_as_openai_chat_stream(
+    request_id: String,
+    session_id: String,
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     compatibility_profile: Option<String>,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
@@ -713,17 +854,19 @@ fn project_responses_sse_as_openai_chat_stream(
     tool_thinking_enabled: bool,
     _stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
-) -> V3OpenAiChatClientStream {
+) -> V3RelayProjectedSseStream {
     use futures_util::StreamExt;
     let decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
         routecodex_v3_sse::SseTransportLimits::default(),
     );
     let transducer = V3OpenAiChatResponsesSseTransducer::new();
+    let request_id = request_id;
     Box::pin(futures_util::stream::unfold(
         (
             stream,
             decoder,
             transducer,
+            V3RelayToolreasonStreamState::new(),
             VecDeque::<Vec<u8>>::new(),
             false,
             false,
@@ -734,10 +877,11 @@ fn project_responses_sse_as_openai_chat_stream(
             tool_thinking_enabled,
             provider_outcome,
         ),
-        |(
+        move |(
             mut provider,
             mut decoder,
             mut transducer,
+            mut toolreason,
             mut pending,
             mut done_seen,
             mut finished,
@@ -747,50 +891,19 @@ fn project_responses_sse_as_openai_chat_stream(
             retain_response_cipher,
             tool_thinking_enabled,
             mut provider_outcome,
-        )| async move {
-            loop {
-                if let Some(frame) = pending.pop_front() {
-                    return Some((
-                        Ok(frame),
-                        (
-                            provider,
-                            decoder,
-                            transducer,
-                            pending,
-                            done_seen,
-                            finished,
-                            compatibility_profile,
-                            web_search_execution_mode,
-                            web_search_center_state,
-                            retain_response_cipher,
-                            tool_thinking_enabled,
-                            provider_outcome,
-                        ),
-                    ));
-                }
-                if finished {
-                    return None;
-                }
-                let Some(chunk) = provider.next().await else {
-                    finished = true;
-                    let decoder_to_finish = std::mem::replace(
-                        &mut decoder,
-                        routecodex_v3_sse::SseIncrementalDecoder::new(
-                            routecodex_v3_sse::SseTransportLimits::default(),
-                        ),
-                    );
-                    let decoder_result = decoder_to_finish
-                        .finish()
-                        .map_err(|error| error.to_string());
-                    let result = decoder_result.and_then(|_| transducer.finish());
-                    if let Err(error) = result {
-                        let recorded = provider_outcome.record_failure(&error).await;
+        )| {
+            let request_id = request_id.clone();
+            let session_id = session_id.clone();
+            async move {
+                loop {
+                    if let Some(frame) = pending.pop_front() {
                         return Some((
-                            Err(recorded.map(|_| error).unwrap_or_else(|record| record)),
+                            Ok(frame),
                             (
                                 provider,
                                 decoder,
                                 transducer,
+                                toolreason,
                                 pending,
                                 done_seen,
                                 finished,
@@ -803,120 +916,256 @@ fn project_responses_sse_as_openai_chat_stream(
                             ),
                         ));
                     }
-                    let success = provider_outcome.record_success();
-                    return match success {
-                        Ok(()) => None,
-                        Err(error) => Some((
-                            Err(error),
-                            (
-                                provider,
-                                decoder,
-                                transducer,
-                                pending,
-                                done_seen,
-                                finished,
-                                compatibility_profile,
-                                web_search_execution_mode,
-                                web_search_center_state,
-                                retain_response_cipher,
-                                tool_thinking_enabled,
-                                provider_outcome,
+                    if finished {
+                        return None;
+                    }
+                    let Some(chunk) = provider.next().await else {
+                        finished = true;
+                        let decoder_to_finish = std::mem::replace(
+                            &mut decoder,
+                            routecodex_v3_sse::SseIncrementalDecoder::new(
+                                routecodex_v3_sse::SseTransportLimits::default(),
                             ),
-                        )),
-                    };
-                };
-                let result = (|| -> Result<(), String> {
-                    let raw = match &chunk {
-                        Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
-                            finished = true;
-                            return Err(error.to_string());
-                        }
-                        Err(error) => return Err(error.to_string()),
-                        Ok(chunk) => {
-                            routecodex_v3_sse::build_v3_sse_transport_in_01_raw_chunk(chunk)
-                        }
-                    };
-                    for frame in decoder.push(raw).map_err(|error| error.to_string())? {
-                        let mut data = None;
-                        for field in frame.frame().fields() {
-                            if let routecodex_v3_sse::SseField::Named { name, value } = field {
-                                if name == "data" {
-                                    data = Some(value.clone());
-                                }
-                            }
-                        }
-                        let Some(data) = data else {
-                            continue;
-                        };
-                        if data == "[DONE]" {
-                            continue;
-                        }
-                        if done_seen {
-                            // 结算尾部帧（opencode.ai/zen/go 在 response.completed 后
-                            // 发送 `{"type":"ping","cost":"0"}` keepalive）是良性协议尾，
-                            // 不是流错误；误判会 abort 客户端连接（客户端已收到 [DONE]）。
-                            if is_v3_responses_settlement_tail_frame(&data) {
-                                continue;
-                            }
-                            let preview: String = data.chars().take(300).collect();
-                            return Err(format!(
-                                "Responses SSE emitted data after response.completed: {preview}"
+                        );
+                        let decoder_result = decoder_to_finish
+                            .finish()
+                            .map_err(|error| error.to_string());
+                        let result = decoder_result.and_then(|_| transducer.finish());
+                        if let Err(error) = result {
+                            let recorded = provider_outcome.record_failure(&error).await;
+                            return Some((
+                                Err(recorded.map(|_| error).unwrap_or_else(|record| record)),
+                                (
+                                    provider,
+                                    decoder,
+                                    transducer,
+                                    toolreason,
+                                    pending,
+                                    done_seen,
+                                    finished,
+                                    compatibility_profile,
+                                    web_search_execution_mode,
+                                    web_search_center_state,
+                                    retain_response_cipher,
+                                    tool_thinking_enabled,
+                                    provider_outcome,
+                                ),
                             ));
                         }
-                        let event: Value =
-                            serde_json::from_str(&data).map_err(|error| error.to_string())?;
-                        let event = classify_v3_responses_sse_event(&event)
-                            .map(|semantic| project_v3_responses_sse_event_json(&semantic))
-                            .map_err(|error| error.to_string())?;
-                        let event_type = event
-                            .get("type")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_string();
-                        for payload in transducer.push_event(event)? {
-                            let governed = project_sse_event_payload(
-                                payload,
-                                compatibility_profile.as_deref(),
-                                web_search_execution_mode,
-                                web_search_center_state.as_ref(),
-                                retain_response_cipher,
-                                tool_thinking_enabled,
-                            )
-                            .map_err(|error| match error {
+                        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
+                            &toolreason.tool_names,
+                            &mut toolreason.pending_reasons,
+                            &mut toolreason.reason_emitted,
+                            crate::hub_v1::V3ToolreasonObservationContext {
+                                session_id: Some(session_id.as_str()),
+                                request_id: Some(request_id.as_str()),
+                            },
+                        );
+                        let success = provider_outcome.record_success();
+                        return match success {
+                            Ok(()) => None,
+                            Err(error) => Some((
+                                Err(error),
+                                (
+                                    provider,
+                                    decoder,
+                                    transducer,
+                                    toolreason,
+                                    pending,
+                                    done_seen,
+                                    finished,
+                                    compatibility_profile,
+                                    web_search_execution_mode,
+                                    web_search_center_state,
+                                    retain_response_cipher,
+                                    tool_thinking_enabled,
+                                    provider_outcome,
+                                ),
+                            )),
+                        };
+                    };
+                    let result = (|| -> Result<(), String> {
+                        let raw = match &chunk {
+                            Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
+                                finished = true;
+                                return Err(error.to_string());
+                            }
+                            Err(error) => return Err(error.to_string()),
+                            Ok(chunk) => {
+                                routecodex_v3_sse::build_v3_sse_transport_in_01_raw_chunk(chunk)
+                            }
+                        };
+                        for frame in decoder.push(raw).map_err(|error| error.to_string())? {
+                            let mut data = None;
+                            for field in frame.frame().fields() {
+                                if let routecodex_v3_sse::SseField::Named { name, value } = field {
+                                    if name == "data" {
+                                        data = Some(value.clone());
+                                    }
+                                }
+                            }
+                            let Some(data) = data else {
+                                if done_seen
+                                    && frame.frame().fields().iter().any(|field| {
+                                        matches!(
+                                            field,
+                                            routecodex_v3_sse::SseField::Named { name, .. }
+                                                if name == "event"
+                                        )
+                                    })
+                                {
+                                    return Err(
+                                        "Responses SSE emitted an event without data after response.completed"
+                                            .to_string(),
+                                    );
+                                }
+                                continue;
+                            };
+                            if data == "[DONE]"
+                                || crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(&data)
+                            {
+                                continue;
+                            }
+                            if done_seen {
+                                // 结算尾部帧（opencode.ai/zen/go 在 response.completed 后
+                                // 发送 `{"type":"ping","cost":"0"}` keepalive）是良性协议尾，
+                                // 不是流错误；误判会 abort 客户端连接（客户端已收到 [DONE]）。
+                                if is_v3_responses_settlement_tail_frame(&data) {
+                                    continue;
+                                }
+                                let preview: String = data.chars().take(300).collect();
+                                return Err(format!(
+                                "Responses SSE emitted data after response.completed: {preview}"
+                            ));
+                            }
+                            let event: Value =
+                                serde_json::from_str(&data).map_err(|error| error.to_string())?;
+                            // Keep the relay boundary aligned with the shared
+                            // Responses provider-event codec: JSON values that
+                            // are not objects are transport/control data, not
+                            // semantic Responses events.  Do not send them to
+                            // the Responses tree or turn them into a client
+                            // stream error.
+                            if !event.is_object() {
+                                continue;
+                            }
+                            let event = classify_v3_responses_sse_event(&event)
+                                .map(|semantic| project_v3_responses_sse_event_json(&semantic))
+                                .map_err(|error| error.to_string())?;
+                            let event_type = event
+                                .get("type")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_string();
+                            for mut payload in transducer.push_event(event)? {
+                                if tool_thinking_enabled {
+                                    crate::hub_v1::collect_v3_responses_sse_tool_name_at_resp03(
+                                        &payload,
+                                        &mut toolreason.tool_names,
+                                    );
+                                    crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
+                                        &mut payload,
+                                        true,
+                                        &toolreason.tool_names,
+                                        &mut toolreason.pending_reasons,
+                                        &mut toolreason.reason_emitted,
+                                        true,
+                                        Some(session_id.as_str()),
+                                        Some(request_id.as_str()),
+                                        Some(&mut toolreason.argument_buffers),
+                                    );
+                                }
+                                let governed = project_sse_event_payload(
+                                    request_id.as_str(),
+                                    Some(session_id.as_str()),
+                                    payload,
+                                    compatibility_profile.as_deref(),
+                                    web_search_execution_mode,
+                                    web_search_center_state.as_ref(),
+                                    retain_response_cipher,
+                                )
+                                .map_err(|error| {
+                                    match error {
                                 V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
                                     "ROUTECODEX_GOVERNANCE_REJECTED".to_string()
                                 }
                                 other => other.to_string(),
-                            })?;
-                            pending.push_back(format!("data: {governed}\n\n").into_bytes());
+                            }
+                                })?;
+                                pending.push_back(format!("data: {governed}\n\n").into_bytes());
+                            }
+                            // response.completed 与 response.incomplete 都是 Responses
+                            // 协议合法终态：codec 已为 incomplete 投影终帧
+                            // （finish_reason=length/content_filter + usage），客户端
+                            // SSE 流同样必须收口 [DONE]，否则截断响应会以
+                            // IncompleteRead / Connection reset 形式中断客户端连接。
+                            if event_type == "response.completed"
+                                || event_type == "response.incomplete"
+                            {
+                                pending.push_back(b"data: [DONE]\n\n".to_vec());
+                                done_seen = true;
+                            }
                         }
-                        // response.completed 与 response.incomplete 都是 Responses
-                        // 协议合法终态：codec 已为 incomplete 投影终帧
-                        // （finish_reason=length/content_filter + usage），客户端
-                        // SSE 流同样必须收口 [DONE]，否则截断响应会以
-                        // IncompleteRead / Connection reset 形式中断客户端连接。
-                        if event_type == "response.completed" || event_type == "response.incomplete"
-                        {
-                            pending.push_back(b"data: [DONE]\n\n".to_vec());
-                            done_seen = true;
+                        Ok(())
+                    })();
+                    match result {
+                        Ok(()) if !pending.is_empty() => {
+                            continue;
                         }
-                    }
-                    Ok(())
-                })();
-                match result {
-                    Ok(()) if !pending.is_empty() => {
-                        continue;
-                    }
-                    Ok(_) => continue,
-                    Err(error) => {
-                        finished = true;
-                        if error.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
+                        Ok(_) => continue,
+                        Err(error) => {
+                            finished = true;
+                            if error.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
+                                return Some((
+                                    Err(error),
+                                    (
+                                        provider,
+                                        decoder,
+                                        transducer,
+                                        toolreason,
+                                        pending,
+                                        done_seen,
+                                        finished,
+                                        compatibility_profile,
+                                        web_search_execution_mode,
+                                        web_search_center_state,
+                                        retain_response_cipher,
+                                        tool_thinking_enabled,
+                                        provider_outcome,
+                                    ),
+                                ));
+                            }
+                            if matches!(&chunk, Err(V3ProviderError::ClientDisconnect { .. })) {
+                                // client disconnect 是健康中性事件（客户端断开导致
+                                // provider 流中止）：禁止写 provider 失败/冷却，与
+                                // project_sse_stream / gemini / direct 路径一致。
+                                return Some((
+                                    Err(error),
+                                    (
+                                        provider,
+                                        decoder,
+                                        transducer,
+                                        toolreason,
+                                        pending,
+                                        done_seen,
+                                        finished,
+                                        compatibility_profile,
+                                        web_search_execution_mode,
+                                        web_search_center_state,
+                                        retain_response_cipher,
+                                        tool_thinking_enabled,
+                                        provider_outcome,
+                                    ),
+                                ));
+                            }
+                            let recorded = provider_outcome.record_failure(&error).await;
                             return Some((
-                                Err(error),
+                                Err(recorded.map(|_| error).unwrap_or_else(|record| record)),
                                 (
                                     provider,
                                     decoder,
                                     transducer,
+                                    toolreason,
                                     pending,
                                     done_seen,
                                     finished,
@@ -929,46 +1178,6 @@ fn project_responses_sse_as_openai_chat_stream(
                                 ),
                             ));
                         }
-                        if matches!(&chunk, Err(V3ProviderError::ClientDisconnect { .. })) {
-                            // client disconnect 是健康中性事件（客户端断开导致
-                            // provider 流中止）：禁止写 provider 失败/冷却，与
-                            // project_sse_stream / gemini / direct 路径一致。
-                            return Some((
-                                Err(error),
-                                (
-                                    provider,
-                                    decoder,
-                                    transducer,
-                                    pending,
-                                    done_seen,
-                                    finished,
-                                    compatibility_profile,
-                                    web_search_execution_mode,
-                                    web_search_center_state,
-                                    retain_response_cipher,
-                                    tool_thinking_enabled,
-                                    provider_outcome,
-                                ),
-                            ));
-                        }
-                        let recorded = provider_outcome.record_failure(&error).await;
-                        return Some((
-                            Err(recorded.map(|_| error).unwrap_or_else(|record| record)),
-                            (
-                                provider,
-                                decoder,
-                                transducer,
-                                pending,
-                                done_seen,
-                                finished,
-                                compatibility_profile,
-                                web_search_execution_mode,
-                                web_search_center_state,
-                                retain_response_cipher,
-                                tool_thinking_enabled,
-                                provider_outcome,
-                            ),
-                        ));
                     }
                 }
             }
@@ -1002,6 +1211,12 @@ fn openai_chat_provider_http_failure(
 ) -> V3RelayProviderFailure {
     let body = match serde_json::from_slice::<Value>(body) {
         Ok(value) => value,
+        Err(_) if body.is_empty() => json!({
+            "error": {
+                "type": "provider_error",
+                "message": format!("provider returned HTTP {status}")
+            }
+        }),
         Err(error) => json!({
             "error": {
                 "type": "provider_error",
@@ -1034,6 +1249,7 @@ fn provider_failure_output(
         error_chain: Some(projected.chain.to_vec()),
         observability: None,
         stream_observation: None,
+        provider_snapshots: None,
     }
 }
 
@@ -1051,6 +1267,7 @@ fn error_output(
         error_chain: Some(projected.chain.to_vec()),
         observability: None,
         stream_observation: None,
+        provider_snapshots: None,
     }
 }
 
@@ -1059,7 +1276,6 @@ pub struct V3OpenAiChatRelayCodec;
 
 impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     type Output = V3OpenAiChatRelayRuntimeOutput;
-    type SseStream = V3OpenAiChatClientStream;
     type SseOutcome = V3OpenAiChatSseProviderOutcome;
 
     const ENTRY_PROTOCOL: V3HubEntryProtocol = V3HubEntryProtocol::OpenAiChat;
@@ -1168,6 +1384,8 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     }
 
     fn project_json_response(
+        request_id: &str,
+        session_id: &str,
         provider_value: Value,
         provider_wire_protocol: V3HubProviderWireProtocol,
         chat_request: &Value,
@@ -1180,6 +1398,8 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         tool_thinking_enabled: bool,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response(
+            Some(request_id),
+            Some(session_id),
             provider_value,
             provider_wire_protocol,
             chat_request,
@@ -1222,6 +1442,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     }
 
     fn project_sse(
+        request_id: &str,
         provider: V3ProviderSseStream,
         provider_wire_protocol: V3HubProviderWireProtocol,
         compatibility_profile: Option<String>,
@@ -1232,8 +1453,11 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         stream_observation: V3RuntimeStreamObservation,
         outcome: V3OpenAiChatSseProviderOutcome,
     ) -> Result<V3OpenAiChatClientStream, V3RelayCoreError> {
+        let session_id = outcome.failure_session_scope.session_id().to_owned();
         if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
             return Ok(project_anthropic_sse_as_openai_chat_stream(
+                request_id.to_owned(),
+                session_id.clone(),
                 provider,
                 compatibility_profile,
                 web_search_execution_mode,
@@ -1250,6 +1474,8 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             // chat.completion.chunk + [DONE]），不允许把 responses SSE 直接
             // 当 chat SSE 透传（缺 choices 会让 chat 状态机 fail-fast）。
             return Ok(project_responses_sse_as_openai_chat_stream(
+                request_id.to_owned(),
+                session_id.clone(),
                 provider,
                 compatibility_profile,
                 web_search_execution_mode,
@@ -1265,6 +1491,8 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         // 命中才 fail-fast 转 ROUTECODEX_GOVERNANCE_REJECTED，不记 provider 失败；
         // 非 websearch 帧正常透传——Mode B 模型的纯文本流不被误伤）。
         Ok(project_sse_stream(
+            request_id.to_owned(),
+            session_id,
             provider,
             compatibility_profile,
             web_search_execution_mode,
@@ -1280,6 +1508,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         client_response: Value,
         trace: Vec<&'static str>,
         observability: V3RuntimeObservability,
+        provider_snapshots: V3RelayProviderSnapshots,
     ) -> V3OpenAiChatRelayRuntimeOutput {
         V3OpenAiChatRelayRuntimeOutput {
             status: 200,
@@ -1288,14 +1517,16 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             error_chain: None,
             observability: Some(observability),
             stream_observation: None,
+            provider_snapshots: Some(provider_snapshots),
         }
     }
 
     fn assemble_sse_output(
-        sse: V3RelayClientSseStream,
+        sse: V3RelayCommittedSseStream,
         trace: Vec<&'static str>,
         observability: V3RuntimeObservability,
         stream_observation: V3RuntimeStreamObservation,
+        provider_snapshots: V3RelayProviderSnapshots,
     ) -> V3OpenAiChatRelayRuntimeOutput {
         V3OpenAiChatRelayRuntimeOutput {
             status: 200,
@@ -1304,13 +1535,8 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             error_chain: None,
             observability: Some(observability),
             stream_observation: Some(stream_observation),
+            provider_snapshots: Some(provider_snapshots),
         }
-    }
-
-    fn sse_from_collected(collected: Vec<Vec<u8>>) -> Self::SseStream {
-        let stream: V3OpenAiChatClientStream =
-            Box::pin(futures_util::stream::iter(collected.into_iter().map(Ok)));
-        stream
     }
 
     fn assemble_failure_output(

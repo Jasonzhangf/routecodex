@@ -2,6 +2,8 @@ use super::*;
 use serde_json::Value;
 
 pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
+    pub(crate) session_id: &'a str,
+    pub(crate) request_id: &'a str,
     pub(crate) provider_value: &'a Value,
     pub(crate) provider_semantic_body: &'a Value,
     pub(crate) manifest: &'a V3Config05ManifestPublished,
@@ -76,6 +78,8 @@ pub(crate) fn run_json_response_hooks(
     let response_hook_profile = responses_relay_response_hook_profile(
         input.manifest,
         input.server_id,
+        input.session_id,
+        input.request_id,
         input.stopless_state,
         input.stopless_control_has_client_session_scope,
         input.transition_request_id,
@@ -214,6 +218,8 @@ pub(crate) fn responses_relay_request_hook_profile(
 pub(crate) fn responses_relay_response_hook_profile(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
+    session_id: &str,
+    request_id: &str,
     stopless_state: Option<&V3StoplessCenterState>,
     stopless_control_has_client_session_scope: bool,
     transition_request_id: &str,
@@ -246,6 +252,8 @@ pub(crate) fn responses_relay_response_hook_profile(
             .with_tool_thinking_enabled(tool_thinking_enabled)
             .with_toolreason_client_projection(toolreason_client_projection)
     };
+    let profile = profile.with_toolreason_observation_request_id(request_id);
+    let profile = profile.with_toolreason_observation_session_id(session_id);
     if !v3_stopless_center_enabled_for_server(manifest, server_id)
         || !stopless_control_has_client_session_scope
     {

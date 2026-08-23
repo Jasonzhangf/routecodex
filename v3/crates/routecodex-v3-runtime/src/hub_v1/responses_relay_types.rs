@@ -2,12 +2,7 @@ use super::*;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub type V3ResponsesRelayClientStream = Pin<
-    Box<
-        dyn futures_util::Stream<Item = Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>>
-            + Send,
-    >,
->;
+pub type V3ResponsesRelayClientStream = crate::nodes::V3CommittedClientSseStream;
 
 pub enum V3ResponsesRelayClientBody {
     Json(Value),
@@ -140,6 +135,15 @@ pub struct V3ResponsesRelayProviderSnapshots {
     pub provider_response: Option<Value>,
 }
 
+/// Provider-wire evidence carried beside relay output until the server snapshot
+/// owner persists it. This is observability side-channel data; it must never be
+/// projected into the client response.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct V3RelayProviderSnapshots {
+    pub provider_request: Option<Value>,
+    pub provider_response: Option<Value>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct V3ResponsesRelayRetryPolicy {
     pub same_candidate_retries: usize,
@@ -245,6 +249,7 @@ pub struct V3RuntimeStreamObservationSnapshot {
     pub usage: Option<V3RuntimeUsageSummary>,
     pub timing: Option<V3RuntimeTimingSummary>,
     pub typed_object_types: Vec<String>,
+    pub provider_raw_sse: String,
 }
 
 pub(crate) struct V3ResponsesRelayProviderFailure {
@@ -348,6 +353,21 @@ impl V3RuntimeStreamObservation {
         }
         if usage.is_some() {
             snapshot.usage = usage;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn record_provider_raw_sse_chunk(&self, chunk: &[u8]) -> Result<(), String> {
+        const MAX_PROVIDER_RAW_SSE_BYTES: usize = 2 * 1024 * 1024;
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        if snapshot.provider_raw_sse.len() < MAX_PROVIDER_RAW_SSE_BYTES {
+            let remaining = MAX_PROVIDER_RAW_SSE_BYTES - snapshot.provider_raw_sse.len();
+            snapshot.provider_raw_sse.push_str(&String::from_utf8_lossy(
+                &chunk[..chunk.len().min(remaining)],
+            ));
         }
         Ok(())
     }

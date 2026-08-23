@@ -13,7 +13,6 @@ pub(crate) struct V3ToolreasonObservationContext<'a> {
     pub(crate) session_id: Option<&'a str>,
     pub(crate) request_id: Option<&'a str>,
 }
-
 fn log_v3_toolreason_observation_at_resp03_with_context(
     tool_name: &str,
     reason: Option<&str>,
@@ -119,13 +118,9 @@ pub(crate) fn audit_v3_toolreason_dry_run_payloads(
     provider_response: &Value,
 ) -> Value {
     let provider_text = provider_request.to_string();
-    let request_guidance_present = [
-        "reason",
-        "goal_alignment_confidence",
-        "model_id",
-    ]
-    .iter()
-    .all(|field| provider_text.contains(field));
+    let request_guidance_present = ["reason", "goal_alignment_confidence", "model_id"]
+        .iter()
+        .all(|field| provider_text.contains(field));
     let mut tool_call_count = 0usize;
     let mut toolreason_count = 0usize;
     collect_v3_toolreason_dry_run_counts(
@@ -1579,6 +1574,7 @@ pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(
         None,
     );
 }
+
 pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_and_request_id(
     payload: &mut Value,
     enabled: bool,
@@ -2774,22 +2770,6 @@ pub(crate) fn finalize_v3_toolreason_observation_at_resp03_with_context(
     );
 }
 
-pub(crate) fn finalize_v3_toolreason_observation_at_resp03(
-    tool_names: &[String],
-    pending_reasons: &mut Vec<Option<String>>,
-    reason_emitted: &mut bool,
-) {
-    finalize_v3_toolreason_observation_at_resp03_with_context(
-        tool_names,
-        pending_reasons,
-        reason_emitted,
-        V3ToolreasonObservationContext {
-            session_id: None,
-            request_id: None,
-        },
-    );
-}
-
 fn find_v3_sse_frame_end_at_resp03(buffer: &[u8]) -> Option<(usize, usize)> {
     let lf = buffer
         .windows(2)
@@ -2887,6 +2867,17 @@ fn project_v3_toolreason_sse_frame_at_resp03(
             // validate every tool call and remove the private marker here.
             let terminal_pending_reason = pending_reasons.iter_mut().find_map(Option::take);
             if let Some(response) = payload.get_mut("response") {
+                // Harvest the native fields before the mapping pass removes
+                // them.  The terminal direct-SSE path is also the observation
+                // closeout; reading the post-map payload turns a valid native
+                // response into a false MISSING.
+                let mut response_tools = Vec::new();
+                let mut response_reasons = Vec::new();
+                collect_v3_toolreason_json_observations_at_resp03(
+                    response,
+                    &mut response_tools,
+                    &mut response_reasons,
+                );
                 map_v3_toolreason_to_reasoning_content_at_resp03_without_observation(
                     response,
                     true,
@@ -2901,13 +2892,6 @@ fn project_v3_toolreason_sse_frame_at_resp03(
                     append_v3_toolreason_completed_visible_text_at_resp03(response, &mut output);
                 }
                 if !*reason_emitted {
-                    let mut response_tools = Vec::new();
-                    let mut response_reasons = Vec::new();
-                    collect_v3_toolreason_json_observations_at_resp03(
-                        response,
-                        &mut response_tools,
-                        &mut response_reasons,
-                    );
                     let tool_label = format_toolreason_tool_label(&response_tools);
                     emit_v3_toolreason_observation_at_resp03_with_context(
                         &tool_label,
@@ -2924,6 +2908,15 @@ fn project_v3_toolreason_sse_frame_at_resp03(
                     );
                 }
             } else {
+                // Same ordering rule for a terminal payload without a nested
+                // response object: observe the native call before stripping.
+                let mut response_tools = Vec::new();
+                let mut response_reasons = Vec::new();
+                collect_v3_toolreason_json_observations_at_resp03(
+                    &payload,
+                    &mut response_tools,
+                    &mut response_reasons,
+                );
                 map_v3_toolreason_to_reasoning_content_at_resp03_without_observation(
                     &mut payload,
                     true,
@@ -2945,13 +2938,6 @@ fn project_v3_toolreason_sse_frame_at_resp03(
                     );
                 }
                 if !*reason_emitted {
-                    let mut response_tools = Vec::new();
-                    let mut response_reasons = Vec::new();
-                    collect_v3_toolreason_json_observations_at_resp03(
-                        &payload,
-                        &mut response_tools,
-                        &mut response_reasons,
-                    );
                     let tool_label = format_toolreason_tool_label(&response_tools);
                     emit_v3_toolreason_observation_at_resp03_with_context(
                         &tool_label,
@@ -3528,13 +3514,12 @@ fn toolreason_display_name_from_object(object: &serde_json::Map<String, Value>) 
         _ => None,
     }
     .and_then(|value| value.get("cmd").and_then(Value::as_str).map(str::to_owned));
-    command
-        .and_then(|command| {
-            command
-                .split_whitespace()
-                .find(|token| !token.is_empty())
-                .map(str::to_owned)
-        })
+    command.and_then(|command| {
+        command
+            .split_whitespace()
+            .find(|token| !token.is_empty())
+            .map(str::to_owned)
+    })
 }
 
 fn is_v3_toolreason_placeholder(reason: &str) -> bool {
@@ -3739,8 +3724,10 @@ mod tests {
 
     #[test]
     fn resp03_dry_run_audit_separates_request_and_response_contracts() {
-        let request = json!({"tools": [{"description": "reason goal_alignment_confidence model_id"}]});
-        let provider_request = json!({"tools": [{"description": "reason goal_alignment_confidence model_id"}]});
+        let request =
+            json!({"tools": [{"description": "reason goal_alignment_confidence model_id"}]});
+        let provider_request =
+            json!({"tools": [{"description": "reason goal_alignment_confidence model_id"}]});
         let response = json!({
             "output": [{
                 "type": "function_call",
@@ -3748,11 +3735,7 @@ mod tests {
                 "arguments": "{\"reason\":\"确认目录\",\"goal_alignment_confidence\":100,\"model_id\":\"m\"}"
             }]
         });
-        let audit = audit_v3_toolreason_dry_run_payloads(
-            &request,
-            &provider_request,
-            &response,
-        );
+        let audit = audit_v3_toolreason_dry_run_payloads(&request, &provider_request, &response);
         assert_eq!(audit["diagnosis"], "raw_contract_present");
         assert_eq!(audit["provider_response_tool_call_count"], 1);
         assert_eq!(audit["provider_response_toolreason_count"], 1);
@@ -3762,7 +3745,10 @@ mod tests {
             &provider_request,
             &json!({"output": [{"type": "function_call", "name": "pwd", "arguments": "{}"}]}),
         );
-        assert_eq!(missing["diagnosis"], "response_missing_toolreason_after_guidance");
+        assert_eq!(
+            missing["diagnosis"],
+            "response_missing_toolreason_after_guidance"
+        );
     }
 
     #[test]

@@ -245,7 +245,7 @@ fn protocol_plan_failure(
 async fn execute_v3_responses_direct_runtime_kernel_with_transport_debug_core<
     T: ResponsesTransport,
 >(
-    state: V3ResponsesDirectRuntimeCoreState<'_>,
+    state: V3ResponsesDirectRuntimeCoreState,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
     hook_registry: V3HookRegistry,

@@ -5,6 +5,7 @@
 //! client payloads. Those operations remain adjacent stage owners.
 
 use crate::hub_v1::V3HubProviderWireProtocol;
+use crate::runtime_timing::V3RuntimeTimingState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3DirectResponseCompatBlock {
@@ -13,7 +14,7 @@ pub enum V3DirectResponseCompatBlock {
     DeepseekConsoleGoResponseShape,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct V3DirectResponseCompatFacts<'a> {
     pub provider_protocol: V3HubProviderWireProtocol,
     pub canonical_model_id: &'a str,
@@ -34,7 +35,7 @@ impl V3DirectResponseCompatPlan {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct V3DirectResponseCompatContext {
     pub provider_protocol: V3HubProviderWireProtocol,
     pub canonical_model_id: String,
@@ -42,9 +43,16 @@ pub struct V3DirectResponseCompatContext {
     pub compatibility_profile: Option<String>,
     pub tool_thinking_enabled: bool,
     pub toolreason_client_projection: bool,
+    pub toolreason_observation_session_id: Option<String>,
+    pub(crate) runtime_timing: V3RuntimeTimingState,
 }
 
 impl V3DirectResponseCompatContext {
+    pub(crate) fn with_runtime_timing(mut self, runtime_timing: V3RuntimeTimingState) -> Self {
+        self.runtime_timing = runtime_timing;
+        self
+    }
+
     pub fn compile_plan(&self) -> Result<V3DirectResponseCompatPlan, String> {
         let capabilities = self
             .model_capabilities

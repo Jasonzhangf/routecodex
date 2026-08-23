@@ -4,6 +4,263 @@
 use super::*;
 
 #[test]
+fn resp03_json_fields_are_removed_and_projected_without_changing_openai_arguments() {
+    let mut payload = json!({
+        "choices":[{"message":{
+            "role":"assistant",
+            "tool_calls":[{"id":"call_json","type":"function","function":{
+                "name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\"}"
+            }}]
+        }}]
+    });
+    let original =
+        payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"].clone();
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    let call = &payload["choices"][0]["message"]["tool_calls"][0];
+    assert_ne!(call["function"]["arguments"], original);
+    assert_eq!(call["function"]["arguments"], "{\"cmd\":\"pwd\"}");
+    assert!(call.get("reason").is_none());
+    assert!(call.get("goal_alignment_confidence").is_none());
+    assert!(call.get("model_id").is_none());
+    assert_eq!(
+        payload["choices"][0]["message"]["reasoning_content"],
+        "调用工具 pwd：确认当前工作目录"
+    );
+}
+
+#[test]
+fn resp03_chat_json_appends_toolreason_after_provider_reasoning() {
+    let mut payload = json!({
+        "choices":[{"message":{
+            "role":"assistant",
+            "reasoning_content":"provider summary",
+            "tool_calls":[{"id":"call_with_reasoning","type":"function","function":{
+                "name":"rcc_probe","arguments":"{\"value\":\"x\",\"reason\":\"确认探针结果\",\"goal_alignment_confidence\":100,\"model_id\":\"ox-alpha\"}"
+            }}]
+        }}]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    assert_eq!(
+        payload["choices"][0]["message"]["reasoning_content"],
+        "provider summary\n调用工具 rcc_probe：确认探针结果"
+    );
+    assert!(payload.get("reasoning_content").is_none());
+}
+
+#[test]
+fn resp03_responses_json_projects_only_into_reasoning_summary() {
+    let mut payload = json!({
+        "output":[
+            {"type":"reasoning","summary":[{"type":"summary_text","text":"provider summary"}]},
+            {"type":"function_call","name":"rcc_probe","call_id":"call_responses_reasoning",
+             "arguments":"{\"value\":\"x\",\"reason\":\"确认探针结果\",\"goal_alignment_confidence\":100,\"model_id\":\"ox-alpha\"}"}
+        ]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    assert_eq!(
+        payload["output"][0]["summary"][1]["text"],
+        "调用工具 rcc_probe：确认探针结果"
+    );
+    assert!(payload.get("reasoning_content").is_none());
+    assert_eq!(payload["output"][1]["arguments"], "{\"value\":\"x\"}");
+}
+
+#[test]
+fn resp03_chat_delta_fields_are_removed_and_projected_for_relay_conversion() {
+    let mut payload = json!({
+        "object": "chat.completion.chunk",
+        "choices": [{"index": 0, "delta": {"tool_calls": [{
+            "index": 0,
+            "id": "call_delta",
+            "function": {"name": "pwd", "arguments":
+                "{\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\",\"reason\":\"读取当前目录\"}"
+            }
+        }]}, "finish_reason": null}]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    let delta = &payload["choices"][0]["delta"];
+    assert_eq!(delta["tool_calls"][0]["function"]["arguments"], "{}");
+    assert_eq!(delta["reasoning_content"], "调用工具 pwd：读取当前目录");
+    assert!(!serde_json::to_string(&payload)
+        .unwrap()
+        .contains("goal_alignment_confidence"));
+    assert!(!serde_json::to_string(&payload)
+        .unwrap()
+        .contains("model_id"));
+    assert!(!serde_json::to_string(&payload)
+        .unwrap()
+        .contains("\"reason\""));
+}
+
+#[test]
+fn resp03_chat_delta_split_toolreason_is_buffered_before_projection() {
+    let tool_names = vec!["pwd".to_string()];
+    let mut pending_reasons = Vec::new();
+    let mut argument_buffers = Vec::new();
+    let mut reason_emitted = false;
+    let fragments = [
+        r#"{"goal_alignment_confidence":100"#,
+        r#", "model_id":"x-preview-f-free""#,
+        r#", "reason":"确认当前工作目录"}"#,
+    ];
+
+    let mut projected = Vec::new();
+    for fragment in fragments {
+        let mut payload = json!({
+            "object": "chat.completion.chunk",
+            "choices": [{"index": 0, "delta": {"tool_calls": [{
+                "index": 0,
+                "function": {"name": "pwd", "arguments": fragment}
+            }]}}]
+        });
+        map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
+            &mut payload,
+            true,
+            &tool_names,
+            &mut pending_reasons,
+            &mut reason_emitted,
+            true,
+            Some("session-split"),
+            Some("request-split"),
+            Some(&mut argument_buffers),
+        );
+        projected.push(payload);
+    }
+
+    assert_eq!(
+        projected[0].pointer("/choices/0/delta/tool_calls/0/function/arguments"),
+        Some(&json!(""))
+    );
+    assert_eq!(
+        projected[1].pointer("/choices/0/delta/tool_calls/0/function/arguments"),
+        Some(&json!(""))
+    );
+    assert_eq!(
+        projected[2].pointer("/choices/0/delta/tool_calls/0/function/arguments"),
+        Some(&json!("{}"))
+    );
+    assert_eq!(
+        projected[2].pointer("/choices/0/delta/reasoning_content"),
+        Some(&json!("调用工具 pwd：确认当前工作目录"))
+    );
+    assert!(reason_emitted);
+    assert!(!projected.iter().any(|payload| {
+        payload.to_string().contains("goal_alignment_confidence")
+            || payload.to_string().contains("model_id")
+            || payload.to_string().contains("\"reason\"")
+    }));
+}
+
+#[test]
+fn resp03_json_fields_inside_openai_function_object_are_removed_without_touching_arguments() {
+    let mut payload = json!({
+        "choices":[{"message":{"tool_calls":[{"id":"call_nested","type":"function",
+            "function":{"name":"read_file","arguments":"{\"path\":\"README.md\",\"reason\":\"读取项目说明\",\"goal_alignment_confidence\":90,\"model_id\":\"glm-5.2\"}"}}]}}]
+    });
+    let original =
+        payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"].clone();
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    let function = &payload["choices"][0]["message"]["tool_calls"][0]["function"];
+    assert_ne!(function["arguments"], original);
+    assert_eq!(function["arguments"], "{\"path\":\"README.md\"}");
+    assert_eq!(
+        payload["choices"][0]["message"]["reasoning_content"],
+        "调用工具 read_file：读取项目说明"
+    );
+}
+
+#[test]
+fn resp03_json_fields_are_removed_from_anthropic_tool_use_without_touching_input() {
+    let mut payload = json!({
+        "content":[{"type":"tool_use","id":"tool_1","name":"read_file","input":{
+            "path":"README.md","reason":"读取项目说明","goal_alignment_confidence":90,"model_id":"glm-5.2"
+        }}]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    assert_eq!(payload["content"][0]["input"], json!({"path":"README.md"}));
+    assert_eq!(
+        payload["reasoning_content"],
+        "调用工具 read_file：读取项目说明"
+    );
+}
+
+#[test]
+fn resp03_json_fields_inside_openai_arguments_are_removed_without_changing_command() {
+    let mut payload = json!({
+        "output":[{"type":"function_call","call_id":"call_nested_args","name":"exec_command",
+            "arguments":"{\"cmd\":\"cat README.md\",\"reason\":\"读取项目说明\",\"goal_alignment_confidence\":90,\"model_id\":\"glm-5.2\"}"}]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    let call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item.get("type") == Some(&json!("function_call")))
+        .unwrap();
+    assert_eq!(call["arguments"], "{\"cmd\":\"cat README.md\"}");
+    assert!(payload["output"].as_array().unwrap().iter().any(|item| {
+        item.get("type") == Some(&json!("reasoning"))
+            && item.to_string().contains("调用工具 cat：读取项目说明")
+    }));
+}
+
+#[test]
+fn resp03_malformed_json_fields_preserve_native_tool_call_and_do_not_project_guess() {
+    let mut payload = json!({
+        "output":[{"type":"function_call","call_id":"call_bad","name":"exec_command",
+            "arguments":"{\"cmd\":\"pwd\"}","reason":"","goal_alignment_confidence":"100","model_id":null}]
+    });
+    let original = payload["output"][0].clone();
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    assert_eq!(payload["output"][0]["name"], original["name"]);
+    assert_eq!(payload["output"][0]["arguments"], original["arguments"]);
+    assert_eq!(payload["output"][0].get("reason"), Some(&json!("")));
+    assert_eq!(payload["output"][0]["goal_alignment_confidence"], "100");
+    assert_eq!(payload["output"][0]["model_id"], Value::Null);
+    assert!(payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item.get("type") != Some(&json!("reasoning"))));
+}
+
+#[test]
+fn resp03_nested_invalid_auxiliary_fields_are_classified_invalid_not_missing() {
+    let raw = first_v3_tool_thinking_object_at_resp03(&json!({
+        "output": [{
+            "type": "function_call",
+            "name": "exec_command",
+            "arguments": "{\"cmd\":\"pwd\",\"reason\":\"inspect\",\"goal_alignment_confidence\":\"100\",\"model_id\":null}"
+        }]
+    }))
+    .expect("nested auxiliary object must be observed");
+    assert_eq!(raw.0, "pwd");
+    assert_eq!(
+        classify_v3_toolreason_observation_at_resp03(Some(&raw.1)).0,
+        V3ToolreasonObservationStatus::Invalid
+    );
+}
+
+#[test]
+fn resp03_observation_label_contains_all_tools_in_one_turn() {
+    let raw = first_v3_tool_thinking_object_at_resp03(&json!({
+        "choices": [{"message": {"tool_calls": [
+            {"type":"function","function":{"name":"rcc_probe","arguments":"{\"value\":\"a\",\"reason\":\"第一探针\",\"goal_alignment_confidence\":100,\"model_id\":\"ox-alpha\"}"}},
+            {"type":"function","function":{"name":"rcc_probe_second","arguments":"{\"value\":\"b\",\"reason\":\"第二探针\",\"goal_alignment_confidence\":100,\"model_id\":\"ox-alpha\"}"}}
+        ]}}]
+    }))
+    .expect("multi-tool turn must be observable");
+
+    assert_eq!(raw.0, "rcc_probe、rcc_probe_second");
+}
+
+#[test]
 fn resp03_toolreason_maps_to_visible_reasoning_content_and_is_removed_from_text() {
     let mut payload = json!({
         "choices":[{"message":{
@@ -14,12 +271,105 @@ fn resp03_toolreason_maps_to_visible_reasoning_content_and_is_removed_from_text(
     });
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
     let message = &payload["choices"][0]["message"];
-    assert_eq!(
-        message["reasoning_content"],
-        "调用工具 exec：Need inspect the file."
-    );
+    assert!(message.get("reasoning_content").is_none());
     assert_eq!(message["content"], "");
     assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
+fn resp03_toolreason_from_responses_output_text_maps_to_reasoning_item() {
+    let mut payload = json!({
+        "output": [
+            {"type":"output_text","text":"<toolreason>{\"reason\":\"Inspect the target file\",\"goal_alignment_confidence\":95,\"model_id\":\"x-preview-f-free\"}</toolreason>"},
+            {"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{}"}
+        ]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    assert_eq!(payload["output"][0]["type"], "output_text");
+    assert_eq!(payload["output"][1]["type"], "function_call");
+    assert_eq!(payload["output"][0]["text"], "");
+    assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
+fn resp03_toolreason_from_generic_text_output_item_is_stripped() {
+    let mut payload = json!({
+        "output": [
+            {"type":"text","text":"<toolreason>{\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\"}</toolreason>"},
+            {"type":"function_call","call_id":"call_1","name":"pwd","arguments":"{}"}
+        ]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    assert_eq!(payload["output"][0]["text"], "");
+    assert_eq!(payload["output"][1]["type"], "function_call");
+    assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
+fn resp03_toolreason_never_rewrites_native_tool_arguments() {
+    let command = "printf '<toolreason>keep this command literal</toolreason>'";
+    let mut payload = json!({
+        "choices":[{"message":{
+            "content":"<toolreason>{\"reason\":\"Inspect the command\"}</toolreason>",
+            "tool_calls":[{"type":"function","function":{
+                "name":"exec_command",
+                "arguments":format!("{{\"cmd\":{}}}", serde_json::to_string(command).unwrap())
+            }}]
+        }}]
+    });
+    let original_arguments =
+        payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"].clone();
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    assert_eq!(
+        payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"],
+        original_arguments
+    );
+    assert!(payload["choices"][0]["message"]
+        .get("reasoning_content")
+        .is_none());
+}
+
+#[test]
+fn resp03_toolreason_never_rewrites_gemini_function_call_args() {
+    let command = "printf '<toolreason>keep this command literal</toolreason>'";
+    let mut payload = json!({
+        "candidates":[{"content":{"parts":[
+            {"text":"<toolreason>{\"reason\":\"Inspect the command\"}</toolreason>"},
+            {"functionCall":{"name":"exec_command","args":{"cmd":command}}}
+        ]}}]
+    });
+    let original_args =
+        payload["candidates"][0]["content"]["parts"][1]["functionCall"]["args"].clone();
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    assert_eq!(
+        payload["candidates"][0]["content"]["parts"][1]["functionCall"]["args"],
+        original_args
+    );
+    assert!(
+        payload["candidates"][0]["content"]["parts"][1]["functionCall"]["args"]["cmd"]
+            .as_str()
+            .unwrap()
+            .contains("<toolreason>keep this command literal</toolreason>")
+    );
+}
+
+#[test]
+fn resp03_native_reasoning_is_not_toolreason() {
+    let mut payload = json!({
+        "output": [
+            {"type":"reasoning","summary":[{"type":"summary_text","text":"native model reasoning"}]},
+            {"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{}"}
+        ]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    assert_eq!(payload["output"][0]["type"], "reasoning");
+    assert_eq!(
+        payload["output"][0]["summary"][0]["text"],
+        "native model reasoning"
+    );
+    assert!(!payload.to_string().contains("调用工具"));
 }
 
 #[test]
@@ -70,10 +420,7 @@ fn resp03_multiple_toolreasons_pair_by_tool_call_order_and_strip_duplicates() {
     });
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
     let message = &payload["choices"][0]["message"];
-    assert_eq!(
-        message["reasoning_content"],
-        "调用工具 cat、test：Inspect file."
-    );
+    assert!(message.get("reasoning_content").is_none());
     assert_eq!(message["content"], "");
     assert!(!payload.to_string().contains("toolreason"));
     assert!(!payload.to_string().contains("duplicate."));
@@ -94,10 +441,7 @@ fn resp03_responses_post_call_toolreason_maps_once_and_preserves_calls() {
 
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
 
-    assert_eq!(
-        payload["output"][2]["reasoning_content"],
-        "调用工具 pwd、read_file：确认工具结果所需的工作状态"
-    );
+    assert_eq!(payload["output"][2]["type"], "message");
     assert_eq!(payload["output"][2]["content"][0]["text"], "");
     assert_eq!(payload["output"][0]["name"], "exec_command");
     assert_eq!(payload["output"][1]["name"], "read_file");
@@ -128,11 +472,56 @@ fn resp03_toolreason_uses_shell_command_as_display_tool_for_exec_command() {
         ]
     });
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-    assert_eq!(
-        payload["output"][1]["reasoning_content"],
-        "调用工具 curl：检查服务健康状态"
-    );
+    assert_eq!(payload["output"][1]["type"], "message");
+    assert_eq!(payload["output"][1]["content"][0]["text"], "");
     assert!(!payload.to_string().contains("调用工具 exec_command"));
+}
+
+#[test]
+fn resp03_duplicate_native_auxiliary_keys_are_invalid_and_not_projected() {
+    let duplicate = r#"{"cmd":"pwd","reason":"确认当前目录","goal_alignment_confidence":100,"model_id":"x-preview-f-free","reason":"获取当前日期","goal_alignment_confidence":100,"model_id":"x-preview-f-free"}"#;
+    assert!(json_object_has_duplicate_keys_at_resp03(duplicate));
+    assert!(
+        v3_tool_thinking_fields_from_parameter_value_at_resp03(&Value::String(
+            duplicate.to_string()
+        ))
+        .is_none()
+    );
+
+    let mut payload = json!({
+        "choices": [{
+            "delta": {
+                "tool_calls": [{
+                    "index": 0,
+                    "function": {"name": "pwd", "arguments": duplicate}
+                }]
+            }
+        }]
+    });
+    map_v3_openai_chat_toolreason_delta_at_resp03(&mut payload, true);
+    let function = &payload["choices"][0]["delta"]["tool_calls"][0]["function"];
+    assert_eq!(function["arguments"], duplicate);
+    assert!(payload["choices"][0]["delta"]
+        .get("reasoning_content")
+        .is_none());
+}
+
+#[test]
+fn resp03_toolreason_strips_model_thinking_tags_before_projection() {
+    let mut payload = json!({
+        "output": [
+            {"type":"function_call","name":"cat","arguments":"{}"},
+            {"type":"message","content":[{"type":"output_text","text":"<toolreason>{\"reason\":\"***<think>检查目标文件</think>***\",\"goal_alignment_confidence\":100}</toolreason>"}]}
+        ]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    assert_eq!(payload["output"][1]["type"], "message");
+    assert_eq!(payload["output"][1]["content"][0]["text"], "");
+    assert!(!payload.to_string().contains("<think>"));
+    assert!(!payload.to_string().contains("</think>"));
+    assert!(!payload.to_string().contains("toolreason"));
 }
 
 #[test]
@@ -214,8 +603,8 @@ fn resp03_toolreason_prompt_fragment_and_mapped_reasoning_are_missing() {
     }
 }
 
-#[test]
-fn direct_sse_toolreason_maps_one_reason_per_turn_and_preserves_tool_calls() {
+/* legacy fence/text contract removed: native tool-argument JSON is the only source */
+/*
     let reason_frame = format!(
         "data: {}\r\n\r\n",
         json!({
@@ -288,7 +677,10 @@ fn direct_sse_toolreason_maps_one_reason_per_turn_and_preserves_tool_calls() {
 
     let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
     assert!(!output.contains("toolreason"));
-    assert_eq!(output.matches("event: response.output_text.delta").count(), 1);
+    assert_eq!(output.matches("event: response.reasoning_summary_text.delta").count(), 1);
+    assert!(output.contains("\"type\":\"reasoning\""));
+    assert!(output.contains("\"summary\":[{\"text\":"));
+    assert!(output.contains("确认当前工作目录"));
     assert!(output.contains("\"type\":\"function_call\""));
     assert!(output.contains("\"call_id\":\"call_1\""));
     assert!(output.contains("\"call_id\":\"call_2\""));
@@ -344,12 +736,236 @@ fn direct_sse_post_call_toolreason_waits_past_tool_done_and_maps_once() {
 
     let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
     assert!(!output.contains("toolreason"));
-    assert_eq!(output.matches("event: response.output_text.delta").count(), 1);
+    assert_eq!(
+        output
+            .matches("event: response.reasoning_summary_text.delta")
+            .count(),
+        1
+    );
     assert!(output.contains("确认当前工作目录"));
     assert!(output.contains("call_post_1"));
     assert!(
         reason_emitted,
         "post-call reason must be mapped when its message item closes"
+    );
+}
+
+#[test]
+fn direct_sse_terminal_toolreason_projects_when_reason_arrives_after_tool_done() {
+    let tool_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {"type": "function_call", "call_id": "call_terminal", "name": "cat", "arguments": "{}"}
+        })
+    );
+    let reason_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.output_text.delta",
+            "output_index": 1,
+            "delta": "<toolreason>读取目标文件</toolreason>"
+        })
+    );
+    let completed_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.completed",
+            "response": {"output": [{"type": "function_call", "name": "cat", "arguments": "{}"}]}
+        })
+    );
+    let mut buffer = Vec::new();
+    let mut tool_names = Vec::new();
+    let mut pending_reasons = Vec::new();
+    let mut reason_emitted = false;
+    let mut output = project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer, &mut tool_names, &mut pending_reasons, &mut reason_emitted, tool_frame.as_bytes()
+    );
+    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer, &mut tool_names, &mut pending_reasons, &mut reason_emitted, reason_frame.as_bytes()
+    ));
+    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer, &mut tool_names, &mut pending_reasons, &mut reason_emitted, completed_frame.as_bytes()
+    ));
+    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
+    assert!(output.contains("\"type\":\"reasoning\""));
+    assert!(output.contains("读取目标文件"));
+    assert!(!output.contains("toolreason"));
+    assert!(reason_emitted);
+}
+
+*/
+#[test]
+fn direct_sse_native_reasoning_is_not_reprojected_as_toolreason() {
+    let completed_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.completed",
+            "response": {"output": [
+                {"id":"native_reasoning_1","type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":"原生模型思考"}]},
+                {"type":"function_call","name":"cat","arguments":"{}"}
+            ]}
+        })
+    );
+    let mut buffer = Vec::new();
+    let mut tool_names = Vec::new();
+    let mut pending_reasons = Vec::new();
+    let mut reason_emitted = false;
+    let output = project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        completed_frame.as_bytes(),
+    );
+    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
+    // The native reasoning item remains transparent to the client. It must
+    // not be re-emitted as a toolreason summary event.
+    assert!(output.contains("原生模型思考"));
+    assert!(!output.contains("response.reasoning_summary_text.delta"));
+    assert!(output.contains("\"type\":\"reasoning\""));
+    assert!(
+        reason_emitted,
+        "the tool call still receives one missing observation"
+    );
+}
+
+#[test]
+fn direct_sse_reasoning_done_gets_client_reasoning_lifecycle_before_original_done() {
+    let reasoning_done = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {
+                "id": "rs_toolreason_1",
+                "type": "reasoning",
+                "status": "completed",
+                "summary": [
+                    {"type": "summary_text", "text": "自然思考"},
+                    {"type": "summary_text", "text": "调用工具 cat：读取目标文件"}
+                ]
+            }
+        })
+    );
+    let mut buffer = Vec::new();
+    let mut tool_names = vec!["cat".to_string()];
+    let mut pending_reasons = Vec::new();
+    let mut reason_emitted = true;
+
+    let output = project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        reasoning_done.as_bytes(),
+    );
+    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
+    let added = output
+        .find("event: response.output_item.added")
+        .expect("client reasoning lifecycle must start with output_item.added");
+    let done_marker = "\"type\":\"response.output_item.done\"";
+    assert!(
+        output.matches(done_marker).count() >= 2,
+        "projected and original reasoning done frames must both be present: {output}"
+    );
+    let original_done = output
+        .rfind(done_marker)
+        .expect("original reasoning done frame must remain");
+    assert!(added < original_done);
+    assert!(output.contains("event: response.reasoning_summary_text.delta"));
+    assert!(output.contains("调用工具 cat：读取目标文件"));
+    assert!(!output.contains("<toolreason>"));
+}
+
+#[test]
+fn direct_sse_plain_output_text_is_not_toolreason_without_fence() {
+    let text_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "delta": "普通模型输出，不是工具调用说明"
+        })
+    );
+    let call_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {"type": "function_call", "name": "cat", "arguments": "{}"}
+        })
+    );
+    let mut buffer = Vec::new();
+    let mut tool_names = Vec::new();
+    let mut pending_reasons = Vec::new();
+    let mut reason_emitted = false;
+    let mut output = project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        text_frame.as_bytes(),
+    );
+    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        call_frame.as_bytes(),
+    ));
+    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
+    assert!(output.contains("普通模型输出，不是工具调用说明"));
+    assert!(!output.contains("response.reasoning_summary_text.delta"));
+    assert!(
+        reason_emitted,
+        "the tool call still receives one missing observation"
+    );
+}
+
+#[test]
+fn direct_sse_strips_legacy_toolreason_fence_from_message_item() {
+    let message_done = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.output_item.done",
+            "output_index": 1,
+            "item": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "<toolreason>{\"reason\":\"打印当前工作目录\",\"goal_alignment_confidence\":100}</toolreason>"
+                }]
+            }
+        })
+    );
+    let mut buffer = Vec::new();
+    let mut tool_names = vec!["exec_command".to_string()];
+    let mut pending_reasons = Vec::new();
+    let mut reason_emitted = false;
+
+    let output = project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        message_done.as_bytes(),
+    );
+    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
+
+    assert!(
+        !output.contains("<toolreason>"),
+        "legacy fence leaked: {output}"
+    );
+    assert!(
+        !output.contains("goal_alignment_confidence"),
+        "schema leaked: {output}"
+    );
+    assert!(
+        !output.contains("打印当前工作目录"),
+        "unmapped fence reason leaked: {output}"
     );
 }
 
@@ -411,13 +1027,17 @@ fn direct_sse_toolreason_closeout_logs_missing_when_no_done_event_arrives() {
     assert!(String::from_utf8(output)
         .expect("projected SSE must remain UTF-8")
         .contains("call_closeout_1"));
-    assert_eq!(tool_names, vec!["exec_command|"]);
+    assert_eq!(tool_names, vec![""]);
     assert!(!reason_emitted);
 
-    finalize_v3_toolreason_observation_at_resp03(
+    finalize_v3_toolreason_observation_at_resp03_with_context(
         &tool_names,
         &mut pending_reasons,
         &mut reason_emitted,
+        V3ToolreasonObservationContext {
+            session_id: Some("session_closeout_1"),
+            request_id: Some("request_closeout_1"),
+        },
     );
     assert!(
         reason_emitted,
@@ -435,11 +1055,52 @@ fn resp03_anthropic_text_toolreason_maps_against_tool_use() {
         ]
     });
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-    assert_eq!(
-        payload["reasoning_content"],
-        "调用工具 lookup：Need lookup."
-    );
+    assert!(payload.get("reasoning_content").is_none());
     assert_eq!(payload["content"][0]["text"], "");
+    assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
+fn resp03_anthropic_thinking_fence_maps_without_replacing_native_thinking() {
+    let mut payload = json!({
+        "output": [
+            {
+                "type": "reasoning",
+                "summary": [{
+                    "type": "summary_text",
+                    "text": "先检查环境。<toolreason>{\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100}</toolreason>继续思考。"
+                }]
+            },
+            {"type":"function_call", "name":"pwd", "call_id":"call_pwd", "arguments":"{}"}
+        ]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    assert_eq!(
+        payload["output"][0]["summary"][0]["text"],
+        "先检查环境。继续思考。"
+    );
+    assert_eq!(payload["output"][1]["type"], "function_call");
+    assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
+fn resp03_anthropic_native_thinking_without_fence_stays_native() {
+    let mut payload = json!({
+        "output": [
+            {
+                "type": "reasoning",
+                "summary": [{"type":"summary_text", "text":"原生模型思考"}]
+            },
+            {"type":"function_call", "name":"pwd", "call_id":"call_pwd", "arguments":"{}"}
+        ]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    assert_eq!(payload["output"].as_array().map(Vec::len), Some(2));
+    assert_eq!(payload["output"][0]["summary"][0]["text"], "原生模型思考");
     assert!(!payload.to_string().contains("toolreason"));
 }
 

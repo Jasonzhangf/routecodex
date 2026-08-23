@@ -214,9 +214,15 @@ fn apply_deepseek_v4_thinking_chat_compat(payload: &mut Value) {
     }
     if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
         for message in messages {
-            let Some(object) = message.as_object_mut() else { continue; };
-            if object.get("role").and_then(Value::as_str) != Some("assistant") { continue; }
-            object.entry("reasoning_content".to_string()).or_insert_with(|| Value::String(String::new()));
+            let Some(object) = message.as_object_mut() else {
+                continue;
+            };
+            if object.get("role").and_then(Value::as_str) != Some("assistant") {
+                continue;
+            }
+            object
+                .entry("reasoning_content".to_string())
+                .or_insert_with(|| Value::String(String::new()));
             if object.get("content").is_none_or(Value::is_null) {
                 object.insert("content".to_string(), Value::String(String::new()));
             }

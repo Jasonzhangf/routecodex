@@ -5742,3 +5742,26 @@ Tags: #v3 #historical-samples #error-samples #provider-debug
 - Bidirectional inbound/outbound conversion must use fully normalized typed objects. Do not retain or replay raw JSON as a hidden round-trip mechanism; otherwise Inbound normalization is not the semantic source of truth.
 - Unknown protocol/provider fields must be represented by explicit typed extension fields owned by the normalized object. Outbound must rebuild JSON/SSE from the normalized tree plus extensions, preserving semantic order/identity without raw payload fallback.
 - Same-protocol contract is semantic round-trip: `decode(encode(tree)) == tree`; wire byte identity is not a reason to preserve raw JSON. Cross-protocol projection is explicit and may not be falsely claimed invertible.
+
+## 2026-08-21 - Tool-thinking contract migration gate
+
+- The active tool-thinking contract is now `tool_thinking_json_v2`: Req04 adds optional `reason`, `goal_alignment_confidence`, and `model_id` properties to non-Gemini tool parameter schemas; model output may place them in Anthropic `input` or JSON `arguments`/`args`; Resp03 owns harvest and stripping, while ordinary command fields remain unchanged.
+- The former `<toolreason>` fence is legacy compatibility input only. It is forbidden as the active request prompt, response success condition, metric, or primary fixture.
+- Contract changes must land in the canonical design, function map, mainline call map, verification map, prompt, and fixtures before Rust implementation changes. Current status is implementation-in-progress pending complete live sample coverage; unit/build/restart evidence alone is not completion.
+- Resp03 owns one shared extractor/stripper and one-turn aggregator for Direct and Relay; SSE, provider codecs, and handlers are transport/shape boundaries only. Missing or malformed auxiliary fields must not reject or mutate the native tool call or create 400/502.
+
+## 2026-08-22 - Provider/SSE 归因必须先做直连 A/B/C
+
+- 已确认一次 P0 流程错误：先通过 7777/4444 入口和 console/旧样本判断，再补测 provider 直连；这不能证明 provider-bound request、provider raw response 与 client projection 的责任边界。
+- 固定顺序：A 为同 provider/model/key 的最小 provider 直连，B 为同一失败 `requestId` 生成的完整 `provider-request.json` 原样直连，C 才是同一客户端请求经 RouteCodex 的在线重放。A 失败才调查 provider/key/model/endpoint；A 成功、B 失败归请求构造；A/B 成功、C 失败才归传输/解析/投影。
+- 该门禁已提升到 `.agents/skills/rcc-dev-skills/SKILL.md` 顶部；缺少同一次失败的 B 与 raw provider response 时只能报告“尚未定位”，不得用入口最小请求、另一 key/端口或 SSE 文案替代。
+
+## 2026-08-22 - Internal request/response errors use 598/599
+
+- Error06 must keep RouteCodex internal failures distinct from provider failures: internal request-lane failures project HTTP 598; internal response-lane failures project HTTP 599. Provider/upstream failures keep their external status semantics, including 502.
+- An upstream HTTP 200/201 followed by RouteCodex response parsing, SSE, transport-read, RespInbound, RespChatProcess, RespOutbound, or client-frame failure is an internal response failure and must project 599, not 502. Internal status must not be overwritten by the upstream/source status.
+- The unique owner is `v3/crates/routecodex-v3-error/src/lib.rs` Error06 projection, using `V3InternalErrorLane`; SSE/handler/provider-health layers must not invent or remap these statuses.
+
+## 2026-08-22 - Current protocol excludes legacy toolreason fences
+
+- The retired `<toolreason>` fence syntax is not part of the current protocol or acceptance criteria. Do not restore, parse, emit, or use legacy fence tests to drive runtime SSE/Resp03 changes; current validation uses native JSON/tool-call shapes and registered semantic projections.

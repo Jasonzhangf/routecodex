@@ -8,10 +8,10 @@ struct V3DirectThinkingItemPlan {
 }
 
 pub(crate) fn wrap_v3_direct_responses_thinking_tag_consumer_stream(
-    source: V3ClientSseStream,
-) -> V3ClientSseStream {
+    source: V3ProviderAttemptSseStream,
+) -> V3ProviderAttemptSseStream {
     struct V3DirectResponsesThinkingTagConsumerState {
-        source: V3ClientSseStream,
+        source: V3ProviderAttemptSseStream,
         detector: SseIncrementalDecoder,
         buffered_frames: Vec<SseTransportIn03ValidatedFrameStream>,
         emitted: bool,

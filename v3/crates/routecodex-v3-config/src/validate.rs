@@ -51,9 +51,7 @@ pub(crate) fn build_resource_registry(
     features
         .entry("stopless_center".to_string())
         .or_insert(true);
-    features
-        .entry("tool_thinking".to_string())
-        .or_insert(false);
+    features.entry("tool_thinking".to_string()).or_insert(false);
 
     Ok(V3Config04ResourceRegistryBuilt {
         version: authoring.version,
@@ -855,7 +853,10 @@ pub(crate) fn compile_auth(
     provider_id: &str,
     authoring: V3ProviderAuthAuthoringConfig,
 ) -> Result<V3ProviderAuthManifest, V3ConfigError> {
-    if matches!(authoring.selection.strategy, V3SelectionStrategy::RoundRobin) {
+    if matches!(
+        authoring.selection.strategy,
+        V3SelectionStrategy::RoundRobin
+    ) {
         return Err(validation(format!(
             "provider {provider_id} auth only supports priority or weighted selection"
         )));
@@ -1586,7 +1587,9 @@ fn validate_auth_alias_ref(
     Ok(())
 }
 
-pub(crate) fn compile_debug(authoring: V3DebugAuthoringConfig) -> Result<V3DebugManifest, V3ConfigError> {
+pub(crate) fn compile_debug(
+    authoring: V3DebugAuthoringConfig,
+) -> Result<V3DebugManifest, V3ConfigError> {
     if authoring
         .log_file
         .as_deref()

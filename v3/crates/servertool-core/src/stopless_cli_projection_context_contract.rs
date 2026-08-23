@@ -1,10 +1,9 @@
 // feature_id: hub.servertool_stopless_cli_projection_context
+use crate::internal::stopless_defaults;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::cli_contract::normalize_stopless_trigger_hint_for_metadata;
-
-const DEFAULT_REASONING_TEXT: &str = "继续。";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -99,7 +98,7 @@ pub fn plan_stopless_cli_projection_context(
             input.chat_stop_text.as_deref(),
             input.adapter_stop_text.as_deref(),
         ])
-        .unwrap_or_else(|| DEFAULT_REASONING_TEXT.to_string()),
+        .unwrap_or_else(|| stopless_defaults().reasoning_text.clone()),
         repeat_count,
         max_repeats,
         public_trigger_hint,
@@ -242,7 +241,7 @@ mod tests {
             request_id: None,
         });
 
-        assert_eq!(plan.reasoning_text, DEFAULT_REASONING_TEXT);
+        assert_eq!(plan.reasoning_text, stopless_defaults().reasoning_text);
         assert_eq!(plan.repeat_count, 1);
         assert_eq!(plan.max_repeats, 1);
         assert_eq!(plan.public_trigger_hint, None);

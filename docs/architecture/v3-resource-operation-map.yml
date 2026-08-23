@@ -995,6 +995,76 @@ resources:
     may_enter_client_body: false
     required_gates: [provider_global_cooldown_persistence_contract, provider_global_probe_startup_contract]
     binding_status: design
+
+  - resource_id: v3.front.request_lease
+    resource_kind: control_resource
+    lifecycle: v3.runtime.restart_handoff_skeleton
+    owner_crate: routecodex-v3-server
+    owner_node: V3FrontRequestLease
+    identity: [request_id, pipeline_id, server_id, port, session_scope]
+    allowed_writers: [V3FrontRequestLease]
+    allowed_readers: [V3RuntimeHandoffCheckpoint, V3ServerAggregateHandle::prepare_for_exec]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, MetadataCenter.payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.front.runtime_handoff_checkpoint
+    resource_kind: control_resource
+    lifecycle: v3.runtime.restart_handoff_skeleton
+    owner_crate: routecodex-v3-server
+    owner_node: V3RuntimeHandoffCheckpoint
+    identity: [request_id, pipeline_id, port, session_scope, runtime_generation]
+    allowed_writers: [V3FrontRequestLease::checkpoint]
+    allowed_readers: [V3FrontRequestLease::reattach]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, raw_json_control_reconstruction]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.front.client_frame_sequence
+    resource_kind: transport_control_resource
+    lifecycle: v3.runtime.restart_handoff_skeleton
+    owner_crate: routecodex-v3-server
+    owner_node: V3FrontFrameSequence
+    identity: [request_id, pipeline_id, port, direction, sequence]
+    allowed_writers: [V3FrontFrameSequence::observe_client, V3FrontFrameSequence::observe_provider]
+    allowed_readers: [V3RuntimeHandoffCheckpoint, V3FrontRequestLease::reattach]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.front.deadline_budget
+    resource_kind: transport_control_resource
+    lifecycle: v3.runtime.restart_handoff_skeleton
+    owner_crate: routecodex-v3-server
+    owner_node: V3FrontDeadlineBudget
+    identity: [request_id, pipeline_id, port, absolute_deadline, idle_deadline]
+    allowed_writers: [V3FrontDeadlineBudget::new, V3FrontDeadlineBudget::observe_activity, V3FrontDeadlineBudget::restore_remaining]
+    allowed_readers: [V3FrontRequestLease::checkpoint]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.front.request_activity_gate
+    resource_kind: transport_lifecycle_resource
+    lifecycle: v3.runtime.restart_handoff_skeleton
+    owner_crate: routecodex-v3-server
+    owner_node: V3ServerRequestActivityGate
+    identity: [server_aggregate, request_body_lifetime]
+    allowed_writers: [V3ServerRequestActivityGate::admit, V3ServerRequestActivityPermit::drop]
+    allowed_readers: [V3ServerAggregateHandle::prepare_for_exec]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, MetadataCenter.payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled_runtime_pending_live_replay
   - resource_id: v3.provider.availability_projection
     resource_kind: side_channel
     lifecycle: v3.debug_error_foundation.mainline
@@ -1489,7 +1559,7 @@ resources:
       default_policy: dev builds enable sampling by default (cfg!(debug_assertions)); release builds require explicit opt-in
       error_evidence: error paths force-write samples even when sampling is disabled
       retention_cap: at most 200 request directories per port are retained
-    allowed_readers: [capture_v3_live_raw_request, capture_v3_responses_relay_response, capture_v3_responses_direct_response, capture_v3_responses_relay_provider_snapshots, V3DebugBoundedTextCapture::rendered_text, developer_diagnostics]
+    allowed_readers: [capture_v3_live_raw_request, capture_v3_responses_relay_response, capture_v3_responses_direct_response, capture_v3_responses_relay_provider_snapshots, capture_v3_relay_provider_snapshots, V3DebugBoundedTextCapture::rendered_text, developer_diagnostics]
     allowed_writers: [V3DebugRuntime::project_payload_verbatim, V3DebugBoundedTextCapture::append, V3CodexSampleStore::persist]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false
@@ -1522,7 +1592,7 @@ resources:
     owner_node: V3ErrorEvidenceFlushOnTerminalFailure
     identity: [entryProtocol, endpoint, port, requestId, artifactName]
     allowed_readers: [developer_diagnostics, incident_replay]
-    allowed_writers: [persist_v3_error_evidence_payload, capture_v3_responses_relay_provider_snapshots]
+    allowed_writers: [persist_v3_error_evidence_payload, capture_v3_responses_relay_provider_snapshots, capture_v3_relay_provider_snapshots]
     forbidden_writers: [routecodex-v3-runtime, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false

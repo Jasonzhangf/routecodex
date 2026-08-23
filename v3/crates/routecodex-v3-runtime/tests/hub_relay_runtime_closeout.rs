@@ -363,7 +363,7 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         V3ResponsesRelayClientBody::Sse(mut stream) => {
             let mut forwarded = Vec::new();
             while let Some(chunk) = stream.next().await {
-                forwarded.extend(chunk.expect("controlled SSE chunk must project"));
+                forwarded.extend(chunk);
             }
             let text = String::from_utf8(forwarded).unwrap();
             assert!(text.contains("event: response.output_item.added"));
@@ -501,7 +501,7 @@ async fn responses_relay_client_sse_request_projects_sse_even_when_provider_retu
         V3ResponsesRelayClientBody::Sse(mut stream) => {
             let mut forwarded = Vec::new();
             while let Some(chunk) = stream.next().await {
-                forwarded.extend(chunk.expect("JSON provider response must project as client SSE"));
+                forwarded.extend(chunk);
             }
             let text = String::from_utf8(forwarded).unwrap();
             assert!(text.contains("event: response.created"));
@@ -923,7 +923,7 @@ async fn responses_relay_sse_completed_without_provider_finish_reason_infers_sto
         V3ResponsesRelayClientBody::Sse(mut stream) => {
             let mut forwarded = Vec::new();
             while let Some(chunk) = stream.next().await {
-                forwarded.extend(chunk.expect("controlled SSE text chunk must project"));
+                forwarded.extend(chunk);
             }
             let text = String::from_utf8(forwarded).unwrap();
             assert!(text.contains("event: response.output_item.done"));
@@ -1872,8 +1872,7 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
     assert_eq!(
         provider_sequence,
         vec![
-            "limited", "minimax", "limited", "minimax", "limited", "minimax", "limited",
-            "minimax",
+            "limited", "minimax", "limited", "minimax", "limited", "minimax", "limited", "minimax",
         ]
     );
 }

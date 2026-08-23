@@ -239,7 +239,7 @@ pub(crate) fn v3_server_frame_error_body_for_console(
 ) -> Option<&Value> {
     frame.error_body.as_ref().or_else(|| match &frame.body {
         V3Server16Body::Json(value) => Some(value),
-        V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+        V3Server16Body::Bytes(_) | V3Server16Body::CommittedSse(_) => None,
     })
 }
 

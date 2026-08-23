@@ -87,8 +87,7 @@ impl V3ProviderCooldownCoordinator {
                 file.schema_version
             ));
         }
-        let mut entries: BTreeMap<V3ProviderCooldownKey, V3ProviderCooldownEntry> =
-            BTreeMap::new();
+        let mut entries: BTreeMap<V3ProviderCooldownKey, V3ProviderCooldownEntry> = BTreeMap::new();
         for (key, entry) in file.entries {
             if let Some((_, existing)) = entries
                 .iter_mut()

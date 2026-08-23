@@ -445,27 +445,27 @@ impl V3TargetInterpreter {
             attempts: index + 1,
             default_floor_protected: false,
         })
-}
+    }
 
-fn route_tier_index(
-    route: &V3Router07OpaqueTargetHitOnce,
-    candidate: &V3TargetCandidate,
-) -> usize {
-    candidate
-        .pool_ids
-        .iter()
-        .filter_map(|pool_id| {
-            route
-                .target_plan
-                .iter()
-                .find(|entry| entry.pool_id == *pool_id)
-                .map(|entry| entry.tier_index)
-        })
-        .min()
-        .unwrap_or(usize::MAX)
-}
+    fn route_tier_index(
+        route: &V3Router07OpaqueTargetHitOnce,
+        candidate: &V3TargetCandidate,
+    ) -> usize {
+        candidate
+            .pool_ids
+            .iter()
+            .filter_map(|pool_id| {
+                route
+                    .target_plan
+                    .iter()
+                    .find(|entry| entry.pool_id == *pool_id)
+                    .map(|entry| entry.tier_index)
+            })
+            .min()
+            .unwrap_or(usize::MAX)
+    }
 
-pub fn select_available<R: V3ProviderAvailabilityReader>(
+    pub fn select_available<R: V3ProviderAvailabilityReader>(
         &self,
         expanded: V3Target09CandidateSetExpanded,
         availability: &R,

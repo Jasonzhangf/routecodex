@@ -327,7 +327,7 @@ fn internal_runtime_failure_projects_numbered_internal_code_without_external_lin
         source_status: None,
     });
 
-    assert_eq!(projected.status, 500);
+    assert_eq!(projected.status, 598);
     assert_eq!(
         projected.body["error"]["code"],
         "provider_auth_handle_missing"
@@ -345,6 +345,39 @@ fn internal_runtime_failure_projects_numbered_internal_code_without_external_lin
         projected.body["error"]
     );
     assert!(projected.body["error"].get("external_error").is_none());
+}
+
+#[test]
+fn internal_request_and_response_failures_use_distinct_status_lanes() {
+    let request_source = build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3Req04StandardizedResponses",
+        "request_codec_failure",
+        "request normalization failed",
+        V3InternalErrorCode::V3Req04StandardizedResponses,
+    );
+    let request_projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source: request_source,
+        action_scope: V3ErrorActionScope::None,
+        candidates_remaining: 0,
+        source_status: Some(502),
+    });
+    assert_eq!(request_projected.status, 598);
+
+    let response_source = build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3ProviderResp14Raw",
+        "response_codec_failure",
+        "response normalization failed",
+        V3InternalErrorCode::V3ProviderResp14Raw,
+    );
+    let response_projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source: response_source,
+        action_scope: V3ErrorActionScope::None,
+        candidates_remaining: 0,
+        source_status: Some(201),
+    });
+    assert_eq!(response_projected.status, 599);
 }
 
 #[test]

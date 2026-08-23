@@ -1,6 +1,6 @@
 use super::{
-    classify_v3_provider_compat_error, provider_protocol_compat_id, V3HubResponsePayload, V3ProviderCompatError,
-    V3ProviderCompatProfileId, V3ProviderRespInbound01Raw,
+    classify_v3_provider_compat_error, provider_protocol_compat_id, V3HubResponsePayload,
+    V3ProviderCompatError, V3ProviderCompatProfileId, V3ProviderRespInbound01Raw,
 };
 use provider_compat_core::req_outbound_stage3_compat::{
     run_resp_inbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
@@ -34,15 +34,13 @@ pub async fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(
     mut input: V3ProviderRespInbound01Raw,
 ) -> Result<ProviderRespCompat02ProviderCompat, V3ProviderCompatError> {
     let provider_protocol = input.provider_protocol;
-    let chunks = input
-        .take_raw_sse_chunks()
-        .ok_or_else(|| {
-            classify_v3_provider_compat_error(
-                "response",
-                &input.compatibility_profile,
-                "ProviderRespInbound01Raw missing SSE chunks".to_string(),
-            )
-        })?;
+    let chunks = input.take_raw_sse_chunks().ok_or_else(|| {
+        classify_v3_provider_compat_error(
+            "response",
+            &input.compatibility_profile,
+            "ProviderRespInbound01Raw missing SSE chunks".to_string(),
+        )
+    })?;
     let provider = Box::pin(futures_util::stream::iter(chunks.into_iter().map(Ok)));
     let payload =
         super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(

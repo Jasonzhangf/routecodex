@@ -2,6 +2,7 @@ use crate::*;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, Response, StatusCode};
+use futures_util::{FutureExt, StreamExt};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
@@ -144,7 +145,7 @@ pub(crate) fn foundation_output_response(output: V3FoundationRuntimeOutput) -> R
             serde_json::to_vec(&value).expect("V3Server16 JSON projection")
         }
         V3Server16Body::Bytes(bytes) => bytes,
-        V3Server16Body::Sse(stream) => {
+        V3Server16Body::CommittedSse(stream) => {
             return builder
                 .body(v3_client_sse_body(stream, None))
                 .expect("typed response");
@@ -188,12 +189,7 @@ pub(crate) fn project_v3_responses_direct_stream_error_frame_if_requested(
         frame.error_body = Some(body);
     }
     frame.content_type = "text/event-stream".to_string();
-    frame.body = V3Server16Body::Sse(Box::pin(stream::iter(vec![Ok::<
-        Vec<u8>,
-        routecodex_v3_error::V3Error01SourceRaised,
-    >(
-        v3_sse_error_event_chunk(frame.status, &code, &message),
-    )])));
+    frame.body = V3Server16Body::Bytes(v3_sse_error_event_chunk(frame.status, &code, &message));
     frame
 }
 
@@ -223,32 +219,7 @@ pub(crate) fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -
             "message": message
         }
     });
-    format!("event: error\ndata: {event}\n\n").into_bytes()
-}
-
-fn v3_post_commit_sse_error_event_chunk(source: V3Error01SourceRaised) -> Vec<u8> {
-    let provider_failure = matches!(
-        source.source_kind,
-        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
-    );
-    let projected = project_v3_post_commit_sse_source(source, 599);
-    let (code, message): (String, String) = if provider_failure {
-        (
-            "response_stream_terminated".to_string(),
-            "response stream terminated before completion".to_string(),
-        )
-    } else {
-        let (code, message) = v3_error_body_code_message(&projected.body);
-        (code, message)
-    };
-    let event = json!({
-        "type": "error",
-        "error": {
-            "code": code,
-            "message": message
-        }
-    });
-    format!("event: error\ndata: {event}\n\n").into_bytes()
+    format!("event: error\ndata: {event}\n\ndata: [DONE]\n\n").into_bytes()
 }
 
 pub(crate) fn responses_direct_output_response_with_console(
@@ -264,9 +235,14 @@ pub(crate) fn responses_direct_output_response_with_console(
             serde_json::to_vec(&value).expect("V3Server16 JSON projection")
         }
         V3Server16Body::Bytes(bytes) => bytes,
-        V3Server16Body::Sse(stream) => {
-            let stream = wrap_v3_direct_sse_console_stream(stream, stream_console_finalizer);
-            let keepalive = frame.error_chain.is_empty().then_some(keepalive_interval).flatten();
+        V3Server16Body::CommittedSse(stream) => {
+            let stream =
+                wrap_v3_direct_committed_sse_console_stream(stream, stream_console_finalizer);
+            let keepalive = frame
+                .error_chain
+                .is_empty()
+                .then_some(keepalive_interval)
+                .flatten();
             return builder
                 .body(v3_client_sse_body(stream, keepalive))
                 .expect("typed response");
@@ -275,20 +251,18 @@ pub(crate) fn responses_direct_output_response_with_console(
     builder.body(Body::from(body)).expect("typed response")
 }
 
-pub(crate) fn wrap_v3_direct_sse_console_stream(
-    stream: V3ClientSseStream,
+pub(crate) fn wrap_v3_direct_committed_sse_console_stream(
+    stream: V3CommittedClientSseStream,
     finalizer: Option<V3DirectSseConsoleFinalizer>,
-) -> V3ClientSseStream {
+) -> V3CommittedClientSseStream {
     match finalizer {
-        Some(finalizer) => {
-            wrap_v3_direct_sse_closeout_stream(stream, move |terminal| match terminal {
-                V3SseConsoleStreamTerminal::Completed => finalizer.complete(),
-                V3SseConsoleStreamTerminal::Dropped => finalizer.client_disconnected(),
-                V3SseConsoleStreamTerminal::Failed(message) => {
-                    finalizer.provider_stream_failed(&message)
-                }
-            })
-        }
+        Some(finalizer) => stream.observe(
+            |_| {},
+            move |terminal| match terminal {
+                V3CommittedSseTerminal::Completed => finalizer.complete(),
+                V3CommittedSseTerminal::Dropped => finalizer.client_disconnected(),
+            },
+        ),
         None => stream,
     }
 }
@@ -296,35 +270,8 @@ pub(crate) fn wrap_v3_direct_sse_console_stream(
 pub(crate) type V3IoSseStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, io::Error>> + Send>>;
 
-pub(crate) fn v3_relay_client_sse_body(
-    stream: V3ResponsesRelayClientStream,
-    keepalive_interval: Option<Duration>,
-) -> Body {
-    let stream = stream::unfold((stream, false), |(mut stream, done)| async move {
-        if done {
-            return None;
-        }
-        match stream.next().await {
-            Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-            Some(Err(source)) if is_v3_client_disconnect_source(&source) => Some((
-                Err(io::Error::other(format!(
-                    "{}: {}",
-                    source.code, source.message
-                ))),
-                (stream, true),
-            )),
-            Some(Err(source)) => Some((
-                Ok(v3_post_commit_sse_error_event_chunk(source)),
-                (stream, true),
-            )),
-            None => None,
-        }
-    });
-    v3_io_sse_body(Box::pin(stream), keepalive_interval)
-}
-
 pub(crate) fn v3_client_sse_body(
-    stream: V3ClientSseStream,
+    stream: V3CommittedClientSseStream,
     keepalive_interval: Option<Duration>,
 ) -> Body {
     let stream: V3IoSseStream = Box::pin(stream::unfold((stream, false), |(mut stream, done)| async move {
@@ -332,18 +279,7 @@ pub(crate) fn v3_client_sse_body(
             return None;
         }
         match stream.next().await {
-            Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-            Some(Err(source)) if is_v3_client_disconnect_source(&source) => Some((
-                Err(io::Error::other(format!(
-                    "{}: {}",
-                    source.code, source.message
-                ))),
-                (stream, true),
-            )),
-            Some(Err(source)) => Some((
-                Ok(v3_post_commit_sse_error_event_chunk(source)),
-                (stream, true),
-            )),
+            Some(chunk) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
             None => None,
         }
     }));
@@ -418,24 +354,23 @@ pub(crate) fn wrap_v3_sse_io_dump_stream(
     ))
 }
 
-pub(crate) fn wrap_v3_sse_client_dump_stream(
-    stream: V3ClientSseStream,
+pub(crate) fn wrap_v3_committed_sse_dump_stream(
+    stream: V3CommittedClientSseStream,
     sse_dump_enabled: bool,
     port: u16,
     endpoint: &str,
     request_id: &str,
-) -> V3ClientSseStream {
+) -> V3CommittedClientSseStream {
     if !sse_dump_enabled {
         return stream;
     }
     let Some(home) = std::env::var_os("HOME") else {
         return stream;
     };
-    let endpoint_segment = endpoint.trim_start_matches('/');
     let dump_dir = PathBuf::from(home.as_os_str())
         .join(".rcc")
         .join("sse-dumps")
-        .join(endpoint_segment)
+        .join(endpoint.trim_start_matches('/'))
         .join("ports")
         .join(port.to_string())
         .join(request_id);
@@ -443,8 +378,7 @@ pub(crate) fn wrap_v3_sse_client_dump_stream(
         eprintln!("[v3-sse-dump] create_dir_all failed: {error}");
         return stream;
     }
-    let dump_path = dump_dir.join("sse-client.bin");
-    let mut file = match std::fs::File::create(&dump_path) {
+    let mut file = match std::fs::File::create(dump_dir.join("sse-client.bin")) {
         Ok(file) => file,
         Err(error) => {
             eprintln!("[v3-sse-dump] create failed: {error}");
@@ -458,37 +392,26 @@ pub(crate) fn wrap_v3_sse_client_dump_stream(
         eprintln!("[v3-sse-dump] header write failed: {error}");
         return stream;
     }
-    Box::pin(stream::unfold(
-        (stream, Some(file)),
-        |(mut stream, mut file)| async move {
-            match stream.next().await {
-                Some(Ok(chunk)) => {
-                    if let Some(file) = file.as_mut() {
-                        let _ = file.write_all(&chunk);
-                    }
-                    Some((Ok(chunk), (stream, file)))
-                }
-                Some(Err(error)) => {
-                    if let Some(file) = file.as_mut() {
-                        let _ = file.write_all(
-                            format!(
-                                "\n# sse stream error code={} stage={} message={}\n",
-                                error.code, error.source_stage, error.message
-                            )
-                            .as_bytes(),
-                        );
-                    }
-                    Some((Err(error), (stream, file)))
-                }
-                None => {
-                    if let Some(file) = file.as_mut() {
-                        let _ = file.write_all(b"\n# sse stream eof\n");
-                    }
-                    None
-                }
+    let file = Arc::new(std::sync::Mutex::new(file));
+    let frame_file = Arc::clone(&file);
+    stream.observe(
+        move |chunk| {
+            if let Ok(mut file) = frame_file.lock() {
+                let _ = file.write_all(chunk);
             }
         },
-    ))
+        move |terminal| {
+            if let Ok(mut file) = file.lock() {
+                let marker = match terminal {
+                    V3CommittedSseTerminal::Completed => b"\n# sse stream eof\n".as_slice(),
+                    V3CommittedSseTerminal::Dropped => {
+                        b"\n# sse stream dropped by client\n".as_slice()
+                    }
+                };
+                let _ = file.write_all(marker);
+            }
+        },
+    )
 }
 
 pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<Duration>) -> Body {
@@ -514,7 +437,56 @@ pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<D
         }
     }));
     let Some(keepalive_interval) = keepalive_interval else {
-        return Body::from_stream(stream);
+        return Body::from_stream(stream::unfold(
+            (stream, false),
+            |(mut stream, done)| async move {
+                if done {
+                    return None;
+                }
+                match std::panic::AssertUnwindSafe(stream.next())
+                    .catch_unwind()
+                    .await
+                {
+                    Ok(Some(Ok(bytes))) => Some((Ok::<Vec<u8>, io::Error>(bytes), (stream, false))),
+                    Ok(Some(Err(error))) => {
+                        let projected = project_v3_server_runtime_failure(
+                            "V3ServerRespOutbound05ClientFrame",
+                            "front_sse_io_stream_failed",
+                            error.to_string(),
+                            599,
+                        );
+                        let body = serde_json::to_vec(&projected)
+                            .expect("typed Front SSE IO failure Error06 projection");
+                        let mut frame = Vec::with_capacity(body.len() + 32);
+                        frame.extend_from_slice(b"data: ");
+                        frame.extend_from_slice(&body);
+                        frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
+                        Some((Ok(frame), (Box::pin(stream::empty()), true)))
+                    }
+                    Ok(None) => None,
+                    Err(payload) => {
+                        let message = payload
+                            .downcast_ref::<&str>()
+                            .copied()
+                            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                            .unwrap_or("Front SSE IO stream panicked");
+                        let projected = project_v3_server_runtime_failure(
+                            "V3ServerRespOutbound05ClientFrame",
+                            "front_sse_io_stream_panicked",
+                            message,
+                            599,
+                        );
+                        let body = serde_json::to_vec(&projected)
+                            .expect("typed Front SSE panic Error06 projection");
+                        let mut frame = Vec::with_capacity(body.len() + 32);
+                        frame.extend_from_slice(b"data: ");
+                        frame.extend_from_slice(&body);
+                        frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
+                        Some((Ok(frame), (Box::pin(stream::empty()), true)))
+                    }
+                }
+            },
+        ));
     };
     let keepalive_chunk =
         build_v3_sse_transport_out_04_keepalive_comment(" keepalive").into_bytes();
@@ -532,15 +504,37 @@ pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<D
                     (stream, interval, false, keepalive_chunk),
                 ));
             }
-            tokio::select! {
+            let next = tokio::select! {
                 biased;
                 item = stream.next() => item.map(|item| {
-                    (item, (stream, interval, false, keepalive_chunk))
+                    (item, (stream, interval, false, keepalive_chunk.clone()))
                 }),
                 _ = interval.tick() => Some((
                     Ok::<Vec<u8>, io::Error>(keepalive_chunk.clone()),
-                    (stream, interval, false, keepalive_chunk),
+                    (stream, interval, false, keepalive_chunk.clone()),
                 )),
+            };
+            match next {
+                Some((Ok(bytes), state)) => Some((Ok(bytes), state)),
+                Some((Err(error), (stream, interval, _, keepalive_chunk))) => {
+                    let projected = project_v3_server_runtime_failure(
+                        "V3ServerRespOutbound05ClientFrame",
+                        "front_sse_io_stream_failed",
+                        error.to_string(),
+                        599,
+                    );
+                    let body = serde_json::to_vec(&projected)
+                        .expect("typed Front SSE IO failure Error06 projection");
+                    let mut frame = Vec::with_capacity(body.len() + 32);
+                    frame.extend_from_slice(b"data: ");
+                    frame.extend_from_slice(&body);
+                    frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
+                    Some((
+                        Ok(frame),
+                        (Box::pin(stream::empty()), interval, false, keepalive_chunk),
+                    ))
+                }
+                None => None,
             }
         },
     ))
@@ -560,7 +554,7 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_resp_15(
     let error_chain = error_chain.unwrap_or_default();
     let error_body = match &payload.body {
         V3ClientBody::Json(value) if !error_chain.is_empty() => Some(value.clone()),
-        V3ClientBody::Json(_) | V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => None,
+        V3ClientBody::Json(_) | V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => None,
     };
     V3Server16HttpFrame {
         status: payload.status,
@@ -568,7 +562,7 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_resp_15(
         body: match payload.body {
             V3ClientBody::Json(value) => V3Server16Body::Json(value),
             V3ClientBody::Bytes(bytes) => V3Server16Body::Bytes(bytes),
-            V3ClientBody::Sse(stream) => V3Server16Body::Sse(stream),
+            V3ClientBody::CommittedSse(stream) => V3Server16Body::CommittedSse(stream),
         },
         debug_node: "V3Debug01NodeEventRegistered",
         error_node: if error_chain.is_empty() {
@@ -773,7 +767,10 @@ pub(crate) fn error_output_response_for_server_with_project_path(
 ) -> Response<Body> {
     let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
     emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
-    responses_direct_output_response(frame, Some(Duration::from_millis(server.http_sse_keepalive_ms)))
+    responses_direct_output_response(
+        frame,
+        Some(Duration::from_millis(server.http_sse_keepalive_ms)),
+    )
 }
 
 pub(crate) fn error_output_response_for_responses_request_with_project_path(

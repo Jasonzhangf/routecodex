@@ -1,657 +1,450 @@
-# V3 Tool-Thinking Hook Design and Implementation Plan
+# V3 Tool-Thinking JSON Contract Design
 
-Status: Phase 1 implementation landed; live quality closeout and DSH Review pending.
+Status: implementation_in_progress_pending_live_replay
+Date: 2026-08-21
+Feature: `v3.tool_thinking_hook_skeleton`
 
-Date: 2026-08-20
+This document is the canonical design contract for the feature. It replaces the
+former `<toolreason>...</toolreason>` fence contract. Code changes are forbidden
+until this document and the three V3 architecture maps agree with this contract.
 
-## 1. Objective
+## 1. Objective and non-goals
 
-Add a config-driven `tool-thinking` Hook Skeleton feature for the V3 Chat Process.
-The first guidance experiment uses the canonical system-instructions surface only;
-tool descriptions are intentionally not modified. Further placement variants are
-not introduced unless measured live samples show this placement is ineffective.
-The request hook adds a tool-use reason contract to the canonical provider-facing
-system instructions. It does not modify tool descriptions or tool schemas.
-The response hook handles imperfect model output, maps a recovered reason to
-`reasoning_content`, and removes the raw `<toolreason>` marker before the response
-leaves Resp03.
+When `tool-thinking` is enabled, the request Chat Process adds a provider-facing
+instruction explaining that every model tool call should carry three auxiliary
+fields in the tool-call's native parameter JSON object:
 
-Phase 1 exposes only the normalized `reasoning_content` to the client for quality
-monitoring. The raw marker and proxy implementation details remain hidden.
+- `reason`: short motivation for this tool call;
+- `goal_alignment_confidence`: integer from 0 through 100, measured against the
+  user's current-turn goal;
+- `model_id`: the model identifier used for this response.
 
-Phase 2 keeps the same parser, recovery, association, and redaction logic, but
-projects synthesized `reasoning_content` only into model continuation context.
-The client projection omits the synthesized field.
+The response Chat Process observes these fields, records bounded diagnostics,
+removes only these auxiliary fields before client projection, and projects one
+visible `reasoning_content` item per turn during Phase 1. The original tool name,
+call id, argument/input object, result, finish reason, and ordinary content remain
+semantically unchanged.
 
-The feature is a Hook Skeleton extension. It must not add a public protocol field,
-change tool parameters, add a handler path, add a provider codec path, or create a
-new mainline pipeline node.
+The request hook extends each non-Gemini provider-facing tool schema with these
+required observability properties. The model places them in the native parameter
+container; Resp03 removes them before execution and client projection. This
+feature does not change executed commands, add a public protocol field, add a
+pipeline node, reject missing fields, use a fence as the current
+contract, infer a reason from user/history/tool text, or change routing/retry/
+health/continuation/Stopless/provider policy.
 
-## 2. Acceptance contract
+## 2. Contract version and authority
 
-The implementation is acceptable only when all conditions hold:
+The contract is versioned as `tool_thinking_json_v2`. Authority order:
 
-1. `tool-thinking` can be disabled without changing request or response payloads.
-2. Enabled request hooks modify only legal tool description fields in the
-   provider-facing tool list.
-3. The detailed tool-reason contract is present in the injected tool description
-   and does not mention RouteCodex, Proxy, hooks, private state, filtering, or
-   implementation details.
-4. Resp03 is the only semantic response owner for collecting, associating,
-   normalizing, and redacting tool reasons.
-5. A valid reason maps to exactly one marked sentence in `reasoning_content`:
-   `🟢 调用工具 <tool_name>[、<tool_name>...]，因为 <reason>`. The green-dot prefix is the
-   visible provenance marker for a RouteCodex toolreason projection; native model
-   reasoning is not given this prefix.
-6. Original tool name, call id, arguments, tool parameters, status, finish reason,
-   and ordinary response content semantics remain unchanged.
-7. Raw `<toolreason>` content never reaches the client, regardless of whether
-   recovery succeeds.
-8. Phase 1 exposes normalized `reasoning_content` for client monitoring.
-9. Phase 2 uses the same normalized value as private model continuation content
-   and omits the synthesized field from the client projection.
-10. Malformed, incomplete, duplicated, missing, misplaced, and multi-tool output
-    has deterministic behavior covered by positive and negative tests.
-11. Handler, inbound/outbound transport, provider runtime, and continuation
-    transport do not own tool-thinking semantics. Relay uses the Req04 and Resp03
-    Chat Process hooks. Direct uses a separately registered Direct response
-    projection hook for its SSE lifecycle; that hook may parse canonicalized
-    Responses SSE data frames only at the Resp03 projection boundary and delegates
-    association, normalization, and redaction to the Resp03 owner. The two paths
-    are behaviorally equivalent but remain separate lifecycle bindings.
-12. No control state, parser status, recovery status, hook identity, or scope is
-    written to normal request/response payload, provider metadata, client metadata,
-    or tool arguments.
+1. this document;
+2. the `v3.tool_thinking_hook_skeleton` entries in the V3 architecture maps;
+3. the Rust Chat Process hook and fixtures;
+4. provider/client black-box evidence.
 
-## 3. Scope
+Any source, test, prompt, or evidence that treats a raw `<toolreason>` marker as
+the primary contract is stale. It must be removed or explicitly marked legacy
+before implementation starts. A passing old-fence test cannot qualify the JSON
+implementation.
 
-### In scope
+## 3. Model-facing request contract
 
-- Static manifest registration of the tool-thinking hook bundle.
-- Req04 injection into the final provider-facing tool list.
-- Resp03 canonical response inspection after normalization and tool-frame repair.
-- Robust extraction and bounded recovery of `<toolreason>`.
-- Association of a reason with the current tool call.
-- Normalization to `reasoning_content`.
-- Hard removal of raw and confirmed malformed markers.
-- Phase 1 visible reasoning-content projection.
-- Phase 2 private continuation projection design and gate.
-- Responses JSON, Responses SSE after canonical materialization, OpenAI Chat,
-  Anthropic Relay, and Gemini Relay parity where their canonical Chat Process
-  shape exposes a legal tool-description surface.
-- Client/provider black-box tests and malformed-response fixtures.
-
-### Out of scope
-
-- Adding `toolreason` to tool parameters or function arguments.
-- Adding a synthetic tool solely to carry the reason.
-- Writing the reason to MetadataCenter control state.
-- Adding an independent SSE semantic owner outside the registered Resp03 Direct
-  response projection hook.
-- Parsing user text, historical text, tool output, or tool arguments as reasons.
-- Changing StoplessCenter, `reasoningStop`, `stop_schema`, or Stopless budgets.
-- Changing provider selection, routing, retry, health, or error policy.
-- Changing Direct into Relay or adding a fallback path.
-- Rewriting client history or cleaning historical payloads.
-- Enabling Phase 2 private projection before Phase 1 monitoring evidence exists.
-
-Direct same-protocol paths that bypass the Relay Chat Process are covered by a
-separately registered Direct semantic hook. Direct must not silently reroute to
-Relay. The Direct hook reuses the same Req04 injector and Resp03 mapper contract;
-it only adds the Direct lifecycle edge at the existing response projection hook.
-
-## 4. Architecture constraints
-
-The feature follows the existing fixed Hook Skeleton:
+The guidance is injected at the final provider-facing tool-list surface after
+ordinary tool governance and before provider wire encoding. It must explain:
 
 ```text
-Config authoring
-  -> V3Config05ManifestPublished
-  -> static hook registry
-
-Req03 continuation classified / restored
-  -> Req04 normal tool governance
-  -> Req04 tool-thinking description hook
-  -> Req04 finalized provider-facing payload
-  -> ReqOutbound / provider
-
-Provider response
-  -> RespInbound normalization
-  -> Resp03 tool-frame repair
-  -> Resp03 tool-thinking harvest / normalize / redact
-  -> existing ordinary-tool and Stopless hooks
-  -> Resp04 continuation commit
-  -> Resp05 client projection
+For every tool call, put the tool-reason fields in the tool's parameter JSON
+object. They are observability metadata, not execution parameters; the proxy
+removes them before execution and client projection.
+reason: one short phrase stating only why this tool is needed now.
+goal_alignment_confidence: integer 0-100 comparing this call with the user's
+current-turn goal; 100 means directly required, 0 means unrelated.
+model_id: the exact model id used for this response.
+If several tools are called in one assistant turn, provide one object per call.
+Do not emit a fence, commentary, or a second textual explanation.
 ```
 
-The hook may mutate the current node's borrowed payload view. It may not mutate
-history before the current response is finalized, and it may not mutate the
-save-to-restore immutable interval.
-
-The parser's model semantic output is not control state. The following remain
-control-side only:
-
-```text
-enabled
-hook id
-request/response scope
-current turn identity
-association confidence
-recovery kind
-malformed/missing counters
-phase visibility policy
-```
-
-These values belong in typed hook resources or diagnostics. They must not enter
-`reasoning_content`, `metadata`, tool arguments, provider options, or client body.
-
-## 5. Config and manifest design
-
-The authoring switch is initially a boolean feature flag:
-
-```toml
-[features]
-tool_thinking = true
-
-`tool_thinking` is the configuration key for the logical `tool-thinking` feature.
-```
-
-The compiler expands it into one atomic hook bundle. The runtime consumes the
-compiled manifest and does not read TOML dynamically.
-
-Logical bundle:
-
-```text
-tool-thinking.req04.system_prompt
-tool-thinking.resp03.harvest_normalize_redact
-tool-thinking.resp04.visibility_projection
-```
-
-Phase policy is a manifest/profile decision, not a payload field:
-
-```text
-visible  -> Phase 1; synthesized reasoning_content is client-visible
-private  -> Phase 2; synthesized reasoning_content is model-continuation-only
-```
-
-Only one visibility policy may be active for a hook set. An incomplete bundle,
-unknown phase, or unsupported hook binding fails manifest validation. It must not
-silently disable only one side of the lifecycle.
-
-Required manifest declarations:
-
-- fixed request node: `V3HubReqChatProcess04Governed`;
-- fixed response node: `V3HubRespChatProcess03Governed`;
-- commit visibility decision immediately before Resp04 canonical commit/client
-  projection;
-- allowed resource: current-node borrowed view;
-- private projection resource for Phase 2;
-- forbidden resources: provider transport, client payload, MetadataCenter control,
-  SSE transport, handler, debug snapshot, and unrelated session state.
-
-## 6. Request hook: tool-list injection
-
-### Exact insertion point
-
-Run after normal tool governance and all registered Stopless/servertool tool
-declarations are finalized, before Req04 exits and before ReqOutbound builds the
-provider wire payload.
-
-The hook must be idempotent and must operate only on the current provider-bound
-payload. Client-originated tool descriptions and historical descriptions remain
-unchanged.
-
-### Allowed payload targets
-
-```text
-Responses function/custom tool: tools[].description
-OpenAI Chat function tool:      tools[].function.description
-Canonical flat function tool:   tools[].description
-```
-
-Do not modify:
-
-```text
-name
-type
-parameters
-function.parameters
-strict
-tool_choice
-parallel_tool_calls
-messages
-instructions
-input
-metadata
-arguments
-```
-
-For a tool type without a legal description surface, the hook registry must mark
-that tool type unsupported. Do not fall back to `instructions`, add a fake tool,
-or emit provider-invalid fields.
-
-Exclude RouteCodex internal tools such as `reasoningStop`, `noop`, and internal
-servertool bridges. Ordinary client/function/custom tools are eligible.
-
-### Exact injected prompt contract
-
-The implementation must keep one canonical prompt constant. Formatting changes
-require fixture updates because the marker grammar is part of the response parser
-contract.
-
-Chinese model-visible instruction:
-
-```text
-下面内容只说明工具调用部分，不适用于普通回答：
-工具调用时必须先输出原因标签：在这一轮第一个结构化工具调用之前，输出且只输出一个原因标签。标签内部填写这一轮调用工具的直接动机，只说现在为什么要调用，不说计划、步骤、结果或总结。多个工具调用共用这一轮唯一原因，不要重复标签。规则不适用于普通回答、解释、代码块或工具结果。
-
-格式示例：`<toolreason>确认当前工作目录</toolreason>`。实际调用时，标签内部必须换成这一轮真实的直接动机；不要输出示例原文、占位词、加号、反引号、角色说明或格式说明。
-
-工具调用必须使用当前工具接口的结构化调用能力，不要把工具名、参数或“调用工具”写成普通文本。`toolreason` 是文本 fence，必须紧跟在第一个结构化调用之前。工具调用发出后，模型可能因协议结束本轮，不能依赖后置文本补原因。
-
-正例：模型先输出 `<toolreason>确认当前工作目录</toolreason>`，然后立即使用结构化工具接口调用 `exec_command`，参数为 `{"cmd":"pwd"}`。
-
-正例：模型先输出 `<toolreason>读取配置核对端口</toolreason>`，然后立即使用结构化工具接口调用 `read_file`，参数为 `{"path":"config.toml"}`。
-
-反例：输出占位词或加号、复述规则、标签外的普通解释、工具调用之间插入普通文本、一个 turn 输出多个标签。实际发起工具调用时，只输出当前 turn 的唯一原因标签，然后立即发出第一个结构化工具调用。模型未输出标签时仍照常发起工具调用。
-```
-
-这是模型生成提示，不是拒绝工具调用的协议校验。模型缺失或违反该
-提示时，响应 hook 必须继续兼容处理，不能因为缺少标签而拒绝工具调用。
-
-English contract for English-model profiles:
-
-```text
-For every tool-call turn, you MUST output exactly one tool-call motive immediately before the first structured tool call:
-<toolreason>motive</toolreason>
-
-Format rules:
-- State only the direct motive for calling this tool.
-- Use a short, direct caveman-style sentence.
-- Emit exactly one toolreason for the whole tool-call turn.
-- Put no ordinary explanation between tool calls. Do not rely on text after a tool call; the provider may end the assistant turn at `tool_calls`. Multiple tool calls share one motive.
-- Do not output a plan, steps, chain of thought, result, or task summary.
-- Do not repeat tool arguments or copy the user message.
-- Do not mention RouteCodex, Proxy, hooks, injection, filtering, client state,
-  or internal policy.
-- Do not add tool-call explanation outside the toolreason marker.
-- If the motive is uncertain, state only the shortest factual motive; do not
-  invent a result.
-```
-
-The model-visible contract intentionally describes normal tool behavior. It must
-not reveal the proxy implementation or tell the model that the field will be
-removed later.
-
-## 7. Response hook: canonical processing
-
-### Exact processing order
-
-```text
-1. Receive canonical Hub response after provider compatibility parsing.
-2. Complete existing tool-frame normalization/repair.
-3. Identify current assistant tool-call batches.
-4. Collect toolreason candidates from allowed canonical text sources.
-5. Associate candidates with current tool calls.
-6. Normalize each accepted candidate to reasoning_content.
-7. Redact raw and confirmed malformed markers from client-visible text.
-8. Preserve all tool-call and protocol terminal semantics.
-9. Produce the configured visible/private projection.
-10. Return through the existing Resp03 outcome and existing Resp04 commit path.
-```
-
-Do not insert this logic in the Stopless state machine. The response hook runs at
-the same Resp03 skeleton location, but tool-thinking and Stopless keep separate
-state and evidence contracts.
-
-### Accepted source locations
-
-Only inspect the current canonical assistant response:
-
-1. assistant content adjacent to the current tool-call batch;
-2. assistant `reasoning_content` for the current response;
-3. canonical reasoning blocks belonging to the current assistant response.
-
-Never inspect user content, historical assistant content, tool output, tool
-arguments, provider metadata, debug fields, or raw transport frames.
-
-### Canonical mapping
-
-Input:
-
-```text
-<toolreason>Need inspect config.</toolreason>
-tool call: read_file
-```
-
-Output:
-
-```text
-reasoning_content:
-  🟢 调用工具 read_file，因为 Need inspect config.
-```
-
-Existing model `reasoning_content` is preserved and the normalized sentence is
-appended. It is never replaced by a guessed value.
-
-Tool call name, id, arguments, parameters, status, finish reason, and ordinary
-content remain semantically unchanged.
-
-## 8. Imperfect-response recovery contract
-
-Recovery is bounded and deterministic. It may recover an incomplete marker, but it
-may not invent a motive or infer a motive from tool arguments/results.
-
-| Input condition | Action | reasoning_content |
-| --- | --- | --- |
-| complete open/close tag | parse and bind | generate |
-| missing closing tag | consume to current assistant/tool boundary | generate if unique |
-| empty tag | redact | omit |
-| whitespace-only tag | redact | omit |
-| nested tags with one clear text candidate | unwrap once | generate |
-| nested/duplicated tags with ambiguity | redact all confirmed markers | omit |
-| reason/tool count mismatch | bind only unambiguous candidates | omit unmatched |
-| reason after call in same batch | positional association if unique | generate if unique |
-| reason in arguments | pass through arguments; do not parse | omit |
-| reason in tool output | pass through tool output; do not parse | omit |
-| no reason emitted | preserve tool call | omit |
-| marker appears in user/history text | do not parse or strip | unchanged |
-| parser error after marker boundary is known | redact marker span | omit |
-
-Raw marker removal is mandatory even when recovery fails. The implementation must
-avoid deleting unrelated normal text when the boundary is not established. If a
-marker is malformed and its safe end cannot be determined, the hook must fail
-explicitly at the owning Resp03 boundary rather than silently pass potentially
-leaking text downstream.
-
-## 9. Phase 1 visible projection
-
-Phase 1 response example:
+Positive OpenAI-style function call:
 
 ```json
 {
-  "content": "",
-  "reasoning_content": "🟢 调用工具 read_file，因为需要读取配置文件",
-  "tool_calls": [
-    {
-      "id": "call_1",
-      "name": "read_file",
-      "arguments": "{}"
-    }
-  ]
+  "name": "exec_command",
+  "arguments": "{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\"}"
 }
 ```
 
-The client may inspect the normalized `reasoning_content`. It must not receive:
+Positive Anthropic/Gemini-style native call:
 
-```text
-<toolreason>...</toolreason>
-tool-thinking enabled
-recovery=...
-association=...
-hook=...
+```json
+{
+  "name": "exec_command",
+  "input": {"cmd": "pwd", "reason": "确认当前工作目录", "goal_alignment_confidence": 100, "model_id": "x-preview-f-free"}
+}
 ```
 
-Phase 1 monitoring fields belong in ordinary internal diagnostics, not in the
-client response.
+Fields outside the parameter container are invalid-placement diagnostics only;
+the native tool call continues unchanged and cannot cause 400/502.
 
-## 10. Phase 2 private projection gate
-
-Phase 2 is not part of the first implementation slice. It is enabled only after
-Phase 1 evidence proves parser quality and client projection stability.
-
-The normalized response has two views:
-
-```text
-ClientResponseProjection:
-  normal response content
-  original tool call
-  no raw marker
-  no synthesized reasoning_content
-
-ModelContinuationProjection:
-  normal response content
-  original tool call
-  synthesized reasoning_content
+```json
+{"name":"exec_command","reason":"..."}
+{"name":"exec_command","arguments":"{\"cmd\":\"pwd\"}","toolreason":"..."}
+{"name":"exec_command","arguments":"{\"cmd\":\"pwd\"}","toolreason":"..."}
 ```
 
-The private projection must be created before canonical continuation commit. It may
-not be reconstructed in RespOutbound, SSE, handler, or the next ReqInbound pass.
+Invalid placement is an auxiliary-field classification only. The native tool
+call continues unchanged; it must not cause 400/502 or mutate the command.
 
-If the existing Resp04 implementation shares one finalized payload between client
-projection and continuation storage, the implementation must first add a
-hook-owned private projection resource or equivalent existing skeleton capability.
-Do not solve the split by adding an external response field or a second outbound
-semantic implementation.
+## 4. Protocol shape matrix
 
-## 11. Lifecycle and ownership
+| Protocol | Native tool-call object | Native argument field | Auxiliary-field location |
+|---|---|---|---|
+| OpenAI Chat | `tool_calls[].function` or canonical function object | `arguments` | JSON value inside `arguments` |
+| OpenAI Responses | `function_call` item | `arguments` | JSON value inside `arguments` |
+| Anthropic | `content[].type=tool_use` | `input` | object inside `input` |
+| Gemini | excluded from this contract | `args` | no injection |
+| Relay canonical Hub | canonical tool-call object | canonical native input | canonical input object |
 
-```text
-Config compile:
-  feature flag -> atomic hook bundle
+The logical contract is identical across protocols. Codecs only normalize native
+shape. Tool-reason harvest, field stripping, association, and reasoning
+projection belong to Resp03. Direct and Relay use the same semantic extractor.
 
-Req04:
-  final tool list -> append canonical description contract
-
-Provider:
-  sees ordinary tool descriptions and emits toolreason
-
-Resp03:
-  canonical response -> collect -> associate -> normalize -> redact
-
-Phase 1:
-  normalized reasoning_content -> client projection + continuation
-
-Phase 2:
-  normalized reasoning_content -> model continuation only
-  client projection omits it
-
-Resp04:
-  commit already-governed canonical continuation
-
-Next Req04:
-  restore model continuation without re-parsing or repairing the immutable interval
-```
-
-Potential private resource for Phase 2:
+## 5. Request lifecycle and owner
 
 ```text
-resource_id:
-  v3.tool_thinking.current_turn_reasoning_projection
-
-identity:
-  request_id
-  session_id
-  conversation_id
-  port/server_id
-  routing_group
-  response_turn_id
-  tool_call_id
-  tool_name
-
-writer:
-  tool-thinking Resp03 hook only
-
-readers:
-  matching Resp04 commit / model-continuation projection only
-
-forbidden:
-  MetadataCenter control state
-  provider transport
-  client payload
-  SSE
-  handler
-  debug snapshot
-  unrelated session/tool
+ReqInbound02 standardized
+  -> ReqChatProcess03/04 normal tool governance
+  -> tool-thinking JSON guidance hook
+  -> final provider-facing tool list
+  -> ReqOutbound05 / provider wire codec
 ```
 
-The reason text is model semantic data, not routing/control state. The resource
-must nevertheless be typed, scoped, single-owner, and released at commit,
-terminal, scope change, or error.
+The request hook is idempotent and runs once per current turn. It appends the
+canonical guidance and required fields to the final provider-facing tool schema.
+It may not create a sibling tool surface, rewrite request shape, or inject values
+into a command. Direct and Relay bind to this same hook; no
+provider-specific prompt branch is allowed.
 
-## 12. Stopless interaction
-
-Tool-thinking response handling runs before the existing ordinary-tool/Stopless
-branch at Resp03. It must not modify StoplessCenter.
-
-If a response contains both a normal tool call and `reasoningStop`:
+Node contract:
 
 ```text
-normal tool call reason -> reasoning_content
-reasoningStop           -> existing Stopless state machine
+Node: ReqChatProcess tool-thinking request hook
+Owner: Rust Chat Process request governance
+Input: current-turn governed tool list + feature manifest + model id
+Output: same tool list with one canonical JSON guidance block
+Normal: native declarations and arguments are byte/semantic stable
+Error: unsupported placement is explicit diagnostic; no invalid provider payload
+Unexpected: duplicate guidance is not added; no fence guidance is emitted
+Blackbox: provider request contains JSON contract and no primary fence contract
 ```
 
-`toolreason` is never accepted as:
+## 6. Response lifecycle and owner
 
 ```text
-stop_schema
-reasoningStop evidence
-next_step_prompt
-Stopless completion evidence
+ProviderRespInbound01 raw
+  -> RespInbound02 protocol parse/normalization
+  -> RespChatProcess03 tool-call harvest
+  -> one-turn aggregation + auxiliary-field stripping
+  -> reasoning_content projection
+  -> RespOutbound04 / client frame
 ```
 
-Non-stop tool progress must retain the existing Stopless reset behavior.
+Resp03 inspects the provider-originated tool-call parameter container after the
+native shape is known and before client projection. It must not search arbitrary text for fields,
+or interpret normal model `thinking`/`reasoning` as tool-reason data. Only fields
+inside the native parameter container qualify.
 
-## 13. Implementation file and map plan
+Node contract:
 
-Before runtime edits, bind the feature to the resource, function, mainline, module,
-and verification maps. Expected owner surfaces:
+```text
+Node: RespChatProcess03 tool-thinking extractor/projector
+Owner: Rust Chat Process response governance
+Input: normalized provider response + same-turn hook scope
+Output: native tool call without auxiliary fields + one reasoning item
+Normal: preserve name/call id/input/arguments; map one turn once
+Error: malformed auxiliary data is diagnostic-only; native call survives
+Unexpected: misplaced/partial/duplicate/provider-wrapper variation is classified
+Blackbox: client sees no auxiliary fields and receives at most one projection
+```
 
-| Concern | Expected owner surface |
-| --- | --- |
-| Config declaration/validation/compile | `v3/crates/routecodex-v3-config` |
-| Static hook declaration | V3 Hub manifest/static hook registry |
-| Req04 tool-list mutation | `v3/crates/routecodex-v3-runtime/src/hub_v1` Req04/servertool hook owner |
-| Relay Req04/Resp03 hook | `v3/crates/routecodex-v3-runtime/src/hub_v1` Chat Process hook owner |
-| Direct SSE response hook | registered Direct response projection hook; lifecycle adapter only |
-| Resp03 parser/association/redaction | `v3/crates/routecodex-v3-runtime/src/hub_v1` Resp03 owner |
-| Resp04 visible/private projection | existing Resp04 continuation owner plus declared hook resource |
-| Canonical protocol parity | adjacent Hub protocol projection tests |
-| Client monitoring evidence | Resp05/client projection black-box tests |
+Supported imperfect output cases are: complete fields; missing fields; null,
+empty, wrong-type, or out-of-range values; partial streamed assembly; multiple
+tool calls; repeated chunks; all native protocol wrappers; and legacy fence input
+only as compatibility evidence.
 
-Do not create a new provider codec, server handler, or parallel tool-governance
-implementation. The registered Direct response projection hook is the only
-Direct streaming adapter and delegates toolreason semantics to Resp03. Relay
-must remain on the Req04/Resp03 Chat Process hooks. When the model omits a reason,
-the response remains protocol-clean; only a console observation sample is emitted,
-with no synthetic `reasoning_content` field added to the client payload.
+## 7. Field semantics and compatibility policy
 
-## 14. Test design
+`reason` is valid only as a non-empty string in the current tool-call parameter
+container (`input`, JSON `arguments`, or `args`).
+`goal_alignment_confidence` is valid only as an integer in 0..100. `model_id` is
+valid only as a non-empty string. A model-id mismatch is diagnostic-only.
 
-### Request-side positive tests
+| Input condition | Tool call | Diagnostic | Client reasoning |
+|---|---|---|---|
+| all valid | strip auxiliary fields only | `JSON OK` | one mapped item |
+| fields missing | native call survives | `JSON MISSING` + field list | map only valid reason |
+| wrong type/range | native call survives | `JSON INVALID` + field list | no guessed value |
+| fields outside the parameter container | native call survives | `JSON MISPLACED` | no projection from misplaced data |
+| duplicate streamed observation | native call survives | count once | no duplicate projection |
+| no qualifying tool object | ordinary response path | no tool-reason event | no projection |
+| legacy fence only | native call survives after legacy redaction | `LEGACY_FENCE` | compatibility only if unambiguous |
 
-- disabled flag leaves tools byte/semantic-equivalent;
-- enabled flag appends the exact contract once per eligible tool;
-- Responses and Chat description paths use the correct field;
-- original tool parameters and choice remain unchanged;
-- internal tools are not decorated;
-- restored continuation does not duplicate the contract;
-- provider-facing payload contains the contract, client-originating request does not;
-- tool descriptions with existing contract remain idempotent.
+The current turn is the aggregation boundary. Multiple calls may be listed in one
+sentence, but the feature emits at most one synthesized reasoning item:
 
-### Response-side positive tests
+```text
+调用工具 <tool_name>[、<tool_name>...]：<reason>
+```
 
-- complete marker maps to the correct tool's `reasoning_content`;
-- existing reasoning content is preserved and normalized reason appended;
-   - one tool-call turn emits one reason and maps the complete tool batch in stable order;
-- marker is removed from content;
-- tool calls and arguments remain identical;
-- Phase 1 client payload exposes normalized reasoning_content;
-- Stopless and ordinary tool calls remain independent.
+No quotation marks, forced “因为”, confidence, model id, or fence is exposed.
+Phase 1 uses visible `reasoning_content`; Phase 2 private projection is future
+work and is not part of this implementation gate.
 
-### Response-side negative tests
+## 8. Hard stripping boundary
 
-- no marker does not synthesize a reason;
-- empty marker does not synthesize a reason;
-- missing close does not leak raw text;
-- malformed marker does not swallow unrelated assistant content;
-- duplicated marker is not copied to multiple tools;
-- user/history/tool-output markers are not parsed or stripped;
-- tool arguments are not parsed as reason;
-- tool output is not parsed as reason;
-- unbound reason is not assigned by guesswork;
-- raw marker cannot reach client JSON or SSE;
-- parser diagnostics cannot reach client payload or metadata;
-- tool call semantics cannot be changed by recovery.
+Only `reason`, `goal_alignment_confidence`, and `model_id` are stripped from a
+recognized tool-call parameter container. The stripper must not recursively walk arbitrary
+payloads or alter `name`, `call_id`, `id`, `type`, ordinary fields inside
+`arguments`, `input`, or `args`,
+`parameters`, tool results, ordinary text, native reasoning, status, or
+continuation/history.
 
-### Phase 2 gate tests
+The client response must contain neither these auxiliary extensions nor a raw
+legacy fence. This is a response projection rule, not request-side cleanup.
 
-- client projection omits only synthesized tool-thinking reasoning;
-- existing client-visible model reasoning remains intact;
-- model continuation retains normalized reasoning_content;
-- Resp04 save occurs after projection preparation;
-- save-to-restore immutable interval performs no parsing, repair, or reconstruction;
-- next Req04 consumes the already-governed continuation;
-- private reason cannot cross session, port, group, conversation, or call id.
+## 9. Observability contract
 
-### Required verification categories
+Diagnostics are side-channel only. Every qualifying tool call ends with exactly
+one terminal observation:
 
-- config schema/manifest validation;
-- static Hook Skeleton owner and fixed-node binding;
-- resource ownership and side-channel isolation;
-- request payload contract tests;
-- response malformed-recovery tests;
-- positive/negative protocol parity tests;
-- client-facing JSON/SSE redaction tests;
-- provider-facing request dry-run;
-- Phase 1 live sample replay before any Phase 2 enablement;
-- build/install/restart/live verification for runtime implementation;
-- DSH review only after all required runtime evidence is complete.
+```text
+TOOLREASON JSON OK       stage=<resp02|resp03> tool=<name> alignment=<0-100> model=<id>
+TOOLREASON JSON MISSING  stage=<resp02|resp03> tool=<name> missing=<fields>
+TOOLREASON JSON INVALID  stage=<resp02|resp03> tool=<name> invalid=<fields>
+TOOLREASON JSON MISPLACED stage=<resp02|resp03> tool=<name> field=<field>
+TOOLREASON PROJECTED     stage=resp03 tool=<name>[,<name>] turn=<turn>
+```
 
-## 15. Implementation sequence
+`OK` means valid fields were found. `PROJECTED` means the client semantic response
+contains the synthesized reasoning item. These are independent facts.
 
-1. Create feature/resource/function/mainline/verification map entries and bind exact
-   owners and allowed paths.
-2. Add red fixtures for tool-list prompt placement, response malformed recovery,
-   raw-marker leakage, and wrong tool association.
-3. Add config compilation and atomic hook registration with Phase 1 `visible`
-   policy.
-4. Implement Req04 description-only injection with exact-format/idempotence tests.
-5. Implement Resp03 canonical response collector, bounded recovery, association,
-   normalization, and hard redaction.
-6. Implement Phase 1 visible `reasoning_content` projection.
-7. Run focused tests, architecture gates, build, install, restart, and live replay.
-8. Monitor real samples and classify parser quality: complete, recovered, missing,
-   malformed, unbound, duplicate, and leaked.
-9. Only after Phase 1 evidence is acceptable, design/enable the private projection
-   resource and Phase 2 continuation split.
-10. Re-run the full continuation immutability, protocol parity, client redaction,
-    and live sample gates before Phase 2 rollout.
+## 10. Direct and Relay equivalence
 
-## 16. Risks and mitigations
+Relay uses ReqChatProcess and RespChatProcess. Direct uses its registered
+same-protocol request/response hook at the existing lifecycle boundary. Neither
+path owns a second parser:
 
-| Risk | Mitigation |
-| --- | --- |
-| Provider emits malformed marker | bounded recovery plus mandatory redaction |
-| Marker appears in user/tool text | source restriction to current assistant response |
-| One reason maps to multiple tools | call-batch association and no-copy rule |
-| Reason leaks to client | Resp03 redaction and client projection tests |
-| Reasoning content leaks control state | typed hook resource; no counters/scope in payload |
-| Description injection changes provider validation | only legal description surface; target validation after projection |
-| Stopless treats toolreason as stop evidence | separate parser and evidence types |
-| Phase 2 changes continuation history | private projection must exist before Resp04 commit |
-| Direct path bypasses Chat Process | separate registered Direct semantic hook; no reroute/fallback |
-| Streaming parser sees partial frames | preserve framing in the registered Direct projection hook, parse only complete canonicalized data frames, and delegate semantics to Resp03 |
+```text
+provider raw object
+  -> protocol-specific shape adapter
+  -> shared tool-thinking extractor
+  -> shared one-turn aggregator/stripper
 
-## 17. Definition of Done
+## 11. Implementation and closeout plan: direct response observation
 
-Phase 1 is done only when:
+Status: closeout_required_after_live_stdout_evidence
 
-- config, maps, hook registration, and owner boundaries are active;
-- exact tool-list injection is provider-facing and idempotent;
-- Resp03 handles complete and imperfect model output with deterministic tests;
-- raw markers never reach clients;
-- normalized `reasoning_content` is client-visible for monitoring;
-- tool-call semantics remain unchanged;
-- architecture gates, build, install, restart, and live replay pass;
-- evidence records contain focused, broad, and live results;
-- no Phase 2 private claim is made without its projection/continuation gates.
+### 11.1 Confirmed failure chain
 
-Phase 2 is separately done only when:
+The current failure is not provider non-compliance alone. The request-side
+schema is present in the provider-bound request, but the direct SSE response
+processor previously received hard-coded `false` values for
+`tool_thinking_enabled` and `toolreason_client_projection`. Consequently the
+Resp03 SSE consumer did not collect tool names, did not aggregate fields, and
+did not emit a terminal MISSING observation. A second failure allowed a
+Responses-only thinking-tag wrapper to wait for `response.completed` while the
+actual provider stream was Chat or Anthropic shaped.
 
-- private model continuation projection is a declared owned resource;
-- client and model views are proven distinct;
-- Resp04 commit remains the continuation semantic owner;
-- immutable interval tests pass;
-- client redaction and model continuation live samples pass;
-- Phase 1 visible monitoring can be disabled without changing parser behavior.
+### 11.2 Required implementation
+
+1. Pass the manifest-derived tool-thinking and client-projection flags from the
+   direct response projection owner into the direct SSE consumer.
+2. Keep the single Resp03 toolreason lifecycle for Responses, OpenAI Chat, and
+   Anthropic streams. Protocol adapters may only expose native tool name and
+   parameter chunks; they may not create a second extractor.
+3. Handle Anthropic `content_block_start/content_block_delta/content_block_stop`
+   in that shared lifecycle. Use `content_block.name` as the tool name and
+   buffer only the native `input_json_delta` parameter object.
+4. Make the Responses thinking-tag wrapper protocol-safe. It may rewrite only
+   a real Responses stream; Chat and Anthropic frames must pass through without
+   waiting for a Responses terminal event.
+5. At stream close, emit exactly one `TOOLREASON MISSING` for a tool call with
+   no valid auxiliary object. Never synthesize missing values and never turn a
+   missing observation into success.
+6. When the complete native parameter JSON is valid, strip only the three
+   auxiliary fields and preserve the original command/tool arguments byte or
+   semantically unchanged.
+
+### 11.3 Mandatory file/owner review
+
+Before code changes, verify the resource map, function map, mainline call map,
+and verification map entries for:
+
+- Req04 tool-thinking request hook;
+- Resp03 toolreason extractor/aggregator/stripper;
+- direct SSE consumer and protocol adapter;
+- direct response compatibility wrapper;
+- client reasoning projection.
+
+The only owners allowed to change are the registered Rust Chat Process hooks
+and the existing direct SSE hook skeleton. Do not add provider branches in the
+router, handler, outbound codec, or client adapter. Do not add fallback,
+request-side cleanup, arbitrary-text parsing, or a second response parser.
+
+### 11.4 Verification matrix
+
+| Gate | Required evidence |
+|---|---|
+| Unit | valid JSON, missing fields, wrong types/range, partial stream, duplicate chunks, multiple tools, native command preservation |
+| Protocol | Responses SSE, OpenAI Chat SSE, Anthropic SSE; Gemini remains excluded |
+| Request | same requestId raw inbound and provider-bound request show guidance plus required schema at the actual provider system/tool surface |
+| Raw response | same requestId provider raw response identifies the real native tool object and exact auxiliary-field presence/absence |
+| Resp03 | exactly one OK/MISSING/INVALID observation per turn; real tool name; no ordinary thinking/reasoning contamination |
+| Client | no `reason`, `goal_alignment_confidence`, `model_id`, or fence leakage; at most one visible `reasoning_content` item per turn; original tool call remains executable |
+| Negative | malformed or missing auxiliary fields never create 400/502, never mutate the command, never become guessed values, and never suppress the terminal observation |
+| Runtime | `npm run build:v3`, `npm run install:v3`, managed `routecodex restart`, health 4444/7777/10000, then live replay with installed binary hash |
+| Live | at least one real Codex sample per active direct/relay protocol path; evidence must bind requestId to raw request, provider request, raw response, client projection, and console observation |
+
+### 11.5 Completion definition
+
+The feature is complete only when all of the following are true:
+
+- every qualifying live tool call produces exactly one terminal observation;
+- a missing model field produces visible `TOOLREASON MISSING` in the managed
+  process console with the real tool name;
+- a valid model field set produces `TOOLREASON OK` with alignment and model id;
+- the client receives one correctly formatted visible reasoning item only for a
+  valid, recognized toolreason object;
+- the client never sees auxiliary fields or legacy fences;
+- Chat, Responses, and Anthropic direct/relay samples pass without 400/502
+  caused by this feature;
+- all evidence is from the rebuilt and restarted binary, not a resident old
+  process;
+- no code review, commit, or completion claim is made while any gate above is
+  missing or inferred from source inspection alone.
+  -> path-specific client projection
+```
+
+Direct SSE framing is transport only. It may not perform field extraction,
+tool-name inference, fence detection, or reasoning construction.
+
+## 11. Configuration and feature bundle
+
+`tool-thinking` remains one compiled atomic hook bundle:
+
+```text
+tool-thinking.req04.json_guidance
+tool-thinking.resp03.json_extract_strip
+tool-thinking.resp03.turn_aggregate
+tool-thinking.resp03.reasoning_project
+```
+
+Disabled mode preserves original behavior. Enabled mode binds all hooks together.
+A partially compiled bundle is a manifest error; it must not silently enable only
+request or response behavior.
+
+## 12. Design gates before code
+
+Before modifying Rust, synchronize this document with:
+
+1. `docs/architecture/v3-function-map.yml`;
+2. `docs/architecture/v3-mainline-call-map.yml`;
+3. `docs/architecture/v3-verification-map.yml`;
+4. `docs/goal-prompts/v3-tool-thinking-hook.md`;
+5. JSON fixtures for OpenAI Chat, Responses, Anthropic, and Gemini;
+6. one explicitly legacy-only fence fixture.
+
+The design gate fails if any active contract or required test still says that a
+fence is the primary request/response format.
+
+## 13. Implementation and verification order
+
+Implementation is blocked until Section 12 is complete. Then:
+
+1. add red fixtures for object-level JSON fields and invalid placements;
+2. implement one shared Resp03 extractor/stripper;
+3. implement request guidance using this exact JSON contract;
+4. bind Direct and Relay to the same semantic functions;
+5. remove old primary fence prompt/parser/metrics, retaining only explicit legacy
+   compatibility handling;
+6. run focused Rust tests, architecture gates, and `git diff --check`;
+7. build from current `main`, globally install, managed-restart, and verify all
+   listeners;
+8. replay real Codex samples and provider raw snapshots;
+9. require every qualifying call to end in `JSON OK`, `JSON MISSING`,
+   `JSON INVALID`, or `JSON MISPLACED`, plus an independent projection result;
+10. only after runtime evidence is complete may review/commit proceed.
+
+No 400/502 may be introduced by absent or malformed auxiliary fields. Native
+argument/schema failures are a separate provider-wire contract failure and must
+not be hidden by this feature.
+
+## 14. Active closeout contract: hook-only session/request correlation
+
+Status: `implementation_in_progress_pending_online_replay`
+
+The only permitted product changes for the remaining defect are the existing
+registered Chat Process tool-thinking hooks and the existing direct SSE hook
+skeleton's typed context plumbing. SSE transport, frame decoding, terminal
+event rules, queueing, error projection, provider adapters, handlers, and
+outbound protocol code are read-only. If one of those layers is the cause,
+stop and report the evidence; do not compensate there.
+
+For every qualifying tool call, prove this exact same-request chain:
+
+```text
+outer request/session log
+== provider-bound request snapshot
+== provider raw response snapshot
+== Resp03 hook observation
+== client projection
+```
+
+The proof must use canonical `session_id` and `request_id` values. Do not
+synthesize a session from a request ID, use `request-local-*` as a substitute,
+or infer pairing from timestamp/order. Missing canonical context is a hard
+diagnostic failure, not a reason to guess or fallback.
+
+Required hook behavior:
+
+- Direct and Relay enter the same semantic extractor through existing hook
+  registrations; no second parser is added.
+- Auxiliary fields are recognized only inside the native tool-call parameter
+  container. Native model thinking/reasoning is never harvested as toolreason.
+- Only `reason`, `goal_alignment_confidence`, and `model_id` are stripped from
+  a recognized container. Native command/input/name/call-id and malformed tool
+  calls remain unchanged.
+- Every qualifying tool call ends with exactly one terminal `OK`, `MISSING`,
+  `INVALID`, or `MISPLACED` observation carrying canonical IDs. Silent
+  absence is a failed hook path.
+- Client projection is a normal `reasoning_content` item only when fields were
+  actually parsed in the native container. No fence, schema fields, raw JSON,
+  or guessed reason may reach the client.
+- Missing or malformed fields never alter the original tool call and never
+  create a 400/502; they remain visible in console diagnostics.
+
+Mandatory live gates:
+
+1. Direct OpenAI Chat, Direct OpenAI Responses, Relay Responses/Chat, and
+   Anthropic native tool calls; Gemini is a negative control and stays
+   uninjected/unmodified.
+2. Complete, missing-field, and malformed/partial samples for every applicable
+   protocol.
+3. Same-request raw inbound, provider-bound request, raw response, hook log,
+   and client body/SSE correlated by exact IDs.
+4. Client assertions: clean native tool arguments, no auxiliary fields,
+   exactly one visible `reasoning_content` item per turn when valid, no native
+   reasoning false positive, and no duplicate projection.
+5. Failure assertions: no 400/502, no panic, no hook-introduced terminal-event
+   requirement, and no silent missing observation when a qualifying tool call
+   exists.
+
+Run targeted tests, full V3 build, distribution install, managed restart, all
+health checks, and live replay on the same source hash. Any new SSE framing or
+terminal failure is evidence against the hook-only change and must be reported,
+not fixed by changing SSE logic.
+
+Completion requires every live qualifying sample to have exact request/session
+correlation, a terminal observation, correct stripping, and correct client
+projection; negative controls unchanged; build/install/restart on that same
+hash; and evidence recorded. One working sample or source inspection is not
+completion.

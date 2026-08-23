@@ -10,7 +10,7 @@
 
 pub async fn execute_v3_direct_runtime_kernel_core<
     C: V3DirectProtocolCodec,
-    T: ResponsesTransport,
+    T: ResponsesTransport + ?Sized,
 >(
     mut control: C::Control,
     manifest: &V3Config05ManifestPublished,
@@ -21,7 +21,12 @@ pub async fn execute_v3_direct_runtime_kernel_core<
     allow_exhaustion_rescue_probe: bool,
     provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
-) -> V3ResponsesDirectRuntimeOutput {
+) -> V3ResponsesDirectRuntimeOutput
+where
+    C::Control: Clone + Send + Sync + 'static,
+    C::Standardized: Send,
+    C::Policy: Send,
+{
     let request_key_catalog =
         crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog();
     execute_v3_direct_runtime_kernel_core_with_key_catalog::<C, T>(
@@ -41,7 +46,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
 
 pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
     C: V3DirectProtocolCodec,
-    T: ResponsesTransport,
+    T: ResponsesTransport + ?Sized,
 >(
     mut control: C::Control,
     manifest: &V3Config05ManifestPublished,
@@ -688,6 +693,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
                 .get("toolreason_client_projection")
                 .copied()
                 .unwrap_or(true),
+            direct_failure_session_scope.session_id(),
         ) {
             Ok(context) => context,
             Err(error) => {
@@ -698,7 +704,9 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
                 )
             }
         };
-        let response_projection = match C::run_response_projection(
+        let response_projection_context =
+            response_projection_context.with_runtime_timing(runtime_timing.clone());
+        let mut response_projection = match C::run_response_projection(
             provider_raw,
             response_projection_context,
         )
@@ -814,6 +822,171 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
                     }
                 }
             };
+        let attempt_body = std::mem::replace(
+            &mut response_projection.attempt_payload.body,
+            V3ProviderAttemptBody::Bytes(Vec::new()),
+        );
+        let client_body = match attempt_body {
+            V3ProviderAttemptBody::Sse(mut stream) => {
+                let mut committed_attempt = crate::nodes::V3CommittedClientSseBuilder::new();
+                let stream_failure = loop {
+                    match stream.next().await {
+                        Some(Ok(frame)) => {
+                            if let Err(message) = committed_attempt.push(frame) {
+                                break Some(build_v3_error_01_source_raised(
+                                    V3ErrorSourceKind::ProviderFailure,
+                                    "V3ProviderResp14Raw",
+                                    "provider_response_sse_attempt_buffer_limit",
+                                    message,
+                                ));
+                            }
+                        }
+                        Some(Err(source)) => break Some(source),
+                        None => break None,
+                    }
+                };
+                let committed_stream = match stream_failure {
+                    None => committed_attempt
+                        .seal_after_validated_terminal()
+                        .map_err(|message| {
+                            build_v3_error_01_source_raised(
+                                V3ErrorSourceKind::ProviderFailure,
+                                "V3ProviderResp14Raw",
+                                "provider_response_sse_empty",
+                                message,
+                            )
+                        }),
+                    Some(source) => Err(source),
+                };
+                match committed_stream {
+                    Ok(stream) => {
+                        drop(provider_action_permit.take());
+                        V3ClientBody::CommittedSse(stream)
+                    }
+                    Err(source) => {
+                        let _ = runtime_timing.finish_external();
+                        drop(provider_action_permit.take());
+                        let policy_result = match run_v3_direct_provider_failure_policy(
+                            &V3DirectProviderFailurePolicyContext {
+                                failure_session_scope: &direct_failure_session_scope,
+                                provider_health: &provider_health,
+                                run_error: C::run_error,
+                                availability: &availability,
+                                expanded: Some(&expanded),
+                                provider_pinned: false,
+                                now_epoch_ms,
+                            },
+                            C::policy_target(&policy),
+                            source,
+                            502,
+                            &mut V3DirectProviderFailurePolicyState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                trace: &mut trace,
+                            },
+                        )
+                        .await
+                        {
+                            Ok(result) => result,
+                            Err(source) => {
+                                return error_output(
+                                    source,
+                                    trace,
+                                    &crate::hooks::register_responses_direct_hooks(),
+                                )
+                            }
+                        };
+                        if let Some(event) = policy_result.event.clone() {
+                            provider_failure_events.push(event.clone());
+                            publish_v3_direct_provider_failure_event(
+                                provider_failure_event_sink,
+                                C::policy_target(&policy),
+                                C::ENTRY_PROTOCOL,
+                                "sse",
+                                Some(event.status),
+                                &provider_failure_events,
+                                &event,
+                                total_attempts(&accumulator, send_attempts),
+                            );
+                        }
+                        match &policy_result.decision.action {
+                            V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                                if !policy_result.retryable_transient {
+                                    pending_provider_action_recovery = Some(recovery.clone());
+                                }
+                                continue;
+                            }
+                            V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
+                                retry_selected =
+                                    policy_result.retry_selected.map(|selected| *selected);
+                                if !policy_result.retryable_transient {
+                                    pending_provider_action_recovery = Some(recovery.clone());
+                                }
+                                continue;
+                            }
+                            V3Error05ExecutionAction::ProjectTerminal => {
+                                if let Err(release_error) = C::release_after_error(
+                                    &control,
+                                    manifest,
+                                    C::server_id(&standardized),
+                                    &standardized,
+                                    C::request_id(&standardized),
+                                    &mut trace,
+                                ) {
+                                    return error_output(
+                                        release_error,
+                                        trace,
+                                        &crate::hooks::register_responses_direct_hooks(),
+                                    );
+                                }
+                                let mut observability = build_v3_direct_runtime_observability(
+                                    C::policy_target(&policy),
+                                    C::ENTRY_PROTOCOL,
+                                    "sse",
+                                    policy_result.event.as_ref().map(|event| event.status),
+                                    "failed",
+                                    provider_failure_events.clone(),
+                                    false,
+                                );
+                                observability.attempts =
+                                    Some(total_attempts(&accumulator, send_attempts));
+                                let projected =
+                                    V3ErrorHandlingCenter::project_terminal(policy_result.decision);
+                                return projected_error_output_with_observability(
+                                    projected,
+                                    trace,
+                                    Some(observability),
+                                );
+                            }
+                            V3Error05ExecutionAction::ClientDisconnected => {
+                                return projected_error_output_with_observability(
+                                    V3ErrorHandlingCenter::project_terminal(policy_result.decision),
+                                    trace,
+                                    None,
+                                );
+                            }
+                            V3Error05ExecutionAction::RejectNonProviderError => {
+                                return error_output(
+                                    runtime_source(
+                                        "V3Error05ExecutionDecision",
+                                        "provider SSE failure entered a non-provider Error05 lane",
+                                    ),
+                                    trace,
+                                    &crate::hooks::register_responses_direct_hooks(),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            V3ProviderAttemptBody::Json(body) => V3ClientBody::Json(body),
+            V3ProviderAttemptBody::Bytes(body) => V3ClientBody::Bytes(body),
+        };
+        let client_payload = V3Resp15ClientPayload {
+            status: response_projection.attempt_payload.status,
+            headers: std::mem::take(&mut response_projection.attempt_payload.headers),
+            body: client_body,
+        };
         if let Err(commit_error) = C::commit_after_response(
             &control,
             manifest,
@@ -869,7 +1042,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
         let mut observability = build_v3_direct_runtime_observability(
             C::policy_target(&policy),
             C::ENTRY_PROTOCOL,
-            v3_direct_client_transport_label(&response_projection.client_payload),
+            v3_direct_client_transport_label(&client_payload),
             Some(provider_status),
             "completed",
             provider_failure_events.clone(),
@@ -883,7 +1056,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
             observability.timing = Some(summary);
         }
         return V3ResponsesDirectRuntimeOutput {
-            client_payload: response_projection.client_payload,
+            client_payload,
             node_trace: trace,
             error_chain: None,
             observability: Some(observability),

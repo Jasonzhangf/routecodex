@@ -348,10 +348,10 @@ impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
 }
 
 #[derive(Clone)]
-struct V3ResponsesDirectRuntimeCoreState<'a> {
-    continuation_state: Option<&'a V3ResponsesDirectContinuationState>,
+struct V3ResponsesDirectRuntimeCoreState {
+    continuation_state: Option<Arc<V3ResponsesDirectContinuationState>>,
     continuation_scope: Option<V3ResponsesDirectContinuationScope>,
-    stopless_control: Option<&'a V3ResponsesDirectStoplessControlState>,
+    stopless_control: Option<Arc<V3ResponsesDirectStoplessControlState>>,
     stopless_scope: Option<V3ResponsesDirectStoplessControlScope>,
     now_epoch_ms: u64,
     provider_health: Option<V3ProviderFailureRuntimeHealth>,
@@ -372,7 +372,7 @@ struct V3ResponsesDirectRuntimeCoreState<'a> {
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
 }
 
-impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
+impl V3ResponsesDirectRuntimeCoreState {
     fn no_continuation() -> Self {
         Self {
             continuation_state: None,
@@ -395,12 +395,12 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
     }
 
     fn with_continuation(
-        state: &'a V3ResponsesDirectContinuationState,
+        state: &V3ResponsesDirectContinuationState,
         scope: V3ResponsesDirectContinuationScope,
         now_epoch_ms: u64,
     ) -> Self {
         Self {
-            continuation_state: Some(state),
+            continuation_state: Some(Arc::new(state.clone())),
             continuation_scope: Some(scope),
             stopless_control: None,
             stopless_scope: None,
@@ -421,10 +421,10 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
 
     fn with_stopless_control(
         mut self,
-        stopless_control: &'a V3ResponsesDirectStoplessControlState,
+        stopless_control: &V3ResponsesDirectStoplessControlState,
         stopless_scope: V3ResponsesDirectStoplessControlScope,
     ) -> Self {
-        self.stopless_control = Some(stopless_control);
+        self.stopless_control = Some(Arc::new(stopless_control.clone()));
         self.stopless_scope = Some(stopless_scope);
         self
     }

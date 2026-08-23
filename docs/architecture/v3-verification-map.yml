@@ -3225,6 +3225,40 @@ features:
     - docs/architecture/evidence/v3-route-policy-condition-evaluation-live.json
     dsh_review: 'VERDICT: PASS (v3-route-policy-condition-20260820-final-review-12)'
 
+- feature_id: v3.runtime_restart_handoff_skeleton
+  status: design
+  change_risk: critical
+  owner_kind: stable_front_request_owner_and_runtime_handoff
+  contract:
+  - docs/goals/v3-runtime-restart-handoff-skeleton-plan.md
+  - docs/design/v3-runtime-restart-handoff-skeleton.md
+  - docs/design/v3-runtime-restart-handoff-test-design.md
+  - docs/architecture/manifests/v3.runtime_restart_handoff_skeleton.yml
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - response Body ownership keeps active JSON/SSE requests alive until terminal, Error chain outcome, client disconnect, or timeout before canonical exec.
+  - Request lease scope, frame sequence, execution mode, continuation owner, and deadline are typed control resources and never enter normal payloads.
+  - restart/reattach preserves frozen execution mode and monotonically decreases absolute and idle deadlines.
+  required_negative:
+  - provider raw SSE is never projected directly to the client.
+  - response shape never reselects Direct or Relay.
+  - restart never silently drops an in-flight request or emits duplicate terminal frames.
+  required_gates:
+  - npm run verify:v3-runtime-restart-handoff
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server restart_handoff --lib -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server request_activity_gate --lib -- --nocapture
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_boundary:
+    source_controlled: pending
+    live_cutover: required
+    global_install_restart: required
+    live_evidence: required
+    dsh_review: required
+
 - feature_id: v3.direct_sse_accept_skeleton
   status: source_controlled_runtime_pending_live_replay
   change_risk: critical
@@ -3265,7 +3299,7 @@ features:
     dsh_review: required
 
 - feature_id: v3.tool_thinking_hook_skeleton
-  status: source_active_live_verification_required
+  status: design_locked_pending_implementation
   owner_kind: rust_v3_chat_process_tool_thinking_hook
   contract:
   - docs/goals/v3-tool-thinking-hook-plan.md
@@ -3273,16 +3307,21 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
   - disabled mode preserves payload identity
-  - direct and relay Req04 inject guidance into the canonical system-instructions surface without modifying tool declarations
-  - split LF/CRLF Responses SSE maps a recovered reason to reasoning_content
+  - direct and relay Req04 inject the tool_thinking_json_v2 contract at the final provider-facing tool-list surface
+  - OpenAI Chat, Responses, and Anthropic tool parameter schemas require the three auxiliary fields; Gemini is excluded
+  - Resp03 strips the three auxiliary fields and emits at most one reasoning_content item per turn
   required_negative:
-  - raw toolreason markers never reach client output
-  - malformed output is stripped without guessed association
-  - tool arguments, parameters, metadata, and continuation state are unchanged
+  - auxiliary fields inside the native parameter container are harvested and stripped without changing ordinary command fields
+  - missing or malformed fields never reject or mutate the native tool call
+  - raw legacy toolreason fences never reach client output
+  - ordinary tool arguments, metadata, and continuation state are unchanged
+  - direct SSE owns only the typed client-frame projection hook; Resp03 remains the sole tool-reason parser
   required_gates:
+  - design contract and all architecture maps contain tool_thinking_json_v2
+  - active prompt and test fixtures contain no primary fence contract
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib req04_tool_thinking -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib resp03_ -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_toolreason -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
@@ -3306,6 +3345,7 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
   - Terminal rows remain bounded at 2048.
+  - Relay provider-request and provider-response snapshot carriers persist under the same canonical request id and never enter client payload.
   - Terminal tombstones remain bounded at 4096.
   - Repeated terminal events do not duplicate statistics or tombstones.
   - Evicted terminal replay returns an explicit resync_required result and does not recreate a row.

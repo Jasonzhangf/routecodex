@@ -2,7 +2,10 @@ use axum::body::Body;
 use axum::http::Response;
 use futures_util::{stream, StreamExt};
 use std::collections::BTreeMap;
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+};
 use tokio::sync::Notify;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +48,9 @@ pub(crate) struct V3ServerRequestActivityPermit {
 impl V3ServerRequestActivityGate {
     pub(crate) fn admit(self: &Arc<Self>) -> V3ServerRequestActivityPermit {
         self.active.fetch_add(1, Ordering::AcqRel);
-        V3ServerRequestActivityPermit { gate: Arc::clone(self) }
+        V3ServerRequestActivityPermit {
+            gate: Arc::clone(self),
+        }
     }
 
     pub(crate) async fn wait_for_quiescence(&self) {
@@ -74,9 +79,7 @@ pub(crate) fn hold_response_body_request_activity_permit(
     let stream = Box::pin(body.into_data_stream());
     let body = Body::from_stream(stream::unfold(
         (stream, permit),
-        |(mut stream, permit)| async move {
-            stream.next().await.map(|item| (item, (stream, permit)))
-        },
+        |(mut stream, permit)| async move { stream.next().await.map(|item| (item, (stream, permit))) },
     ));
     Response::from_parts(parts, body)
 }

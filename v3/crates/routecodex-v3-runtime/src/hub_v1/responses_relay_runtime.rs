@@ -765,16 +765,17 @@ fn project_v3_responses_relay_client_body(
     client_response_transport_intent: V3HubTransportIntent,
     finalized_response: Value,
     strip_client_response_id: bool,
-) -> V3ResponsesRelayClientBody {
+) -> Result<V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeError> {
     let mut finalized_response = finalized_response;
     if strip_client_response_id {
         crate::shared::strip_v3_response_id_from_json_body(&mut finalized_response);
     }
     match client_response_transport_intent {
-        V3HubTransportIntent::Json => V3ResponsesRelayClientBody::Json(finalized_response),
-        V3HubTransportIntent::Sse => V3ResponsesRelayClientBody::Sse(
-            build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(finalized_response),
-        ),
+        V3HubTransportIntent::Json => Ok(V3ResponsesRelayClientBody::Json(finalized_response)),
+        V3HubTransportIntent::Sse => Ok(V3ResponsesRelayClientBody::Sse(
+            build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(finalized_response)
+                .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?,
+        )),
     }
 }
 
@@ -960,11 +961,9 @@ pub use provider_stream_materialization::{
     materialize_v3_responses_provider_sse_as_canonical_response,
 };
 use responses_provider_event_codec::*;
-pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
+pub fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
     response: Value,
-) -> V3ResponsesRelayClientStream {
-    use futures_util::stream;
-
+) -> Result<V3ResponsesRelayClientStream, String> {
     let _owner = V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER;
     let status = response.get("status").and_then(Value::as_str);
     // response.incomplete 是 Responses 协议合法终态（max_output_tokens 截断 /
@@ -976,7 +975,7 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
     let mut frames = Vec::new();
     if !failed {
         if let Some(response_id) = response.get("id").and_then(Value::as_str) {
-            frames.push(Ok(build_v3_runtime_sse_json_frame(
+            frames.push(build_v3_runtime_sse_json_frame(
                 "response.created",
                 &json!({
                     "type": "response.created",
@@ -988,24 +987,26 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
                             .unwrap_or_else(|| json!("in_progress")),
                     }
                 }),
-            )));
+            ));
             if let Some(output) = response.get("output").and_then(Value::as_array) {
+                let mut reasoning_progress_emitted = false;
                 for (index, item) in output.iter().enumerate() {
                     let projected_item =
                         project_v3_responses_client_event_output_item_done_item(item);
-                    if let Err(error) = append_v3_responses_client_function_call_progress_frames(
+                    append_v3_responses_client_reasoning_progress_frames(
                         &mut frames,
                         response_id,
                         index,
                         &projected_item,
-                    ) {
-                        frames.push(Err(routecodex_v3_error::raise_v3_sse_provider_failure(
-                            "provider_response_sse_stream",
-                            error,
-                        )));
-                        return Box::pin(stream::iter(frames));
-                    }
-                    frames.push(Ok(build_v3_runtime_sse_json_frame(
+                        &mut reasoning_progress_emitted,
+                    );
+                    append_v3_responses_client_function_call_progress_frames(
+                        &mut frames,
+                        response_id,
+                        index,
+                        &projected_item,
+                    )?;
+                    frames.push(build_v3_runtime_sse_json_frame(
                         "response.output_item.done",
                         &json!({
                             "type": "response.output_item.done",
@@ -1013,19 +1014,19 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
                             "output_index": index,
                             "item": projected_item,
                         }),
-                    )));
+                    ));
                 }
             }
         }
     }
     if failed {
-        frames.push(Ok(build_v3_runtime_sse_json_frame(
+        frames.push(build_v3_runtime_sse_json_frame(
             "response.failed",
             &json!({
                 "type": "response.failed",
                 "response": response,
             }),
-        )));
+        ));
     } else {
         let terminal_response = project_v3_responses_client_completed_response(&response);
         let terminal_event = if incomplete {
@@ -1033,27 +1034,121 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
         } else {
             "response.completed"
         };
-        frames.push(Ok(build_v3_runtime_sse_json_frame(
+        frames.push(build_v3_runtime_sse_json_frame(
             terminal_event,
             &json!({
                 "type": terminal_event,
                 "response": terminal_response,
             }),
-        )));
-        frames.push(Ok(build_v3_runtime_sse_json_frame(
+        ));
+        frames.push(build_v3_runtime_sse_json_frame(
             "response.done",
             &json!({
                 "type": "response.done",
                 "response": terminal_response,
             }),
-        )));
+        ));
     }
-    frames.push(Ok(b"data: [DONE]\n\n".to_vec()));
-    Box::pin(stream::iter(frames))
+    frames.push(b"data: [DONE]\n\n".to_vec());
+    let mut committed = crate::nodes::V3CommittedClientSseBuilder::new();
+    for frame in frames {
+        committed.push(frame)?;
+    }
+    committed.seal_after_validated_terminal()
+}
+
+fn append_v3_responses_client_reasoning_progress_frames(
+    frames: &mut Vec<Vec<u8>>,
+    response_id: &str,
+    output_index: usize,
+    item: &Value,
+    reasoning_progress_emitted: &mut bool,
+) {
+    if *reasoning_progress_emitted || item.get("type").and_then(Value::as_str) != Some("reasoning")
+    {
+        return;
+    }
+    let Some(reasoning) = item
+        .get("summary")
+        .and_then(Value::as_array)
+        .and_then(|summary| {
+            summary.iter().find_map(|part| {
+                let text = part.get("text").and_then(Value::as_str)?;
+                text.starts_with("调用工具 ").then_some(text)
+            })
+        })
+    else {
+        return;
+    };
+    *reasoning_progress_emitted = true;
+    let item_id = item
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .unwrap_or("rcc_reason_tool_call");
+    let added_item = json!({
+        "id": item_id,
+        "type": "reasoning",
+        "status": "in_progress",
+        "summary": []
+    });
+    frames.push(build_v3_runtime_sse_json_frame(
+        "response.output_item.added",
+        &json!({
+            "type": "response.output_item.added",
+            "response_id": response_id,
+            "output_index": output_index,
+            "item": added_item,
+        }),
+    ));
+    frames.push(build_v3_runtime_sse_json_frame(
+        "response.reasoning_summary_part.added",
+        &json!({
+            "type": "response.reasoning_summary_part.added",
+            "response_id": response_id,
+            "output_index": output_index,
+            "item_id": item_id,
+            "summary_index": 0,
+            "part": {"type": "summary_text", "text": ""},
+        }),
+    ));
+    frames.push(build_v3_runtime_sse_json_frame(
+        "response.reasoning_summary_text.delta",
+        &json!({
+            "type": "response.reasoning_summary_text.delta",
+            "response_id": response_id,
+            "output_index": output_index,
+            "item_id": item_id,
+            "summary_index": 0,
+            "delta": reasoning,
+        }),
+    ));
+    frames.push(build_v3_runtime_sse_json_frame(
+        "response.reasoning_summary_text.done",
+        &json!({
+            "type": "response.reasoning_summary_text.done",
+            "response_id": response_id,
+            "output_index": output_index,
+            "item_id": item_id,
+            "summary_index": 0,
+            "text": reasoning,
+        }),
+    ));
+    frames.push(build_v3_runtime_sse_json_frame(
+        "response.reasoning_summary_part.done",
+        &json!({
+            "type": "response.reasoning_summary_part.done",
+            "response_id": response_id,
+            "output_index": output_index,
+            "item_id": item_id,
+            "summary_index": 0,
+            "part": {"type": "summary_text", "text": reasoning},
+        }),
+    ));
 }
 
 fn append_v3_responses_client_function_call_progress_frames(
-    frames: &mut Vec<Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>>,
+    frames: &mut Vec<Vec<u8>>,
     response_id: &str,
     output_index: usize,
     item: &Value,
@@ -1071,7 +1166,7 @@ fn append_v3_responses_client_function_call_progress_frames(
             object.insert("arguments".to_string(), Value::String(String::new()));
         }
     }
-    frames.push(Ok(build_v3_runtime_sse_json_frame(
+    frames.push(build_v3_runtime_sse_json_frame(
         "response.output_item.added",
         &json!({
             "type": "response.output_item.added",
@@ -1079,7 +1174,7 @@ fn append_v3_responses_client_function_call_progress_frames(
             "output_index": output_index,
             "item": added_item,
         }),
-    )));
+    ));
     if item_type != Some("function_call") {
         return Ok(());
     }
@@ -1088,17 +1183,25 @@ fn append_v3_responses_client_function_call_progress_frames(
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
-            "V3 Responses Relay client SSE function_call item is missing call_id".to_string()
+            "Responses client projection function_call is missing call_id".to_string()
         })?;
-    let arguments = item
-        .get("arguments")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            format!(
-                "V3 Responses Relay client SSE function_call item {call_id} is missing string arguments"
-            )
-        })?;
-    frames.push(Ok(build_v3_runtime_sse_json_frame(
+    // Responses clients require the progress event's arguments field to be a
+    // string. Preserve an imperfect provider tool call instead of converting
+    // it into a 502: native string arguments pass through byte-for-byte;
+    // structured arguments are deterministically encoded; an absent field is
+    // represented by the protocol's empty initial argument buffer. This does
+    // not infer or repair toolreason fields, and it never changes the command
+    // object itself.
+    let arguments = match item.get("arguments") {
+        Some(Value::String(arguments)) => arguments.clone(),
+        Some(arguments @ (Value::Object(_) | Value::Array(_))) => serde_json::to_string(arguments)
+            .map_err(|error| {
+                format!("Responses client projection function_call arguments failed: {error}")
+            })?,
+        Some(value) => value.to_string(),
+        None => String::new(),
+    };
+    frames.push(build_v3_runtime_sse_json_frame(
         "response.function_call_arguments.done",
         &json!({
             "type": "response.function_call_arguments.done",
@@ -1107,7 +1210,7 @@ fn append_v3_responses_client_function_call_progress_frames(
             "call_id": call_id,
             "arguments": arguments,
         }),
-    )));
+    ));
     Ok(())
 }
 

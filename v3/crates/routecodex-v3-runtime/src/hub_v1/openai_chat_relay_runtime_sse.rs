@@ -1,13 +1,34 @@
+struct V3RelayToolreasonStreamState {
+    tool_names: Vec<String>,
+    pending_reasons: Vec<Option<String>>,
+    argument_buffers: Vec<String>,
+    reason_emitted: bool,
+}
+
+impl V3RelayToolreasonStreamState {
+    fn new() -> Self {
+        Self {
+            tool_names: Vec::new(),
+            pending_reasons: Vec::new(),
+            argument_buffers: Vec::new(),
+            reason_emitted: false,
+        }
+    }
+}
+
 fn project_sse_event_payload(
+    request_id: &str,
+    session_id: Option<&str>,
     payload: Value,
     compatibility_profile: Option<&str>,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<&V3WebSearchCenterState>,
     retain_response_cipher: bool,
-    tool_thinking_enabled: bool,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
     let mut trace = Vec::new();
     project_json_response(
+        Some(request_id),
+        session_id,
         payload,
         V3HubProviderWireProtocol::OpenAiChat,
         &Value::Null,
@@ -17,13 +38,15 @@ fn project_sse_event_payload(
         web_search_execution_mode,
         web_search_center_state,
         retain_response_cipher,
-        tool_thinking_enabled,
+        false,
     )
 }
 
 /// Anthropic wire SSE stream -> responses canonical -> OpenAI Chat SSE 事件流
 /// （chat 入口 outbound 投影；SSE 仅负责 framing，语义转换走 canonical）。
 fn project_anthropic_sse_as_openai_chat_stream(
+    request_id: String,
+    session_id: String,
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     compatibility_profile: Option<String>,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
@@ -32,7 +55,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
     tool_thinking_enabled: bool,
     _stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
-) -> V3OpenAiChatClientStream {
+) -> V3RelayProjectedSseStream {
     use futures_util::StreamExt;
     let decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
         routecodex_v3_sse::SseTransportLimits::default(),
@@ -40,11 +63,13 @@ fn project_anthropic_sse_as_openai_chat_stream(
     let transducer = V3OpenAiChatAnthropicSseTransducer::new(
         web_search_execution_mode.is_metadata_center_local_search(),
     );
+    let request_id = request_id;
     Box::pin(futures_util::stream::unfold(
         (
             stream,
             decoder,
             transducer,
+            V3RelayToolreasonStreamState::new(),
             VecDeque::<Vec<u8>>::new(),
             false,
             false,
@@ -58,6 +83,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
             mut provider,
             mut decoder,
             mut transducer,
+            mut toolreason,
             mut pending,
             mut done_seen,
             mut finished,
@@ -66,7 +92,10 @@ fn project_anthropic_sse_as_openai_chat_stream(
             web_search_center_state,
             retain_response_cipher,
             mut provider_outcome,
-        )| async move {
+        )| {
+            let request_id = request_id.clone();
+            let session_id = session_id.clone();
+            async move {
             loop {
                 if let Some(frame) = pending.pop_front() {
                     return Some((
@@ -75,6 +104,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                             provider,
                             decoder,
                             transducer,
+                            toolreason,
                             pending,
                             done_seen,
                             finished,
@@ -85,7 +115,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                             provider_outcome,
                         ),
                     ));
-                }
+            }
                 if finished {
                     return None;
                 }
@@ -109,6 +139,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 provider,
                                 decoder,
                                 transducer,
+                                toolreason,
                                 pending,
                                 done_seen,
                                 finished,
@@ -129,6 +160,15 @@ fn project_anthropic_sse_as_openai_chat_stream(
                         done_seen = true;
                         pending.push_back(b"data: [DONE]\n\n".to_vec());
                     }
+                    crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
+                        &toolreason.tool_names,
+                        &mut toolreason.pending_reasons,
+                        &mut toolreason.reason_emitted,
+                        crate::hub_v1::V3ToolreasonObservationContext {
+                            session_id: Some(session_id.as_str()),
+                            request_id: Some(request_id.as_str()),
+                        },
+                    );
                     match provider_outcome.record_success() {
                         Ok(()) => {}
                         Err(error) => {
@@ -138,6 +178,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                     provider,
                                     decoder,
                                     transducer,
+                                    toolreason,
                                     pending,
                                     done_seen,
                                     finished,
@@ -157,6 +198,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 provider,
                                 decoder,
                                 transducer,
+                                toolreason,
                                 pending,
                                 done_seen,
                                 finished,
@@ -182,6 +224,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 provider,
                                 decoder,
                                 transducer,
+                                toolreason,
                                 pending,
                                 done_seen,
                                 finished,
@@ -231,14 +274,32 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 }
                                 let event: Value = serde_json::from_str(data)
                                     .map_err(|error| error.to_string())?;
-                                for payload in transducer.push_event(event)? {
+                                for mut payload in transducer.push_event(event)? {
+                                    if tool_thinking_enabled {
+                                        crate::hub_v1::collect_v3_responses_sse_tool_name_at_resp03(
+                                            &payload,
+                                            &mut toolreason.tool_names,
+                                        );
+                                        crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
+                                            &mut payload,
+                                            true,
+                                            &toolreason.tool_names,
+                                            &mut toolreason.pending_reasons,
+                                            &mut toolreason.reason_emitted,
+                                            true,
+                                            Some(session_id.as_str()),
+                                            Some(request_id.as_str()),
+                                            Some(&mut toolreason.argument_buffers),
+                                        );
+                                    }
                                     let governed = project_sse_event_payload(
+                                        request_id.as_str(),
+                                        Some(session_id.as_str()),
                                         payload,
                                         compatibility_profile.as_deref(),
                                         web_search_execution_mode,
                                         web_search_center_state.as_ref(),
                                         retain_response_cipher,
-                                        tool_thinking_enabled,
                                     )
                                     .map_err(|error| match error {
                                         V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
@@ -266,6 +327,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                     provider,
                                     decoder,
                                     transducer,
+                                    toolreason,
                                     pending,
                                     done_seen,
                                     finished,
@@ -284,6 +346,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 provider,
                                 decoder,
                                 transducer,
+                                toolreason,
                                 pending,
                                 done_seen,
                                 finished,
@@ -297,6 +360,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                     }
                 }
             }
-        },
+        }}
     ))
 }

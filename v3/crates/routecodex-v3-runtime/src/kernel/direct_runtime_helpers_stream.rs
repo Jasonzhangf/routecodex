@@ -3,73 +3,13 @@ use crate::kernel::direct_sse_consumers::{
     build_v3_sse_transport_error_source, V3DirectSseContentConsumer,
 };
 
-struct V3DirectSseRemoteContinuationPolicy {
-    state: V3ResponsesDirectContinuationState,
-    scope_key: V3RemoteContinuationScopeKey,
-    previous_response_id: Option<String>,
-    selected_pin: V3RemoteContinuationPin,
-    selected_capability_revision: String,
-    now_epoch_ms: u64,
-    committed_pending: bool,
-}
-
-fn wrap_direct_sse_remote_continuation_stream(
-    source: V3ClientSseStream,
-    observation_state: V3SseRemoteContinuationObservationState,
-    policy: V3DirectSseRemoteContinuationPolicy,
-) -> V3ClientSseStream {
-    struct StreamState {
-        source: V3ClientSseStream,
-        observation_state: V3SseRemoteContinuationObservationState,
-        policy: V3DirectSseRemoteContinuationPolicy,
-        done: bool,
-    }
-
-    Box::pin(stream::unfold(
-        StreamState {
-            source,
-            observation_state,
-            policy,
-            done: false,
-        },
-        |mut state| async move {
-            if state.done {
-                return None;
-            }
-            match state.source.next().await {
-                Some(Ok(chunk)) => {
-                    let result = state
-                        .policy
-                        .commit_observed_pending(&state.observation_state)
-                        .map(|()| chunk);
-                    if result.is_err() {
-                        state.done = true;
-                    }
-                    Some((result, state))
-                }
-                Some(Err(error)) => {
-                    state.done = true;
-                    Some((Err(error), state))
-                }
-                None => match state.policy.release_terminal_previous() {
-                    Ok(()) => None,
-                    Err(error) => {
-                        state.done = true;
-                        Some((Err(error), state))
-                    }
-                },
-            }
-        },
-    ))
-}
-
 fn wrap_direct_sse_provider_event_json_observation_stream(
-    source: V3ClientSseStream,
+    source: V3ProviderAttemptSseStream,
     stream_observation: V3RuntimeStreamObservation,
     runtime_timing: V3RuntimeTimingState,
     strip_client_response_id: bool,
     retain_response_cipher: bool,
-) -> V3ClientSseStream {
+) -> V3ProviderAttemptSseStream {
     wrap_direct_sse_provider_event_json_observation_stream_with_compat(
         source,
         stream_observation,
@@ -79,11 +19,16 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
         false,
         false,
         V3DirectSseTypedHookCatalog::default(),
+        false,
+        false,
+        None,
+        None,
+        false,
     )
 }
 
 pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat(
-    source: V3ClientSseStream,
+    source: V3ProviderAttemptSseStream,
     stream_observation: V3RuntimeStreamObservation,
     runtime_timing: V3RuntimeTimingState,
     strip_client_response_id: bool,
@@ -91,16 +36,21 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     deepseek_console_go: bool,
     thinking_tags: bool,
     typed_hooks: V3DirectSseTypedHookCatalog,
-) -> V3ClientSseStream {
+    tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
+    session_id: Option<String>,
+    request_id: Option<String>,
+    client_responses_projection: bool,
+) -> V3ProviderAttemptSseStream {
     struct StreamState {
-        source: V3ClientSseStream,
+        source: V3ProviderAttemptSseStream,
         decoder: SseIncrementalDecoder,
         stream_observation: V3RuntimeStreamObservation,
         runtime_timing: V3RuntimeTimingState,
         strip_client_response_id: bool,
         retain_response_cipher: bool,
         deepseek_console_go: bool,
-        typed_hooks: V3DirectSseTypedHookCatalog,
+        content_consumer: V3DirectSseContentConsumer,
         done: bool,
     }
 
@@ -118,7 +68,17 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
             strip_client_response_id,
             retain_response_cipher,
             deepseek_console_go,
-            typed_hooks,
+            content_consumer: V3DirectSseContentConsumer {
+                retain_response_cipher,
+                strip_client_response_id,
+                deepseek_console_go,
+                session_id,
+                request_id,
+                ..Default::default()
+            }
+            .with_typed_hooks(typed_hooks)
+            .with_tool_thinking(tool_thinking_enabled, toolreason_client_projection)
+            .with_client_responses_projection(client_responses_projection),
             done: false,
         },
         |mut state| async move {
@@ -133,8 +93,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                         &state.stream_observation,
                         state.strip_client_response_id,
                         state.retain_response_cipher,
-                        state.deepseek_console_go,
-                        state.typed_hooks,
+                        &mut state.content_consumer,
                     )
                     .map(|out| out.unwrap_or(chunk));
                     if result.is_err() {
@@ -152,13 +111,14 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                         &mut state.decoder,
                         SseIncrementalDecoder::new(SseTransportLimits::default()),
                     );
-                    match decoder
+                    let decoder_result = decoder
                         .finish()
-                        .map_err(build_v3_sse_transport_error_source)
-                    {
+                        .map_err(build_v3_sse_transport_error_source);
+                    state.content_consumer.finalize_toolreason_observation();
+                    match decoder_result {
                         Ok(()) if state.runtime_timing.is_finished().unwrap_or(false) => None,
-                        Ok(()) => match state.runtime_timing.finish_external() {
-                            Ok(()) => None,
+                        Ok(()) => match state.runtime_timing.finish_external_if_active() {
+                            Ok(_) => None,
                             Err(error) => {
                                 Some((Err(runtime_source("V3RuntimeTimingExternal", error)), state))
                             }
@@ -180,8 +140,7 @@ fn record_direct_sse_provider_event_json_chunk(
     stream_observation: &V3RuntimeStreamObservation,
     strip_client_response_id: bool,
     retain_response_cipher: bool,
-    deepseek_console_go: bool,
-    typed_hooks: V3DirectSseTypedHookCatalog,
+    content_consumer: &mut V3DirectSseContentConsumer,
 ) -> Result<Option<Vec<u8>>, V3Error01SourceRaised> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
@@ -191,21 +150,25 @@ fn record_direct_sse_provider_event_json_chunk(
     }
     let mut rewritten = Vec::new();
     let mut any_rewritten = false;
-    let mut content_consumer = V3DirectSseContentConsumer {
-        retain_response_cipher,
-        strip_client_response_id,
-        deepseek_console_go,
-        typed_hooks,
-    };
     for frame in frames {
+        let data = collect_v3_provider_sse_json_data(frame.frame().fields());
+        if is_v3_provider_sse_keepalive_text(&data) {
+            continue;
+        }
         record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
         let original =
             build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame).into_bytes();
-        let projected = process_sse_object_frame(&frame, &mut content_consumer)
+        let projected = process_sse_object_frame(&frame, content_consumer)
             .map_err(|error| provider_sse_failure_source(error.to_string()))?
             .into_bytes();
+        let toolreason_reasoning_projection =
+            content_consumer.take_toolreason_reasoning_projection();
         if projected != original {
             any_rewritten = true;
+        }
+        if let Some(prefix) = toolreason_reasoning_projection {
+            any_rewritten = true;
+            rewritten.extend_from_slice(&prefix);
         }
         rewritten.extend_from_slice(&projected);
     }
@@ -220,6 +183,10 @@ fn record_direct_sse_provider_event_json_frame(
     fields: &[SseField],
     stream_observation: &V3RuntimeStreamObservation,
 ) -> Result<(), V3Error01SourceRaised> {
+    let data = collect_v3_provider_sse_json_data(fields);
+    if is_v3_provider_sse_keepalive_text(&data) {
+        return Ok(());
+    }
     record_v3_provider_sse_json_frame(fields, stream_observation)
         .map_err(provider_sse_failure_source)
 }
@@ -231,68 +198,6 @@ fn provider_sse_failure_source(message: impl Into<String>) -> V3Error01SourceRai
         "provider_response_sse_stream",
         message.into(),
     )
-}
-
-impl V3DirectSseRemoteContinuationPolicy {
-    fn commit_observed_pending(
-        &mut self,
-        observation_state: &V3SseRemoteContinuationObservationState,
-    ) -> Result<(), V3Error01SourceRaised> {
-        if self.committed_pending {
-            return Ok(());
-        }
-        let Some(response_id) = observation_state
-            .pending_response_id()
-            .map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))?
-        else {
-            return Ok(());
-        };
-        let locator = V3RemoteContinuationLocator::new_direct(
-            response_id,
-            self.scope_key.clone(),
-            self.selected_pin.clone(),
-            self.selected_capability_revision.clone(),
-            self.now_epoch_ms,
-            self.now_epoch_ms + REMOTE_CONTINUATION_TTL_MS,
-        );
-        let input = V3RemoteContinuationCommitInput::locator_only(locator);
-        let mut store = self
-            .state
-            .store
-            .lock()
-            .map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))?;
-        let commit = match self.previous_response_id.as_deref() {
-            Some(previous_response_id) => store.rebind_for_resp04(previous_response_id, input),
-            None => store.commit(input),
-        };
-        commit.map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))?;
-        self.committed_pending = true;
-        self.previous_response_id = None;
-        Ok(())
-    }
-
-    fn release_terminal_previous(&mut self) -> Result<(), V3Error01SourceRaised> {
-        if self.committed_pending {
-            return Ok(());
-        }
-        let Some(previous_response_id) = self.previous_response_id.take() else {
-            return Ok(());
-        };
-        let mut store = self
-            .state
-            .store
-            .lock()
-            .map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))?;
-        if !store.release_bound(&previous_response_id, &self.scope_key, &self.selected_pin) {
-            return Err(runtime_source(
-                "V3HubRespContinuation04Committed",
-                format!(
-                    "terminal locator {previous_response_id} was not present at Resp04 release"
-                ),
-            ));
-        }
-        Ok(())
-    }
 }
 
 fn capability_revision_for_pin(
@@ -615,7 +520,7 @@ fn client_payload_debug_value(payload: &V3Resp15ClientPayload) -> Value {
             "body_kind": "bytes",
             "byte_len": bytes.len()
         }),
-        V3ClientBody::Sse(_) => json!({
+        V3ClientBody::CommittedSse(_) => json!({
             "body_kind": "sse_stream"
         }),
     }

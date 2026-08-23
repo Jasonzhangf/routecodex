@@ -7,10 +7,11 @@ use crate::kernel::direct_request_key_hooks::{
 use crate::kernel::V3DirectSseTypedHookCatalog;
 use crate::nodes::{
     build_v3_responses_direct_11_policy_from_v3_target_10, V3ChatDirect11Policy,
-    V3ClientBody, V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
+    V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
 };
 use crate::shared::{
-    project_provider_raw_to_client_payload_with_plan_and_projection, V3ProviderResponseProjection,
+    project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context,
+    V3ProviderAttemptBody, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
@@ -235,9 +236,8 @@ pub(crate) fn register_responses_direct_hooks_with_key_catalog(
             output_node: "V3Error05ExecutionDecision",
         },
     ];
-    let direct_sse_typed_hooks = V3DirectSseTypedHookCatalog::new().with_toolreason(
-        apply_responses_toolreason_sse_hook,
-    );
+    let direct_sse_typed_hooks =
+        V3DirectSseTypedHookCatalog::new().with_toolreason(apply_responses_toolreason_sse_hook);
     V3HookRegistry {
         hooks: HOOKS,
         route: responses_direct_route_hook,
@@ -506,6 +506,7 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
     context: V3DirectResponseCompatContext,
 ) -> ResponseProjectionFuture {
     Box::pin(async move {
+        let request_id = raw.request_id().to_owned();
         let plan = context.compile_plan().map_err(|error| {
             build_v3_error_01_source_raised_internal(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -515,19 +516,24 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
                 V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
             )
         })?;
-        let mut projection = project_provider_raw_to_client_payload_with_plan_and_projection(
+        let mut projection = project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
             raw,
             &plan,
             context.tool_thinking_enabled,
             context.toolreason_client_projection,
+            context.toolreason_observation_session_id.as_deref(),
         )
         .await?;
         if context.tool_thinking_enabled {
-            if let V3ClientBody::Json(payload) = &mut projection.client_payload.body {
-                crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(
+            if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
+                crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_and_context(
                     payload,
                     true,
                     context.toolreason_client_projection,
+                    crate::hub_v1::V3ToolreasonObservationContext {
+                        session_id: context.toolreason_observation_session_id.as_deref(),
+                        request_id: Some(request_id.as_str()),
+                    },
                 );
             }
         }
@@ -540,6 +546,7 @@ pub(crate) fn chat_direct_response_projection_hook(
     context: V3DirectResponseCompatContext,
 ) -> ResponseProjectionFuture {
     Box::pin(async move {
+        let request_id = raw.request_id().to_owned();
         let plan = context.compile_plan().map_err(|error| {
             build_v3_error_01_source_raised_internal(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -549,19 +556,24 @@ pub(crate) fn chat_direct_response_projection_hook(
                 V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
             )
         })?;
-        let mut projection = project_provider_raw_to_client_payload_with_plan_and_projection(
+        let mut projection = project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
             raw,
             &plan,
             context.tool_thinking_enabled,
             context.toolreason_client_projection,
+            context.toolreason_observation_session_id.as_deref(),
         )
         .await?;
         if context.tool_thinking_enabled {
-            if let V3ClientBody::Json(payload) = &mut projection.client_payload.body {
-                crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(
+            if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
+                crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_and_context(
                     payload,
                     true,
                     context.toolreason_client_projection,
+                    crate::hub_v1::V3ToolreasonObservationContext {
+                        session_id: context.toolreason_observation_session_id.as_deref(),
+                        request_id: Some(request_id.as_str()),
+                    },
                 );
             }
         }
@@ -1396,6 +1408,8 @@ mod tests {
                     compatibility_profile: None,
                     tool_thinking_enabled: false,
                     toolreason_client_projection: true,
+                    toolreason_observation_session_id: Some("session-test".to_string()),
+                    runtime_timing: crate::runtime_timing::V3RuntimeTimingState::start(),
                 },
             )
             .await;

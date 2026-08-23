@@ -10,6 +10,10 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::pin::Pin;
+use std::task::{Context, Poll};
+
+const V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES: usize = 64 * 1024 * 1024;
+const V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES: usize = 262_144;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Server03HttpRequestRaw {
@@ -209,13 +213,149 @@ pub struct V3Execution11ProtocolDecision {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
 }
 
-pub type V3ClientSseStream =
+pub(crate) type V3ProviderAttemptSseStream =
     Pin<Box<dyn Stream<Item = Result<Vec<u8>, V3Error01SourceRaised>> + Send>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3CommittedSseTerminal {
+    Completed,
+    Dropped,
+}
+
+/// Runtime-sealed replay of one completely validated provider attempt.
+///
+/// The inner stream and constructor are intentionally private. Server/Front
+/// code may consume or observe the replay, but cannot manufacture an empty or
+/// terminal-incomplete stream and call it committed.
+pub struct V3CommittedClientSseStream {
+    inner: Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>,
+}
+
+impl fmt::Debug for V3CommittedClientSseStream {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("V3CommittedClientSseStream(<sealed-replay>)")
+    }
+}
+
+impl Stream for V3CommittedClientSseStream {
+    type Item = Vec<u8>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+}
+
+impl V3CommittedClientSseStream {
+    pub fn observe(
+        self,
+        on_frame: impl Fn(&[u8]) + Send + Sync + 'static,
+        on_terminal: impl FnOnce(V3CommittedSseTerminal) + Send + 'static,
+    ) -> Self {
+        Self {
+            inner: Box::pin(V3ObservedCommittedSseStream {
+                source: self,
+                on_frame: Box::new(on_frame),
+                on_terminal: Some(Box::new(on_terminal)),
+            }),
+        }
+    }
+}
+
+struct V3ObservedCommittedSseStream {
+    source: V3CommittedClientSseStream,
+    on_frame: Box<dyn Fn(&[u8]) + Send + Sync>,
+    on_terminal: Option<Box<dyn FnOnce(V3CommittedSseTerminal) + Send>>,
+}
+
+impl V3ObservedCommittedSseStream {
+    fn finish(&mut self, terminal: V3CommittedSseTerminal) {
+        if let Some(on_terminal) = self.on_terminal.take() {
+            on_terminal(terminal);
+        }
+    }
+}
+
+impl Stream for V3ObservedCommittedSseStream {
+    type Item = Vec<u8>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match Pin::new(&mut self.source).poll_next(cx) {
+            Poll::Ready(Some(frame)) => {
+                (self.on_frame)(&frame);
+                Poll::Ready(Some(frame))
+            }
+            Poll::Ready(None) => {
+                self.finish(V3CommittedSseTerminal::Completed);
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for V3ObservedCommittedSseStream {
+    fn drop(&mut self) {
+        self.finish(V3CommittedSseTerminal::Dropped);
+    }
+}
+
+/// Attempt-local bounded buffer owned by Runtime/Broker. Successful clean EOF
+/// of the protocol-validating projected stream is the only call site allowed
+/// to seal it into `V3CommittedClientSseStream`.
+pub(crate) struct V3CommittedClientSseBuilder {
+    frames: Vec<Vec<u8>>,
+    byte_len: usize,
+}
+
+impl V3CommittedClientSseBuilder {
+    pub(crate) fn new() -> Self {
+        Self {
+            frames: Vec::new(),
+            byte_len: 0,
+        }
+    }
+
+    pub(crate) fn push(&mut self, frame: Vec<u8>) -> Result<(), String> {
+        if frame.is_empty() {
+            return Err("provider response event codec produced an empty frame".to_string());
+        }
+        if self.frames.len() >= V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES {
+            return Err(format!(
+                "provider SSE attempt exceeded the committed replay frame limit ({V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES})"
+            ));
+        }
+        let byte_len = self
+            .byte_len
+            .checked_add(frame.len())
+            .ok_or_else(|| "provider SSE attempt byte count overflowed".to_string())?;
+        if byte_len > V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES {
+            return Err(format!(
+                "provider SSE attempt exceeded the committed replay byte limit ({V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES})"
+            ));
+        }
+        self.byte_len = byte_len;
+        self.frames.push(frame);
+        Ok(())
+    }
+
+    pub(crate) fn seal_after_validated_terminal(
+        self,
+    ) -> Result<V3CommittedClientSseStream, String> {
+        if self.frames.is_empty() {
+            return Err("provider response event codec produced an empty stream".to_string());
+        }
+        Ok(V3CommittedClientSseStream {
+            inner: Box::pin(futures_util::stream::iter(self.frames)),
+        })
+    }
+}
 
 pub enum V3ClientBody {
     Json(Value),
     Bytes(Vec<u8>),
-    Sse(V3ClientSseStream),
+    /// Runtime-sealed client stream. Provider/Broker errors have already been
+    /// resolved before this public boundary; only validated bytes may escape.
+    CommittedSse(V3CommittedClientSseStream),
 }
 
 impl fmt::Debug for V3ClientBody {
@@ -226,7 +366,7 @@ impl fmt::Debug for V3ClientBody {
                 .debug_struct("Bytes")
                 .field("byte_len", &bytes.len())
                 .finish(),
-            Self::Sse(_) => formatter.write_str("Sse(<client-event-stream>)"),
+            Self::CommittedSse(_) => formatter.write_str("CommittedSse(<front-event-stream>)"),
         }
     }
 }
@@ -327,7 +467,10 @@ pub fn build_v3_router_request_facts_from_v3_req_04_chat(
             &standardized.protocol_context.server_id,
         ),
         false,
-        standardized.protocol_context.request_purpose.is_compaction()
+        standardized
+            .protocol_context
+            .request_purpose
+            .is_compaction()
             || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
         Some(manifest),
     )
@@ -345,11 +488,17 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
             &standardized.protocol_context.server_id,
         ),
         false,
-        standardized.protocol_context.request_purpose.is_compaction()
-        || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
+        standardized
+            .protocol_context
+            .request_purpose
+            .is_compaction()
+            || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
         Some(manifest),
     );
-    if standardized.protocol_context.request_purpose.is_compaction()
+    if standardized
+        .protocol_context
+        .request_purpose
+        .is_compaction()
         || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint)
     {
         facts.client_model = None;
@@ -427,7 +576,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
     entry_protocol: &str,
     longcontext_threshold_tokens: Option<u64>,
     stopless_followup: bool,
-        is_compaction: bool,
+    is_compaction: bool,
     manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
@@ -446,8 +595,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
         latest_message_from_user: active_turn.latest_message_from_user,
         stopless_followup,
         has_current_turn_tool_output: active_turn.has_current_turn_tool_output,
-        has_current_turn_tool_execution_error: active_turn
-            .has_current_turn_tool_execution_error,
+        has_current_turn_tool_execution_error: active_turn.has_current_turn_tool_execution_error,
         has_current_turn_web_search: active_turn.has_current_turn_web_search
             || declares_web_search_tool,
         last_assistant_tool_category: active_turn
@@ -789,8 +937,7 @@ mod tests {
         build_v3_req_04_standardized_responses_from_v3_server_03,
         build_v3_router_request_facts_for_entry,
         build_v3_router_request_facts_for_entry_with_control,
-        build_v3_router_request_facts_from_v3_req_04_chat,
-        build_v3_server_03_http_request_raw,
+        build_v3_router_request_facts_from_v3_req_04_chat, build_v3_server_03_http_request_raw,
         build_v3_server_03_http_request_raw_with_purpose,
         build_v3_server_03_http_request_raw_with_purpose_and_scope, V3RequestPurpose,
     };

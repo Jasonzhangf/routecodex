@@ -663,14 +663,9 @@ fn stopless_center_compiled_default_preserves_global_and_server_overrides() {
 
 #[test]
 fn tool_thinking_compiled_feature_preserves_explicit_global_toggle() {
-    let enabled = FULL_CONFIG.replace(
-        "[features]\n",
-        "[features]\ntool_thinking = true\n",
-    );
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&enabled).unwrap(),
-    )
-    .unwrap();
+    let enabled = FULL_CONFIG.replace("[features]\n", "[features]\ntool_thinking = true\n");
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&enabled).unwrap()).unwrap();
     assert_eq!(manifest.features.get("tool_thinking"), Some(&true));
 }
 
@@ -823,21 +818,25 @@ fn route_object_binding_compiles_and_compact_pool_stays_independent() {
             "[route_groups.secondary.pools.default]",
             "[[route_groups.primary.route_policies]]\nid = \"compact-purpose\"\nprecedence = 10\ncondition = { kind = \"current_compaction\" }\naction = { select_route_pool = \"compact\" }\n\n[route_groups.secondary.pools.default]",
         );
-    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&configured).unwrap())
-        .expect("compact route object must compile to the independent compact pool");
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&configured).unwrap())
+            .expect("compact route object must compile to the independent compact pool");
     let group = &manifest.route_groups["primary"];
-    assert_eq!(group.compact_route_object.as_deref(), Some("compact-default"));
+    assert_eq!(
+        group.compact_route_object.as_deref(),
+        Some("compact-default")
+    );
     assert_eq!(
         group.pools["compact"].route_object.as_deref(),
         Some("compact-default")
     );
-    assert_eq!(group.route_pool_for_object("compact-default"), Some("compact"));
+    assert_eq!(
+        group.route_pool_for_object("compact-default"),
+        Some("compact")
+    );
     assert_eq!(group.compact_route_pool(), Some("compact"));
     assert_eq!(group.route_policies[0].id, "compact-purpose");
-    assert_eq!(
-        group.route_policies[0].action.select_route_pool,
-        "compact"
-    );
+    assert_eq!(group.route_policies[0].action.select_route_pool, "compact");
 }
 
 #[test]

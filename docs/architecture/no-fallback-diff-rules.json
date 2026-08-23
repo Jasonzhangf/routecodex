@@ -6,6 +6,23 @@
     ".cjs",
     ".rs"
   ],
+  "scanRoots": [
+    "src",
+    "sharedmodule/llmswitch-core",
+    "v3/crates",
+    "v4/crates",
+    "v4/cordis",
+    "v4/build-control"
+  ],
+  "ignorePathSegments": [
+    "node_modules",
+    "target",
+    "coverage",
+    "tests",
+    "fixtures",
+    "build-contracts",
+    "protected"
+  ],
   "ignorePaths": [
     "dist/",
     "dist.new/",
@@ -18,7 +35,9 @@
     "eslint.config.js",
     "scripts/architecture/verify-no-fallback-diff.mjs",
     "tests/",
-    "scripts/tests/"
+    "scripts/tests/",
+    "v3/build-contracts/",
+    "v4/protected/history/"
   ],
   "linePatterns": [
     {
@@ -50,6 +69,26 @@
     }
   ],
   "allowlist": [
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "v4/cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "textContains": "return;"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "v3/crates/routecodex-v3-server/src/lib.rs",
+      "textContains": ".fallback(path_not_found)"
+    },
+    {
+      "ruleId": "degrade-keyword",
+      "pathContains": "v4/crates/routecodex-v4-provider/src/lib.rs",
+      "textContains": "Degraded,"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "v3/crates/routecodex-v3-provider-responses/src/transport.rs",
+      "textContains": "fallback-credit-2026-06-01"
+    },
     {
       "ruleId": "fallback-keyword",
       "pathContains": ".rs",

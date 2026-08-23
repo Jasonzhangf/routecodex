@@ -414,11 +414,15 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     if custom_tool_names.contains(name) {
         // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
         // 按客户端声明的 custom 名归类回 custom_tool_call，保持客户端契约。
+        // provider function arguments 必须是我们发出的对象 schema；只把
+        // schema 的 input 字段恢复成原始 free-form 字符串，三个治理字段
+        // 只在 provider wire 存在，不能泄露到客户端 custom input。
+        let input = parse_v3_openai_chat_custom_tool_input(name, arguments)?;
         return Ok(json!({
             "type":"custom_tool_call",
             "call_id":call_id,
             "name":name,
-            "input":arguments
+            "input":input
         }));
     }
     Ok(json!({
@@ -427,6 +431,22 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         "name":name,
         "arguments":arguments
     }))
+}
+
+fn parse_v3_openai_chat_custom_tool_input(
+    name: &str,
+    arguments: &str,
+) -> Result<String, V3ResponsesRelayRuntimeError> {
+    let parsed = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
+    parsed
+        .get("input")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                "OpenAI Chat custom tool {name} function arguments must contain string input"
+            ))
+        })
 }
 
 pub(crate) fn parse_v3_openai_chat_tool_call_arguments_object(
