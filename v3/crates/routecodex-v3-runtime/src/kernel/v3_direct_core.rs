@@ -95,7 +95,7 @@ where
     ));
     let request_key_catalog =
         crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog();
-    let handoff = move |_failure: String| -> Pin<Box<dyn Future<Output = Option<V3ClientSseStream>> + Send>> {
+    let handoff = move |_failure: String| -> Pin<Box<dyn Future<Output = Option<crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderAttempt>> + Send>> {
         let manifest = manifest.clone();
         let raw = raw.clone();
         let control = control.clone();
@@ -130,8 +130,14 @@ where
                 .as_ref()
                 .and_then(|observability| observability.provider_key.clone());
             match next.client_payload.body {
-                V3ClientBody::Sse(stream) => Some(stream.into_provider_stream()),
-                V3ClientBody::ProviderSse(stream) => Some(stream),
+                V3ClientBody::Sse(stream) => Some(crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderAttempt {
+                    stream: stream.into_provider_stream(),
+                    terminal_validated: true,
+                }),
+                V3ClientBody::ProviderSse(stream) => Some(crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderAttempt {
+                    stream,
+                    terminal_validated: true,
+                }),
                 V3ClientBody::Json(_)
                 | V3ClientBody::Bytes(_)
                 | V3ClientBody::RelayProviderSse(_)

@@ -21,6 +21,16 @@ mod preplanned_target_revalidation;
 mod protocol_mode_lock;
 use fixtures::*;
 
+fn direct_sse_attempt(
+    stream: V3ClientSseStream,
+    terminal_validated: bool,
+) -> crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderAttempt {
+    crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderAttempt {
+        stream,
+        terminal_validated,
+    }
+}
+
 fn test_failure_session_scope(routing_group: &str) -> V3ProviderFailureSessionScope {
     test_failure_session_scope_for(routing_group, &format!("test-session:{routing_group}"))
 }
@@ -972,7 +982,12 @@ async fn direct_sse_handoff_empty_stream_is_not_silent_eof() {
         )),
     ]));
     let handoff = |_reason: String| {
-        Box::pin(async { Some(Box::pin(stream::empty()) as V3ClientSseStream) })
+        Box::pin(async {
+            Some(direct_sse_attempt(
+                Box::pin(stream::empty()) as V3ClientSseStream,
+                false,
+            ))
+        })
     };
     let mut wrapped = crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
         source, handoff, Some(1),
@@ -1001,9 +1016,12 @@ async fn direct_sse_handoff_reselects_when_first_attempt_eof_lacks_terminal() {
     ]));
     let handoff = |_reason: String| {
         Box::pin(async {
-            Some(Box::pin(stream::iter(vec![Ok(
-                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n".to_vec(),
-            )])) as V3ClientSseStream)
+            Some(direct_sse_attempt(
+                Box::pin(stream::iter(vec![Ok(
+                    b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n".to_vec(),
+                )])) as V3ClientSseStream,
+                true,
+            ))
         })
     };
     let mut wrapped =
@@ -1036,9 +1054,12 @@ async fn direct_sse_handoff_partial_stream_without_terminal_is_not_silent_eof() 
     ]));
     let handoff = |_reason: String| {
         Box::pin(async {
-            Some(Box::pin(stream::iter(vec![Ok(
-                b"data: recovered-partial\n\n".to_vec(),
-            )])) as V3ClientSseStream)
+            Some(direct_sse_attempt(
+                Box::pin(stream::iter(vec![Ok(
+                    b"data: recovered-partial\n\n".to_vec(),
+                )])) as V3ClientSseStream,
+                false,
+            ))
         })
     };
     let mut wrapped =
@@ -1082,11 +1103,17 @@ async fn direct_sse_handoff_follows_pool_until_callback_exhaustion_without_fixed
                     "provider_response_sse_stream",
                     "provider stream failed",
                 );
-                Some(Box::pin(stream::iter(vec![Err(error)])) as V3ClientSseStream)
+                Some(direct_sse_attempt(
+                    Box::pin(stream::iter(vec![Err(error)])) as V3ClientSseStream,
+                    false,
+                ))
             } else {
-                Some(Box::pin(stream::iter(vec![Ok(
-                    b"data: [DONE]\n\n".to_vec(),
-                )])) as V3ClientSseStream)
+                Some(direct_sse_attempt(
+                    Box::pin(stream::iter(vec![Ok(
+                        b"data: [DONE]\n\n".to_vec(),
+                    )])) as V3ClientSseStream,
+                    false,
+                ))
             }
         })
     };
@@ -1096,8 +1123,12 @@ async fn direct_sse_handoff_follows_pool_until_callback_exhaustion_without_fixed
 
     let frames = wrapped.collect::<Vec<_>>().await;
     assert_eq!(attempts.load(Ordering::SeqCst), 10);
-    assert_eq!(frames.len(), 1);
+    assert_eq!(frames.len(), 2);
     assert!(frames[0].as_ref().unwrap().contains(&b"[DONE]"[0]));
+    assert_eq!(
+        frames[1].as_ref().unwrap_err().code,
+        "provider_sse_handoff_terminal_missing"
+    );
 }
 
 pub(super) async fn run_normal_direct_request_does_not_consume_unrelated_provider_failure_gate() {

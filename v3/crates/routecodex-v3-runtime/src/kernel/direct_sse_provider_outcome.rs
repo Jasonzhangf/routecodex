@@ -7,6 +7,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+pub(super) struct V3DirectSseProviderAttempt {
+    pub(super) stream: V3ClientSseStream,
+    pub(super) terminal_validated: bool,
+}
+
 pub(super) type V3DirectSseProviderHandoff = Arc<
     dyn Fn(
             String,
@@ -470,13 +475,13 @@ pub(super) fn wrap_direct_sse_provider_handoff_stream<F, Fut>(
 ) -> V3ClientSseStream
 where
     F: Fn(String) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = Option<V3ClientSseStream>> + Send + 'static,
+    Fut: Future<Output = Option<V3DirectSseProviderAttempt>> + Send + 'static,
 {
     Box::pin(stream::unfold(
         // The first provider attempt is already part of the handoff contract:
         // an EOF without a terminal event must be treated as a provider
         // failure and offered to the next attempt, never as client success.
-        (source, handoff, handoff_budget, true, false, false),
+        (source, handoff, handoff_budget, true, false, false, false),
         |(
             mut source,
             handoff,
@@ -484,6 +489,7 @@ where
             mut handoff_active,
             mut handoff_emitted_frame,
             mut handoff_client_committed,
+            mut handoff_terminal_validated,
         )| async move {
             loop {
                 match source.next().await {
@@ -502,6 +508,7 @@ where
                                 handoff_active,
                                 handoff_emitted_frame,
                                 handoff_client_committed,
+                                handoff_terminal_validated,
                             ),
                         ));
                     }
@@ -518,16 +525,18 @@ where
                                     false,
                                     handoff_emitted_frame,
                                     handoff_client_committed,
+                                    handoff_terminal_validated,
                                 ),
                             ));
                         };
-                        source = next;
+                        source = next.stream;
                         if let Some(budget) = handoff_budget.as_mut() {
                             *budget = budget.saturating_sub(1);
                         }
                         handoff_active = true;
                         handoff_emitted_frame = false;
                         handoff_client_committed = false;
+                        handoff_terminal_validated = next.terminal_validated;
                     }
                     Some(Err(error)) => {
                         return Some((
@@ -539,10 +548,30 @@ where
                                 false,
                                 handoff_emitted_frame,
                                 handoff_client_committed,
+                                handoff_terminal_validated,
                             ),
                         ));
                     }
-                    None if handoff_active => return None,
+                    None if handoff_active && handoff_terminal_validated => return None,
+                    None if handoff_active => {
+                        return Some((
+                            Err(build_v3_error_01_source_raised(
+                                V3ErrorSourceKind::ProviderFailure,
+                                "V3ProviderResp14Raw",
+                                "provider_sse_handoff_terminal_missing",
+                                "provider handoff stream ended without codec-validated terminal event",
+                            )),
+                            (
+                                Box::pin(stream::empty()),
+                                handoff,
+                                Some(0),
+                                false,
+                                handoff_emitted_frame,
+                                handoff_client_committed,
+                                handoff_terminal_validated,
+                            ),
+                        ));
+                    }
                     None => return None,
                 }
             }
@@ -552,7 +581,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::wrap_direct_sse_provider_handoff_stream;
+    use super::{wrap_direct_sse_provider_handoff_stream, V3DirectSseProviderAttempt};
     use crate::nodes::V3ClientSseStream;
     use futures_util::StreamExt;
     use routecodex_v3_error::{build_v3_error_01_source_raised, V3ErrorSourceKind};
@@ -579,9 +608,12 @@ mod tests {
             let calls = calls.clone();
             async move {
                 calls.fetch_add(1, Ordering::SeqCst);
-                Some(Box::pin(futures_util::stream::iter(vec![Ok(
-                    b"data: [DONE]\n\n".to_vec(),
-                )])) as V3ClientSseStream)
+                Some(V3DirectSseProviderAttempt {
+                    stream: Box::pin(futures_util::stream::iter(vec![Ok(
+                        b"data: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n".to_vec(),
+                    )])) as V3ClientSseStream,
+                    terminal_validated: true,
+                })
             }
         }, None);
 
@@ -601,7 +633,7 @@ mod tests {
         ]));
         let stream = wrap_direct_sse_provider_handoff_stream(
             source,
-            |_message| async { None::<V3ClientSseStream> },
+            |_message| async { None::<V3DirectSseProviderAttempt> },
             None,
         );
 
