@@ -481,7 +481,9 @@ where
         // The first provider attempt is already part of the handoff contract:
         // an EOF without a terminal event must be treated as a provider
         // failure and offered to the next attempt, never as client success.
-        (source, handoff, handoff_budget, true, false, false, false),
+        // The initial source is already wrapped by the typed provider outcome
+        // codec. Replacement attempts carry the same validation bit explicitly.
+        (source, handoff, handoff_budget, true, false, false, true),
         |(
             mut source,
             handoff,
@@ -624,6 +626,27 @@ mod tests {
             .iter()
             .flatten()
             .any(|frame| frame.as_slice() == b"data: [DONE]\n\n"));
+    }
+
+    #[tokio::test]
+    async fn codec_validated_initial_attempt_ends_cleanly() {
+        let handoff_calls = Arc::new(AtomicUsize::new(0));
+        let calls = handoff_calls.clone();
+        let source: V3ClientSseStream = Box::pin(futures_util::stream::iter(vec![Ok(
+            b"data: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n".to_vec(),
+        )]));
+        let stream = wrap_direct_sse_provider_handoff_stream(source, move |_message| {
+            let calls = calls.clone();
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                None::<V3DirectSseProviderAttempt>
+            }
+        }, None);
+
+        let frames = stream.collect::<Vec<_>>().await;
+        assert_eq!(handoff_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(frames.len(), 1);
+        assert!(frames[0].is_ok());
     }
 
     #[tokio::test]
