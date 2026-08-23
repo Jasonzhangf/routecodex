@@ -28,7 +28,8 @@ pub(crate) use crate::shared_direct_thinking_compat::project_v3_thinking_tag_tex
 /// （默认 60s，明显短于 provider 请求总超时，避免客户端无限等待/EOF 且无日志）。
 /// 超时归一化为 transport Error01 进入错误链（reselect / Error06 终态投影），
 /// 不在 server/SSE 层裸造错误帧。
-const V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+const V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(60);
 
 pub(crate) fn v3_route_plan_error_source(
     stage: &'static str,
@@ -425,7 +426,7 @@ async fn process_direct_sse_stream(
         false,
     );
     Ok((
-        V3ClientBody::Sse(client_stream),
+        V3ClientBody::ProviderSse(client_stream),
         V3RemoteContinuationObservation::Streaming {
             state: observation_state,
         },
@@ -462,13 +463,17 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
 ) -> Result<V3ProviderSseStream, V3Error01SourceRaised> {
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut buffered = Vec::<Vec<u8>>::new();
+    // This is a deadline for the first semantic event, not a per-chunk idle
+    // timer. Transport keepalives must preserve the client connection, but
+    // must not extend a provider stream that never produces a semantic frame.
+    let first_event_deadline = tokio::time::Instant::now() + first_event_timeout;
     loop {
         // 首帧超时守卫：provider 返回 200 但 SSE 首帧挂起（连接保持、无数据）时，
         // 必须 fail-fast 产生显式 provider 错误（而不是无限等待 -> 客户端超时/EOF
         // 且无 console 打印）。超时错误进入 provider 失败链，可触发 reselect 与
         // console 错误投影；客户端连接由 server 侧 keepalive 保持存活，与 provider
         // 状态解耦。
-        let next = tokio::time::timeout(first_event_timeout, stream.next())
+        let next = tokio::time::timeout_at(first_event_deadline, stream.next())
             .await
             .map_err(|_| {
                 build_v3_error_01_source_raised_external(
@@ -850,10 +855,6 @@ fn observed_sse_client_stream_with_protocol(
             };
             match next {
                 Some(Ok(chunk)) => {
-                    // transport 帧活跃即保活：任何 provider 字节（含 keepalive/
-                    // 非语义帧）都刷新帧间隔 deadline，避免"活着但语义安静"
-                    // 的流被误杀；只有完全无字节的挂起流才超时。
-                    state.semantic_deadline = tokio::time::Instant::now() + frame_interval_timeout;
                     let client_chunk = if state.tool_thinking_enabled {
                         apply_toolreason_to_sse_chunk_buffered_with_state_and_request_id(
                             &mut state.tool_thinking_buffer,
@@ -983,7 +984,32 @@ fn observed_sse_client_stream_with_protocol(
                         .finish()
                         .map_err(|error| sse_transport_source(&state.provider_id, error))
                     {
-                        Ok(()) => None,
+                        Ok(()) if state.terminal_observed => None,
+                        Ok(()) => {
+                            state.done = true;
+                            Some((
+                                Err(build_v3_error_01_source_raised_external(
+                                    V3ErrorSourceKind::ProviderFailure,
+                                    "V3ProviderResp14Raw",
+                                    "provider_response_sse_stream",
+                                    "provider response SSE stream ended without a terminal semantic event",
+                                    V3ExternalErrorLink {
+                                        kind: V3ExternalErrorKind::Provider,
+                                        status: None,
+                                        code: Some(
+                                            "PROVIDER_RESPONSE_SSE_MISSING_TERMINAL".to_string(),
+                                        ),
+                                        provider_id: Some(state.provider_id.clone()),
+                                        upstream_request_id: None,
+                                        message: Some(
+                                            "provider response SSE stream ended without a terminal semantic event"
+                                                .to_string(),
+                                        ),
+                                    },
+                                )),
+                                state,
+                            ))
+                        }
                         Err(error) => {
                             state.done = true;
                             Some((Err(error), state))
@@ -1196,7 +1222,10 @@ fn observe_sse_remote_continuation_chunk(
         semantic_observed |= classification.is_some();
         terminal_observed |= matches!(
             classification,
-            Some(V3ProviderResponsesJsonFrameOutcome::Terminal)
+            Some(
+                V3ProviderResponsesJsonFrameOutcome::Terminal
+                    | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput,
+            )
         );
     }
     Ok((terminal_observed, semantic_observed))
@@ -1671,7 +1700,7 @@ mod tests {
 
         let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
         match projection.client_payload.body {
-            V3ClientBody::Sse(mut stream) => {
+            V3ClientBody::ProviderSse(mut stream) => {
                 let chunk = stream.next().await.unwrap().unwrap();
                 let text = std::str::from_utf8(&chunk).unwrap();
                 assert!(text.contains("response.output_text.delta"), "{text}");
@@ -1701,7 +1730,7 @@ mod tests {
         );
 
         let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
-        let V3ClientBody::Sse(mut stream) = projection.client_payload.body else {
+        let V3ClientBody::ProviderSse(mut stream) = projection.client_payload.body else {
             panic!("expected direct SSE body");
         };
         let chunk = tokio::time::timeout(std::time::Duration::from_millis(100), stream.next())
@@ -1710,6 +1739,31 @@ mod tests {
             .expect("provider first chunk must be forwarded")
             .expect("provider first chunk must be valid");
         assert!(std::str::from_utf8(&chunk).unwrap().contains("early"));
+    }
+
+    #[tokio::test]
+    async fn direct_sse_projection_does_not_turn_missing_terminal_into_silent_eof() {
+        let first =
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec();
+        let mut stream = observed_sse_client_stream_with_timeout(
+            "provider".to_string(),
+            Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(first)])),
+            V3SseRemoteContinuationObservationState::default(),
+            V3RuntimeStreamObservation::default(),
+            std::time::Duration::from_millis(100),
+            None,
+            false,
+        );
+
+        assert!(stream.next().await.expect("first frame").is_ok());
+        let error = stream
+            .next()
+            .await
+            .expect("missing terminal must emit an explicit error")
+            .expect_err("missing terminal must not become silent EOF");
+        assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(error.code, "provider_response_sse_stream");
+        assert!(error.message.contains("without a terminal semantic event"));
     }
 
     #[tokio::test]
@@ -1740,6 +1794,42 @@ mod tests {
             .expect("mid-stream stall must become an explicit error")
             .expect_err("mid-stream stall must not become silent EOF");
         assert_eq!(error.code, "provider_response_sse_inter_event_timeout");
+    }
+
+    #[tokio::test]
+    async fn direct_sse_projection_times_out_when_provider_only_sends_keepalives() {
+        let first =
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n"
+                .to_vec();
+        let keepalives = futures_util::stream::unfold((), |_| async {
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            Some((
+                Ok::<Vec<u8>, V3ProviderError>(b": keepalive\n\n".to_vec()),
+                (),
+            ))
+        });
+        let mut stream = observed_sse_client_stream_with_timeout(
+            "provider".to_string(),
+            Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(first)]).chain(keepalives)),
+            V3SseRemoteContinuationObservationState::default(),
+            V3RuntimeStreamObservation::default(),
+            std::time::Duration::from_millis(20),
+            None,
+            false,
+        );
+        assert!(stream.next().await.expect("first frame").is_ok());
+        let result = tokio::time::timeout(std::time::Duration::from_millis(100), async {
+            loop {
+                match stream.next().await {
+                    Some(Ok(_)) => continue,
+                    Some(Err(error)) => break error,
+                    None => panic!("keepalive-only provider stream ended silently"),
+                }
+            }
+        })
+        .await
+        .expect("keepalives must not suppress semantic timeout");
+        assert_eq!(result.code, "provider_response_sse_inter_event_timeout");
     }
 
     #[tokio::test]
@@ -1857,6 +1947,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn guard_initial_direct_sse_provider_failure_does_not_extend_deadline_for_keepalives() {
+        // 反向：transport keepalive 不能把“没有首个语义事件”的 provider
+        // 变成无限等待；每个 keepalive 都会刷新 stream.next()，但不应刷新
+        // 整段首语义事件 deadline。
+        let keepalives = futures_util::stream::unfold((), |_| async {
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            Some((Ok::<Vec<u8>, V3ProviderError>(b": keepalive\n\n".to_vec()), ()))
+        });
+        let stream: V3ProviderSseStream = Box::pin(keepalives);
+        let result = guard_initial_direct_sse_provider_failure_with_timeout(
+            "keepalive-only-provider",
+            stream,
+            std::time::Duration::from_millis(30),
+            None,
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        )
+        .await;
+        let Err(error) = result else {
+            panic!("keepalive-only provider must hit the semantic first-event deadline");
+        };
+        assert_eq!(error.code, "provider_response_sse_first_event_timeout");
+    }
+
+    #[tokio::test]
     async fn guard_initial_direct_sse_provider_failure_accepts_prompt_first_frame() {
         // 反向：正常 provider 在超时内给出首个语义事件（首个非前导事件 ->
         // StartClientStream）则放行并 replay 缓冲字节，不误杀健康 provider。
@@ -1903,6 +2017,23 @@ mod tests {
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "provider_response_sse_event_invalid");
         assert!(!error.message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn direct_sse_guard_accepts_structured_function_call_arguments_before_client_commit() {
+        let compatible = b"data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"apply_patch\",\"arguments\":{\"patch\":\"*** Begin Patch\"}}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"apply_patch\",\"arguments\":{\"patch\":\"*** Begin Patch\"}}]}}\n\n".to_vec();
+        let stream: V3ProviderSseStream =
+            Box::pin(futures_util::stream::once(async move { Ok(compatible) }));
+        let mut guarded = guard_initial_direct_sse_provider_failure_with_timeout(
+            "structured-arguments-provider",
+            stream,
+            std::time::Duration::from_secs(5),
+            None,
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        )
+        .await
+        .expect("structured function_call arguments are syntax-compatible");
+        assert!(guarded.next().await.is_some());
     }
 
     #[tokio::test]
@@ -1967,23 +2098,23 @@ mod tests {
             }],
             source,
         );
-        let projection = project_provider_raw_to_client_payload(raw)
-            .await
-            .expect("post-first-frame failure belongs to the committed client stream");
-        let V3ClientBody::Sse(mut stream) = projection.client_payload.body else {
+        let projection = project_provider_raw_to_client_payload(raw).await.expect(
+            "projection returns a typed stream; runtime owns pre-commit attempt collection",
+        );
+        let V3ClientBody::ProviderSse(mut stream) = projection.client_payload.body else {
             panic!("expected direct SSE body");
         };
         let first = stream
             .next()
             .await
-            .expect("first provider frame must reach the client")
+            .expect("first provider frame must reach the runtime")
             .expect("first provider frame must be valid");
         assert!(std::str::from_utf8(&first).unwrap().contains("partial"));
         let error = stream
             .next()
             .await
-            .expect("post-commit provider error must not become silent EOF")
-            .expect_err("post-commit provider error must remain explicit");
+            .expect("post-commit provider error must remain explicit")
+            .expect_err("post-commit provider error must remain typed for runtime handoff");
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "provider_response_body_error");
     }
