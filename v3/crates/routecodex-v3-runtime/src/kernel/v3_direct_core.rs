@@ -116,7 +116,7 @@ where
     };
     output.client_payload.body = V3ClientBody::Sse(
         crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
-            stream, handoff, Some(8),
+            stream, handoff, None,
         ),
     );
     output
