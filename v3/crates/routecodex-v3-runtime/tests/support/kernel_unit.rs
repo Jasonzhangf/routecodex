@@ -974,6 +974,35 @@ async fn direct_sse_handoff_empty_stream_is_not_silent_eof() {
 }
 
 #[tokio::test]
+async fn direct_sse_handoff_reselects_when_first_attempt_eof_lacks_terminal() {
+    let source: V3ClientSseStream = Box::pin(stream::iter(vec![Ok(
+        b"data: first\n\n".to_vec(),
+    )]));
+    let handoff = |_reason: String| {
+        Box::pin(async {
+            Some(Box::pin(stream::iter(vec![Ok(
+                b"data: recovered\ndata: [DONE]\n\n".to_vec(),
+            )])) as V3ClientSseStream)
+        })
+    };
+    let mut wrapped =
+        crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
+            source, handoff, 1,
+        );
+
+    assert!(wrapped.next().await.expect("first frame").is_ok());
+    let recovered = wrapped
+        .next()
+        .await
+        .expect("first-attempt EOF must hand off")
+        .expect("handoff frame must be forwarded");
+    assert!(String::from_utf8(recovered)
+        .unwrap()
+        .contains("data: recovered"));
+    assert!(wrapped.next().await.is_none());
+}
+
+#[tokio::test]
 async fn direct_sse_handoff_partial_stream_without_terminal_is_not_silent_eof() {
     let source: V3ClientSseStream = Box::pin(stream::iter(vec![
         Ok(b"data: first\n\n".to_vec()),

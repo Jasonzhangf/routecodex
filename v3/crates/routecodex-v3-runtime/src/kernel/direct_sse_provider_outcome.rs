@@ -487,7 +487,10 @@ where
     }
 
     Box::pin(stream::unfold(
-        (source, handoff, remaining_handoffs, false, false, false),
+        // The first provider attempt is already part of the handoff contract:
+        // an EOF without a terminal event must be treated as a provider
+        // failure and offered to the next attempt, never as client success.
+        (source, handoff, remaining_handoffs, true, false, false),
         |(
             mut source,
             handoff,
@@ -554,21 +557,36 @@ where
                         if handoff_terminal_seen {
                             return None;
                         }
+                        let error = build_v3_error_01_source_raised(
+                            V3ErrorSourceKind::ProviderFailure,
+                            "V3ProviderResp14Raw",
+                            if handoff_emitted_frame {
+                                "provider_sse_terminal_missing"
+                            } else {
+                                "provider_sse_handoff_empty_stream"
+                            },
+                            if handoff_emitted_frame {
+                                "provider handoff stream ended without a terminal event"
+                            } else {
+                                "provider handoff stream ended without a frame"
+                            },
+                        );
+                        if remaining_handoffs > 0 {
+                            let Some(next) = handoff.clone()(error.message.clone()).await else {
+                                return Some((
+                                    Err(error),
+                                    (source, handoff, 0, false, false, false),
+                                ));
+                            };
+                            source = next;
+                            remaining_handoffs = remaining_handoffs.saturating_sub(1);
+                            handoff_active = true;
+                            handoff_terminal_seen = false;
+                            handoff_emitted_frame = false;
+                            continue;
+                        }
                         return Some((
-                            Err(build_v3_error_01_source_raised(
-                                V3ErrorSourceKind::ProviderFailure,
-                                "V3ProviderResp14Raw",
-                                if handoff_emitted_frame {
-                                    "provider_sse_terminal_missing"
-                                } else {
-                                    "provider_sse_handoff_empty_stream"
-                                },
-                                if handoff_emitted_frame {
-                                    "provider handoff stream ended without a terminal event"
-                                } else {
-                                    "provider handoff stream ended without a frame"
-                                },
-                            )),
+                            Err(error),
                             (source, handoff, 0, false, false, false),
                         ));
                     }
