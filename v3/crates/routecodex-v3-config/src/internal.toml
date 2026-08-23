@@ -81,7 +81,7 @@
 [error_handling]
   transient_stages = ["provider.sse_decode", "provider.sse_stream", "provider.transport_transient", "V3ProviderResp14Raw", "V3ProviderRespInbound01Raw", "V3ProviderReqOutbound09TransportRequest", "V3Transport13ResponsesHttpRequest"]
   transient_wait_ms = [1000, 3000, 5000]
-  recoverable_http_statuses = [500, 502]
+  recoverable_http_statuses = [429, 500, 502]
   recoverable_failure_threshold = 3
   recoverable_cooldown_ms = 900000
   recoverable_probe_interval_ms = 900000

@@ -71,7 +71,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .as_ref()
         .and_then(|error| error.status);
     let response_stream_failure = classified.source.code == "provider_response_sse_stream";
-    let http_status_is_health_counted = matches!(status, Some(500 | 502));
+    let http_status_is_health_counted = matches!(status, Some(429 | 500 | 502));
     if !response_stream_failure
         && !http_status_is_health_counted
         && is_v3_retryable_transient_source(&classified.source)
@@ -292,6 +292,16 @@ mod tests {
             "V3ProviderRespInbound01Raw",
             "provider_response_sse_stream",
             502,
+        ));
+        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
+        assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
+        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.score_delta_milli, -100);
+
+        let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "rate_limit_error",
+            429,
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);

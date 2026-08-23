@@ -535,5 +535,13 @@ mod tests {
             ),
             V3InternalErrorCategory::Transient
         );
+        assert_eq!(
+            classify_v3_internal_provider_error(
+                "V3ProviderReqOutbound09TransportRequest",
+                429,
+                "rate_limit_error"
+            ),
+            V3InternalErrorCategory::Recoverable
+        );
     }
 }
