@@ -153,12 +153,20 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
         }
     }
     if let Some(provider_key) = observability.provider_key.as_deref() {
-        let recovered = context
-            .state
-            .realtime_cooled_provider_keys
-            .lock()
-            .expect("V3 console cooled-provider mutex poisoned")
-            .remove(provider_key);
+        let same_observation_is_still_cooldown = observability
+            .provider_failure_events
+            .iter()
+            .any(|event| event.provider_key == provider_key && event.health_state == "cooldown");
+        let recovered = if same_observation_is_still_cooldown {
+            false
+        } else {
+            context
+                .state
+                .realtime_cooled_provider_keys
+                .lock()
+                .expect("V3 console cooled-provider mutex poisoned")
+                .remove(provider_key)
+        };
         if recovered {
             let content = format_v3_console_timed_content(
                 "[provider-recovered]",

@@ -1934,7 +1934,16 @@ fn cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_line
     cooldown.cooldown_until_ms = Some(900_000);
     emit_v3_provider_observability_console_lines(
         &context,
-        &test_direct_observability(vec![cooldown]),
+        &test_direct_observability(vec![cooldown.clone()]),
+    );
+    let mut same_request = test_direct_observability(vec![cooldown.clone()]);
+    same_request.provider_key = Some("first:key:gpt-5.5".to_string());
+    emit_v3_provider_observability_console_lines(&context, &same_request);
+    let same_request_log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert_eq!(
+        same_request_log.matches("[provider-recovered]").count(),
+        0,
+        "an observation that is still cooldown must not claim recovery: {same_request_log}"
     );
     let mut observability = test_direct_observability(Vec::new());
     observability.unavailable_candidates =
