@@ -31,6 +31,14 @@ pub(crate) use crate::shared_direct_thinking_compat::project_v3_thinking_tag_tex
 const V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(60);
 
+fn v3_direct_sse_frame_interval_timeout(
+    sse_first_frame_timeout_ms: Option<u64>,
+) -> std::time::Duration {
+    sse_first_frame_timeout_ms
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT)
+}
+
 pub(crate) fn v3_route_plan_error_source(
     stage: &'static str,
     code: &'static str,
@@ -414,7 +422,7 @@ async fn process_direct_sse_stream(
         stream,
         observation_state.clone(),
         usage_observation.clone(),
-        V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT,
+        v3_direct_sse_frame_interval_timeout(sse_first_frame_timeout_ms),
         compatibility_profile,
         provider_protocol,
         // Resp03 toolreason parsing/projection has one owner: the registered
@@ -1550,6 +1558,18 @@ pub(crate) async fn project_provider_raw_to_client_payload(
 mod tests {
     use super::*;
     use routecodex_v3_provider_responses::V3ProviderResponseHeader;
+
+    #[test]
+    fn direct_sse_frame_interval_timeout_uses_provider_cold_start_budget() {
+        assert_eq!(
+            v3_direct_sse_frame_interval_timeout(Some(900_000)),
+            std::time::Duration::from_secs(900)
+        );
+        assert_eq!(
+            v3_direct_sse_frame_interval_timeout(None),
+            V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT
+        );
+    }
 
     #[tokio::test]
     async fn missing_content_type_is_explicit_error() {
