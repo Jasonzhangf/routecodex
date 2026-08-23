@@ -1339,6 +1339,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     let reason = (!message.trim().is_empty()).then_some(message.as_str());
     let is_request_local_compat_failure = source_stage == "ProviderReqCompat06ProviderCompat"
         || error_type.as_deref() == Some("provider_request_compat_error")
+        // Provider semantic invalid-request responses describe this request,
+        // not provider health.  Relay may surface them as a runtime 502 after
+        // decoding an HTTP-200 SSE error event, so status alone is insufficient.
+        || error_type.as_deref() == Some("invalid_request_error")
         // HTTP 400 is a request/provider-compatibility rejection (for example
         // context-window or wire-shape limits), not an account-health signal.
         // Keep it health-neutral so all keys do not enter cooldown for the
