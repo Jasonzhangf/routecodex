@@ -2,6 +2,7 @@ use crate::*;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, Response, StatusCode};
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
@@ -146,7 +147,10 @@ pub(crate) fn foundation_output_response(output: V3FoundationRuntimeOutput) -> R
         V3Server16Body::Bytes(bytes) => bytes,
         V3Server16Body::Sse(stream) => {
             return builder
-                .body(v3_client_sse_body(stream, None))
+                .body(v3_client_sse_body(
+                    commit_v3_client_sse_stream(stream),
+                    None,
+                ))
                 .expect("typed response");
         }
     };
@@ -226,31 +230,6 @@ pub(crate) fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -
     format!("event: error\ndata: {event}\n\n").into_bytes()
 }
 
-fn v3_post_commit_sse_error_event_chunk(source: V3Error01SourceRaised) -> Vec<u8> {
-    let provider_failure = matches!(
-        source.source_kind,
-        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
-    );
-    let projected = project_v3_post_commit_sse_source(source, 599);
-    let (code, message): (String, String) = if provider_failure {
-        (
-            "response_stream_terminated".to_string(),
-            "response stream terminated before completion".to_string(),
-        )
-    } else {
-        let (code, message) = v3_error_body_code_message(&projected.body);
-        (code, message)
-    };
-    let event = json!({
-        "type": "error",
-        "error": {
-            "code": code,
-            "message": message
-        }
-    });
-    format!("event: error\ndata: {event}\n\n").into_bytes()
-}
-
 pub(crate) fn responses_direct_output_response_with_console(
     frame: V3Server16HttpFrame,
     stream_console_finalizer: Option<V3DirectSseConsoleFinalizer>,
@@ -266,9 +245,16 @@ pub(crate) fn responses_direct_output_response_with_console(
         V3Server16Body::Bytes(bytes) => bytes,
         V3Server16Body::Sse(stream) => {
             let stream = wrap_v3_direct_sse_console_stream(stream, stream_console_finalizer);
-            let keepalive = frame.error_chain.is_empty().then_some(keepalive_interval).flatten();
+            let keepalive = frame
+                .error_chain
+                .is_empty()
+                .then_some(keepalive_interval)
+                .flatten();
             return builder
-                .body(v3_client_sse_body(stream, keepalive))
+                .body(v3_client_sse_body(
+                    commit_v3_client_sse_stream(stream),
+                    keepalive,
+                ))
                 .expect("typed response");
         }
     };
@@ -296,8 +282,68 @@ pub(crate) fn wrap_v3_direct_sse_console_stream(
 pub(crate) type V3IoSseStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, io::Error>> + Send>>;
 
+pub(crate) fn commit_v3_client_sse_stream(stream: V3ClientSseStream) -> V3CommittedClientSseStream {
+    Box::pin(futures_util::stream::unfold(
+        (stream, false, false),
+        |(mut stream, mut emitted_frame, mut closeout_emitted)| async move {
+            match stream.next().await {
+                Some(Ok(frame)) => {
+                    emitted_frame = true;
+                    Some((frame, (stream, emitted_frame, closeout_emitted)))
+                }
+                Some(Err(source)) => {
+                    // Error01 must normally be consumed by Broker/Runtime before the
+                    // Front commit. If one crosses this boundary, turning it into
+                    // EOF makes the client report a silent disconnect. Keep the
+                    // client stream explicit: this is a RouteCodex response-stage
+                    // failure (599), followed by the protocol terminal marker.
+                    closeout_emitted = true;
+                    let projected = project_v3_server_runtime_failure(
+                        "V3ServerRespOutbound05ClientFrame",
+                        "front_sse_unresolved_error_chain",
+                        format!(
+                            "SSE Front received unresolved Error01 ({}) before Error05 client decision",
+                            source.code
+                        ),
+                        599,
+                    );
+                    let body = serde_json::to_vec(&projected)
+                        .expect("typed Front unresolved SSE Error06 projection");
+                    let mut frame = Vec::with_capacity(body.len() + 32);
+                    frame.extend_from_slice(b"data: ");
+                    frame.extend_from_slice(&body);
+                    frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
+                    Some((frame, (stream, emitted_frame, closeout_emitted)))
+                }
+                None if !emitted_frame && !closeout_emitted => {
+                    // A committed SSE response that produces no frame is never a
+                    // successful protocol completion. Converting this empty EOF
+                    // into the same typed 599 closeout prevents the client from
+                    // seeing a silent stop when an upstream/inner broker path
+                    // accidentally terminates without raising Error01.
+                    closeout_emitted = true;
+                    let projected = project_v3_server_runtime_failure(
+                        "V3ServerRespOutbound05ClientFrame",
+                        "front_sse_empty_stream",
+                        "committed SSE stream ended before emitting a client frame",
+                        599,
+                    );
+                    let body = serde_json::to_vec(&projected)
+                        .expect("typed Front empty SSE Error06 projection");
+                    let mut frame = Vec::with_capacity(body.len() + 32);
+                    frame.extend_from_slice(b"data: ");
+                    frame.extend_from_slice(&body);
+                    frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
+                    Some((frame, (stream, emitted_frame, closeout_emitted)))
+                }
+                None => None,
+            }
+        },
+    ))
+}
+
 pub(crate) fn v3_client_sse_body(
-    stream: V3ClientSseStream,
+    stream: V3CommittedClientSseStream,
     keepalive_interval: Option<Duration>,
 ) -> Body {
     let stream = stream::unfold((stream, false), |(mut stream, done)| async move {
@@ -305,18 +351,7 @@ pub(crate) fn v3_client_sse_body(
             return None;
         }
         match stream.next().await {
-            Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-            Some(Err(source)) if is_v3_client_disconnect_source(&source) => Some((
-                Err(io::Error::other(format!(
-                    "{}: {}",
-                    source.code, source.message
-                ))),
-                (stream, true),
-            )),
-            Some(Err(source)) => Some((
-                Ok(v3_post_commit_sse_error_event_chunk(source)),
-                (stream, true),
-            )),
+            Some(chunk) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
             None => None,
         }
     });
@@ -512,7 +547,12 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_resp_15(
     let error_chain = error_chain.unwrap_or_default();
     let error_body = match &payload.body {
         V3ClientBody::Json(value) if !error_chain.is_empty() => Some(value.clone()),
-        V3ClientBody::Json(_) | V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => None,
+        V3ClientBody::Json(_)
+        | V3ClientBody::Bytes(_)
+        | V3ClientBody::ProviderSse(_)
+        | V3ClientBody::RelayProviderSse(_)
+        | V3ClientBody::Sse(_)
+        | V3ClientBody::CommittedSse(_) => None,
     };
     V3Server16HttpFrame {
         status: payload.status,
@@ -520,7 +560,16 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_resp_15(
         body: match payload.body {
             V3ClientBody::Json(value) => V3Server16Body::Json(value),
             V3ClientBody::Bytes(bytes) => V3Server16Body::Bytes(bytes),
+            V3ClientBody::ProviderSse(_) => {
+                panic!("provider SSE attempt escaped Resp15 client projection")
+            }
+            V3ClientBody::RelayProviderSse(_) => {
+                panic!("relay provider SSE attempt escaped Front/Broker finalization")
+            }
             V3ClientBody::Sse(stream) => V3Server16Body::Sse(stream),
+            V3ClientBody::CommittedSse(stream) => V3Server16Body::Sse(Box::pin(
+                stream.map(Ok::<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>),
+            )),
         },
         debug_node: "V3Debug01NodeEventRegistered",
         error_node: if error_chain.is_empty() {
@@ -725,7 +774,10 @@ pub(crate) fn error_output_response_for_server_with_project_path(
 ) -> Response<Body> {
     let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
     emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
-    responses_direct_output_response(frame, Some(Duration::from_millis(server.http_sse_keepalive_ms)))
+    responses_direct_output_response(
+        frame,
+        Some(Duration::from_millis(server.http_sse_keepalive_ms)),
+    )
 }
 
 pub(crate) fn error_output_response_for_responses_request_with_project_path(

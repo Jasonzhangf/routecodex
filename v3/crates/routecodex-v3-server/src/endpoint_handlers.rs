@@ -2,10 +2,41 @@ use crate::*;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, Response};
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use serde_json::{json, Value};
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+fn v3_front_chunk_is_transport_keepalive(bytes: &[u8]) -> bool {
+    bytes == b": keepalive\n\n"
+}
+
+fn v3_front_json_body_to_sse_frame(bytes: &[u8]) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(bytes.len() + 8);
+    frame.extend_from_slice(b"data: ");
+    frame.extend_from_slice(bytes);
+    frame.extend_from_slice(b"\n\n");
+    frame
+}
+
+fn v3_front_sse_worker_panic_frame(message: &str) -> Vec<u8> {
+    let frame = build_v3_server_16_http_frame_from_v3_error_06(project_v3_server_runtime_failure(
+        "V3ServerRespOutbound05ClientFrame",
+        "front_sse_worker_panicked",
+        message,
+        599,
+    ));
+    let V3Server16Body::Json(value) = frame.body else {
+        panic!("Front worker panic must project JSON Error06 body");
+    };
+    let bytes = serde_json::to_vec(&value).expect("typed Front worker panic Error06 projection");
+    let mut sse_frame = Vec::with_capacity(bytes.len() + 24);
+    sse_frame.extend_from_slice(b"data: ");
+    sse_frame.extend_from_slice(&bytes);
+    sse_frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
+    sse_frame
+}
 
 pub(crate) async fn pending_endpoint_after_responses_admission(
     state: Arc<V3ListenerState>,
@@ -20,7 +51,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     request_purpose: V3RequestPurpose,
     payload: Value,
 ) -> Response<Body> {
-    if entry_protocol == "responses" && v3_responses_request_wants_sse(&request_headers, &payload) {
+    if v3_entry_request_wants_sse(&request_headers, &payload) {
         return V3DirectSseAcceptSkeleton::accept(
             state,
             front_connection_identity,
@@ -73,29 +104,113 @@ impl V3DirectSseAcceptSkeleton {
         let keepalive_interval =
             std::time::Duration::from_millis(state.server.http_sse_keepalive_ms);
         tokio::spawn(async move {
-            let response = pending_endpoint_after_responses_admission_inner(
-                state,
-                front_connection_identity,
-                request_headers,
-                method,
-                path,
-                started_at,
-                entry_protocol,
-                execution_mode,
-                pending_owner_symbol,
-                request_purpose,
-                payload,
-                true,
-            )
-            .await;
-            let mut body = response.into_body().into_data_stream();
-            while let Some(chunk) = body.next().await {
-                let chunk = chunk
-                    .map(|bytes| bytes.to_vec())
-                    .map_err(std::io::Error::other);
-                if tx.send(chunk).await.is_err() {
-                    return;
+            let panic_tx = tx.clone();
+            let worker = async move {
+                let response = pending_endpoint_after_responses_admission_inner(
+                    state,
+                    front_connection_identity,
+                    request_headers,
+                    method,
+                    path,
+                    started_at,
+                    entry_protocol,
+                    execution_mode,
+                    pending_owner_symbol,
+                    request_purpose,
+                    payload,
+                    true,
+                )
+                .await;
+                let response_is_sse = response
+                    .headers()
+                    .get(axum::http::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .is_some_and(|value| {
+                        value.to_ascii_lowercase().starts_with("text/event-stream")
+                    });
+                let mut body = response.into_body().into_data_stream();
+                let mut emitted_response_frame = false;
+                let mut buffered_json_body = Vec::new();
+                while let Some(chunk) = body.next().await {
+                    match chunk {
+                        Ok(bytes) => {
+                            if !response_is_sse {
+                                buffered_json_body.extend_from_slice(&bytes);
+                                continue;
+                            }
+                            if !v3_front_chunk_is_transport_keepalive(&bytes) {
+                                emitted_response_frame = true;
+                            }
+                            if tx.send(Ok(bytes.to_vec())).await.is_err() {
+                                return;
+                            }
+                        }
+                        Err(error) => {
+                            let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                                project_v3_server_runtime_failure(
+                                    "V3ServerRespOutbound05ClientFrame",
+                                    "front_sse_response_body_failed",
+                                    error.to_string(),
+                                    599,
+                                ),
+                            );
+                            let V3Server16Body::Json(value) = frame.body else {
+                                panic!("Front response failure must project JSON Error06 body");
+                            };
+                            let bytes = serde_json::to_vec(&value)
+                                .expect("typed Front response Error06 projection");
+                            let mut sse_frame = Vec::with_capacity(bytes.len() + 8);
+                            sse_frame.extend_from_slice(b"data: ");
+                            sse_frame.extend_from_slice(&bytes);
+                            sse_frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
+                            let _ = tx.send(Ok(sse_frame)).await;
+                            return;
+                        }
+                    }
                 }
+                if !response_is_sse && !buffered_json_body.is_empty() {
+                    emitted_response_frame = true;
+                    if tx
+                        .send(Ok(v3_front_json_body_to_sse_frame(&buffered_json_body)))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    if tx.send(Ok(b"data: [DONE]\n\n".to_vec())).await.is_err() {
+                        return;
+                    }
+                }
+                if !emitted_response_frame {
+                    let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                        project_v3_server_runtime_failure(
+                            "V3ServerRespOutbound05ClientFrame",
+                            "front_sse_response_empty",
+                            "Front SSE response ended without a response frame",
+                            599,
+                        ),
+                    );
+                    let V3Server16Body::Json(value) = frame.body else {
+                        panic!("Front empty response must project JSON Error06 body");
+                    };
+                    let bytes = serde_json::to_vec(&value)
+                        .expect("typed Front empty response Error06 projection");
+                    let mut sse_frame = Vec::with_capacity(bytes.len() + 8);
+                    sse_frame.extend_from_slice(b"data: ");
+                    sse_frame.extend_from_slice(&bytes);
+                    sse_frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
+                    let _ = tx.send(Ok(sse_frame)).await;
+                }
+            };
+            if let Err(payload) = AssertUnwindSafe(worker).catch_unwind().await {
+                let message = payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("Front SSE worker panicked");
+                let _ = panic_tx
+                    .send(Ok(v3_front_sse_worker_panic_frame(message)))
+                    .await;
             }
         });
         let client_stream = futures_util::stream::unfold(rx, |mut rx| async move {
@@ -212,10 +327,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         &request_headers,
                         Some(&payload),
                     );
-                    return responses_direct_output_response(
-                        frame,
-                        client_keepalive_interval,
-                    );
+                    return responses_direct_output_response(frame, client_keepalive_interval);
                 }
             };
         match resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
@@ -264,10 +376,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     &request_headers,
                     Some(&payload),
                 );
-                return responses_direct_output_response(
-                    frame,
-                    client_keepalive_interval,
-                );
+                return responses_direct_output_response(frame, client_keepalive_interval);
             }
         }
     }
@@ -305,7 +414,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 &state.server,
                 &path,
                 &request_id,
-                project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                project_v3_server_runtime_failure(
+                    "V3Server03HttpRequestRaw",
+                    "provider_transport_handoff_scope_incomplete",
+                    message,
+                    598,
+                ),
                 None,
             );
         }
@@ -360,7 +474,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             state.server.id.clone(),
             state.server.port,
             provider_failure_session_scope.session_id().to_string(),
-            v3_responses_request_wants_sse(&request_headers, &payload),
+            v3_entry_request_wants_sse(&request_headers, &payload),
             plan,
         );
         if front_transport_owns_keepalive {
@@ -446,17 +560,14 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 state.server.port,
                 provider_failure_session_scope.session_id().to_string(),
                 state.front_transport_broker.generation(),
-                Duration::from_millis(
-                    routecodex_v3_config::default_provider_request_timeout_ms(),
-                ),
-                Duration::from_millis(
-                    routecodex_v3_config::default_provider_request_timeout_ms(),
-                ),
+                Duration::from_millis(routecodex_v3_config::default_provider_request_timeout_ms()),
+                Duration::from_millis(routecodex_v3_config::default_provider_request_timeout_ms()),
                 now,
             );
-            if let Err(error) = state
-                .front_transport_broker
-                .bind_connection_lease(connection_identity, lease, now)
+            if let Err(error) =
+                state
+                    .front_transport_broker
+                    .bind_connection_lease(connection_identity, lease, now)
             {
                 return responses_direct_output_response(
                     project_v3_responses_error_frame_for_request_if_sse(
@@ -1205,6 +1316,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 method,
                 path.clone(),
                 request_id.clone(),
+                Some(request_identity.pipeline_id.clone()),
                 execution_id,
                 handoff.request_payload.clone(),
                 Some(&handoff.plan),
@@ -1221,15 +1333,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         &mut frame,
                         handoff.provider_failure_events,
                     );
-                    // 可观测性：handoff direct 分支与纯 direct 分支对齐——status>=400
-                    // 或 provider 失败时无条件落盘 request.json + error.json（绕过
-                    // codex_samples 开关）。此前该分支只落 response.json，400/5xx
-                    // 样本全部丢失，无法事后诊断（770577 等 400 无 error 样本）。
-                    let has_provider_failure =
-                        frame.observability.as_ref().is_some_and(|observability| {
-                            !observability.provider_failure_events.is_empty()
-                        });
-                    if frame.status >= 400 || has_provider_failure {
+                    // Provider failure events describe recovered attempts. They are not a
+                    // terminal client error when the handoff eventually returns 2xx; only the
+                    // Error06/status truth may create error.json.
+                    if frame.status >= 400 || !frame.error_chain.is_empty() {
                         let _ = persist_v3_error_evidence_payload(
                             &state,
                             &entry_protocol,
@@ -1349,6 +1456,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             method,
             path.clone(),
             request_id.clone(),
+            Some(request_identity.pipeline_id.clone()),
             execution_id,
             payload,
             responses_protocol_plan
@@ -1362,14 +1470,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         .await;
         match outcome {
             V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
-                // 可观测性：direct 分支对齐 relay——status>=400 或 provider 失败时
-                // 无条件落盘 request.json + error.json（绕过 codex_samples 开关），
-                // 否则 direct 错误只在内存 trace，无法事后诊断。
-                let has_provider_failure = frame
-                    .observability
-                    .as_ref()
-                    .is_some_and(|observability| !observability.provider_failure_events.is_empty());
-                if frame.status >= 400 || has_provider_failure {
+                // Recovered provider attempts are observability events, not a terminal
+                // client error. Only status/Error06 truth creates error.json.
+                if frame.status >= 400 || !frame.error_chain.is_empty() {
                     let _ = persist_v3_error_evidence_payload(
                         &state,
                         &entry_protocol,
@@ -1694,5 +1797,49 @@ pub(crate) fn format_v3_request_id_token(value: &str) -> String {
         "unknown".to_string()
     } else {
         token
+    }
+}
+
+#[cfg(test)]
+mod front_sse_contract_tests {
+    use super::{
+        v3_front_chunk_is_transport_keepalive, v3_front_json_body_to_sse_frame,
+        v3_front_sse_worker_panic_frame,
+    };
+
+    #[test]
+    fn front_sse_worker_panic_projects_internal_error_and_done() {
+        let frame = v3_front_sse_worker_panic_frame("worker panic");
+        assert_eq!(
+            frame,
+            b"data: {\"error\":{\"code\":\"front_sse_worker_panicked\",\"message\":\"worker panic\"}}\n\ndata: [DONE]\n\n"
+        );
+    }
+
+    #[test]
+    fn front_keepalive_does_not_commit_a_client_response_frame() {
+        assert!(v3_front_chunk_is_transport_keepalive(b": keepalive\n\n"));
+        assert!(!v3_front_chunk_is_transport_keepalive(
+            b"event: response.created\ndata: {}\n\n"
+        ));
+        assert!(!v3_front_chunk_is_transport_keepalive(
+            b"data: {\"error\":{\"code\":\"front_sse_response_empty\"}}\n\n"
+        ));
+    }
+
+    #[test]
+    fn front_json_error_is_projected_as_one_sse_data_frame() {
+        assert_eq!(
+            v3_front_json_body_to_sse_frame(br#"{"error":{"code":"internal"}}"#),
+            b"data: {\"error\":{\"code\":\"internal\"}}\n\n"
+        );
+    }
+
+    #[test]
+    fn front_empty_json_body_does_not_fake_a_success_frame() {
+        assert!(v3_front_json_body_to_sse_frame(b"").is_empty() == false);
+        assert!(!v3_front_chunk_is_transport_keepalive(
+            &v3_front_json_body_to_sse_frame(b"{}")
+        ));
     }
 }

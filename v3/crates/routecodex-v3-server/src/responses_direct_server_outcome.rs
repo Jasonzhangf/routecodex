@@ -11,6 +11,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
     method: String,
     path: String,
     request_id: String,
+    pipeline_id: Option<String>,
     execution_id: String,
     payload: serde_json::Value,
     responses_protocol_plan: Option<&V3ResponsesProtocolExecutionPlan>,
@@ -30,10 +31,13 @@ pub(super) async fn execute_responses_direct_server_outcome(
     ) {
         Ok(scope) => scope,
         Err(message) => {
-            let frame = build_v3_server_16_http_frame_from_v3_error_06(project_http_input_error(
-                V3HttpBoundaryErrorKind::MalformedJson,
-                message,
-            ));
+            let frame =
+                build_v3_server_16_http_frame_from_v3_error_06(project_v3_server_runtime_failure(
+                    "V3ServerReqChatProcess03Governed",
+                    "responses_direct_continuation_scope_incomplete",
+                    message,
+                    598,
+                ));
             return V3ResponsesDirectServerOutcome::DirectFrame(
                 project_v3_responses_direct_stream_error_frame_if_requested(
                     frame,
@@ -51,10 +55,13 @@ pub(super) async fn execute_responses_direct_server_outcome(
     ) {
         Ok(scope) => scope,
         Err(message) => {
-            let frame = build_v3_server_16_http_frame_from_v3_error_06(project_http_input_error(
-                V3HttpBoundaryErrorKind::MalformedJson,
-                message,
-            ));
+            let frame =
+                build_v3_server_16_http_frame_from_v3_error_06(project_v3_server_runtime_failure(
+                    "V3ServerReqChatProcess03Governed",
+                    "responses_relay_continuation_scope_incomplete",
+                    message,
+                    598,
+                ));
             return V3ResponsesDirectServerOutcome::DirectFrame(
                 project_v3_responses_direct_stream_error_frame_if_requested(
                     frame,
@@ -84,7 +91,48 @@ pub(super) async fn execute_responses_direct_server_outcome(
     let provider_failure_session_scope =
         get_failure_session_scope(&state.server, request_headers, "responses", &request_id)
             .expect("responses continuation requires session-id for failure scope");
-    let raw = build_v3_server_03_http_request_raw_with_purpose_and_port(
+    let pipeline_id = match pipeline_id {
+        Some(pipeline_id) if !pipeline_id.trim().is_empty() => pipeline_id,
+        _ => {
+            let frame =
+                build_v3_server_16_http_frame_from_v3_error_06(project_v3_server_runtime_failure(
+                    "V3Transport13ResponsesHttpRequest",
+                    "provider_transport_handoff_scope_incomplete",
+                    "Responses direct handoff is missing pipeline_id",
+                    598,
+                ));
+            return V3ResponsesDirectServerOutcome::DirectFrame(
+                project_v3_responses_direct_stream_error_frame_if_requested(
+                    frame,
+                    requested_stream,
+                ),
+            );
+        }
+    };
+    let provider_failure_session_scope = match provider_failure_session_scope
+        .with_transport_handoff_scope(
+            pipeline_id.clone(),
+            state.server.port,
+            state.front_transport_broker.generation(),
+        ) {
+        Ok(scope) => scope,
+        Err(message) => {
+            let frame =
+                build_v3_server_16_http_frame_from_v3_error_06(project_v3_server_runtime_failure(
+                    "V3Transport13ResponsesHttpRequest",
+                    "provider_transport_handoff_scope_incomplete",
+                    message,
+                    598,
+                ));
+            return V3ResponsesDirectServerOutcome::DirectFrame(
+                project_v3_responses_direct_stream_error_frame_if_requested(
+                    frame,
+                    requested_stream,
+                ),
+            );
+        }
+    };
+    let raw = build_v3_server_03_http_request_raw_with_purpose_and_scope(
         state.server.id.clone(),
         provider_failure_session_scope.clone(),
         request_id.clone(),
@@ -93,6 +141,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
         path.clone(),
         request_purpose,
         Some(state.server.port),
+        Some(pipeline_id.clone()),
         payload.clone(),
     );
     let output = match responses_protocol_plan {
@@ -234,6 +283,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 method,
                 path,
                 request_id,
+                Some(pipeline_id.clone()),
                 execution_id,
                 next_handoff.request_payload.clone(),
                 Some(&next_handoff.plan),
