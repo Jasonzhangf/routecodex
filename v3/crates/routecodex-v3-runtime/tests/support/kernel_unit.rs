@@ -2028,7 +2028,10 @@ async fn responses_direct_debug_entrypoint_does_not_handoff_after_first_provider
                     }],
                     Box::pin(stream::iter([
                         Ok::<Vec<u8>, V3ProviderError>(
-                            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec(),
+                            b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_first\",\"status\":\"in_progress\"}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec(),
+                        ),
+                        Ok::<Vec<u8>, V3ProviderError>(
+                            b"event: response.in_progress\ndata: {\"type\":\"response.in_progress\"}\n\n".to_vec(),
                         ),
                         Err(V3ProviderError::ResponseBody {
                             request_id: request.request_id().to_string(),
@@ -2086,6 +2089,14 @@ async fn responses_direct_debug_entrypoint_does_not_handoff_after_first_provider
         .expect("first provider frame must be forwarded")
         .expect("first provider frame must be successful");
     assert!(String::from_utf8(first).unwrap().contains("partial"));
+    let lifecycle = stream
+        .next()
+        .await
+        .expect("lifecycle frame must be forwarded")
+        .expect("lifecycle frame must be successful");
+    assert!(String::from_utf8(lifecycle)
+        .unwrap()
+        .contains("response.in_progress"));
     let error = stream
         .next()
         .await

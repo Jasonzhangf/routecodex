@@ -16,13 +16,29 @@ pub(super) type V3DirectSseProviderHandoff = Arc<
 >;
 
 fn direct_sse_frame_commits_client_stream(frame: &[u8]) -> bool {
-    let compact: String = String::from_utf8_lossy(frame)
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect();
-    !compact.contains("\"type\":\"response.created\"")
-        && !compact.contains("\"type\":\"response.in_progress\"")
-        && !compact.contains("\"type\":\"message_start\"")
+    let text = String::from_utf8_lossy(frame);
+    for line in text.lines() {
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let data = data.trim();
+        if data.is_empty() {
+            continue;
+        }
+        if data == "[DONE]" {
+            return true;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
+            return true;
+        };
+        let Some(kind) = value.get("type").and_then(serde_json::Value::as_str) else {
+            return true;
+        };
+        if !matches!(kind, "response.created" | "response.in_progress" | "message_start") {
+            return true;
+        }
+    }
+    false
 }
 pub(super) struct V3DirectSseProviderOutcome {
     pub(super) provider_health: V3ProviderFailureRuntimeHealth,
@@ -258,7 +274,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                 match next {
                 Some(Ok(chunk)) => {
                     if state.handoff_active {
-                        state.client_committed = direct_sse_frame_commits_client_stream(&chunk);
+                        state.client_committed |= direct_sse_frame_commits_client_stream(&chunk);
                         state.handoff_emitted_frame = true;
                         if direct_sse_frame_has_terminal_marker(
                             &chunk,
