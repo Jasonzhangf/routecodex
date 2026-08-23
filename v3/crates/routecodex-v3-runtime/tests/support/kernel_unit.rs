@@ -986,7 +986,7 @@ async fn direct_sse_handoff_empty_stream_is_not_silent_eof() {
 #[tokio::test]
 async fn direct_sse_handoff_reselects_when_first_attempt_eof_lacks_terminal() {
     let source: V3ClientSseStream = Box::pin(stream::iter(vec![Ok(
-        b"data: first\n\n".to_vec(),
+        b"data: {\"type\":\"response.created\"}\n\ndata: [DONE]\n\n".to_vec(),
     )]));
     let handoff = |_reason: String| {
         Box::pin(async {
@@ -1001,13 +1001,20 @@ async fn direct_sse_handoff_reselects_when_first_attempt_eof_lacks_terminal() {
         );
 
     assert!(wrapped.next().await.expect("first frame").is_ok());
+    let recovered = wrapped
+        .next()
+        .await
+        .expect("lifecycle-only EOF must hand off")
+        .expect("handoff frame must be forwarded");
+    assert!(String::from_utf8(recovered)
+        .unwrap()
+        .contains("data: recovered"));
     let error = wrapped
         .next()
         .await
-        .expect("post-commit missing terminal must be explicit")
-        .expect_err("post-commit missing terminal must not hand off");
+        .expect("recovered attempt missing terminal must be explicit")
+        .expect_err("[DONE] alone must not become terminal success");
     assert_eq!(error.code, "provider_sse_terminal_missing");
-    assert!(wrapped.next().await.is_none());
 }
 
 #[tokio::test]

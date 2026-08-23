@@ -26,7 +26,7 @@ fn direct_sse_frame_commits_client_stream(frame: &[u8]) -> bool {
             continue;
         }
         if data == "[DONE]" {
-            return true;
+            continue;
         }
         let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
             return true;
@@ -206,19 +206,18 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
         let text = String::from_utf8_lossy(frame);
         match provider_protocol {
             V3HubProviderWireProtocol::Responses => {
-                text.contains("data: [DONE]")
-                    || text.contains("response.completed")
+                text.contains("response.completed")
                     || text.contains("response.incomplete")
                     || text.contains("response.failed")
             }
             V3HubProviderWireProtocol::Anthropic => {
-                text.contains("message_stop") || text.contains("data: [DONE]")
+                text.contains("message_stop")
             }
             V3HubProviderWireProtocol::OpenAiChat => {
-                text.contains("data: [DONE]") || text.contains("\"finish_reason\":\"")
+                text.contains("\"finish_reason\":\"")
             }
             V3HubProviderWireProtocol::Gemini => {
-                text.contains("turn_complete") || text.contains("data: [DONE]")
+                text.contains("turn_complete")
             }
         }
     }
@@ -519,8 +518,7 @@ where
 {
     fn direct_sse_frame_has_terminal_marker(frame: &[u8]) -> bool {
         let text = String::from_utf8_lossy(frame);
-        text.contains("data: [DONE]")
-            || text.contains("response.completed")
+        text.contains("response.completed")
             || text.contains("message_stop")
             || text.contains("turn_complete")
             || text.contains("\"finish_reason\":\"")
