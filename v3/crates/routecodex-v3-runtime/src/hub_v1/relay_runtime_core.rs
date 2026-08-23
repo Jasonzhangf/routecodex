@@ -19,6 +19,7 @@ use crate::provider_failure_runtime_policy::{
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
     V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
 };
+use crate::hub_v1::relay_runtime_shared::collect_v3_relay_sse_attempt;
 use crate::runtime_timing::V3RuntimeTimingState;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
 use routecodex_v3_error::{V3ErrorSourceKind, V3ProviderFailureSessionScope};
@@ -808,7 +809,7 @@ where
                     V3_RELAY_SSE_STREAM_IDLE_TIMEOUT,
                 );
                 let stream_observation = V3RuntimeStreamObservation::default();
-                let sse = C::project_sse(
+                let projected_sse = C::project_sse(
                     idle_guarded_stream,
                     provider_wire_protocol,
                     selected_target_compatibility_profile,
@@ -827,6 +828,43 @@ where
                         provider_action_permit.take(),
                     ),
                 )?;
+                let collected = match collect_v3_relay_sse_attempt(Box::pin(projected_sse)).await {
+                    Ok(collected) => collected,
+                    Err(error) if error.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") => {
+                        return Err(V3RelayCoreError::WebSearchIntercepted(error));
+                    }
+                    Err(error) => {
+                        let failure = provider_runtime_failure(
+                            V3ProviderError::ResponseBody {
+                                request_id: request_id.to_string(),
+                                provider_id: selected_target_provider_id.clone(),
+                                reason: format!(
+                                    "provider response SSE projection failed: {error}"
+                                ),
+                            },
+                            &selected_target_provider_id,
+                        );
+                        drop(provider_action_permit.take());
+                        if let Some(failure) = handle_provider_failure(
+                            &failure_context,
+                            selected,
+                            failure,
+                            &mut V3RelayProviderFailurePolicyState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                trace: &mut trace,
+                            },
+                            &mut retry_selected,
+                            &mut pending_provider_action_recovery,
+                        )
+                        .await
+                        .map_err(V3RelayCoreError::Target)?
+                        {
+                            return Ok(C::assemble_failure_output(failure, trace));
+                        }
+                        continue;
+                    }
+                };
                 let mut observability =
                     build_v3_relay_observability(C::ENTRY_KIND, &selected, "sse");
                 observability.provider_status = Some(provider_status);
@@ -839,14 +877,14 @@ where
                         .map_err(|timing_error| V3RelayCoreError::Target(timing_error))?,
                 );
                 let sse = wrap_v3_relay_client_sse_usage_observation(
-                    sse,
+                    C::sse_from_collected(collected),
                     C::ENTRY_PROTOCOL,
                     stream_observation.clone(),
                 );
-                // Return the projected stream immediately after the first-frame guard.
-                // The client connection must remain independent from provider EOF and
-                // post-commit failures; the codec stream owns those later outcomes and
-                // records them through its typed side-channel.
+                // Only a fully validated provider attempt crosses the Front.
+                // Provider EOF/codec/terminal failures were handled above by
+                // the provider Error01->05 loop; the client never observes a
+                // failed attempt or a provider error item.
                 return Ok(C::assemble_sse_output(
                     sse,
                     trace,

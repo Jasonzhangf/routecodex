@@ -282,9 +282,11 @@ pub(crate) fn openai_chat_relay_output_response(
         .status(StatusCode::from_u16(output.status).expect("typed V3 OpenAI Chat Relay status"))
         .header("content-type", content_type);
     let body = match output.client_body {
-        V3OpenAiChatRelayClientBody::Sse(client_stream) => Body::from_stream(
-            wrap_v3_relay_sse_console_stream(client_stream, stream_console_finalizer),
-        ),
+        V3OpenAiChatRelayClientBody::Sse(client_stream) => {
+            let stream = wrap_v3_relay_sse_console_stream(client_stream, stream_console_finalizer)
+                .map(|chunk| chunk.map_err(std::io::Error::other));
+            v3_io_sse_body(Box::pin(stream), None)
+        }
         V3OpenAiChatRelayClientBody::Json(client_response) => Body::from(
             serde_json::to_vec(&client_response).expect("typed V3 OpenAI Chat Relay projection"),
         ),
@@ -308,6 +310,7 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
     failure_session_scope: V3ProviderFailureSessionScope,
     console_context: V3ConsoleEmissionContext,
     started_at: Instant,
+    front_transport_owns_keepalive: bool,
 ) -> Response<Body> {
     use futures_util::StreamExt;
     let manifest = state.manifest.clone();
@@ -379,7 +382,21 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                             }
                             V3OpenAiChatRelayClientBody::Json(json) => {
                                 // provider 以 JSON 完成（非 SSE）：包装为 SSE data 帧。
-                                let bytes = serde_json::to_vec(&json).unwrap_or_default();
+                                let bytes = match serde_json::to_vec(&json) {
+                                    Ok(bytes) => bytes,
+                                    Err(error) => {
+                                        let _ = tx
+                                            .send(Ok(v3_sse_error_event_chunk(
+                                                599,
+                                                "internal_response_projection_error",
+                                                &format!(
+                                                    "internal response JSON projection failed: {error}"
+                                                ),
+                                            )))
+                                            .await;
+                                        return;
+                                    }
+                                };
                                 let mut frame = Vec::with_capacity(bytes.len() + 8);
                                 frame.extend_from_slice(b"data: ");
                                 frame.extend_from_slice(&bytes);
@@ -415,7 +432,21 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                                     }
                                 }),
                             };
-                            let bytes = serde_json::to_vec(&body).unwrap_or_default();
+                            let bytes = match serde_json::to_vec(&body) {
+                                Ok(bytes) => bytes,
+                                Err(error) => {
+                                    let _ = tx
+                                        .send(Ok(v3_sse_error_event_chunk(
+                                            599,
+                                            "internal_error_projection_error",
+                                            &format!(
+                                                "internal error JSON projection failed: {error}"
+                                            ),
+                                        )))
+                                        .await;
+                                    return;
+                                }
+                            };
                             let mut frame = Vec::with_capacity(bytes.len() + 8);
                             frame.extend_from_slice(b"data: ");
                             frame.extend_from_slice(&bytes);
@@ -425,7 +456,7 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                     }
                     return;
                 }
-                _ = interval.tick() => {
+                _ = interval.tick(), if !front_transport_owns_keepalive => {
                     if tx.send(Ok(heartbeat.clone())).await.is_err() {
                         return;
                     }
@@ -448,7 +479,10 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
         "/v1/chat/completions",
         &request_id,
     );
-    let body = v3_io_sse_body(client_stream, None);
+    let body = v3_io_sse_body(
+        client_stream,
+        (!front_transport_owns_keepalive).then_some(Duration::from_millis(keepalive_ms)),
+    );
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/event-stream")
@@ -468,9 +502,22 @@ pub(crate) async fn drain_v3_openai_chat_relay_sse_stream_to_client(
 ) {
     let mut stream = wrap_v3_relay_sse_console_stream(stream, stream_console_finalizer);
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(std::io::Error::other);
-        if tx.send(chunk).await.is_err() {
-            return;
+        match chunk {
+            Ok(chunk) => {
+                if tx.send(Ok(chunk)).await.is_err() {
+                    return;
+                }
+            }
+            Err(error) => {
+                let _ = tx
+                    .send(Ok(v3_sse_error_event_chunk(
+                        599,
+                        "internal_response_stream_error",
+                        &format!("internal response stream failed: {error}"),
+                    )))
+                    .await;
+                return;
+            }
         }
     }
 }
@@ -586,6 +633,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
                 provider_failure_session_scope.clone(),
                 console_context,
                 started_at,
+                true,
             )
             .await;
         }
@@ -730,9 +778,11 @@ pub(crate) fn gemini_relay_output_response(
         .status(StatusCode::from_u16(output.status).expect("typed V3 Gemini Relay status"))
         .header("content-type", content_type);
     let body = match output.client_body {
-        V3GeminiRelayClientBody::Sse(client_stream) => Body::from_stream(
-            wrap_v3_relay_sse_console_stream(client_stream, stream_console_finalizer),
-        ),
+        V3GeminiRelayClientBody::Sse(client_stream) => {
+            let stream = wrap_v3_relay_sse_console_stream(client_stream, stream_console_finalizer)
+                .map(|chunk| chunk.map_err(std::io::Error::other));
+            v3_io_sse_body(Box::pin(stream), None)
+        }
         V3GeminiRelayClientBody::Json(client_response) => Body::from(
             serde_json::to_vec(&client_response).expect("typed V3 Gemini Relay projection"),
         ),
@@ -756,7 +806,7 @@ pub(crate) fn anthropic_relay_output_response(
             },
         );
     let body = if stream {
-        anthropic_relay_sse_body(output.client_response)
+        anthropic_relay_sse_body(output.client_response, output.status)
     } else {
         Body::from(
             serde_json::to_vec(&output.client_response)
@@ -768,23 +818,29 @@ pub(crate) fn anthropic_relay_output_response(
         .expect("typed V3 Anthropic Relay response")
 }
 
-pub(crate) fn anthropic_relay_sse_body(client_response: serde_json::Value) -> Body {
+pub(crate) fn anthropic_relay_sse_body(client_response: serde_json::Value, status: u16) -> Body {
     let Some(events) = client_response
         .get("events")
         .and_then(serde_json::Value::as_array)
         .cloned()
     else {
-        return Body::from_stream(stream::once(async {
-            Err::<Vec<u8>, io::Error>(io::Error::other(
-                "typed V3 Anthropic Relay SSE projection is missing events",
-            ))
-        }));
+        return v3_io_sse_body(
+            Box::pin(stream::once(async move {
+                Ok::<Vec<u8>, io::Error>(v3_sse_error_event_chunk(
+                    status,
+                    "internal_response_projection_error",
+                    "typed V3 Anthropic Relay SSE projection is missing events",
+                ))
+            })),
+            None,
+        );
     };
-    Body::from_stream(stream::iter(
+    let stream: V3IoSseStream = Box::pin(stream::iter(
         events
             .into_iter()
             .map(|event| anthropic_relay_sse_event_chunk(&event)),
-    ))
+    ));
+    v3_io_sse_body(stream, None)
 }
 
 pub(crate) fn anthropic_relay_sse_event_chunk(

@@ -273,6 +273,11 @@ impl V3ServerAggregateHandle {
     /// deadlock restart on a provider stream that is already being replaced.
     pub async fn prepare_for_exec(mut self) -> Vec<V3RuntimeHandoffCheckpoint> {
         let checkpoints = self.front_transport_broker.freeze(Instant::now());
+        // The current exec path does not transfer accepted client descriptors
+        // or Hyper connection tasks. Close those transports before replacing
+        // the process; otherwise the replacement can restore a lease with no
+        // socket owner and the client waits forever.
+        self.front_transport_broker.close_active_client_transports();
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -1022,7 +1027,7 @@ fn request_accepts_sse(headers: &HeaderMap) -> bool {
         })
 }
 
-fn v3_responses_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool {
+fn v3_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool {
     payload.get("stream").and_then(Value::as_bool) == Some(true) || request_accepts_sse(headers)
 }
 

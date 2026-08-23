@@ -1693,16 +1693,12 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
     )
     .await;
 
-    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
-        panic!("expected direct SSE response");
-    };
-    assert!(stream.next().await.expect("partial frame").is_ok());
-    let error = stream
-        .next()
-        .await
-        .expect("provider EOF must emit a typed error")
-        .expect_err("provider EOF without response.completed must not be clean EOF");
-    assert_eq!(error.code, "provider_response_sse_terminal_missing");
+    assert_ne!(output.client_payload.status, 200);
+    assert!(output.error_chain.is_some(), "provider EOF must enter Error01->06");
+    assert!(
+        matches!(output.client_payload.body, V3ClientBody::Json(_)),
+        "exhausted provider SSE must project a terminal JSON error, never a client stream"
+    );
 }
 
 #[tokio::test]

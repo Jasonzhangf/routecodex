@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
@@ -682,6 +683,34 @@ impl V3FrontTransportBroker {
         connections.insert(lease.key.clone(), connection);
         Ok(())
     }
+
+    /// Close every accepted client transport before an exec replacement.
+    ///
+    /// The current lifecycle does not transfer accepted TCP descriptors or
+    /// Hyper connection tasks to the replacement process. Leaving them open
+    /// would make the new process restore a lease with no owner and leave the
+    /// client waiting forever. This is an explicit transport closeout, not a
+    /// provider/runtime failure and never enters a business payload.
+    pub fn close_active_client_transports(&self) {
+        let mut sockets = Vec::new();
+        sockets.extend(
+            self.front_sockets
+                .lock()
+                .expect("front broker accepted socket lock")
+                .values()
+                .cloned(),
+        );
+        sockets.extend(
+            self.client_sockets
+                .lock()
+                .expect("front broker client socket lock")
+                .values()
+                .cloned(),
+        );
+        for socket in sockets {
+            socket.close();
+        }
+    }
 }
 
 fn v3_front_epoch_ms() -> u64 {
@@ -843,23 +872,64 @@ impl V3StableFrontConnection {
 #[derive(Clone, Debug)]
 pub struct V3StableFrontSocket {
     write_tx: mpsc::Sender<Vec<u8>>,
+    close_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    closed: Arc<AtomicBool>,
 }
 
 impl V3StableFrontSocket {
     fn spawn(mut write_half: OwnedWriteHalf) -> Self {
         let (write_tx, mut write_rx) = mpsc::channel::<Vec<u8>>(32);
+        let (close_tx, mut close_rx) = oneshot::channel();
+        let closed = Arc::new(AtomicBool::new(false));
         tokio::spawn(async move {
-            while let Some(frame) = write_rx.recv().await {
-                if write_half.write_all(&frame).await.is_err() {
-                    break;
-                }
-                if write_half.flush().await.is_err() {
-                    break;
+            let mut close_requested = false;
+            loop {
+                tokio::select! {
+                    biased;
+                    close = &mut close_rx, if !close_requested => {
+                        if close.is_ok() {
+                            break;
+                        }
+                        // Dropping the last socket handle cancels the
+                        // oneshot without requesting an early close. Drain
+                        // queued response bytes before the write channel
+                        // itself closes.
+                        close_requested = true;
+                    },
+                    frame = write_rx.recv() => {
+                        let Some(frame) = frame else { break };
+                        if write_half.write_all(&frame).await.is_err() {
+                            break;
+                        }
+                        if write_half.flush().await.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
             let _ = write_half.shutdown().await;
         });
-        Self { write_tx }
+        Self {
+            write_tx,
+            close_tx: Arc::new(Mutex::new(Some(close_tx))),
+            closed,
+        }
+    }
+
+    fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+        if let Some(close_tx) = self
+            .close_tx
+            .lock()
+            .expect("front socket close lock")
+            .take()
+        {
+            let _ = close_tx.send(());
+        }
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
     }
 }
 
@@ -883,6 +953,9 @@ impl AsyncRead for V3FrontHttpIo {
         cx: &mut std::task::Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
+        if self.front_socket.is_closed() {
+            return std::task::Poll::Ready(Ok(()));
+        }
         std::pin::Pin::new(&mut self.read_half).poll_read(cx, buf)
     }
 }
@@ -893,6 +966,12 @@ impl AsyncWrite for V3FrontHttpIo {
         cx: &mut std::task::Context<'_>,
         data: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
+        if self.front_socket.is_closed() {
+            return std::task::Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "front socket closed for exec replacement",
+            )));
+        }
         let sender = &self.front_socket.write_tx;
         match sender.try_reserve() {
             Ok(permit) => {
@@ -981,6 +1060,15 @@ mod tests {
             port: 7777,
             session_scope: "session-1".into(),
             generation: 4,
+        }
+    }
+
+    fn test_front_socket(write_tx: mpsc::Sender<Vec<u8>>) -> V3StableFrontSocket {
+        let (close_tx, _close_rx) = oneshot::channel();
+        V3StableFrontSocket {
+            write_tx,
+            close_tx: Arc::new(Mutex::new(Some(close_tx))),
+            closed: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -1123,7 +1211,7 @@ mod tests {
         let connection = broker.allocate_connection_identity();
         let lease = lease(now);
         let (write_tx, _write_rx) = mpsc::channel(1);
-        let socket = V3StableFrontSocket { write_tx };
+        let socket = test_front_socket(write_tx);
 
         broker
             .register_front_socket(connection, socket)
@@ -1139,6 +1227,78 @@ mod tests {
     }
 
     #[test]
+    fn broker_closes_active_client_transports_before_exec_replacement() {
+        let broker = V3FrontTransportBroker::new(4);
+        let connection = broker.allocate_connection_identity();
+        let (write_tx, _write_rx) = mpsc::channel(1);
+        let socket = test_front_socket(write_tx);
+        broker
+            .register_front_socket(connection, socket.clone())
+            .expect("front socket registration");
+
+    broker.close_active_client_transports();
+
+        assert!(socket.is_closed());
+    }
+
+    #[tokio::test]
+    async fn broker_close_finishes_active_tcp_client_before_exec_replacement() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let broker = V3FrontTransportBroker::new(0);
+        let connection_identity = broker.allocate_connection_identity();
+        let service = axum::Router::new().into_service();
+        let accept_broker = broker.clone();
+        let accept = tokio::spawn(async move {
+            let (stream, remote_addr) = listener.accept().await.unwrap();
+            serve_v3_front_http_connection(
+                stream,
+                remote_addr,
+                connection_identity,
+                accept_broker,
+                service,
+            )
+            .await
+        });
+
+        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+        for _ in 0..100 {
+            if broker
+                .front_sockets
+                .lock()
+                .expect("front socket registry lock")
+                .contains_key(&connection_identity)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        assert!(
+            broker
+                .front_sockets
+                .lock()
+                .expect("front socket registry lock")
+                .contains_key(&connection_identity),
+            "accepted client must be registered before restart closeout"
+        );
+
+        broker.close_active_client_transports();
+        let mut response = Vec::new();
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            tokio::io::AsyncReadExt::read_to_end(&mut client, &mut response),
+        )
+            .await
+            .expect("restart closeout must not leave a half-open client transport")
+            .expect("client EOF read must succeed");
+        assert!(response.is_empty(), "no HTTP response should be fabricated by closeout");
+        tokio::io::AsyncWriteExt::shutdown(&mut client)
+            .await
+            .expect("client write half shutdown");
+        let _ = accept.await;
+    }
+
+    #[test]
     fn broker_reattach_moves_client_socket_to_new_generation_key() {
         let now = Instant::now();
         let broker = V3FrontTransportBroker::new(4);
@@ -1147,7 +1307,7 @@ mod tests {
         let (write_tx, _write_rx) = mpsc::channel(1);
 
         broker
-            .register_front_socket(connection, V3StableFrontSocket { write_tx })
+            .register_front_socket(connection, test_front_socket(write_tx))
             .expect("front socket registration");
         broker
             .bind_connection_lease(connection, lease.clone(), now)

@@ -19,7 +19,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
     request_purpose: V3RequestPurpose,
 ) -> V3ResponsesDirectServerOutcome {
-    let requested_stream = v3_responses_request_wants_sse(request_headers, &payload);
+    let requested_stream = v3_request_wants_sse(request_headers, &payload);
     let entry_facts = V3ResponsesContinuationEntryFacts::project(&payload);
     let continuation_scope = match build_responses_direct_continuation_scope(
         request_headers,

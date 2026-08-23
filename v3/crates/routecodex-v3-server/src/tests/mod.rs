@@ -3609,6 +3609,43 @@ async fn completed_responses_sse_reaches_eof_without_late_keepalive_comments() {
 }
 
 #[tokio::test]
+async fn io_sse_body_internal_error_is_explicit_599_not_silent_eof() {
+    let provider = futures_util::stream::iter(vec![Err::<Vec<u8>, io::Error>(
+        io::Error::other("response body transport failed"),
+    )]);
+    let body = v3_io_sse_body(Box::pin(provider), None);
+    let mut client = body.into_data_stream();
+
+    let error = client
+        .next()
+        .await
+        .expect("internal response error must emit an SSE error event")
+        .expect("error event must be transportable");
+    let error = std::str::from_utf8(&error).unwrap();
+    assert!(error.starts_with("event: error\n"), "{error}");
+    assert!(error.contains("\"status\":599"), "{error}");
+    assert!(error.contains("internal_response_stream_error"), "{error}");
+    assert!(client.next().await.is_none(), "error event must close the body");
+}
+
+#[tokio::test]
+async fn anthropic_sse_projection_error_is_explicit_not_silent_eof() {
+    let body = anthropic_relay_sse_body(json!({}), 599);
+    let mut client = body.into_data_stream();
+
+    let error = client
+        .next()
+        .await
+        .expect("Anthropic projection error must emit an SSE error event")
+        .expect("Anthropic error event must be transportable");
+    let error = std::str::from_utf8(&error).unwrap();
+    assert!(error.starts_with("event: error\n"), "{error}");
+    assert!(error.contains("\"status\":599"), "{error}");
+    assert!(error.contains("internal_response_projection_error"), "{error}");
+    assert!(client.next().await.is_none(), "error event must close the body");
+}
+
+#[tokio::test]
 async fn responses_sse_relay_provider_stream_error_projects_standard_error_then_clean_eof() {
     let provider = futures_util::stream::iter(vec![Err::<Vec<u8>, V3Error01SourceRaised>(
         raise_v3_sse_provider_failure("provider_response_sse_stream", "controlled error"),

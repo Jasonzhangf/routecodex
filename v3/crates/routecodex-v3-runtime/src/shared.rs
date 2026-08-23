@@ -424,6 +424,21 @@ async fn process_direct_sse_stream(
         false,
         false,
     );
+    // Direct SSE is still a Front-owned stream, not a provider-owned socket.
+    // Materialize the complete provider attempt before returning Resp15 so a
+    // post-first-frame codec/EOF/timeout failure re-enters the Direct policy
+    // loop instead of becoming a client-visible stream error.  The server
+    // Front skeleton supplies keepalive while this await is in progress.
+    let mut client_stream = client_stream;
+    let mut collected = Vec::new();
+    while let Some(chunk) = client_stream.next().await {
+        collected.push(chunk?);
+    }
+    let client_stream = Box::pin(stream::iter(
+        collected
+            .into_iter()
+            .map(Ok::<Vec<u8>, V3Error01SourceRaised>),
+    ));
     Ok((
         V3ClientBody::Sse(client_stream),
         V3RemoteContinuationObservation::Streaming {
@@ -976,7 +991,28 @@ fn observed_sse_client_stream_with_protocol(
                         .finish()
                         .map_err(|error| sse_transport_source(&state.provider_id, error))
                     {
-                        Ok(()) => None,
+                        Ok(()) if state.terminal_observed => None,
+                        Ok(()) => {
+                            state.done = true;
+                            let error = build_v3_error_01_source_raised_external(
+                                V3ErrorSourceKind::ProviderFailure,
+                                "V3ProviderResp14Raw",
+                                "provider_response_sse_terminal_missing",
+                                "provider response SSE stream ended without a terminal semantic event",
+                                V3ExternalErrorLink {
+                                    kind: V3ExternalErrorKind::Provider,
+                                    status: None,
+                                    code: Some("PROVIDER_RESPONSE_SSE_TERMINAL_MISSING".to_string()),
+                                    provider_id: Some(state.provider_id.clone()),
+                                    upstream_request_id: None,
+                                    message: Some(
+                                        "provider response SSE stream ended without a terminal semantic event"
+                                            .to_string(),
+                                    ),
+                                },
+                            );
+                            Some((Err(error), state))
+                        }
                         Err(error) => {
                             state.done = true;
                             Some((Err(error), state))
@@ -1668,7 +1704,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_sse_projection_starts_client_stream_before_provider_eof() {
+    async fn direct_sse_projection_waits_for_terminal_before_client_commit() {
         let raw = V3ProviderResp14Raw::from_sse(
             "req".to_string(),
             "provider".to_string(),
@@ -1678,14 +1714,18 @@ mod tests {
                 value: b"text/event-stream".to_vec(),
             }],
             Box::pin(
-                stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(
-                    b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n".to_vec(),
-                )])
-                .chain(futures_util::stream::pending()),
+                stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(concat!(
+                    "event: response.output_text.delta\n",
+                    "data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n",
+                    "event: response.completed\n",
+                    "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"early\"}]}]}}\n\n",
+                ).as_bytes().to_vec())]),
             ),
         );
 
-        let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
+        let projection = project_provider_raw_to_client_payload(raw)
+            .await
+            .expect("complete provider attempt must commit");
         let V3ClientBody::Sse(mut stream) = projection.client_payload.body else {
             panic!("expected direct SSE body");
         };
@@ -1931,7 +1971,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_sse_projection_exposes_post_first_frame_provider_error_after_commit() {
+    async fn direct_sse_projection_rejects_post_first_frame_provider_error_before_commit() {
         let first =
             b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec();
         let source: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
@@ -1952,23 +1992,9 @@ mod tests {
             }],
             source,
         );
-        let projection = project_provider_raw_to_client_payload(raw)
+        let error = project_provider_raw_to_client_payload(raw)
             .await
-            .expect("post-first-frame failure belongs to the committed client stream");
-        let V3ClientBody::Sse(mut stream) = projection.client_payload.body else {
-            panic!("expected direct SSE body");
-        };
-        let first = stream
-            .next()
-            .await
-            .expect("first provider frame must reach the client")
-            .expect("first provider frame must be valid");
-        assert!(std::str::from_utf8(&first).unwrap().contains("partial"));
-        let error = stream
-            .next()
-            .await
-            .expect("post-commit provider error must not become silent EOF")
-            .expect_err("post-commit provider error must remain explicit");
+            .expect_err("post-first-frame provider failure must be rejected before client commit");
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "provider_response_body_error");
     }

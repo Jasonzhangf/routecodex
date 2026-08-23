@@ -849,11 +849,12 @@ impl V3ManagedLifecycle {
         let handle = handle;
         let handoff_path = instance_dir.join(FRONT_HANDOFF_FILE);
         if handoff_path.exists() {
-            let checkpoints: Vec<routecodex_v3_server::V3RuntimeHandoffCheckpoint> =
-                read_json(&handoff_path)?;
-            handle
-                .restore_front_checkpoints(&checkpoints)
-                .map_err(V3LifecycleError::Validation)?;
+            // Front checkpoints describe lease metadata only. The current
+            // exec path does not transfer accepted client descriptors or
+            // Hyper connection tasks, so restoring them would create orphan
+            // leases that can never produce a response and make clients hang.
+            // Keep the file as an audit artifact, then discard it; real
+            // cross-exec continuation requires an explicit fd/task handoff.
             fs::remove_file(&handoff_path)?;
         }
         let provider_handoff_path = instance_dir.join(PROVIDER_HANDOFF_FILE);

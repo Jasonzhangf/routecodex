@@ -383,6 +383,24 @@ pub(crate) fn build_v3_relay_observability(
 pub(crate) type V3RelayClientSseStream =
     Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
 
+/// Consume one complete provider SSE attempt before it crosses the Front.
+///
+/// A relay attempt is transactional: codec/EOF/terminal failures are provider
+/// failures and must return to the relay Error01->05 loop.  Returning the
+/// projected stream after the first frame leaks a later provider failure into
+/// the client connection and makes reselect impossible.  This helper keeps
+/// that boundary in the shared relay owner; it never rewrites or truncates
+/// business bytes.
+pub(crate) async fn collect_v3_relay_sse_attempt(
+    mut stream: V3RelayClientSseStream,
+) -> Result<Vec<Vec<u8>>, String> {
+    let mut collected = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        collected.push(chunk?);
+    }
+    Ok(collected)
+}
+
 /// 客户端 SSE usage 观测包装：逐帧解码客户端协议 wire（openai_chat chunk /
 /// gemini chunk），把 usage / finish_reason 写入 typed stream observation；
 /// chat/gemini wire 无 `status` 字段，语义 finish_reason 出现即推导

@@ -20,8 +20,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     request_purpose: V3RequestPurpose,
     payload: Value,
 ) -> Response<Body> {
-    if entry_protocol == "responses" && v3_responses_request_wants_sse(&request_headers, &payload) {
-        return V3DirectSseAcceptSkeleton::accept(
+    if v3_request_wants_sse(&request_headers, &payload) {
+        return V3FrontSseAcceptSkeleton::accept(
             state,
             front_connection_identity,
             request_headers,
@@ -53,9 +53,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     .await
 }
 
-struct V3DirectSseAcceptSkeleton;
+struct V3FrontSseAcceptSkeleton;
 
-impl V3DirectSseAcceptSkeleton {
+impl V3FrontSseAcceptSkeleton {
     async fn accept(
         state: Arc<V3ListenerState>,
         front_connection_identity: Option<V3FrontConnectionIdentity>,
@@ -90,11 +90,22 @@ impl V3DirectSseAcceptSkeleton {
             .await;
             let mut body = response.into_body().into_data_stream();
             while let Some(chunk) = body.next().await {
-                let chunk = chunk
-                    .map(|bytes| bytes.to_vec())
-                    .map_err(std::io::Error::other);
-                if tx.send(chunk).await.is_err() {
-                    return;
+                match chunk {
+                    Ok(bytes) => {
+                        if tx.send(Ok(bytes.to_vec())).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = tx
+                            .send(Ok(v3_sse_error_event_chunk(
+                                599,
+                                "internal_response_stream_error",
+                                &format!("internal response stream failed: {error}"),
+                            )))
+                            .await;
+                        return;
+                    }
                 }
             }
         });
@@ -355,7 +366,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             state.server.id.clone(),
             state.server.port,
             provider_failure_session_scope.session_id().to_string(),
-            v3_responses_request_wants_sse(&request_headers, &payload),
+            v3_request_wants_sse(&request_headers, &payload),
             plan,
         );
         if front_transport_owns_keepalive {

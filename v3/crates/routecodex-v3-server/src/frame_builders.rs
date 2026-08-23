@@ -327,7 +327,7 @@ pub(crate) fn v3_client_sse_body(
     stream: V3ClientSseStream,
     keepalive_interval: Option<Duration>,
 ) -> Body {
-    let stream = stream::unfold((stream, false), |(mut stream, done)| async move {
+    let stream: V3IoSseStream = Box::pin(stream::unfold((stream, false), |(mut stream, done)| async move {
         if done {
             return None;
         }
@@ -346,7 +346,7 @@ pub(crate) fn v3_client_sse_body(
             )),
             None => None,
         }
-    });
+    }));
     v3_io_sse_body(Box::pin(stream), keepalive_interval)
 }
 
@@ -492,6 +492,27 @@ pub(crate) fn wrap_v3_sse_client_dump_stream(
 }
 
 pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<Duration>) -> Body {
+    // A body-stream error must never become a bare EOF. Runtime/provider
+    // failures are already handled before client commit; anything that still
+    // reaches this transport owner is an internal response-stage failure and
+    // is made explicit as 599 before the SSE body closes.
+    let stream: V3IoSseStream = Box::pin(stream::unfold((stream, false), |(mut stream, done)| async move {
+        if done {
+            return None;
+        }
+        match stream.next().await {
+            Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
+            Some(Err(error)) => Some((
+                Ok(v3_sse_error_event_chunk(
+                    599,
+                    "internal_response_stream_error",
+                    &format!("internal response stream failed: {error}"),
+                )),
+                (stream, true),
+            )),
+            None => None,
+        }
+    }));
     let Some(keepalive_interval) = keepalive_interval else {
         return Body::from_stream(stream);
     };
