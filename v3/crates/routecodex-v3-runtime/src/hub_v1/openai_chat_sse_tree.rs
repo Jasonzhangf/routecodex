@@ -396,12 +396,7 @@ impl V3OpenAiChatSseChoice {
                 delta.insert("content".to_owned(), Value::String(text.clone()));
             }
             V3OpenAiChatSseDelta::Reasoning(text) => {
-                let field = if delta.contains_key("reasoning_content") {
-                    "reasoning_content"
-                } else {
-                    "reasoning"
-                };
-                delta.insert(field.to_owned(), Value::String(text.clone()));
+                delta.insert("reasoning_content".to_owned(), Value::String(text.clone()));
             }
             V3OpenAiChatSseDelta::Refusal(refusal) => {
                 delta.insert("refusal".to_owned(), Value::String(refusal.clone()));
@@ -625,7 +620,7 @@ fn classify_choice(choice: &Value) -> Result<V3OpenAiChatSseChoice, V3OpenAiChat
     // otherwise the tool-call semantic branch would consume the call and
     // silently drop the co-located reasoning projection.
     let delta_extensions = if has_tool_calls {
-        object_extensions(delta_object, &["content", "refusal", "role", "tool_calls"])
+        object_extensions(delta_object, &["content", "refusal", "tool_calls"])
     } else {
         object_extensions(
             delta_object,
