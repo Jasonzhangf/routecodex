@@ -45,6 +45,7 @@ where
         provider_failure_event_sink,
         route_selection_event_sink,
         &request_key_catalog,
+        BTreeSet::new(),
     )
     .await;
     attach_v3_direct_sse_handoff::<C>(
@@ -81,9 +82,19 @@ where
     let Some(transport) = transport else {
         return output;
     };
-    let V3ClientBody::Sse(stream) = output.client_payload.body else {
+    let V3ClientBody::Sse(front_stream) = output.client_payload.body else {
         return output;
     };
+    let stream = front_stream.into_provider_stream();
+    let failed_provider_keys = Arc::new(std::sync::Mutex::new(BTreeSet::new()));
+    let current_provider_key = Arc::new(std::sync::Mutex::new(
+        output
+            .observability
+            .as_ref()
+            .and_then(|observability| observability.provider_key.clone()),
+    ));
+    let request_key_catalog =
+        crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog();
     let handoff = move |_failure: String| -> Pin<Box<dyn Future<Output = Option<V3ClientSseStream>> + Send>> {
         let manifest = manifest.clone();
         let raw = raw.clone();
@@ -92,8 +103,15 @@ where
         let provider_health = provider_health.clone();
         let provider_failure_event_sink = provider_failure_event_sink.clone();
         let route_selection_event_sink = route_selection_event_sink.clone();
+        let failed_provider_keys = failed_provider_keys.clone();
+        let current_provider_key = current_provider_key.clone();
+        let request_key_catalog = request_key_catalog.clone();
         Box::pin(async move {
-            let next = execute_v3_direct_runtime_kernel_core::<C, dyn ResponsesTransport>(
+            if let Some(provider_key) = current_provider_key.lock().unwrap().take() {
+                failed_provider_keys.lock().unwrap().insert(provider_key);
+            }
+            let initial_failed_candidates = failed_provider_keys.lock().unwrap().clone();
+            let next = execute_v3_direct_runtime_kernel_core_with_key_catalog::<C, dyn ResponsesTransport>(
                 control,
                 &manifest,
                 raw,
@@ -103,10 +121,17 @@ where
                 allow_exhaustion_rescue_probe,
                 provider_failure_event_sink.as_ref(),
                 route_selection_event_sink.as_ref(),
+                &request_key_catalog,
+                initial_failed_candidates,
             )
             .await;
+            *current_provider_key.lock().unwrap() = next
+                .observability
+                .as_ref()
+                .and_then(|observability| observability.provider_key.clone());
             match next.client_payload.body {
-                V3ClientBody::Sse(stream) | V3ClientBody::ProviderSse(stream) => Some(stream),
+                V3ClientBody::Sse(stream) => Some(stream.into_provider_stream()),
+                V3ClientBody::ProviderSse(stream) => Some(stream),
                 V3ClientBody::Json(_)
                 | V3ClientBody::Bytes(_)
                 | V3ClientBody::RelayProviderSse(_)
@@ -114,11 +139,11 @@ where
             }
         })
     };
-    output.client_payload.body = V3ClientBody::Sse(
+    output.client_payload.body = V3ClientBody::Sse(crate::nodes::V3FrontClientSseStream(
         crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
             stream, handoff, None,
         ),
-    );
+    ));
     output
 }
 
@@ -136,6 +161,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
     provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
     request_key_catalog: &crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog,
+    initial_failed_candidates: BTreeSet<String>,
 ) -> V3ResponsesDirectRuntimeOutput {
     let accumulator = V3RuntimeObservabilityAccumulator::start();
     let runtime_timing = accumulator.timing();
@@ -241,7 +267,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
         }
     };
     trace.push("V3Target09CandidateSetExpanded");
-    let mut failed_candidates = BTreeSet::new();
+    let mut failed_candidates = initial_failed_candidates;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
@@ -942,7 +968,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
                     None,
                     None,
                 );
-                V3ClientBody::Sse(stream)
+                V3ClientBody::Sse(crate::nodes::V3FrontClientSseStream(stream))
             }
             other => other,
         };
