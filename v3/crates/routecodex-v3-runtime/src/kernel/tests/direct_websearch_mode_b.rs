@@ -71,6 +71,10 @@ async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
         json!({
             "model": "client-model",
             "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "continue the search"}]
+            }, {
                 "type": "function_call_output",
                 "call_id": "call_ws_1",
                 "output": "search result"

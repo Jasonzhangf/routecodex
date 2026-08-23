@@ -6,12 +6,12 @@ use crate::kernel::direct_request_key_hooks::{
 };
 use crate::kernel::V3DirectSseTypedHookCatalog;
 use crate::nodes::{
-    build_v3_responses_direct_11_policy_from_v3_target_10, V3ChatDirect11Policy, V3ClientBody,
+    build_v3_responses_direct_11_policy_from_v3_target_10, V3ChatDirect11Policy,
     V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
 };
 use crate::shared::{
     project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context,
-    V3ProviderResponseProjection,
+    V3ProviderAttemptBody, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
@@ -525,7 +525,7 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
         )
         .await?;
         if context.tool_thinking_enabled {
-            if let V3ClientBody::Json(payload) = &mut projection.client_payload.body {
+            if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
                 crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_and_context(
                     payload,
                     true,
@@ -565,7 +565,7 @@ pub(crate) fn chat_direct_response_projection_hook(
         )
         .await?;
         if context.tool_thinking_enabled {
-            if let V3ClientBody::Json(payload) = &mut projection.client_payload.body {
+            if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
                 crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_and_context(
                     payload,
                     true,

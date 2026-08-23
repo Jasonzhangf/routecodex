@@ -17,7 +17,7 @@ async fn anthropic_direct_sse_lifecycle_waits_for_first_business_frame() {
         project_provider_raw_to_client_payload(V3HubProviderWireProtocol::Anthropic, raw)
             .await
             .expect("Anthropic business delta must authorize Direct client commit");
-    let V3ClientBody::Sse(mut stream) = projection.client_payload.body else {
+    let V3ClientBody::ProviderSse(mut stream) = projection.client_payload.body else {
         panic!("expected Anthropic Direct SSE body");
     };
     let chunk = stream.next().await.unwrap().unwrap();
@@ -65,7 +65,7 @@ async fn openai_chat_direct_sse_role_frame_waits_for_first_business_delta() {
         project_provider_raw_to_client_payload(V3HubProviderWireProtocol::OpenAiChat, raw)
             .await
             .expect("Chat content delta must authorize Direct client commit");
-    let V3ClientBody::Sse(mut stream) = projection.client_payload.body else {
+    let V3ClientBody::ProviderSse(mut stream) = projection.client_payload.body else {
         panic!("expected OpenAI Chat Direct SSE body");
     };
     let chunk = stream.next().await.unwrap().unwrap();
@@ -152,7 +152,7 @@ async fn responses_direct_sse_reasoning_text_terminal_does_not_fail_after_partia
         project_provider_raw_to_client_payload(V3HubProviderWireProtocol::Responses, raw)
             .await
             .expect("reasoning delta must authorize Direct client commit");
-    let V3ClientBody::Sse(mut stream) = projection.client_payload.body else {
+    let V3ClientBody::ProviderSse(mut stream) = projection.client_payload.body else {
         panic!("expected Responses Direct SSE body");
     };
     assert_eq!(
@@ -235,7 +235,7 @@ async fn direct_sse_first_non_failure_frame_replays_buffered_chunk() {
             .await
             .unwrap();
     match projection.client_payload.body {
-        V3ClientBody::Sse(mut stream) => {
+        V3ClientBody::ProviderSse(mut stream) => {
             let chunk = stream.next().await.unwrap().unwrap();
             let text = std::str::from_utf8(&chunk).unwrap();
             assert!(text.contains("response.output_text.delta"), "{text}");
@@ -268,7 +268,7 @@ async fn direct_sse_projection_starts_client_stream_before_provider_eof() {
         project_provider_raw_to_client_payload(V3HubProviderWireProtocol::Responses, raw)
             .await
             .unwrap();
-    let V3ClientBody::Sse(mut stream) = projection.client_payload.body else {
+    let V3ClientBody::ProviderSse(mut stream) = projection.client_payload.body else {
         panic!("expected direct SSE body");
     };
     let chunk = tokio::time::timeout(std::time::Duration::from_millis(100), stream.next())

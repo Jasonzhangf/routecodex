@@ -775,7 +775,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
     let projection = result
         .terminal_projection
         .expect("non-provider target-resolution failure is terminal");
-    assert_eq!(projection.status, 500);
+    assert_eq!(projection.status, 598);
     assert_ne!(projection.status, 429);
     assert_eq!(
         projection.body["error"]["code"],

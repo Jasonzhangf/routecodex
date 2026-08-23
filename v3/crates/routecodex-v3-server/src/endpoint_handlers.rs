@@ -318,7 +318,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                             error_chain: &frame.error_chain,
                             body: match &frame.body {
                                 V3Server16Body::Json(value) => Some(value),
-                                V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+                                V3Server16Body::Bytes(_) | V3Server16Body::CommittedSse(_) => None,
                             },
                             project_path: resolve_v3_console_project_path(
                                 &request_headers,
@@ -370,7 +370,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         error_chain: &frame.error_chain,
                         body: match &frame.body {
                             V3Server16Body::Json(value) => Some(value),
-                            V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+                            V3Server16Body::Bytes(_) | V3Server16Body::CommittedSse(_) => None,
                         },
                         project_path: resolve_v3_console_project_path(&request_headers, &payload)
                             .as_deref(),
@@ -1542,16 +1542,19 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 );
                 let stream_console_finalizer =
                     emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
-                if let V3Server16Body::Sse(stream) = &mut frame.body {
-                    let wrapped =
-                        std::mem::replace(stream, Box::pin(futures_util::stream::pending()));
-                    *stream = wrap_v3_sse_client_dump_stream(
-                        wrapped,
+                if matches!(&frame.body, V3Server16Body::CommittedSse(_)) {
+                    let body =
+                        std::mem::replace(&mut frame.body, V3Server16Body::Bytes(Vec::new()));
+                    let V3Server16Body::CommittedSse(stream) = body else {
+                        unreachable!("matched committed Direct SSE body")
+                    };
+                    frame.body = V3Server16Body::CommittedSse(wrap_v3_committed_sse_dump_stream(
+                        stream,
                         state.sse_dump_enabled,
                         state.server.port,
                         &path,
                         &request_id,
-                    );
+                    ));
                 }
                 responses_direct_output_response_with_console(
                     frame,

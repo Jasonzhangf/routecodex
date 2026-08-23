@@ -29,7 +29,6 @@ use routecodex_v3_sse::{
 };
 use routecodex_v3_target::V3Target10ConcreteProviderSelected;
 use serde_json::{json, Value};
-use std::future::Future;
 use std::pin::Pin;
 
 /// 统一的 relay provider 失败结构（替代各协议 `V3*RelayProviderFailure` 副本）。
@@ -396,88 +395,11 @@ pub(crate) fn build_v3_relay_observability(
 pub(crate) type V3RelayClientSseStream =
     Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
 pub(crate) type V3RelayProjectedSseStream = V3RelayClientSseStream;
-
-/// Keep provider-attempt recovery on the relay side of the Front boundary.
-///
-/// The callback creates the next projected attempt using the already-frozen
-/// request execution plan. A provider stream error is never translated into a
-/// client frame or EOF here; it is either handed to the next attempt or
-/// returned as the typed stream error for the final Error05/06 owner.
-pub(crate) fn wrap_v3_relay_provider_sse_handoff<F, Fut>(
-    stream: V3RelayProjectedSseStream,
-    handoff: F,
-    remaining_handoffs: usize,
-) -> V3RelayProjectedSseStream
-where
-    F: Fn(String) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = Option<V3RelayProjectedSseStream>> + Send + 'static,
-{
-    fn relay_sse_frame_has_terminal_marker(frame: &[u8]) -> bool {
-        let text = String::from_utf8_lossy(frame);
-        text.contains("data: [DONE]")
-            || text.contains("response.completed")
-            || text.contains("message_stop")
-            || text.contains("turn_complete")
-            || text.contains("\"finish_reason\":\"")
-    }
-
-    Box::pin(futures_util::stream::unfold(
-        (stream, handoff, remaining_handoffs, false, false),
-        |(mut stream, handoff, mut remaining_handoffs, mut emitted_frame, mut terminal_seen)| async move {
-            loop {
-                match stream.next().await {
-                    Some(Ok(frame)) => {
-                        emitted_frame = true;
-                        if relay_sse_frame_has_terminal_marker(&frame) {
-                            terminal_seen = true;
-                        }
-                        return Some((
-                            Ok(frame),
-                            (stream, handoff, remaining_handoffs, emitted_frame, terminal_seen),
-                        ));
-                    }
-                    Some(Err(message)) if remaining_handoffs > 0 => {
-                        let Some(next_stream) = handoff.clone()(message.clone()).await else {
-                            return Some((
-                                Err(message),
-                                (stream, handoff, 0, emitted_frame, true),
-                            ));
-                        };
-                        stream = next_stream;
-                        remaining_handoffs = remaining_handoffs.saturating_sub(1);
-                        emitted_frame = false;
-                        terminal_seen = false;
-                    }
-                    Some(Err(message)) => {
-                        return Some((
-                            Err(message),
-                            (stream, handoff, 0, emitted_frame, true),
-                        ));
-                    }
-                    None if terminal_seen => return None,
-                    None => {
-                        let message = if emitted_frame {
-                            "provider stream ended without a terminal event"
-                        } else {
-                            "provider stream ended without a frame"
-                        }
-                        .to_string();
-                        if remaining_handoffs == 0 {
-                            return Some((Err(message), (stream, handoff, 0, emitted_frame, true)));
-                        }
-                        let Some(next_stream) = handoff.clone()(message.clone()).await else {
-                            return Some((Err(message), (stream, handoff, 0, emitted_frame, true)));
-                        };
-                        stream = next_stream;
-                        remaining_handoffs = remaining_handoffs.saturating_sub(1);
-                        emitted_frame = false;
-                        terminal_seen = false;
-                    }
-                }
-            }
-        },
-    ))
-}
+/// A provider attempt may cross the Broker -> Front boundary only after its
+/// complete projected stream has been validated.  The committed stream is
+/// therefore infallible: provider failures remain in Error01 -> Error05 and
+/// cannot be observed as a client SSE item or EOF.
+pub(crate) type V3RelayCommittedSseStream = crate::nodes::V3CommittedClientSseStream;
 
 /// 客户端 SSE usage 观测包装：逐帧解码客户端协议 wire（openai_chat chunk /
 /// gemini chunk），把 usage / finish_reason 写入 typed stream observation；
@@ -658,139 +580,6 @@ mod tests {
         let error =
             observe_one(V3HubEntryProtocol::Responses, "not-json", &observation).unwrap_err();
         assert!(error.contains("not valid JSON"));
-    }
-
-    #[tokio::test]
-    async fn provider_sse_handoff_never_projects_provider_error_frame() {
-        let first: V3RelayProjectedSseStream = Box::pin(futures_util::stream::iter([
-            Ok(b"data: first\n\n".to_vec()),
-            Err("provider stream failed".to_string()),
-        ]));
-        let handoff = |_failure: String| async {
-            Some(Box::pin(futures_util::stream::iter([Ok(
-                b"data: recovered\n\ndata: [DONE]\n\n".to_vec()
-            )])) as V3RelayProjectedSseStream)
-        };
-        let frames = wrap_v3_relay_provider_sse_handoff(first, handoff, 1)
-            .collect::<Vec<_>>()
-            .await;
-        assert_eq!(
-            frames,
-            vec![
-                Ok(b"data: first\n\n".to_vec()),
-                Ok(b"data: recovered\n\ndata: [DONE]\n\n".to_vec()),
-            ]
-        );
-        assert!(frames.iter().all(Result::is_ok));
-    }
-
-    #[tokio::test]
-    async fn provider_sse_handoff_reselects_when_first_attempt_eof_lacks_terminal() {
-        let first: V3RelayProjectedSseStream = Box::pin(futures_util::stream::iter([
-            Ok(b"data: first\n\n".to_vec()),
-        ]));
-        let handoff_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let handoff_count_for_callback = handoff_count.clone();
-        let handoff = move |_failure: String| {
-            let handoff_count = handoff_count_for_callback.clone();
-            async move {
-                handoff_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Some(Box::pin(futures_util::stream::iter([Ok(
-                    b"data: recovered\ndata: [DONE]\n\n".to_vec(),
-                )])) as V3RelayProjectedSseStream)
-            }
-        };
-        let frames = wrap_v3_relay_provider_sse_handoff(first, handoff, 1)
-            .collect::<Vec<_>>()
-            .await;
-        assert_eq!(
-            frames,
-            vec![
-                Ok(b"data: first\n\n".to_vec()),
-                Ok(b"data: recovered\ndata: [DONE]\n\n".to_vec()),
-            ]
-        );
-        assert_eq!(
-            handoff_count.load(std::sync::atomic::Ordering::SeqCst),
-            1
-        );
-    }
-
-    #[tokio::test]
-    async fn provider_sse_handoff_empty_next_stream_is_not_silent_eof() {
-        let first: V3RelayProjectedSseStream = Box::pin(futures_util::stream::iter([
-            Ok(b"data: first\n\n".to_vec()),
-            Err("provider stream failed".to_string()),
-        ]));
-        let handoff = |_failure: String| async {
-            Some(Box::pin(futures_util::stream::empty()) as V3RelayProjectedSseStream)
-        };
-        let frames = wrap_v3_relay_provider_sse_handoff(first, handoff, 1)
-            .collect::<Vec<_>>()
-            .await;
-        assert_eq!(frames.len(), 2);
-        assert_eq!(frames[0], Ok(b"data: first\n\n".to_vec()));
-        let error = frames[1].as_ref().expect_err("empty handoff must be an error");
-        assert!(error.contains("provider stream ended without a frame"));
-    }
-
-    #[tokio::test]
-    async fn provider_sse_handoff_empty_next_stream_can_continue_to_recovery() {
-        let first: V3RelayProjectedSseStream = Box::pin(futures_util::stream::iter([
-            Ok(b"data: first\n\n".to_vec()),
-            Err("provider stream failed".to_string()),
-        ]));
-        let handoff_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let handoff_count_for_callback = handoff_count.clone();
-        let handoff = move |_failure: String| {
-            let handoff_count = handoff_count_for_callback.clone();
-            async move {
-                match handoff_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
-                    0 => Some(Box::pin(futures_util::stream::empty()) as V3RelayProjectedSseStream),
-                    1 => Some(Box::pin(futures_util::stream::iter([
-                        Ok(b"data: recovered\n\ndata: [DONE]\n\n".to_vec()),
-                    ])) as V3RelayProjectedSseStream),
-                    _ => None,
-                }
-            }
-        };
-        let frames = wrap_v3_relay_provider_sse_handoff(first, handoff, 2)
-            .collect::<Vec<_>>()
-            .await;
-        assert_eq!(
-            frames,
-            vec![
-                Ok(b"data: first\n\n".to_vec()),
-                Ok(b"data: recovered\n\ndata: [DONE]\n\n".to_vec()),
-            ]
-        );
-        assert_eq!(
-            handoff_count.load(std::sync::atomic::Ordering::SeqCst),
-            2
-        );
-    }
-
-    #[tokio::test]
-    async fn provider_sse_handoff_partial_stream_without_terminal_is_not_silent_eof() {
-        let first: V3RelayProjectedSseStream = Box::pin(futures_util::stream::iter([
-            Ok(b"data: first\n\n".to_vec()),
-            Err("provider stream failed".to_string()),
-        ]));
-        let handoff = |_failure: String| async {
-            Some(Box::pin(futures_util::stream::iter([Ok(
-                b"data: recovered-partial\n\n".to_vec(),
-            )])) as V3RelayProjectedSseStream)
-        };
-        let frames = wrap_v3_relay_provider_sse_handoff(first, handoff, 1)
-            .collect::<Vec<_>>()
-            .await;
-        assert_eq!(frames.len(), 3);
-        assert!(frames[0].is_ok());
-        assert!(frames[1].is_ok());
-        let error = frames[2]
-            .as_ref()
-            .expect_err("partial handoff EOF must not become normal EOF");
-        assert!(error.contains("without a terminal event"));
     }
 
     #[tokio::test]

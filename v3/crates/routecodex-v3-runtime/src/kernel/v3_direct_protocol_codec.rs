@@ -288,29 +288,30 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         standardized: &Self::Standardized,
     ) -> Result<routecodex_v3_provider_responses::V3ProviderTransportHandoffScope, String> {
         let context = &standardized.protocol_context;
-        Ok(routecodex_v3_provider_responses::V3ProviderTransportHandoffScope {
-            pipeline_id: context
-                .pipeline_id
-                .clone()
-                .ok_or_else(|| "provider transport handoff pipeline_id is missing".to_string())?,
-            server_id: context.server_id.clone(),
-            port: context
-                .port
-                .ok_or_else(|| "provider transport handoff port is missing".to_string())?,
-            session_scope: format!(
-                "{}:{}:{}",
-                context.failure_session_scope.server_id(),
-                context.failure_session_scope.routing_group(),
-                context.failure_session_scope.session_id()
-            ),
-            runtime_generation: context
-                .failure_session_scope
-                .transport_handoff_scope()
-                .map(|(_, _, generation)| generation)
-                .ok_or_else(|| {
-                    "provider transport handoff runtime_generation is missing".to_string()
+        Ok(
+            routecodex_v3_provider_responses::V3ProviderTransportHandoffScope {
+                pipeline_id: context.pipeline_id.clone().ok_or_else(|| {
+                    "provider transport handoff pipeline_id is missing".to_string()
                 })?,
-        })
+                server_id: context.server_id.clone(),
+                port: context
+                    .port
+                    .ok_or_else(|| "provider transport handoff port is missing".to_string())?,
+                session_scope: format!(
+                    "{}:{}:{}",
+                    context.failure_session_scope.server_id(),
+                    context.failure_session_scope.routing_group(),
+                    context.failure_session_scope.session_id()
+                ),
+                runtime_generation: context
+                    .failure_session_scope
+                    .transport_handoff_scope()
+                    .map(|(_, _, generation)| generation)
+                    .ok_or_else(|| {
+                        "provider transport handoff runtime_generation is missing".to_string()
+                    })?,
+            },
+        )
     }
 
     fn run_response_projection(
@@ -460,29 +461,30 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
         standardized: &Self::Standardized,
     ) -> Result<routecodex_v3_provider_responses::V3ProviderTransportHandoffScope, String> {
         let context = &standardized.protocol_context;
-        Ok(routecodex_v3_provider_responses::V3ProviderTransportHandoffScope {
-            pipeline_id: context
-                .pipeline_id
-                .clone()
-                .ok_or_else(|| "provider transport handoff pipeline_id is missing".to_string())?,
-            server_id: context.server_id.clone(),
-            port: context
-                .port
-                .ok_or_else(|| "provider transport handoff port is missing".to_string())?,
-            session_scope: format!(
-                "{}:{}:{}",
-                context.failure_session_scope.server_id(),
-                context.failure_session_scope.routing_group(),
-                context.failure_session_scope.session_id()
-            ),
-            runtime_generation: context
-                .failure_session_scope
-                .transport_handoff_scope()
-                .map(|(_, _, generation)| generation)
-                .ok_or_else(|| {
-                    "provider transport handoff runtime_generation is missing".to_string()
+        Ok(
+            routecodex_v3_provider_responses::V3ProviderTransportHandoffScope {
+                pipeline_id: context.pipeline_id.clone().ok_or_else(|| {
+                    "provider transport handoff pipeline_id is missing".to_string()
                 })?,
-        })
+                server_id: context.server_id.clone(),
+                port: context
+                    .port
+                    .ok_or_else(|| "provider transport handoff port is missing".to_string())?,
+                session_scope: format!(
+                    "{}:{}:{}",
+                    context.failure_session_scope.server_id(),
+                    context.failure_session_scope.routing_group(),
+                    context.failure_session_scope.session_id()
+                ),
+                runtime_generation: context
+                    .failure_session_scope
+                    .transport_handoff_scope()
+                    .map(|(_, _, generation)| generation)
+                    .ok_or_else(|| {
+                        "provider transport handoff runtime_generation is missing".to_string()
+                    })?,
+            },
+        )
     }
 
     fn run_response_projection(

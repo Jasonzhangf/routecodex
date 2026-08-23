@@ -5,7 +5,7 @@ use crate::hub_v1::{
     parse_v3_provider_sse_json_data, v3_feature_enabled_for_server, V3HubProviderWireProtocol,
     V3ProviderResponsesJsonFrameOutcome, V3RuntimeStreamObservation,
 };
-use crate::nodes::{V3ClientBody, V3ClientSseStream, V3Resp15ClientPayload};
+use crate::nodes::V3ProviderAttemptSseStream;
 use futures_util::{stream, StreamExt};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
@@ -20,23 +20,27 @@ use routecodex_v3_sse::{
 };
 use routecodex_v3_virtual_router::V3VirtualRouterError;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
 pub(crate) use crate::shared_direct_thinking_compat::project_v3_thinking_tag_text;
 
-/// Direct SSE 帧间超时：provider 返回 200 但首个或后续语义事件挂起时 fail-fast
-/// （默认 60s，明显短于 provider 请求总超时，避免客户端无限等待/EOF 且无日志）。
+/// Direct SSE 首语义帧与帧间超时：provider 返回 200 后挂起时 fail-fast。
+/// 未配置时使用 30s compatibility default；慢 provider 可显式覆盖该预算。
 /// 超时归一化为 transport Error01 进入错误链（reselect / Error06 终态投影），
 /// 不在 server/SSE 层裸造错误帧。
-const V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(60);
+fn v3_direct_sse_default_timeout() -> std::time::Duration {
+    std::time::Duration::from_millis(
+        routecodex_v3_config::default_provider_sse_first_frame_timeout_ms(),
+    )
+}
 
 fn v3_direct_sse_frame_interval_timeout(
     sse_first_frame_timeout_ms: Option<u64>,
 ) -> std::time::Duration {
     sse_first_frame_timeout_ms
         .map(std::time::Duration::from_millis)
-        .unwrap_or(V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT)
+        .unwrap_or_else(v3_direct_sse_default_timeout)
 }
 
 pub(crate) fn v3_route_plan_error_source(
@@ -110,12 +114,38 @@ impl V3SseRemoteContinuationObservationState {
     }
 }
 
+pub(crate) enum V3ProviderAttemptBody {
+    Json(serde_json::Value),
+    Bytes(Vec<u8>),
+    Sse(V3ProviderAttemptSseStream),
+}
+
+impl fmt::Debug for V3ProviderAttemptBody {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Json(value) => formatter.debug_tuple("Json").field(value).finish(),
+            Self::Bytes(bytes) => formatter
+                .debug_struct("Bytes")
+                .field("byte_len", &bytes.len())
+                .finish(),
+            Self::Sse(_) => formatter.write_str("Sse(<provider-attempt-stream>)"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct V3ProviderAttemptPayload {
+    pub(crate) status: u16,
+    pub(crate) headers: BTreeMap<String, String>,
+    pub(crate) body: V3ProviderAttemptBody,
+}
+
 #[derive(Debug)]
 pub struct V3ProviderResponseProjection {
-    pub client_payload: V3Resp15ClientPayload,
-    pub remote_continuation: V3RemoteContinuationObservation,
-    pub stream_observation: Option<V3RuntimeStreamObservation>,
-    pub compat_plan: V3DirectResponseCompatPlan,
+    pub(crate) attempt_payload: V3ProviderAttemptPayload,
+    pub(crate) remote_continuation: V3RemoteContinuationObservation,
+    pub(crate) stream_observation: Option<V3RuntimeStreamObservation>,
+    pub(crate) compat_plan: V3DirectResponseCompatPlan,
 }
 
 /// 客户端响应 id 剥离开关：开启后把返回给客户端的 Responses body 中
@@ -287,7 +317,7 @@ async fn project_provider_raw_to_client_payload_inner(
     {
         match provider_body {
             V3ProviderResponseBody::Sse(stream) => {
-                process_direct_sse_stream(
+                let (stream, remote_continuation, stream_observation) = process_direct_sse_stream(
                     &provider_id,
                     &request_id,
                     observation_session_id,
@@ -299,11 +329,16 @@ async fn project_provider_raw_to_client_payload_inner(
                     tool_thinking_enabled,
                     toolreason_client_projection,
                 )
-                .await?
+                .await?;
+                (
+                    V3ProviderAttemptBody::Sse(stream),
+                    remote_continuation,
+                    stream_observation,
+                )
             }
             V3ProviderResponseBody::Json(body_bytes) => {
                 let observation = observe_sse_remote_continuation_bytes(&provider_id, &body_bytes)?;
-                (V3ClientBody::Bytes(body_bytes), observation, None)
+                (V3ProviderAttemptBody::Bytes(body_bytes), observation, None)
             }
         }
     } else if content_type.starts_with("application/json") {
@@ -349,7 +384,7 @@ async fn project_provider_raw_to_client_payload_inner(
             parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
         }
         let observation = observe_json_remote_continuation(&provider_id, status, &parsed)?;
-        (V3ClientBody::Json(parsed), observation, None)
+        (V3ProviderAttemptBody::Json(parsed), observation, None)
     } else {
         return Err(build_v3_error_01_source_raised_external(
             V3ErrorSourceKind::ProviderFailure,
@@ -369,7 +404,7 @@ async fn project_provider_raw_to_client_payload_inner(
         ));
     };
     Ok(V3ProviderResponseProjection {
-        client_payload: V3Resp15ClientPayload {
+        attempt_payload: V3ProviderAttemptPayload {
             status,
             headers: BTreeMap::from([("content-type".to_string(), content_type)]),
             body,
@@ -396,7 +431,7 @@ async fn process_direct_sse_stream(
     toolreason_client_projection: bool,
 ) -> Result<
     (
-        V3ClientBody,
+        V3ProviderAttemptSseStream,
         V3RemoteContinuationObservation,
         Option<V3RuntimeStreamObservation>,
     ),
@@ -434,7 +469,7 @@ async fn process_direct_sse_stream(
         false,
     );
     Ok((
-        V3ClientBody::ProviderSse(client_stream),
+        client_stream,
         V3RemoteContinuationObservation::Streaming {
             state: observation_state,
         },
@@ -451,7 +486,7 @@ async fn guard_initial_direct_sse_provider_failure(
 ) -> Result<V3ProviderSseStream, V3Error01SourceRaised> {
     let first_event_timeout = sse_first_frame_timeout_ms
         .map(std::time::Duration::from_millis)
-        .unwrap_or(V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT);
+        .unwrap_or_else(v3_direct_sse_default_timeout);
     guard_initial_direct_sse_provider_failure_with_timeout(
         provider_id,
         stream,
@@ -668,13 +703,13 @@ fn observed_sse_client_stream(
     usage_observation: V3RuntimeStreamObservation,
     compatibility_profile: Option<&str>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
-) -> V3ClientSseStream {
+) -> V3ProviderAttemptSseStream {
     observed_sse_client_stream_with_protocol(
         provider_id,
         stream,
         observation_state,
         usage_observation,
-        V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT,
+        v3_direct_sse_default_timeout(),
         compatibility_profile,
         provider_protocol,
         false,
@@ -692,7 +727,7 @@ fn observed_sse_client_stream_with_timeout(
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
     tool_thinking_enabled: bool,
-) -> V3ClientSseStream {
+) -> V3ProviderAttemptSseStream {
     observed_sse_client_stream_with_timeout_and_projection(
         provider_id,
         stream,
@@ -716,7 +751,7 @@ fn observed_sse_client_stream_with_timeout_and_projection(
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
-) -> V3ClientSseStream {
+) -> V3ProviderAttemptSseStream {
     observed_sse_client_stream_with_timeout_and_projection_and_request_id(
         provider_id,
         String::new(),
@@ -744,7 +779,7 @@ fn observed_sse_client_stream_with_timeout_and_projection_and_request_id(
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
-) -> V3ClientSseStream {
+) -> V3ProviderAttemptSseStream {
     observed_sse_client_stream_with_protocol(
         provider_id,
         stream,
@@ -772,7 +807,7 @@ fn observed_sse_client_stream_with_protocol(
     toolreason_client_projection: bool,
     request_id: Option<String>,
     session_id: Option<String>,
-) -> V3ClientSseStream {
+) -> V3ProviderAttemptSseStream {
     struct ObservedState {
         stream: V3ProviderSseStream,
         decoder: SseIncrementalDecoder,
@@ -1469,6 +1504,12 @@ fn observe_json_remote_continuation(
 
 fn provider_body_source(error: V3ProviderError) -> V3Error01SourceRaised {
     match &error {
+        V3ProviderError::ClientDisconnect { provider_id, .. } => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ClientDisconnect,
+            "V3ProviderResp14Raw",
+            "client_disconnect",
+            format!("client disconnected while reading provider {provider_id} response"),
+        ),
         V3ProviderError::ResponseBody {
             provider_id,
             reason,
@@ -1567,7 +1608,7 @@ mod tests {
         );
         assert_eq!(
             v3_direct_sse_frame_interval_timeout(None),
-            V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT
+            v3_direct_sse_default_timeout()
         );
     }
 
@@ -1719,8 +1760,8 @@ mod tests {
         );
 
         let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
-        match projection.client_payload.body {
-            V3ClientBody::ProviderSse(mut stream) => {
+        match projection.attempt_payload.body {
+            V3ProviderAttemptBody::Sse(mut stream) => {
                 let chunk = stream.next().await.unwrap().unwrap();
                 let text = std::str::from_utf8(&chunk).unwrap();
                 assert!(text.contains("response.output_text.delta"), "{text}");
@@ -1732,7 +1773,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_sse_projection_starts_client_stream_before_provider_eof() {
+    async fn direct_sse_projection_starts_provider_attempt_before_provider_eof() {
         let raw = V3ProviderResp14Raw::from_sse(
             "req".to_string(),
             "provider".to_string(),
@@ -1750,12 +1791,12 @@ mod tests {
         );
 
         let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
-        let V3ClientBody::ProviderSse(mut stream) = projection.client_payload.body else {
-            panic!("expected direct SSE body");
+        let V3ProviderAttemptBody::Sse(mut stream) = projection.attempt_payload.body else {
+            panic!("expected provider-attempt SSE body");
         };
         let chunk = tokio::time::timeout(std::time::Duration::from_millis(100), stream.next())
             .await
-            .expect("client stream must start before provider EOF")
+            .expect("provider-attempt stream must start before provider EOF")
             .expect("provider first chunk must be forwarded")
             .expect("provider first chunk must be valid");
         assert!(std::str::from_utf8(&chunk).unwrap().contains("early"));
@@ -1819,8 +1860,7 @@ mod tests {
     #[tokio::test]
     async fn direct_sse_projection_times_out_when_provider_only_sends_keepalives() {
         let first =
-            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n"
-                .to_vec();
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n".to_vec();
         let keepalives = futures_util::stream::unfold((), |_| async {
             tokio::time::sleep(std::time::Duration::from_millis(2)).await;
             Some((
@@ -1973,7 +2013,10 @@ mod tests {
         // 整段首语义事件 deadline。
         let keepalives = futures_util::stream::unfold((), |_| async {
             tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-            Some((Ok::<Vec<u8>, V3ProviderError>(b": keepalive\n\n".to_vec()), ()))
+            Some((
+                Ok::<Vec<u8>, V3ProviderError>(b": keepalive\n\n".to_vec()),
+                (),
+            ))
         });
         let stream: V3ProviderSseStream = Box::pin(keepalives);
         let result = guard_initial_direct_sse_provider_failure_with_timeout(
@@ -2097,7 +2140,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_sse_projection_exposes_post_first_frame_provider_error_after_commit() {
+    async fn direct_sse_projection_keeps_post_first_frame_provider_error_in_attempt() {
         let first =
             b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec();
         let source: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
@@ -2121,8 +2164,8 @@ mod tests {
         let projection = project_provider_raw_to_client_payload(raw).await.expect(
             "projection returns a typed stream; runtime owns pre-commit attempt collection",
         );
-        let V3ClientBody::ProviderSse(mut stream) = projection.client_payload.body else {
-            panic!("expected direct SSE body");
+        let V3ProviderAttemptBody::Sse(mut stream) = projection.attempt_payload.body else {
+            panic!("expected provider-attempt SSE body");
         };
         let first = stream
             .next()
@@ -2153,8 +2196,8 @@ mod tests {
         )
         .with_compatibility_profile(Some("responses:thinking-tags".to_string()));
         let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
-        let V3ClientBody::Json(body) = projection.client_payload.body else {
-            panic!("expected JSON client body");
+        let V3ProviderAttemptBody::Json(body) = projection.attempt_payload.body else {
+            panic!("expected JSON provider-attempt body");
         };
         assert_eq!(body["output"][0]["text"], "answer");
         assert_eq!(body["output"][0]["reasoning_content"], "plan");

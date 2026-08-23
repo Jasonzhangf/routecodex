@@ -1687,7 +1687,7 @@ async fn sse_runtime_runs_stopless_center_through_json_hub_pipeline_before_clien
         V3ResponsesRelayClientBody::Sse(mut stream) => {
             let mut text = String::new();
             while let Some(chunk) = stream.next().await {
-                text.push_str(&String::from_utf8(chunk.unwrap()).unwrap());
+                text.push_str(&String::from_utf8(chunk).unwrap());
             }
             assert!(
                 text.contains("event: response.completed"),
@@ -2061,7 +2061,7 @@ async fn sse_runtime_runs_apply_patch_through_json_hub_pipeline_before_client_ss
         V3ResponsesRelayClientBody::Sse(mut stream) => {
             let mut forwarded = Vec::new();
             while let Some(chunk) = stream.next().await {
-                forwarded.extend(chunk.expect("projected apply_patch SSE chunk"));
+                forwarded.extend(chunk);
             }
             let text = String::from_utf8(forwarded).unwrap();
             assert!(
@@ -4320,7 +4320,7 @@ async fn responses_relay_selected_openai_chat_provider_sse_uses_chat_wire_and_re
         V3ResponsesRelayClientBody::Sse(mut stream) => {
             let mut forwarded = Vec::new();
             while let Some(chunk) = stream.next().await {
-                forwarded.extend(chunk.expect("projected OpenAI Chat provider SSE chunk"));
+                forwarded.extend(chunk);
             }
             let text = String::from_utf8(forwarded).unwrap();
             assert!(

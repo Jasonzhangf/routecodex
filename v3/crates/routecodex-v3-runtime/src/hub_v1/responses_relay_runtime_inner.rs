@@ -964,7 +964,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         manifest,
                         &input.server_id,
                     ),
-                );
+                )?;
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
                     client_body,
@@ -1338,7 +1338,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         manifest,
                         &input.server_id,
                     ),
-                );
+                )?;
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
                     client_body,

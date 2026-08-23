@@ -265,11 +265,7 @@ pub(crate) fn classify_v3_provider_sse_json_data(
         V3HubProviderWireProtocol::OpenAiChat => {
             classify_v3_provider_openai_chat_json_event(&event)?
         }
-        V3HubProviderWireProtocol::Gemini => {
-            return Err(
-                "provider Gemini SSE precommit classifier is not registered for Direct".to_string(),
-            );
-        }
+        V3HubProviderWireProtocol::Gemini => classify_v3_provider_gemini_json_event(&event)?,
     };
     Ok(Some(outcome))
 }
@@ -889,6 +885,77 @@ fn classify_v3_provider_openai_chat_json_event(
     })
 }
 
+pub(crate) fn classify_v3_provider_gemini_json_event(
+    event: &Value,
+) -> Result<V3ProviderResponsesJsonFrameOutcome, String> {
+    if event.get("error").is_some() {
+        return classify_provider_error_object(event, "gemini_provider_error");
+    }
+    let candidates = event
+        .get("candidates")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "provider Gemini SSE event requires candidates array".to_string())?;
+    let mut has_output = false;
+    let mut terminal = false;
+    for candidate in candidates {
+        let candidate = candidate
+            .as_object()
+            .ok_or_else(|| "provider Gemini candidate must be an object".to_string())?;
+        if let Some(finish_reason) = candidate.get("finishReason") {
+            match finish_reason {
+                Value::Null => {}
+                Value::String(value) if !value.trim().is_empty() => terminal = true,
+                _ => {
+                    return Err(
+                        "provider Gemini finishReason must be null or a non-empty string"
+                            .to_string(),
+                    )
+                }
+            }
+        }
+        let Some(content) = candidate.get("content") else {
+            continue;
+        };
+        let content = content
+            .as_object()
+            .ok_or_else(|| "provider Gemini candidate content must be an object".to_string())?;
+        let Some(parts) = content.get("parts") else {
+            continue;
+        };
+        let parts = parts.as_array().ok_or_else(|| {
+            "provider Gemini candidate content.parts must be an array".to_string()
+        })?;
+        for part in parts {
+            let part = part
+                .as_object()
+                .ok_or_else(|| "provider Gemini content part must be an object".to_string())?;
+            has_output |= has_non_empty_string(part.get("text"));
+            has_output |= part
+                .get("functionCall")
+                .and_then(Value::as_object)
+                .is_some_and(|call| !call.is_empty());
+            has_output |= part
+                .get("inlineData")
+                .and_then(Value::as_object)
+                .is_some_and(|data| !data.is_empty());
+            has_output |= part
+                .get("executableCode")
+                .and_then(Value::as_object)
+                .is_some_and(|code| !code.is_empty());
+            has_output |= part
+                .get("codeExecutionResult")
+                .and_then(Value::as_object)
+                .is_some_and(|result| !result.is_empty());
+        }
+    }
+    Ok(match (has_output, terminal) {
+        (true, true) => V3ProviderResponsesJsonFrameOutcome::Terminal,
+        (false, true) => V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput,
+        (true, false) => V3ProviderResponsesJsonFrameOutcome::StartClientStream,
+        (false, false) => V3ProviderResponsesJsonFrameOutcome::ContinueBuffering,
+    })
+}
+
 fn classify_provider_error_object(
     event: &Value,
     default_code: &str,
@@ -1006,6 +1073,22 @@ mod provider_sse_json_codec_tests {
             })
         );
         assert_eq!(classify("ping"), None);
+    }
+
+    #[test]
+    fn direct_observation_normalizes_structured_function_call_arguments_before_terminal_check() {
+        let data = r#"{"type":"response.completed","response":{"id":"resp_1","output":[{"type":"function_call","call_id":"call_1","name":"apply_patch","arguments":{"patch":"*** Begin Patch"}}]}}"#;
+        let normalized = normalize_v3_provider_sse_json_data_with_event_name(
+            V3HubProviderWireProtocol::Responses,
+            data,
+            None,
+        )
+        .expect("structured function_call arguments must be normalized");
+        assert_eq!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &normalized)
+                .expect("normalized terminal event must classify"),
+            Some(V3ProviderResponsesJsonFrameOutcome::Terminal)
+        );
     }
 
     #[test]
@@ -1458,6 +1541,25 @@ mod provider_sse_json_codec_tests {
             classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
                 .expect("normalized function_call must classify")
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn responses_function_call_normalization_ignores_metadata_shadow_objects() {
+        let data = normalize_v3_provider_sse_json_data_with_event_name(
+            V3HubProviderWireProtocol::Responses,
+            r#"{"type":"response.completed","response":{"output":[{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":{"cmd":"pwd"}}],"metadata":{"shadow":{"type":"function_call","arguments":{"keep":"object"}}}}}"#,
+            None,
+        )
+        .expect("registered output item must normalize without walking metadata");
+        let value: Value = serde_json::from_str(&data).expect("normalized JSON");
+        assert_eq!(
+            value["response"]["output"][0]["arguments"],
+            r#"{"cmd":"pwd"}"#
+        );
+        assert_eq!(
+            value["response"]["metadata"]["shadow"]["arguments"],
+            serde_json::json!({"keep":"object"})
         );
     }
 

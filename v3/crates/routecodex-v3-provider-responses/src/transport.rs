@@ -668,9 +668,10 @@ impl Default for ProviderResponsesTransport {
 }
 
 impl ProviderResponsesTransport {
-    fn with_http_read_timeout(_timeout: Duration) -> Self {
+    fn with_http_read_timeout(timeout: Duration) -> Self {
         Self {
             client: reqwest::Client::builder()
+                .read_timeout(timeout)
                 .pool_idle_timeout(Duration::from_secs(V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS))
                 .tcp_keepalive(Duration::from_secs(V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS))
                 .build()
@@ -692,6 +693,16 @@ impl ProviderResponsesTransport {
     }
 }
 
+#[async_trait]
+impl ResponsesTransport for Arc<dyn ResponsesTransport> {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.as_ref().send(request).await
+    }
+}
+
 pub type ReqwestResponsesTransport = ProviderResponsesTransport;
 
 #[async_trait]
@@ -704,20 +715,24 @@ impl ResponsesTransport for ProviderResponsesTransport {
         let cancellation = request.cancellation();
         let request_id = request.request_id().to_string();
         let provider_id = request.provider_id().to_string();
-        let attempt_key = request.handoff_scope.clone().map(|scope| {
-            self.handoff
-                .begin_next(
-                    request_id.clone(),
-                    provider_id.clone(),
-                    request.transport_kind(),
-                    scope,
-                )
-                .map_err(|reason| V3ProviderError::Transport {
-                    request_id: request_id.clone(),
-                    provider_id: provider_id.clone(),
-                    reason,
-                })
-        }).transpose()?;
+        let attempt_key = request
+            .handoff_scope
+            .clone()
+            .map(|scope| {
+                self.handoff
+                    .begin_next(
+                        request_id.clone(),
+                        provider_id.clone(),
+                        request.transport_kind(),
+                        scope,
+                    )
+                    .map_err(|reason| V3ProviderError::Transport {
+                        request_id: request_id.clone(),
+                        provider_id: provider_id.clone(),
+                        reason,
+                    })
+            })
+            .transpose()?;
         let controller = V3AdaptiveConcurrencyController::process_shared();
         if let Err(reason) =
             controller.ensure_initial_budget(&provider_key, request.initial_concurrency_budget())
@@ -819,15 +834,15 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 if was_probe {
                     if let Some(attempt_key) = &attempt_key {
                         self.handoff
-                        .transition(
-                            attempt_key,
-                            crate::transport_handoff::V3ProviderTransportAttemptState::Terminal,
-                        )
-                        .map_err(|reason| V3ProviderError::Transport {
-                            request_id: raw.request_id().to_string(),
-                            provider_id: raw.provider_id().to_string(),
-                            reason,
-                        })?;
+                            .transition(
+                                attempt_key,
+                                crate::transport_handoff::V3ProviderTransportAttemptState::Terminal,
+                            )
+                            .map_err(|reason| V3ProviderError::Transport {
+                                request_id: raw.request_id().to_string(),
+                                provider_id: raw.provider_id().to_string(),
+                                reason,
+                            })?;
                     }
                     controller
                         .complete_probe(permit, V3AdaptiveConcurrencyProbeResult::Accepted, now_ms)
@@ -859,15 +874,15 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 } else {
                     if let Some(attempt_key) = &attempt_key {
                         self.handoff
-                        .transition(
-                            attempt_key,
-                            crate::transport_handoff::V3ProviderTransportAttemptState::Terminal,
-                        )
-                        .map_err(|reason| V3ProviderError::Transport {
-                            request_id: raw.request_id().to_string(),
-                            provider_id: raw.provider_id().to_string(),
-                            reason,
-                        })?;
+                            .transition(
+                                attempt_key,
+                                crate::transport_handoff::V3ProviderTransportAttemptState::Terminal,
+                            )
+                            .map_err(|reason| V3ProviderError::Transport {
+                                request_id: raw.request_id().to_string(),
+                                provider_id: raw.provider_id().to_string(),
+                                reason,
+                            })?;
                     }
                     controller
                         .release(permit)
@@ -882,15 +897,15 @@ impl ResponsesTransport for ProviderResponsesTransport {
             Err(error) => {
                 if let Some(attempt_key) = &attempt_key {
                     self.handoff
-                    .transition(
-                        attempt_key,
-                        crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
-                    )
-                    .map_err(|reason| V3ProviderError::Transport {
-                        request_id: request_id.clone(),
-                        provider_id: provider_id.clone(),
-                        reason,
-                    })?;
+                        .transition(
+                            attempt_key,
+                            crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
+                        )
+                        .map_err(|reason| V3ProviderError::Transport {
+                            request_id: request_id.clone(),
+                            provider_id: provider_id.clone(),
+                            reason,
+                        })?;
                 }
                 if is_rate_limited(&error) {
                     if was_probe {
@@ -959,7 +974,9 @@ fn hold_sse_lease(
                 match stream.next().await {
                     Some(Ok(bytes)) => {
                         let observed = match &attempt_key {
-                            Some(attempt_key) => handoff.observe_provider_frame(attempt_key, provider_sequence),
+                            Some(attempt_key) => {
+                                handoff.observe_provider_frame(attempt_key, provider_sequence)
+                            }
                             None => Ok(true),
                         };
                         match observed {
@@ -969,8 +986,14 @@ fn hold_sse_lease(
                             )),
                             Ok(false) | Err(_) => Some((
                                 Err(V3ProviderError::Transport {
-                                    request_id: attempt_key.as_ref().map(|key| key.request_id.clone()).unwrap_or_default(),
-                                    provider_id: attempt_key.as_ref().map(|key| key.provider_id.clone()).unwrap_or_default(),
+                                    request_id: attempt_key
+                                        .as_ref()
+                                        .map(|key| key.request_id.clone())
+                                        .unwrap_or_default(),
+                                    provider_id: attempt_key
+                                        .as_ref()
+                                        .map(|key| key.provider_id.clone())
+                                        .unwrap_or_default(),
                                     reason: format!(
                                         "provider transport frame sequence mismatch at {}",
                                         provider_sequence
@@ -1059,7 +1082,6 @@ impl ProviderResponsesTransport {
             provider_id: provider_id.clone(),
             reason: error.to_string(),
         })?;
-
         let status = response.status().as_u16();
         let headers = collect_response_headers(response.headers());
         let response_content_type = content_type(response.headers());

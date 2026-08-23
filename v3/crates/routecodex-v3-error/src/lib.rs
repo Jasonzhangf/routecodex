@@ -416,9 +416,7 @@ impl V3ProviderFailureSessionScope {
         &self.session_id
     }
 
-    pub fn transport_handoff_scope(
-        &self,
-    ) -> Option<(&str, u16, u64)> {
+    pub fn transport_handoff_scope(&self) -> Option<(&str, u16, u64)> {
         Some((
             self.transport_pipeline_id.as_deref()?,
             self.transport_port?,

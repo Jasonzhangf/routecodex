@@ -114,6 +114,11 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
     }
     crate::hub_v1::normalize_v3_responses_function_call_arguments(&mut event)
         .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+    if let Some(message) = extract_v3_provider_event_error_payload_message(&event) {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            message,
+        ));
+    }
     if !event
         .get("type")
         .and_then(Value::as_str)
@@ -139,11 +144,6 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
         object.event_name().map(ToOwned::to_owned),
         event.clone(),
     );
-    if let Some(message) = extract_v3_provider_event_error_payload_message(&event) {
-        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            message,
-        ));
-    }
     let semantic = classify_v3_responses_sse_event(&event).map_err(|error| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
     })?;

@@ -11,6 +11,7 @@
 //! 收敛；JSON 响应链（resp01->02->03->04->05->06）经 `project_json_response` 收敛。
 
 use super::*;
+use crate::nodes::V3CommittedClientSseBuilder;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     resolve_v3_relay_target_outcome, resolve_v3_relay_target_outcome_with_rescue,
@@ -20,6 +21,7 @@ use crate::provider_failure_runtime_policy::{
     V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
 };
 use crate::runtime_timing::V3RuntimeTimingState;
+use futures_util::StreamExt;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
 use routecodex_v3_error::{V3ErrorSourceKind, V3ProviderFailureSessionScope};
 use routecodex_v3_provider_responses::{
@@ -44,7 +46,7 @@ async fn guard_relay_sse_first_frame(
         routecodex_v3_sse::SseTransportLimits::default(),
     );
     let mut consumed = Vec::new();
-    let mut terminal_frame_seen = false;
+    let mut first_semantic_frame_seen = false;
     let first_frame_timeout = sse_first_frame_timeout_ms
         .map(std::time::Duration::from_millis)
         .ok_or_else(|| V3ProviderError::Transport {
@@ -52,7 +54,8 @@ async fn guard_relay_sse_first_frame(
             provider_id: provider_id.to_string(),
             reason: "published provider SSE first-frame timeout is missing".to_string(),
         })?;
-    let first = tokio::time::timeout(first_frame_timeout, stream.next())
+    let first_frame_deadline = tokio::time::Instant::now() + first_frame_timeout;
+    let first = tokio::time::timeout_at(first_frame_deadline, stream.next())
         .await
         .map_err(|_| V3ProviderError::Transport {
             request_id: request_id.to_string(),
@@ -95,12 +98,15 @@ async fn guard_relay_sse_first_frame(
                                 reason: error,
                             })?;
                     match outcome {
-                        Some(crate::hub_v1::V3ProviderResponsesJsonFrameOutcome::StartClientStream) => {}
+                        Some(crate::hub_v1::V3ProviderResponsesJsonFrameOutcome::StartClientStream) => {
+                            first_semantic_frame_seen = true;
+                            break;
+                        }
                         Some(
                             crate::hub_v1::V3ProviderResponsesJsonFrameOutcome::Terminal
                             | crate::hub_v1::V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput,
                         ) => {
-                            terminal_frame_seen = true;
+                            first_semantic_frame_seen = true;
                             break;
                         }
                         Some(crate::hub_v1::V3ProviderResponsesJsonFrameOutcome::Failure {
@@ -119,10 +125,10 @@ async fn guard_relay_sse_first_frame(
                         | None => {}
                     }
                 }
-                if terminal_frame_seen {
+                if first_semantic_frame_seen {
                     break;
                 }
-                let next = tokio::time::timeout(first_frame_timeout, stream.next())
+                let next = tokio::time::timeout_at(first_frame_deadline, stream.next())
                     .await
                     .map_err(|_| V3ProviderError::Transport {
                         request_id: request_id.to_string(),
@@ -146,12 +152,7 @@ async fn guard_relay_sse_first_frame(
             let replay = futures_util::stream::iter(consumed.into_iter().map(Ok)).chain(stream);
             Ok(Box::pin(replay))
         }
-        Some(Err(error @ V3ProviderError::ClientDisconnect { .. })) => {
-            // Client disconnect is health-neutral and must stay lazy: the client
-            // connection owns observing this terminal stream item.
-            let replay = futures_util::stream::iter(vec![Err(error)]).chain(stream);
-            Ok(Box::pin(replay))
-        }
+        Some(Err(error @ V3ProviderError::ClientDisconnect { .. })) => Err(error),
         Some(Err(error)) => Err(error),
         None => Err(V3ProviderError::Transport {
             request_id: request_id.to_string(),
@@ -163,8 +164,8 @@ async fn guard_relay_sse_first_frame(
 
 /// Relay SSE 流"每帧空闲守卫"(独立 relay 路径专用):responses/anthropic relay
 /// 不走本骨架的收集循环,需要本守卫保证 provider SSE 数据挂起(连接保持、无新帧)
-/// 超过 30s 时归一化为 Transport 错误进入 provider 失败链(记录 failure + reselect
-/// 切 provider),而不是让客户端无限等待/无限重试同一挂起 provider。
+/// 超过 30s 时归一化为 Transport 错误进入 provider 失败链（记录 failure +
+/// reselect 切 provider），而不是让客户端无限等待/无限重试同一挂起 provider。
 /// 语义:任意两帧之间(含首帧)超过窗口即产出 Err 并终止流。
 pub(crate) fn guard_v3_provider_sse_idle(
     request_id: &str,
@@ -302,8 +303,6 @@ impl fmt::Display for V3RelayCoreError {
 pub(crate) trait V3RelayProtocolCodec: Sized {
     /// 协议 runtime 输出类型（如 `V3GeminiRelayRuntimeOutput`）。
     type Output;
-    /// SSE 客户端流类型（如 `V3GeminiRelayClientStream`）。
-    type SseStream: futures_util::Stream<Item = Result<Vec<u8>, String>> + Send + Unpin + 'static;
     /// SSE provider outcome（记录 success/failure）。
     type SseOutcome;
 
@@ -398,7 +397,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         tool_thinking_enabled: bool,
         stream_observation: V3RuntimeStreamObservation,
         outcome: Self::SseOutcome,
-    ) -> Result<Self::SseStream, V3RelayCoreError>;
+    ) -> Result<V3RelayProjectedSseStream, V3RelayCoreError>;
     /// 组装 JSON 成功输出（observability 由骨架统一构建，codec 只负责写入
     /// 自身 Output 结构；控制语义只走 typed observability，不进 payload）。
     fn assemble_json_output(
@@ -410,14 +409,12 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
     /// 组装 SSE 成功输出（stream_observation 供 server 在流收口后打印
     /// usage/终态；观测只读，不改写业务字节）。
     fn assemble_sse_output(
-        sse: V3RelayClientSseStream,
+        sse: V3RelayCommittedSseStream,
         trace: Vec<&'static str>,
         observability: V3RuntimeObservability,
         stream_observation: V3RuntimeStreamObservation,
         provider_snapshots: V3RelayProviderSnapshots,
     ) -> Self::Output;
-    /// 从收集的完整字节重建客户端流（非空响应返回给 server；实现方构造自己的流类型）。
-    fn sse_from_collected(collected: Vec<Vec<u8>>) -> Self::SseStream;
     /// 组装 provider failure 输出（terminal Error06）。
     fn assemble_failure_output(
         failure: V3RelayProviderFailure,
@@ -920,6 +917,12 @@ where
                 .await
                 {
                     Ok(stream) => stream,
+                    Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
+                        // The client owns this lifecycle termination. Do not feed it
+                        // into provider Error01-05, health, retry, or reselect.
+                        let failure = provider_runtime_failure(error, &selected_target_provider_id);
+                        return Ok(C::assemble_failure_output(failure, trace));
+                    }
                     Err(error) => {
                         let failure = provider_runtime_failure(error, &selected_target_provider_id);
                         drop(provider_action_permit.take());
@@ -944,7 +947,7 @@ where
                     }
                 };
                 // 首帧已收：后续流仍受 idle guard 约束（provider 发一帧后挂起
-                // 30s → 归一化为 Transport 错误进入错误链，客户端不无限等待）。
+                // provider 配置窗口 → 归一化为 Transport 错误进入错误链，客户端不无限等待）。
                 let idle_guarded_stream = guard_v3_provider_sse_idle(
                     request_id,
                     &selected_target_provider_id,
@@ -954,7 +957,7 @@ where
                 let stream_observation = V3RuntimeStreamObservation::default();
                 let idle_guarded_stream =
                     observe_v3_provider_sse(idle_guarded_stream, stream_observation.clone());
-                let sse = C::project_sse(
+                let projected_sse = match C::project_sse(
                     &request_id,
                     idle_guarded_stream,
                     provider_wire_protocol,
@@ -968,34 +971,160 @@ where
                         &provider_health,
                         &failure_session_scope,
                         selected_target_provider_id.clone(),
-                        selected_target_auth_alias,
-                        selected_target_model_id,
-                        false,
-                        provider_action_permit.take(),
+                        selected_target_auth_alias.clone(),
+                        selected_target_model_id.clone(),
+                        true,
+                        None,
                     ),
-                )?;
+                ) {
+                    Ok(sse) => sse,
+                    Err(error @ V3RelayCoreError::WebSearchIntercepted(_)) => {
+                        drop(provider_action_permit.take());
+                        return Err(error);
+                    }
+                    Err(error) => {
+                        let failure = provider_runtime_failure(
+                            V3ProviderError::ResponseBody {
+                                request_id: request_id.to_string(),
+                                provider_id: selected_target_provider_id.clone(),
+                                reason: format!(
+                                    "provider response event codec initialization failed: {error}"
+                                ),
+                            },
+                            &selected_target_provider_id,
+                        );
+                        drop(provider_action_permit.take());
+                        if let Some(failure) = handle_provider_failure(
+                            &failure_context,
+                            selected,
+                            failure,
+                            &mut V3RelayProviderFailurePolicyState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                trace: &mut trace,
+                            },
+                            &mut retry_selected,
+                            &mut pending_provider_action_recovery,
+                        )
+                        .await
+                        .map_err(V3RelayCoreError::Target)?
+                        {
+                            return Ok(C::assemble_failure_output(failure, trace));
+                        }
+                        continue;
+                    }
+                };
+                let projected_sse = wrap_v3_relay_client_sse_usage_observation(
+                    projected_sse,
+                    C::ENTRY_PROTOCOL,
+                    stream_observation.clone(),
+                );
+
+                // Broker arbitration owns the complete provider attempt.  No
+                // projected byte crosses into the Front until the codec has
+                // reached a successful terminal EOF.  A failure after any
+                // number of frames discards the entire attempt and enters the
+                // same Error01 -> Error05 policy path as pre-first-frame
+                // transport failures.
+                let mut committed_attempt = V3CommittedClientSseBuilder::new();
+                let mut projected_sse = projected_sse;
+                let stream_failure = loop {
+                    match projected_sse.next().await {
+                        Some(Ok(frame)) => {
+                            if let Err(reason) = committed_attempt.push(frame) {
+                                break Some(reason);
+                            }
+                        }
+                        Some(Err(reason)) => break Some(reason),
+                        None => break None,
+                    }
+                };
+                if let Some(reason) = stream_failure {
+                    drop(provider_action_permit.take());
+                    if reason.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
+                        return Err(V3RelayCoreError::WebSearchIntercepted(reason));
+                    }
+                    let failure = provider_runtime_failure(
+                        V3ProviderError::ResponseBody {
+                            request_id: request_id.to_string(),
+                            provider_id: selected_target_provider_id.clone(),
+                            reason: format!("provider response event codec failed: {reason}"),
+                        },
+                        &selected_target_provider_id,
+                    );
+                    if let Some(failure) = handle_provider_failure(
+                        &failure_context,
+                        selected,
+                        failure,
+                        &mut V3RelayProviderFailurePolicyState {
+                            failed_candidates: &mut failed_candidates,
+                            same_candidate_retries: &mut same_candidate_retries,
+                            trace: &mut trace,
+                        },
+                        &mut retry_selected,
+                        &mut pending_provider_action_recovery,
+                    )
+                    .await
+                    .map_err(V3RelayCoreError::Target)?
+                    {
+                        return Ok(C::assemble_failure_output(failure, trace));
+                    }
+                    continue;
+                }
+                let committed_sse = match committed_attempt.seal_after_validated_terminal() {
+                    Ok(committed_sse) => committed_sse,
+                    Err(reason) => {
+                        drop(provider_action_permit.take());
+                        let failure = provider_runtime_failure(
+                            V3ProviderError::ResponseBody {
+                                request_id: request_id.to_string(),
+                                provider_id: selected_target_provider_id.clone(),
+                                reason,
+                            },
+                            &selected_target_provider_id,
+                        );
+                        if let Some(failure) = handle_provider_failure(
+                            &failure_context,
+                            selected,
+                            failure,
+                            &mut V3RelayProviderFailurePolicyState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                trace: &mut trace,
+                            },
+                            &mut retry_selected,
+                            &mut pending_provider_action_recovery,
+                        )
+                        .await
+                        .map_err(V3RelayCoreError::Target)?
+                        {
+                            return Ok(C::assemble_failure_output(failure, trace));
+                        }
+                        continue;
+                    }
+                };
+                drop(provider_action_permit.take());
+                provider_health
+                    .record_provider_success_in_failure_scope(
+                        &failure_session_scope,
+                        &selected_target_provider_id,
+                        Some(&selected_target_auth_alias),
+                        Some(&selected_target_model_id),
+                        v3_relay_provider_policy_now_epoch_ms()
+                            .map_err(V3RelayCoreError::Target)?,
+                    )
+                    .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
                 let mut observability =
                     build_v3_relay_observability(C::ENTRY_KIND, &selected, "sse");
                 observability.provider_status = Some(provider_status);
-                // SSE 终态由客户端流收口时的 observation 合并决定（chat/gemini
-                // wire 无 status 字段，语义 finish_reason 推导 completed）。
-                observability.response_status = Some("streaming".to_string());
+                observability.response_status = Some("completed".to_string());
                 observability.timing = Some(
                     runtime_timing
                         .finish_runtime()
                         .map_err(|timing_error| V3RelayCoreError::Target(timing_error))?,
                 );
-                let sse = wrap_v3_relay_client_sse_usage_observation(
-                    sse,
-                    C::ENTRY_PROTOCOL,
-                    stream_observation.clone(),
-                );
-                // Return the projected stream immediately after the first-frame guard.
-                // The client connection must remain independent from provider EOF and
-                // post-commit failures; the codec stream owns those later outcomes and
-                // records them through its typed side-channel.
                 return Ok(C::assemble_sse_output(
-                    sse,
+                    committed_sse,
                     trace,
                     observability,
                     stream_observation,
@@ -1096,6 +1225,28 @@ mod tests {
         )
         .await;
         assert!(result.is_err(), "first frame error must propagate");
+    }
+
+    #[tokio::test]
+    async fn guard_keeps_client_disconnect_out_of_provider_failure_policy() {
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(
+            futures_util::stream::iter(vec![Err(V3ProviderError::ClientDisconnect {
+                request_id: "req-client-disconnect".to_string(),
+                provider_id: "provider-1".to_string(),
+            })]),
+        );
+        let result = guard_relay_sse_first_frame(
+            "req-client-disconnect",
+            "provider-1",
+            V3HubProviderWireProtocol::Responses,
+            stream,
+            Some(30_000),
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(V3ProviderError::ClientDisconnect { .. })
+        ));
     }
 
     #[tokio::test]

@@ -12,8 +12,8 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
-use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tower_service::Service;
 
@@ -426,7 +426,9 @@ impl V3FrontTransportBroker {
             .lock()
             .expect("front broker connection lease lock");
         if connections.contains_key(&connection) {
-            return Err("front connection identity is already bound to a request lease".to_string());
+            return Err(
+                "front connection identity is already bound to a request lease".to_string(),
+            );
         }
         self.register(&lease, now);
         connections.insert(connection, lease);
@@ -545,9 +547,8 @@ impl V3FrontTransportBroker {
             }
             let mut checkpoint = checkpoint.clone();
             let elapsed_ms = restored_at_epoch_ms.saturating_sub(checkpoint.captured_at_epoch_ms);
-            checkpoint.absolute_remaining_ms = checkpoint
-                .absolute_remaining_ms
-                .saturating_sub(elapsed_ms);
+            checkpoint.absolute_remaining_ms =
+                checkpoint.absolute_remaining_ms.saturating_sub(elapsed_ms);
             checkpoint.idle_remaining_ms = checkpoint.idle_remaining_ms.saturating_sub(elapsed_ms);
             let lease = V3FrontRequestLease::reattach(&checkpoint, now, next_generation);
             stored.insert(
@@ -652,10 +653,7 @@ impl V3FrontTransportBroker {
             .remove(key)
     }
 
-    pub fn client_socket(
-        &self,
-        key: &V3FrontRequestLeaseKey,
-    ) -> Option<V3StableFrontSocket> {
+    pub fn client_socket(&self, key: &V3FrontRequestLeaseKey) -> Option<V3StableFrontSocket> {
         self.client_sockets
             .lock()
             .expect("front broker client socket lock")
@@ -1097,7 +1095,10 @@ mod tests {
             .expect("front connection lease binding");
 
         assert_eq!(broker.connection_lease(connection), Some(lease.key.clone()));
-        assert_eq!(broker.lease_for_connection(connection).unwrap().key, lease.key);
+        assert_eq!(
+            broker.lease_for_connection(connection).unwrap().key,
+            lease.key
+        );
     }
 
     #[test]
@@ -1112,8 +1113,13 @@ mod tests {
 
         let mut second = lease(now);
         second.key.request_id = "req-2".into();
-        assert!(broker.bind_connection_lease(connection, second, now).is_err());
-        assert_eq!(broker.connection_lease(connection).unwrap().request_id, "req-1");
+        assert!(broker
+            .bind_connection_lease(connection, second, now)
+            .is_err());
+        assert_eq!(
+            broker.connection_lease(connection).unwrap().request_id,
+            "req-1"
+        );
     }
 
     #[test]
@@ -1316,8 +1322,8 @@ mod tests {
                 V3FrontTransportBroker::new(0),
                 app.into_service(),
             )
-                .await
-                .unwrap();
+            .await
+            .unwrap();
         });
         let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
         tokio::io::AsyncWriteExt::write_all(

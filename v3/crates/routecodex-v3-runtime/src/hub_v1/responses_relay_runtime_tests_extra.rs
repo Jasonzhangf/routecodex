@@ -44,7 +44,7 @@ fn non_target_runtime_failure_remains_runtime_error() {
         V3ResponsesRelayRuntimeError::StaticRegistry("registry unavailable".to_string()),
     );
 
-    assert_eq!(output.status, 500);
+    assert_eq!(output.status, 598);
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => panic!("runtime failure must project as JSON"),
@@ -105,7 +105,7 @@ fn provider_response_projection_failure_is_not_client_invalid_request() {
         ),
     );
 
-    assert_eq!(output.status, 500);
+    assert_eq!(output.status, 598);
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => {
@@ -124,7 +124,7 @@ fn internal_web_search_canonicalization_failure_is_not_client_invalid_request() 
         ),
     );
 
-    assert_eq!(output.status, 500);
+    assert_eq!(output.status, 598);
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => {
@@ -414,13 +414,11 @@ async fn runtime_provider_snap_captures_sse_response_without_consuming_stream() 
 }
 
 async fn collect_projected_sse(
-    stream: V3ResponsesRelayClientStream,
+    stream: Result<V3ResponsesRelayClientStream, String>,
 ) -> Vec<Result<String, String>> {
+    let stream = stream.expect("Responses client projection must be valid before stream creation");
     stream
-        .map(|item| {
-            item.map_err(|error| error.message)
-                .and_then(|bytes| String::from_utf8(bytes).map_err(|error| error.to_string()))
-        })
+        .map(|item| String::from_utf8(item).map_err(|error| error.to_string()))
         .collect()
         .await
 }
@@ -639,22 +637,19 @@ async fn provider_sse_requires_action_without_completed_is_terminal_missing() {
 
 #[tokio::test]
 async fn client_sse_function_call_projection_missing_call_id_fails_explicitly() {
-    let projected = collect_projected_sse(
-        build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
-            "id": "resp_bad_call_id",
-            "status": "requires_action",
-            "output": [{
-                "type": "function_call",
-                "name": "exec_command",
-                "arguments": "{\"cmd\":\"pwd\"}"
-            }]
-        })),
-    )
-    .await;
-    let error = projected
-        .into_iter()
-        .find_map(Result::err)
-        .expect("missing call_id must fail before terminal success");
+    let result = build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
+        "id": "resp_bad_call_id",
+        "status": "requires_action",
+        "output": [{
+            "type": "function_call",
+            "name": "exec_command",
+            "arguments": "{\"cmd\":\"pwd\"}"
+        }]
+    }));
+    let error = match result {
+        Ok(_) => panic!("missing call_id must fail before stream creation"),
+        Err(error) => error,
+    };
 
     assert!(
         error.contains("missing call_id"),

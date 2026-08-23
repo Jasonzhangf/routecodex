@@ -10,6 +10,10 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::pin::Pin;
+use std::task::{Context, Poll};
+
+const V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES: usize = 64 * 1024 * 1024;
+const V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES: usize = 262_144;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Server03HttpRequestRaw {
@@ -209,27 +213,148 @@ pub struct V3Execution11ProtocolDecision {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
 }
 
-pub type V3ClientSseStream =
+pub(crate) type V3ProviderAttemptSseStream =
     Pin<Box<dyn Stream<Item = Result<Vec<u8>, V3Error01SourceRaised>> + Send>>;
-pub type V3RelayProviderSseStream = V3ClientSseStream;
-pub type V3CommittedClientSseStream = Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3CommittedSseTerminal {
+    Completed,
+    Dropped,
+}
+
+/// Runtime-sealed replay of one completely validated provider attempt.
+///
+/// The inner stream and constructor are intentionally private. Server/Front
+/// code may consume or observe the replay, but cannot manufacture an empty or
+/// terminal-incomplete stream and call it committed.
+pub struct V3CommittedClientSseStream {
+    inner: Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>,
+}
+
+impl fmt::Debug for V3CommittedClientSseStream {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("V3CommittedClientSseStream(<sealed-replay>)")
+    }
+}
+
+impl Stream for V3CommittedClientSseStream {
+    type Item = Vec<u8>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+}
+
+impl V3CommittedClientSseStream {
+    pub fn observe(
+        self,
+        on_frame: impl Fn(&[u8]) + Send + Sync + 'static,
+        on_terminal: impl FnOnce(V3CommittedSseTerminal) + Send + 'static,
+    ) -> Self {
+        Self {
+            inner: Box::pin(V3ObservedCommittedSseStream {
+                source: self,
+                on_frame: Box::new(on_frame),
+                on_terminal: Some(Box::new(on_terminal)),
+            }),
+        }
+    }
+}
+
+struct V3ObservedCommittedSseStream {
+    source: V3CommittedClientSseStream,
+    on_frame: Box<dyn Fn(&[u8]) + Send + Sync>,
+    on_terminal: Option<Box<dyn FnOnce(V3CommittedSseTerminal) + Send>>,
+}
+
+impl V3ObservedCommittedSseStream {
+    fn finish(&mut self, terminal: V3CommittedSseTerminal) {
+        if let Some(on_terminal) = self.on_terminal.take() {
+            on_terminal(terminal);
+        }
+    }
+}
+
+impl Stream for V3ObservedCommittedSseStream {
+    type Item = Vec<u8>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match Pin::new(&mut self.source).poll_next(cx) {
+            Poll::Ready(Some(frame)) => {
+                (self.on_frame)(&frame);
+                Poll::Ready(Some(frame))
+            }
+            Poll::Ready(None) => {
+                self.finish(V3CommittedSseTerminal::Completed);
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for V3ObservedCommittedSseStream {
+    fn drop(&mut self) {
+        self.finish(V3CommittedSseTerminal::Dropped);
+    }
+}
+
+/// Attempt-local bounded buffer owned by Runtime/Broker. Successful clean EOF
+/// of the protocol-validating projected stream is the only call site allowed
+/// to seal it into `V3CommittedClientSseStream`.
+pub(crate) struct V3CommittedClientSseBuilder {
+    frames: Vec<Vec<u8>>,
+    byte_len: usize,
+}
+
+impl V3CommittedClientSseBuilder {
+    pub(crate) fn new() -> Self {
+        Self {
+            frames: Vec::new(),
+            byte_len: 0,
+        }
+    }
+
+    pub(crate) fn push(&mut self, frame: Vec<u8>) -> Result<(), String> {
+        if frame.is_empty() {
+            return Err("provider response event codec produced an empty frame".to_string());
+        }
+        if self.frames.len() >= V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES {
+            return Err(format!(
+                "provider SSE attempt exceeded the committed replay frame limit ({V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES})"
+            ));
+        }
+        let byte_len = self
+            .byte_len
+            .checked_add(frame.len())
+            .ok_or_else(|| "provider SSE attempt byte count overflowed".to_string())?;
+        if byte_len > V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES {
+            return Err(format!(
+                "provider SSE attempt exceeded the committed replay byte limit ({V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES})"
+            ));
+        }
+        self.byte_len = byte_len;
+        self.frames.push(frame);
+        Ok(())
+    }
+
+    pub(crate) fn seal_after_validated_terminal(
+        self,
+    ) -> Result<V3CommittedClientSseStream, String> {
+        if self.frames.is_empty() {
+            return Err("provider response event codec produced an empty stream".to_string());
+        }
+        Ok(V3CommittedClientSseStream {
+            inner: Box::pin(futures_util::stream::iter(self.frames)),
+        })
+    }
+}
 
 pub enum V3ClientBody {
     Json(Value),
     Bytes(Vec<u8>),
-    /// Provider/Broker attempt stream. This variant is consumed before Resp15
-    /// and must never be projected by the Server/Front response builder.
-    ProviderSse(V3ClientSseStream),
-    /// Relay provider-attempt stream. Its String error must be consumed by
-    /// the Front/Broker finalization boundary before it becomes client SSE.
-    RelayProviderSse(V3RelayProviderSseStream),
-    /// Final client stream. The first semantic frame commits the client
-    /// response; any later source error remains typed until the final server
-    /// SSE adapter projects it through Error06. Errors before this variant is
-    /// constructed stay in the provider retry/reselect path.
-    Sse(V3ClientSseStream),
-    /// Front-owned committed client stream. Provider/Broker errors have
-    /// already been resolved before this boundary; only bytes may escape.
+    /// Runtime-sealed client stream. Provider/Broker errors have already been
+    /// resolved before this public boundary; only validated bytes may escape.
     CommittedSse(V3CommittedClientSseStream),
 }
 
@@ -241,9 +366,6 @@ impl fmt::Debug for V3ClientBody {
                 .debug_struct("Bytes")
                 .field("byte_len", &bytes.len())
                 .finish(),
-            Self::ProviderSse(_) => formatter.write_str("ProviderSse(<attempt-stream>)"),
-            Self::RelayProviderSse(_) => formatter.write_str("RelayProviderSse(<attempt-stream>)"),
-            Self::Sse(_) => formatter.write_str("Sse(<client-event-stream>)"),
             Self::CommittedSse(_) => formatter.write_str("CommittedSse(<front-event-stream>)"),
         }
     }

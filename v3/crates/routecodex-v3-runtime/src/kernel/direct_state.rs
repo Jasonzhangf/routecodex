@@ -370,7 +370,6 @@ struct V3ResponsesDirectRuntimeCoreState {
     initial_plan_trace: Option<Vec<&'static str>>,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
-    direct_sse_handoff: Option<direct_sse_provider_outcome::V3DirectSseProviderHandoff>,
 }
 
 impl V3ResponsesDirectRuntimeCoreState {
@@ -392,7 +391,6 @@ impl V3ResponsesDirectRuntimeCoreState {
             initial_plan_trace: None,
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
-            direct_sse_handoff: None,
         }
     }
 
@@ -418,7 +416,6 @@ impl V3ResponsesDirectRuntimeCoreState {
             initial_plan_trace: None,
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
-            direct_sse_handoff: None,
         }
     }
 

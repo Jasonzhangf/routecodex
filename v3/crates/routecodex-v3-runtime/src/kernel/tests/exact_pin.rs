@@ -105,7 +105,7 @@ async fn missing_exact_pin_is_provider_availability_error05_without_router_reent
                 "Error06 body must not carry control-plane fields: {value}"
             );
         }
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
+        V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => {
             panic!("missing exact pin must project typed terminal Error06 JSON")
         }
     }
@@ -215,7 +215,7 @@ async fn exact_pin_capability_revision_mismatch_stays_out_of_provider_failure_ga
                 json!("continuation_exact_pin_unavailable")
             );
         }
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
+        V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => {
             panic!("capability revision mismatch must project non-provider JSON error")
         }
     }

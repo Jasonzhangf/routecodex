@@ -17,15 +17,14 @@ use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecove
 use crate::provider_failure_runtime_policy::{
     build_v3_transient_failure_record, build_v3_transient_recovery_witness,
     select_v3_expanded_target_with_exhaustion_rescue, select_v3_target_with_session_then_global,
-    v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
-    V3TargetSelectionAfterRescue, V3_TRANSIENT_RETRY_BUDGET,
+    V3ProviderFailureRuntimeHealth, V3TargetSelectionAfterRescue, V3_TRANSIENT_RETRY_BUDGET,
 };
 use crate::remote_continuation::{
     V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,
     V3RemoteContinuationScopeKey, V3RemoteContinuationStore,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
-use crate::shared::{V3RemoteContinuationObservation, V3SseRemoteContinuationObservationState};
+use crate::shared::{V3ProviderAttemptBody, V3RemoteContinuationObservation};
 use crate::sse_object_pipeline::process_sse_object_frame;
 use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
@@ -54,16 +53,8 @@ use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
 
-mod direct_sse_provider_outcome;
-use direct_sse_provider_outcome::{
-    wrap_direct_sse_provider_outcome_stream,
-    wrap_direct_sse_provider_outcome_stream_with_terminal_commit, V3DirectSseProviderHandoff,
-    V3DirectSseProviderOutcome,
-};
 pub mod direct_request_key_hooks;
 mod direct_runtime_helpers_stream;
 pub(crate) use direct_runtime_helpers_stream::wrap_direct_sse_provider_event_json_observation_stream_with_compat as wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook;
@@ -137,7 +128,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
         allow_exhaustion_rescue_probe,
         provider_failure_event_sink,
         route_selection_event_sink,
-        direct_sse_handoff,
         observability_accumulator: _,
     } = state;
 
@@ -466,19 +456,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                 &hook_registry,
             )
         }
-    };
-    let route_policy_terminal_commit: Arc<dyn Fn() -> Result<(), String> + Send + Sync> = {
-        let route_policy_state = route_policy_state.clone();
-        let route_policy_scope = route_policy_scope.clone();
-        let request_id = standardized.protocol_context.request_id.clone();
-        let route_policy_policies = route_policy_policies.clone();
-        Arc::new(move || {
-            route_policy_state.commit_request(
-                &route_policy_scope,
-                &request_id,
-                &route_policy_policies,
-            )
-        })
     };
     let standardized_request_id = standardized.protocol_context.request_id.clone();
     let standardized_server_id = standardized.protocol_context.server_id.clone();
@@ -1355,20 +1332,21 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                 )
             })
             .unwrap_or(false);
-        let direct_web_search_request_state = match (stopless_control.as_deref(), stopless_scope.as_ref()) {
-            (Some(control), Some(scope)) => match control.web_search_load_for_scope(scope) {
-                Ok(state) => state,
-                Err(error) => {
-                    return error_output(
-                        runtime_source("V3DirectWebSearchResp01Intercepted", error),
-                        trace,
-                        &hook_registry,
-                    )
-                }
-            },
-            _ => None,
-        };
-        if let V3ClientBody::Json(body) = &mut response_projection.client_payload.body {
+        let direct_web_search_request_state =
+            match (stopless_control.as_deref(), stopless_scope.as_ref()) {
+                (Some(control), Some(scope)) => match control.web_search_load_for_scope(scope) {
+                    Ok(state) => state,
+                    Err(error) => {
+                        return error_output(
+                            runtime_source("V3DirectWebSearchResp01Intercepted", error),
+                            trace,
+                            &hook_registry,
+                        )
+                    }
+                },
+                _ => None,
+            };
+        if let V3ProviderAttemptBody::Json(body) = &mut response_projection.attempt_payload.body {
             if crate::shared::v3_strip_client_response_id_enabled_for_server(
                 manifest,
                 &standardized.protocol_context.server_id,
@@ -1481,7 +1459,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                             }
                         }
                         if let (Some(control), Some(scope)) =
-                            (stopless_control, stopless_scope.as_ref())
+                            (stopless_control.as_ref(), stopless_scope.as_ref())
                         {
                             if let Err(error) = control.web_search_store_for_scope(
                                 scope,
@@ -1512,22 +1490,20 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                 }
             }
         }
+        let mut committed_sse = None;
         if let V3RemoteContinuationObservation::Streaming { state } =
             &response_projection.remote_continuation
         {
-            // Resp14 projection has already passed the first-business-frame
-            // precommit gate; retain its observation (including usage) while
-            // forwarding the committed stream without materializing the tail.
             let stream_observation = response_projection
                 .stream_observation
                 .clone()
                 .unwrap_or_default();
             let body = std::mem::replace(
-                &mut response_projection.client_payload.body,
-                V3ClientBody::Bytes(Vec::new()),
+                &mut response_projection.attempt_payload.body,
+                V3ProviderAttemptBody::Bytes(Vec::new()),
             );
-            response_projection.client_payload.body = match body {
-                V3ClientBody::ProviderSse(stream) => {
+            response_projection.attempt_payload.body = match body {
+                V3ProviderAttemptBody::Sse(stream) => {
                     let stream = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
                         stream,
                         stream_observation.clone(),
@@ -1556,58 +1532,208 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                         Some(standardized.protocol_context.request_id.clone()),
                         true,
                     );
-                    V3ClientBody::ProviderSse(stream)
+                    V3ProviderAttemptBody::Sse(stream)
                 }
                 other => other,
             };
-            if let (Some(continuation_state), Some(scope)) =
-                (continuation_state, continuation_scope.as_ref())
-            {
-                if !continuation_disabled {
-                    wrap_v3_direct_sse_remote_stream_for_outcome(
-                        &mut response_projection.client_payload.body,
-                        continuation_state.as_ref().clone(),
-                        scope,
-                        previous_response_id.clone(),
-                        selected_pin.clone(),
-                        selected_capability_revision.clone(),
-                        now_epoch_ms,
-                        state.clone(),
-                    );
+            let attempt = std::mem::replace(
+                &mut response_projection.attempt_payload.body,
+                V3ProviderAttemptBody::Bytes(Vec::new()),
+            );
+            let V3ProviderAttemptBody::Sse(mut stream) = attempt else {
+                return error_output(
+                    runtime_source(
+                        "V3DirectResp14ProviderCompat",
+                        "streaming continuation did not retain a provider-attempt SSE stream",
+                    ),
+                    trace,
+                    &hook_registry,
+                );
+            };
+            let mut committed_attempt = crate::nodes::V3CommittedClientSseBuilder::new();
+            let stream_failure = loop {
+                match stream.next().await {
+                    Some(Ok(frame)) => {
+                        if let Err(message) = committed_attempt.push(frame) {
+                            break Some(build_v3_error_01_source_raised(
+                                V3ErrorSourceKind::ProviderFailure,
+                                "V3ProviderResp14Raw",
+                                "provider_response_sse_attempt_buffer_limit",
+                                message,
+                            ));
+                        }
+                    }
+                    Some(Err(source)) => break Some(source),
+                    None => break None,
+                }
+            };
+            let committed_stream = match stream_failure {
+                None => committed_attempt
+                    .seal_after_validated_terminal()
+                    .map_err(|message| {
+                        build_v3_error_01_source_raised(
+                            V3ErrorSourceKind::ProviderFailure,
+                            "V3ProviderResp14Raw",
+                            "provider_response_sse_empty",
+                            message,
+                        )
+                    }),
+                Some(source) => Err(source),
+            };
+            match committed_stream {
+                Ok(stream) => {
+                    drop(provider_action_permit.take());
+                    committed_sse = Some(stream);
+                    response_projection.remote_continuation = match state.pending_response_id() {
+                        Ok(Some(response_id)) => {
+                            V3RemoteContinuationObservation::Pending { response_id }
+                        }
+                        Ok(None) => V3RemoteContinuationObservation::Terminal,
+                        Err(error) => {
+                            return error_output(
+                                runtime_source("V3HubRespContinuation04Committed", error),
+                                trace,
+                                &hook_registry,
+                            )
+                        }
+                    };
+                }
+                Err(source) => {
+                    let _ = runtime_timing.finish_external_if_active();
+                    drop(provider_action_permit.take());
+                    let policy_result = match run_v3_direct_provider_failure_policy(
+                        &V3DirectProviderFailurePolicyContext {
+                            failure_session_scope: &direct_failure_session_scope,
+                            provider_health: &provider_health,
+                            run_error: crate::hooks::responses_direct_error_hook,
+                            availability: &availability,
+                            expanded: expanded.as_ref(),
+                            provider_pinned: previous_response_id.is_some(),
+                            now_epoch_ms,
+                        },
+                        &policy.target,
+                        source,
+                        502,
+                        &mut V3DirectProviderFailurePolicyState {
+                            failed_candidates: &mut failed_candidates,
+                            same_candidate_retries: &mut same_candidate_retries,
+                            trace: &mut trace,
+                        },
+                    )
+                    .await
+                    {
+                        Ok(result) => result,
+                        Err(source) => return error_output(source, trace, &hook_registry),
+                    };
+                    if let Some(event) = policy_result.event.clone() {
+                        provider_failure_events.push(event.clone());
+                        publish_v3_direct_provider_failure_event(
+                            provider_failure_event_sink.as_ref(),
+                            &policy.target,
+                            "responses",
+                            "sse",
+                            Some(event.status),
+                            &provider_failure_events,
+                            &event,
+                            total_attempts(&accumulator, send_attempts),
+                        );
+                    }
+                    match &policy_result.decision.action {
+                        V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                            if !policy_result.retryable_transient {
+                                pending_provider_action_recovery = Some(recovery.clone());
+                            }
+                            continue;
+                        }
+                        V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
+                            retry_selected = policy_result.retry_selected.map(|selected| *selected);
+                            if !policy_result.retryable_transient {
+                                pending_provider_action_recovery = Some(recovery.clone());
+                            }
+                            continue;
+                        }
+                        V3Error05ExecutionAction::ProjectTerminal => {
+                            if let Err(error) = release_terminal_failure_locator(
+                                continuation_state.as_deref(),
+                                continuation_scope.as_ref(),
+                                previous_response_id.as_deref(),
+                                &selected_pin,
+                            ) {
+                                return error_output(
+                                    runtime_source("V3HubRespContinuation04Committed", error),
+                                    trace,
+                                    &hook_registry,
+                                );
+                            }
+                            if previous_response_id.is_some() {
+                                trace.push("V3HubRespContinuation04Committed");
+                            }
+                            let mut observability = build_v3_direct_runtime_observability(
+                                &policy.target,
+                                "responses",
+                                "sse",
+                                policy_result.event.as_ref().map(|event| event.status),
+                                "failed",
+                                provider_failure_events.clone(),
+                                false,
+                            );
+                            observability.attempts =
+                                Some(total_attempts(&accumulator, send_attempts));
+                            let projected =
+                                V3ErrorHandlingCenter::project_terminal(policy_result.decision);
+                            return projected_error_output_with_observability(
+                                projected,
+                                trace,
+                                Some(observability),
+                            );
+                        }
+                        V3Error05ExecutionAction::ClientDisconnected => {
+                            return projected_error_output_with_observability(
+                                V3ErrorHandlingCenter::project_terminal(policy_result.decision),
+                                trace,
+                                None,
+                            );
+                        }
+                        V3Error05ExecutionAction::RejectNonProviderError => {
+                            return error_output(
+                                runtime_source(
+                                    "V3Error05ExecutionDecision",
+                                    "provider SSE failure entered a non-provider Error05 lane",
+                                ),
+                                trace,
+                                &hook_registry,
+                            )
+                        }
+                    }
                 }
             }
-            wrap_v3_direct_sse_provider_stream_for_outcome(
-                &mut response_projection.client_payload.body,
-                provider_health.clone(),
-                &direct_failure_session_scope,
-                &policy,
-                provider_health_neutral,
-                &mut provider_action_permit,
-                runtime_timing.clone(),
-                stream_observation.clone(),
-                Some(Arc::clone(&route_policy_terminal_commit)),
-                direct_sse_handoff.clone(),
-            );
-            let attempt = std::mem::replace(
-                &mut response_projection.client_payload.body,
-                V3ClientBody::Bytes(Vec::new()),
-            );
-            response_projection.client_payload.body = match attempt {
-                V3ClientBody::ProviderSse(stream) => V3ClientBody::Sse(stream),
-                other => other,
-            };
-            return finalize_v3_direct_resp15_streaming_output(
-                &policy,
-                provider_status,
-                provider_failure_events,
-                direct_stopless_request_state.is_some(),
-                &accumulator,
-                send_attempts,
-                response_projection,
-                stream_observation,
-                &mut trace,
-            );
         }
+        let attempt_body = std::mem::replace(
+            &mut response_projection.attempt_payload.body,
+            V3ProviderAttemptBody::Bytes(Vec::new()),
+        );
+        let client_body = match (committed_sse, attempt_body) {
+            (Some(stream), V3ProviderAttemptBody::Bytes(bytes)) if bytes.is_empty() => {
+                V3ClientBody::CommittedSse(stream)
+            }
+            (None, V3ProviderAttemptBody::Json(body)) => V3ClientBody::Json(body),
+            (None, V3ProviderAttemptBody::Bytes(body)) => V3ClientBody::Bytes(body),
+            _ => {
+                return error_output(
+                    runtime_source(
+                        "V3DirectResp14ProviderCompat",
+                        "provider attempt did not resolve to one final client body",
+                    ),
+                    trace,
+                    &hook_registry,
+                )
+            }
+        };
+        let client_payload = V3Resp15ClientPayload {
+            status: response_projection.attempt_payload.status,
+            headers: std::mem::take(&mut response_projection.attempt_payload.headers),
+            body: client_body,
+        };
         if let (false, Some(_state), Some(scope)) = (
             continuation_disabled,
             continuation_state.as_ref(),
@@ -1659,7 +1785,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
         let mut observability = build_v3_direct_runtime_observability(
             &policy.target,
             "responses",
-            v3_direct_client_transport_label(&response_projection.client_payload),
+            v3_direct_client_transport_label(&client_payload),
             Some(provider_status),
             "completed",
             provider_failure_events.clone(),
@@ -1670,8 +1796,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
 
         return V3ResponsesDirectRuntimeOutput {
             observability: Some(observability),
-            stream_observation: None,
-            client_payload: response_projection.client_payload,
+            stream_observation: response_projection.stream_observation.clone(),
+            client_payload,
             node_trace: trace,
             error_chain: None,
             protocol_relay_handoff: None,
@@ -1683,6 +1809,5 @@ include!("kernel/direct_stopless.rs");
 include!("kernel/direct_runtime_helpers.rs");
 include!("kernel/v3_direct_core.rs");
 include!("kernel/direct_continuation_commit.rs");
-include!("kernel/direct_resp15_finalize.rs");
 #[cfg(test)]
 mod tests;

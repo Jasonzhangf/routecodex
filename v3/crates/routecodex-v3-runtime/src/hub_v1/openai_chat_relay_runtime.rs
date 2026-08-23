@@ -6,6 +6,7 @@ use crate::provider_failure_runtime_policy::{
     v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
     V3RelayProviderFailureRetryPolicy,
 };
+use futures_util::StreamExt;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
@@ -19,12 +20,12 @@ use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::pin::Pin;
 
-pub type V3OpenAiChatClientStream =
-    Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
+pub type V3OpenAiChatClientStream = V3RelayProjectedSseStream;
+pub type V3OpenAiChatCommittedStream = V3RelayCommittedSseStream;
 
 pub enum V3OpenAiChatRelayClientBody {
     Json(Value),
-    Sse(V3OpenAiChatClientStream),
+    Sse(V3OpenAiChatCommittedStream),
 }
 
 impl V3OpenAiChatRelayClientBody {
@@ -35,10 +36,7 @@ impl V3OpenAiChatRelayClientBody {
     pub fn into_v3_client_body(self) -> V3ClientBody {
         match self {
             Self::Json(value) => V3ClientBody::Json(value),
-            Self::Sse(stream) => V3ClientBody::Sse(crate::nodes::map_v3_client_sse_stream(
-                stream,
-                "V3HubRespOutbound05ClientSemantic",
-            )),
+            Self::Sse(stream) => V3ClientBody::CommittedSse(stream),
         }
     }
 }
@@ -510,14 +508,19 @@ impl V3OpenAiChatSseProviderOutcome {
             return Ok(());
         }
         drop(self._provider_action_permit.take());
+        let source = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_stream",
+            reason,
+        );
         self.provider_health
-            .record_post_commit_provider_stream_failure(
+            .record_post_commit_provider_stream_failure_from_source(
                 &self.failure_session_scope,
                 &self.provider_id,
                 Some(&self.auth_alias),
                 Some(&self.model_id),
-                "provider_response_protocol",
-                reason,
+                &source,
             )?;
         self.recorded = true;
         Ok(())
@@ -551,7 +554,7 @@ fn project_sse_stream(
     tool_thinking_enabled: bool,
     stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
-) -> V3OpenAiChatClientStream {
+) -> V3RelayProjectedSseStream {
     use futures_util::StreamExt;
     let state = V3OpenAiChatSseState {
         request_id,
@@ -656,7 +659,7 @@ fn project_sse_stream(
                     }
                     let result = state
                         .provider_outcome
-                        .record_failure(&error)
+                        .record_failure(&error.to_string())
                         .await
                         .map(|()| error)
                         .and_then(Err);
@@ -720,7 +723,14 @@ fn enqueue_sse_client_chunks(
                 .normalized_data_json()
                 .as_deref()
                 .is_some_and(is_v3_openai_chat_settlement_tail_frame);
-            if !object.has_data() || is_tail {
+            if !object.has_data() {
+                if object.event_name().is_some() {
+                    return Err("OpenAI Chat SSE emitted an event frame after [DONE]".into());
+                }
+                // Comment-only keep-alive frames after [DONE] are benign.
+                continue;
+            }
+            if is_tail {
                 // Comment-only keep-alive frames and non-semantic settlement
                 // frames (e.g. `{"choices":[],"cost":"0"}`) after [DONE] are
                 // benign protocol tails, not stream corruption.
@@ -844,7 +854,7 @@ fn project_responses_sse_as_openai_chat_stream(
     tool_thinking_enabled: bool,
     _stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
-) -> V3OpenAiChatClientStream {
+) -> V3RelayProjectedSseStream {
     use futures_util::StreamExt;
     let decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
         routecodex_v3_sse::SseTransportLimits::default(),
@@ -995,6 +1005,20 @@ fn project_responses_sse_as_openai_chat_stream(
                                 }
                             }
                             let Some(data) = data else {
+                                if done_seen
+                                    && frame.frame().fields().iter().any(|field| {
+                                        matches!(
+                                            field,
+                                            routecodex_v3_sse::SseField::Named { name, .. }
+                                                if name == "event"
+                                        )
+                                    })
+                                {
+                                    return Err(
+                                        "Responses SSE emitted an event without data after response.completed"
+                                            .to_string(),
+                                    );
+                                }
                                 continue;
                             };
                             if data == "[DONE]"
@@ -1046,7 +1070,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                         &mut toolreason.pending_reasons,
                                         &mut toolreason.reason_emitted,
                                         true,
-                                        None,
+                                        Some(session_id.as_str()),
                                         Some(request_id.as_str()),
                                         Some(&mut toolreason.argument_buffers),
                                     );
@@ -1252,7 +1276,6 @@ pub struct V3OpenAiChatRelayCodec;
 
 impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     type Output = V3OpenAiChatRelayRuntimeOutput;
-    type SseStream = V3OpenAiChatClientStream;
     type SseOutcome = V3OpenAiChatSseProviderOutcome;
 
     const ENTRY_PROTOCOL: V3HubEntryProtocol = V3HubEntryProtocol::OpenAiChat;
@@ -1499,7 +1522,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     }
 
     fn assemble_sse_output(
-        sse: V3RelayClientSseStream,
+        sse: V3RelayCommittedSseStream,
         trace: Vec<&'static str>,
         observability: V3RuntimeObservability,
         stream_observation: V3RuntimeStreamObservation,
@@ -1514,12 +1537,6 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             stream_observation: Some(stream_observation),
             provider_snapshots: Some(provider_snapshots),
         }
-    }
-
-    fn sse_from_collected(collected: Vec<Vec<u8>>) -> Self::SseStream {
-        let stream: V3OpenAiChatClientStream =
-            Box::pin(futures_util::stream::iter(collected.into_iter().map(Ok)));
-        stream
     }
 
     fn assemble_failure_output(

@@ -6,6 +6,13 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
+pub(crate) fn v3_output_has_terminal_client_error(
+    status: u16,
+    error_chain: Option<&[&'static str]>,
+) -> bool {
+    status >= 400 || error_chain.is_some_and(|chain| !chain.is_empty())
+}
+
 #[derive(Clone)]
 pub(crate) struct V3LiveSnapSseRecorderCore {
     state: Arc<V3ListenerState>,
@@ -108,75 +115,6 @@ impl V3LiveSnapSseRecorderCore {
     }
 }
 
-pub(crate) struct V3LiveSnapRecordedStream<S, E, F, O> {
-    inner: S,
-    recorder: V3LiveSnapSseRecorderCore,
-    terminal_persisted: bool,
-    error_message: F,
-    map_error: O,
-    _phantom: std::marker::PhantomData<E>,
-}
-
-impl<S, E, F, O, OErr> futures_util::Stream for V3LiveSnapRecordedStream<S, E, F, O>
-where
-    S: futures_util::Stream<Item = Result<Vec<u8>, E>> + futures_util::StreamExt + Unpin,
-    E: Unpin,
-    F: Fn(&E) -> String + Unpin,
-    O: Fn(String) -> OErr + Unpin,
-{
-    type Item = Result<Vec<u8>, OErr>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        context: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        match std::pin::Pin::new(&mut this.inner).poll_next(context) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Some(Ok(bytes))) => match this.recorder.append_chunk(&bytes) {
-                Ok(()) => Poll::Ready(Some(Ok(bytes))),
-                Err(error) => {
-                    this.terminal_persisted = true;
-                    Poll::Ready(Some(Err((this.map_error)(error))))
-                }
-            },
-            Poll::Ready(Some(Err(error))) => {
-                this.terminal_persisted = true;
-                let message = (this.error_message)(&error);
-                match this.recorder.persist_current(Some(&message)) {
-                    Ok(()) => Poll::Ready(Some(Err((this.map_error)(message)))),
-                    Err(persistence_error) => Poll::Ready(Some(Err((this.map_error)(format!(
-                        "{message}; codex sample persistence failed: {persistence_error}"
-                    ))))),
-                }
-            }
-            Poll::Ready(None) if !this.terminal_persisted => {
-                this.terminal_persisted = true;
-                match this.recorder.persist_current(None) {
-                    Ok(()) => Poll::Ready(None),
-                    Err(error) => Poll::Ready(Some(Err((this.map_error)(error)))),
-                }
-            }
-            Poll::Ready(None) => Poll::Ready(None),
-        }
-    }
-}
-
-impl<S, E, F, O> Drop for V3LiveSnapRecordedStream<S, E, F, O> {
-    fn drop(&mut self) {
-        if self.terminal_persisted {
-            return;
-        }
-        self.terminal_persisted = true;
-        if let Err(error) = self
-            .recorder
-            .persist_current(Some("client disconnected before SSE stream terminal"))
-        {
-            eprintln!("[v3-codex-sample] client-response snapshot persistence failed on stream drop: {error}");
-        }
-    }
-}
-
 pub(crate) struct V3LiveSnapClientResponseSseRecorder {
     core: V3LiveSnapSseRecorderCore,
 }
@@ -215,25 +153,27 @@ impl V3LiveSnapClientResponseSseRecorder {
         &self,
         stream: V3ResponsesRelayClientStream,
     ) -> V3ResponsesRelayClientStream {
-        Box::pin(V3LiveSnapRecordedStream {
-            inner: stream,
-            recorder: self.core.clone(),
-            terminal_persisted: false,
-            error_message: |error: &V3Error01SourceRaised| error.message.clone(),
-            map_error: v3_codex_sample_stream_error,
-            _phantom: std::marker::PhantomData,
-        })
+        let frame_recorder = self.core.clone();
+        let terminal_recorder = self.core.clone();
+        stream.observe(
+            move |bytes| {
+                if let Err(error) = frame_recorder.append_chunk(bytes) {
+                    eprintln!("[v3-sse-snapshot] client response capture failed: {error}");
+                }
+            },
+            move |terminal| {
+                let disconnect = matches!(terminal, V3CommittedSseTerminal::Dropped)
+                    .then_some("client disconnected before SSE replay completed");
+                if let Err(error) = terminal_recorder.persist_current(disconnect) {
+                    eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
+                }
+            },
+        )
     }
 
     pub(crate) fn persist_initial(&self) -> Result<(), String> {
         self.core.persist_initial()
     }
-}
-
-pub(crate) struct V3LiveSnapRelayRecordedStream {
-    inner: V3ResponsesRelayClientStream,
-    recorder: V3LiveSnapClientResponseSseRecorder,
-    terminal_persisted: bool,
 }
 
 #[derive(Clone)]
@@ -271,24 +211,31 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
         }
     }
 
-    pub(crate) fn wrap(&self, stream: V3ClientSseStream) -> V3ClientSseStream {
-        Box::pin(V3LiveSnapRecordedStream {
-            inner: stream,
-            recorder: self.core.clone(),
-            terminal_persisted: false,
-            error_message: |error: &V3Error01SourceRaised| error.message.clone(),
-            map_error: v3_codex_sample_stream_error,
-            _phantom: std::marker::PhantomData,
-        })
+    pub(crate) fn wrap_committed(
+        &self,
+        stream: V3CommittedClientSseStream,
+    ) -> V3CommittedClientSseStream {
+        let frame_recorder = self.core.clone();
+        let terminal_recorder = self.core.clone();
+        stream.observe(
+            move |bytes| {
+                if let Err(error) = frame_recorder.append_chunk(bytes) {
+                    eprintln!("[v3-sse-snapshot] client response capture failed: {error}");
+                }
+            },
+            move |terminal| {
+                let disconnect = matches!(terminal, V3CommittedSseTerminal::Dropped)
+                    .then_some("client disconnected before SSE replay completed");
+                if let Err(error) = terminal_recorder.persist_current(disconnect) {
+                    eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
+                }
+            },
+        )
     }
 
     pub(crate) fn persist_initial(&self) -> Result<(), String> {
         self.core.persist_initial()
     }
-}
-
-pub(crate) fn v3_codex_sample_stream_error(message: String) -> V3Error01SourceRaised {
-    raise_v3_debug_artifact_failure(message)
 }
 
 pub(crate) fn capture_v3_live_raw_request(
@@ -466,7 +413,8 @@ pub(crate) fn capture_v3_openai_chat_relay_response(
     raw_request_payload: &Value,
     output: &mut V3OpenAiChatRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
-    let force_error_evidence = output.status >= 400 || output.error_chain.is_some();
+    let force_error_evidence =
+        v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref());
     if force_error_evidence {
         let _ = persist_v3_error_evidence_payload(
             state,
@@ -593,15 +541,21 @@ impl V3LiveSnapOpenAiChatClientResponseSseRecorder {
         }
     }
 
-    pub(crate) fn wrap(&self, stream: V3OpenAiChatClientStream) -> V3OpenAiChatClientStream {
-        Box::pin(V3LiveSnapRecordedStream {
-            inner: stream,
-            recorder: self.core.clone(),
-            terminal_persisted: false,
-            error_message: |error: &String| error.clone(),
-            map_error: |message: String| message,
-            _phantom: std::marker::PhantomData,
-        })
+    pub(crate) fn wrap(&self, stream: V3OpenAiChatCommittedStream) -> V3OpenAiChatCommittedStream {
+        let frame_recorder = self.core.clone();
+        let terminal_recorder = self.core.clone();
+        stream.observe(
+            move |bytes| {
+                if let Err(error) = frame_recorder.append_chunk(bytes) {
+                    eprintln!("[v3-sse-snapshot] client response capture failed: {error}");
+                }
+            },
+            move |_terminal| {
+                if let Err(error) = terminal_recorder.persist_current(None) {
+                    eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
+                }
+            },
+        )
     }
 
     pub(crate) fn persist_initial(&self) -> Result<(), String> {
@@ -616,25 +570,28 @@ pub(crate) fn capture_v3_responses_relay_provider_snapshots(
     request_id: &str,
     output: &mut V3ResponsesRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
-    let force_error_evidence = output.status >= 400
-        || output
-            .observability
-            .as_ref()
-            .is_some_and(|observability| !observability.provider_failure_events.is_empty());
+    let terminal_error_evidence =
+        v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref());
+    let provider_attempt_evidence = output
+        .observability
+        .as_ref()
+        .is_some_and(|observability| !observability.provider_failure_events.is_empty());
+    let capture_for_evidence = terminal_error_evidence || provider_attempt_evidence;
+    let force_error_evidence = terminal_error_evidence;
     if !state
         .debug
         .should_capture_snapshot_stage("provider-request")
         && !state
             .debug
             .should_capture_snapshot_stage("provider-response")
-        && !force_error_evidence
+        && !capture_for_evidence
     {
         return None;
     }
     let snapshots = output.provider_snapshots.as_mut()?;
     let error_status = (output.status >= 400).then_some(output.status);
     if let Some(provider_request) = snapshots.provider_request.take() {
-        if force_error_evidence
+        if capture_for_evidence
             || state
                 .debug
                 .should_capture_snapshot_stage("provider-request")
@@ -669,7 +626,7 @@ pub(crate) fn capture_v3_responses_relay_provider_snapshots(
         }
     }
     if let Some(provider_response) = snapshots.provider_response.take() {
-        if force_error_evidence
+        if capture_for_evidence
             || state
                 .debug
                 .should_capture_snapshot_stage("provider-response")
@@ -771,11 +728,7 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
     raw_request_payload: &Value,
     keepalive_interval: Option<Duration>,
 ) -> Response<Body> {
-    let has_provider_failure = output
-        .observability
-        .as_ref()
-        .is_some_and(|observability| !observability.provider_failure_events.is_empty());
-    if output.status >= 400 || has_provider_failure {
+    if v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref()) {
         let _ = persist_v3_error_evidence_payload(
             state,
             entry_protocol,
@@ -933,12 +886,12 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             output.stream_observation.is_none(),
         );
         // Typed WebUI projection: relay terminal (Completed/Failed).
-        let terminal = if output.status >= 400 || !observability.provider_failure_events.is_empty()
-        {
-            V3ObsEventType::Failed
-        } else {
-            V3ObsEventType::Completed
-        };
+        let terminal =
+            if v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref()) {
+                V3ObsEventType::Failed
+            } else {
+                V3ObsEventType::Completed
+            };
         if let Err(error) = crate::console::record_v3_webui_event_for_context(
             console_context,
             terminal,
@@ -983,10 +936,10 @@ pub(crate) fn capture_v3_responses_direct_response(
             "error_chain": frame.error_chain.clone(),
             "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
         }),
-        V3Server16Body::Sse(_) => {
+        V3Server16Body::CommittedSse(_) => {
             let body = std::mem::replace(&mut frame.body, V3Server16Body::Bytes(Vec::new()));
-            let V3Server16Body::Sse(stream) = body else {
-                unreachable!("matched Direct SSE client body");
+            let V3Server16Body::CommittedSse(stream) = body else {
+                unreachable!("matched committed Direct SSE client body");
             };
             let recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
                 Arc::clone(state),
@@ -1001,7 +954,7 @@ pub(crate) fn capture_v3_responses_direct_response(
                     V3DebugError::Sink(error),
                 )));
             }
-            frame.body = V3Server16Body::Sse(recorder.wrap(stream));
+            frame.body = V3Server16Body::CommittedSse(recorder.wrap_committed(stream));
             return None;
         }
     };

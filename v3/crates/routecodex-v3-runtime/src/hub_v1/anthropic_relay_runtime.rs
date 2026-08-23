@@ -12,7 +12,7 @@ use crate::{
     V3LocalContinuationError, V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey,
     V3LocalContinuationStore, V3LocalContinuationTerminalOutcome,
 };
-use futures_util::{stream, StreamExt};
+use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
@@ -92,23 +92,31 @@ pub struct V3AnthropicRelayRuntimeOutput {
 
 pub fn project_v3_anthropic_client_sse_stream(
     client_response: Value,
-) -> crate::nodes::V3ClientSseStream {
+) -> Result<crate::nodes::V3CommittedClientSseStream, String> {
     let events = client_response
         .get("events")
         .and_then(Value::as_array)
         .cloned();
-    let stream: Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>> =
-        match events {
-            Some(events) => Box::pin(stream::iter(
-                events
-                    .into_iter()
-                    .map(|event| build_v3_anthropic_client_sse_event_chunk(&event)),
-            )),
-            None => Box::pin(stream::iter(vec![Err(
-                "typed V3 Anthropic Relay SSE projection is missing events".to_string(),
-            )])),
-        };
-    crate::nodes::map_v3_client_sse_stream(stream, "V3HubRespOutbound05ClientSemantic")
+    let events = events
+        .ok_or_else(|| "typed V3 Anthropic Relay SSE projection is missing events".to_string())?;
+    let terminal_is_valid = events.last().is_some_and(|event| {
+        event.get("event").and_then(Value::as_str) == Some("message_stop")
+            && v3_anthropic_relay_sse_event_semantic(event)
+                .get("type")
+                .and_then(Value::as_str)
+                == Some("message_stop")
+    });
+    if !terminal_is_valid {
+        return Err(
+            "typed V3 Anthropic Relay SSE projection is missing the final message_stop terminal"
+                .to_string(),
+        );
+    }
+    let mut committed = crate::nodes::V3CommittedClientSseBuilder::new();
+    for event in &events {
+        committed.push(build_v3_anthropic_client_sse_event_chunk(event)?)?;
+    }
+    committed.seal_after_validated_terminal()
 }
 
 fn build_v3_anthropic_client_sse_event_chunk(event: &Value) -> Result<Vec<u8>, String> {

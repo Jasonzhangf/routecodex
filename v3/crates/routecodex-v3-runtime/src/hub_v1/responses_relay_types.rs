@@ -2,12 +2,7 @@ use super::*;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub type V3ResponsesRelayClientStream = Pin<
-    Box<
-        dyn futures_util::Stream<Item = Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>>
-            + Send,
-    >,
->;
+pub type V3ResponsesRelayClientStream = crate::nodes::V3CommittedClientSseStream;
 
 pub enum V3ResponsesRelayClientBody {
     Json(Value),

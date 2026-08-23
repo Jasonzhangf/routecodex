@@ -122,7 +122,7 @@ impl V3ResponsesRelayStoplessControlState {
 /// 形式 direct pin），响应文本归一化为 hosted web_search text_result，
 /// 状态机迁移 ToolCallObserved -> SearchDispatchPrepared -> SearchInFlight
 /// -> SearchResultCaptured。
-pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
+pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport + ?Sized>(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
     failure_session_scope: &V3ProviderFailureSessionScope,

@@ -40,10 +40,10 @@ pub use kernel::direct_request_key_hooks::{
     V3DirectRequestKeyKind, V3DirectRequestKeyMount, V3DirectRequestKeyView,
     V3DirectRequestProtocol, V3DirectRequestToolInjection, V3DirectRequestToolKey,
 };
+pub use kernel::restore_default_provider_transport_handoff_checkpoints;
 pub use kernel::{
     default_provider_transport_handoff_checkpoints, default_responses_transport,
-    execute_v3_direct_runtime_kernel_core,
-    execute_v3_direct_runtime_kernel_core_with_key_catalog,
+    execute_v3_direct_runtime_kernel_core, execute_v3_direct_runtime_kernel_core_with_key_catalog,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel,
@@ -60,7 +60,6 @@ pub use kernel::{
     V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure,
     V3ResponsesProtocolRelayHandoff,
 };
-pub use kernel::restore_default_provider_transport_handoff_checkpoints;
 pub use local_continuation::*;
 pub use nodes::*;
 pub use provider_action_gate::*;

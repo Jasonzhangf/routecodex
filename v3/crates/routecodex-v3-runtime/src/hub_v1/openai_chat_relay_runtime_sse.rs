@@ -55,7 +55,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
     tool_thinking_enabled: bool,
     _stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
-) -> V3OpenAiChatClientStream {
+) -> V3RelayProjectedSseStream {
     use futures_util::StreamExt;
     let decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
         routecodex_v3_sse::SseTransportLimits::default(),

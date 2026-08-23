@@ -21,16 +21,6 @@ mod preplanned_target_revalidation;
 mod protocol_mode_lock;
 use fixtures::*;
 
-fn direct_sse_attempt(
-    stream: V3ClientSseStream,
-    terminal_validated: bool,
-) -> crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderAttempt {
-    crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderAttempt {
-        stream,
-        terminal_validated,
-    }
-}
-
 fn test_failure_session_scope(routing_group: &str) -> V3ProviderFailureSessionScope {
     test_failure_session_scope_for(routing_group, &format!("test-session:{routing_group}"))
 }
@@ -102,11 +92,7 @@ async fn runtime_executes_adjacent_responses_direct_chain() {
         V3ClientBody::Json(value) => {
             assert_eq!(value, json!({"id":"resp_test","output_text":"ok"}));
         }
-        V3ClientBody::Bytes(_)
-        | V3ClientBody::ProviderSse(_)
-        | V3ClientBody::RelayProviderSse(_)
-        | V3ClientBody::Sse(_)
-        | V3ClientBody::CommittedSse(_) => {
+        V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => {
             panic!("direct JSON response must remain JSON")
         }
     }
@@ -213,102 +199,6 @@ fn test_protocol_plan(
         now_epoch_ms,
     )
     .expect("test protocol plan")
-}
-
-fn test_direct_sse_provider_outcome(routing_group: &str) -> V3DirectSseProviderOutcome {
-    let manifest = scoped_test_manifest(test_manifest(), routing_group);
-    V3DirectSseProviderOutcome {
-        provider_health: V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
-        failure_session_scope: test_failure_session_scope(routing_group),
-        provider_id: "openai".to_string(),
-        auth_alias: "key1".to_string(),
-        model_id: "gpt-test".to_string(),
-        provider_protocol: V3HubProviderWireProtocol::Responses,
-        terminal: false,
-        seen_done: false,
-        recorded: false,
-        provider_health_neutral: false,
-        _provider_action_permit: None,
-    }
-}
-
-#[tokio::test]
-async fn direct_sse_runtime_timing_publishes_only_after_clean_eof() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(
-        b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
-            .to_vec(),
-    )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_runtime_timing_clean_eof"),
-        runtime_timing,
-        observation.clone(),
-    );
-
-    while governed.next().await.is_some() {}
-
-    let timing = observation
-        .snapshot()
-        .unwrap()
-        .timing
-        .expect("clean EOF must publish terminal Runtime timing");
-    assert_eq!(
-        timing.internal.checked_add(timing.external),
-        Some(timing.runtime_total)
-    );
-}
-
-#[tokio::test]
-async fn direct_sse_keepalive_text_frames_do_not_fail_the_stream() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(concat!(
-        "data: ping\n\n",
-        "event: response.completed\n",
-        "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
-    )
-    .as_bytes()
-    .to_vec())]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_keepalive_text"),
-        runtime_timing,
-        observation.clone(),
-    );
-
-    while let Some(item) = governed.next().await {
-        if let Err(error) = item {
-            panic!("keepalive stream unexpectedly failed: {error:?}");
-        }
-    }
-
-    let snapshot = observation.snapshot().unwrap();
-    assert_eq!(
-        snapshot.response_status.as_deref(),
-        Some("completed"),
-        "keepalive text frame must not abort the direct SSE stream"
-    );
-    assert!(
-        snapshot.timing.is_some(),
-        "clean EOF after keepalive must publish terminal Runtime timing"
-    );
 }
 
 #[tokio::test]
@@ -432,705 +322,6 @@ async fn direct_sse_retain_false_passes_cipher_free_frames_byte_for_byte() {
     );
 }
 
-#[tokio::test]
-async fn direct_sse_terminal_event_before_eof_does_not_publish_runtime_timing() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(
-        stream::iter(vec![Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec())]).chain(stream::pending()),
-    );
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_terminal_before_eof"),
-        runtime_timing,
-        observation.clone(),
-    );
-
-    governed.next().await.unwrap().unwrap();
-    assert!(
-        observation.snapshot().unwrap().timing.is_none(),
-        "terminal event without clean EOF must not publish Runtime timing"
-    );
-    drop(governed);
-    assert!(observation.snapshot().unwrap().timing.is_none());
-}
-
-#[tokio::test]
-async fn direct_sse_terminal_event_without_provider_done_projects_done_before_eof() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(
-        b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
-            .to_vec(),
-    )]));
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        source,
-        test_direct_sse_provider_outcome("direct_sse_terminal_without_done"),
-        runtime_timing,
-        observation,
-    );
-
-    let first = governed.next().await.unwrap().unwrap();
-    assert!(first.windows(18).any(|window| window == b"response.completed"));
-    let done = governed.next().await.unwrap().unwrap();
-    assert!(done.windows(12).any(|window| window == b"data: [DONE]"));
-    let terminal = governed.next().await;
-    assert!(terminal.is_none(), "unexpected post-DONE item: {terminal:?}");
-}
-
-#[tokio::test]
-async fn direct_sse_malformed_tail_does_not_publish_runtime_timing() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(
-        b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\ndata: {"
-            .to_vec(),
-    )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_malformed_tail"),
-        runtime_timing,
-        observation.clone(),
-    );
-
-    let mut saw_error = false;
-    while let Some(result) = governed.next().await {
-        if result.is_err() {
-            saw_error = true;
-        }
-    }
-    assert!(saw_error, "malformed SSE tail must fail closeout");
-    assert!(
-        observation.snapshot().unwrap().timing.is_none(),
-        "malformed SSE tail must not publish successful Runtime timing"
-    );
-}
-
-#[tokio::test]
-async fn direct_sse_response_done_without_completed_is_terminal_missing() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(concat!(
-        "event: response.done\n",
-        "data: {\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}\n\n",
-        "data: [DONE]\n\n"
-    )
-    .as_bytes()
-    .to_vec())]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_done_without_completed"),
-        runtime_timing,
-        observation.clone(),
-    );
-
-    let mut error = None;
-    let mut forwarded_done = false;
-    while let Some(result) = governed.next().await {
-        match result {
-            Ok(frame) => {
-                forwarded_done |= frame.windows(12).any(|window| window == b"data: [DONE]")
-            }
-            Err(source) => error = Some(source),
-        }
-    }
-    assert!(
-        forwarded_done,
-        "direct must preserve trailing [DONE] after terminal event"
-    );
-    let error = error.expect("response.done without response.completed must fail closeout");
-    assert_eq!(error.code, "provider_response_sse_terminal_missing");
-    assert!(error.message.contains("[DONE] without response.completed"));
-    assert!(
-        observation.snapshot().unwrap().timing.is_none(),
-        "terminal-missing provider stream must not publish successful Runtime timing"
-    );
-}
-
-#[tokio::test]
-async fn direct_sse_failed_event_without_error_code_is_protocol_invalid() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(
-        b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"message\":\"quota exhausted\"}}}\n\n"
-            .to_vec(),
-    )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_failed_missing_error_code"),
-        runtime_timing,
-        observation.clone(),
-    );
-
-    let error = governed
-        .next()
-        .await
-        .expect("invalid failure event must terminate the stream")
-        .expect_err("missing provider error.code must fail explicitly");
-    assert_eq!(error.code, "provider_response_sse_event_invalid");
-    assert!(
-        error.message.contains("non-empty error code"),
-        "{}",
-        error.message
-    );
-    assert!(observation.snapshot().unwrap().timing.is_none());
-}
-
-#[tokio::test]
-async fn direct_sse_incomplete_event_without_error_message_is_protocol_invalid() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(
-        b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"error\":{\"code\":\"HTTP_429\"}}}\n\n"
-            .to_vec(),
-    )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_incomplete_missing_error_message"),
-        runtime_timing,
-        observation.clone(),
-    );
-
-    let error = governed
-        .next()
-        .await
-        .expect("invalid incomplete event must terminate the stream")
-        .expect_err("missing provider error.message must fail explicitly");
-    assert_eq!(error.code, "provider_response_sse_event_invalid");
-    assert!(
-        error.message.contains("non-empty error message"),
-        "{}",
-        error.message
-    );
-    assert!(observation.snapshot().unwrap().timing.is_none());
-}
-
-#[tokio::test]
-async fn direct_sse_incomplete_details_reason_is_a_valid_terminal() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(
-        b"data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n".to_vec(),
-    )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let stream = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_incomplete_details_reason"),
-        runtime_timing,
-        observation.clone(),
-    );
-    let items = stream.collect::<Vec<_>>().await;
-    assert!(
-        items.iter().all(Result::is_ok),
-        "response.incomplete with incomplete_details.reason is a valid terminal, not a failure: {items:?}"
-    );
-    let snapshot = observation.snapshot().unwrap();
-    assert_eq!(snapshot.response_status.as_deref(), Some("incomplete"));
-    assert_eq!(
-        snapshot.finish_reason.as_deref(),
-        Some("length"),
-        "max_output_tokens incomplete terminal must record finish_reason=length"
-    );
-    assert!(
-        snapshot.timing.is_some(),
-        "terminal stream must finalize runtime timing"
-    );
-}
-
-#[tokio::test]
-async fn direct_sse_failed_event_accepts_top_level_error_envelope() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(
-        b"event: response.failed\ndata: {\"type\":\"response.failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"alternate envelope\"}}\n\n"
-            .to_vec(),
-    )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_failed_top_level_error"),
-        runtime_timing,
-        observation.clone(),
-    );
-
-    let error = governed
-        .next()
-        .await
-        .expect("alternate failure envelope must terminate the stream")
-        .expect_err("top-level JSON error must terminate the stream");
-    assert_eq!(error.code, "HTTP_429");
-    assert!(
-        error.message.contains("alternate envelope"),
-        "{}",
-        error.message
-    );
-    assert!(observation.snapshot().unwrap().timing.is_none());
-}
-
-#[tokio::test]
-async fn direct_sse_json_type_remains_provider_semantic_source() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(
-        b"event: response.completed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"quota exhausted\"}}}\n\n"
-            .to_vec(),
-    )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_event_type_mismatch"),
-        runtime_timing,
-        observation.clone(),
-    );
-
-    let mut error = None;
-    while let Some(result) = governed.next().await {
-        if let Err(source) = result {
-            error = Some(source);
-        }
-    }
-    let error = error.expect("JSON response.failed must remain a provider failure");
-    assert_eq!(error.code, "HTTP_429");
-    assert!(
-        error.message.contains("quota exhausted"),
-        "{}",
-        error.message
-    );
-    assert!(
-        observation.snapshot().unwrap().timing.is_none(),
-        "mismatched provider terminal semantics must not publish successful timing"
-    );
-}
-
-#[tokio::test]
-async fn red_sse_semantics_must_use_json_type_not_event_name() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(
-        b"event: response.created\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"quota exhausted\"}}}\n\n"
-            .to_vec(),
-    )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("red_json_type_authority"),
-        runtime_timing,
-        observation,
-    );
-
-    let mut error = None;
-    while let Some(result) = governed.next().await {
-        if let Err(source) = result {
-            error = Some(source);
-        }
-    }
-    let error = error.expect("JSON response.failed must remain a provider failure");
-    assert_eq!(
-        error.code, "HTTP_429",
-        "provider JSON type is authoritative; SSE event label is opaque"
-    );
-}
-
-#[tokio::test]
-async fn red_sse_semantics_ignore_event_name_when_json_is_completed() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(
-        b"event: provider-specific-label\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
-            .to_vec(),
-    )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("red_json_completed_authority"),
-        runtime_timing,
-        observation,
-    );
-
-    let mut results = Vec::new();
-    while let Some(result) = governed.next().await {
-        results.push(result);
-    }
-    assert!(
-        results.iter().all(Result::is_ok),
-        "JSON response.completed must not be rejected because SSE event label differs"
-    );
-}
-
-#[tokio::test]
-async fn direct_sse_failure_after_client_commit_does_not_reselect_current_request() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![
-        Ok(b"event: provider-label\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"committed\"}\n\n".to_vec()),
-        Ok(b"event: provider-label\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"after commit\"}}}\n\n".to_vec()),
-    ]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_failure_after_commit"),
-        runtime_timing,
-        observation,
-    );
-
-    assert!(governed.next().await.expect("committed frame").is_ok());
-    let error = governed
-        .next()
-        .await
-        .expect("post-commit failure event")
-        .expect_err("post-commit provider failure must close current direct stream");
-    assert_eq!(error.code, "HTTP_429");
-    assert!(
-        governed.next().await.is_none(),
-        "current stream must not reroute"
-    );
-}
-
-#[tokio::test]
-async fn direct_sse_failure_after_client_commit_does_not_reroute() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
-
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![
-        Ok(b"event: provider-label\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\n".to_vec()),
-        Ok(b"event: provider-label\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"after commit\"}}}\n\n".to_vec()),
-    ]));
-    let handoff_calls = Arc::new(AtomicUsize::new(0));
-    let handoff_calls_for_callback = handoff_calls.clone();
-    let handoff: crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderHandoff =
-        Arc::new(move |_reason| {
-            handoff_calls_for_callback.fetch_add(1, Ordering::SeqCst);
-            Box::pin(async move {
-                let fallback: crate::V3ClientSseStream = Box::pin(stream::iter(vec![Ok(
-                    b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
-                        .to_vec(),
-                )]));
-                Some(fallback)
-            })
-        });
-    let mut governed = wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
-        source,
-        test_direct_sse_provider_outcome("direct_sse_failure_after_commit_handoff"),
-        runtime_timing,
-        observation,
-        None,
-        Some(handoff),
-    );
-
-    let first = governed
-        .next()
-        .await
-        .expect("first frame must be forwarded")
-        .expect("first frame must be successful");
-    assert!(String::from_utf8(first).unwrap().contains("response.output_text.delta"));
-    let error = governed
-        .next()
-        .await
-        .expect("post-commit provider failure must be explicit")
-        .expect_err("post-commit provider failure must not be rerouted");
-    assert_eq!(error.code, "HTTP_429");
-    assert_eq!(handoff_calls.load(Ordering::SeqCst), 0);
-    assert!(governed.next().await.is_none());
-}
-
-#[tokio::test]
-async fn direct_sse_handoff_partial_stream_is_not_silent_eof() {
-    use std::sync::Arc;
-
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Err(build_v3_error_01_source_raised(
-        V3ErrorSourceKind::ProviderFailure,
-        "V3ProviderResp14Raw",
-        "provider_response_sse_stream",
-        "provider stream failed",
-    ))]));
-    let handoff: crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderHandoff =
-        Arc::new(move |_reason| {
-            Box::pin(async move {
-                Some(Box::pin(stream::iter(vec![Ok(
-                    b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"
-                        .to_vec(),
-                ), Err(build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::ProviderFailure,
-                    "V3ProviderResp14Raw",
-                    "provider_response_sse_stream",
-                    "partial handoff failed",
-                ))])) as V3ClientSseStream)
-            })
-        });
-    let mut governed = wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
-        source,
-        test_direct_sse_provider_outcome("direct_sse_partial_handoff"),
-        runtime_timing,
-        observation,
-        None,
-        Some(handoff),
-    );
-
-    let frame = governed
-        .next()
-        .await
-        .expect("partial handoff frame")
-        .expect("partial handoff frame must be forwarded");
-    assert!(String::from_utf8(frame).unwrap().contains("partial"));
-    let error = governed
-        .next()
-        .await
-        .expect("partial handoff failure must be explicit")
-        .expect_err("partial handoff must not become normal EOF");
-    assert_eq!(error.code, "provider_response_sse_stream");
-}
-
-#[tokio::test]
-async fn direct_sse_handoff_empty_stream_is_not_silent_eof() {
-    use futures_util::StreamExt;
-
-    let source: V3ClientSseStream = Box::pin(stream::iter(vec![
-        Ok(b"data: first\n\n".to_vec()),
-        Err(build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_response_sse_stream",
-            "provider stream failed",
-        )),
-    ]));
-    let handoff = |_reason: String| {
-        Box::pin(async {
-            Some(direct_sse_attempt(
-                Box::pin(stream::empty()) as V3ClientSseStream,
-                false,
-            ))
-        })
-    };
-    let mut wrapped = crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
-        source, handoff, Some(1),
-    );
-
-    assert!(wrapped.next().await.expect("first frame").is_ok());
-    let error = wrapped
-        .next()
-        .await
-        .expect("post-commit provider failure must be explicit")
-        .expect_err("post-commit provider failure must not hand off");
-    assert_eq!(error.code, "provider_response_sse_stream");
-    assert!(wrapped.next().await.is_none());
-}
-
-#[tokio::test]
-async fn direct_sse_handoff_reselects_when_first_attempt_eof_lacks_terminal() {
-    let source: V3ClientSseStream = Box::pin(stream::iter(vec![
-        Ok(b"data: {\"type\":\"response.created\"}\n\ndata: [DONE]\n\n".to_vec()),
-        Err(build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_response_sse_stream",
-            "lifecycle-only provider failed before semantic output",
-        )),
-    ]));
-    let handoff = |_reason: String| {
-        Box::pin(async {
-            Some(direct_sse_attempt(
-                Box::pin(stream::iter(vec![Ok(
-                    b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n".to_vec(),
-                )])) as V3ClientSseStream,
-                true,
-            ))
-        })
-    };
-    let mut wrapped =
-        crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
-            source, handoff, Some(1),
-        );
-
-    assert!(wrapped.next().await.expect("first frame").is_ok());
-    let recovered = wrapped
-        .next()
-        .await
-        .expect("lifecycle-only EOF must hand off")
-        .expect("handoff frame must be forwarded");
-    assert!(String::from_utf8(recovered)
-        .unwrap()
-        .contains("recovered"));
-    assert!(wrapped.next().await.is_none());
-}
-
-#[tokio::test]
-async fn direct_sse_handoff_partial_stream_without_terminal_is_not_silent_eof() {
-    let source: V3ClientSseStream = Box::pin(stream::iter(vec![
-        Ok(b"data: first\n\n".to_vec()),
-        Err(build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_response_sse_stream",
-            "provider stream failed",
-        )),
-    ]));
-    let handoff = |_reason: String| {
-        Box::pin(async {
-            Some(direct_sse_attempt(
-                Box::pin(stream::iter(vec![Ok(
-                    b"data: recovered-partial\n\n".to_vec(),
-                )])) as V3ClientSseStream,
-                false,
-            ))
-        })
-    };
-    let mut wrapped =
-        crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
-            source, handoff, Some(1),
-        );
-
-    assert!(wrapped.next().await.expect("first frame").is_ok());
-    let error = wrapped
-        .next()
-        .await
-        .expect("post-commit provider failure must be explicit")
-        .expect_err("post-commit provider failure must not hand off");
-    assert_eq!(error.code, "provider_response_sse_stream");
-}
-
-#[tokio::test]
-async fn direct_sse_handoff_follows_pool_until_callback_exhaustion_without_fixed_cap() {
-    use futures_util::StreamExt;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
-
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let source: V3ClientSseStream = Box::pin(stream::iter(vec![Err(
-        build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_response_sse_stream",
-            "provider stream failed",
-        ),
-    )]));
-    let handoff_attempts = attempts.clone();
-    let handoff = move |_reason: String| {
-        let handoff_attempts = handoff_attempts.clone();
-        Box::pin(async move {
-            let attempt = handoff_attempts.fetch_add(1, Ordering::SeqCst);
-            if attempt < 9 {
-                let error = build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::ProviderFailure,
-                    "V3ProviderResp14Raw",
-                    "provider_response_sse_stream",
-                    "provider stream failed",
-                );
-                Some(direct_sse_attempt(
-                    Box::pin(stream::iter(vec![Err(error)])) as V3ClientSseStream,
-                    false,
-                ))
-            } else {
-                Some(direct_sse_attempt(
-                    Box::pin(stream::iter(vec![Ok(
-                        b"data: [DONE]\n\n".to_vec(),
-                    )])) as V3ClientSseStream,
-                    false,
-                ))
-            }
-        })
-    };
-    let wrapped = crate::kernel::direct_sse_provider_outcome::wrap_direct_sse_provider_handoff_stream(
-        source, handoff, None,
-    );
-
-    let frames = wrapped.collect::<Vec<_>>().await;
-    assert_eq!(attempts.load(Ordering::SeqCst), 10);
-    assert_eq!(frames.len(), 2);
-    assert!(frames[0].as_ref().unwrap().contains(&b"[DONE]"[0]));
-    assert_eq!(
-        frames[1].as_ref().unwrap_err().code,
-        "provider_sse_handoff_terminal_missing"
-    );
-}
-
 pub(super) async fn run_normal_direct_request_does_not_consume_unrelated_provider_failure_gate() {
     let routing_group = "normal_direct_bypasses_provider_action_gate";
     let manifest = scoped_test_manifest(test_manifest(), routing_group);
@@ -1234,10 +425,7 @@ async fn provider_error_enters_error_chain_not_success() {
             assert!(body["error"]["message"].as_str().unwrap().contains("boom"))
         }
         V3ClientBody::Bytes(_) => panic!("error response must be JSON"),
-        V3ClientBody::ProviderSse(_)
-        | V3ClientBody::RelayProviderSse(_)
-        | V3ClientBody::Sse(_)
-        | V3ClientBody::CommittedSse(_) => panic!("error response must be JSON"),
+        V3ClientBody::CommittedSse(_) => panic!("error response must be JSON"),
     }
 }
 
@@ -1332,7 +520,7 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
     )
     .await;
 
-    assert_eq!(output.client_payload.status, 598);
+    assert_eq!(output.client_payload.status, 599);
     assert!(output.node_trace.contains(&"V3Req04StandardizedResponses"));
     assert!(!output
         .node_trace
@@ -1344,11 +532,9 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
                 .expect("error message")
                 .contains("metadataCenter"));
         }
-        V3ClientBody::Bytes(_)
-        | V3ClientBody::ProviderSse(_)
-        | V3ClientBody::RelayProviderSse(_)
-        | V3ClientBody::Sse(_)
-        | V3ClientBody::CommittedSse(_) => panic!("error response must be JSON"),
+        V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => {
+            panic!("error response must be JSON")
+        }
     }
 }
 
@@ -1407,11 +593,9 @@ async fn direct_runtime_rejects_invalid_current_data_image_before_provider_send(
                 .expect("error message")
                 .contains("invalid data:image/png payload"));
         }
-        V3ClientBody::Bytes(_)
-        | V3ClientBody::ProviderSse(_)
-        | V3ClientBody::RelayProviderSse(_)
-        | V3ClientBody::Sse(_)
-        | V3ClientBody::CommittedSse(_) => panic!("error response must be JSON"),
+        V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => {
+            panic!("error response must be JSON")
+        }
     }
 }
 
@@ -1967,11 +1151,7 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
     );
     match output.client_payload.body {
         V3ClientBody::Json(value) => assert_eq!(value["id"], "resp_second"),
-        V3ClientBody::Bytes(_)
-        | V3ClientBody::ProviderSse(_)
-        | V3ClientBody::RelayProviderSse(_)
-        | V3ClientBody::Sse(_)
-        | V3ClientBody::CommittedSse(_) => {
+        V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => {
             panic!("provider SSE failure must be reselected before client stream starts")
         }
     }
@@ -2024,22 +1204,22 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
     )
     .await;
 
-    assert_eq!(output.client_payload.status, 200);
-    assert!(output.error_chain.is_none());
-    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
-        panic!("a committed direct provider stream must remain a client SSE stream");
+    assert_eq!(output.client_payload.status, 502, "{output:?}");
+    assert!(output.error_chain.is_some(), "{output:?}");
+    let V3ClientBody::Json(error) = output.client_payload.body else {
+        panic!("pool exhaustion must project one terminal Error06 JSON body: {output:?}");
     };
-    assert!(stream.next().await.unwrap().is_ok());
-    let error = stream
-        .next()
-        .await
-        .expect("missing terminal must be explicit after the first client frame")
-        .expect_err("missing terminal must not become a silent EOF");
-    assert_eq!(error.code, "provider_response_sse_stream");
+    assert_eq!(error["error"]["code"], "provider_response_sse_stream");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("without a terminal semantic event")),
+        "{error}"
+    );
 }
 
 #[tokio::test]
-async fn responses_direct_debug_entrypoint_does_not_handoff_after_first_provider_frame() {
+async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_front_commit() {
     use futures_util::StreamExt;
     use std::sync::{Arc, Mutex};
 
@@ -2049,12 +1229,6 @@ async fn responses_direct_debug_entrypoint_does_not_handoff_after_first_provider
 
     #[async_trait]
     impl ResponsesTransport for PostCommitResponsesTransport {
-        fn handoff_handle(&self) -> Option<Arc<dyn ResponsesTransport>> {
-            Some(Arc::new(Self {
-                calls: Arc::clone(&self.calls),
-            }))
-        }
-
         async fn send(
             &self,
             request: V3Transport13ResponsesHttpRequest,
@@ -2124,31 +1298,22 @@ async fn responses_direct_debug_entrypoint_does_not_handoff_after_first_provider
     )
     .await;
 
-    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
-        panic!("expected direct SSE client body: {output:?}");
+    let V3ClientBody::CommittedSse(mut stream) = output.client_payload.body else {
+        panic!("expected committed direct SSE client body: {output:?}");
     };
-    let first = stream
-        .next()
-        .await
-        .expect("first provider frame must be forwarded")
-        .expect("first provider frame must be successful");
-    assert!(String::from_utf8(first).unwrap().contains("partial"));
-    let lifecycle = stream
-        .next()
-        .await
-        .expect("lifecycle frame must be forwarded")
-        .expect("lifecycle frame must be successful");
-    assert!(String::from_utf8(lifecycle)
-        .unwrap()
-        .contains("response.in_progress"));
-    let error = stream
-        .next()
-        .await
-        .expect("post-commit provider failure must be explicit")
-        .expect_err("post-commit provider failure must not be handed off");
-    assert!(error.message.contains("post-first-frame failure"));
-    assert_eq!(*calls.lock().unwrap(), 1, "post-commit failure must not re-execute provider request");
-    assert!(stream.next().await.is_none());
+    let mut bytes = Vec::new();
+    while let Some(frame) = stream.next().await {
+        bytes.extend_from_slice(&frame);
+    }
+    let text = String::from_utf8(bytes).expect("committed client frames must be UTF-8");
+    assert!(text.contains("recovered"), "{text}");
+    assert!(!text.contains("partial"), "failed-attempt bytes leaked: {text}");
+    assert!(!text.contains("post-first-frame failure"), "{text}");
+    assert_eq!(
+        *calls.lock().unwrap(),
+        2,
+        "post-frame failure must be retried entirely inside the Broker"
+    );
 }
 
 #[tokio::test]
@@ -2478,11 +1643,7 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     let value = match output.client_payload.body {
         V3ClientBody::Json(value) => value,
-        V3ClientBody::Bytes(_)
-        | V3ClientBody::ProviderSse(_)
-        | V3ClientBody::RelayProviderSse(_)
-        | V3ClientBody::Sse(_)
-        | V3ClientBody::CommittedSse(_) => {
+        V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => {
             panic!("direct JSON response must remain JSON")
         }
     };
