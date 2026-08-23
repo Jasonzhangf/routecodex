@@ -209,6 +209,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
         handoff_emitted_frame: bool,
         handoff_terminal_seen: bool,
         source_exhausted: bool,
+        client_committed: bool,
         done: bool,
     }
 
@@ -225,6 +226,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
             handoff_emitted_frame: false,
             handoff_terminal_seen: false,
             source_exhausted: false,
+            client_committed: false,
             done: false,
         },
         |mut state| async move {
@@ -246,6 +248,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                 match next {
                 Some(Ok(chunk)) => {
                     if state.handoff_active {
+                        state.client_committed = true;
                         state.handoff_emitted_frame = true;
                         if direct_sse_frame_has_terminal_marker(
                             &chunk,
@@ -259,7 +262,10 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                         .provider_outcome
                         .observe_chunk(&chunk, &mut state.decoder)
                     {
-                        Ok(()) => Some((Ok(chunk), state)),
+                        Ok(()) => {
+                            state.client_committed = true;
+                            Some((Ok(chunk), state))
+                        }
                         Err(source) => {
                             let result = state
                                 .provider_outcome
@@ -272,7 +278,8 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                                 state.done = true;
                                 return Some((Err(error), state));
                             }
-                            if let Some(handoff) = state.handoff.take() {
+                            if !state.client_committed {
+                                if let Some(handoff) = state.handoff.take() {
                                 if let Some(next_stream) = handoff(source.message.clone()).await {
                                     state.source = next_stream;
                                     state.handoff_active = true;
@@ -280,6 +287,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                                     state.handoff_terminal_seen = false;
                                     state.source_exhausted = false;
                                     continue;
+                                }
                                 }
                             }
                             state.done = true;
@@ -297,7 +305,8 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                         state.done = true;
                         return Some((Err(error), state));
                     }
-                    if let Some(handoff) = state.handoff.take() {
+                    if !state.client_committed {
+                        if let Some(handoff) = state.handoff.take() {
                         if let Some(next_stream) = handoff(source.message.clone()).await {
                             state.source = next_stream;
                             state.handoff_active = true;
@@ -305,6 +314,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                             state.handoff_terminal_seen = false;
                             state.source_exhausted = false;
                             continue;
+                        }
                         }
                     }
                     state.done = true;
@@ -368,7 +378,8 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                             state.done = true;
                             return Some((Err(error), state));
                         }
-                        if let Some(handoff) = state.handoff.take() {
+                        if !state.client_committed {
+                            if let Some(handoff) = state.handoff.take() {
                             if let Some(next_stream) = handoff(source.message.clone()).await {
                                 state.source = next_stream;
                                 state.handoff_active = true;
@@ -376,6 +387,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                                 state.handoff_terminal_seen = false;
                                 state.source_exhausted = false;
                                 continue;
+                            }
                             }
                         }
                         state.done = true;
@@ -413,13 +425,15 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                             state.done = true;
                             return Some((Err(error), state));
                         }
-                        if let Some(handoff) = state.handoff.take() {
+                        if !state.client_committed {
+                            if let Some(handoff) = state.handoff.take() {
                             if let Some(next_stream) = handoff(source.message.clone()).await {
                             state.source = next_stream;
                             state.handoff_active = true;
                             state.handoff_emitted_frame = false;
                             state.source_exhausted = false;
                                 continue;
+                            }
                             }
                         }
                         state.done = true;

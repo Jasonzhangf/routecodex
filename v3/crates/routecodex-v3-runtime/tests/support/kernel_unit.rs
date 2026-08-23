@@ -859,7 +859,8 @@ async fn direct_sse_failure_after_client_commit_does_not_reselect_current_reques
 }
 
 #[tokio::test]
-async fn direct_sse_failure_after_client_commit_handoffs_before_error_projection() {
+async fn direct_sse_failure_after_client_commit_does_not_reroute() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
     let runtime_timing = V3RuntimeTimingState::start();
@@ -869,8 +870,11 @@ async fn direct_sse_failure_after_client_commit_handoffs_before_error_projection
         Ok(b"event: provider-label\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\n".to_vec()),
         Ok(b"event: provider-label\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"after commit\"}}}\n\n".to_vec()),
     ]));
+    let handoff_calls = Arc::new(AtomicUsize::new(0));
+    let handoff_calls_for_callback = handoff_calls.clone();
     let handoff: crate::kernel::direct_sse_provider_outcome::V3DirectSseProviderHandoff =
         Arc::new(move |_reason| {
+            handoff_calls_for_callback.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
                 let fallback: crate::V3ClientSseStream = Box::pin(stream::iter(vec![Ok(
                     b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
@@ -888,14 +892,20 @@ async fn direct_sse_failure_after_client_commit_handoffs_before_error_projection
         Some(handoff),
     );
 
-    let mut frames = Vec::new();
-    while let Some(result) = governed.next().await {
-        frames.push(result.expect("provider failure must be consumed by handoff"));
-    }
-    let body = String::from_utf8(frames.concat()).expect("UTF-8 SSE fixture");
-    assert!(body.contains("response.output_text.delta"));
-    assert!(body.contains("response.completed"));
-    assert!(body.contains("[DONE]"));
+    let first = governed
+        .next()
+        .await
+        .expect("first frame must be forwarded")
+        .expect("first frame must be successful");
+    assert!(String::from_utf8(first).unwrap().contains("response.output_text.delta"));
+    let error = governed
+        .next()
+        .await
+        .expect("post-commit provider failure must be explicit")
+        .expect_err("post-commit provider failure must not be rerouted");
+    assert_eq!(error.code, "HTTP_429");
+    assert_eq!(handoff_calls.load(Ordering::SeqCst), 0);
+    assert!(governed.next().await.is_none());
 }
 
 #[tokio::test]
@@ -1992,7 +2002,7 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
 }
 
 #[tokio::test]
-async fn responses_direct_debug_entrypoint_handoffs_after_first_provider_frame() {
+async fn responses_direct_debug_entrypoint_does_not_handoff_after_first_provider_frame() {
     use futures_util::StreamExt;
     use std::sync::{Arc, Mutex};
 
@@ -2061,6 +2071,7 @@ async fn responses_direct_debug_entrypoint_handoffs_after_first_provider_frame()
     );
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
     let debug = V3DebugRuntime::new(Default::default()).unwrap();
+    let calls = Arc::new(Mutex::new(0));
     let output = execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         V3ResponsesDirectRuntimeCoreState::no_continuation()
             .with_provider_health(provider_health)
@@ -2068,9 +2079,7 @@ async fn responses_direct_debug_entrypoint_handoffs_after_first_provider_frame()
         &manifest,
         raw,
         crate::register_responses_direct_hooks(),
-        &PostCommitResponsesTransport {
-            calls: Arc::new(Mutex::new(0)),
-        },
+        &PostCommitResponsesTransport { calls: calls.clone() },
         &debug,
     )
     .await;
@@ -2078,14 +2087,20 @@ async fn responses_direct_debug_entrypoint_handoffs_after_first_provider_frame()
     let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
         panic!("expected direct SSE client body: {output:?}");
     };
-    let mut body = Vec::new();
-    while let Some(frame) = stream.next().await {
-        body.extend(frame.expect("provider failure must be consumed by runtime handoff"));
-    }
-    let body = String::from_utf8(body).unwrap();
-    assert!(body.contains("partial"), "first provider frame was lost: {body}");
-    assert!(body.contains("resp_recovered"), "handoff response was lost: {body}");
-    assert!(body.contains("[DONE]"), "handoff stream stopped without terminal: {body}");
+    let first = stream
+        .next()
+        .await
+        .expect("first provider frame must be forwarded")
+        .expect("first provider frame must be successful");
+    assert!(String::from_utf8(first).unwrap().contains("partial"));
+    let error = stream
+        .next()
+        .await
+        .expect("post-commit provider failure must be explicit")
+        .expect_err("post-commit provider failure must not be handed off");
+    assert!(error.message.contains("post-first-frame failure"));
+    assert_eq!(*calls.lock().unwrap(), 1, "post-commit failure must not re-execute provider request");
+    assert!(stream.next().await.is_none());
 }
 
 #[tokio::test]
