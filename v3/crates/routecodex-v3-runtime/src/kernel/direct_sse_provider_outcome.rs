@@ -641,7 +641,6 @@ mod tests {
         let handoff_calls = Arc::new(AtomicUsize::new(0));
         let calls = handoff_calls.clone();
         let source: V3ClientSseStream = Box::pin(futures_util::stream::iter(vec![
-            Ok(b"data: {\"type\":\"response.created\"}\n\n".to_vec()),
             Err(provider_failure()),
         ]));
         let stream = wrap_direct_sse_provider_handoff_stream(source, move |_message| {
