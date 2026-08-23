@@ -13,11 +13,7 @@ pub(super) struct V3DirectSseProviderAttempt {
 }
 
 pub(super) type V3DirectSseProviderHandoff = Arc<
-    dyn Fn(
-            String,
-        ) -> Pin<Box<dyn Future<Output = Option<V3ClientSseStream>> + Send>>
-        + Send
-        + Sync,
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = Option<V3ClientSseStream>> + Send>> + Send + Sync,
 >;
 
 fn direct_sse_frame_commits_client_stream(frame: &[u8]) -> bool {
@@ -39,7 +35,10 @@ fn direct_sse_frame_commits_client_stream(frame: &[u8]) -> bool {
         let Some(kind) = value.get("type").and_then(serde_json::Value::as_str) else {
             return true;
         };
-        if !matches!(kind, "response.created" | "response.in_progress" | "message_start") {
+        if !matches!(
+            kind,
+            "response.created" | "response.in_progress" | "message_start"
+        ) {
             return true;
         }
     }
@@ -251,21 +250,117 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                     }
                 };
                 match next {
-                Some(Ok(chunk)) => {
-                    if state.handoff_active {
-                        state.client_committed |= direct_sse_frame_commits_client_stream(&chunk);
-                        state.handoff_emitted_frame = true;
-                        return Some((Ok(chunk), state));
-                    }
-                    return match state
-                        .provider_outcome
-                        .observe_chunk(&chunk, &mut state.decoder)
-                    {
-                        Ok(()) => {
-                            state.client_committed |= direct_sse_frame_commits_client_stream(&chunk);
-                            Some((Ok(chunk), state))
+                    Some(Ok(chunk)) => {
+                        if state.handoff_active {
+                            state.client_committed |=
+                                direct_sse_frame_commits_client_stream(&chunk);
+                            state.handoff_emitted_frame = true;
+                            return Some((Ok(chunk), state));
                         }
-                        Err(source) => {
+                        return match state
+                            .provider_outcome
+                            .observe_chunk(&chunk, &mut state.decoder)
+                        {
+                            Ok(()) => {
+                                state.client_committed |=
+                                    direct_sse_frame_commits_client_stream(&chunk);
+                                Some((Ok(chunk), state))
+                            }
+                            Err(source) => {
+                                let result = state
+                                    .provider_outcome
+                                    .record_failure(&source)
+                                    .await
+                                    .map_err(|error| {
+                                        runtime_source("V3ProviderActionGateAdmission", error)
+                                    });
+                                if let Err(error) = result {
+                                    state.done = true;
+                                    return Some((Err(error), state));
+                                }
+                                if !state.client_committed {
+                                    if let Some(handoff) = state.handoff.take() {
+                                        if let Some(next_stream) =
+                                            handoff(source.message.clone()).await
+                                        {
+                                            state.source = next_stream;
+                                            state.handoff_active = true;
+                                            state.handoff_emitted_frame = false;
+                                            state.source_exhausted = false;
+                                            continue;
+                                        }
+                                    }
+                                }
+                                state.done = true;
+                                return Some((Err(source), state));
+                            }
+                        };
+                    }
+                    Some(Err(source)) => {
+                        let result = state
+                            .provider_outcome
+                            .record_failure(&source)
+                            .await
+                            .map_err(|error| {
+                                runtime_source("V3ProviderActionGateAdmission", error)
+                            });
+                        if let Err(error) = result {
+                            state.done = true;
+                            return Some((Err(error), state));
+                        }
+                        if !state.client_committed {
+                            if let Some(handoff) = state.handoff.take() {
+                                if let Some(next_stream) = handoff(source.message.clone()).await {
+                                    state.source = next_stream;
+                                    state.handoff_active = true;
+                                    state.handoff_emitted_frame = false;
+                                    state.source_exhausted = false;
+                                    continue;
+                                }
+                            }
+                        }
+                        state.done = true;
+                        return Some((Err(source), state));
+                    }
+                    None => {
+                        if state.handoff_active && !state.handoff_emitted_frame {
+                            state.done = true;
+                            return Some((
+                                Err(build_v3_error_01_source_raised(
+                                    V3ErrorSourceKind::ProviderFailure,
+                                    "V3ProviderResp14Raw",
+                                    "provider_sse_handoff_empty_stream",
+                                    "provider handoff stream ended without a frame",
+                                )),
+                                state,
+                            ));
+                        }
+                        if state.handoff_active {
+                            state.done = true;
+                            return None;
+                        }
+                        if state.provider_outcome.terminal
+                            && !state.provider_outcome.seen_done
+                            && matches!(
+                                state.provider_outcome.provider_protocol,
+                                V3HubProviderWireProtocol::Responses
+                                    | V3HubProviderWireProtocol::OpenAiChat
+                            )
+                        {
+                            state.provider_outcome.seen_done = true;
+                            return Some((Ok(b"data: [DONE]\n\n".to_vec()), state));
+                        }
+                        let decoder = std::mem::replace(
+                            &mut state.decoder,
+                            SseIncrementalDecoder::new(SseTransportLimits::default()),
+                        );
+                        if let Err(error) = decoder.finish() {
+                            let source = build_v3_error_01_source_raised(
+                                V3ErrorSourceKind::ProviderFailure,
+                                "V3ProviderResp14Raw",
+                                "provider_response_sse_transport_invalid",
+                                error.to_string(),
+                            );
                             let result = state
                                 .provider_outcome
                                 .record_failure(&source)
@@ -279,185 +374,101 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                             }
                             if !state.client_committed {
                                 if let Some(handoff) = state.handoff.take() {
-                                if let Some(next_stream) = handoff(source.message.clone()).await {
-                                    state.source = next_stream;
-                                    state.handoff_active = true;
-                                    state.handoff_emitted_frame = false;
-                                    state.source_exhausted = false;
-                                    continue;
-                                }
+                                    if let Some(next_stream) = handoff(source.message.clone()).await
+                                    {
+                                        state.source = next_stream;
+                                        state.handoff_active = true;
+                                        state.handoff_emitted_frame = false;
+                                        state.source_exhausted = false;
+                                        continue;
+                                    }
                                 }
                             }
                             state.done = true;
                             return Some((Err(source), state));
                         }
-                    }
-                }
-                Some(Err(source)) => {
-                    let result = state
-                        .provider_outcome
-                        .record_failure(&source)
-                        .await
-                        .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error));
-                    if let Err(error) = result {
-                        state.done = true;
-                        return Some((Err(error), state));
-                    }
-                    if !state.client_committed {
-                        if let Some(handoff) = state.handoff.take() {
-                        if let Some(next_stream) = handoff(source.message.clone()).await {
-                            state.source = next_stream;
-                            state.handoff_active = true;
-                            state.handoff_emitted_frame = false;
-                            state.source_exhausted = false;
-                            continue;
-                        }
-                        }
-                    }
-                    state.done = true;
-                    return Some((Err(source), state));
-                }
-                None => {
-                    if state.handoff_active && !state.handoff_emitted_frame {
-                        state.done = true;
-                        return Some((
-                            Err(build_v3_error_01_source_raised(
+                        if !state.provider_outcome.terminal {
+                            let terminal_name = match state.provider_outcome.provider_protocol {
+                                V3HubProviderWireProtocol::Responses => "response.completed",
+                                V3HubProviderWireProtocol::Anthropic => "message_stop",
+                                V3HubProviderWireProtocol::OpenAiChat => "finish_reason",
+                                V3HubProviderWireProtocol::Gemini => "turn_complete",
+                            };
+                            let source = build_v3_error_01_source_raised(
                                 V3ErrorSourceKind::ProviderFailure,
                                 "V3ProviderResp14Raw",
-                                "provider_sse_handoff_empty_stream",
-                                "provider handoff stream ended without a frame",
-                            )),
-                            state,
-                        ));
-                    }
-                    if state.handoff_active {
-                        state.done = true;
-                        return None;
-                    }
-                    if state.provider_outcome.terminal
-                        && !state.provider_outcome.seen_done
-                        && matches!(
-                            state.provider_outcome.provider_protocol,
-                            V3HubProviderWireProtocol::Responses
-                                | V3HubProviderWireProtocol::OpenAiChat
-                        )
-                    {
-                        state.provider_outcome.seen_done = true;
-                        return Some((Ok(b"data: [DONE]\n\n".to_vec()), state));
-                    }
-                    let decoder = std::mem::replace(
-                        &mut state.decoder,
-                        SseIncrementalDecoder::new(SseTransportLimits::default()),
-                    );
-                    if let Err(error) = decoder.finish() {
-                        let source = build_v3_error_01_source_raised(
-                            V3ErrorSourceKind::ProviderFailure,
-                            "V3ProviderResp14Raw",
-                            "provider_response_sse_transport_invalid",
-                            error.to_string(),
-                        );
-                        let result = state
-                            .provider_outcome
-                            .record_failure(&source)
-                            .await
-                            .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error));
-                        if let Err(error) = result {
+                                "provider_response_sse_terminal_missing",
+                                if state.provider_outcome.seen_done {
+                                    format!(
+                                        "provider {:?} SSE emitted [DONE] without {terminal_name}",
+                                        state.provider_outcome.provider_protocol
+                                    )
+                                } else {
+                                    format!(
+                                        "provider {:?} SSE ended without {terminal_name}",
+                                        state.provider_outcome.provider_protocol
+                                    )
+                                },
+                            );
+                            let result = state
+                                .provider_outcome
+                                .record_failure(&source)
+                                .await
+                                .map_err(|error| {
+                                    runtime_source("V3ProviderActionGateAdmission", error)
+                                });
+                            if let Err(error) = result {
+                                state.done = true;
+                                return Some((Err(error), state));
+                            }
+                            if !state.client_committed {
+                                if let Some(handoff) = state.handoff.take() {
+                                    if let Some(next_stream) = handoff(source.message.clone()).await
+                                    {
+                                        state.source = next_stream;
+                                        state.handoff_active = true;
+                                        state.handoff_emitted_frame = false;
+                                        state.source_exhausted = false;
+                                        continue;
+                                    }
+                                }
+                            }
                             state.done = true;
-                            return Some((Err(error), state));
-                        }
-                        if !state.client_committed {
-                            if let Some(handoff) = state.handoff.take() {
-                            if let Some(next_stream) = handoff(source.message.clone()).await {
-                                state.source = next_stream;
-                                state.handoff_active = true;
-                                state.handoff_emitted_frame = false;
-                                state.source_exhausted = false;
-                                continue;
-                            }
-                            }
+                            return Some((Err(source), state));
                         }
                         state.done = true;
-                        return Some((Err(source), state));
-                    }
-                    if !state.provider_outcome.terminal {
-                        let terminal_name = match state.provider_outcome.provider_protocol {
-                            V3HubProviderWireProtocol::Responses => "response.completed",
-                            V3HubProviderWireProtocol::Anthropic => "message_stop",
-                            V3HubProviderWireProtocol::OpenAiChat => "finish_reason",
-                            V3HubProviderWireProtocol::Gemini => "turn_complete",
-                        };
-                        let source = build_v3_error_01_source_raised(
-                            V3ErrorSourceKind::ProviderFailure,
-                            "V3ProviderResp14Raw",
-                            "provider_response_sse_terminal_missing",
-                            if state.provider_outcome.seen_done {
-                                format!(
-                                    "provider {:?} SSE emitted [DONE] without {terminal_name}",
-                                    state.provider_outcome.provider_protocol
-                                )
-                            } else {
-                                format!(
-                                    "provider {:?} SSE ended without {terminal_name}",
-                                    state.provider_outcome.provider_protocol
-                                )
-                            },
-                        );
-                        let result = state
-                            .provider_outcome
-                            .record_failure(&source)
-                            .await
-                            .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error));
-                        if let Err(error) = result {
-                            state.done = true;
-                            return Some((Err(error), state));
-                        }
-                        if !state.client_committed {
-                            if let Some(handoff) = state.handoff.take() {
-                            if let Some(next_stream) = handoff(source.message.clone()).await {
-                            state.source = next_stream;
-                            state.handoff_active = true;
-                            state.handoff_emitted_frame = false;
-                            state.source_exhausted = false;
-                                continue;
-                            }
-                            }
-                        }
-                        state.done = true;
-                        return Some((Err(source), state));
-                    }
-                    state.done = true;
-                    if let Err(error) = state.provider_outcome.record_success() {
-                        return Some((
-                            Err(runtime_source("V3ProviderHealthStateMutated", error)),
-                            state,
-                        ));
-                    }
-                    let timing = match state.runtime_timing.finish_runtime() {
-                        Ok(timing) => timing,
-                        Err(error) => {
+                        if let Err(error) = state.provider_outcome.record_success() {
                             return Some((
-                                Err(runtime_source("V3RuntimeTimingTerminal", error)),
+                                Err(runtime_source("V3ProviderHealthStateMutated", error)),
                                 state,
                             ));
                         }
-                    };
-                    return match state.stream_observation.record_timing(timing) {
-                        Ok(()) => match state
-                            .route_policy_terminal_commit
-                            .as_ref()
-                            .map(|commit| commit())
-                        {
-                            Some(Err(error)) => Some((
-                                Err(runtime_source("V3Router06RoutePoolResolved", error)),
-                                state,
-                            )),
-                            _ => None,
-                        },
-                        Err(error) => {
-                            Some((Err(runtime_source("V3RuntimeTimingTerminal", error)), state))
-                        }
-                    };
-                }
+                        let timing = match state.runtime_timing.finish_runtime() {
+                            Ok(timing) => timing,
+                            Err(error) => {
+                                return Some((
+                                    Err(runtime_source("V3RuntimeTimingTerminal", error)),
+                                    state,
+                                ));
+                            }
+                        };
+                        return match state.stream_observation.record_timing(timing) {
+                            Ok(()) => match state
+                                .route_policy_terminal_commit
+                                .as_ref()
+                                .map(|commit| commit())
+                            {
+                                Some(Err(error)) => Some((
+                                    Err(runtime_source("V3Router06RoutePoolResolved", error)),
+                                    state,
+                                )),
+                                _ => None,
+                            },
+                            Err(error) => {
+                                Some((Err(runtime_source("V3RuntimeTimingTerminal", error)), state))
+                            }
+                        };
+                    }
                 }
             }
         },
@@ -516,7 +527,8 @@ where
                     }
                     Some(Err(error))
                         if !handoff_client_committed
-                            && handoff_budget.is_none_or(|budget| budget > 0) => {
+                            && handoff_budget.is_none_or(|budget| budget > 0) =>
+                    {
                         let Some(next) = handoff.clone()(error.message.clone()).await else {
                             return Some((
                                 Err(error),
@@ -603,21 +615,24 @@ mod tests {
     async fn provider_failure_before_terminal_is_handed_off_without_client_error() {
         let handoff_calls = Arc::new(AtomicUsize::new(0));
         let calls = handoff_calls.clone();
-        let source: V3ClientSseStream = Box::pin(futures_util::stream::iter(vec![
-            Err(provider_failure()),
-        ]));
-        let stream = wrap_direct_sse_provider_handoff_stream(source, move |_message| {
-            let calls = calls.clone();
-            async move {
-                calls.fetch_add(1, Ordering::SeqCst);
-                Some(V3DirectSseProviderAttempt {
-                    stream: Box::pin(futures_util::stream::iter(vec![Ok(
-                        b"data: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n".to_vec(),
-                    )])) as V3ClientSseStream,
-                    terminal_validated: true,
-                })
-            }
-        }, None);
+        let source: V3ClientSseStream =
+            Box::pin(futures_util::stream::iter(vec![Err(provider_failure())]));
+        let stream = wrap_direct_sse_provider_handoff_stream(
+            source,
+            move |_message| {
+                let calls = calls.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Some(V3DirectSseProviderAttempt {
+                        stream: Box::pin(futures_util::stream::iter(vec![Ok(
+                            b"data: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n".to_vec(),
+                        )])) as V3ClientSseStream,
+                        terminal_validated: true,
+                    })
+                }
+            },
+            None,
+        );
 
         let frames = stream.collect::<Vec<_>>().await;
         assert_eq!(handoff_calls.load(Ordering::SeqCst), 1);
@@ -635,13 +650,17 @@ mod tests {
         let source: V3ClientSseStream = Box::pin(futures_util::stream::iter(vec![Ok(
             b"data: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n".to_vec(),
         )]));
-        let stream = wrap_direct_sse_provider_handoff_stream(source, move |_message| {
-            let calls = calls.clone();
-            async move {
-                calls.fetch_add(1, Ordering::SeqCst);
-                None::<V3DirectSseProviderAttempt>
-            }
-        }, None);
+        let stream = wrap_direct_sse_provider_handoff_stream(
+            source,
+            move |_message| {
+                let calls = calls.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    None::<V3DirectSseProviderAttempt>
+                }
+            },
+            None,
+        );
 
         let frames = stream.collect::<Vec<_>>().await;
         assert_eq!(handoff_calls.load(Ordering::SeqCst), 0);
@@ -651,9 +670,8 @@ mod tests {
 
     #[tokio::test]
     async fn provider_failure_after_handoff_is_exposed_only_when_handoff_is_exhausted() {
-        let source: V3ClientSseStream = Box::pin(futures_util::stream::iter(vec![
-            Err(provider_failure()),
-        ]));
+        let source: V3ClientSseStream =
+            Box::pin(futures_util::stream::iter(vec![Err(provider_failure())]));
         let stream = wrap_direct_sse_provider_handoff_stream(
             source,
             |_message| async { None::<V3DirectSseProviderAttempt> },
