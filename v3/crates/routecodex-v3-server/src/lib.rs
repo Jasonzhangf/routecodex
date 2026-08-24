@@ -1037,10 +1037,6 @@ fn v3_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool {
     payload.get("stream").and_then(Value::as_bool) == Some(true) || request_accepts_sse(headers)
 }
 
-fn v3_entry_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool {
-    payload.get("stream").and_then(Value::as_bool) == Some(true) || request_accepts_sse(headers)
-}
-
 fn build_v3_provider_failure_session_scope_for_request(
     server: &V3ServerManifest,
     headers: &HeaderMap,

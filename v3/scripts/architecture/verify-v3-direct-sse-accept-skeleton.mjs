@@ -44,11 +44,11 @@ const mainlineMap = readFirst(admissionWorkspace
   : ['../docs/architecture/v3-mainline-call-map.yml']);
 
 for (const marker of [
-  'V3DirectSseAcceptSkeleton',
+  'V3FrontSseAcceptSkeleton',
   'pending_endpoint_after_responses_admission_inner',
   'tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(32)',
   'v3_io_sse_body(Box::pin(client_stream), Some(keepalive_interval))',
-  'v3_entry_request_wants_sse(&request_headers, &payload)',
+  'v3_request_wants_sse(&request_headers, &payload)',
 ]) {
   if (!endpoint.includes(marker)) failures.push(`endpoint_handlers.rs: missing fixed skeleton marker ${marker}`);
 }
