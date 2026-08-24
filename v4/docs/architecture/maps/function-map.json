@@ -732,7 +732,10 @@
         "crates/routecodex-v4-node-container/tests/l2_epoch.rs"
       ],
       "required_gates": [
-        "v4_node_container_l2_regression"
+        "v4_node_container_epoch_positive",
+        "v4_node_container_epoch_red",
+        "v4_node_container_epoch_boundary",
+        "v4_node_container_epoch_plane"
       ],
       "resource_bindings": [
         "v4.node_container.execution_epoch"

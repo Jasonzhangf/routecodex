@@ -430,6 +430,50 @@
       ]
     },
     {
+      "gate_id": "v4_node_container_epoch_positive",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-node-container",
+      "feature_ids": ["V4-RUNTIME-002"],
+      "command": "cargo test -p routecodex-v4-node-container --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
+      "producer": {"adapter": "cargo", "identity": "v4_node_container_epoch_positive"},
+      "evidence_role": "positive",
+      "required_for": ["V4-RUNTIME-002:source_green"]
+    },
+    {
+      "gate_id": "v4_node_container_epoch_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-node-container",
+      "feature_ids": ["V4-RUNTIME-002"],
+      "command": "cargo test -p routecodex-v4-node-container --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
+      "producer": {"adapter": "cargo", "identity": "v4_node_container_epoch_red"},
+      "evidence_role": "red_gate",
+      "required_for": ["V4-RUNTIME-002:source_green"]
+    },
+    {
+      "gate_id": "v4_node_container_epoch_boundary",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-node-container",
+      "feature_ids": ["V4-RUNTIME-002"],
+      "command": "cargo test -p routecodex-v4-node-container --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
+      "producer": {"adapter": "cargo", "identity": "v4_node_container_epoch_boundary"},
+      "evidence_role": "boundary_audit",
+      "required_for": ["V4-RUNTIME-002:source_green"]
+    },
+    {
+      "gate_id": "v4_node_container_epoch_plane",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-node-container",
+      "feature_ids": ["V4-RUNTIME-002"],
+      "command": "cargo test -p routecodex-v4-node-container --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
+      "producer": {"adapter": "cargo", "identity": "v4_node_container_epoch_plane"},
+      "evidence_role": "plane_isolation",
+      "required_for": ["V4-RUNTIME-002:source_green"]
+    },
+    {
       "gate_id": "v4_node_container_epoch_closure_audit",
       "status": "active",
       "owner_module_id": "routecodex-v4-runtime",
