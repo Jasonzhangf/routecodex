@@ -1,4 +1,5 @@
 use routecodex_v4_base_node::Scope;
+use routecodex_v4_cordis_bridge::NodeExecutionInput;
 use routecodex_v4_cli::{
     Cli, ConfigIntent, ConfigPathIntent, InitIntent, ManagedChildIntent, RestartIntent,
     ServerIntent, ServerStartIntent, ServertoolIntent, SnapshotIntent, StartIntent, StopIntent,
@@ -15,6 +16,8 @@ use routecodex_v4_lifecycle::{
     ManagedAction, ManagedControlPlane, ManagedInstanceRecord, ManagedSpawnOptions,
     V4LifecyclePaths,
 };
+use routecodex_v4_node_container::{NodeContainer, PlanBindings};
+use routecodex_v4_standard_plugins::{compile_standard_plan, StandardHandleRegistry};
 use routecodex_v4_provider::{
     send_responses, send_responses_streaming, write_provider_profile, ProviderInitAuth,
     ProviderInitOptions, ProviderResponseStream,
@@ -382,20 +385,96 @@ fn format_status(state: &str, record: &ManagedInstanceRecord) -> String {
 struct PipelineHandler {
     manifest: RuntimeConfigManifest,
     runtime: Arc<Mutex<SkeletonRuntime>>,
+    request_node: Arc<Mutex<NodeContainer>>,
+    response_node: Arc<Mutex<NodeContainer>>,
+    plugin_registry: Arc<StandardHandleRegistry>,
+}
+
+fn publish_node_container(
+    node_id: &str,
+    plan: routecodex_v4_plugin_plan::NodePluginPlan,
+) -> Result<NodeContainer, String> {
+    let plan_hash = plan.plan_hash();
+    let mut node = NodeContainer::declare(
+        node_id,
+        plan,
+        PlanBindings {
+            graph_hash: plan_hash.clone(),
+            manifest_hash: plan_hash.clone(),
+            loaded_plan_hash: plan_hash,
+        },
+    )
+    .map_err(|error| format!("{node_id} NodeContainer declare failed: {error}"))?;
+    node.context_created()
+        .and_then(|_| node.plugins_mounted())
+        .and_then(|_| node.publish())
+        .map_err(|error| format!("{node_id} NodeContainer publish failed: {error}"))?;
+    Ok(node)
 }
 
 impl PipelineHandler {
     fn new(manifest: RuntimeConfigManifest) -> Result<Self, String> {
         let runtime = SkeletonRuntime::load(SKELETON_PLAN).map_err(|error| error.to_string())?;
+        let request_plan = compile_standard_plan(
+            "V4HubReqInbound03Normalized",
+            "request_inbound",
+            "request",
+            3,
+            &["v4.std.contract.input_validate"],
+        )
+        .map_err(|error| format!("request NodePluginPlan compile failed: {error:?}"))?;
+        let response_plan = compile_standard_plan(
+            "V4HubRespInbound02Parsed",
+            "response_inbound",
+            "response",
+            2,
+            &["v4.std.response.protocol_decode"],
+        )
+        .map_err(|error| format!("response NodePluginPlan compile failed: {error:?}"))?;
         Ok(Self {
             manifest,
             runtime: Arc::new(Mutex::new(runtime)),
+            request_node: Arc::new(Mutex::new(publish_node_container(
+                "V4HubReqInbound03Normalized",
+                request_plan,
+            )?)),
+            response_node: Arc::new(Mutex::new(publish_node_container(
+                "V4HubRespInbound02Parsed",
+                response_plan,
+            )?)),
+            plugin_registry: Arc::new(StandardHandleRegistry::new()),
         })
     }
+
+    fn execute_request_node(&self, request: &HttpRequest) -> Result<(), RuntimeFault> {
+        let Ok(data) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
+            return Ok(());
+        };
+        let node = self.request_node.lock().map_err(|_| {
+            RuntimeFault::new("request_node_lock", "request NodeContainer lock poisoned")
+        })?;
+        let plan_hash = node.bindings().loaded_plan_hash.clone();
+        node.execute_with_plan_hash(
+            &plan_hash,
+            NodeExecutionInput {
+                data,
+                control: serde_json::json!({}),
+            },
+            self.plugin_registry.as_ref(),
+        )
+        .map(|_| ())
+        .map_err(|error| RuntimeFault::new("request_node_execution", error.to_string()))
+    }
+
 }
 
 impl HttpHandler for PipelineHandler {
     fn handle(&mut self, request: HttpRequest) -> HttpResponse {
+        if request.method == "POST" {
+            if let Err(fault) = self.execute_request_node(&request) {
+                return project_fault(&request, fault, 409);
+            }
+        }
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/health") => json_response(
                 200,
@@ -409,14 +488,24 @@ impl HttpHandler for PipelineHandler {
             ("POST", "/v1/responses") => handle_responses(
                 &self.manifest,
                 &self.runtime,
+                &self.response_node,
+                &self.plugin_registry,
                 &request,
                 "responses",
                 "direct",
             )
             .unwrap_or_else(|response| response),
             ("POST", "/v1/chat/completions") => {
-                handle_responses(&self.manifest, &self.runtime, &request, "chat", "relay")
-                    .unwrap_or_else(|response| response)
+                handle_responses(
+                    &self.manifest,
+                    &self.runtime,
+                    &self.response_node,
+                    &self.plugin_registry,
+                    &request,
+                    "chat",
+                    "relay",
+                )
+                .unwrap_or_else(|response| response)
             }
             _ => project_fault(
                 &request,
@@ -451,6 +540,8 @@ fn models_response(manifest: &RuntimeConfigManifest) -> HttpResponse {
 fn handle_responses(
     manifest: &RuntimeConfigManifest,
     runtime: &Arc<Mutex<SkeletonRuntime>>,
+    response_node: &Arc<Mutex<NodeContainer>>,
+    plugin_registry: &Arc<StandardHandleRegistry>,
     request: &HttpRequest,
     entry_protocol: &str,
     continuation_owner: &str,
@@ -596,6 +687,35 @@ fn handle_responses(
         .map_err(|fault| project_fault(request, fault, 502))?
     {
         ResponsesProviderPayload::Json(value) => {
+            let response_node_guard = response_node.lock().map_err(|_| {
+                project_fault(
+                    request,
+                    RuntimeFault::new("response_node_lock", "response NodeContainer lock poisoned"),
+                    409,
+                )
+            })?;
+            let response_plan_hash = response_node_guard.bindings().loaded_plan_hash.clone();
+            response_node_guard
+                .execute_with_plan_hash(
+                    &response_plan_hash,
+                    NodeExecutionInput {
+                        data: serde_json::json!({
+                            "requestId": request.request_id,
+                            "providerId": target.provider_id,
+                            "statusCode": raw.status,
+                            "data": value.clone(),
+                        }),
+                        control: serde_json::json!({}),
+                    },
+                    plugin_registry.as_ref(),
+                )
+                .map_err(|error| {
+                    project_fault(
+                        request,
+                        RuntimeFault::new("response_node_execution", error.to_string()),
+                        502,
+                    )
+                })?;
             let provider_raw = serde_json::to_string(&value).map_err(|error| {
                 project_fault(
                     request,
@@ -876,6 +996,89 @@ fn json_response(status: u16, value: serde_json::Value) -> HttpResponse {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+    use routecodex_v4_config::compile_runtime_config;
+    use routecodex_v4_node_container::NodeContainerState;
+
+    fn test_manifest() -> RuntimeConfigManifest {
+        compile_runtime_config(
+            r#"
+version = 4
+
+[runtime]
+id = "rccv4"
+
+[[listeners]]
+id = "primary"
+address = "127.0.0.1:17777"
+
+[[providers]]
+provider_id = "mock"
+config_path = "provider.toml"
+protocol = "responses"
+wire_model = "mock-model"
+priority = 1
+entry_models = ["mock-model"]
+
+[[routes]]
+id = "default"
+models = ["mock-model"]
+targets = ["mock"]
+"#,
+            None,
+        )
+        .expect("test runtime manifest compiles")
+    }
+
+    #[test]
+    fn production_pipeline_declares_and_executes_request_node_container() {
+        let mut handler = PipelineHandler::new(test_manifest()).expect("handler initializes");
+        assert_eq!(
+            handler
+                .request_node
+                .lock()
+                .expect("request node lock")
+                .state(),
+            NodeContainerState::Accepting
+        );
+        assert_eq!(
+            handler
+                .response_node
+                .lock()
+                .expect("response node lock")
+                .state(),
+            NodeContainerState::Accepting
+        );
+        {
+            let response_node = handler.response_node.lock().expect("response node lock");
+            let response_plan_hash = response_node.bindings().loaded_plan_hash.clone();
+            let output = response_node
+                .execute_with_plan_hash(
+                    &response_plan_hash,
+                    NodeExecutionInput {
+                        data: serde_json::json!({
+                            "requestId": "request-node-container-test",
+                            "providerId": "mock",
+                            "statusCode": 200,
+                            "data": {"output": [{"type": "message"}]}
+                        }),
+                        control: serde_json::json!({}),
+                    },
+                    handler.plugin_registry.as_ref(),
+                )
+                .expect("response inbound plan executes through NodeContainer");
+            assert_eq!(output.data["output"][0]["type"], "message");
+        }
+        let response = handler.handle(HttpRequest {
+            method: "POST".to_string(),
+            path: "/unknown".to_string(),
+            headers: Vec::new(),
+            body: br#"{"model":"mock-model","input":"hello"}"#.to_vec(),
+            request_id: "request-node-container-test".to_string(),
+            server_id: "test".to_string(),
+            port: 17777,
+        });
+        assert_eq!(response.status, 404, "request node must run before route projection");
+    }
 
     struct MockSseSource {
         chunks: VecDeque<Result<Vec<u8>, String>>,
