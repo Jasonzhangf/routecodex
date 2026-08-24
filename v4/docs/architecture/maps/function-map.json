@@ -300,6 +300,27 @@
       ]
     },
     {
+      "function_id": "v4.runtime.cordis_mount_candidate",
+      "owner": "routecodex-v4-cordis-bridge",
+      "status": "active",
+      "feature_id": "V4-RUNTIME-004",
+      "entry_symbols": [
+        "CordisMountCandidate",
+        "mount_candidate",
+        "CordisMountCandidate::verify"
+      ],
+      "entry_paths": ["crates/routecodex-v4-cordis-bridge/src/lib.rs"],
+      "source_paths": ["crates/routecodex-v4-cordis-bridge/src/lib.rs"],
+      "resource_ids": ["v4.cordis.mount_candidate"],
+      "required_gates": [
+        "v4_runtime_004_mount_positive",
+        "v4_runtime_004_mount_red",
+        "v4_runtime_004_mount_boundary",
+        "v4_runtime_004_mount_plane"
+      ],
+      "resource_bindings": ["v4.cordis.mount_candidate"]
+    },
+    {
       "function_id": "v4.plugin.cli_inspector",
       "owner": "routecodex-v4-cli-plugin",
       "entry_symbols": [

@@ -394,6 +394,54 @@
       "required_for": ["V4-RUNTIME-003:source_green"]
     },
     {
+      "gate_id": "v4_runtime_004_mount_positive",
+      "status": "active",
+      "command": "cargo test -p routecodex-v4-cordis-bridge --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-cordis-bridge", "--manifest-path", "Cargo.toml", "--locked"],
+      "owner_module_id": "routecodex-v4-cordis-bridge",
+      "feature_ids": ["V4-RUNTIME-004"],
+      "evidence_role": "positive",
+      "producer": {"adapter": "cargo", "identity": "v4_runtime_004_mount_positive"},
+      "input_paths": ["crates/routecodex-v4-cordis-bridge/src/lib.rs"],
+      "required_for": ["V4-RUNTIME-004:source_green"]
+    },
+    {
+      "gate_id": "v4_runtime_004_mount_red",
+      "status": "active",
+      "command": "cargo test -p routecodex-v4-cordis-bridge --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-cordis-bridge", "--manifest-path", "Cargo.toml", "--locked"],
+      "owner_module_id": "routecodex-v4-cordis-bridge",
+      "feature_ids": ["V4-RUNTIME-004"],
+      "evidence_role": "red_gate",
+      "producer": {"adapter": "cargo", "identity": "v4_runtime_004_mount_red"},
+      "input_paths": ["crates/routecodex-v4-cordis-bridge/src/lib.rs"],
+      "required_for": ["V4-RUNTIME-004:source_green"]
+    },
+    {
+      "gate_id": "v4_runtime_004_mount_boundary",
+      "status": "active",
+      "command": "cargo test -p routecodex-v4-cordis-bridge --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-cordis-bridge", "--manifest-path", "Cargo.toml", "--locked"],
+      "owner_module_id": "routecodex-v4-cordis-bridge",
+      "feature_ids": ["V4-RUNTIME-004"],
+      "evidence_role": "boundary_audit",
+      "producer": {"adapter": "cargo", "identity": "v4_runtime_004_mount_boundary"},
+      "input_paths": ["crates/routecodex-v4-cordis-bridge/src/lib.rs"],
+      "required_for": ["V4-RUNTIME-004:source_green"]
+    },
+    {
+      "gate_id": "v4_runtime_004_mount_plane",
+      "status": "active",
+      "command": "cargo test -p routecodex-v4-cordis-bridge --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-cordis-bridge", "--manifest-path", "Cargo.toml", "--locked"],
+      "owner_module_id": "routecodex-v4-cordis-bridge",
+      "feature_ids": ["V4-RUNTIME-004"],
+      "evidence_role": "plane_isolation",
+      "producer": {"adapter": "cargo", "identity": "v4_runtime_004_mount_plane"},
+      "input_paths": ["crates/routecodex-v4-cordis-bridge/src/lib.rs"],
+      "required_for": ["V4-RUNTIME-004:source_green"]
+    },
+    {
       "gate_id": "v4_plugin_bridge_l2_regression",
       "command": "cargo test -p routecodex-v4-cordis-bridge --manifest-path Cargo.toml --locked",
       "required_for": [
