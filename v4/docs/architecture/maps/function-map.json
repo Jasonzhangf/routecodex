@@ -705,6 +705,7 @@
     {
       "function_id": "v4.node_container.execution_epoch",
       "owner": "routecodex-v4-node-container",
+      "feature_id": "V4-RUNTIME-002",
       "status": "active",
       "entry_symbols": [
         "ExecutionEpochIdentity",
@@ -726,12 +727,20 @@
       "entry_paths": [
         "crates/routecodex-v4-node-container/src/lib.rs"
       ],
+      "source_paths": [
+        "crates/routecodex-v4-node-container/src/lib.rs",
+        "crates/routecodex-v4-node-container/tests/l2_epoch.rs"
+      ],
       "required_gates": [
-        "v4_node_container_l2_regression"
+        "v4_node_container_epoch_positive",
+        "v4_node_container_epoch_red",
+        "v4_node_container_epoch_boundary",
+        "v4_node_container_epoch_plane"
       ],
       "resource_bindings": [
         "v4.node_container.execution_epoch"
       ],
+      "resource_ids": ["v4.node_container.execution_epoch"],
       "mainline_binding": "forbidden_before_integration"
     },
     {
