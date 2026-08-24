@@ -6,10 +6,10 @@
   "base_commit": "3de5dda5e3a3246c980e31921c469b6903110efa",
   "head_commit": "bbbf52ae84491d04ca25070968d8ebbcb9f56c20",
   "tree_hash": "4bf7cdae21fef0abb47cd18839f390fd39872c8a",
-  "diff_hash": "71303d8b2d6efeea9f43fadaf0181de9ebf1df25f115fc45b84d744732eca799",
+  "diff_hash": "sha256:71303d8b2d6efeea9f43fadaf0181de9ebf1df25f115fc45b84d744732eca799",
   "design_id": "v4-feature-completion-r002-epoch-lifecycle",
   "owner": "routecodex-v4-node-container",
-  "scope_hash": "7e5db24cd66e377325386bbf37fb42a49d3ae5d8c9f85dbd2394ec4b5d3c51a0",
+  "scope_hash": "sha256:4e89e0ec06641ac4d860feabd2bdbf09284aded9b376f2a1739e20470600a5c9",
   "changed_paths": [
     "v4/crates/routecodex-v4-node-container/src/lib.rs",
     "v4/crates/routecodex-v4-node-container/tests/l2_epoch.rs"
