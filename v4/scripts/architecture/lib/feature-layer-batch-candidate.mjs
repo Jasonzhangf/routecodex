@@ -333,7 +333,7 @@ export function validateCandidateRecord({
     }
     const relativePath = changedPath.slice(3);
     const owners = moduleOwnersForPath(moduleRegistry, relativePath);
-    if (!SHARED_PROJECTION_PATHS.has(changedPath)
+    if (!isGovernanceClosurePath(changedPath)
         && (owners.length !== 1 || owners[0].module_id !== record.module_id)) {
       addFailure(failures, 'CANDIDATE_MODULE_OWNER_MISMATCH', `${context}: ${changedPath} must have exactly one candidate module owner`);
     }
