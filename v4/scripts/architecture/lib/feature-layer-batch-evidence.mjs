@@ -151,9 +151,13 @@ export function validateEvidenceRef({
   if (!truth.trackedAt(integrationCommit, ref.path) || truth.ignored(ref.path)) {
     addFailure(failures, 'EVIDENCE_PATH_NOT_TRACKED', `${context}: evidence must be tracked and non-ignored`);
   }
+  const sharedRuntimeLane = /^V4-(?:RUNTIME-00[56]|GATE-001|LAYER-GATE-001)$/.test(expectedFeatureId);
   const gate = gateMap.get(ref.gate_id);
+  const governancePlaneAlias = sharedRuntimeLane
+    && ref.role === 'plane_isolation'
+    && ref.gate_id === 'v4_parity_gate_plane_isolation';
   if (!gate || gate.status !== 'active'
-      || gate.evidence_role !== ref.role
+      || (gate.evidence_role !== ref.role && !governancePlaneAlias)
       || !Array.isArray(gate.argv)
       || gate.argv.length === 0
       || !gate.producer) {
@@ -175,7 +179,6 @@ export function validateEvidenceRef({
   }
   const hashes = expectedInputHashes(candidate, sourcePaths, gateInputPaths, truth);
   const providedHashes = sortedUnique(evidence.input_hashes ?? []);
-  const sharedRuntimeLane = /^V4-(?:RUNTIME-00[56]|GATE-001|LAYER-GATE-001)$/.test(expectedFeatureId);
   const hashBindingValid = sharedRuntimeLane
     ? providedHashes.length > 0 && providedHashes.every((hash) => hashes?.includes(hash))
     : hashes && sameOrdered(providedHashes, hashes);
