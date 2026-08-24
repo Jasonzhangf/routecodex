@@ -423,6 +423,9 @@ export function runFeatureLayerBatchRedFixtures({
       name: 'pending task claims candidate',
       expected: ['PENDING_OWNER_PRETENDS_BOUND', 'PENDING_TASK_CLAIMS_CANDIDATE'],
       mutate(input) {
+        resetPendingGuard(input);
+        input.manifest.integration.wiring_started = false;
+        input.manifest.integration.wiring_edges = [];
         const batch = resetPendingBatch(input, 'A');
         batch.tasks.find((task) => task.task_id === 'V4-PARITY-001').candidate_record = 'records/fake.json';
       },
