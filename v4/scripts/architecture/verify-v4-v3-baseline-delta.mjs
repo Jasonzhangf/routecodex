@@ -15,5 +15,10 @@ if (process.argv[2] === '--red-self-test') {
   console.log('[V4-PARITY-002] RED OK baseline delta mutation rejected');
   process.exit(0);
 }
+if (process.argv[2] === '--boundary-self-test') {
+  if (!map.includes('coverage:')) process.exit(1);
+  console.log('[V4-PARITY-002] BOUNDARY OK coverage closure');
+  process.exit(0);
+}
 if (process.argv.length > 2) { console.error('MODE_INVALID'); process.exit(2); }
 console.log('[V4-PARITY-002] OK baseline delta inputs and coverage lock');

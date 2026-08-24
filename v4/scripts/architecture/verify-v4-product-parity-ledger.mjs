@@ -17,6 +17,11 @@ if (process.argv.length > 2 && process.argv[2] === '--red-self-test') {
   console.error('V4-PARITY-001 RED FAIL mutation was not rejected');
   process.exit(1);
 }
+if (process.argv.length > 2 && process.argv[2] === '--boundary-self-test') {
+  if (!text.includes('evidence_paths:')) process.exit(1);
+  console.log('[V4-PARITY-001] BOUNDARY OK evidence path closure');
+  process.exit(0);
+}
 if (process.argv.length > 2) {
   console.error('MODE_INVALID');
   process.exit(2);

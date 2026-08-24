@@ -15,5 +15,10 @@ if (process.argv[2] === '--red-self-test') {
   console.log('[V4-PARITY-003] RED OK status downgrade remains explicit');
   process.exit(0);
 }
+if (process.argv[2] === '--boundary-self-test') {
+  if (!ledger.includes('blocking_dependencies:')) process.exit(1);
+  console.log('[V4-PARITY-003] BOUNDARY OK dependency closure');
+  process.exit(0);
+}
 if (process.argv.length > 2) { console.error('MODE_INVALID'); process.exit(2); }
 console.log('[V4-PARITY-003] OK status promotion fields are explicit');

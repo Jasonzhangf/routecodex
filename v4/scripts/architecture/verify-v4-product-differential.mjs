@@ -15,5 +15,10 @@ if (process.argv[2] === '--red-self-test') {
   console.log('[V4-PARITY-HARNESS-001] RED OK unexplained differential remains blocking');
   process.exit(0);
 }
+if (process.argv[2] === '--boundary-self-test') {
+  if (!map.includes('checkpoint_evidence:')) process.exit(1);
+  console.log('[V4-PARITY-HARNESS-001] BOUNDARY OK checkpoint evidence closure');
+  process.exit(0);
+}
 if (process.argv.length > 2) { console.error('MODE_INVALID'); process.exit(2); }
 console.log('[V4-PARITY-HARNESS-001] OK request/response/error/config differential surfaces locked');
