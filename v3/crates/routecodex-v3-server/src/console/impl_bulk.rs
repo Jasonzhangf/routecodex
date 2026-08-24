@@ -927,6 +927,7 @@ pub(crate) fn enrich_v3_direct_observability_from_frame(
     observability.transport = match &frame.body {
         V3Server16Body::Json(_) => "json",
         V3Server16Body::Bytes(_) => "bytes",
+        V3Server16Body::Sse(_) => "sse",
         V3Server16Body::CommittedSse(_) => "sse",
     }
     .to_string();

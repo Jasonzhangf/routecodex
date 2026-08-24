@@ -51,8 +51,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     request_purpose: V3RequestPurpose,
     payload: Value,
 ) -> Response<Body> {
-    if v3_request_wants_sse(&request_headers, &payload) {
-        return V3FrontSseAcceptSkeleton::accept(
+    if v3_entry_request_wants_sse(&request_headers, &payload) {
+        return V3DirectSseAcceptSkeleton::accept(
             state,
             front_connection_identity,
             request_headers,
@@ -84,9 +84,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     .await
 }
 
-struct V3FrontSseAcceptSkeleton;
+struct V3DirectSseAcceptSkeleton;
 
-impl V3FrontSseAcceptSkeleton {
+impl V3DirectSseAcceptSkeleton {
     async fn accept(
         state: Arc<V3ListenerState>,
         front_connection_identity: Option<V3FrontConnectionIdentity>,
@@ -318,7 +318,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                             error_chain: &frame.error_chain,
                             body: match &frame.body {
                                 V3Server16Body::Json(value) => Some(value),
-                                V3Server16Body::Bytes(_) | V3Server16Body::CommittedSse(_) => None,
+                                V3Server16Body::Bytes(_)
+                                | V3Server16Body::Sse(_)
+                                | V3Server16Body::CommittedSse(_) => None,
                             },
                             project_path: resolve_v3_console_project_path(
                                 &request_headers,
@@ -370,7 +372,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         error_chain: &frame.error_chain,
                         body: match &frame.body {
                             V3Server16Body::Json(value) => Some(value),
-                            V3Server16Body::Bytes(_) | V3Server16Body::CommittedSse(_) => None,
+                            V3Server16Body::Bytes(_)
+                            | V3Server16Body::Sse(_)
+                            | V3Server16Body::CommittedSse(_) => None,
                         },
                         project_path: resolve_v3_console_project_path(&request_headers, &payload)
                             .as_deref(),
@@ -1542,7 +1546,20 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 );
                 let stream_console_finalizer =
                     emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
-                if matches!(&frame.body, V3Server16Body::CommittedSse(_)) {
+                if matches!(&frame.body, V3Server16Body::Sse(_)) {
+                    let body =
+                        std::mem::replace(&mut frame.body, V3Server16Body::Bytes(Vec::new()));
+                    let V3Server16Body::Sse(stream) = body else {
+                        unreachable!("matched live Direct SSE body")
+                    };
+                    frame.body = V3Server16Body::Sse(wrap_v3_live_sse_dump_stream(
+                        stream,
+                        state.sse_dump_enabled,
+                        state.server.port,
+                        &path,
+                        &request_id,
+                    ));
+                } else if matches!(&frame.body, V3Server16Body::CommittedSse(_)) {
                     let body =
                         std::mem::replace(&mut frame.body, V3Server16Body::Bytes(Vec::new()));
                     let V3Server16Body::CommittedSse(stream) = body else {

@@ -668,6 +668,7 @@ fn v3_direct_client_transport_label(payload: &V3Resp15ClientPayload) -> &str {
     match &payload.body {
         V3ClientBody::Json(_) => "json",
         V3ClientBody::Bytes(_) => "bytes",
+        V3ClientBody::Sse(_) => "sse",
         V3ClientBody::CommittedSse(_) => "sse",
     }
 }

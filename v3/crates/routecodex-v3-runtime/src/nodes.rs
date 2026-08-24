@@ -213,8 +213,9 @@ pub struct V3Execution11ProtocolDecision {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
 }
 
-pub(crate) type V3ProviderAttemptSseStream =
+pub type V3ClientSseStream =
     Pin<Box<dyn Stream<Item = Result<Vec<u8>, V3Error01SourceRaised>> + Send>>;
+pub(crate) type V3ProviderAttemptSseStream = V3ClientSseStream;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3CommittedSseTerminal {
@@ -353,6 +354,10 @@ impl V3CommittedClientSseBuilder {
 pub enum V3ClientBody {
     Json(Value),
     Bytes(Vec<u8>),
+    /// Runtime-projected client stream. The server owns the HTTP/SSE frame
+    /// and heartbeat boundary; typed stream errors remain on the Error chain
+    /// until the front transport projects the post-commit failure.
+    Sse(V3ClientSseStream),
     /// Runtime-sealed client stream. Provider/Broker errors have already been
     /// resolved before this public boundary; only validated bytes may escape.
     CommittedSse(V3CommittedClientSseStream),
@@ -366,6 +371,7 @@ impl fmt::Debug for V3ClientBody {
                 .debug_struct("Bytes")
                 .field("byte_len", &bytes.len())
                 .finish(),
+            Self::Sse(_) => formatter.write_str("Sse(<runtime-client-stream>)"),
             Self::CommittedSse(_) => formatter.write_str("CommittedSse(<front-event-stream>)"),
         }
     }

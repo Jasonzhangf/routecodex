@@ -123,6 +123,7 @@ pub(crate) fn responses_relay_output_response(
             let frame = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
             match frame.body {
                 V3Server16Body::CommittedSse(stream) => v3_client_sse_body(stream, None),
+                V3Server16Body::Sse(stream) => v3_live_client_sse_body(stream, None),
                 V3Server16Body::Json(value) => Body::from(
                     serde_json::to_vec(&value).expect("typed V3 Responses Relay error projection"),
                 ),
@@ -183,6 +184,10 @@ pub(crate) fn openai_chat_relay_output_response(
             },
         );
     let body = match frame.body {
+        V3Server16Body::Sse(client_stream) => v3_live_client_sse_body(
+            client_stream,
+            (frame.error_chain.is_empty() && status < 400).then_some(keepalive_interval),
+        ),
         V3Server16Body::CommittedSse(client_stream) => v3_client_sse_body(
             wrap_v3_committed_relay_sse_console_stream(client_stream, stream_console_finalizer),
             (frame.error_chain.is_empty() && status < 400).then_some(keepalive_interval),
@@ -648,7 +653,19 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
     }
     let stream_console_finalizer =
         emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
-    if matches!(&frame.body, V3Server16Body::CommittedSse(_)) {
+    if matches!(&frame.body, V3Server16Body::Sse(_)) {
+        let body = std::mem::replace(&mut frame.body, V3Server16Body::Bytes(Vec::new()));
+        let V3Server16Body::Sse(stream) = body else {
+            unreachable!("matched live OpenAI Chat SSE body")
+        };
+        frame.body = V3Server16Body::Sse(wrap_v3_live_sse_dump_stream(
+            stream,
+            state.sse_dump_enabled,
+            state.server.port,
+            &path,
+            &request_id,
+        ));
+    } else if matches!(&frame.body, V3Server16Body::CommittedSse(_)) {
         let body = std::mem::replace(&mut frame.body, V3Server16Body::Bytes(Vec::new()));
         let V3Server16Body::CommittedSse(stream) = body else {
             unreachable!("matched committed OpenAI Chat SSE body")
@@ -690,6 +707,10 @@ pub(crate) fn gemini_relay_output_response(
             },
         );
     let body = match frame.body {
+        V3Server16Body::Sse(client_stream) => v3_live_client_sse_body(
+            client_stream,
+            (frame.error_chain.is_empty() && status < 400).then_some(keepalive_interval),
+        ),
         V3Server16Body::CommittedSse(client_stream) => v3_client_sse_body(
             wrap_v3_committed_relay_sse_console_stream(client_stream, stream_console_finalizer),
             (frame.error_chain.is_empty() && status < 400).then_some(keepalive_interval),

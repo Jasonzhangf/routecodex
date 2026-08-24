@@ -92,7 +92,7 @@ async fn runtime_executes_adjacent_responses_direct_chain() {
         V3ClientBody::Json(value) => {
             assert_eq!(value, json!({"id":"resp_test","output_text":"ok"}));
         }
-        V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => {
+        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
             panic!("direct JSON response must remain JSON")
         }
     }
@@ -425,7 +425,9 @@ async fn provider_error_enters_error_chain_not_success() {
             assert!(body["error"]["message"].as_str().unwrap().contains("boom"))
         }
         V3ClientBody::Bytes(_) => panic!("error response must be JSON"),
-        V3ClientBody::CommittedSse(_) => panic!("error response must be JSON"),
+        V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
+            panic!("error response must be JSON")
+        }
     }
 }
 
@@ -532,7 +534,7 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
                 .expect("error message")
                 .contains("metadataCenter"));
         }
-        V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => {
+        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
             panic!("error response must be JSON")
         }
     }
@@ -593,7 +595,7 @@ async fn direct_runtime_rejects_invalid_current_data_image_before_provider_send(
                 .expect("error message")
                 .contains("invalid data:image/png payload"));
         }
-        V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => {
+        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
             panic!("error response must be JSON")
         }
     }
@@ -1151,7 +1153,7 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
     );
     match output.client_payload.body {
         V3ClientBody::Json(value) => assert_eq!(value["id"], "resp_second"),
-        V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => {
+        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
             panic!("provider SSE failure must be reselected before client stream starts")
         }
     }
@@ -1204,22 +1206,24 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
     )
     .await;
 
-    assert_eq!(output.client_payload.status, 502, "{output:?}");
-    assert!(output.error_chain.is_some(), "{output:?}");
-    let V3ClientBody::Json(error) = output.client_payload.body else {
-        panic!("pool exhaustion must project one terminal Error06 JSON body: {output:?}");
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert!(output.error_chain.is_none(), "{output:?}");
+    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
+        panic!("Direct stream must stay live until its provider failure is observed: {output:?}");
     };
-    assert_eq!(error["error"]["code"], "provider_response_sse_stream");
-    assert!(
-        error["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("without a terminal semantic event")),
-        "{error}"
-    );
+    let first = stream.next().await.expect("first semantic frame").expect("valid frame");
+    assert!(String::from_utf8(first).unwrap().contains("partial"));
+    let failure = stream
+        .next()
+        .await
+        .expect("provider failure must not become silent EOF")
+        .expect_err("provider failure must remain on the typed error stream");
+    assert_eq!(failure.code, "provider_response_sse_stream");
+    assert!(failure.message.contains("without a terminal semantic event"));
 }
 
 #[tokio::test]
-async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_front_commit() {
+async fn responses_direct_debug_entrypoint_keeps_client_stream_after_post_frame_failure() {
     use futures_util::StreamExt;
     use std::sync::{Arc, Mutex};
 
@@ -1298,22 +1302,99 @@ async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_fro
     )
     .await;
 
-    let V3ClientBody::CommittedSse(mut stream) = output.client_payload.body else {
-        panic!("expected committed direct SSE client body: {output:?}");
+    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
+        panic!("expected live direct SSE client body: {output:?}");
     };
     let mut bytes = Vec::new();
+    let mut provider_failure = None;
     while let Some(frame) = stream.next().await {
-        bytes.extend_from_slice(&frame);
+        match frame {
+            Ok(frame) => bytes.extend_from_slice(&frame),
+            Err(error) => {
+                provider_failure = Some(error);
+                break;
+            }
+        }
     }
-    let text = String::from_utf8(bytes).expect("committed client frames must be UTF-8");
-    assert!(text.contains("recovered"), "{text}");
-    assert!(!text.contains("partial"), "failed-attempt bytes leaked: {text}");
-    assert!(!text.contains("post-first-frame failure"), "{text}");
+    let text = String::from_utf8(bytes).expect("live client frames must be UTF-8");
+    assert!(text.contains("partial"), "first semantic frame must reach client: {text}");
+    assert!(!text.contains("recovered"), "post-commit provider failure must not reroute client stream: {text}");
+    let provider_failure = provider_failure.expect("post-commit provider failure must remain observable");
+    assert_eq!(provider_failure.code, "provider_response_body_error");
+    assert!(provider_failure.message.contains("post-first-frame failure"));
     assert_eq!(
         *calls.lock().unwrap(),
-        2,
-        "post-frame failure must be retried entirely inside the Broker"
+        1,
+        "post-commit provider failure must not start a second provider attempt"
     );
+}
+
+#[tokio::test]
+async fn responses_direct_runtime_returns_before_provider_terminal_eof() {
+    struct PendingTerminalResponsesTransport;
+
+    #[async_trait]
+    impl ResponsesTransport for PendingTerminalResponsesTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            let first = b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n";
+            let stream = futures_util::stream::once(async {
+                Ok::<Vec<u8>, V3ProviderError>(first.to_vec())
+            })
+            .chain(futures_util::stream::pending::<
+                Result<Vec<u8>, V3ProviderError>,
+            >());
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream),
+            ))
+        }
+    }
+
+    let routing_group = "responses_direct_live_sse";
+    let manifest = scoped_test_manifest(test_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req-responses-direct-live-sse",
+        "exec",
+        json!({"model":"client-model","input":"hello","stream":true}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let debug = V3DebugRuntime::new(Default::default()).unwrap();
+    let output = tokio::time::timeout(
+        Duration::from_millis(150),
+        execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
+            V3ResponsesDirectRuntimeCoreState::no_continuation()
+                .with_provider_health(provider_health)
+                .with_initial_plan(&plan),
+            &manifest,
+            raw,
+            crate::register_responses_direct_hooks(),
+            &PendingTerminalResponsesTransport,
+            &debug,
+        ),
+    )
+    .await
+    .expect("Direct runtime must return a client SSE stream before provider terminal EOF");
+
+    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
+        panic!("expected live Direct SSE client body: {output:?}");
+    };
+    let first = tokio::time::timeout(Duration::from_millis(100), stream.next())
+        .await
+        .expect("client stream must expose the first semantic frame")
+        .expect("client stream ended before first frame")
+        .expect("first semantic frame must be valid");
+    assert!(String::from_utf8(first).unwrap().contains("early"));
 }
 
 #[tokio::test]
@@ -1643,7 +1724,7 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     let value = match output.client_payload.body {
         V3ClientBody::Json(value) => value,
-        V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => {
+        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
             panic!("direct JSON response must remain JSON")
         }
     };

@@ -451,6 +451,65 @@ async fn direct_sse_http_projection_injects_keepalive_and_preserves_provider_byt
 }
 
 #[tokio::test]
+async fn direct_live_sse_reaches_front_before_provider_stream_eof() {
+    let provider_bytes = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"live\"}\n\n".to_vec();
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "text/event-stream".to_string(),
+        body: V3Server16Body::Sse(Box::pin(futures_util::stream::iter(vec![
+            Ok::<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>(provider_bytes.clone()),
+        ]))),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        node_trace: vec!["V3Server16HttpFrame"],
+        observability: None,
+        stream_observation: None,
+    };
+
+    let response = responses_direct_output_response(frame, Some(Duration::from_millis(3_000)));
+    let mut client = response.into_body().into_data_stream();
+    assert_eq!(client.next().await.unwrap().unwrap().as_ref(), b": keepalive\n\n");
+    assert_eq!(client.next().await.unwrap().unwrap().as_ref(), provider_bytes.as_slice());
+    assert!(client.next().await.is_none());
+}
+
+#[tokio::test]
+async fn direct_live_sse_provider_error_projects_generic_599_without_provider_detail() {
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "text/event-stream".to_string(),
+        body: V3Server16Body::Sse(Box::pin(futures_util::stream::iter(vec![
+            Ok::<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>(
+                b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec(),
+            ),
+            Err(routecodex_v3_error::build_v3_error_01_source_raised(
+                V3ErrorSourceKind::ProviderFailure,
+                "V3ProviderResp14Raw",
+                "provider_response_body_error",
+                "provider secret detail must stay off the client stream",
+            )),
+        ]))),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        node_trace: vec!["V3Server16HttpFrame"],
+        observability: None,
+        stream_observation: None,
+    };
+
+    let response = responses_direct_output_response(frame, None);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(text.contains("599"), "{text}");
+    assert!(text.contains("internal_response_stream_error"), "{text}");
+    assert!(!text.contains("provider secret detail"), "{text}");
+    assert!(text.contains("[DONE]"), "{text}");
+}
+
+#[tokio::test]
 async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts() {
     let _home_lock = TEST_HOME_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(
