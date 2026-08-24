@@ -4133,9 +4133,9 @@ chains:
   - step_id: v3-responses-provider-event-terminal-merge-01
     from_node: V3ProviderResponsesEventCodec
     to_node: V3ProviderResponsesTerminalOrFailureObserved
-    caller_symbol: apply_v3_runtime_responses_semantic_event
+    caller_symbol: observe_v3_runtime_responses_sse_transport_chunk_typed_with_hook
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
-    callee_symbol: merge_v3_runtime_responses_stream_output_items_into_terminal_response
+    callee_symbol: build_typed_responses_terminal_response
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
     status: anchored
     owner_feature_id: v3.hub_relay_runtime_closeout
@@ -7025,7 +7025,7 @@ chains:
       caller_symbol: observe_v3_runtime_responses_sse_semantic_frame_typed
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
       callee_symbol: V3ResponsesSseReducerState::apply_event
-      callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+      callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -7591,7 +7591,7 @@ chains:
   - step_id: v3-responses-sse-tree-01
     from_node: ProviderRespInbound01Raw
     to_node: HubRespInbound02Parsed
-    caller_symbol: parse_v3_responses_sse_event
+    caller_symbol: observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
     callee_symbol: V3ResponsesSseProtocolMetadata::from_event
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
@@ -7605,8 +7605,8 @@ chains:
   - step_id: v3-responses-sse-tree-02
     from_node: HubRespInbound02Parsed
     to_node: HubRespChatProcess03Governed
-    caller_symbol: upsert_v3_runtime_responses_event_output_item
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+    caller_symbol: V3ResponsesSseReducerState::apply_event
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
     callee_symbol: classify_v3_responses_sse_output_item
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
     status: active

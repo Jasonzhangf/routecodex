@@ -5765,3 +5765,17 @@ Tags: #v3 #historical-samples #error-samples #provider-debug
 ## 2026-08-22 - Current protocol excludes legacy toolreason fences
 
 - The retired `<toolreason>` fence syntax is not part of the current protocol or acceptance criteria. Do not restore, parse, emit, or use legacy fence tests to drive runtime SSE/Resp03 changes; current validation uses native JSON/tool-call shapes and registered semantic projections.
+
+## 2026-08-22 - DSH session identity is frozen
+
+- Jason repaired DSH session pairing. Do not modify session-id extraction, header/metadata precedence, canonical session scope propagation, or DSH identity handling while working on toolreason. Toolreason hooks may only consume the existing canonical request/session context; they must never synthesize a request-local session id or alter the session owner path.
+
+## 2026-08-23 - Provider timeout defaults and overrides are separate contracts
+
+- Omitted V3 provider timeouts retain the compatibility defaults: request budget `300_000ms` and SSE first-semantic-frame budget `30_000ms`. These defaults are not global caps: an individual provider, especially a slow self-hosted provider, may explicitly configure longer values such as `900_000ms`, and Config → Manifest → transport/first-frame guard must preserve that exact override.
+
+## 2026-08-23 - Relay HTTP 429 is counted provider health
+
+- Relay provider responses such as MiniMax `HTTP 429` with body code `rate_limit_error` must be classified as `Recoverable`, not as transient/request-local compatibility. The unique config owner is `v3/crates/routecodex-v3-config/src/internal.toml` plus `classify_v3_internal_provider_error` in `internal.rs`.
+- The typed provider failure action owner must map ordinary 429 rate-limit failures to `RecoverableCounted / GlobalProviderKey` with threshold 3. `insufficient_quota` and other account-disabled/auth markers may remain the stricter irrecoverable class.
+- Verified live after commit `789b077ed`: MiniMax key recorded 429 failure counts 1, 2, 3, then `health=cooldown`; persisted key health showed `failure_streak=4`, `probe_required=true`, and a future `cooldown_until_ms`. Intermediate provider attempts did not produce client projection; Error06 appeared only after route/default exhaustion.
