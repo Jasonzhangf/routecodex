@@ -13,7 +13,12 @@ if (missing.length > 0) {
   process.exit(1);
 }
 if (process.argv[2] === '--red-self-test') {
-  console.log('[V4-PARITY-002] RED OK baseline delta mutation rejected');
+  const mutated = map.replace('coverage:', 'coverage_removed:');
+  if (required.every((marker) => mutated.includes(marker))) {
+    console.error('[V4-PARITY-002] RED FAIL mutation was not rejected');
+    process.exit(1);
+  }
+  console.log('[V4-PARITY-002] RED OK coverage mutation rejected');
   process.exit(0);
 }
 if (process.argv[2] === '--boundary-self-test') {

@@ -14,9 +14,14 @@ if (failures.length > 0) {
   process.exit(1);
 }
 if (process.argv.length > 2 && process.argv[2] === '--red-self-test') {
-  if (text.includes('status: invalid')) process.exit(0);
-  console.error('V4-PARITY-001 RED FAIL mutation was not rejected');
-  process.exit(1);
+  const mutated = text.replace('evidence_paths:', 'evidence_paths_removed:');
+  const rejected = required.some((marker) => !mutated.includes(marker));
+  if (!rejected) {
+    console.error('V4-PARITY-001 RED FAIL mutation was not rejected');
+    process.exit(1);
+  }
+  console.log('[V4-PARITY-001] RED OK evidence path mutation rejected');
+  process.exit(0);
 }
 if (process.argv.length > 2 && process.argv[2] === '--boundary-self-test') {
   if (!text.includes('evidence_paths:')) process.exit(1);

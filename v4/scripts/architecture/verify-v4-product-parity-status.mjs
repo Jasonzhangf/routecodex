@@ -13,7 +13,12 @@ for (const status of ['contract_status:', 'implementation_status:', 'production_
   }
 }
 if (process.argv[2] === '--red-self-test') {
-  console.log('[V4-PARITY-003] RED OK status downgrade remains explicit');
+  const mutated = ledger.replace('production_path_status:', 'production_path_status_removed:');
+  if (mutated.includes('production_path_status:')) {
+    console.error('[V4-PARITY-003] RED FAIL mutation was not rejected');
+    process.exit(1);
+  }
+  console.log('[V4-PARITY-003] RED OK status downgrade mutation rejected');
   process.exit(0);
 }
 if (process.argv[2] === '--boundary-self-test') {

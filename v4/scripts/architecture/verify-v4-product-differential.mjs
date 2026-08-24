@@ -13,7 +13,12 @@ if (missing.length > 0) {
   process.exit(1);
 }
 if (process.argv[2] === '--red-self-test') {
-  console.log('[V4-PARITY-HARNESS-001] RED OK unexplained differential remains blocking');
+  const mutated = map.replace('checkpoint_evidence:', 'checkpoint_evidence_removed:');
+  if (requiredStages.every((marker) => mutated.includes(marker))) {
+    console.error('[V4-PARITY-HARNESS-001] RED FAIL mutation was not rejected');
+    process.exit(1);
+  }
+  console.log('[V4-PARITY-HARNESS-001] RED OK checkpoint mutation rejected');
   process.exit(0);
 }
 if (process.argv[2] === '--boundary-self-test') {
