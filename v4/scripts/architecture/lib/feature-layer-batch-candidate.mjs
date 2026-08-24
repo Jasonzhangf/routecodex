@@ -44,13 +44,15 @@ function escapedPattern(value) {
 
 function sourceDefinesSymbol(sourcePath, source, symbol) {
   const name = escapedPattern(symbol.split('::').at(-1));
-  const code = source
+  const codeWithoutSingleQuotedStrings = source
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/\/\/[^\n]*/g, ' ')
     .replace(/r(#+)?"[\s\S]*?"\1/g, ' ')
     .replace(/`(?:\\.|[^`\\])*`/g, ' ')
-    .replace(/b?"(?:\\.|[^"\\])*"/g, ' ')
-    .replace(/b?'(?:\\.|[^'\\])*'/g, ' ');
+    .replace(/b?"(?:\\.|[^"\\])*"/g, ' ');
+  const code = path.extname(sourcePath) === '.rs'
+    ? codeWithoutSingleQuotedStrings
+    : codeWithoutSingleQuotedStrings.replace(/b?'(?:\\.|[^'\\])*'/g, ' ');
   if (path.extname(sourcePath) === '.rs') {
     return new RegExp(`\\b(?:pub(?:\\([^)]*\\))?\\s+)?(?:async\\s+)?(?:fn|struct|enum|trait|type|const|static|mod)\\s+${name}\\b`)
       .test(code);
