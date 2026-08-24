@@ -230,6 +230,7 @@
       tr.appendChild(el("td", "muted", timeText(status === "success" || status === "error" || status === "cancelled" ? row.finished_epoch_ms : row.updated_epoch_ms)));
       const details = el("td");
       const disclosure = document.createElement("details");
+      disclosure.addEventListener("click", (e) => e.stopPropagation());
       disclosure.appendChild(el("summary", null, "details"));
       disclosure.appendChild(detailGrid(row));
       details.appendChild(disclosure);
@@ -289,6 +290,7 @@
     ["status-filter", "port-filter", "search-filter", "sort-field", "sort-order", "group-toggle"].forEach((id) => {
       document.getElementById(id).addEventListener("input", render);
     });
+    document.getElementById("drawer-cancel")?.addEventListener("click", closePanel);
 
     load().catch((error) => showStatus("err", `observability failed: ${error.message}`));
     schedulePoll();
