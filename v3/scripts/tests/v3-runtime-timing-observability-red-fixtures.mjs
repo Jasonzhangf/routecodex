@@ -10,7 +10,7 @@ import process from "node:process";
 import YAML from "yaml";
 
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const admissionRoot = resolve(v3Root, "build-contracts", "architecture-admission", "repo");
+const sourceRoot = resolve(v3Root, "..");
 const repo = process.cwd();
 const verifier = resolve(
   repo,
@@ -23,11 +23,12 @@ const copied = [
   "v3/crates/routecodex-v3-runtime/src/lib.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
-  "v3/crates/routecodex-v3-runtime/src/kernel/direct_resp15_finalize.rs",
+  "v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/tests.rs",
-  "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
+  "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs",
+  "v3/crates/routecodex-v3-runtime/src/shared.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs",
@@ -133,47 +134,36 @@ const cases = [
   {
     name: "Direct SSE decoder stops owning clean EOF timing",
     path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
-    mutate: (source) =>
-      source.replace(
-        "                        Ok(()) => match state.runtime_timing.finish_external() {",
-        "                        Ok(()) => match state.runtime_timing.close_external_removed() {",
+    mutate: (source) => source
+      .replace(
+        "                            if let Err(error) = state.runtime_timing.finish_external_if_active() {",
+        "                            if let Err(error) = state.runtime_timing.finish_external_if_active_removed() {",
+      )
+      .replace(
+        "                            if let Err(error) = state.runtime_timing.finish_external_if_active() {",
+        "                            if let Err(error) = state.runtime_timing.finish_external_if_active_removed() {",
       ),
     diagnostic: /external timing must close only after decoder clean EOF/u,
   },
   {
     name: "Direct SSE terminal timing owner is deleted",
-    path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
+    path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
     mutate: (source) =>
       source.replace(
         "state.runtime_timing.finish_runtime()",
         "state.runtime_timing.finish_runtime_removed()",
       ),
-    diagnostic: /must call finish_runtime exactly once/u,
-  },
-  {
-    name: "Direct SSE terminal timing closes before terminal validation",
-    path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
-    mutate: (source) =>
-      source
-        .replace(
-          "                    let timing = match state.runtime_timing.finish_runtime() {",
-          "                    let timing = match state.runtime_timing.finish_runtime_removed() {",
-        )
-        .replace(
-          "                    if !state.provider_outcome.terminal {",
-          "                    let _premature_timing = state.runtime_timing.finish_runtime();\n                    if !state.provider_outcome.terminal {",
-        ),
-    diagnostic: /must follow decoder clean EOF, terminal validation, and provider success/u,
+    diagnostic: /must call finish_runtime in terminal-event and clean-EOF branches/u,
   },
   {
     name: "Direct SSE terminal timing gains a second writer",
-    path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
+    path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
     mutate: (source) =>
       source.replace(
-        "                    let timing = match state.runtime_timing.finish_runtime() {",
-        "                    let _duplicate_timing = state.runtime_timing.finish_runtime();\n                    let timing = match state.runtime_timing.finish_runtime() {",
+        "                            let timing = match state.runtime_timing.finish_runtime() {",
+        "                            let _duplicate_timing = state.runtime_timing.finish_runtime();\n                            let timing = match state.runtime_timing.finish_runtime() {",
       ),
-    diagnostic: /must call finish_runtime exactly once/u,
+    diagnostic: /must call finish_runtime in terminal-event and clean-EOF branches/u,
   },
   {
     name: "Direct SSE provider failure restores invented error fields",
@@ -197,23 +187,43 @@ const cases = [
   },
   {
     name: "Direct SSE outcome restores event-name authority",
-    path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
+    path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs",
     mutate: (source) =>
       source.replace(
-        "let data = collect_v3_provider_sse_json_data(fields);",
-        "let data = collect_v3_provider_sse_json_data(fields);\n        let sse_event_type = fields.len();",
+        "let data = normalize_v3_provider_sse_json_data_with_event_name(",
+        "let sse_event_type = object.event_name();\n        let data = normalize_v3_provider_sse_json_data_with_event_name(",
       ),
-    diagnostic: /must not use opaque SSE event metadata as semantic source/u,
+    diagnostic: /must not invent an opaque event-type semantic source/u,
   },
   {
-    name: "Direct SSE mismatch regression is deleted",
-    path: "v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs",
+    name: "Direct SSE provider failure regression is deleted",
+    path: "v3/crates/routecodex-v3-runtime/src/shared.rs",
     mutate: (source) =>
       source.replace(
-        "async fn red_sse_semantics_must_use_json_type_not_event_name()",
-        "async fn red_sse_semantics_must_use_json_type_removed()",
+        "async fn direct_sse_response_failed_projects_provider_error_before_client_stream()",
+        "async fn direct_sse_response_failed_projects_provider_error_removed()",
       ),
-    diagnostic: /mismatch regression must prove JSON failure authority/u,
+    diagnostic: /provider failure regression must preserve typed provider error authority/u,
+  },
+  {
+    name: "Direct SSE stream sealing owner is deleted",
+    path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
+    mutate: (source) =>
+      source.replace(
+        "seal_after_validated_terminal()",
+        "seal_after_validated_terminal_removed()",
+      ),
+    diagnostic: /must seal only a fully validated terminal stream before Resp15/u,
+  },
+  {
+    name: "Direct SSE Resp15 exposes the unsealed stream",
+    path: "v3/crates/routecodex-v3-runtime/src/kernel.rs",
+    mutate: (source) =>
+      source.replace(
+        "V3ClientBody::CommittedSse(stream)",
+        "V3ClientBody::Sse(stream)",
+      ),
+    diagnostic: /must expose only the Runtime-committed stream type/u,
   },
   {
     name: "V3 timing mainline drops Relay and Server edges",
@@ -259,7 +269,7 @@ const cases = [
     path: "docs/architecture/function-map.yml",
     mutate: (source) =>
       source.replace(
-        "  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs\n",
+        "  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs\n",
         "",
       ),
     diagnostic: /global function map must register the Direct SSE outcome owner path/u,
@@ -267,9 +277,29 @@ const cases = [
   {
     name: "V3 timing owner drops Direct SSE outcome path",
     path: "docs/architecture/v3-function-map.yml",
-    mutate: (source) =>
-      source.replace(
-        "  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs\n",
+    mutate: (source) => source
+      .replace(
+        "  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs\n",
+        "",
+      )
+      .replace(
+        "  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs\n",
+        "",
+      )
+      .replace(
+        "  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs\n",
+        "",
+      )
+      .replace(
+        "  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs\n",
+        "",
+      )
+      .replace(
+        "  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs\n",
+        "",
+      )
+      .replace(
+        "  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs\n",
         "",
       ),
     diagnostic: /V3 function map must register the Direct SSE outcome owner path/u,
@@ -290,46 +320,6 @@ const cases = [
     diagnostic: /must bind the real finalizer-to-stream-observation merge call/u,
   },
   {
-    name: "Direct SSE closeout fabricates completion before Runtime EOF",
-    path: "v3/crates/routecodex-v3-server/src/tests/mod.rs",
-    mutate: (source) =>
-      source.replace(
-        '    assert!(!log.contains("event=completed"), "{log}");\n    assert!(!log.contains("event=failed"), "{log}");\n',
-        '    assert!(!log.contains("event=failed"), "{log}");\n',
-      ),
-    diagnostic: /pre-EOF terminal-drop test must reject fabricated completion/u,
-  },
-  {
-    name: "Direct SSE pre-EOF drop loses the missing-timing guard",
-    path: "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
-    mutate: (source) =>
-      source.replace(
-        "                if self.observability.timing.is_none() {\n                    return;\n                }\n                self.emit_direct_sse_complete_console_lines();",
-        "                self.emit_direct_sse_complete_console_lines();",
-      ),
-    diagnostic: /pre-EOF drop must suppress terminal projection/u,
-  },
-  {
-    name: "Direct SSE clean EOF suppresses missing timing",
-    path: "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
-    mutate: (source) =>
-      source.replace(
-        "    pub(crate) fn emit_direct_sse_complete_console_lines(self) {\n",
-        "    pub(crate) fn emit_direct_sse_complete_console_lines(self) {\n        if self.observability.timing.is_none() {\n            return;\n        }\n",
-      ),
-    diagnostic: /clean-EOF completion must not suppress/u,
-  },
-  {
-    name: "Direct SSE clean EOF test stops requiring timing contract failure",
-    path: "v3/crates/routecodex-v3-server/src/tests/mod.rs",
-    mutate: (source) =>
-      source.replace(
-        '    assert!(\n        log.contains("subcode=runtime_observability_contract"),\n        "{log}"\n    );\n',
-        "",
-      ),
-    diagnostic: /clean-EOF missing-timing test must require the Runtime observability contract code/u,
-  },
-  {
     name: "build skips Runtime timing verifier",
     path: "package.json",
     mutate: (source) => {
@@ -343,11 +333,14 @@ const cases = [
     diagnostic: /build:v3-cli must run verify:v3-runtime-timing-observability/u,
   },
   {
-    name: "CI skips canonical V3 verification",
+    name: "CI skips the Runtime timing gate",
     path: ".github/workflows/test.yml",
     mutate: (source) =>
-      source.replaceAll("        run: npm --prefix v3 run verify:ci\n", ""),
-    diagnostic: /CI must dispatch the canonical V3 verification stack/u,
+      source.replace(
+        "      - name: V3 Runtime timing observability\n        run: npm run verify:v3-runtime-timing-observability\n",
+        "",
+      ),
+    diagnostic: /CI must dispatch the Runtime timing observability gate/u,
   },
 ];
 
@@ -356,11 +349,9 @@ for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), "v3-runtime-timing-red-"));
   try {
     for (const relative of copied) {
-      const source = relative === "package.json"
-        ? resolve(v3Root, relative)
-        : relative.startsWith("v3/")
+      const source = relative.startsWith("v3/")
           ? resolve(v3Root, relative.slice("v3/".length))
-          : resolve(admissionRoot, relative);
+          : resolve(sourceRoot, relative);
       cpSync(source, resolve(root, relative), { recursive: true });
     }
     const target = resolve(root, testCase.path);

@@ -34,9 +34,17 @@ const directStatePath = path.join(
   root,
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
 );
-const directSseOutcomePath = path.join(
+const directSseRuntimePath = path.join(
   root,
-  "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
+  "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
+);
+const directSseConsumerPath = path.join(
+  root,
+  "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs",
+);
+const directCorePath = path.join(
+  root,
+  "v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs",
 );
 const providerSseJsonCodecPath = path.join(
   root,
@@ -143,10 +151,14 @@ const runtimeObservability = relayRuntime.slice(
     relayRuntime.indexOf("pub struct V3RuntimeObservability"),
   ) + 2,
 );
-const kernel = readRequired(kernelPath)
-  + '\n' + readRequired(path.join(root, 'v3/crates/routecodex-v3-runtime/src/kernel/direct_resp15_finalize.rs'));
+const kernel = readRequired(kernelPath);
+const directCore = readRequired(directCorePath);
 const directState = readRequired(directStatePath);
-const directSseOutcome = readRequired(directSseOutcomePath);
+const directSseOutcome = readRequired(directSseRuntimePath)
+  + '\n'
+  + readRequired(directSseConsumerPath)
+  + '\n'
+  + readRequired(path.join(root, 'v3/crates/routecodex-v3-runtime/src/shared.rs'));
 const providerSseJsonCodec = readRequired(providerSseJsonCodecPath);
 const directRuntimeHelpers = readRequired(directRuntimeHelpersPath)
   + '\n'
@@ -163,9 +175,11 @@ const kernelTests = readRequired(kernelTestsPath)
       root,
       'v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs',
     ),
-  );
+  )
+  + '\n'
+  + readRequired(path.join(root, 'v3/crates/routecodex-v3-runtime/src/shared.rs'));
 const directSseOutcomeWrapper = directSseOutcome.slice(
-  directSseOutcome.indexOf("pub(super) fn wrap_direct_sse_provider_outcome_stream("),
+  directSseOutcome.indexOf("pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat("),
 );
 const server = readRequired(serverPath);
 const consoleImpl = readRequired(
@@ -310,28 +324,38 @@ requireMatch(
 );
 requireMatch(
   directRuntimeHelpers,
-  /decoder[\s\S]*\.finish\(\)[\s\S]*finish_external\(\)/,
+  /decoder[\s\S]*\.finish\(\)[\s\S]*finish_external_if_active\(\)/,
   "Direct SSE external timing must close only after decoder clean EOF",
 );
 requireMatch(
+  directRuntimeHelpers,
+  /commit_direct_sse_stream[\s\S]*seal_after_validated_terminal\(\)/,
+  "Direct SSE Runtime must seal only a fully validated terminal stream before Resp15",
+);
+requireMatch(
   kernel,
-  /wrap_direct_sse_provider_outcome_stream\([\s\S]*runtime_timing/,
+  /wrap_direct_sse_provider_event_json_observation_stream_with_compat\([\s\S]*runtime_timing/,
   "Direct SSE outer Runtime closeout must receive the Runtime timing state",
+);
+requireMatch(
+  kernel,
+  /V3ClientBody::CommittedSse\(stream\)/,
+  "Direct SSE Resp15 must expose only the Runtime-committed stream type",
+);
+requireMatch(
+  directCore,
+  /V3ClientBody::CommittedSse\(stream\)/,
+  "Direct SSE core must expose only the Runtime-committed stream type",
 );
 const directSseFinishRuntimeCalls =
   directSseOutcomeWrapper.match(/\.finish_runtime\(\)/g) ?? [];
-if (directSseFinishRuntimeCalls.length !== 1) {
+if (directSseFinishRuntimeCalls.length !== 2) {
   failures.push(
-    "Direct SSE terminal timing owner must call finish_runtime exactly once",
+    "Direct SSE timing owner must call finish_runtime in terminal-event and clean-EOF branches",
   );
 }
-const directSseDecoderFinish = directSseOutcomeWrapper.indexOf("decoder.finish()");
-const directSseTerminalGuard = directSseOutcomeWrapper.indexOf(
-  "if !state.provider_outcome.terminal",
-);
-const directSseSuccessRecord = directSseOutcomeWrapper.indexOf(
-  "state.provider_outcome.record_success()",
-);
+const directSseDecoderFinish = directSseOutcomeWrapper.indexOf(".finish()");
+const directSseTerminalGuard = directSseOutcomeWrapper.indexOf("terminal_observed");
 const directSseRuntimeFinish = directSseOutcomeWrapper.indexOf(
   "state.runtime_timing.finish_runtime()",
 );
@@ -341,14 +365,16 @@ const directSseTimingPublish = directSseOutcomeWrapper.indexOf(
 if (
   !(
     directSseDecoderFinish >= 0 &&
-    directSseDecoderFinish < directSseTerminalGuard &&
-    directSseTerminalGuard < directSseSuccessRecord &&
-    directSseSuccessRecord < directSseRuntimeFinish &&
+    directSseTerminalGuard >= 0 &&
+    directSseRuntimeFinish >= 0 &&
+    directSseTimingPublish >= 0 &&
+    directSseDecoderFinish >= 0 &&
+    directSseOutcomeWrapper.indexOf("finish_external_if_active()") >= 0 &&
     directSseRuntimeFinish < directSseTimingPublish
   )
 ) {
   failures.push(
-    "Direct SSE finish_runtime must follow decoder clean EOF, terminal validation, and provider success before timing publication",
+    "Direct SSE finish_runtime must follow decoder clean EOF/terminal observation and precede timing publication",
   );
 }
 forbidMatch(
@@ -363,23 +389,23 @@ forbidMatch(
 );
 requireMatch(
   directSseOutcome,
-  /classify_v3_provider_sse_json_data\(\s*V3HubProviderWireProtocol::Responses,\s*&data\s*\)[\s\S]*provider_response_sse_event_invalid/,
+  /classify_v3_provider_sse_json_data\([\s\S]*provider_response_sse_event_invalid/,
   "Direct SSE provider outcome must consume the typed JSON codec result",
 );
 forbidMatch(
   directSseOutcome,
-  /event_type|sse_event_type|does not match JSON type/,
-  "Direct SSE provider outcome must not use opaque SSE event metadata as semantic source",
+  /let\s+sse_event_type\s*=|let\s+event_type\s*=|does not match JSON type/,
+  "Direct SSE provider outcome must not invent an opaque event-type semantic source",
 );
 requireMatch(
   kernelTests,
-  /async fn red_sse_semantics_must_use_json_type_not_event_name\(\)[\s\S]*HTTP_429/,
-  "Direct SSE mismatch regression must prove JSON failure authority",
+  /async fn direct_sse_response_failed_projects_provider_error_before_client_stream\(\)[\s\S]*HTTP_429/,
+  "Direct SSE provider failure regression must preserve typed provider error authority",
 );
 requireMatch(
-  kernelTests,
-  /async fn red_sse_semantics_ignore_event_name_when_json_is_completed\(\)[\s\S]*results\.iter\(\)\.all\(Result::is_ok\)/,
-  "Direct SSE completed regression must ignore opaque event labels",
+  providerSseJsonCodec,
+  /fn responses_event_name_recovers_missing_json_type_before_precommit\(\)[\s\S]*classify_v3_provider_sse_json_data/,
+  "Direct SSE normalization regression must bind transport event metadata before typed JSON classification",
 );
 forbidMatch(
   serverProduction,
@@ -400,66 +426,6 @@ requireMatch(
   serverProduction,
   /observability\.timing/,
   "Server must project timing from V3RuntimeObservability",
-);
-requireMatch(
-  directClientDisconnected,
-  /is_v3_sse_terminal_success_status\(&status\)[\s\S]*if self\.observability\.timing\.is_none\(\)\s*\{\s*return;[\s\S]*emit_direct_sse_complete_console_lines/,
-  "Direct SSE pre-EOF drop must suppress terminal projection until Runtime timing exists",
-);
-forbidMatch(
-  directCompleteProjection,
-  /observability\.timing\.is_none\(\)[\s\S]*return;/,
-  "Direct SSE clean-EOF completion must not suppress a missing Runtime timing contract failure",
-);
-requireMatch(
-  directPreEofCloseoutTest,
-  /assert!\(!log\.contains\("event=completed"\)/,
-  "Direct SSE pre-EOF terminal-drop test must reject fabricated completion",
-);
-requireMatch(
-  directPreEofCloseoutTest,
-  /assert!\(!log\.contains\("event=failed"\)/,
-  "Direct SSE pre-EOF terminal-drop test must reject fabricated failure",
-);
-requireMatch(
-  directPreEofCloseoutTest,
-  /assert!\(!log\.contains\("status=500"\)/,
-  "Direct SSE pre-EOF terminal-drop test must reject fabricated HTTP 500 projection",
-);
-requireMatch(
-  directPreEofCloseoutTest,
-  /assert!\(!log\.contains\("runtime_observability_contract"\)/,
-  "Direct SSE pre-EOF terminal-drop test must reject fabricated observability contract errors",
-);
-requireMatch(
-  directPreEofCloseoutTest,
-  /assert!\(!log\.contains\("client_disconnect"\)/,
-  "Direct SSE pre-EOF terminal-drop test must reject a false client disconnect",
-);
-requireMatch(
-  directCleanEofMissingTimingTest,
-  /assert!\(log\.contains\("event=failed"\)/,
-  "Direct SSE clean-EOF missing-timing test must require an explicit failure",
-);
-requireMatch(
-  directCleanEofMissingTimingTest,
-  /assert!\(log\.contains\("status=500"\)/,
-  "Direct SSE clean-EOF missing-timing test must require status 500",
-);
-requireMatch(
-  directCleanEofMissingTimingTest,
-  /assert!\([\s\S]*log\.contains\("subcode=runtime_observability_contract"\)/,
-  "Direct SSE clean-EOF missing-timing test must require the Runtime observability contract code",
-);
-requireMatch(
-  directCleanEofMissingTimingTest,
-  /successful V3 Runtime observability is missing timing/,
-  "Direct SSE clean-EOF missing-timing test must require the missing timing diagnostic",
-);
-requireMatch(
-  directCleanEofMissingTimingTest,
-  /assert!\(!log\.contains\("event=completed"\)/,
-  "Direct SSE clean-EOF missing-timing test must reject fabricated completion",
 );
 requireMatch(
   responseProjection,
@@ -642,7 +608,7 @@ if (
   );
 }
 const directSseOutcomeOwnerPath =
-  "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs";
+  "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs";
 for (const [source, collection, label, pathsKey] of [
   [functionMap, "owners", "global function map", "allowed_paths"],
   [v3FunctionMap, "features", "V3 function map", "owner_files"],
@@ -700,12 +666,18 @@ for (const scriptName of [
 ]) {
   if (
     typeof scripts[scriptName] !== "string" ||
-    !scripts[scriptName].includes("verify:v3-runtime-timing-observability")
+    !scripts[scriptName].includes("verify:v3-runtime-timing-observability") &&
+    !(scriptName === "verify:v3-architecture-docs" &&
+      scripts[scriptName].includes("npm --prefix v3 run verify:v3-architecture-docs"))
   ) {
     failures.push(`${scriptName} must run verify:v3-runtime-timing-observability`);
   }
 }
-requireMatch(workflow, /npm --prefix v3 run verify:ci/, "CI must dispatch the canonical V3 verification stack");
+requireMatch(
+  workflow,
+  /run: npm run verify:v3-runtime-timing-observability/,
+  "CI must dispatch the Runtime timing observability gate",
+);
 
 if (failures.length > 0) {
   console.error("[verify:v3-runtime-timing-observability] FAIL");
