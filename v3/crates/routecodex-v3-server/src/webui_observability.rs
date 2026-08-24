@@ -6,8 +6,8 @@
 //
 // P0 boundary: NO control semantics enter business payload, and the projection
 // does not own routing/retry/provider-health/error-policy truth. It only
-// projects already-typed observability data. No fallback; cursor/sequence
-// errors are explicit.
+// projects already-typed observability data. Cursor/sequence errors remain
+// explicit and are never recovered into success.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
@@ -28,7 +28,6 @@ pub(crate) enum V3ObsEventType {
     ProviderAttemptStarted,
     ProviderAttemptFailed,
     ProviderSwitched,
-    ResponseProgress,
     Completed,
     Failed,
     Cancelled,
@@ -42,7 +41,6 @@ impl V3ObsEventType {
             Self::ProviderAttemptStarted => "request.provider_attempt_started",
             Self::ProviderAttemptFailed => "request.provider_attempt_failed",
             Self::ProviderSwitched => "request.provider_switched",
-            Self::ResponseProgress => "request.response_progress",
             Self::Completed => "request.completed",
             Self::Failed => "request.failed",
             Self::Cancelled => "request.cancelled",
@@ -136,26 +134,16 @@ fn classify_v3_obs_error(
     observability: &crate::V3RuntimeObservability,
 ) -> (Option<String>, Option<String>) {
     let Some(event) = observability.provider_failure_events.last() else {
-        if let Some(status) = observability.provider_status {
-            let category = if status >= 500 { "upstream" } else { "request" };
-            return (Some(category.to_string()), Some(format!("HTTP {status}")));
-        }
-        return (Some("runtime".to_string()), observability.response_status.clone());
+        return (None, None);
     };
 
     let category = event
         .error_type
         .as_deref()
         .or(event.external_error_kind.as_deref())
-        .map(str::to_string)
-        .unwrap_or_else(|| match event.status {
-            401 | 403 => "auth".to_string(),
-            429 => "rate_limit".to_string(),
-            500..=599 => "upstream".to_string(),
-            400..=499 => "request".to_string(),
-            _ => "provider".to_string(),
-        });
-    (Some(category), Some(event.message.clone()))
+        .or(event.internal_code.as_deref())
+        .map(str::to_string);
+    (category, Some(event.message.clone()))
 }
 
 fn add_port_stats(stats: &mut V3ObsStats, port: u16, update: impl FnOnce(&mut V3ObsPortStats)) {
@@ -219,7 +207,7 @@ impl V3WebuiObservability {
     }
 
     /// Record a lifecycle event, upserting the mutable row for requestKey.
-    /// Returns Ok(sequence) on success; Err(e) is explicit (never silent fallback).
+    /// Returns Ok(sequence) on success; Err(e) is explicit and never becomes success.
     pub(crate) fn record(
         &self,
         event_type: V3ObsEventType,
@@ -261,6 +249,17 @@ impl V3WebuiObservability {
             event_type,
             V3ObsEventType::Completed | V3ObsEventType::Failed | V3ObsEventType::Cancelled
         );
+        if !is_terminal
+            && inner
+                .requests
+                .get(request_key)
+                .is_some_and(|row| row.result.is_some())
+        {
+            return Err(format!(
+                "request {request_key} is already terminal; refusing {} restart",
+                event_type_str
+            ));
+        }
         if is_terminal
             && !inner.requests.contains_key(request_key)
             && inner.terminal_keys.contains(request_key)
@@ -307,7 +306,8 @@ impl V3WebuiObservability {
                         port.success += 1;
                     });
                     if let Some(tokens) = row.tokens_output {
-                        inner.stats.tokens_output = inner.stats.tokens_output.saturating_add(tokens);
+                        inner.stats.tokens_output =
+                            inner.stats.tokens_output.saturating_add(tokens);
                         add_port_stats(&mut inner.stats, scope.port, |port| {
                             port.tokens_output = port.tokens_output.saturating_add(tokens);
                         });
@@ -334,7 +334,11 @@ impl V3WebuiObservability {
                         port.error += 1;
                     });
                     if let Some(category) = row.meta.error_category.as_ref() {
-                        *inner.stats.error_categories.entry(category.clone()).or_default() += 1;
+                        *inner
+                            .stats
+                            .error_categories
+                            .entry(category.clone())
+                            .or_default() += 1;
                     }
                 }
                 inner.stats.active = inner.active.len() as u64;
@@ -370,9 +374,9 @@ impl V3WebuiObservability {
             event_type,
             V3ObsEventType::Completed | V3ObsEventType::Failed | V3ObsEventType::Cancelled
         ) {
-                inner.active.remove(request_key);
-                inner.stats.active = inner.active.len() as u64;
-            }
+            inner.active.remove(request_key);
+            inner.stats.active = inner.active.len() as u64;
+        }
 
         let stats_snapshot = inner.stats.clone();
         inner.requests.insert(request_key.to_string(), row.clone());
@@ -543,6 +547,43 @@ mod tests {
         assert_eq!(row.result.as_deref(), Some("error"));
         assert_eq!(snap.stats.error, 1);
         assert_eq!(snap.stats.success, 0);
+    }
+
+    #[test]
+    fn started_after_failure_preserves_terminal_projection() {
+        let o = V3WebuiObservability::new();
+        let k = build_v3_obs_request_key(5555, "r-terminal");
+        o.record(V3ObsEventType::Started, &k, scope(5555), meta("r-terminal"))
+            .unwrap();
+        let mut failed_meta = meta("r-terminal");
+        failed_meta.error_category = Some("target_pool".to_string());
+        failed_meta.error_detail = Some("selected target exhausted".to_string());
+        o.record(V3ObsEventType::Failed, &k, scope(5555), failed_meta)
+            .unwrap();
+
+        // A duplicate ingress Started is rejected without reopening the
+        // terminal row or erasing its failure projection.
+        let restart_error = o
+            .record(V3ObsEventType::Started, &k, scope(5555), meta("r-terminal"))
+            .unwrap_err();
+        assert!(
+            restart_error.contains("already terminal"),
+            "duplicate Started must fail explicitly: {restart_error}"
+        );
+        let snap = o.snapshot(0).unwrap();
+        let row = snap.requests.get(&k).unwrap();
+        assert_eq!(row.event_type, "request.failed");
+        assert_eq!(row.result.as_deref(), Some("error"));
+        assert!(row.finished_epoch_ms.is_some());
+        assert_eq!(
+            row.meta.error_category.as_deref(),
+            Some("target_pool"),
+            "terminal error classification must survive duplicate Started"
+        );
+        assert_eq!(
+            row.meta.error_detail.as_deref(),
+            Some("selected target exhausted")
+        );
     }
 
     #[test]

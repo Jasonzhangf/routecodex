@@ -5034,7 +5034,7 @@ features:
   - npm run verify:v3-module-boundaries
   - git diff --check
   migration_target: rust
-  runtime_status: source_controlled_runtime_pending_live_replay
+  runtime_status: source_controlled_live_verified
 
 - feature_id: v3.runtime_restart_handoff_skeleton
   status: design
@@ -5301,10 +5301,11 @@ features:
   - git diff --check
 
 - feature_id: v3.server_internal_observability_projection
-  status: source_controlled_runtime_pending_live_replay
+  status: source_controlled_live_verified
   owner_crate: routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  - v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -5312,16 +5313,30 @@ features:
   - v3.server.internal_observability_projection
   entry_symbols:
   - V3WebuiObservability::record
+  - V3WebuiObservability::record_observed
   - V3WebuiObservability::snapshot
   - V3WebuiObservability::since
   - V3ObsSinceResult
+  - observability_snapshot
+  - observability_events
+  - record_v3_webui_projected_runtime_failure_for_context
   - emit_v3_request_console_observation
   - capture_v3_relay_provider_snapshots
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  - v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/executors.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-admin/src/api/observability.rs
+  - v3/crates/routecodex-v3-admin/src/api/mod.rs
+  - v3/crates/routecodex-v3-admin/src/lib.rs
+  - v3/admin-webui/requests.html
+  - docs/architecture/v3-build-tool-module-registry.yml
+  - v3/scripts/install-cli.mjs
+  - v3/tests/scripts/v3-cli-distribution.spec.mjs
   forbidden_paths:
   - request.normal_payload
   - response.client_payload
@@ -5330,7 +5345,11 @@ features:
   - protocol.metadata
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin --test l4_admin_api -- --nocapture
+  - npm --prefix v3 run test:distribution
   - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow
   - git diff --check
   runtime_status: source_controlled_runtime_pending_live_replay
 

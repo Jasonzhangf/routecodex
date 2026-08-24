@@ -3,7 +3,6 @@ use axum::body::Body;
 use axum::extract::Request;
 use axum::http::{HeaderMap, Response, StatusCode};
 use futures_util::{FutureExt, StreamExt};
-use routecodex_v3_error::{build_v3_error_01_source_raised, V3ErrorSourceKind};
 use routecodex_v3_runtime::V3OpenAiChatRelayRuntimeError;
 use serde_json::{json, Value};
 use std::panic::AssertUnwindSafe;
@@ -350,6 +349,19 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                                     // the client stream explicitly.
                                     let frame = append_v3_openai_chat_relay_sse_done(&data_frame);
                                     let _ = tx.send(frame).await;
+                                    if let Err(error) = record_v3_webui_projected_runtime_failure_for_context(
+                                        &console_context,
+                                        projected.error_class.expect(
+                                            "terminal Error06 projection must carry Error02 class",
+                                        ),
+                                        Some(projected.error_detail.as_deref().expect(
+                                            "terminal Error06 projection must carry source detail",
+                                        )),
+                                        projected.status,
+                                        "sse",
+                                    ) {
+                                        emit_v3_webui_projection_failure(&console_context, &error);
+                                    }
                                 }
                             }
                         return;

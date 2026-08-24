@@ -2074,6 +2074,70 @@ fn routed_observability_emits_exactly_one_request_block() {
 }
 
 #[test]
+fn nonstream_relay_terminal_projects_webui_success_and_failure() {
+    let log_file = test_v3_console_log_file("nonstream-relay-webui-terminal");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "openai_chat",
+        "/v1/chat/completions",
+        "req-nonstream-success",
+        &headers,
+        &json!({"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}]}),
+    );
+    let mut observability = test_direct_observability(Vec::new());
+    observability.response_status = Some("success".to_string());
+    observability.finish_reason = Some("stop".to_string());
+
+    emit_v3_observability_console_lines(
+        &context,
+        200,
+        &["V3OpenAiChatRelayClientPayload"],
+        &observability,
+        Instant::now(),
+        true,
+    );
+
+    let snapshot = state.webui_observability.snapshot(0).unwrap();
+    let row = snapshot
+        .requests
+        .get("4444:req-nonstream-success")
+        .expect("terminal nonstream request row");
+    assert_eq!(row.result.as_deref(), Some("success"));
+    assert_eq!(row.event_type, "request.completed");
+    assert!(row.finished_epoch_ms.is_some());
+
+    let failure_context = test_v3_console_emission_context(
+        &state,
+        "openai_chat",
+        "/v1/chat/completions",
+        "req-nonstream-failure",
+        &headers,
+        &json!({"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}]}),
+    );
+    let mut failure = test_direct_observability(Vec::new());
+    failure.response_status = Some("failed".to_string());
+    emit_v3_observability_console_lines(
+        &failure_context,
+        502,
+        &["V3ErrorErr06ClientProjected"],
+        &failure,
+        Instant::now(),
+        true,
+    );
+
+    let snapshot = state.webui_observability.snapshot(0).unwrap();
+    let row = snapshot
+        .requests
+        .get("4444:req-nonstream-failure")
+        .expect("terminal nonstream failure row");
+    assert_eq!(row.result.as_deref(), Some("error"));
+    assert_eq!(row.event_type, "request.failed");
+}
+
+#[test]
 fn response_console_rejects_missing_terminal_summary_instead_of_showing_unreported() {
     let log_file = test_v3_console_log_file("response-console-unreported-status");
     let _ = std::fs::remove_file(&log_file);

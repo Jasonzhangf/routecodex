@@ -13,7 +13,7 @@ const copyScript = read('scripts/copy-cli-bin.mjs');
 const installScript = read('scripts/install-cli.mjs');
 const packScript = read('scripts/pack-release.mjs');
 
-test('V3 owns one local binary and command alias contract', () => {
+test('V3 owns one local runtime binary, Admin host, and command alias contract', () => {
   assert.deepEqual(packageJson.bin, {
     routecodex: 'dist/bin/rccv3',
     rcc: 'dist/bin/rccv3',
@@ -25,11 +25,14 @@ test('V3 owns one local binary and command alias contract', () => {
   assert.ok(copyScript.includes("path.join(v3Root, 'dist', 'bin'"));
 });
 
-test('install builds release inside V3 and atomically publishes one direct binary', () => {
+test('install builds release inside V3 and atomically publishes direct runtime and Admin binaries', () => {
   assert.ok(installScript.includes("path.join(v3Root, 'build-control', 'install-target'"));
   assert.match(installScript, /runInterruptibleCommand\('cargo', \[[\s\S]*'--locked',[\s\S]*'--release'/);
   assert.ok(installScript.includes("path.join(cargoTargetDir, 'release', binaryName)"));
+  assert.ok(installScript.includes("'-p',\n    'routecodex-v3-admin'"));
+  assert.ok(installScript.includes("path.join(cargoTargetDir, 'release', adminBinaryName)"));
   assert.ok(installScript.includes('copyExecutableAtomic(sourceBin, repoBin)'));
+  assert.ok(installScript.includes('copyExecutableAtomic(path.join(path.dirname(sourceBin), adminBinaryName), repoAdminBin)'));
   assert.ok(installScript.includes('copyExecutableAtomic(repoBin, installBin, { sign: false })'));
   assert.ok(installScript.includes("for (const alias of ['routecodex', 'rcc'])"));
   assert.ok(installScript.includes('fs.symlinkSync(path.basename(binaryPath), temporaryPath)'));

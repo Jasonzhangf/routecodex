@@ -13,6 +13,7 @@ mod scope_metadata;
 mod session_admission;
 mod websocket;
 mod webui_observability;
+mod webui_observability_endpoints;
 
 use compaction_request::classify_v3_request_purpose;
 use console::*;
@@ -362,7 +363,6 @@ pub async fn spawn_v3_server_aggregate(
     }
 
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
-    let webui_observability = V3WebuiObservability::new();
     let request_activity_gate = Arc::new(V3ServerRequestActivityGate::default());
     // Generation zero is reserved for an uninitialized handoff carrier. A
     // listener may accept requests as soon as it binds, so the normal startup
@@ -389,7 +389,7 @@ pub async fn spawn_v3_server_aggregate(
             responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
             request_activity_gate: Arc::clone(&request_activity_gate),
             front_transport_broker: front_transport_broker.clone(),
-            webui_observability: webui_observability.clone(),
+            webui_observability: V3WebuiObservability::new(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let connection_broker = front_transport_broker.clone();
@@ -596,6 +596,14 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         .route("/_routecodex/debug/logs", get(debug_logs))
         .route("/_routecodex/debug/snapshots", get(debug_snapshots))
         .route("/_routecodex/debug/dry-run", post(debug_dry_run))
+        .route(
+            "/_routecodex/observability/snapshot",
+            get(webui_observability_endpoints::observability_snapshot),
+        )
+        .route(
+            "/_routecodex/observability/events",
+            get(webui_observability_endpoints::observability_events),
+        )
         .route(
             "/_routecodex/diagnostics/virtual-router",
             get(virtual_router_status),

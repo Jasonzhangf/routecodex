@@ -13,6 +13,7 @@ use std::sync::Arc;
 pub const STATIC_INDEX_HTML: &str = include_str!("../../../admin-webui/index.html");
 pub const STATIC_ROUTES_HTML: &str = include_str!("../../../admin-webui/routes.html");
 pub const STATIC_PROVIDERS_HTML: &str = include_str!("../../../admin-webui/providers.html");
+pub const STATIC_REQUESTS_HTML: &str = include_str!("../../../admin-webui/requests.html");
 pub const STATIC_APP_JS: &str = include_str!("../../../admin-webui/app.embedded.txt");
 pub const STATIC_STYLE_CSS: &str = include_str!("../../../admin-webui/styles.css");
 

@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RouteCodex — Requests</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <div class="brand">Route<span class="accent">Codex</span></div>
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/routes.html">Routes</a>
+      <a href="/providers.html">Providers</a>
+      <a href="/requests.html" class="active">Requests</a>
+    </nav>
+    <div class="spacer"></div>
+    <button class="btn" id="pause-btn" type="button">Pause</button>
+    <button class="btn primary" id="reload-btn" type="button">Reload</button>
+  </header>
+
+  <main>
+    <h1>Requests</h1>
+    <div class="sub">Realtime request lifecycle, errors and port distribution</div>
+    <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
+
+    <div class="section">
+      <h2>Statistics</h2>
+      <div class="cards" id="summary-cards"></div>
+      <div class="layout">
+        <div class="panel"><table id="ports-table"><thead><tr><th>Port</th><th class="num">Total</th><th class="num">Active</th><th class="num">Success</th><th class="num">Error</th><th class="num">Cancelled</th></tr></thead><tbody><tr><td colspan="6" class="loading">loading…</td></tr></tbody></table></div>
+        <div class="panel"><table id="errors-table"><thead><tr><th>Error category</th><th class="num">Count</th><th>Latest</th></tr></thead><tbody><tr><td colspan="3" class="loading">no errors</td></tr></tbody></table></div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <label>Status<select id="status-filter"><option value="all">all</option><option value="active">active</option><option value="retrying">retrying</option><option value="success">success</option><option value="error">error</option><option value="cancelled">cancelled</option></select></label>
+      <label>Port<select id="port-filter"><option value="all">all ports</option></select></label>
+      <label>Search<input id="search-filter" type="search" placeholder="request, model, provider, route, error"></label>
+      <label>Sort by<select id="sort-field"><option value="updated_epoch_ms">Updated</option><option value="started_epoch_ms">Started</option><option value="finished_epoch_ms">Finished</option><option value="duration_ms">Duration</option><option value="attempts">Attempts</option><option value="failed_attempts">Failures</option><option value="switches">Switches</option></select></label>
+      <label>Order<select id="sort-order"><option value="desc">Descending</option><option value="asc">Ascending</option></select></label>
+      <label class="checkbox"><input id="group-toggle" type="checkbox" checked> Group by port</label>
+    </div>
+
+    <div class="section">
+      <div class="panel table-panel" id="requests-panel"><div class="loading">loading…</div></div>
+    </div>
+  </main>
+
+  <script src="/app.embedded.txt"></script>
+  <script>
+    let snapshot = { requests: {}, stats: {}, sources: [], recent_events: [] };
+    let paused = false;
+    let pollTimer = null;
+    const sourceCursors = new Map();
+
+    function statusOf(row) {
+      if (row.result === "success") return "success";
+      if (row.result === "error") return "error";
+      if (row.result === "cancelled") return "cancelled";
+      if (row.event_type === "request.provider_attempt_failed") return "retrying";
+      return "active";
+    }
+
+    function timeText(value) {
+      if (!value) return "—";
+      return new Date(value).toLocaleString([], { hour12: false });
+    }
+
+    function metaValue(row, key) {
+      return row.meta?.[key] ?? "—";
+    }
+
+    function applyPoll(data) {
+      if (!data || typeof data !== "object") throw new Error("invalid observability poll");
+      for (const source of data.sources || []) sourceCursors.set(source.port, source.cursor);
+      snapshot = data;
+      render();
+      showConnection();
+    }
+
+    async function poll() {
+      const params = new URLSearchParams();
+      if (sourceCursors.size) {
+        params.set("sources", [...sourceCursors.entries()].sort(([a], [b]) => a - b).map(([port, cursor]) => `${port}:${cursor}`).join(","));
+      }
+      const data = await api(`/api/observability/poll?${params}`);
+      applyPoll(data);
+    }
+
+    function schedulePoll() {
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = setTimeout(async () => {
+        pollTimer = null;
+        if (!paused) {
+          try { await poll(); } catch (error) { showStatus("err", `observability failed: ${error.message}`); }
+        }
+        schedulePoll();
+      }, 1000);
+    }
+
+    async function load() {
+      sourceCursors.clear();
+      await poll();
+    }
+
+    function showConnection() {
+      hideStatus();
+    }
+
+    function matches(row) {
+      const statusFilter = document.getElementById("status-filter").value;
+      const portFilter = document.getElementById("port-filter").value;
+      const search = document.getElementById("search-filter").value.trim().toLowerCase();
+      const status = statusOf(row);
+      if (statusFilter !== "all" && status !== statusFilter) return false;
+      if (portFilter !== "all" && String(row.scope?.port) !== portFilter) return false;
+      if (!search) return true;
+      const values = [row.request_key, row.meta?.request_id, row.meta?.model, row.meta?.provider, row.meta?.route, row.scope?.session, row.scope?.workdir, row.meta?.error_category, row.meta?.error_detail];
+      return values.some((value) => String(value ?? "").toLowerCase().includes(search));
+    }
+
+    function sortRows(rows) {
+      const field = document.getElementById("sort-field").value;
+      const direction = document.getElementById("sort-order").value === "asc" ? 1 : -1;
+      return rows.sort((left, right) => {
+        let a = left[field];
+        let b = right[field];
+        if (field === "finished_epoch_ms") { a = a ?? Number.MAX_SAFE_INTEGER; b = b ?? Number.MAX_SAFE_INTEGER; }
+        else { a = a ?? 0; b = b ?? 0; }
+        return direction * ((a > b) - (b > a) || String(left.request_key).localeCompare(right.request_key));
+      });
+    }
+
+    function renderStats() {
+      const stats = snapshot.stats || {};
+      const cards = document.getElementById("summary-cards");
+      cards.replaceChildren();
+      const values = [["Total", stats.total], ["Active", stats.active], ["Success", stats.success], ["Error", stats.error], ["Cancelled", stats.cancelled], ["Switches", stats.switches], ["Output tokens", stats.tokens_output]];
+      for (const [label, value] of values) {
+        const card = el("div", `card stat-${label.toLowerCase().replace(/\s+/g, "-")}`);
+        card.appendChild(el("div", "label", label));
+        card.appendChild(el("div", "value", Number(value || 0).toLocaleString()));
+        cards.appendChild(card);
+      }
+      const portBody = document.querySelector("#ports-table tbody");
+      const ports = [...(stats.by_port ? Object.entries(stats.by_port) : [])].sort(([a], [b]) => Number(a) - Number(b));
+      portBody.replaceChildren(...ports.map(([port, item]) => {
+        const row = el("tr", item.error ? "status-error" : item.active ? "status-active" : "status-success");
+        row.append(el("td", null, String(port)), numberCell(item.total), numberCell(item.active), numberCell(item.success), numberCell(item.error), numberCell(item.cancelled));
+        return row;
+      }));
+      if (!ports.length) {
+        const cell = document.createElement("td");
+        cell.colSpan = 6;
+        portBody.replaceChildren(el("tr", null, cell));
+      }
+      const errorBody = document.querySelector("#errors-table tbody");
+      const categories = Object.entries(stats.error_categories || {}).sort(([, a], [, b]) => b - a);
+      errorBody.replaceChildren(...categories.map(([category, count]) => {
+        const latest = [...Object.values(snapshot.requests || {})].filter((row) => metaValue(row, "error_category") === category).reduce((latest, row) => Math.max(latest, row.updated_epoch_ms || 0), 0);
+        const row = el("tr", "status-error");
+        row.append(el("td", null, category), numberCell(count), el("td", "muted", timeText(latest)));
+        return row;
+      }));
+      if (!categories.length) {
+        const cell = document.createElement("td");
+        cell.colSpan = 3;
+        errorBody.replaceChildren(el("tr", null, cell));
+      }
+      const portSelect = document.getElementById("port-filter");
+      const selected = portSelect.value;
+      portSelect.replaceChildren(el("option", null, "all ports"), ...ports.map(([port]) => {
+        const option = el("option", null, String(port)); option.value = String(port); return option;
+      }));
+      portSelect.value = [...portSelect.options].some((option) => option.value === selected) ? selected : "all";
+    }
+
+    function numberCell(value) {
+      const cell = el("td", "num", Number(value || 0).toLocaleString());
+      return cell;
+    }
+
+    function detailGrid(row) {
+      const grid = el("div", "detail-grid");
+      const fields = [
+        ["request id", row.meta?.request_id], ["protocol", row.meta?.entry_protocol], ["mode", row.meta?.execution_mode],
+        ["transport", row.meta?.transport], ["session", row.scope?.session], ["workdir", row.scope?.workdir],
+        ["provider status", row.meta?.provider_status], ["response status", row.meta?.response_status], ["finish reason", row.meta?.finish_reason],
+        ["error category", row.meta?.error_category], ["error detail", row.meta?.error_detail], ["output tokens", row.tokens_output],
+        ["started", timeText(row.started_epoch_ms)], ["updated", timeText(row.updated_epoch_ms)], ["finished", timeText(row.finished_epoch_ms)]
+      ];
+      for (const [label, value] of fields) {
+        const item = el("span");
+        item.append(el("strong", null, `${label}: `), document.createTextNode(String(value ?? "—")));
+        grid.appendChild(item);
+      }
+      return grid;
+    }
+
+    function requestRow(row) {
+      const status = statusOf(row);
+      const tr = el("tr", `request-row status-${status}`);
+      tr.appendChild(el("td", null, status));
+      tr.appendChild(el("td", "mono", row.request_key));
+      tr.appendChild(el("td", null, `${metaValue(row, "endpoint")} · ${metaValue(row, "model")}`));
+      tr.appendChild(el("td", null, `${metaValue(row, "route")} · ${metaValue(row, "provider")}`));
+      tr.appendChild(el("td", "num", `${row.attempts || 0}/${row.failed_attempts || 0}`));
+      tr.appendChild(el("td", "num", fmtMs(row.duration_ms)));
+      tr.appendChild(el("td", "muted", timeText(status === "success" || status === "error" || status === "cancelled" ? row.finished_epoch_ms : row.updated_epoch_ms)));
+      const details = el("td");
+      const disclosure = document.createElement("details");
+      disclosure.appendChild(el("summary", null, "details"));
+      disclosure.appendChild(detailGrid(row));
+      details.appendChild(disclosure);
+      tr.appendChild(details);
+      return tr;
+    }
+
+    function renderRequests() {
+      const panel = document.getElementById("requests-panel");
+      const rows = sortRows(Object.values(snapshot.requests || {}).filter(matches));
+      if (!rows.length) { panel.replaceChildren(el("div", "loading", "no matching requests")); return; }
+      const table = el("table", "request-table");
+      const head = el("tr");
+      ["Status", "Request / Port", "Endpoint · Model", "Route · Provider", "Try/Fail", "Duration", "Time", ""].forEach((label) => head.appendChild(el("th", null, label)));
+      const tableHead = document.createElement("thead");
+      tableHead.appendChild(head);
+      table.appendChild(tableHead);
+      const body = document.createElement("tbody");
+      body.className = "request-body is-updating";
+      if (document.getElementById("group-toggle").checked) {
+        let lastPort = null;
+        for (const row of rows) {
+          const port = String(row.scope?.port ?? "?");
+          if (port !== lastPort) {
+            const group = el("tr", "group-row");
+            group.appendChild(el("td", null, `Port ${port}`));
+            group.firstChild.colSpan = 8;
+            body.appendChild(group);
+            lastPort = port;
+          }
+          body.appendChild(requestRow(row));
+        }
+      } else {
+        rows.forEach((row) => body.appendChild(requestRow(row)));
+      }
+      table.appendChild(body);
+      panel.replaceChildren(table);
+      requestAnimationFrame(() => body.classList.remove("is-updating"));
+    }
+
+    function render() { renderStats(); renderRequests(); }
+
+    document.getElementById("reload-btn").addEventListener("click", () => load().catch((error) => showStatus("err", error.message)));
+    document.getElementById("pause-btn").addEventListener("click", (event) => {
+      paused = !paused;
+      event.currentTarget.textContent = paused ? "Resume" : "Pause";
+      if (!paused) poll().catch((error) => showStatus("err", error.message));
+    });
+    ["status-filter", "port-filter", "search-filter", "sort-field", "sort-order", "group-toggle"].forEach((id) => {
+      document.getElementById(id).addEventListener("input", render);
+    });
+
+    load().catch((error) => showStatus("err", `observability failed: ${error.message}`));
+    schedulePoll();
+  </script>
+</body>
+</html>

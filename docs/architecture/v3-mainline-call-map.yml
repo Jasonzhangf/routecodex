@@ -7939,3 +7939,142 @@ chains:
       produces: [v3.sse.direct.accept_skeleton]
       side_channel_reads: []
       side_channel_writes: []
+
+- chain_id: v3.webui_request_observability.mainline
+  owner_feature_id: v3.server_internal_observability_projection
+  manifest: docs/architecture/manifests/v3.webui_request_observability.mainline.yml
+  summary: Server console consumers project already-typed Runtime observability into one bounded request row; a loopback-only listener projection is read by Admin solely for the single WebUI.
+  edges:
+  - step_id: v3-webui-observability-01
+    from_node: V3RuntimeTimingServerProjection
+    to_node: V3WebuiObservabilityProjection
+    caller_symbol: record_v3_webui_event_for_context
+    caller_file: v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+    callee_symbol: V3WebuiObservability::record_observed
+    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_observability
+      produces:
+      - v3.server.internal_observability_projection
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.server.internal_observability_projection
+  - step_id: v3-webui-observability-error-sse
+    from_node: V3OpenAiChatRelayError06Projection
+    to_node: V3WebuiObservabilityProjection
+    caller_symbol: v3_openai_chat_relay_sse_accept_response
+    caller_file: v3/crates/routecodex-v3-server/src/executors.rs
+    callee_symbol: record_v3_webui_projected_runtime_failure_for_context
+    callee_file: v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes:
+      - v3.error.chain
+      produces:
+      - v3.server.internal_observability_projection
+      side_channel_reads:
+      - v3.error.chain
+      side_channel_writes:
+      - v3.server.internal_observability_projection
+  - step_id: v3-webui-observability-error-json
+    from_node: V3OpenAiChatRelayError06Projection
+    to_node: V3WebuiObservabilityProjection
+    caller_symbol: pending_endpoint_after_responses_admission_inner
+    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    callee_symbol: record_v3_webui_projected_runtime_failure_for_context
+    callee_file: v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes:
+      - v3.error.chain
+      produces:
+      - v3.server.internal_observability_projection
+      side_channel_reads:
+      - v3.error.chain
+      side_channel_writes:
+      - v3.server.internal_observability_projection
+  - step_id: v3-webui-observability-02
+    from_node: V3WebuiObservabilityProjection
+    to_node: V3WebuiObservabilityLoopbackProjection
+    caller_symbol: observability_snapshot
+    caller_file: v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
+    callee_symbol: V3WebuiObservability::snapshot
+    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes:
+      - v3.server.internal_observability_projection
+      produces: []
+      side_channel_reads:
+      - v3.server.internal_observability_projection
+      side_channel_writes: []
+  - step_id: v3-webui-observability-config
+    from_node: V3AdminObservabilityPoll
+    to_node: V3AdminRequestedPorts
+    caller_symbol: requested_ports
+    caller_file: v3/crates/routecodex-v3-admin/src/api/observability.rs
+    callee_symbol: V3ConfigStore::read_authoring
+    callee_file: v3/crates/routecodex-v3-config/src/store.rs
+    status: anchored
+    binding_kind: in_process_config_read
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes:
+      - config.authoring_surface
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-webui-observability-03
+    from_node: V3AdminRequestedPorts
+    to_node: V3WebuiObservabilityLoopbackProjection
+    caller_symbol: fetch_snapshot
+    caller_file: v3/crates/routecodex-v3-admin/src/api/observability.rs
+    callee_symbol: observability_snapshot
+    callee_file: v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
+    status: anchored
+    binding_kind: loopback_http_transport
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads:
+      - v3.server.internal_observability_projection
+      side_channel_writes: []
+  - step_id: v3-webui-observability-events-http
+    from_node: V3AdminRequestedPorts
+    to_node: V3WebuiObservabilityLoopbackProjection
+    caller_symbol: fetch_events
+    caller_file: v3/crates/routecodex-v3-admin/src/api/observability.rs
+    callee_symbol: observability_events
+    callee_file: v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
+    status: anchored
+    binding_kind: loopback_http_transport_once_json
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads:
+      - v3.server.internal_observability_projection
+      side_channel_writes: []
+  - step_id: v3-webui-observability-04
+    from_node: V3AdminRequestsPage
+    to_node: V3AdminObservabilityPoll
+    caller_symbol: poll
+    caller_file: v3/admin-webui/requests.html
+    callee_symbol: routecodex_v3_admin::api::observability::poll
+    callee_file: v3/crates/routecodex-v3-admin/src/api/observability.rs
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads:
+      - v3.server.internal_observability_projection
+      side_channel_writes: []

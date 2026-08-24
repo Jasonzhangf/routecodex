@@ -4965,3 +4965,76 @@ async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
     }
     handle.shutdown().await;
 }
+
+#[tokio::test]
+async fn observability_projection_is_isolated_per_listener() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) =
+        start_controlled_responses_relay_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-webui-port-isolation");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let [first, second] = handle.listeners.as_slice() else {
+        panic!("aggregate must expose exactly two listeners");
+    };
+    let client = reqwest::Client::new();
+
+    for listener in [&first, &second] {
+        let response = client
+            .post(format!("http://{}/v1/responses", listener.addr))
+            .json(&json!({
+                "model": "client-test",
+                "input": "webui observability port marker"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let mut seen_ports = Vec::new();
+    for listener in [&first, &second] {
+        let snapshot: Value = client
+            .get(format!(
+                "http://{}/_routecodex/observability/snapshot",
+                listener.addr
+            ))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let expected_port = listener.addr.port();
+        seen_ports.push(expected_port);
+        let unexpected_port = if expected_port == first.addr.port() {
+            second.addr.port()
+        } else {
+            first.addr.port()
+        };
+        let serialized = serde_json::to_string(&snapshot).unwrap();
+        assert!(
+            !serialized.contains(&format!("\"{unexpected_port}:")),
+            "listener {expected_port} must not project requests owned by {unexpected_port}: {serialized}"
+        );
+        assert_eq!(
+            snapshot["stats"]["by_port"][expected_port.to_string()]["total"],
+            1,
+            "listener {expected_port} must count its own request"
+        );
+        assert!(
+            snapshot["stats"]["by_port"][unexpected_port.to_string()].is_null(),
+            "listener {expected_port} must not create stats for {unexpected_port}"
+        );
+    }
+    assert_ne!(seen_ports[0], seen_ports[1]);
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}

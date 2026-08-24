@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 static TEST_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static OBSERVABILITY_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn temp_home() -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -128,6 +129,101 @@ async fn bind_test_server() -> (String, AppState, PathBuf) {
         let _ = axum::serve(listener, router).await;
     });
     (url, state, home)
+}
+
+fn observability_source_row() -> serde_json::Value {
+    serde_json::json!({
+        "request_key": "19999:req-source",
+        "event_type": "request.failed",
+        "started_epoch_ms": 1,
+        "updated_epoch_ms": 3,
+        "finished_epoch_ms": 2,
+        "duration_ms": 1,
+        "meta": {
+            "request_id": "req-source",
+            "endpoint": "/v1/chat/completions",
+            "error_category": "provider_http_429",
+            "error_detail": "upstream rate limited"
+        },
+        "scope": {"port": 19999},
+        "result": "error",
+        "attempts": 2,
+        "failed_attempts": 1,
+        "switches": 1,
+        "tokens_output": 7
+    })
+}
+
+fn source_snapshot() -> serde_json::Value {
+    serde_json::json!({
+        "cursor": 7,
+        "requests": {"19999:req-source": observability_source_row()},
+        "stats": {
+            "total": 2,
+            "active": 0,
+            "success": 1,
+            "error": 1,
+            "cancelled": 0,
+            "switches": 1,
+            "tokens_output": 11,
+            "by_port": {
+                "19999": {
+                    "total": 2,
+                    "active": 0,
+                    "success": 1,
+                    "error": 1,
+                    "cancelled": 0,
+                    "switches": 1,
+                    "tokens_output": 11
+                }
+            },
+            "error_categories": {"provider_http_429": 1}
+        }
+    })
+}
+
+async fn spawn_source_on_configured_port() -> (u16, tokio::sync::oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:19999")
+        .await
+        .expect("bind configured observability source port");
+    let port = listener.local_addr().expect("source address").port();
+    let app = axum::Router::new()
+        .route(
+            "/_routecodex/observability/snapshot",
+            axum::routing::get(|| async { axum::Json(source_snapshot()) }),
+        )
+        .route(
+            "/_routecodex/observability/events",
+            axum::routing::get(
+                |axum::extract::Query(params): axum::extract::Query<
+                    std::collections::BTreeMap<String, String>,
+                >| async move {
+                    let cursor = params
+                        .get("cursor")
+                        .and_then(|cursor| cursor.parse::<u64>().ok())
+                        .unwrap_or_default();
+                    axum::Json(serde_json::json!({
+                        "kind": "events",
+                        "cursor": cursor + 1,
+                        "resync_required": cursor == 99,
+                        "events": [{
+                            "sequence": cursor + 1,
+                            "timestamp_epoch_ms": 4,
+                            "row": observability_source_row()
+                        }]
+                    }))
+                },
+            ),
+        );
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await;
+    });
+    (port, shutdown_tx)
 }
 
 #[tokio::test]
@@ -284,6 +380,17 @@ async fn revisions_and_static_assets_are_served() {
     assert!(index.status().is_success());
     let body = index.text().await.expect("index body");
     assert!(body.contains("Dashboard"), "index page rendered");
+    let requests = http_client()
+        .get(format!("{base}/requests.html"))
+        .send()
+        .await
+        .expect("requests page response");
+    assert!(requests.status().is_success());
+    let requests_body = requests.text().await.expect("requests page body");
+    assert!(
+        requests_body.contains("Realtime request lifecycle"),
+        "requests page rendered"
+    );
     let css = http_client()
         .get(format!("{base}/styles.css"))
         .send()
@@ -350,4 +457,83 @@ supportsStreaming = true
         "error message captured when endpoint unreachable"
     );
     let _ = sample_health();
+}
+
+#[tokio::test]
+async fn observability_poll_aggregates_source_and_advances_cursor() {
+    let _guard = OBSERVABILITY_TEST_LOCK.lock().await;
+    let (base, _state, _home) = bind_test_server().await;
+    let (source_port, shutdown) = spawn_source_on_configured_port().await;
+    assert_eq!(source_port, 19999);
+
+    let response = http_client()
+        .get(format!("{base}/api/observability/poll?sources=19999:7"))
+        .send()
+        .await
+        .expect("observability poll response");
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await.expect("poll json");
+    println!("observability poll body: {body}");
+    assert!(
+        body["requests"]["19999:req-source"].is_object(),
+        "source request row must be aggregated: {body}"
+    );
+    assert_eq!(body["stats"]["total"], 2);
+    assert_eq!(body["stats"]["by_port"]["19999"]["error"], 1);
+    assert_eq!(body["stats"]["error_categories"]["provider_http_429"], 1);
+    assert_eq!(body["sources"][0]["port"], 19999);
+    assert_eq!(body["sources"][0]["cursor"], 8);
+    assert_eq!(body["recent_events"][0]["sequence"], 8);
+    assert!(
+        body.get("errors").is_none(),
+        "errors field removed from aggregate"
+    );
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn observability_poll_fails_fast_when_source_unavailable() {
+    let _guard = OBSERVABILITY_TEST_LOCK.lock().await;
+    let (base, _state, _home) = bind_test_server().await;
+
+    // Port 19999 is intentionally unbound for this negative test.
+    let response = http_client()
+        .get(format!("{base}/api/observability/poll?sources=19999:0"))
+        .send()
+        .await
+        .expect("observability poll response");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::BAD_GATEWAY,
+        "source unavailable must fail fast, not degrade to partial success"
+    );
+    let body: serde_json::Value = response.json().await.expect("poll json");
+    assert!(body["error"].is_string(), "error message present");
+}
+
+#[tokio::test]
+async fn observability_poll_fails_fast_when_source_requires_resync() {
+    let _guard = OBSERVABILITY_TEST_LOCK.lock().await;
+    let (base, _state, _home) = bind_test_server().await;
+    let (source_port, shutdown) = spawn_source_on_configured_port().await;
+    assert_eq!(source_port, 19999);
+
+    let response = http_client()
+        .get(format!("{base}/api/observability/poll?sources=19999:99"))
+        .send()
+        .await
+        .expect("observability poll response");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::BAD_GATEWAY,
+        "resync_required must fail fast instead of merging incomplete events"
+    );
+    let body: serde_json::Value = response.json().await.expect("poll json");
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("resync")),
+        "resync reason present: {body}"
+    );
+    shutdown.send(()).unwrap();
 }

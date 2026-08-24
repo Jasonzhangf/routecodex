@@ -932,17 +932,43 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 Ok(output) => output,
                 Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
             };
-        if let Some(response) = emit_relay_error_chain_if_any(
-            &state,
-            &trace_scope,
-            &path,
-            &request_id,
-            output.status,
-            output.error_chain.as_deref(),
-            openai_chat_error_body_for_console(&output.client_body),
-            request_console_project_path.as_deref(),
-        ) {
-            return response;
+        if output.error_chain.is_some() {
+            let console_context = build_v3_console_emission_context(
+                &state,
+                &entry_protocol,
+                &path,
+                &request_identity,
+                &request_headers,
+                &payload,
+            );
+            if let Err(error) = record_v3_webui_projected_runtime_failure_for_context(
+                &console_context,
+                output
+                    .error_class
+                    .expect("terminal Error06 output must carry Error02 classification"),
+                Some(
+                    output
+                        .error_detail
+                        .as_deref()
+                        .expect("terminal Error06 output must carry source detail"),
+                ),
+                output.status,
+                "json",
+            ) {
+                emit_v3_webui_projection_failure(&console_context, &error);
+            }
+            if let Some(response) = emit_relay_error_chain_if_any(
+                &state,
+                &trace_scope,
+                &path,
+                &request_id,
+                output.status,
+                output.error_chain.as_deref(),
+                openai_chat_error_body_for_console(&output.client_body),
+                request_console_project_path.as_deref(),
+            ) {
+                return response;
+            }
         }
         let mut output = output;
         if let Some(response) = capture_v3_relay_provider_snapshots(

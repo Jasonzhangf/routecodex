@@ -2,7 +2,7 @@ use crate::webui_observability::{
     build_v3_obs_request_key, V3ObsEventType, V3ObsRequestMeta, V3ObsScope,
 };
 use crate::*;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -103,10 +103,66 @@ pub(crate) fn record_v3_webui_event_for_context(
         session: Some(context.identity.session_id.clone()),
     };
     let meta = build_v3_webui_meta_for_context(context, observability);
-    context
-        .state
-        .webui_observability
-        .record_observed(event_type, &request_key, scope, meta, observability)
+    context.state.webui_observability.record_observed(
+        event_type,
+        &request_key,
+        scope,
+        meta,
+        observability,
+    )
+}
+
+fn v3_obs_error_fields_from_error_body(
+    error_class: &'static str,
+    detail: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    (
+        Some(error_class.to_string()),
+        Some(detail.unwrap_or(error_class).to_string()),
+    )
+}
+
+/// Project an already-terminal Error06 into the WebUI side-channel. The caller
+/// owns the client projection; this function must never alter it.
+pub(crate) fn record_v3_webui_projected_runtime_failure_for_context(
+    context: &V3ConsoleEmissionContext,
+    error_class: &'static str,
+    error_detail: Option<&str>,
+    status: u16,
+    transport: &'static str,
+) -> Result<u64, String> {
+    let request_key = build_v3_obs_request_key(
+        context.state.server.port,
+        &context.request_identity.request_id,
+    );
+    let scope = V3ObsScope {
+        port: context.state.server.port,
+        workdir: context.identity.project_path.clone(),
+        session: Some(context.identity.session_id.clone()),
+    };
+    let (error_category, error_detail) =
+        v3_obs_error_fields_from_error_body(error_class, error_detail);
+    let meta = V3ObsRequestMeta {
+        request_id: context.request_identity.request_id.clone(),
+        endpoint: context.endpoint.clone(),
+        entry_protocol: Some(context.entry_protocol.clone()),
+        execution_mode: Some("relay".to_string()),
+        transport: Some(transport.to_string()),
+        provider_status: Some(status),
+        response_status: Some("error".to_string()),
+        finish_reason: Some("error".to_string()),
+        route: Some("-".to_string()),
+        error_category,
+        error_detail,
+        ..Default::default()
+    };
+    context.state.webui_observability.record_observed(
+        V3ObsEventType::Failed,
+        &request_key,
+        scope,
+        meta,
+        &V3RuntimeObservability::default(),
+    )
 }
 
 // Started projection: uses only scope + identity (route/model/provider unknown
@@ -848,6 +904,22 @@ pub(crate) fn emit_v3_colorized_request_console_line(
     println!("{colorized}");
 }
 
+fn v3_webui_terminal_event_for_response(
+    status: u16,
+    observability: &V3RuntimeObservability,
+) -> V3ObsEventType {
+    let is_error = status >= 400
+        || matches!(
+            observability.response_status.as_deref(),
+            Some("error" | "failed" | "incomplete")
+        );
+    if is_error {
+        V3ObsEventType::Failed
+    } else {
+        V3ObsEventType::Completed
+    }
+}
+
 pub(crate) fn emit_v3_observability_console_lines(
     context: &V3ConsoleEmissionContext,
     status: u16,
@@ -863,6 +935,10 @@ pub(crate) fn emit_v3_observability_console_lines(
     if include_usage {
         let elapsed = started_at.elapsed();
         emit_v3_stopless_console_line(context, observability);
+        let terminal = v3_webui_terminal_event_for_response(status, observability);
+        if let Err(error) = record_v3_webui_event_for_context(context, terminal, observability) {
+            emit_v3_webui_projection_failure(context, &error);
+        }
         if should_emit_v3_request_complete_console_line(status, observability) {
             if let Err(error) = emit_v3_request_complete_console_line(
                 context,
@@ -902,16 +978,7 @@ pub(crate) fn emit_v3_direct_frame_console_lines(
     // SSE streams defer terminal ownership to their console finalizer so the
     // final outcome (Completed/Failed/Cancelled) reflects stream closeout.
     if !is_sse {
-        let is_error_status = frame.status >= 400
-            || matches!(
-                observability.response_status.as_deref(),
-                Some("error" | "failed" | "incomplete")
-            );
-        let terminal = if is_error_status {
-            V3ObsEventType::Failed
-        } else {
-            V3ObsEventType::Completed
-        };
+        let terminal = v3_webui_terminal_event_for_response(frame.status, &observability);
         if let Err(error) = record_v3_webui_event_for_context(context, terminal, &observability) {
             emit_v3_webui_projection_failure(context, &error);
         }
@@ -1578,5 +1645,31 @@ pub(crate) fn parse_v3_console_provider_key(
         ),
         [provider] => (Some((*provider).to_string()), None, None),
         [] => (None, None, None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn projected_typed_error_carries_classification_and_detail() {
+        let (category, detail) = v3_obs_error_fields_from_error_body(
+            "target_pool",
+            Some("selected target exhausted after [provider:model:capability_mismatch]"),
+        );
+        assert_eq!(category.as_deref(), Some("target_pool"));
+        assert_eq!(
+            detail.as_deref(),
+            Some("selected target exhausted after [provider:model:capability_mismatch]")
+        );
+    }
+
+    #[test]
+    fn projected_missing_detail_uses_error_classification() {
+        let (category, detail) = v3_obs_error_fields_from_error_body("provider_http_429", None);
+        assert_eq!(category.as_deref(), Some("provider_http_429"));
+        assert_eq!(detail.as_deref(), Some("provider_http_429"));
     }
 }

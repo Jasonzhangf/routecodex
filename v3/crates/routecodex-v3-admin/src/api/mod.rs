@@ -1,5 +1,6 @@
 // feature_id: v3.admin_api
 pub mod dashboard;
+pub mod observability;
 pub mod providers;
 pub mod reload;
 pub mod routes;
@@ -11,6 +12,7 @@ use axum::Router;
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .merge(dashboard::routes())
+        .merge(observability::routes())
         .merge(routes::routes())
         .merge(providers::routes())
         .merge(reload::routes())
@@ -20,6 +22,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/index.html", get(static_serve))
         .route("/routes.html", get(static_serve))
         .route("/providers.html", get(static_serve))
+        .route("/requests.html", get(static_serve))
         .route("/", get(static_serve))
         .with_state(state)
 }
@@ -42,6 +45,7 @@ async fn static_serve(State(state): State<AppState>, uri: axum::http::Uri) -> Re
         "" | "index.html" => (crate::STATIC_INDEX_HTML, "text/html; charset=utf-8"),
         "routes.html" => (crate::STATIC_ROUTES_HTML, "text/html; charset=utf-8"),
         "providers.html" => (crate::STATIC_PROVIDERS_HTML, "text/html; charset=utf-8"),
+        "requests.html" => (crate::STATIC_REQUESTS_HTML, "text/html; charset=utf-8"),
         "app.js" => (crate::STATIC_APP_JS, "text/javascript; charset=utf-8"),
         "app.embedded.txt" => (crate::STATIC_APP_JS, "text/javascript; charset=utf-8"),
         "styles.css" => (crate::STATIC_STYLE_CSS, "text/css; charset=utf-8"),

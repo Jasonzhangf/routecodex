@@ -76,7 +76,6 @@ request.route_selected
 request.provider_attempt_started
 request.provider_attempt_failed
 request.provider_switched
-request.response_progress
 request.completed
 request.failed
 request.cancelled

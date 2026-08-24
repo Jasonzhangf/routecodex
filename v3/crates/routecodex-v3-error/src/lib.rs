@@ -584,6 +584,12 @@ pub struct V3Error06ClientProjected {
     pub status: u16,
     pub body: serde_json::Value,
     pub chain: [&'static str; 6],
+    /// Error02 classification projected as typed side-channel metadata; it is
+    /// never merged into the normal client response body.
+    pub error_class: &'static str,
+    /// Stable source reason projected as typed side-channel metadata; it is
+    /// never merged into the normal client response body.
+    pub error_detail: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health_action: Option<V3ErrorActionPlan>,
 }
@@ -904,7 +910,9 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
     terminal: V3Error05TerminalDecision,
 ) -> V3Error06ClientProjected {
     let execution = terminal.into_execution();
+    let error_class = execution.exhaustion.local_action.classified.class;
     let source = &execution.exhaustion.local_action.classified.source;
+    let error_detail = client_error_message(source);
     let status = match source.source_kind {
         V3ErrorSourceKind::InvalidRequest => 400,
         V3ErrorSourceKind::RequestConflict => 409,
@@ -939,6 +947,8 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         status,
         body,
         chain: V3_ERROR_CHAIN_NODE_IDS,
+        error_class,
+        error_detail,
         health_action,
     }
 }

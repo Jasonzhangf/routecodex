@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "feature_id": "v3.server_internal_observability_projection",
+  "captured_at_epoch_ms": 1787584211384,
+  "installed_binary": {
+    "runtime_version": "0.90.4574",
+    "runtime_sha256": "5e56d8123e38ac1987aba2bad7d3c963df0a7cc6b4683762625b15981b17c48f",
+    "admin_sha256": "7cddae9c3e779e5b4cd8399dcac32c7013e51a29681368eb442706b6f0a16bb6"
+  },
+  "aggregate_restart": {
+    "config": "~/.rcc/config.v3.toml",
+    "instance_id": "v3-507a0275437e4ab0afcf",
+    "state": "running",
+    "listeners": [4444, 7777],
+    "health_versions": {
+      "4444": "0.90.4574",
+      "7777": "0.90.4574"
+    }
+  },
+  "real_requests": [
+    {
+      "port": 4444,
+      "endpoint": "/v1/chat/completions",
+      "model": "deepseek-v4-flash",
+      "http_status": 200,
+      "result": "OK"
+    },
+    {
+      "port": 7777,
+      "endpoint": "/v1/responses",
+      "model": "x-preview-f-free",
+      "http_status": 200,
+      "status": "completed",
+      "result": "OK"
+    }
+  ],
+  "observability_poll": {
+    "endpoint": "http://127.0.0.1:8777/api/observability/poll",
+    "sources": [
+      {"port": 4444, "cursor": 2},
+      {"port": 7777, "cursor": 66}
+    ],
+    "by_port": {
+      "4444": {"total": 1, "success": 1},
+      "7777": {"total": 17, "success": 12}
+    },
+    "error_categories": {},
+    "timestamp_fields_verified": [
+      "started_epoch_ms",
+      "updated_epoch_ms",
+      "finished_epoch_ms"
+    ]
+  }
+}

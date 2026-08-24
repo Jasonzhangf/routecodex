@@ -60,6 +60,8 @@ pub struct V3OpenAiChatRelayRuntimeOutput {
     pub client_body: V3OpenAiChatRelayClientBody,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
+    pub error_class: Option<&'static str>,
+    pub error_detail: Option<String>,
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub provider_snapshots: Option<V3RelayProviderSnapshots>,
@@ -1258,12 +1260,16 @@ fn provider_failure_output(
     let projected = failure
         .terminal_projection
         .expect("terminal OpenAI Chat provider failure must carry typed Error06 projection");
+    let error_class = projected.error_class;
+    let error_detail = projected.error_detail.clone();
     trace.push("V3Error06ClientProjected");
     V3OpenAiChatRelayRuntimeOutput {
         status: projected.status,
         client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
+        error_class: Some(error_class),
+        error_detail: Some(error_detail),
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
@@ -1277,11 +1283,15 @@ fn error_output(
     mut trace: Vec<&'static str>,
 ) -> V3OpenAiChatRelayRuntimeOutput {
     let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
+    let error_class = projected.error_class;
+    let error_detail = projected.error_detail.clone();
     V3OpenAiChatRelayRuntimeOutput {
         status: projected.status,
         client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
+        error_class: Some(error_class),
+        error_detail: Some(error_detail),
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
@@ -1532,6 +1542,8 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             client_body: V3OpenAiChatRelayClientBody::Json(client_response),
             node_trace: trace,
             error_chain: None,
+            error_class: None,
+            error_detail: None,
             observability: Some(observability),
             stream_observation: None,
             provider_snapshots: Some(provider_snapshots),
@@ -1550,6 +1562,8 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             client_body: V3OpenAiChatRelayClientBody::Sse(sse),
             node_trace: trace,
             error_chain: None,
+            error_class: None,
+            error_detail: None,
             observability: Some(observability),
             stream_observation: Some(stream_observation),
             provider_snapshots: Some(provider_snapshots),

@@ -120,3 +120,20 @@ modules:
       - npm --prefix v3 run verify:admission
       - npm --prefix v3 run test:admission:red
       - npm --prefix v3 run verify:ci
+
+  - module_id: v3-admin-webui-static
+    status: active
+    owner_feature_id: v3.server_internal_observability_projection
+    owned_paths:
+      - v3/admin-webui/**
+    referenced_paths:
+      - v3/crates/routecodex-v3-admin/**
+    allowed_dependencies:
+      - routecodex-v3-admin
+      - browser:fetch
+    forbidden_paths:
+      - request.normal_payload
+      - response.client_payload
+      - provider.wire_payload
+    required_gates:
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin --test l4_admin_api

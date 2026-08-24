@@ -1908,15 +1908,21 @@ resources:
     owner_node: V3WebuiObservability
     identity: [port, requestKey, sequence]
     semantic_contract:
-      public_http_api: retired
+      public_http_api: controlled_loopback_diagnostic_projection
+      listener_routes:
+      - /_routecodex/observability/snapshot
+      - /_routecodex/observability/events
+      listener_access: loopback_only
+      events_once_contract: terminal_json
+      admin_aggregation_route: /api/observability/poll
       request_rows_max: 2048
       terminal_tombstones_max: 4096
       evicted_terminal_replay: explicit_resync_required
       event_log_cursor_gap: explicit_resync_required
       sequence_overflow: explicit_error
       control_state_in_payload: forbidden
-    allowed_writers: [emit_v3_request_console_observation]
-    allowed_readers: [V3WebuiObservability::snapshot, V3WebuiObservability::since]
+    allowed_writers: [record_v3_webui_started_for_context, record_v3_webui_event_for_context, record_v3_webui_projected_runtime_failure_for_context]
+    allowed_readers: [V3WebuiObservability::snapshot, V3WebuiObservability::since, observability_snapshot, observability_events, routecodex_v3_admin::api::observability::poll, v3.admin_webui.requests_page]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false

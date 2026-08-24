@@ -12,7 +12,9 @@ const manifestPath = path.join(v3Root, 'Cargo.toml');
 const packageJsonPath = path.join(v3Root, 'package.json');
 const isolationGate = path.join(v3Root, 'scripts', 'verify-isolation.mjs');
 const binaryName = process.platform === 'win32' ? 'rccv3.exe' : 'rccv3';
+const adminBinaryName = process.platform === 'win32' ? 'rccv3-admin.exe' : 'rccv3-admin';
 const repoBin = path.join(v3Root, 'dist', 'bin', binaryName);
+const repoAdminBin = path.join(v3Root, 'dist', 'bin', adminBinaryName);
 
 function readPackageVersion() {
   if (!fs.existsSync(packageJsonPath)) {
@@ -182,6 +184,8 @@ async function buildV3Cli(build) {
     manifestPath,
     '-p',
     'routecodex-v3-cli',
+    '-p',
+    'routecodex-v3-admin',
   ], {
     cwd: v3Root,
     env,
@@ -190,6 +194,10 @@ async function buildV3Cli(build) {
   const sourceBin = path.join(cargoTargetDir, 'release', binaryName);
   if (!fs.existsSync(sourceBin)) {
     fail(`built V3 CLI binary not found: ${sourceBin}`);
+  }
+  const sourceAdminBin = path.join(cargoTargetDir, 'release', adminBinaryName);
+  if (!fs.existsSync(sourceAdminBin)) {
+    fail(`built V3 Admin binary not found: ${sourceAdminBin}`);
   }
   return sourceBin;
 }
@@ -301,11 +309,15 @@ async function main() {
   return withOwnedV3CargoTarget(async (build) => {
     const sourceBin = await buildV3Cli(build);
     copyExecutableAtomic(sourceBin, repoBin);
+    copyExecutableAtomic(path.join(path.dirname(sourceBin), adminBinaryName), repoAdminBin);
     const expectedHash = sha256(repoBin);
     console.log(`[install-cli] installed repo ${path.relative(v3Root, repoBin)} sha256=${expectedHash}`);
+    console.log(`[install-cli] installed repo ${path.relative(v3Root, repoAdminBin)} sha256=${sha256(repoAdminBin)}`);
 
     const installBin = path.join(resolveInstallBinDir(), binaryName);
     copyExecutableAtomic(repoBin, installBin, { sign: false });
+    const installAdminBin = path.join(resolveInstallBinDir(), adminBinaryName);
+    copyExecutableAtomic(repoAdminBin, installAdminBin, { sign: false });
     const actualHash = sha256(installBin);
     if (actualHash !== expectedHash) {
       fail(`hash mismatch after installing ${installBin}`);
@@ -318,6 +330,7 @@ async function main() {
       }
     }
     console.log(`[install-cli] installed ${installBin} sha256=${actualHash}`);
+    console.log(`[install-cli] installed ${installAdminBin} sha256=${sha256(installAdminBin)}`);
     console.log('[install-cli] ok: installed direct V3 binary without root or release snapshot inputs');
   });
 }
