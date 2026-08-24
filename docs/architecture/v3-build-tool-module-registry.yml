@@ -4,9 +4,6 @@ modules:
   - module_id: v3-entry-protocol-config
     owner_feature_id: v3.entry_protocol_registry_contract
     owned_paths:
-      - v3/crates/routecodex-v3-config/src/defaults.rs
-      - v3/crates/routecodex-v3-config/src/types.rs
-      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
     allowed_dependencies:
       - v3/crates/routecodex-v3-config
       - v3/crates/routecodex-v3-runtime
@@ -27,7 +24,6 @@ modules:
       - scripts/install-global.sh
       - tests/scripts/v3-cli-distribution.spec.mjs
       - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
-      - v3/crates/routecodex-v3-config/src/lib.rs
       - package.json
       - package-lock.json
       - src/build-info.ts

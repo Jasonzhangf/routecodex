@@ -52,7 +52,7 @@ Nodes may initially return an explicit pending/not-implemented result, but no re
 | `v3.config.published_manifest` | config_manifest | config publisher | no | no |
 | `v3.secret.provider_auth_handle` | secret_handle | config manifest compiler | no | no |
 | `v3.request.normal_payload` | normal_payload | runtime inbound builder | input only | no |
-| `v3.request.protocol_context` | protocol_context | server inbound | no | no |
+| `v3.request.protocol_fields` | protocol_fields | server inbound | no | no |
 | `v3.route.opaque_target` | side_channel | virtual router | no | no |
 | `v3.target.candidate_set` | side_channel | target interpreter | no | no |
 | `v3.target.concrete_provider` | side_channel | target interpreter | no | no |

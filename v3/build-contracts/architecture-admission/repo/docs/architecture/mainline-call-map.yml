@@ -26,6 +26,30 @@ chains:
       side_channel_reads: []
       side_channel_writes: []
     status: anchored
+- chain_id: architecture.v3_contract_maps.mainline
+  summary: V3 architecture contract maps are owned, verified, and released as one synchronized map lifecycle.
+  entry_contract:
+    node: ArchitectureContractMapAuthoring01
+    owner_doc: docs/architecture/function-map.yml
+  edges:
+  - step_id: architecture-v3-contract-map-01
+    from_node: ArchitectureContractMapAuthoring01
+    to_node: ArchitectureContractMapVerification02
+    caller_symbol: verifyV3ContractMapOwner
+    caller_file: v3/scripts/architecture/verify-v3-contract-map-owner.mjs
+    callee_symbol: assertCanonicalFeatureBindings
+    callee_file: v3/scripts/architecture/verify-v3-contract-map-owner.mjs
+    owner_feature_id: architecture.repository_filesystem_governance
+    semantic_input: V3 resource, function, mainline, and verification maps plus the module registry
+    semantic_output: one filesystem owner and synchronized executable contract-map gates
+    resource_flow:
+      consumes:
+      - architecture.v3_contract_map_set
+      produces:
+      - architecture.v3_contract_map_set
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
 - chain_id: v3.v2_config_toml_compat_5555.mainline
   summary: V3 config store detects explicit V2 root TOML and compiles it with provider
     config.v2.toml files into the V3 published manifest for 5555.
@@ -1002,7 +1026,7 @@ chains:
     semantic_output: one request headline plus one complete diagnostic detail line
     resource_flow:
       consumes:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       - v3.runtime.responses_observability
       produces:
       - v3.debug.artifact
@@ -1883,8 +1907,7 @@ chains:
     callee_symbol: with_direct_snapshots_enabled
     callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
     owner_feature_id: v3.codex_sample_retention_snap_scope
-    semantic_input: no flag, Relay-only --snap, or Relay-plus-Direct --snapall CLI
-      intent
+    semantic_input: no flag, or full Direct-plus-Relay --snap/--snapall CLI intent
     semantic_output: typed managed-lifecycle snapshot authorization
     resource_flow:
       consumes: []

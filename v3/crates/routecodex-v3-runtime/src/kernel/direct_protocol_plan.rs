@@ -16,7 +16,11 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         }
     };
     trace.push("V3Req04StandardizedResponses");
-    if standardized.protocol_context.previous_response_id.is_some() {
+    if standardized
+        .body
+        .get("previous_response_id")
+        .is_some_and(|value| !value.is_null())
+    {
         return Err(protocol_plan_failure(
             runtime_source(
                 "V3HubReqContinuation03Classified",
@@ -27,7 +31,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     }
     let allowed_modes = match manifest
         .servers
-        .get(&standardized.protocol_context.server_id)
+        .get(&standardized.server_id)
         .and_then(|server| server.execution.as_ref())
     {
         Some(execution) => execution.allowed_modes.clone(),
@@ -37,7 +41,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
                     "V3Execution11ProtocolDecision",
                     format!(
                         "server {} lacks execution allowed_modes",
-                        standardized.protocol_context.server_id
+                        standardized.server_id
                     ),
                 ),
                 trace,
@@ -49,8 +53,8 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     let router = V3VirtualRouter::process_shared();
     let classified = match router.classify_request_with_facts(
         manifest,
-        &standardized.protocol_context.server_id,
-        &standardized.protocol_context.endpoint,
+        &standardized.server_id,
+        &standardized.endpoint,
         routing_facts,
     ) {
         Ok(value) => value,
@@ -63,12 +67,12 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     };
     let route_policy_state = crate::route_policy::V3RoutePolicyRuntimeState::process_shared();
     let route_policy_scope = crate::route_policy::V3RoutePolicyScope::without_conversation(
-        &standardized.protocol_context.server_id,
+        &standardized.server_id,
         &classified.routing_group_id,
-        standardized.protocol_context.failure_session_scope.session_id(),
-        &standardized.protocol_context.server_id,
+        standardized.failure_session_scope.session_id(),
+        &standardized.server_id,
     )
-    .with_conversation(standardized.protocol_context.failure_session_scope.session_id());
+    .with_conversation(standardized.failure_session_scope.session_id());
     let route_policy_observation = crate::route_policy::observe_route_turn(
         &standardized.body,
         &classified.facts.route_classification.route_name,
@@ -77,7 +81,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         manifest,
         classified,
         route_policy_scope,
-        &standardized.protocol_context.request_id,
+        &standardized.request_id,
         route_policy_observation,
     ) {
         Ok(value) => value,
@@ -88,9 +92,8 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
             ))
         }
     };
-    let request_is_compaction = standardized.protocol_context.request_purpose.is_compaction()
+    let request_is_compaction = standardized.request_purpose.is_compaction()
         || standardized
-            .protocol_context
             .endpoint
             .trim_end_matches('/')
             .ends_with("/responses/compact");
@@ -122,7 +125,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     trace.push("V3Router07OpaqueTargetHitOnce");
     let deterministic_sample =
         crate::provider_failure_runtime_policy::v3_relay_provider_target_selection_sample(
-            &standardized.protocol_context.request_id,
+            &standardized.request_id,
         );
     let kind = target.classify_kind(hit);
     trace.push("V3Target08KindClassified");
@@ -138,7 +141,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     trace.push("V3Target09CandidateSetExpanded");
     let provider_health = provider_health.into();
     let availability = provider_health
-        .session_bound_availability(&standardized.protocol_context.failure_session_scope);
+        .session_bound_availability(&standardized.failure_session_scope);
     let selected = match select_v3_target_with_session_then_global(
         &target,
         expanded.clone(),
@@ -373,6 +376,11 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         response_payload: fixture.response_payload.clone(),
         captured_provider_request: Arc::clone(&captured_provider_request),
     };
+    let dry_port = manifest
+        .servers
+        .get(&fixture.server_id)
+        .map(|server| server.port);
+    let dry_pipeline_id = format!("dry-pipeline-{}", fixture.fixture_id);
     let core_state = match initial_plan {
         Some(plan) => V3ResponsesDirectRuntimeCoreState::no_continuation().with_initial_plan(plan),
         None => V3ResponsesDirectRuntimeCoreState::no_continuation(),
@@ -384,11 +392,11 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         manifest,
         V3Server03HttpRequestRaw {
             server_id: fixture.server_id.clone(),
-            port: manifest
-                .servers
-                .get(&fixture.server_id)
-                .map(|server| server.port),
-            pipeline_id: None,
+            port: dry_port,
+            // Dry Run still traverses the typed transport handoff. Its
+            // pipeline identity belongs to the control carrier, not the
+            // fixture request payload.
+            pipeline_id: Some(dry_pipeline_id.clone()),
             failure_session_scope: V3ProviderFailureSessionScope::new(
                 &fixture.server_id,
                 manifest
@@ -398,7 +406,13 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
                     .unwrap_or("dry-run"),
                 "dry-run",
             )
-            .expect("dry-run failure session scope"),
+            .expect("dry-run failure session scope")
+            .with_transport_handoff_scope(
+                dry_pipeline_id,
+                dry_port.expect("dry-run server port"),
+                1,
+            )
+            .expect("dry-run transport handoff scope"),
             request_id,
             execution_id,
             method: fixture.method.clone(),

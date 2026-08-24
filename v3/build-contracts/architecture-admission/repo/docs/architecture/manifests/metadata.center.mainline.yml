@@ -28,7 +28,7 @@ edges:
     split_binding_id: null
     resource_flow:
       consumes:
-        - request.protocol_context
+        - request.protocol_fields
       produces:
         - metadata.request_truth
       side_channel_reads: []

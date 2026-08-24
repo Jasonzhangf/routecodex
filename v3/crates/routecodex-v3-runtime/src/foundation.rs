@@ -100,16 +100,16 @@ pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
     };
     let deterministic_sample =
         crate::provider_failure_runtime_policy::v3_relay_provider_target_selection_sample(
-            &standardized.protocol_context.request_id,
+            &standardized.request_id,
         );
     if let Err(error) = debug.record_node_event(
         &scope,
         "V3Req04StandardizedResponses",
         "standardized",
         Some(json!({
-            "server_id": standardized.protocol_context.server_id,
-            "endpoint": standardized.protocol_context.endpoint,
-            "method": standardized.protocol_context.method
+            "server_id": standardized.server_id,
+            "endpoint": standardized.endpoint,
+            "method": standardized.method
         })),
     ) {
         return project_v3_debug_failure("V3Req04StandardizedResponses", error);
@@ -118,8 +118,8 @@ pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
     let routing_facts = build_v3_router_request_facts_from_v3_req_04(&standardized, manifest);
     let classified = match router.classify_request_with_facts(
         manifest,
-        &standardized.protocol_context.server_id,
-        &standardized.protocol_context.endpoint,
+        &standardized.server_id,
+        &standardized.endpoint,
         routing_facts,
     ) {
         Ok(node) => node,

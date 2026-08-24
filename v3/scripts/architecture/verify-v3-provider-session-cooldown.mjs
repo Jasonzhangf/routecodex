@@ -354,7 +354,7 @@ requireBlockLine(
 );
 requireBlockLine(
   de18Edge,
-  /consumes:[\s\S]*- v3\.server\.validated_http_input[\s\S]*- v3\.request\.protocol_context/u,
+  /consumes:[\s\S]*- v3\.server\.validated_http_input[\s\S]*- v3\.request\.protocol_fields/u,
   "Mainline map v3-de-18 must consume only validated HTTP-boundary input and protocol context",
 );
 requireBlockLine(

@@ -170,12 +170,12 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
-  - resource_id: v3.request.protocol_context
-    resource_kind: protocol_context
+  - resource_id: v3.request.protocol_fields
+    resource_kind: protocol_fields
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-server
     owner_node: V3Server03HttpRequestRaw
-    identity: [requestId, serverId, endpoint, method, streamIntent, previousResponseId]
+    identity: [requestId, serverId, endpoint, method]
     allowed_writers: [V3Server03HttpRequestRaw]
     allowed_readers: [V3Req04StandardizedResponses, V3Execution11ProtocolDecision, V3Server16HttpFrame]
     forbidden_writers: [routecodex-v3-provider-responses]

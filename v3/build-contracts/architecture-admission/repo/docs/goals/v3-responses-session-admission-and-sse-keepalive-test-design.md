@@ -14,7 +14,7 @@ HTTP POST /v1/responses
   -> listener-local body capture
   -> explicit session/conversation scope extraction
   -> V3Server03HttpRequestRaw admission block
-     -> conflict: Error01-06 -> standard Responses JSON/SSE error
+     -> overlap: await exact listener-local permit release, then recheck
      -> admitted: Runtime/Provider mainline
   -> V3ServerRespOutbound06ClientFrame
   -> response body EOF / stream error / body drop
@@ -33,7 +33,6 @@ finalized Direct/Relay client SSE stream
 
 - Session admission: `routecodex-v3-server`, listener-local state and HTTP
   response-body lifetime.
-- Conflict projection: `routecodex-v3-error` HTTP boundary Error01-06 chain.
 - Keepalive encoding: existing
   `routecodex-v3-sse::build_v3_sse_transport_out_04_keepalive_comment`.
 - Keepalive scheduling: `routecodex-v3-server` HTTP SSE body transport wrapper.
@@ -46,29 +45,34 @@ owners.
 
 ## Whitebox Tests
 
-1. Same listener, endpoint, and explicit session conflicts while active.
-2. Same listener and explicit conversation conflicts while active.
+1. Same listener, endpoint, and explicit session waits while active, then
+   acquires after the exact permit drops.
+2. Same listener and explicit conversation waits while active, then acquires.
 3. Different sessions on one listener are admitted concurrently.
 4. Same session on different listener gate instances is admitted concurrently.
 5. Missing explicit session/conversation does not invent a cross-request key.
 6. Permit drop removes the exact active scope.
 7. Already released permits cannot release another request.
-8. Conflict projects HTTP 409 with `request_in_flight` through Error01-06.
-9. JSON conflict uses the standard error object.
-10. Streaming conflict uses one `event: error` Responses SSE event and ends.
+8. Permit drop wakes all predicate waiters, preventing an unrelated waiter from
+   consuming the only notification for a newly available scope.
+9. The Server caller cannot access a nonblocking admission API and therefore
+   cannot turn contention into a client-visible overlap error.
 
 ## Module Blackbox Tests
 
 1. Hold the first controlled upstream response body open.
-2. Send a second request with the same `client_metadata.session_id/thread_id`.
-3. Assert the second response is immediate 409 and the upstream capture count
-   remains one.
-4. Send a different-session request while the first is open and assert a second
+2. Send a second request with the same typed `session-id` and `thread-id`
+   control headers.
+3. Assert the second request remains pending and the upstream capture count
+   remains one until the first response body releases.
+4. Release and consume the first body; assert the second request reaches the
+   provider and returns HTTP 200 without `request_in_flight`.
+5. Send a different-session request while the first is open and assert a second
    upstream capture occurs.
-5. Start two listeners from one aggregate, use the same scope on both, and
+6. Start two listeners from one aggregate, use the same scope on both, and
    assert both upstream requests are admitted.
-6. Consume the first body to EOF, retry the original scope, and assert admission.
-7. Drop the first client body before EOF, retry the scope, and assert admission.
+7. Drop the first client body before EOF and assert an already-waiting request
+   resumes and reaches the provider.
 
 ## SSE Transport Tests
 
@@ -97,16 +101,17 @@ After source gates:
 3. Verify all aggregate member `/health` endpoints and installed binary identity.
 4. Send a managed 5555 same-session overlap pair while the first SSE body is
    active.
-5. Verify the second request returns standard `request_in_flight`, no second
-   provider request is recorded, and no malformed tool-output/empty-role error
-   appears.
+5. Verify the second request remains pending without a second provider send,
+   then returns 200 after the first response body releases; no 409 storm,
+   malformed tool-output, or empty-role error appears.
 6. Send a different-session control concurrently and verify it reaches Runtime.
 7. Verify raw SSE starts with a keepalive comment and later completes normally.
 
 ## Known Gaps And Non-Goals
 
 - This does not repair malformed client history in a codec.
-- This does not queue or retry a rejected request.
+- This does not add client retry or error projection; contention remains inside
+  the listener-local predicate wait owner.
 - This does not use provider action gate as request admission.
 - This does not change continuation ownership or save/restore semantics.
 - Requests without an explicit stable session/conversation scope remain

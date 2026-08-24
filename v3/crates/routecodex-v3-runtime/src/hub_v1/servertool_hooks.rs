@@ -212,6 +212,29 @@ pub(crate) fn current_v3_tool_thinking_payload_start(payload: &Value) -> Result<
     Ok(0)
 }
 
+/// A Responses tool-output continuation resumes the provider-owned turn; it
+/// does not introduce a new user payload boundary for Req04 tool-thinking
+/// injection.  Such requests legitimately contain only `function_call_output`
+/// items and therefore have no current user message to locate.
+pub(crate) fn is_v3_tool_thinking_output_continuation(
+    payload: &Value,
+    previous_response_id: Option<&str>,
+) -> bool {
+    if !previous_response_id.is_some_and(|value| !value.trim().is_empty()) {
+        return false;
+    }
+    let Some(items) = payload.get("input").and_then(Value::as_array) else {
+        return false;
+    };
+    !items.is_empty()
+        && items.iter().all(|item| {
+            matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("function_call_output" | "custom_tool_call_output" | "tool_call_output")
+            )
+        })
+}
+
 fn inject_v3_tool_thinking_fields_into_tool_schemas(payload: &mut Value) -> Result<(), String> {
     let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
         return Ok(());

@@ -13,12 +13,11 @@ for arg in "$@"; do
 done
 source "$SOURCE_ROOT/scripts/lib/install-lifecycle-lock.sh"
 acquire_routecodex_install_lock
-VERIFY_PORT="${ROUTECODEX_INSTALL_VERIFY_PORT:-5520}"
 VERIFY_HOST="${ROUTECODEX_INSTALL_VERIFY_HOST:-127.0.0.1}"
 VERIFY_CONFIG="${ROUTECODEX_INSTALL_VERIFY_CONFIG:-${RCC_INSTALL_VERIFY_CONFIG:-/Volumes/extension/.rcc/config.v3.toml}}"
-VERIFY_BASE_URL="http://${VERIFY_HOST}:${VERIFY_PORT}"
-VERIFY_HEALTH_URL="http://${VERIFY_HOST}:${VERIFY_PORT}/health"
-EXPECTED_VERSION="$(node -p "require('./package.json').version" 2>/dev/null || true)"
+VERIFY_PORT_OVERRIDE="${ROUTECODEX_INSTALL_VERIFY_PORT:-}"
+VERIFY_PORTS=()
+EXPECTED_VERSION="$(node -p "require('./v3/package.json').version" 2>/dev/null || true)"
 
 cleanup_isolated_build_root() {
   if [ -n "${INSTALL_BUILD_ROOT:-}" ] && [ "$INSTALL_BUILD_ROOT" != "$SOURCE_ROOT" ] && [ -d "$INSTALL_BUILD_ROOT" ]; then
@@ -36,6 +35,47 @@ fail() {
 check_repo_root() {
   if [ ! -f "package.json" ] || [ ! -f "v3/Cargo.toml" ]; then
     fail "请在 routecodex 仓库根目录下执行：scripts/install-release.sh"
+  fi
+}
+
+resolve_v3_verify_ports() {
+  if [ -n "$VERIFY_PORT_OVERRIDE" ]; then
+    VERIFY_PORTS=("$VERIFY_PORT_OVERRIDE")
+    return
+  fi
+
+  local configured_ports
+  configured_ports="$(node - "$VERIFY_CONFIG" <<'NODE'
+const fs = require('fs');
+const configPath = process.argv[2];
+const lines = fs.readFileSync(configPath, 'utf8').split(/\r?\n/);
+let inServer = false;
+const ports = [];
+for (const line of lines) {
+  const section = line.match(/^\[servers\.([^\]]+)\]\s*$/);
+  if (section) {
+    inServer = true;
+    continue;
+  }
+  if (/^\[[^\]]+\]\s*$/.test(line)) {
+    inServer = false;
+    continue;
+  }
+  if (!inServer) continue;
+  const port = line.match(/^\s*port\s*=\s*(\d+)\s*(?:#.*)?$/);
+  if (port) ports.push(port[1]);
+}
+const uniquePorts = [...new Set(ports)];
+if (uniquePorts.length === 0) process.exit(1);
+process.stdout.write(`${uniquePorts.join('\n')}\n`);
+NODE
+)" || fail "无法从配置文件解析 V3 server listener：$VERIFY_CONFIG；请显式设置 ROUTECODEX_INSTALL_VERIFY_PORT"
+
+  while IFS= read -r configured_port; do
+    [ -n "$configured_port" ] && VERIFY_PORTS+=("$configured_port")
+  done <<< "$configured_ports"
+  if [ "${#VERIFY_PORTS[@]}" -eq 0 ]; then
+    fail "无法从配置文件解析 V3 server listener：$VERIFY_CONFIG"
   fi
 }
 
@@ -223,6 +263,10 @@ prepare_dependencies() {
   fi
 }
 
+
+
+
+
 verify_cli_commands() {
   echo "🔍 验证 routecodex / rccv3 / rcc 安装..."
   if ! command -v routecodex >/dev/null 2>&1; then
@@ -244,14 +288,18 @@ verify_cli_commands() {
 
 verify_runtime_health() {
   echo "🚦 验证 release runtime 启动与健康状态..."
-  EXPECTED_VERSION="$(node -p "require('./package.json').version" 2>/dev/null || true)"
+  EXPECTED_VERSION="$(node -p "require('./v3/package.json').version" 2>/dev/null || true)"
   if [ -z "${EXPECTED_VERSION:-}" ]; then
-    fail "无法读取 package.json version，不能验证 release runtime 版本"
+    fail "无法读取 v3/package.json version，不能验证 release runtime 版本"
   fi
   if [ ! -f "$VERIFY_CONFIG" ]; then
     fail "V3 release 验证缺少配置文件：$VERIFY_CONFIG；可用 ROUTECODEX_INSTALL_VERIFY_CONFIG 指定"
   fi
+  resolve_v3_verify_ports
+  local VERIFY_PORT="${VERIFY_PORTS[0]}"
+  local VERIFY_HEALTH_URL="http://${VERIFY_HOST}:${VERIFY_PORT}/health"
   echo "🔒 期望 release runtime version: ${EXPECTED_VERSION}"
+  echo "🔎 V3 release listener ports: ${VERIFY_PORTS[*]}"
 
   health_matches_expected_version() {
     local health_file="$1"
@@ -286,50 +334,42 @@ verify_runtime_health() {
     start_release_runtime_when_stopped
   fi
 
-  local attempt=1
-  local max_attempts=20
-  local health_dump="/tmp/routecodex-install-release-health.$$"
-  local wrong_version=""
-  while [ "$attempt" -le "$max_attempts" ]; do
-    if curl -fsS "$VERIFY_HEALTH_URL" >"$health_dump"; then
-      if health_matches_expected_version "$health_dump"; then
-        echo "✅ /health 通过且版本匹配: $VERIFY_HEALTH_URL version=${EXPECTED_VERSION}"
-        rm -f "$health_dump"
-        return
+  for verify_port in "${VERIFY_PORTS[@]}"; do
+    VERIFY_HEALTH_URL="http://${VERIFY_HOST}:${verify_port}/health"
+    local attempt=1
+    local max_attempts=20
+    local health_dump="/tmp/routecodex-install-release-health.$$"
+    local wrong_version=""
+    while [ "$attempt" -le "$max_attempts" ]; do
+      if curl -fsS "$VERIFY_HEALTH_URL" >"$health_dump"; then
+        if health_matches_expected_version "$health_dump"; then
+          echo "✅ /health 通过且版本匹配: $VERIFY_HEALTH_URL version=${EXPECTED_VERSION}"
+          rm -f "$health_dump"
+          break
+        fi
+        wrong_version="$(health_reports_ready_wrong_version "$health_dump" || true)"
+        if [ -n "$wrong_version" ]; then
+          echo "❌ live runtime version 仍不匹配: ${VERIFY_HEALTH_URL} expected=${EXPECTED_VERSION} actual=${wrong_version}"
+          echo "最近一次响应:"
+          cat "$health_dump"
+          rm -f "$health_dump"
+          exit 1
+        fi
       fi
-      wrong_version="$(health_reports_ready_wrong_version "$health_dump" || true)"
-      if [ -n "$wrong_version" ]; then
-        echo "❌ live runtime version 仍不匹配: ${VERIFY_HEALTH_URL} expected=${EXPECTED_VERSION} actual=${wrong_version}"
+      sleep 1
+      attempt=$((attempt + 1))
+    done
+
+    if [ "$attempt" -gt "$max_attempts" ]; then
+      echo "❌ /health 未通过或 live runtime 版本不匹配: $VERIFY_HEALTH_URL expected=${EXPECTED_VERSION}"
+      if [ -f "$health_dump" ]; then
         echo "最近一次响应:"
         cat "$health_dump"
         rm -f "$health_dump"
-        exit 1
       fi
+      exit 1
     fi
-    sleep 1
-    attempt=$((attempt + 1))
   done
-
-  attempt=1
-  while [ "$attempt" -le "$max_attempts" ]; do
-    if curl -fsS "$VERIFY_HEALTH_URL" >"$health_dump"; then
-      if health_matches_expected_version "$health_dump"; then
-        echo "✅ /health 通过且版本匹配: $VERIFY_HEALTH_URL version=${EXPECTED_VERSION}"
-        rm -f "$health_dump"
-        return
-      fi
-    fi
-    sleep 1
-    attempt=$((attempt + 1))
-  done
-
-  echo "❌ /health 未通过或 live runtime 版本不匹配: $VERIFY_HEALTH_URL expected=${EXPECTED_VERSION}"
-  if [ -f "$health_dump" ]; then
-    echo "最近一次响应:"
-    cat "$health_dump"
-    rm -f "$health_dump"
-  fi
-  exit 1
 }
 
 run_default_v3_release_install() {

@@ -402,6 +402,7 @@ mod tests {
         selected.provider_type = "responses".into();
         selected.canonical_model_id = "deepseek-v4-flash".into();
         selected.wire_model = "deepseek-v4-flash".into();
+        selected.compatibility_profile = Some("responses:deepseek-console-go".into());
         let wire = build_v3_provider_12_responses_wire_payload("req-deepseek-stopless", selected, json!({
             "model": "deepseek-v4-flash", "input": "continue",
             "reasoning": {"effort": "high"}, "tool_choice": "required",
@@ -424,6 +425,7 @@ mod tests {
             selected.provider_type = provider_type.into();
             selected.canonical_model_id = "deepseek-v4-flash".into();
             selected.wire_model = "deepseek-v4-flash".into();
+            selected.compatibility_profile = Some("responses:deepseek-console-go".into());
             let wire = build_v3_provider_12_responses_wire_payload(
                 "req-deepseek-protocol-matrix",
                 selected,
@@ -672,6 +674,37 @@ mod tests {
         );
         assert!(reasoning.get("summary").is_none());
         assert!(reasoning.get("encrypted_content").is_none());
+    }
+
+    #[test]
+    fn wire_keeps_max_reasoning_summary_when_content_is_redacted_placeholder() {
+        let mut target = target();
+        target.provider_id = "opencode-go".into();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        target.wire_model = "deepseek-v4-flash".into();
+        target.compatibility_profile = Some("responses:deepseek-console-go".into());
+        let body = json!({
+            "model": "deepseek-v4-flash",
+            "reasoning": {"effort": "max"},
+            "input": [
+                {
+                    "type": "reasoning",
+                    "content": [{"type": "reasoning_text", "text": "[thinking redacted]"}],
+                    "summary": [{"type": "summary_text", "text": "preserve this reasoning"}],
+                    "encrypted_content": null
+                },
+                {"type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "ok"}
+            ]
+        });
+
+        let wire = build_v3_provider_12_responses_wire_payload("req-max-summary", target, body)
+            .unwrap();
+        assert_eq!(wire.body()["reasoning"]["effort"], "max");
+        assert_eq!(
+            wire.body()["input"][0]["content"],
+            json!([{"type": "reasoning_text", "text": "preserve this reasoning"}])
+        );
     }
 
     #[test]

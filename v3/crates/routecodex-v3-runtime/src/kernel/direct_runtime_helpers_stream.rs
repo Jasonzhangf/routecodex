@@ -186,23 +186,13 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     )))
 }
 
-/// Consume one Direct SSE provider attempt inside Runtime and seal only the
-/// fully validated client bytes for Front.  Timing and provider-stream errors
-/// therefore settle before Resp15 is returned; Front never owns a partially
-/// validated provider stream.
-pub(crate) async fn commit_direct_sse_stream(
-    mut stream: V3ProviderAttemptSseStream,
-) -> Result<V3CommittedClientSseStream, V3Error01SourceRaised> {
-    let mut committed = crate::nodes::V3CommittedClientSseBuilder::new();
-    while let Some(frame) = stream.next().await {
-        let frame = frame?;
-        committed
-            .push(frame)
-            .map_err(|error| runtime_source("V3DirectResp15ClientPayload", error))?;
-    }
-    committed
-        .seal_after_validated_terminal()
-        .map_err(|error| runtime_source("V3DirectResp15ClientPayload", error))
+/// Hand off the typed Direct provider attempt to the client-facing stream
+/// broker without waiting for provider EOF.  Runtime-owned wrappers continue
+/// to validate and observe frames incrementally after Resp15 returns.
+pub(crate) fn commit_direct_sse_stream(
+    stream: V3ProviderAttemptSseStream,
+) -> V3ClientSseStream {
+    Box::pin(stream)
 }
 
 #[cfg(test)]
@@ -211,7 +201,7 @@ mod direct_sse_timing_tests {
 
     #[tokio::test]
     async fn direct_sse_broker_hands_off_before_provider_eof() {
-        let provider = V3ProviderAttemptSseStream::new(Box::pin(stream::unfold(
+        let provider = Box::pin(stream::unfold(
             0usize,
             |index| async move {
                 if index == 0 {
@@ -223,8 +213,8 @@ mod direct_sse_timing_tests {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 None
             },
-        )));
-        let mut client = commit_direct_sse_stream(provider);
+        ));
+        let mut client = commit_direct_sse_stream(V3ProviderAttemptSseStream::new(provider));
         let first = tokio::time::timeout(std::time::Duration::from_millis(100), client.next())
             .await
             .expect("broker must not wait for provider EOF")

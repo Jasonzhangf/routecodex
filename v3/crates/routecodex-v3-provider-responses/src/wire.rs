@@ -205,8 +205,7 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
         // deepseek thinking 模式下被证实，其他模型即使走同一网关也不追加
         // 未经证明的条目。
         if deepseek_compat
-            && (target.compatibility_profile.as_deref() == Some("responses:deepseek-console-go")
-                || target.provider_id == "opencode-go")
+            && target.compatibility_profile.as_deref() == Some("responses:deepseek-console-go")
             && v3_wire_payload_is_thinking_mode(&body)
         {
             // 先做 call/output 配对归一（Console Go Chat 降级契约），再做
@@ -324,10 +323,19 @@ fn strip_v3_request_encrypted_reasoning(body: &mut Value, deepseek_compat: bool)
     }
 }
 
-/// 提取 reasoning 条目的明文表示，按 content -> summary -> text/reasoning_content
-/// 顺序取第一段非空明文并 join 所有 text 片段；全空返回空串。
+/// 提取 reasoning 条目的明文表示；真实 content 优先，但不能覆盖历史 summary
+/// 的确定性 `[thinking redacted]` 占位；全空返回空串。
 fn join_v3_reasoning_plain_text(obj: &Map<String, Value>) -> String {
-    for key in ["content", "summary"] {
+    if let Some(Value::Array(items)) = obj.get("content") {
+        let joined = items
+            .iter()
+            .filter_map(|item| item.get("text").and_then(Value::as_str))
+            .collect::<String>();
+        if !joined.is_empty() && joined != "[thinking redacted]" {
+            return joined;
+        }
+    }
+    for key in ["summary", "text", "reasoning_content"] {
         if let Some(Value::Array(items)) = obj.get(key) {
             let mut joined = String::new();
             for item in items {
@@ -338,6 +346,15 @@ fn join_v3_reasoning_plain_text(obj: &Map<String, Value>) -> String {
             if !joined.is_empty() {
                 return joined;
             }
+        }
+    }
+    if let Some(Value::Array(items)) = obj.get("content") {
+        let joined = items
+            .iter()
+            .filter_map(|item| item.get("text").and_then(Value::as_str))
+            .collect::<String>();
+        if !joined.is_empty() {
+            return joined;
         }
     }
     for key in ["text", "reasoning_content"] {
@@ -507,7 +524,7 @@ fn normalize_deepseek_thinking_stopless_tool_choice(
     }
 }
 
-/// cc-sol rejects a native `tool_search_output` whose result is an empty array,
+/// One configured Responses target rejects a native `tool_search_output` whose result is an empty array,
 /// although the Responses shape permits an empty search result.  Preserve the
 /// no-result meaning at this provider boundary by representing the completed
 /// search as an ordinary function call/output pair with `[]` output.  This is

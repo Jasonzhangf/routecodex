@@ -35,6 +35,27 @@ does not claim that every row in that inventory is already implemented. A field
 is runtime-active only after its positive and negative gates, global install,
 managed restart, and live replay have passed.
 
+## Registered black-box client compatibility exception
+
+The lossless schema rule has one deliberately narrow inbound exception for the
+Codex client's built-in shell tools. The Codex source declares the runtime
+integer arguments `exec_command.yield_time_ms`,
+`exec_command.max_output_tokens`, `write_stdin.session_id`,
+`write_stdin.yield_time_ms`, and `write_stdin.max_output_tokens` as JSON Schema
+`number`. The client is a black box and its emitted request snapshot is already
+`number`, while the tool contract consumed by the downstream provider must be
+`integer` for these known fields.
+
+Accordingly, the Responses inbound owner may rewrite only a direct
+`parameters.properties.<field>.type` value from `number` to `integer` when the
+tool name is exactly `exec_command` or `write_stdin` and the field is in the
+registered list above. This is a protocol-compatibility projection, not generic
+schema normalization: user-defined tools, other numeric fields, non-direct
+schemas, and all outbound codecs remain unchanged. The positive and negative
+tests are `responses_inbound_restores_codex_integer_tool_schema_types`,
+`responses_inbound_does_not_rewrite_string_session_id_schema`, and
+`responses_inbound_does_not_rewrite_same_named_user_tool_schema`.
+
 ## Canonical storage contract
 
 `request.*` in this document is a semantic path, not a wire object to serialize.
@@ -165,7 +186,7 @@ does not authorize reuse of the source object or of another target's mapping.
 | `input[].input_audio` | Chat audio content extension | preserve data/format; no text fallback | exact audio input | Chat audio input if target capability | unmapped |
 | `input[].message.id/status/phase` | registered message lifecycle extension | validate enum/identity; never use for routing or terminal control | exact Responses item fields | source-roundtrip extension or explicit unmapped; never silently drop | source-roundtrip extension or explicit unmapped |
 | `input[].function_call` | Chat function tool-call semantic (`id`, name, exact argument string) | pair by call id; preserve malformed argument bytes; no `{}` repair | exact function call item | native function tool call | `tool_use` with JSON input only when parseable; malformed exact raw preservation path required |
-| `input[].function_call_output` | Chat tool-result semantic (`tool_call_id`, output, status) | require matching call or explicit unpaired policy; preserve output string and status | exact function output item | tool-role result with `tool_call_id` | `tool_result` with `tool_use_id`; status only if target has exact error slot |
+| `input[].function_call_output` | Chat tool-result semantic (`tool_call_id`, output, registered `routecodex_chat_extension.responses_tool_output_status`) | require matching call or explicit unpaired policy; preserve output string and validate status as absent/completed/incomplete before Chat canonical | exact function output item | tool-role result with `tool_call_id`; consume the extension before wire | `tool_result` with `tool_use_id`; incomplete alone maps to `is_error=true` through the shared Anthropic status projector |
 | `input[].custom_tool_call` | Chat native custom tool call (`id`, name, raw input) | preserve raw input as string and bind it to the governed custom-tool declaration | exact custom call item | native `type=custom` call | `mapped_compatible_registered`: declared custom call becomes `tool_use`; raw input becomes the exact wrapper `{"input": raw}` |
 | `input[].item_reference` | typed Responses item-reference extension | validate same Responses scope; never dereference by session alone | exact reference | unmapped | unmapped |
 | `input[].reasoning.summary/content/encrypted_content` | Chat reasoning semantic plus encrypted side-channel carrier | preserve order and identity; encrypted content never enters normal message payload | exact reasoning item | target capability/field-specific reasoning projection or unmapped | thinking blocks only for exact Anthropic shape; no summary-policy reconstruction |
@@ -179,7 +200,7 @@ does not authorize reuse of the source object or of another target's mapping.
 | `prompt` | Responses reusable-prompt extension | validate object/variables; never inline into instructions silently | exact Responses only | unmapped | unmapped |
 | `prompt_cache_key` | client cache-key payload extension | preserve exact string; not routing/control state | exact | exact | valid local cache hint is consumed before wire; malformed fails; never rebuild `cache_control` |
 | `prompt_cache_options.*` / `prompt_cache_retention` | cache-options extension | preserve independently from `prompt_cache_key`; no provider-health/cache mutation | exact Responses only | target-specific exact field or unmapped | unmapped |
-| `reasoning.effort` | `request.reasoning_effort` | validate enum; keep separate from budget/summary/mode | exact | exact `reasoning_effort` | conditional exact `output_config.effort` intersection only |
+| `reasoning.effort` | `request.reasoning_effort` | validate non-empty string; preserve until concrete target selection; keep separate from budget/summary/mode | registered OpenAI-domain compatibility (`max -> xhigh`, unknown -> `medium`) | registered provider-domain compatibility; DeepSeek lower/unknown -> `high`, `xhigh/max -> max` | registered Anthropic-domain compatibility (`none/minimal -> low`, unknown -> `medium`); MiniMax Anthropic uses `thinking.type=adaptive` and no `output_config.effort` |
 | `reasoning.summary` / `generate_summary` | `request.reasoning_summary_policy` | aliases must agree; policy is not response reasoning text | exact Responses | registered static compatibility: `auto/concise/detailed -> medium/low/high`, merged with explicit effort by the higher level | registered many-to-one static compatibility preserves complete Anthropic native thinking as Responses reasoning summary for all valid policy values |
 | `reasoning.context` | `request.reasoning_context_policy` | validate scope/value; no history reconstruction outside Chat Process | exact Responses | unmapped | unmapped |
 | `reasoning.mode` | `request.reasoning_mode` | preserve mode independently from effort/context | exact Responses | unmapped | unmapped |
@@ -229,6 +250,71 @@ JSON parse failure is not permission to fabricate `{}`, stringify twice, drop a
 paired result, or switch protocols. `reasoning.summary` response content is not
 reused to reconstruct a request `reasoning.summary` policy.
 
+### Anthropic response terminal projection
+
+Anthropic `stop_reason` is first normalized through `finish_reason_map.json` and
+then projected by the single typed terminal owner in the Anthropic response
+codec. The following table is closed-world; a value not listed here is not a
+successful terminal response.
+
+| Anthropic `stop_reason` | Hub terminal semantic | Responses projection | Mapping class | Additional contract |
+| --- | --- | --- | --- | --- |
+| `end_turn` | `stop` | `status=completed`, `finish_reason=end_turn` | `mapped_exact` | `stop_sequence` and `stop_details` must be absent/null. |
+| `tool_use` | `tool_calls` | `status=requires_action`, `finish_reason=tool_use` | `mapped_compatible_registered` | RouteCodex's registered local tool-continuation status; output must contain a typed tool call. |
+| `max_tokens` | `max_tokens` | `status=incomplete`, `incomplete_details.reason=max_output_tokens`, `finish_reason=max_tokens` | `mapped_exact` | Partial output remains business response data, not a provider error. |
+| `stop_sequence` | `stop_sequence` | `status=completed`, exact `finish_reason=stop_sequence` and exact `stop_sequence` | `mapped_exact` | A non-empty `stop_sequence` is required. |
+| `pause_turn` | `pause_turn` | `status=in_progress`, `finish_reason=pause_turn` | `mapped_compatible_registered` | Preserves Anthropic's resumable non-terminal meaning without fabricating a tool result or incomplete reason. |
+| `refusal` | `content_filter` | `status=incomplete`, `incomplete_details.reason=content_filter`, `finish_reason=refusal`, exact `stop_details` when present | `mapped_compatible_registered` | Refusal is response terminal semantics, not transport/provider failure. |
+| `model_context_window_exceeded` | `context_window_exceeded` | no exact Responses incomplete reason | `unsupported_fail_fast` | Fail with the exact source value; never relabel input-context exhaustion as `max_output_tokens`. |
+
+`stop_reason=null` is valid only on the Anthropic streaming `message_start`
+shape. A materialized final message, whether sourced from JSON or SSE, requires
+a listed non-null value. Unknown/non-string values, contradictory
+`stop_sequence`, and non-object `stop_details` fail at the same terminal owner.
+The SSE transport may only frame the resulting canonical response; it does not
+own another stop-reason mapping.
+
+### Typed tool-result error projection
+
+| Responses tool output status | Anthropic `tool_result` | Mapping class |
+| --- | --- | --- |
+| absent | omit `is_error` | `mapped_exact` legacy success |
+| `completed` | omit `is_error` | `mapped_exact` success |
+| `incomplete` | `is_error=true` | `mapped_compatible_registered` failed/incomplete tool outcome |
+| `in_progress` | fail before Anthropic wire | `unsupported_fail_fast` because Anthropic `tool_result` is terminal |
+| null, non-string, or unknown | fail before Anthropic wire | `unsupported_fail_fast` |
+
+Only the typed `function_call_output.status` semantic authorizes this mapping.
+The Responses inbound codec validates and writes it to the registered
+`request.messages[].routecodex_chat_extension.responses_tool_output_status`
+data-plane carrier. The adjacent Anthropic outbound codec consumes that exact
+carrier and shares one status-to-`is_error` projector with the direct Responses
+semantic encoder. The carrier is never emitted on provider wire.
+Output text, tool name, HTTP status, provider identity, error-message text, and
+MetadataCenter are forbidden inference sources.
+
+### Anthropic response content block closed enum
+
+| Anthropic response block | Responses target policy | Mapping class |
+| --- | --- | --- |
+| `text` | ordered `output_text` message content | `mapped_exact` |
+| `thinking` | Responses reasoning summary/signature projection | `mapped_compatible_registered` |
+| `redacted_thinking` | opaque Responses reasoning encrypted content | `mapped_compatible_registered` |
+| `tool_use` | typed Responses function/custom tool call | `mapped_exact` or governed custom compatibility wrapper |
+| `server_tool_use` | only the registered `web_search` subset | `mapped_compatible_registered`; other names fail |
+| `web_search_tool_result` | only an exactly paired registered web-search result | `mapped_compatible_registered`; missing/duplicate/unpaired identity or unsupported result shape fails |
+| `web_fetch_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
+| `code_execution_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
+| `bash_code_execution_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
+| `text_editor_code_execution_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
+| `tool_search_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
+| `container_upload` | no registered Responses mapping | `unsupported_fail_fast` |
+
+Missing and unknown `content[].type` values are distinct malformed/unknown
+errors. Every unsupported diagnostic includes the exact
+`response.content[index].type` path and source type; silent skip, generic
+`provider response content type`, and text fallback are forbidden.
+
 ## Exact protocol projections
 
 ### Qualitative effort
@@ -240,9 +326,22 @@ reused to reconstruct a request `reasoning.summary` policy.
 | Anthropic Messages | `output_config.effort` | `low`, `medium`, `high`, `xhigh`, `max`; model support varies. |
 | Gemini GenerateContent | `generationConfig.thinkingConfig.thinkingLevel` | `MINIMAL`, `LOW`, `MEDIUM`, `HIGH`; supported levels vary by model. |
 
-Projection is exact only for the concrete intersection:
+OpenAI effort values are forward-compatible protocol data. Req02 validates that
+`reasoning.effort` is a non-empty string but does not close the domain to the values
+known on the verification date. The source value remains unchanged through Chat
+canonical storage until concrete target selection. ProviderReqCompat06 is the unique
+owner of the registered target-domain compatibility projection: standard OpenAI maps
+`max -> xhigh` and unknown values to `medium`; DeepSeek maps active lower/unknown
+values to `high` and `xhigh/max` to `max`; standard Anthropic maps `none/minimal` to
+`low` and unknown values to `medium`; MiniMax Anthropic removes unsupported
+`output_config.effort` and requests `thinking.type=adaptive`. This projection never
+creates a numeric thinking budget and never writes a projection decision to control
+metadata or client payload.
 
-- OpenAI to Anthropic: `low`, `medium`, `high`, `xhigh`, `max`.
+Exact intersections remain unchanged:
+
+- OpenAI to Anthropic: `low`, `medium`, `high`, `xhigh`, `max`; other non-empty
+  values use the registered nearest qualitative projection above.
 - OpenAI to Gemini: `minimal`, `low`, `medium`, `high`, after model-level
   capability validation.
 - Anthropic to OpenAI: all declared Anthropic effort values, after target-model

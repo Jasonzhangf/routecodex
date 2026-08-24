@@ -278,7 +278,7 @@ features:
   - v3.config.published_manifest
   - v3.server.listener_set
   - v3.server.validated_http_input
-  - v3.request.protocol_context
+  - v3.request.protocol_fields
   - v3.debug.artifact
   - v3.error.chain
   - v3.response.client_payload
@@ -359,7 +359,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
-  - v3.request.protocol_context
+  - v3.request.protocol_fields
   - v3.debug.trace_context
   - v3.debug.raw_capture
   - v3.debug.event_ledger
@@ -502,7 +502,7 @@ features:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   resource_bindings:
-  - v3.request.protocol_context
+  - v3.request.protocol_fields
   - v3.request.normal_payload
   - v3.target.concrete_provider
   - v3.execution.protocol_decision
@@ -687,7 +687,7 @@ features:
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
   - v3.config.published_manifest
-  - v3.request.protocol_context
+  - v3.request.protocol_fields
   - v3.request.normal_payload
   - v3.route.opaque_target
   - v3.target.candidate_set

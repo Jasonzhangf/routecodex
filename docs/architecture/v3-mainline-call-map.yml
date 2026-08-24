@@ -19,6 +19,7 @@ chains:
     from_node: V3ProviderHealthStore
     to_node: V3ProviderHealthStore
     caller_symbol: V3ProviderHealthStore::from_manifest
+    caller_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     callee_symbol: V3ProviderCooldownCoordinator::load
     callee_file: v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
     status: source_controlled
@@ -27,6 +28,7 @@ chains:
     from_node: V3ServerStartup01ListenerSetPreflight
     to_node: V3ProviderHealthStore
     caller_symbol: spawn_v3_server_aggregate
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_key_health_probes
     callee_file: v3/crates/routecodex-v3-server/src/lib.rs
     status: source_controlled
@@ -891,7 +893,7 @@ chains:
       consumes:
       - v3.config.published_manifest
       produces:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       side_channel_reads: []
       side_channel_writes: []
   - step_id: v3-rd-02
@@ -905,7 +907,7 @@ chains:
     owner_feature_id: v3.virtual_router_target_interpreter
     resource_flow:
       consumes:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.request.normal_payload
       side_channel_reads: []
@@ -1037,13 +1039,13 @@ chains:
     resource_flow:
       consumes:
       - v3.target.concrete_provider
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       - v3.config.published_manifest
       produces:
       - v3.execution.protocol_decision
       side_channel_reads:
       - v3.target.concrete_provider
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       side_channel_writes:
       - v3.execution.protocol_decision
   - step_id: v3-rd-09-direct-policy
@@ -1060,13 +1062,13 @@ chains:
       - v3.execution.protocol_decision
       - v3.target.concrete_provider
       - v3.request.normal_payload
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.responses_direct.policy
       side_channel_reads:
       - v3.execution.protocol_decision
       - v3.target.concrete_provider
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       side_channel_writes:
       - v3.responses_direct.policy
       - v3.request.tool_thinking_turn_context
@@ -1198,7 +1200,7 @@ chains:
     resource_flow:
       consumes:
       - v3.response.client_payload
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces: []
       side_channel_reads: []
       side_channel_writes: []
@@ -1219,7 +1221,7 @@ chains:
     owner_feature_id: v3.hub_pipeline_static_skeleton
     resource_flow:
       consumes:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.request.normal_payload
       - v3.hub.entry_protocol
@@ -2188,7 +2190,7 @@ chains:
       - v3.server.listener_set
       - v3.server.validated_http_input
       produces:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       side_channel_reads: []
       side_channel_writes: []
     status: anchored
@@ -2219,7 +2221,7 @@ chains:
     owner_feature_id: v3.foundation_p0_p2
     resource_flow:
       consumes:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.debug.artifact
       side_channel_reads: []
@@ -2275,7 +2277,7 @@ chains:
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.debug.trace_context
       side_channel_reads: []
@@ -2328,7 +2330,7 @@ chains:
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.error.source
       - v3.error.internal_identity
@@ -2588,7 +2590,7 @@ chains:
     resource_flow:
       consumes:
       - v3.server.validated_http_input
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.provider.failure_session_scope
       side_channel_reads: []

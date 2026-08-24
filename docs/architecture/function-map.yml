@@ -532,7 +532,7 @@ owners:
   owner_module: v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
     reads:
-    - request.protocol_context
+    - request.protocol_fields
     - provider_runtime.observation
     - error.chain
     - runtime.http_lifecycle_context

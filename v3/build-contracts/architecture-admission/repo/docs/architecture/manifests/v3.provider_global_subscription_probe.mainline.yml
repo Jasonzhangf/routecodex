@@ -1,15 +1,19 @@
 lifecycle_id: v3.provider_global_subscription_probe
 entrypoint: spawn_v3_server_aggregate
-return_path: V3ProviderGlobalSubscriptionHealthStore
+return_path: V3ProviderHealthStore
 owner_feature: v3.provider_global_subscription_probe
 canonical_docs:
   - docs/goals/v3-provider-error-disposition-path-config-plan.md
   - docs/architecture/v3-resource-operation-map.yml
 verification_gates:
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
-  - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --no-default-features
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib configured_semantic_global_failure_keeps_manifest_cooldown_policy -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
 nodes:
-  - id: V3ProviderGlobalSubscriptionHealthStore
+  - id: V3ProviderHealthStore
     owner: routecodex-v3-provider-responses
   - id: V3ProviderGlobalProbePermit
     owner: routecodex-v3-provider-responses
@@ -19,12 +23,22 @@ nodes:
     owner: routecodex-v3-runtime
   - id: V3ProviderGlobalSubscriptionFailureObservation
     owner: routecodex-v3-runtime
+  - id: V3Error02Classified
+    owner: routecodex-v3-error
+  - id: V3Error01SourceRaised
+    owner: routecodex-v3-error
+  - id: V3ProviderFailureRuntimeHealth
+    owner: routecodex-v3-runtime
 edges:
-  - from: V3ProviderGlobalSubscriptionHealthStore
+  - from: V3ProviderHealthStore
     to: V3ProviderGlobalProbePermit
   - from: V3ServerAggregateLifecycle
     to: V3ProviderGlobalProbeExecution
   - from: V3ProviderGlobalSubscriptionFailureObservation
-    to: V3ProviderGlobalSubscriptionHealthStore
-  - from: V3ProviderGlobalSubscriptionFailureObservation
-    to: V3ProviderGlobalSubscriptionHealthStore
+    to: V3ProviderHealthStore
+  - from: V3Error02Classified
+    to: V3ProviderHealthStore
+  - from: V3Error01SourceRaised
+    to: V3Error02Classified
+  - from: V3ProviderFailureRuntimeHealth
+    to: V3ProviderGlobalSubscriptionFailureObservation

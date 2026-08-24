@@ -160,7 +160,7 @@ ServerReqInbound01ClientRaw
 | `HubReqChatProcess03Governed` | `HubReqInbound02Standardized` | governed Hub request | 工具治理、tool result 顺序、servertool/MCP/apply_patch 规则 | 协议转换、路由选择 |
 | `VrRoute04SelectedTarget` | `HubReqChatProcess03Governed` | selected target/decision | 路由分类、quota/health、provider target 选择 | payload 修补、工具治理 |
 | `HubReqOutbound05ProviderSemantic` | `VrRoute04SelectedTarget` + governed request | provider-neutral outbound semantic | Hub 出站语义定型，隔离 metadata/debug/error | provider-specific auth/transport |
-| `ProviderReqCompat06ProviderCompat` | `HubReqOutbound05ProviderSemantic` | provider-compatible standard provider protocol | 标准 provider 协议到 provider 实现微调；family-specific 字段映射；compat profile 应用 | 重新做协议映射、重做工具治理、fallback/silent repair、改 model 选路 |
+| `ProviderReqCompat06ProviderCompat` | `HubReqOutbound05ProviderSemantic` + selected target capability carrier | provider-compatible standard provider protocol | 标准 provider 协议到 provider 实现微调；family-specific 字段映射；已选非 multimodal target 的会话保持兼容投影 | 重新做协议映射、重做工具治理、改 model 选路、无 typed target 决策时清洗 |
 | `ProviderReqOutbound07TransportRequest` | `ProviderReqCompat06ProviderCompat` | HTTP/SDK transport request | auth/header/timeout/transport | Hub 工具治理 |
 
 请求链清洗标准：每一跳只能减少歧义、增加显式类型，不得靠删除真实 payload 语义提速；内部观测数据只能进入 `Meta*` / `Snapshot*` carrier。
@@ -179,7 +179,8 @@ ServerReqInbound01ClientRaw
 
 ### 3.2.1 历史图片统一占位清理（已登记唯一 payload 清理例外）
 
-- 规则（v5，2026-08-08 登记）：仅允许把**历史轮次**（最后一个 user carrier 之外）的图片 part 原位替换为统一固定占位符 `[Image]`——chat wire `{"type":"text","text":"[Image]"}` / responses wire `{"type":"input_text","text":"[Image]"}` / gemini parts `{"text":"[Image]"}`；无编号、无前缀、同位置永远同 token；**当前轮图片必须保留**（驱动 multimodal 路由）。
+- 规则（v6，2026-08-24，Jason 锁定）：图片事实先驱动 multimodal 路由；有 multimodal/vision target 时图片原样保留。若 VR 已完成目标选择且选中 target 没有 multimodal/vision 能力，ProviderReqCompat06 才执行会话保持兼容投影，把图片 part 原位替换为统一固定占位符 `[Image]`——这不是改路由或 fallback，而是 proxy 为维持同一会话结构对非多模态模型的兼容语义投影。若图片语义不可丢失，则必须由能力/错误链显式失败；禁止无 typed target 决策的清洗。
+- 占位符格式固定：chat wire `{"type":"text","text":"[Image]"}` / responses wire `{"type":"input_text","text":"[Image]"}` / gemini parts `{"text":"[Image]"}`；无编号、无前缀、同位置永远同 token。
 - 唯一实现：`v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs` 的 `normalize_v3_history_image_placeholders`（纯函数、无状态）。
 - 唯一调用点（各入口标准化路径各一处 + route facts 幂等清理，禁止再新增）：
   1. Relay（responses/anthropic/gemini/openai_chat 入口共享）：`build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01`（ReqInbound02 各 canonical 分支对最终 payload 执行一次）；
@@ -187,7 +188,7 @@ ServerReqInbound01ClientRaw
   3. Direct（openai_chat 入口）：`build_v3_chat_req_04_standardized_from_v3_server_03`（chat 直通标准化后对 body 执行一次，与 responses direct 对齐）；
   4. Route facts builder（诊断/dry-run/测试入口）：`build_v3_router_request_facts_for_entry` 对 body 做幂等清理后再判定（与 live 路径 cleaned payload 保持一致，禁止 dry-run/tests 与真实路由发散）。
 - 当前轮判定与 Virtual Router `extract_active_turn_signals` 对齐：最后一个 `role=="user"`（responses 无 role 时按 `input_text`/`text`/`output_text` 类型判定；gemini 按 `role=="user"` content）；`function_call_output`/tool 结果不是 user carrier，不得把真实当前轮误判为历史。
-- 边界：Responses continuation 恢复发生在 ReqChatProcess restore（本清理在其之前），恢复的已保存上下文若含历史图片不覆盖，属已记录边界。
+- 生命周期：Resp04 save 仍全量占位，ReqInbound 只按历史边界归一化；Req04 restore 对残留历史图片再次按唯一 owner 归一化；最终 ProviderReqCompat06 读取 selected target capability，只有非 multimodal/vision target 才做会话保持投影。当前轮图片在 multimodal target 上不清洗；非 multimodal target 的整个图片语义只转为占位符，不改变 turn/tool/continuation 顺序。
 
 ### 3.3 HubReqChatProcess03Governed
 

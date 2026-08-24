@@ -14,6 +14,10 @@ modules:
     owner_feature_id: v3.config_interpreter_contract
     owned_paths:
       - v3/crates/routecodex-v3-config/**
+  - module_id: v3.admin_webui
+    owner_feature_id: v3.config_server_full_function
+    owned_paths:
+      - v3/crates/routecodex-v3-admin/**
   - module_id: v3.debug
     owner_feature_id: v3.debug_error_foundation
     owned_paths:

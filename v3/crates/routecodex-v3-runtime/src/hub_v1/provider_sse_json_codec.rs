@@ -23,7 +23,7 @@ pub(crate) fn parse_v3_provider_sse_json_data(data: &str) -> Result<Option<Value
     // SSE data 的多行语义是一个聚合 payload，不能逐行挑出首个可解析 JSON。
     // 那会把同帧后续数据静默丢弃，错误地把不完整流当作成功。兼容只处理
     // JSON 字符串内未转义的控制字符；结构性尾随、截断和多对象帧必须保留为
-    // Error01，让 Direct 在客户端提交前按既有策略重试完整尝试。
+    // Error01，让 Direct 在客户端提交前按既有策略重新执行完整尝试。
     let normalized = escape_v3_sse_raw_control_characters(data);
     match serde_json::from_str(&normalized) {
         Ok(value) => return Ok(Some(value)),
@@ -184,7 +184,7 @@ fn normalize_v3_responses_function_call_arguments_for_event(
             // Responses function_call.arguments is JSON text. Providers may
             // emit the JSON value itself (object/array/number/bool/null);
             // serialize that value at the provider-response boundary without
-            // interpreting or repairing tool semantics. Missing terminal
+            // interpreting or rewriting tool semantics. Missing terminal
             // arguments remain invalid because there is no value to preserve.
             *arguments =
                 Value::String(serde_json::to_string(arguments).map_err(|error| error.to_string())?);

@@ -33,12 +33,16 @@ modules:
     owned_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
     allowed_operations:
       - decode Responses wire into Chat canonical and registered payload extensions
-      - validate source protocol field types and value domains
+      - validate source protocol field types while preserving non-empty forward-compatible effort values
+      - apply the registered Codex built-in integer-schema compatibility projection only at Responses ReqInbound02
     forbidden_operations:
       - read or write MetadataCenter
       - encode Anthropic or Gemini wire
+      - apply the Codex integer-schema projection to Anthropic inbound or Resp04 continuation callers
+      - classify a user-defined same-named tool by name alone
       - recover fields from raw payload after Req02
   - module_id: v3.protocol_codec.openai_outbound
     owner: routecodex-v3-runtime::hub_v1::request_outbound_format
@@ -47,6 +51,7 @@ modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
     allowed_operations:
       - validate target field domain
       - project Chat semantics to OpenAI Chat or Responses wire
@@ -61,13 +66,14 @@ modules:
     owned_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
     allowed_operations:
       - decode Anthropic wire into Chat semantics
       - project governed Chat semantics into Anthropic wire
-      - enforce Anthropic metadata, effort, thinking, and budget domains
+      - enforce Anthropic metadata, effort, thinking, budget, terminal, tool-result error, and response content-block domains
     forbidden_operations:
       - encode reasoning policy as system marker
       - infer budget from qualitative effort
@@ -75,6 +81,32 @@ modules:
       - reconstruct Anthropic cache_control from Responses prompt_cache_key
       - consume unregistered Responses store or text.verbosity values
       - read MetadataCenter or raw Responses wire
+      - infer tool_result.is_error from output text, HTTP status, provider identity, or error messages
+      - treat unknown or unsupported terminal/content values as successful output
+  - module_id: v3.protocol_codec.typed_terminality
+    owner: routecodex-v3-runtime::hub_v1::resp_chat_process_03_governed
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
+    allowed_operations:
+      - validate canonical Responses completed, requires_action, incomplete, and registered nonterminal status semantics after adjacent response codec projection
+      - reject malformed or contradictory incomplete_details before continuation commit and client projection
+    forbidden_operations:
+      - parse Anthropic source wire or SSE frames
+      - invent provider-specific stop_reason mappings
+      - read MetadataCenter or reconstruct response payload from control state
+  - module_id: v3.protocol_codec.finish_reason_registry
+    owner: routecodex-v3-runtime::protocol_tables
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/protocol_tables.rs
+      - v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json
+    allowed_operations:
+      - publish the closed protocol finish-reason value correspondence table
+      - expose exact bidirectional registered mappings to adjacent codecs
+    forbidden_operations:
+      - classify transport, retry, routing, health, or continuation state
+      - approximate unknown protocol terminal values
+      - write provider or client payloads
   - module_id: v3.protocol_codec.gemini
     owner: routecodex-v3-runtime::hub_v1::gemini_codec
     owned_paths:
@@ -93,9 +125,10 @@ modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
     allowed_operations:
       - dispatch Req07 Chat/provider semantic to the selected adjacent target codec
+      - project qualitative reasoning effort into the registered concrete target protocol domain after target selection
     forbidden_operations:
       - reconstruct source protocol payload
-      - implement field-specific approximation
+      - approximate numeric reasoning budget from qualitative effort
       - read MetadataCenter payload copies
 allowed_edges:
   - from: v3.protocol_codec.openai_outbound
@@ -126,4 +159,10 @@ allowed_edges:
   - from: v3.protocol_codec.provider_compat_dispatch
     to: v3.protocol_codec.gemini
     direction: outbound_gemini_dispatch
+  - from: v3.protocol_codec.anthropic
+    to: v3.protocol_codec.finish_reason_registry
+    direction: terminal_value_registry
+  - from: v3.protocol_codec.anthropic
+    to: v3.protocol_codec.typed_terminality
+    direction: response_terminality_governance
 verification_gate: npm run verify:v3-protocol-conversion-field-parity

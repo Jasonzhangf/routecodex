@@ -44,7 +44,7 @@ edges:
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
     resource_flow:
       consumes:
-        - v3.request.protocol_context
+        - v3.request.protocol_fields
       produces:
         - v3.request.normal_payload
         - v3.hub.entry_protocol

@@ -1,8 +1,8 @@
 # V3 Independent Build Isolation Plan
 
-Status: current-line source, isolation, packaging, install, aggregate restart, all-listener health, and same-entry replay verified; DSH review findings under repair
-Design ID: `V3-INDEPENDENT-BUILD-ISOLATION-20260816`
-Owner feature: `v3.build.independent_domain`
+Status: proposed execution design; implementation pending  
+Design ID: `V3-INDEPENDENT-BUILD-ISOLATION-20260816`  
+Owner feature: `v3.build.independent_domain`  
 Scope root: `v3/`
 
 ## 1. Objective and Acceptance Contract
@@ -499,10 +499,6 @@ is an explicit final publication of the verified V3 binary.
 ### Phase 5: Root npm, CI, and Release Thinning
 
 1. Convert root V3 aliases to thin `npm --prefix v3` dispatchers.
-   Retire the obsolete root runtime aliases (`start`, `dev`, `start:bg`, `start:fg`)
-   instead of mapping start-shaped commands onto restart. Root `bin` must not publish
-   or execute the retired root `dist/bin/rccv3` path; managed runtime control uses
-   the globally installed `routecodex restart` lifecycle.
 2. Replace root CI's individual V3 gate/build/install/test matrix with the V3
    canonical entrypoint, retaining separate jobs only when platform/runtime isolation
    requires it and still invoking V3-owned commands.
@@ -797,3 +793,4 @@ The final report must state, with command/artifact evidence:
 10. remaining risks or explicit `none`;
 11. explicit confirmation that V4 and unrelated root/shared/runtime semantics were
     untouched.
+

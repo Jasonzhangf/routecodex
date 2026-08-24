@@ -62,8 +62,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:6723629cdf05ebc91d9a951f9e255cf89b6c4ee326544fc451b11a222f68d4ca
-    last_manual_authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-server-startup
+    fingerprint: sha256:edd1d4d6c653ef4db400253cb52760ff70f9492b1c3beefdaff526d6f07f33f6
+    last_manual_authorization_id: auth-20260824-v3-protocol-fields-server-startup
   - item_id: chain:v3.responses_direct.required_mainline
     chain_id: v3.responses_direct.required_mainline
     status: audited_locked
@@ -71,8 +71,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:77f60d9f59f40d3415c2f74e8c6bcb50f5aa2aabf28956f414a0c064c55a0952
-    last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-responses-direct
+    fingerprint: sha256:6d464f4c7a5db684d479844a903b573904da3fcb3be2b13b75a0a23e0387cd25
+    last_manual_authorization_id: auth-20260824-v3-protocol-fields-responses-direct
   - item_id: chain:v3.hub_pipeline.v1.request
     chain_id: v3.hub_pipeline.v1.request
     status: audited_locked
@@ -80,8 +80,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:66d3f5549e48833950458b764034374874942d7da96e8e7bdff939feb8310b90
-    last_manual_authorization_id: auth-20260802-v3-hub-request-codec-boundary-lock-refresh
+    fingerprint: sha256:8aef490e60aec1ba0e582d7e462a2f36c39979188736b374fb48ccccb2c2e7c0
+    last_manual_authorization_id: auth-20260824-v3-protocol-fields-hub-request
   - item_id: chain:v3.hub_pipeline.v1.response
     chain_id: v3.hub_pipeline.v1.response
     status: audited_locked
@@ -106,8 +106,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:3a62cd4e24df96130d7a9892f027608a4c10bd32e404481e18aa5896330849f2
-    last_manual_authorization_id: auth-20260731-v3-de18-failure-session-scope-lock-refresh
+    fingerprint: sha256:cb6111cbbfa6348623d9f489935026efb60a8aaae72d32bbb932faccce22b6e8
+    last_manual_authorization_id: auth-20260824-v3-protocol-fields-debug-error
   - item_id: chain:v3.sse.transport_boundary
     chain_id: v3.sse.transport_boundary
     status: audited_locked
@@ -729,7 +729,7 @@ manual_authorizations:
     item_id: chain:v3.responses_direct.required_mainline
     approved_by: Jason
     approved_at: '2026-08-01T21:44:49+08:00'
-    reason: "Jason instructed continuing the real-server closeout after the locked Direct mainline gate exposed the already source-verified control/data split. This refresh records v3-rd-09 consuming typed v3.request.protocol_context for the standard previous_response_id continuation locator while v3.request.normal_payload remains business payload; the Direct lifecycle, target ownership, and adjacent request nodes are unchanged."
+    reason: "Jason instructed continuing the real-server closeout after the locked Direct mainline gate exposed the source-verified control/data split. v3-rd-09 now consumes the standard Responses previous_response_id as a real protocol field while route-local control remains in MetadataCenter; v3.request.normal_payload remains business payload."
     fingerprint_before: sha256:9c8e7f1e93a0ba4b1ffffc68bad3af881fe5216b822ee45c9a260a5b461f1b56
     fingerprint_after: sha256:2a5ca1c00c3fc8b3296236a8810d425f38b01c499113490de879e99f65659933
   - authorization_id: auth-20260731-v3-de18-failure-session-scope-lock-refresh
@@ -900,3 +900,31 @@ manual_authorizations:
     reason: "Jason authorized repairing the pre-existing audit-lock drift before the runtime restart handoff implementation. The current session selection chain fingerprint was recalculated from the checked-in caller map; no session selection behavior is changed by this lock refresh."
     fingerprint_before: sha256:d3464c14e382058281cb6a37af01503f828e48d27a49b101181672e2f3532e74
     fingerprint_after: sha256:ff56cb023f013272313c6aaafd46a4db185dc3fc7389e3e6d85609877266dde4
+  - authorization_id: auth-20260824-v3-protocol-fields-server-startup
+    item_id: chain:v3.server.startup
+    approved_by: Jason
+    approved_at: '2026-08-24T17:00:00-07:00'
+    reason: "Jason instructed removal of the legacy red-zone carrier. The server-startup map now records protocol fields as real protocol data while routing and other control signals remain in MetadataCenter; this refresh changes only the registered resource name and its derived audit fingerprint."
+    fingerprint_before: sha256:6723629cdf05ebc91d9a951f9e255cf89b6c4ee326544fc451b11a222f68d4ca
+    fingerprint_after: sha256:edd1d4d6c653ef4db400253cb52760ff70f9492b1c3beefdaff526d6f07f33f6
+  - authorization_id: auth-20260824-v3-protocol-fields-responses-direct
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-24T17:00:00-07:00'
+    reason: "Jason instructed removal of the legacy red-zone carrier and full conversion to actual protocol fields for inbound/outbound. previous_response_id remains a Responses payload field; route, switch, retry, provider, health, and scope controls remain side-channel state."
+    fingerprint_before: sha256:77f60d9f59f40d3415c2f74e8c6bcb50f5aa2aabf28956f414a0c064c55a0952
+    fingerprint_after: sha256:6d464f4c7a5db684d479844a903b573904da3fcb3be2b13b75a0a23e0387cd25
+  - authorization_id: auth-20260824-v3-protocol-fields-hub-request
+    item_id: chain:v3.hub_pipeline.v1.request
+    approved_by: Jason
+    approved_at: '2026-08-24T17:00:00-07:00'
+    reason: "Jason instructed removal of the legacy red-zone carrier. The fixed Hub request map now consumes real protocol fields and keeps control signals on MetadataCenter/typed side-channels; no pipeline node order or owner changed."
+    fingerprint_before: sha256:66d3f5549e48833950458b764034374874942d7da96e8e7bdff939feb8310b90
+    fingerprint_after: sha256:8aef490e60aec1ba0e582d7e462a2f36c39979188736b374fb48ccccb2c2e7c0
+  - authorization_id: auth-20260824-v3-protocol-fields-debug-error
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-08-24T17:00:00-07:00'
+    reason: "Jason instructed removal of the legacy red-zone carrier. Debug/error source registration now binds to real protocol fields while error control remains in the Error chain and debug remains side-channel evidence; no runtime error ownership changed."
+    fingerprint_before: sha256:3a62cd4e24df96130d7a9892f027608a4c10bd32e404481e18aa5896330849f2
+    fingerprint_after: sha256:cb6111cbbfa6348623d9f489935026efb60a8aaae72d32bbb932faccce22b6e8

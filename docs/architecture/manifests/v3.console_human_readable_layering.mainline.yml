@@ -35,7 +35,7 @@ edges:
     split_binding_id: null
     resource_flow:
       consumes:
-        - v3.request.protocol_context
+        - v3.request.protocol_fields
         - v3.runtime.responses_observability
       produces:
         - v3.debug.artifact

@@ -103,6 +103,7 @@
     <nav class="nav" aria-label="Review sections">
       <a href="#source-inventory">source inventory</a>
       <a href="#audit-truth-contract">audit truth</a>
+      <a href="#anthropic-response-projection-contract">Anthropic response contract</a>
       <a href="#manual-semantic-translation-groups">manual semantic groups</a>
       <a href="#chat-standard-equivalence">Chat standard equivalence</a>
       <a href="#noncanonical-fields">non-canonical / isolated fields</a>
@@ -353,6 +354,42 @@
     <td>Edge rows describe stream/event transport state and must stay outside Chat Process business payload semantics.</td>
     <td><code>SSE/edge transport docs and gate only</code><br><span class="badge no_business_runtime_closeout">no_business_runtime_closeout</span><br><span class="muted">Keep edge fields out of provider/client normal payload; do not reclassify them as Chat semantic fields.</span></td>
   </tr></tbody>
+  </table></div>
+    </section>
+
+    <section class="section" id="anthropic-response-projection-contract">
+      <span class="marker">anthropic-response-projection-contract closed-terminal-matrix typed-tool-result-is-error closed-content-block-enum source_roundtrip_only</span>
+      <h2>Anthropic response projection contract / Anthropic 响应投影闭合矩阵</h2>
+      <p>终止原因、tool-result 错误状态和 response content block 只由相邻 Rust codec 与通用 typed terminality owner 处理；Direct 保持同协议原样，SSE/handler/provider transport 不拥有第二套语义。</p>
+      <div class="grid">
+    <article class="card"><h3>Owners and policy</h3><div class="source-meta">
+      <div>contract: <code>missing</code></div>
+      <div>terminal owner: <code>missing</code></div>
+      <div>typed terminality owner: <code>missing</code></div>
+      <div>tool-result owner: <code>missing</code></div>
+      <div>Direct policy: <span class="badge missing">missing</span></div>
+    </div></article>
+    <article class="card"><h3>Forbidden semantic owners</h3><span class="muted">—</span></article>
+    <article class="card"><h3>Unknown-value policies</h3><div class="source-meta">
+      <div>missing</div>
+      <div>missing</div>
+    </div></article>
+    <article class="card"><h3>Required regressions</h3><span class="muted">—</span></article>
+  </div>
+  <div class="protocol-title"><h3>Closed stop_reason matrix</h3><span class="muted">JSON and SSE materialization share this owner</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Anthropic stop_reason</th><th>Hub terminal</th><th>Responses status</th><th>mapping</th><th>supplemental contract</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <div class="protocol-title"><h3>Typed tool-result error projection</h3><span class="muted">no text or HTTP inference</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Responses status</th><th>Anthropic is_error</th><th>mapping</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <div class="protocol-title"><h3>Closed response content block enum</h3><span class="muted">unsupported values fail with exact content path</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Anthropic content block</th><th>mapping</th><th>Relay policy</th></tr></thead>
+    <tbody></tbody>
   </table></div>
     </section>
 

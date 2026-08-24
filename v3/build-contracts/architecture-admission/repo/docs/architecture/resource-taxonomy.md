@@ -35,9 +35,9 @@ Client-visible request payload after entry parsing and non-destructive normaliza
 - Forbidden: response stages, provider response converters, SSE handlers.
 - Boundary: must not carry internal metadata, debug, snapshot, or error carriers.
 
-### `request.protocol_context`
+### `request.protocol_fields`
 
-Entry protocol facts such as endpoint, request path, headers, stream intent, client originator, and route-local scope.
+Entry protocol fields such as endpoint, request path, headers, stream intent, and client-originated protocol data remain in the normal protocol payload and are converted by the adjacent inbound/outbound codecs. Route-local control scope is owned by `metadata.runtime_control`, never by the payload.
 
 - Identity: current request lifecycle only.
 - Canonical writer: server inbound / handler bridge.

@@ -10,7 +10,7 @@ use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw as build_v3_server_03_http_request_raw_with_scope,
     execute_v3_responses_direct_runtime_kernel_with_continuation,
     execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control,
-    register_responses_direct_hooks, V3ClientBody, V3CommittedClientSseStream,
+    register_responses_direct_hooks, V3ClientBody,
     V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesDirectStoplessControlScope, V3ResponsesDirectStoplessControlState,
     V3RuntimeUsageSummary, V3ServerToolCenterWriteOrigin, V3StoplessCenterState,
@@ -233,14 +233,16 @@ async fn direct_sse_completed_without_summary_passes_through_without_synthetic_s
     assert_eq!(first.client_payload.status, 200, "{:#?}", first);
     assert!(matches!(
         &first.client_payload.body,
-        V3ClientBody::CommittedSse(_)
+        V3ClientBody::Sse(_)
     ));
     assert_eq!(
         state.len().unwrap(),
         0,
         "direct completed SSE must not commit a synthetic remote continuation locator"
     );
-    let first_body = collect_sse_body_text(first.client_payload.body).await;
+    let first_body = collect_sse_body_text(first.client_payload.body)
+        .await
+        .expect("Direct SSE must remain valid while streaming");
     assert!(first_body.contains("response.completed"), "{first_body}");
     assert!(first_body.contains("response.done"), "{first_body}");
     assert!(first_body.contains("data: [DONE]"), "{first_body}");
@@ -647,9 +649,11 @@ async fn direct_sse_stopless_metadata_center_projects_terminal_frames_without_ss
     assert_eq!(first.client_payload.status, 200, "{first:#?}");
     assert!(matches!(
         &first.client_payload.body,
-        V3ClientBody::CommittedSse(_)
+        V3ClientBody::Sse(_)
     ));
-    let first_body = collect_sse_body_text(first.client_payload.body).await;
+    let first_body = collect_sse_body_text(first.client_payload.body)
+        .await
+        .expect("Direct SSE must remain valid while streaming");
     assert!(first_body.contains("response.completed"), "{first_body}");
     assert!(first_body.contains("response.done"), "{first_body}");
     assert!(first_body.contains("partial direct SSE answer without summary"));
@@ -1569,10 +1573,12 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
     assert_eq!(count(&first.node_trace, "V3Router07OpaqueTargetHitOnce"), 1);
     assert_eq!(
         state.len().unwrap(),
-        1,
-        "Runtime must validate the complete provider attempt before returning the committed carrier"
+        0,
+        "an incremental client broker must not commit continuation before terminal provider SSE"
     );
-    let first_body = collect_sse_body_text(first.client_payload.body).await;
+    let first_body = collect_sse_body_text(first.client_payload.body)
+        .await
+        .expect("first Direct SSE must remain valid while streaming");
     assert!(first_body.contains("resp_sse_1"));
     assert!(first_body.contains("call_sse_1"));
     assert!(first_body.contains("[DONE]"));
@@ -1606,8 +1612,10 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
         .node_trace
         .contains(&"V3HubReqContinuation03Classified"));
     assert!(second.node_trace.contains(&"V3HubReqTarget06Resolved"));
-    assert_eq!(state.len().unwrap(), 0);
-    let second_body = collect_sse_body_text(second.client_payload.body).await;
+    assert_eq!(state.len().unwrap(), 1);
+    let second_body = collect_sse_body_text(second.client_payload.body)
+        .await
+        .expect("Direct SSE continuation must remain valid while streaming");
     assert!(second_body.contains("resp_sse_2"));
     assert!(second_body.contains("[DONE]"));
     assert_eq!(state.len().unwrap(), 0);
@@ -1656,7 +1664,9 @@ async fn repeated_provider_resp_0_across_sessions_never_breaks_the_second_client
         )
         .await;
         assert_eq!(output.client_payload.status, 200, "{output:#?}");
-        let body = collect_sse_body_text(output.client_payload.body).await;
+        let body = collect_sse_body_text(output.client_payload.body)
+            .await
+            .expect("Direct SSE must remain valid while streaming");
         assert!(body.contains("resp_0"), "{body}");
         assert!(body.contains("call_0"), "{body}");
         assert!(body.contains("[DONE]"), "{body}");
@@ -1689,7 +1699,9 @@ async fn http_only_sse_terminal_response_streams_without_remote_continuation_com
     .await;
     assert_eq!(first.client_payload.status, 200);
     assert_eq!(state.len().unwrap(), 0);
-    let body = collect_sse_body_text(first.client_payload.body).await;
+    let body = collect_sse_body_text(first.client_payload.body)
+        .await
+        .expect("Direct SSE must remain valid while streaming");
     assert!(body.contains("resp_http_sse_terminal"));
     assert!(body.contains("response.completed"));
     assert!(body.contains("[DONE]"));
@@ -1724,7 +1736,9 @@ async fn direct_provider_event_json_observation_records_usage_and_completed_term
         .stream_observation
         .clone()
         .expect("Direct output must expose runtime provider-event JSON observation state");
-    let body = collect_sse_body_text(output.client_payload.body).await;
+    let body = collect_sse_body_text(output.client_payload.body)
+        .await
+        .expect("Direct SSE must remain valid while streaming");
     assert!(body.contains("response.in_progress"));
     assert!(body.contains("response.completed"));
     assert!(body.contains("[DONE]"));
@@ -1801,7 +1815,9 @@ async fn direct_provider_event_json_observation_infers_terminal_status_from_even
         .stream_observation
         .clone()
         .expect("Direct output must expose runtime provider-event JSON observation state");
-    let body = collect_sse_body_text(output.client_payload.body).await;
+    let body = collect_sse_body_text(output.client_payload.body)
+        .await
+        .expect("Direct SSE must remain valid while streaming");
     assert!(body.contains("response.completed"));
     assert!(body.contains("response.in_progress"));
     assert!(body.contains("[DONE]"));
@@ -1904,10 +1920,12 @@ async fn http_only_sse_function_call_uses_v2_direct_http_continuation_without_re
     assert_eq!(first.client_payload.status, 200);
     assert_eq!(
         state.len().unwrap(),
-        1,
-        "Runtime must commit continuation truth before exposing the sealed replay"
+        0,
+        "an incremental client broker must not commit continuation before terminal provider SSE"
     );
-    let first_body = collect_sse_body_text(first.client_payload.body).await;
+    let first_body = collect_sse_body_text(first.client_payload.body)
+        .await
+        .expect("first Direct SSE must remain valid while streaming");
     assert!(first_body.contains("resp_http_sse_pending"));
     assert!(first_body.contains("call_http_sse_pending"));
     assert!(first_body.contains("[DONE]"));
@@ -1940,7 +1958,9 @@ async fn http_only_sse_function_call_uses_v2_direct_http_continuation_without_re
         count(&second.node_trace, "V3Router07OpaqueTargetHitOnce"),
         0
     );
-    let second_body = collect_sse_body_text(second.client_payload.body).await;
+    let second_body = collect_sse_body_text(second.client_payload.body)
+        .await
+        .expect("Direct SSE continuation must remain valid while streaming");
     assert!(second_body.contains("resp_http_sse_done"));
     assert!(second_body.contains("[DONE]"));
     assert_eq!(state.len().unwrap(), 0);
@@ -1982,15 +2002,9 @@ async fn continuation_disabled_keeps_repeated_sse_response_ids_out_of_remote_sto
         )
         .await;
         assert_eq!(output.client_payload.status, 200, "{output:?}");
-        assert!(
-            output
-                .observability
-                .as_ref()
-                .and_then(|observation| observation.timing.as_ref())
-                .is_some(),
-            "Runtime/Broker must finish provider SSE timing before sealing the committed carrier"
-        );
-        let body = collect_sse_body_text(output.client_payload.body).await;
+        let body = collect_sse_body_text(output.client_payload.body)
+            .await
+            .expect("continuation-disabled Direct SSE must remain valid while streaming");
         assert!(body.contains("resp_http_sse_pending"));
         assert!(body.contains("call_http_sse_pending"));
         assert!(body.contains("[DONE]"));
@@ -2002,19 +2016,24 @@ async fn continuation_disabled_keeps_repeated_sse_response_ids_out_of_remote_sto
     }
 }
 
-async fn collect_sse_body_text(body: V3ClientBody) -> String {
-    let V3ClientBody::CommittedSse(stream) = body else {
-        panic!("successful SSE response must use the Runtime-sealed committed carrier")
-    };
-    collect_committed_sse_text(stream).await
-}
-
-async fn collect_committed_sse_text(mut stream: V3CommittedClientSseStream) -> String {
+async fn collect_sse_body_text(body: V3ClientBody) -> Result<String, String> {
     let mut bytes = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        bytes.extend_from_slice(&chunk);
+    match body {
+        V3ClientBody::Sse(mut stream) => {
+            while let Some(chunk) = stream.next().await {
+                bytes.extend_from_slice(&chunk.map_err(|error| format!("{error:?}"))?);
+            }
+        }
+        V3ClientBody::CommittedSse(mut stream) => {
+            while let Some(chunk) = stream.next().await {
+                bytes.extend_from_slice(&chunk);
+            }
+        }
+        V3ClientBody::Json(_) | V3ClientBody::Bytes(_) => {
+            return Err("successful response must use an SSE client carrier".to_string());
+        }
     }
-    String::from_utf8(bytes).expect("controlled SSE must remain UTF-8")
+    String::from_utf8(bytes).map_err(|error| error.to_string())
 }
 
 #[tokio::test]
@@ -2247,15 +2266,15 @@ async fn malformed_sse_attempt_never_commits_partial_bytes_and_fresh_request_rem
         1_000,
     )
     .await;
-    assert_error_chain(&first);
-    let V3ClientBody::Json(body) = first.client_payload.body else {
-        panic!("malformed provider event must not escape as committed client SSE")
-    };
-    let body_text = body.to_string();
-    assert_eq!(body["error"]["code"], "provider_response_sse_event_invalid");
+    assert_eq!(first.client_payload.status, 200, "{first:?}");
+    let stream_error = collect_sse_body_text(first.client_payload.body)
+        .await
+        .expect_err("malformed provider event must fail while the live stream is consumed");
+    let body_text = stream_error;
+    assert!(body_text.contains("provider_response_sse_event_invalid"), "{body_text}");
     assert!(
         !body_text.contains("partial"),
-        "failed-attempt bytes must remain inside Runtime/Broker: {body_text}"
+        "failed-attempt diagnostics must not expose partial control state: {body_text}"
     );
 
     let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
@@ -2292,14 +2311,13 @@ async fn failed_terminal_sse_attempt_never_commits_partial_bytes_and_exhausts_to
         1_000,
     )
     .await;
-    assert_error_chain(&first);
-    let V3ClientBody::Json(body) = first.client_payload.body else {
-        panic!("response.failed must not escape as committed client SSE")
-    };
-    let body_text = body.to_string();
+    assert_eq!(first.client_payload.status, 200, "{first:?}");
+    let body_text = collect_sse_body_text(first.client_payload.body)
+        .await
+        .expect_err("response.failed must fail while the live stream is consumed");
     assert!(
         !body_text.contains("partial"),
-        "failed-attempt bytes must remain inside Runtime/Broker: {body_text}"
+        "failed-attempt diagnostics must not expose partial control state: {body_text}"
     );
 
     let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
@@ -2336,11 +2354,11 @@ async fn terminal_sse_success_seals_replay_without_blocking_a_fresh_request() {
         1_000,
     )
     .await;
-    assert_error_chain(&failed);
-    let V3ClientBody::Json(failed_body) = failed.client_payload.body else {
-        panic!("failed provider attempt must project only the terminal Error06 body")
-    };
-    assert!(!failed_body.to_string().contains("partial"));
+    assert_eq!(failed.client_payload.status, 200, "{failed:?}");
+    let failed_error = collect_sse_body_text(failed.client_payload.body)
+        .await
+        .expect_err("failed provider attempt must fail while the live stream is consumed");
+    assert!(!failed_error.contains("partial"), "{failed_error}");
 
     let terminal = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &state,
@@ -2355,9 +2373,8 @@ async fn terminal_sse_success_seals_replay_without_blocking_a_fresh_request() {
         2_000,
     )
     .await;
-    let V3ClientBody::CommittedSse(terminal_stream) = terminal.client_payload.body else {
-        panic!("validated terminal Direct response must use the committed carrier")
-    };
+    assert_eq!(terminal.client_payload.status, 200, "{terminal:?}");
+    let terminal_body = terminal.client_payload.body;
 
     let waiting_manifest = manifest.clone();
     let waiting_state = V3ResponsesDirectContinuationState::default();
@@ -2383,7 +2400,9 @@ async fn terminal_sse_success_seals_replay_without_blocking_a_fresh_request() {
     );
     let fresh = waiter.await.expect("fresh Direct request task panicked");
     assert_eq!(fresh.client_payload.status, 200, "{fresh:?}");
-    let terminal_text = collect_committed_sse_text(terminal_stream).await;
+    let terminal_text = collect_sse_body_text(terminal_body)
+        .await
+        .expect("terminal Direct SSE must remain valid while streaming");
     assert!(
         terminal_text.contains("response.completed"),
         "{terminal_text}"
@@ -2493,21 +2512,19 @@ async fn pinned_failed_sse_attempt_terminates_without_front_leak_or_reroute() {
         2_000,
     )
     .await;
-    assert_eq!(recovered.client_payload.status, 502, "{recovered:?}");
+    assert_eq!(recovered.client_payload.status, 200, "{recovered:?}");
     assert_eq!(
         count(&recovered.node_trace, "V3Router07OpaqueTargetHitOnce"),
         0,
         "pinned provider-attempt failure must not re-enter or scan the Router"
     );
     assert_eq!(count(&recovered.node_trace, "V3TargetLocalReselected"), 0);
-    let V3ClientBody::Json(body) = recovered.client_payload.body else {
-        panic!("the failed pinned attempt must project a terminal JSON response")
-    };
-    let body_text = body.to_string();
-    assert!(body_text.contains("HTTP_502"), "{body_text}");
+    let body_text = collect_sse_body_text(recovered.client_payload.body)
+        .await
+        .expect_err("the failed pinned attempt must fail while the live stream is consumed");
     assert!(
         !body_text.contains("partial"),
-        "the failed pinned attempt must remain inside Runtime/Broker: {body_text}"
+        "the failed pinned attempt must not expose partial control state: {body_text}"
     );
     assert_eq!(state.len().unwrap(), 1);
     let requests = transport.requests.lock().unwrap();

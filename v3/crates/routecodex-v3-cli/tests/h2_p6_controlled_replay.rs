@@ -129,17 +129,13 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     );
     assert_eq!(json_capture.accept.as_deref(), Some("application/json"));
     assert_eq!(json_capture.body["model"], "wire-success");
-    // “先归一化，再治理”：字符串 input 在 req_inbound 归一言化为 Chat-canonical
-    // message 数组，再按 direct 出口投影到 Responses wire（合法形态，语义等价）。
-    // 断言语义等价而非字节原样。
+    // Responses -> Responses is same-protocol Direct.  ReqInbound preserves the
+    // client protocol field; Chat-canonical projection belongs to Relay/provider
+    // protocol conversion and must not be invented on the Direct path.
     assert_eq!(
         json_capture.body["input"],
-        json!([{
-            "type": "message",
-            "role": "user",
-            "content": [{"type": "input_text", "text": "json baseline"}]
-        }]),
-        "wire input must be the Chat-canonical projection of the client input"
+        json!("json baseline"),
+        "same-protocol Direct must preserve the Responses input field shape"
     );
     assert_eq!(json_capture.body["metadata"], json_request["metadata"]);
     assert_no_internal_wire_fields(&json_capture.body);
@@ -216,13 +212,13 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         .unwrap();
     assert_eq!(
         exhausted_response.status(),
-        ReqwestStatusCode::SERVICE_UNAVAILABLE
+        ReqwestStatusCode::BAD_GATEWAY
     );
     let exhausted_body: Value = exhausted_response.json().await.unwrap();
     assert_eq!(exhausted_body["error"]["code"], "provider_http_503");
     assert_eq!(
         exhausted_body["error"]["message"],
-        "provider returned HTTP 503"
+        "provider_http_503"
     );
     assert!(exhausted_body["error"].get("internal_code").is_none());
     assert!(
@@ -262,8 +258,14 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         .send()
         .await
         .unwrap();
-    assert_eq!(dry_run_response.status(), ReqwestStatusCode::OK);
-    let dry_run: Value = dry_run_response.json().await.unwrap();
+    let dry_run_status = dry_run_response.status();
+    let dry_run_body_text = dry_run_response.text().await.unwrap();
+    assert_eq!(
+        dry_run_status,
+        ReqwestStatusCode::OK,
+        "dry-run response body: {dry_run_body_text}"
+    );
+    let dry_run: Value = serde_json::from_str(&dry_run_body_text).unwrap();
     assert_eq!(dry_run["dry_run"]["terminal_effect"], "no_network_send");
     assert_eq!(dry_run["dry_run"]["provider_pipeline_executed"], true);
     assert_eq!(dry_run["dry_run"]["provider_network_send"], false);

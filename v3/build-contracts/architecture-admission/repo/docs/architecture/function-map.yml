@@ -10,14 +10,24 @@ owners:
   owner_module: scripts/architecture/verify-repository-filesystem-governance.mjs
   canonical_types:
   - RepositoryFilesystemContract
+  - V3ArchitectureContractMapSet
   canonical_builders:
   - verifyRepositoryFilesystemGovernance
+  - verifyV3ContractMapOwner
+  - assertCanonicalFeatureBindings
+  - verifyV3MainlineManifestSync
   allowed_paths:
   - .gitignore
   - scripts/ci/repo-sanity.mjs
   - scripts/ci/mempalace-scan-artifact-audit.mjs
   - scripts/architecture/verify-repository-filesystem-governance.mjs
+  - scripts/architecture/verify-architecture-mainline-manifest-sync.mjs
   - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+  - v3/scripts/architecture/verify-v3-contract-map-owner.mjs
+  - v3/scripts/architecture/verify-v3-mainline-manifest-sync.mjs
+  - v3/scripts/architecture/verify-v3-architecture-ci.mjs
+  - package.json
+  - v3/package.json
   - v3/README.md
   - README.md
   - tsconfig.json
@@ -25,6 +35,12 @@ owners:
   - .agents/skills/rcc-dev-skills/references
   - .agents/skills/rcc-v3-architecture/SKILL.md
   - docs/architecture/repository-filesystem-module-registry.yml
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+  - docs/architecture/manifests/architecture.repository_filesystem.mainline.yml
+  - docs/architecture/manifests/architecture.v3_contract_maps.mainline.yml
   - docs/audits/repository-root-layout-v3-v2-audit.md
   - docs/audits/v2-to-v3-migration-audit-2026-08-04.md
   - docs/architecture/v3-control-plane-data-plane-audit-2026-08-10.md
@@ -52,15 +68,23 @@ owners:
   - scripts/architecture/verify-repository-filesystem-governance.mjs
   - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
   - scripts/ci/repo-sanity.mjs
+  - v3/scripts/architecture/verify-v3-contract-map-owner.mjs
   required_gates:
   - npm run verify:repo-sanity
   - npm run verify:v3-resource-map
+  - npm run verify:v3-contract-map-owner
+  - npm run verify:v3-direct-sse-accept-skeleton
+  - npm run verify:sse-architecture-boundary
+  - npm run verify:v3-architecture-ci
+  - npm run verify:v3-mainline-manifest-sync
   migration_target: none
   resource_bindings:
     writes:
     - architecture.repository_filesystem_contract@RepoFilesystemAuthoring01Policy
+    - architecture.v3_contract_map_set@ArchitectureContractMapAuthoring01
     reads:
     - architecture.repository_filesystem_contract@RepoFilesystemVerify02Gate
+    - architecture.v3_contract_map_set@ArchitectureContractMapVerification02
     forbidden:
     - request.normal_payload@HubReqInbound02Standardized
     - provider.wire_payload@ProviderReqOutbound06WirePayload
@@ -339,6 +363,7 @@ owners:
   - v3.hub.provider_wire_payload
   - v3.response.provider_raw
   - v3.hub.response_semantic
+  - v3.provider_compat.profile_application
   canonical_types:
   - AdapterContext
   - ReqOutboundCompatInput
@@ -351,6 +376,7 @@ owners:
   - apply_request_compat
   mainline_bindings:
   - v3-model-bind-04
+  - v3-provider-compat-request-01
   - v3-provider-compat-minimax-anthropic-01
   - v3-provider-compat-profile-request-01
   - v3-provider-compat-profile-response-01
@@ -364,7 +390,12 @@ owners:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/tests
+  - v3/tests/resources/glm-anthropic-request-outbound-config.toml
   - docs/architecture
+  - docs/goals/v3-glm-request-outbound-compat-20260819.md
+  - scripts/architecture/v3-provider-compat-module-boundary-lib.mjs
+  - scripts/architecture/verify-v3-provider-compat-module-boundary.mjs
+  - scripts/tests/v3-provider-compat-module-boundary-red-fixtures.mjs
   forbidden_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - v3/crates/routecodex-v3-target
@@ -382,8 +413,12 @@ owners:
   - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
   - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
   - v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs
+  - v3/crates/routecodex-v3-runtime/tests/glm_anthropic_request_outbound_compat.rs
   required_gates:
   - npm run test:v3-provider-compat-profile-loading
+  - npm run test:v3-glm-anthropic-request-outbound-compat
+  - npm run verify:v3-provider-compat-module-boundary
+  - npm run test:v3-provider-compat-module-boundary-red-fixtures
   - npm run test:v3-workspace
   - npm run verify:v3-resource-map
   - npm run verify:v3-architecture-docs
@@ -497,7 +532,7 @@ owners:
   owner_module: v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
     reads:
-    - request.protocol_context
+    - request.protocol_fields
     - provider_runtime.observation
     - error.chain
     - runtime.http_lifecycle_context
@@ -674,7 +709,7 @@ owners:
   - v3/crates/routecodex-v3-runtime/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
-  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/tests
   - v3/crates/routecodex-v3-server/src/lib.rs

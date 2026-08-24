@@ -107,11 +107,11 @@ semantic_registry:
       gemini: unmapped
   - semantic_id: request.reasoning_effort
     chat_storage: reasoning_effort
-    type: qualitative_enum
+    type: non_empty_qualitative_string_target_protocol_compatible
     projections:
-      responses: reasoning.effort
-      openai_chat: reasoning_effort
-      anthropic: output_config.effort_shared_domain_only
+      responses: reasoning.effort_known_domain_unknown_to_medium
+      openai_chat: reasoning_effort_provider_compatible_domain
+      anthropic: output_config.effort_or_minimax_adaptive_thinking
       gemini: generationConfig.thinkingConfig.thinkingLevel_shared_domain_only
   - semantic_id: request.reasoning_budget_tokens
     chat_storage: reasoning_budget_tokens
@@ -271,6 +271,38 @@ compatibility_registry:
       - chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input
       - anthropic_malformed_function_wrapper_restores_exact_raw_arguments
       - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
+  - compatibility_id: v3.responses_inbound.codex_builtin_integer_schema
+    status: source_controlled
+    source_semantics:
+      - Responses request tool declaration for Codex built-in exec_command
+      - Responses request tool declaration for Codex built-in write_stdin
+    target_protocol: chat_canonical
+    owner_stage: V3HubReqInbound02Normalized
+    owner_symbol: build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat
+    implementation_symbol: normalize_v3_codex_integer_tool_schema
+    identity:
+      tool_shape: exact_registered_function_schema
+      tool_names: [exec_command, write_stdin]
+      exec_command_properties: [cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]
+      write_stdin_properties: [chars, max_output_tokens, session_id, yield_time_ms]
+      exec_command_required: [cmd]
+      write_stdin_required: [session_id]
+      parameters: {type: object, additionalProperties: false}
+      strict: false
+    rewrite: direct_parameters_properties_type_number_to_integer
+    semantic_delta: black_box_codex_client_schema_number_for_runtime_integer_arguments
+    forbidden:
+      - generic_schema_coercion
+      - user_tool_rewrite
+      - outbound_rewrite
+      - numeric_value_rewrite
+      - metadata_projection
+      - anthropic_inbound_rewrite
+      - resp04_continuation_rewrite
+    required_tests:
+      - responses_inbound_restores_codex_integer_tool_schema_types
+      - responses_inbound_does_not_rewrite_string_session_id_schema
+      - responses_inbound_does_not_rewrite_same_named_user_tool_schema
 forbidden_carriers:
   - MetadataCenter
   - routing

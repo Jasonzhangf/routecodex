@@ -2,6 +2,83 @@ version: 2
 status: p6_source_and_local_live_verified_hub_v1_contract_defined
 scope: routecodex-v3
 chains:
+- chain_id: v3.provider_global_cooldown_persistence
+  owner_feature_id: v3.provider_global_cooldown_persistence
+  summary: Provider cooldown state is loaded before listeners bind, persisted on provider health mutation, and probed once after ready before re-admission.
+  edges:
+  - step_id: v3-provider-global-cooldown-01
+    from_node: V3Config05ManifestPublished
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::from_manifest
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderHealthStore::from_manifest
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    status: source_controlled
+    owner_feature_id: v3.provider_global_cooldown_persistence
+  - step_id: v3-provider-global-cooldown-02
+    from_node: V3ProviderHealthStore
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderHealthStore::from_manifest
+    caller_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    callee_symbol: V3ProviderCooldownCoordinator::load
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+    status: source_controlled
+    owner_feature_id: v3.provider_global_cooldown_persistence
+  - step_id: v3-provider-global-cooldown-03
+    from_node: V3ServerStartup01ListenerSetPreflight
+    to_node: V3ProviderHealthStore
+    caller_symbol: spawn_v3_server_aggregate
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_key_health_probes
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: source_controlled
+    owner_feature_id: v3.provider_global_cooldown_persistence
+- chain_id: v3.provider_key_health_model_granularity
+  owner_feature_id: v3.provider_key_health_model_granularity
+  summary: Runtime passes the exact provider, auth alias, and model identity to the Provider-owned key health store; Target reads only the resulting per-model scheduling projection.
+  edges:
+  - step_id: v3-provider-key-health-model-01
+    from_node: V3Error02Classified
+    to_node: V3ProviderFailureAction
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_source
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: build_v3_provider_failure_action_from_v3_error_02
+    callee_file: v3/crates/routecodex-v3-error/src/subscription.rs
+    status: source_controlled
+    owner_feature_id: v3.debug_error_foundation
+    resource_flow:
+      consumes: [v3.error.classified]
+      produces: [v3.provider.failure_action]
+      side_channel_reads: [v3.error.classified]
+      side_channel_writes: [v3.provider.failure_action]
+  - step_id: v3-provider-key-health-model-02
+    from_node: V3ProviderFailureAction
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_key_failure_action
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderHealthStore::record_provider_failure_action
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    status: source_controlled
+    owner_feature_id: v3.provider_key_health_model_granularity
+    resource_flow:
+      consumes: [v3.provider.failure_action]
+      produces: [v3.provider.key_health_state]
+      side_channel_reads: [v3.provider.failure_action]
+      side_channel_writes: [v3.provider.key_health_state]
+  - step_id: v3-provider-key-health-model-03
+    from_node: V3Target09CandidateSetExpanded
+    to_node: V3Target10ConcreteProviderSelected
+    caller_symbol: V3TargetInterpreter::select_available_with_health
+    caller_file: v3/crates/routecodex-v3-target/src/lib.rs
+    callee_symbol: V3ProviderSchedulingReader::scheduling_projection
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    status: source_controlled
+    owner_feature_id: v3.virtual_router_target_interpreter
+    resource_flow:
+      consumes: [v3.provider.scheduling_projection]
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.scheduling_projection]
+      side_channel_writes: []
 - chain_id: v3.global_binary_install
   owner_feature_id: v3.global_binary_install
   summary: The isolated Cargo build embeds the RouteCodex version, atomically publishes one Rust binary to the user bin directory, then creates same-directory command aliases without release snapshots.
@@ -21,6 +98,67 @@ chains:
     resource_flow:
       consumes: []
       produces: [v3.global_binary_install]
+      side_channel_reads: []
+      side_channel_writes: []
+
+- chain_id: v3.direct.request_key_hooks
+  owner_feature_id: v3.direct.request_key_hooks
+  summary: Direct request projection exposes typed mounts for system, developer, and tools keys; Relay JSON remains owned by req_inbound and req_chatprocess governance.
+  edges:
+  - step_id: v3-direct-request-key-01
+    from_node: V3ResponsesDirect11Policy
+    to_node: V3Provider12ResponsesWirePayload
+    caller_symbol: responses_direct_request_projection_hook
+    caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    callee_symbol: apply_v3_direct_request_key_hook
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_request_key_hooks.rs
+    status: active
+    owner_feature_id: v3.direct.request_key_hooks
+    resource_flow:
+      consumes: [v3.direct.request_key_view]
+      produces: [v3.direct.request_key_effect]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-direct-request-key-03
+    from_node: V3ResponsesDirect11Policy
+    to_node: V3Provider12ResponsesWirePayload
+    caller_symbol: responses_direct_request_projection_hook_with_key_catalog
+    caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    callee_symbol: apply_v3_direct_request_key_hook_with_catalog
+    callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    status: active
+    owner_feature_id: v3.direct.request_key_hooks
+    resource_flow:
+      consumes: [v3.direct.request_key_view]
+      produces: [v3.direct.request_key_effect]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-direct-request-key-02
+    from_node: V3ChatDirect11Policy
+    to_node: V3Provider12ResponsesWirePayload
+    caller_symbol: chat_direct_request_projection_hook
+    caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    callee_symbol: apply_v3_direct_request_key_hook
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_request_key_hooks.rs
+    status: active
+    owner_feature_id: v3.direct.request_key_hooks
+    resource_flow:
+      consumes: [v3.direct.request_key_view]
+      produces: [v3.direct.request_key_effect]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-direct-request-key-04
+    from_node: V3ChatDirect11Policy
+    to_node: V3Provider12ResponsesWirePayload
+    caller_symbol: execute_v3_direct_runtime_kernel_core_with_key_catalog
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    callee_symbol: V3ChatDirectCodec::run_request_projection
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
+    status: active
+    owner_feature_id: v3.direct.request_key_hooks
+    resource_flow:
+      consumes: [v3.direct.request_key_view]
+      produces: [v3.direct.request_key_effect]
       side_channel_reads: []
       side_channel_writes: []
   - step_id: v3-install-02
@@ -59,7 +197,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.provider_compat_profile.request
   owner_feature_id: v3.provider_compat_profile_loading
-  summary: The request provider-compat node consumes only the adjacent provider-semantic payload, validates the normal-payload boundary, and applies the selected provider-family wire profile without routing or control reconstruction.
+  summary: The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, and performs the registered session-preserving image compatibility projection only for a selected target without multimodal/vision capability.
   edges:
   - step_id: v3-provider-compat-profile-request-01
     from_node: V3HubReqOutbound07ProviderSemantic
@@ -76,6 +214,26 @@ chains:
       produces: [v3.hub.provider_wire_payload]
       side_channel_reads: [v3.hub.resolved_target, v3.hub.provider_protocol]
       side_channel_writes: []
+  
+- chain_id: v3.provider_compat.request_invalid_error_source
+  owner_feature_id: v3.provider_compat_profile_loading
+  summary: Request-shape compatibility failures enter the canonical typed Error01 source chain before relay policy and client projection.
+  edges:
+  - step_id: v3-provider-compat-profile-request-invalid-source-01
+    from_node: ProviderReqCompat06ProviderCompat
+    to_node: V3Error01SourceRaised
+    caller_symbol: provider_request_relay_failure
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
+    callee_symbol: provider_request_payload_source
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs
+    status: anchored
+    binding_kind: request_invalid_error_source
+    owner_feature_id: v3.provider_compat_profile_loading
+    resource_flow:
+      consumes: [v3.provider_compat.payload_boundary_contract]
+      produces: [v3.error.source]
+      side_channel_reads: []
+      side_channel_writes: [v3.error.source]
 - chain_id: v3.provider_compat_profile.response
   owner_feature_id: v3.provider_compat_profile_loading
   summary: The response provider-compat node consumes only the adjacent provider-raw payload, validates the normal-payload boundary, and applies the selected provider-family response profile before Hub response normalization.
@@ -120,8 +278,8 @@ chains:
   - step_id: v3-rd-target-select-direct-kernel
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    caller_symbol: execute_v3_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
     callee_symbol: select_v3_target_with_session_then_global
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     status: anchored
@@ -406,6 +564,7 @@ chains:
       - v3.config.schema_validated
       produces:
       - v3.config.resource_registry
+      - v3.config.server_manifests
       - v3.config.hub_pipeline_declarations
       - v3.hub.runtime_resource_declarations
       - v3.config.route_pool_match_declarations
@@ -426,6 +585,7 @@ chains:
     resource_flow:
       consumes:
       - v3.config.resource_registry
+      - v3.config.server_manifests
       produces:
       - v3.config.published_manifest
       - v3.secret.provider_auth_handle
@@ -433,6 +593,58 @@ chains:
       side_channel_reads: []
       side_channel_writes:
       - v3.secret.provider_auth_handle
+    status: anchored
+- chain_id: v3.config.server_manifest_compile.mainline
+  owner_feature_id: v3.config_interpreter_contract
+  summary: Config compiles each server authoring entry into the server manifest consumed by publication and startup.
+  edges:
+  - step_id: v3-config-server-manifest-01
+    from_node: V3ServerAuthoringConfig
+    to_node: V3ServerManifest
+    caller_symbol: compile_servers
+    caller_file: v3/crates/routecodex-v3-config/src/validate.rs
+    callee_symbol: V3ServerManifest
+    callee_file: v3/crates/routecodex-v3-config/src/types.rs
+    owner_feature_id: v3.config_interpreter_contract
+    resource_flow:
+      consumes:
+      - v3.config.authoring_parsed
+      produces:
+      - v3.config.server_manifests
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+- chain_id: v3.config.provider_sse_timeout_projection.mainline
+  owner_feature_id: v3.config_interpreter_contract
+  summary: Config compiles and publishes the validated per-provider SSE first-frame timeout consumed by the shared Relay guard.
+  edges:
+  - step_id: v3-config-provider-sse-timeout-01
+    from_node: V3ProviderAuthoringConfig
+    to_node: V3ProviderManifest
+    caller_symbol: compile_providers
+    caller_file: v3/crates/routecodex-v3-config/src/validate.rs
+    callee_symbol: V3ProviderManifest
+    callee_file: v3/crates/routecodex-v3-config/src/types.rs
+    owner_feature_id: v3.config_interpreter_contract
+    resource_flow:
+      consumes: [v3.config.authoring_parsed]
+      produces: [v3.config.provider_sse_first_frame_timeout]
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-config-provider-sse-timeout-02
+    from_node: V3Config05ManifestPublished
+    to_node: V3RelaySseFirstFrameGuard
+    caller_symbol: execute_v3_relay_runtime_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    callee_symbol: guard_relay_sse_first_frame
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    owner_feature_id: v3.relay_runtime_core
+    resource_flow:
+      consumes: [v3.config.provider_sse_first_frame_timeout]
+      produces: [v3.error.source]
+      side_channel_reads: [v3.config.provider_sse_first_frame_timeout]
+      side_channel_writes: [v3.error.source]
     status: anchored
 - chain_id: v3.config.compact_hub_v1_defaults
   owner_feature_id: v3.config_interpreter_contract
@@ -681,7 +893,7 @@ chains:
       consumes:
       - v3.config.published_manifest
       produces:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       side_channel_reads: []
       side_channel_writes: []
   - step_id: v3-rd-02
@@ -695,7 +907,7 @@ chains:
     owner_feature_id: v3.virtual_router_target_interpreter
     resource_flow:
       consumes:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.request.normal_payload
       side_channel_reads: []
@@ -808,6 +1020,9 @@ chains:
       - v3.target.candidate_set
       side_channel_writes:
       - v3.target.concrete_provider
+    semantic_contract:
+      - Target10 performs context admission from the typed requestInputTokens carried by Target09 and each candidate max_context_tokens before availability or provider transport.
+      - context_window_exceeded is emitted in Target10 selection evidence; no request or response payload is rewritten.
   - step_id: v3-rd-09
     from_node: V3Target10ConcreteProviderSelected
     to_node: V3Execution11ProtocolDecision
@@ -824,13 +1039,13 @@ chains:
     resource_flow:
       consumes:
       - v3.target.concrete_provider
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       - v3.config.published_manifest
       produces:
       - v3.execution.protocol_decision
       side_channel_reads:
       - v3.target.concrete_provider
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       side_channel_writes:
       - v3.execution.protocol_decision
   - step_id: v3-rd-09-direct-policy
@@ -847,15 +1062,16 @@ chains:
       - v3.execution.protocol_decision
       - v3.target.concrete_provider
       - v3.request.normal_payload
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.responses_direct.policy
       side_channel_reads:
       - v3.execution.protocol_decision
       - v3.target.concrete_provider
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       side_channel_writes:
       - v3.responses_direct.policy
+      - v3.request.tool_thinking_turn_context
     semantic_contract:
       - consumes the current selected Target10 protocol decision and fails fast if Direct receives a non-Direct mode at initial entry
       - Direct runtime reselects from the full captured Target09 candidate set; when the new selected target requires Hub Relay and no Direct-owned previous_response_id is active, it returns a typed relay handoff side-channel carrying every request-local failed candidate so Relay cannot retry an already-failed Direct target
@@ -879,6 +1095,9 @@ chains:
       - v3.responses_direct.policy
       - v3.target.concrete_provider
       side_channel_writes: []
+    semantic_contract:
+      - preserves source reasoning effort until Target10 is concrete, then maps it at the Provider compatibility boundary to the registered official target-protocol domain before Provider12 wire construction
+      - never writes source effort or projection decisions to MetadataCenter, error metadata, or client payload
   - step_id: v3-rd-11
     from_node: V3Provider12ResponsesWirePayload
     to_node: V3Transport13ResponsesHttpRequest
@@ -916,9 +1135,9 @@ chains:
   - step_id: v3-rd-13
     from_node: V3ProviderResp14Raw
     to_node: V3DirectResp14ProviderProjectionPrepared
-    caller_symbol: execute_v3_responses_direct_runtime_kernel
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: responses_direct_response_projection_hook
+    caller_symbol: execute_v3_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    callee_symbol: responses_direct_response_projection_hook_with_context
     callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
     status: anchored
     owner_feature_id: v3.responses_direct_mvp_architecture
@@ -926,9 +1145,11 @@ chains:
       consumes:
       - v3.response.provider_raw
       - v3.responses_direct.policy
+      - v3.direct_response.compat_context
       produces: []
       side_channel_reads:
       - v3.responses_direct.policy
+      - v3.direct_response.compat_context
       side_channel_writes: []
   - step_id: v3-rd-14
     from_node: V3DirectResp14ProviderProjectionPrepared
@@ -943,9 +1164,11 @@ chains:
       consumes:
       - v3.response.provider_raw
       - v3.responses_direct.policy
+      - v3.direct_response.compat_plan
       produces: []
       side_channel_reads:
       - v3.responses_direct.policy
+      - v3.direct_response.compat_plan
       side_channel_writes: []
   - step_id: v3-rd-15
     from_node: V3DirectResp15ClientPayloadReady
@@ -977,7 +1200,7 @@ chains:
     resource_flow:
       consumes:
       - v3.response.client_payload
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces: []
       side_channel_reads: []
       side_channel_writes: []
@@ -998,7 +1221,7 @@ chains:
     owner_feature_id: v3.hub_pipeline_static_skeleton
     resource_flow:
       consumes:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.request.normal_payload
       - v3.hub.entry_protocol
@@ -1967,7 +2190,7 @@ chains:
       - v3.server.listener_set
       - v3.server.validated_http_input
       produces:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       side_channel_reads: []
       side_channel_writes: []
     status: anchored
@@ -1998,7 +2221,7 @@ chains:
     owner_feature_id: v3.foundation_p0_p2
     resource_flow:
       consumes:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.debug.artifact
       side_channel_reads: []
@@ -2054,7 +2277,7 @@ chains:
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.debug.trace_context
       side_channel_reads: []
@@ -2107,7 +2330,7 @@ chains:
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes:
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.error.source
       - v3.error.internal_identity
@@ -2367,7 +2590,7 @@ chains:
     resource_flow:
       consumes:
       - v3.server.validated_http_input
-      - v3.request.protocol_context
+      - v3.request.protocol_fields
       produces:
       - v3.provider.failure_session_scope
       side_channel_reads: []
@@ -2482,8 +2705,8 @@ chains:
   - step_id: v3-rci-02
     from_node: V3HubReqContinuation03Classified
     to_node: V3HubReqTarget06Resolved
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    caller_symbol: execute_v3_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
     callee_symbol: V3TargetInterpreter::resolve_exact_provider_model_auth
     callee_file: v3/crates/routecodex-v3-target/src/lib.rs
     owner_feature_id: v3.responses_direct_remote_continuation_integration
@@ -2524,9 +2747,9 @@ chains:
   - step_id: v3-rci-03
     from_node: V3ProviderResp14Raw
     to_node: V3DirectResp14ProviderProjectionPrepared
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: responses_direct_response_projection_hook
+    caller_symbol: execute_v3_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    callee_symbol: responses_direct_response_projection_hook_with_context
     callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
     owner_feature_id: v3.responses_direct_remote_continuation_integration
     binding_kind: responses_direct_runtime_source
@@ -2534,10 +2757,13 @@ chains:
       consumes:
       - v3.response.provider_raw
       - v3.target.concrete_provider
-      produces: []
+      - v3.direct_response.compat_context
+      produces:
+      - v3.direct_response.compat_plan
       side_channel_reads:
       - v3.target.concrete_provider
-      side_channel_writes: []
+      side_channel_writes:
+      - v3.direct_response.compat_plan
     status: anchored
   - step_id: v3-rci-04
     from_node: V3DirectResp14ProviderProjectionPrepared
@@ -3959,9 +4185,9 @@ chains:
   - step_id: v3-responses-provider-event-terminal-merge-01
     from_node: V3ProviderResponsesEventCodec
     to_node: V3ProviderResponsesTerminalOrFailureObserved
-    caller_symbol: apply_v3_runtime_responses_semantic_event
+    caller_symbol: observe_v3_runtime_responses_sse_transport_chunk_typed_with_hook
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
-    callee_symbol: merge_v3_runtime_responses_stream_output_items_into_terminal_response
+    callee_symbol: build_typed_responses_terminal_response
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
     status: anchored
     owner_feature_id: v3.hub_relay_runtime_closeout
@@ -4060,7 +4286,7 @@ chains:
     to_node: V3HubReqInbound02Normalized
     caller_symbol: build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
-    callee_symbol: build_v3_chat_canonical_request_from_responses_payload_for_req_inbound
+    callee_symbol: build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
     status: anchored
     binding_kind: adjacent_inbound_static_order_projection
@@ -4068,6 +4294,7 @@ chains:
     semantic_contract:
       - Consume Responses input strictly left to right without sorting messages, declarations, calls, or results.
       - Project only contiguous assistant semantic items into one Chat assistant turn and stop at every message or tool-result boundary.
+      - Apply only the registered black-box Codex compatibility exception `v3.responses_inbound.codex_builtin_integer_schema`: exact built-in `exec_command`/`write_stdin` tool schema fields may project direct `number` types to `integer`; no generic, user-tool, value, outbound, or metadata rewrite is permitted.
     resource_flow:
       consumes:
       - v3.request.normal_payload
@@ -4138,7 +4365,7 @@ chains:
   - step_id: v3-protocol-field-parity-responses-anthropic-req-01
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: ProviderReqCompat06ProviderCompat
-    caller_symbol: responses_relay_reasoning_effort_projects_anthropic_output_config_effort
+    caller_symbol: responses_relay_reasoning_effort_projects_minimax_adaptive_thinking
     caller_file: v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs
     callee_symbol: build_provider_req_compat_06_from_v3_hub_req_outbound_07
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
@@ -5881,7 +6108,7 @@ chains:
 
 - chain_id: v3.provider_action_gate.mainline
   owner_feature_id: v3.provider_action_gate
-  summary: V3 provider action gate serializes provider failure recovery, terminal projection, permit ownership, post-commit SSE success/failure observation, and provider response event-codec terminal evidence without Server/SSE owning Error06 semantics.
+  summary: V3 provider action gate serializes provider failure recovery, permit ownership, post-commit SSE success/failure observation, and provider response event-codec terminal evidence; the Server frame owner consumes typed Error01 and performs the sole Error06 client-protocol projection.
   manifest: docs/architecture/manifests/v3.provider_action_gate.mainline.yml
   edges:
     - step_id: v3-provider-action-gate-01
@@ -6549,7 +6776,7 @@ chains:
       to_node: V3ProviderActionFailureRecorded
       caller_symbol: V3DirectSseProviderOutcome::record_failure
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -6829,7 +7056,7 @@ chains:
       to_node: V3ProviderResponsesEventCodec
       caller_symbol: build_v3_hub_resp_inbound_02_from_responses_provider_stream_events
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
-      callee_symbol: observe_v3_runtime_responses_sse_transport_chunk
+      callee_symbol: observe_v3_runtime_responses_sse_transport_chunk_typed
       callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -6847,10 +7074,10 @@ chains:
     - step_id: v3-provider-action-gate-51
       from_node: V3ProviderResponsesEventCodec
       to_node: V3ProviderResponsesTerminalOrFailureObserved
-      caller_symbol: observe_v3_runtime_responses_sse_semantic_frame
+      caller_symbol: observe_v3_runtime_responses_sse_semantic_frame_typed
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
-      callee_symbol: apply_v3_runtime_responses_semantic_event
-      callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+      callee_symbol: V3ResponsesSseReducerState::apply_event
+      callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -7023,12 +7250,12 @@ chains:
   manifest: docs/architecture/manifests/v3.provider_global_subscription_probe.mainline.yml
   edges:
   - step_id: v3-provider-global-probe-01
-    from_node: V3ProviderGlobalSubscriptionHealthStore
+    from_node: V3ProviderHealthStore
     to_node: V3ProviderGlobalProbePermit
     caller_symbol: V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+    callee_symbol: V3ProviderHealthStore::try_acquire_provider_cooldown_probe
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
@@ -7042,6 +7269,21 @@ chains:
     to_node: V3ProviderGlobalProbeExecution
     caller_symbol: spawn_v3_server_aggregate
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health, v3.config.published_manifest]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health, v3.config.published_manifest]
+      side_channel_writes: [v3.provider.global_subscription_health]
+
+  - step_id: v3-provider-global-probe-02-target
+    from_node: V3ProviderGlobalProbePermit
+    to_node: V3ProviderGlobalProbeExecution
+    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: probe_v3_provider_global_target
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     status: anchored
@@ -7052,173 +7294,743 @@ chains:
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
 
+  - step_id: v3-provider-global-probe-02-persistent
+    from_node: V3ServerAggregateLifecycle
+    to_node: V3ProviderGlobalProbeExecution
+    caller_symbol: spawn_v3_server_aggregate
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health, v3.config.published_manifest]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health, v3.config.published_manifest]
+      side_channel_writes: [v3.provider.global_subscription_health]
+
   - step_id: v3-provider-global-probe-03
-    from_node: V3ProviderGlobalSubscriptionFailureObservation
-    to_node: V3ProviderGlobalSubscriptionHealthStore
+    from_node: V3Error02Classified
+    to_node: V3ProviderHealthStore
     caller_symbol: execute_v3_responses_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health, v3.error.classified]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health, v3.error.classified]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-error-classification
+    from_node: V3Error01SourceRaised
+    to_node: V3Error02Classified
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    callee_symbol: build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.source]
+      produces: [v3.error.classified]
+      side_channel_reads: [v3.error.source]
+      side_channel_writes: [v3.error.classified]
+
+- chain_id: v3.tool_thinking_hook_skeleton.mainline
+  owner_feature_id: v3.tool_thinking_hook_skeleton
+  status: source_controlled_pending_online_matrix
+  summary: Req04 atomically compiles one tool_thinking_json_v2 contract with required reason and optional diagnostics, wraps free-form custom tools, and emits request-local typed custom provenance; protocol projections preserve complete schemas and parameter containers; Resp03 alone classifies, performs all-or-nothing valid-key removal, mechanically restores custom shape, finalizes one typed turn result, and projects one separate normal reasoning item without changing provider-native reasoning.
+  edges:
+  - step_id: v3-tool-thinking-req04-relay-contract
+    from_node: V3HubReqContinuation03Classified
+    to_node: V3HubReqChatProcess04Governed
+    caller_symbol: V3HubRelayRequestHooks::run_from_normalized_with_events
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+    callee_symbol: govern_v3_servertool_request_at_req04
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    status: anchored
+    behavior_gap: implementation is bound; remaining gap is the complete live matrix evidence for this edge
+    owner_feature_id: v3.tool_thinking_hook_skeleton
+    resource_flow:
+      consumes: [v3.request.normal_payload]
+      produces: [v3.request.normal_payload]
+      side_channel_reads: []
+      side_channel_writes: [v3.request.tool_thinking_turn_context]
+  - step_id: v3-tool-thinking-req04-direct-chat
+    from_node: V3Execution11ProtocolDecision
+    to_node: V3ChatDirect11Policy
+    caller_symbol: execute_v3_direct_runtime_kernel_core_with_key_catalog
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    callee_symbol: V3ChatDirectCodec::run_route
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
+    status: anchored
+    binding_kind: adjacent_direct_policy_edge_with_req04_side_channel
+    behavior_gap: implementation carries the request-local context; remaining gap is complete retry/direct live evidence
+    owner_feature_id: v3.tool_thinking_hook_skeleton
+    resource_flow:
+      consumes: [v3.execution.protocol_decision, v3.request.normal_payload]
+      produces: [v3.responses_direct.policy]
+      side_channel_reads: [v3.execution.protocol_decision]
+      side_channel_writes: [v3.request.tool_thinking_turn_context]
+  - step_id: v3-tool-thinking-provider-schema-preservation
+    from_node: V3HubReqOutbound07ProviderSemantic
+    to_node: ProviderReqCompat06ProviderCompat
+    caller_symbol: build_v3_provider_standard_protocol_payload_from_req07
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+    callee_symbol: build_v3_openai_chat_standard_request_for_selected_web_search_mode
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+    status: anchored
+    behavior_gap: current Req04 wrapper and mechanical projection are source-controlled; remaining gap is complete native/custom live evidence across every provider protocol
+    owner_feature_id: v3.tool_thinking_hook_skeleton
+    resource_flow:
+      consumes: [v3.request.normal_payload]
+      produces: [v3.hub.provider_wire_payload]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-tool-thinking-resp02-preserve-custom-arguments
+    from_node: ProviderRespCompat02ProviderCompat
+    to_node: V3HubRespInbound02Normalized
+    caller_symbol: run_json_response_hooks
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+    callee_symbol: build_v3_responses_provider_response_from_openai_chat_payload_with_manifest
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
+    status: anchored
+    behavior_gap: current response bridge preserves the governed native container for Resp03; remaining gap is canonical persisted evidence for duplicate/malformed negative samples
+    owner_feature_id: v3.tool_thinking_hook_skeleton
+    resource_flow:
+      consumes: [v3.hub.response_semantic]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-tool-thinking-resp02-preserve-anthropic-input
+    from_node: ProviderRespCompat02ProviderCompat
+    to_node: V3HubRespInbound02Normalized
+    caller_symbol: project_v3_anthropic_message_as_responses_response_with_context
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+    callee_symbol: anthropic_tool_use_as_responses_call
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
+    status: design
+    behavior_gap: current Anthropic bridge preserves the governed input for Resp03; remaining gap is a canonical client-response snapshot and raw duplicate-key negative evidence
+    owner_feature_id: v3.tool_thinking_hook_skeleton
+    resource_flow:
+      consumes: [v3.hub.response_semantic, v3.request.tool_thinking_turn_context]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: [v3.request.tool_thinking_turn_context]
+      side_channel_writes: []
+  - step_id: v3-tool-thinking-resp03-relay
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3HubRespChatProcess03Governed
+    caller_symbol: V3HubRelayResponseHookRegistry::govern
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    callee_symbol: govern_v3_hub_relay_response
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    status: anchored
+    behavior_gap: Relay response profiles carry the request-local context; remaining gap is complete multi-tool/custom live matrix evidence
+    owner_feature_id: v3.tool_thinking_hook_skeleton
+    resource_flow:
+      consumes: [v3.hub.response_semantic, v3.request.tool_thinking_turn_context]
+      produces: [v3.response.client_payload]
+      side_channel_reads: [v3.request.tool_thinking_turn_context]
+      side_channel_writes: [v3.response.tool_thinking_turn_result]
+  - step_id: v3-tool-thinking-resp03-json
+    from_node: V3ProviderResp14Raw
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: responses_direct_response_projection_hook_with_context
+    caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    callee_symbol: map_v3_toolreason_to_reasoning_content_at_resp03
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    status: anchored
+    behavior_gap: Direct JSON response path is hook-owned and context-aware; remaining gap is complete current-binary Direct evidence across all applicable providers
+    owner_feature_id: v3.tool_thinking_hook_skeleton
+    resource_flow:
+      consumes: [v3.response.client_payload, v3.request.tool_thinking_turn_context, v3.response.tool_thinking_turn_result]
+      produces: [v3.response.client_payload]
+      side_channel_reads: [v3.request.tool_thinking_turn_context, v3.response.tool_thinking_turn_result]
+      side_channel_writes: [v3.response.tool_thinking_turn_result]
+  - step_id: v3-tool-thinking-resp03-sse
+    from_node: V3ProviderResp14Raw
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: apply_toolreason_to_sse_frame
+    caller_file: v3/crates/routecodex-v3-runtime/src/shared.rs
+    callee_symbol: map_v3_toolreason_stream_event_at_resp03
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    status: anchored
+    behavior_gap: Direct SSE response path is hook-owned and typed-fragment driven; remaining gap is complete current-binary Direct evidence and negative terminal coverage
+    owner_feature_id: v3.tool_thinking_hook_skeleton
+    resource_flow:
+      consumes: [v3.response.client_payload, v3.request.tool_thinking_turn_context]
+      produces: [v3.response.client_payload]
+      side_channel_reads: [v3.request.tool_thinking_turn_context]
+      side_channel_writes: [v3.response.tool_thinking_turn_result]
+  - step_id: v3-tool-thinking-resp03-direct-sse-client-reasoning
+    from_node: V3DirectResp14ProviderProjectionPrepared
+    to_node: V3DirectResp15ClientPayloadReady
+    caller_symbol: V3DirectSseContentConsumer::take_toolreason_reasoning_projection
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    callee_symbol: build_v3_toolreason_visible_text_sse_events_at_resp03
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    status: anchored
+    behavior_gap: current edge consumes the Resp03 projection and closes the reasoning item before the native tool-call terminal event; remaining gap is the full duplicate/terminal live evidence bundle
+    owner_feature_id: v3.tool_thinking_hook_skeleton
+    resource_flow:
+      consumes: [v3.response.client_payload, v3.response.tool_thinking_turn_result]
+      produces: [v3.response.client_payload]
+      side_channel_reads: [v3.response.tool_thinking_turn_result]
+      side_channel_writes: []
+
+- chain_id: v3.server.internal_observability_projection
+  owner_feature_id: v3.server_internal_observability_projection
+  summary: Server-owned typed diagnostic projection records bounded request lifecycle observations; evicted terminal replay reports resync requirement without entering business payload.
+  edges:
+  - step_id: v3-server-observability-record
+    from_node: V3ServerConsoleObservation
+    to_node: V3WebuiObservability
+    caller_symbol: emit_v3_request_console_observation
+    caller_file: v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+    callee_symbol: V3WebuiObservability::record
+    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes: [v3.runtime.responses_observability]
+      produces: [v3.server.internal_observability_projection]
+      side_channel_reads: [v3.runtime.responses_observability]
+      side_channel_writes: [v3.server.internal_observability_projection]
+  - step_id: v3-server-observability-resync
+    from_node: V3WebuiObservability
+    to_node: V3ObsSinceResult
+    caller_symbol: V3WebuiObservability::since
+    caller_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    callee_symbol: V3ObsSinceResult
+    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes: [v3.server.internal_observability_projection]
+      produces: [v3.server.internal_observability_projection]
+      side_channel_reads: [v3.server.internal_observability_projection]
+      side_channel_writes: []
+
+- chain_id: v3.route_policy.condition_evaluation
+  owner_feature_id: v3.route_policy_condition_evaluation
+  summary: Typed turn observations are projected into a bounded history window and evaluated into a route-pool-only policy action before Virtual Router selection.
+  edges:
+  - step_id: v3-route-policy-01
+    from_node: V3RouteTurnObservation
+    to_node: V3RouteHistoryWindow
+    caller_symbol: V3RouteHistoryWindow::record_turn
+    caller_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+    callee_symbol: V3RouteHistoryWindow::facts
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+    status: source_controlled
+    owner_feature_id: v3.route_policy_condition_evaluation
+    resource_flow:
+      consumes: [v3.route.current_turn_facts]
+      produces: [v3.route.policy_observations]
+      side_channel_reads: []
+      side_channel_writes: [v3.route.policy_observations]
+  - step_id: v3-route-policy-02
+    from_node: V3RouteHistoryWindow
+    to_node: V3RoutePolicyAction
+    caller_symbol: evaluate_v3_route_policies
+    caller_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+    callee_symbol: V3RoutePolicyAction
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+    status: source_controlled
+    owner_feature_id: v3.route_policy_condition_evaluation
+    resource_flow:
+      consumes: [v3.route.policy_observations]
+      produces: [v3.route.policy_action]
+      side_channel_reads: [v3.route.policy_observations]
+      side_channel_writes: [v3.route.policy_action]
+  - step_id: v3-route-policy-03
+    from_node: V3RoutePolicyAction
+    to_node: V3Router06RoutePoolResolved
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: V3VirtualRouter::resolve_route_pool_plan
+    callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    status: source_controlled
+    owner_feature_id: v3.route_policy_condition_evaluation
+    resource_flow:
+      consumes: [v3.route.policy_action]
+      produces: [v3.route.policy_action]
+      side_channel_reads: [v3.route.policy_action]
+      side_channel_writes: []
+  - step_id: v3-route-policy-04
+    from_node: V3Router05RequestClassified
+    to_node: V3Router06RoutePoolResolved
+    caller_symbol: plan_v3_responses_protocol_execution_with_provider_health
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+    callee_symbol: V3VirtualRouter::resolve_route_pool_plan
+    callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    status: source_controlled
+    owner_feature_id: v3.route_policy_condition_evaluation
+    resource_flow:
+      consumes: [v3.route.policy_action]
+      produces: [v3.route.policy_action]
+      side_channel_reads: [v3.route.policy_action]
+      side_channel_writes: []
+  - step_id: v3-route-policy-05
+    from_node: V3Router05RequestClassified
+    to_node: V3RouteHistoryWindow
+    caller_symbol: V3RoutePolicyRuntimeState::commit_request
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    callee_symbol: V3RouteHistoryWindow::record_turn
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+    status: source_controlled
+    owner_feature_id: v3.route_policy_condition_evaluation
+    resource_flow:
+      consumes: [v3.route.current_turn_facts]
+      produces: [v3.route.policy_observations]
+      side_channel_reads: []
+      side_channel_writes: [v3.route.policy_observations]
+  - step_id: v3-provider-global-probe-relay-error-source
+    from_node: V3HubRespChatProcess03Governed
+    to_node: V3Error01SourceRaised
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    callee_symbol: build_v3_error_01_source_raised_external
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.source]
+      produces: [v3.error.source]
+      side_channel_reads: [v3.error.source]
+      side_channel_writes: [v3.error.source]
+  - step_id: v3-provider-global-probe-04
+    from_node: V3ProviderGlobalSubscriptionFailureObservation
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderHealthStore::record_provider_failure_in_session_with_policy
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health, v3.error.classified]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-05
+    from_node: V3ProviderFailureRuntimeHealth
+    to_node: V3ProviderGlobalSubscriptionFailureObservation
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.classified]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.error.classified]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-06
+    from_node: V3ProviderGlobalSubscriptionFailureObservation
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
-      consumes: [v3.provider.global_subscription_health, v3.error.source]
+      consumes: [v3.error.classified]
       produces: [v3.provider.global_subscription_health]
-      side_channel_reads: [v3.provider.global_subscription_health, v3.error.source]
+      side_channel_reads: [v3.error.classified]
       side_channel_writes: [v3.provider.global_subscription_health]
-  - step_id: v3-provider-global-probe-04
-    from_node: V3ProviderGlobalSubscriptionFailureObservation
-    to_node: V3ProviderGlobalSubscriptionHealthStore
-    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
+  - step_id: v3-provider-global-probe-07
+    from_node: V3ProviderFailureRuntimeHealth
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+    callee_symbol: V3ProviderHealthStore::record_provider_key_success
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
-      consumes: [v3.provider.global_subscription_health, v3.error.source]
+      consumes: [v3.provider.global_subscription_health]
       produces: [v3.provider.global_subscription_health]
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-08
+    from_node: V3ProviderFailureRuntimeHealth
+    to_node: V3ProviderGlobalSubscriptionFailureObservation
+    caller_symbol: record_v3_direct_provider_failure_record
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.classified]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.error.classified]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-direct-error-classification
+    from_node: V3Error01SourceRaised
+    to_node: V3Error02Classified
+    caller_symbol: record_v3_direct_provider_failure_record
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+    callee_symbol: build_v3_error_02_classified_from_v3_error_01
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.source]
+      produces: [v3.error.classified]
+      side_channel_reads: [v3.error.source]
+      side_channel_writes: [v3.error.classified]
+  - step_id: v3-provider-global-probe-09
+    from_node: V3ProviderGlobalSubscriptionFailureObservation
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.classified]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.error.classified]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-post-commit-error-classification
+    from_node: V3Error01SourceRaised
+    to_node: V3Error02Classified
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: build_v3_error_02_classified_from_v3_error_01
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.source]
+      produces: [v3.error.classified]
+    side_channel_reads: [v3.error.source]
+    side_channel_writes: [v3.error.classified]
 
-- chain_id: v3.build.independent_domain
-  owner_feature_id: v3.build.independent_domain
-  status: active
-  summary: Root orchestration dispatches into one V3-local command surface; V3-local
-    contracts and admission manifests authorize build/test/package writes only under
-    declared V3 artifact roots before explicit global binary publication.
-  manifest: docs/architecture/manifests/v3.build.independent_domain.mainline.yml
-  entry_contract:
-    node: V3BuildDomain00RootDispatcher
-    owner_doc: docs/architecture/wiki/v3-independent-build-isolation.md
+- chain_id: v3.responses_chat_sse_typed_tree
+  owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+  summary: The selected Responses or Chat protocol codec parses SSE data into transport, protocol metadata, and semantic typed nodes; only typed notification and business-content rewrite hooks may observe or mutate the semantic branch.
   edges:
-  - step_id: v3-build-domain-01
-    from_node: V3BuildDomain00RootDispatcher
-    to_node: V3BuildDomain01LocalContractsLoaded
-    caller_symbol: verify:v3
-    caller_file: package.json
-    callee_symbol: verify:ci
-    callee_file: v3/package.json
-    status: anchored
-    owner_feature_id: v3.build.independent_domain
-    semantic_contract:
-    - Root npm, CI, and release surfaces may dispatch through npm --prefix v3 only.
-    - Root orchestration cannot enumerate V3 crates, gates, version inputs, or artifact paths.
-    - Retired root start/dev command aliases stay absent; managed runtime control uses the installed routecodex restart lifecycle only.
-    - The admission compiler executes the root thin-dispatch contract and rejects any V3 change set that modifies root src/build-info.ts.
+  - step_id: v3-responses-json-document-01
+    from_node: ProviderRespInbound01Raw
+    to_node: HubRespInbound02Parsed
+    caller_symbol: run_json_response_hooks
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+    callee_symbol: V3ResponsesJsonDocument::from_json
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
-      consumes: []
-      produces:
-      - v3.build.node_dependency_lock
-      - v3.build.cargo_dependency_lock
-      - v3.build.rust_toolchain_contract
-      - v3.build.version_truth
+      consumes: [v3.sse.responses.json_document]
+      produces: [v3.sse.responses.semantic_tree]
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-build-domain-01-global-install-wrapper
-    from_node: V3BuildDomain00RootDispatcher
-    to_node: V3BuildDomain04ReleaseSurfaceReady
-    caller_symbol: run_default_v3_install
-    caller_file: scripts/install-global.sh
-    callee_symbol: install
-    callee_file: v3/package.json
-    status: anchored
-    owner_feature_id: v3.build.independent_domain
-    semantic_contract:
-    - The root global-install wrapper is a thin dispatcher to the V3 package install command.
-    - Binary publication and aliases remain owned by v3/scripts/install-cli.mjs.
+  - step_id: v3-responses-sse-tree-01
+    from_node: ProviderRespInbound01Raw
+    to_node: HubRespInbound02Parsed
+    caller_symbol: observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+    callee_symbol: V3ResponsesSseProtocolMetadata::from_event
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
-      consumes: []
-      produces:
-      - v3.global_binary_install
+      consumes: [v3.sse.transport_decoded_frame]
+      produces: [v3.sse.responses.protocol_metadata, v3.sse.responses.semantic_tree]
+      side_channel_reads: []
+      side_channel_writes: [v3.sse.responses.protocol_metadata]
+  - step_id: v3-responses-sse-tree-02
+    from_node: HubRespInbound02Parsed
+    to_node: HubRespChatProcess03Governed
+    caller_symbol: V3ResponsesSseReducerState::apply_event
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+    callee_symbol: classify_v3_responses_sse_output_item
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.responses.protocol_metadata]
+      produces: [v3.sse.responses.semantic_tree]
+      side_channel_reads: [v3.sse.responses.protocol_metadata]
+      side_channel_writes: []
+
+  - step_id: v3-responses-sse-tree-03
+    from_node: HubRespChatProcess03Governed
+    to_node: HubRespOutbound04ClientSemantic
+    caller_symbol: rewrite_v3_responses_sse_content
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+    callee_symbol: rewrite_v3_responses_sse_content
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+    status: design
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.responses.semantic_tree]
+      produces: [v3.sse.responses.hook_effect]
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-build-domain-01-release-install-wrapper
-    from_node: V3BuildDomain00RootDispatcher
-    to_node: V3BuildDomain04ReleaseSurfaceReady
-    caller_symbol: run_default_v3_release_install
-    caller_file: scripts/install-release.sh
-    callee_symbol: install
-    callee_file: v3/package.json
-    status: anchored
-    owner_feature_id: v3.build.independent_domain
-    semantic_contract:
-    - The root release-install wrapper is a thin dispatcher to the V3 package install command.
-    - Root shim and executable helpers do not publish the V3 command aliases.
+  - step_id: v3-responses-relay-typed-hook-catalog-01
+    from_node: HubRespInbound02Parsed
+    to_node: HubRespOutbound04ClientSemantic
+    caller_symbol: V3HubRelayResponseHookRegistry::typed_sse_catalog
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    callee_symbol: V3RelaySseHookCatalog::rewrite_responses
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
-      consumes: []
-      produces:
-      - v3.global_binary_install
+      consumes: [v3.sse.relay.typed_hook_catalog, v3.sse.responses.semantic_tree]
+      produces: [v3.sse.responses.hook_effect]
+      side_channel_reads: [v3.sse.relay.typed_hook_catalog]
+      side_channel_writes: []
+
+- chain_id: v3.openai_chat_sse_typed_tree
+  owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+  summary: The OpenAI Chat codec keeps chunk transport, protocol metadata, choices, deltas, finish reasons, and tool-call fragments distinct; rewrite hooks can change only business content.
+  edges:
+  - step_id: v3-chat-sse-tree-01
+    from_node: ProviderRespInbound01Raw
+    to_node: HubRespInbound02Parsed
+    caller_symbol: enqueue_sse_client_chunks
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    callee_symbol: classify_v3_openai_chat_sse_chunk
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.transport_decoded_frame]
+      produces: [v3.sse.chat.protocol_metadata, v3.sse.chat.semantic_tree]
+      side_channel_reads: []
+      side_channel_writes: [v3.sse.chat.protocol_metadata]
+  - step_id: v3-chat-sse-tree-02
+    from_node: HubRespChatProcess03Governed
+    to_node: HubRespOutbound04ClientSemantic
+    caller_symbol: rewrite_v3_openai_chat_sse_content
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
+    callee_symbol: rewrite_v3_openai_chat_sse_content
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
+    status: design
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.chat.semantic_tree]
+      produces: [v3.sse.chat.hook_effect]
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-build-domain-02
-    from_node: V3BuildDomain01LocalContractsLoaded
-    to_node: V3BuildDomain02AdmissionVerified
-    caller_symbol: verify:ci
-    caller_file: v3/package.json
-    callee_symbol: collectAdmissionFailures
-    callee_file: v3/scripts/architecture/verify-admission.mjs
-    status: anchored
-    owner_feature_id: v3.build.independent_domain
-    semantic_contract:
-    - Ordinary V3 build and verify consume tracked V3-local admission contracts only.
-    - Missing, stale, tampered, or externally resolved admission input fails explicitly.
+  - step_id: v3-chat-json-document-01
+    from_node: ProviderRespInbound01Raw
+    to_node: HubRespInbound02Parsed
+    caller_symbol: run_json_response_hooks
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+    callee_symbol: V3OpenAiChatJsonDocument::from_json
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
-      consumes:
-      - v3.build.node_dependency_lock
-      - v3.build.cargo_dependency_lock
-      - v3.build.rust_toolchain_contract
-      - v3.build.architecture_admission
-      - v3.build.version_truth
+      consumes: [v3.sse.chat.json_document]
+      produces: [v3.sse.chat.semantic_tree]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-relay-typed-hook-catalog-01
+    from_node: HubRespInbound02Parsed
+    to_node: HubRespOutbound04ClientSemantic
+    caller_symbol: V3HubRelayResponseHookRegistry::typed_sse_catalog
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    callee_symbol: V3RelaySseHookCatalog::rewrite_chat
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.relay.typed_hook_catalog, v3.sse.chat.semantic_tree]
+      produces: [v3.sse.chat.hook_effect]
+      side_channel_reads: [v3.sse.relay.typed_hook_catalog]
+      side_channel_writes: []
+
+- chain_id: v3.sse_error_and_direct_consumer_pre_wiring
+  owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+  summary: Direct SSE routes decoder failures through the exported transport-error adapter and response compatibility through the independent object consumer; Relay Responses/Chat materialization and projection now consume the same independent transport boundary and Relay-owned typed hook catalog.
+  edges:
+  - step_id: v3-sse-error-export-01
+    from_node: V3ProviderResp14Raw
+    to_node: ErrorErr01SourceRaised
+    caller_symbol: build_v3_sse_transport_error_source
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    callee_symbol: SseTransportErrorExport::from
+    callee_file: v3/crates/routecodex-v3-sse/src/lib.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.transport_error_export]
+      produces: [v3.error.source]
+      side_channel_reads: []
+      side_channel_writes: [v3.error.source]
+  - step_id: v3-direct-content-consumer-01
+    from_node: V3ProviderResp14Raw
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: V3DirectSseContentConsumer::consume
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    callee_symbol: process_sse_object_frame
+    callee_file: v3/crates/routecodex-v3-sse/src/lib.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.object_pipeline, v3.direct_response.compat_plan]
+      produces: [v3.sse.responses.hook_effect]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-direct-typed-projection-01
+    from_node: V3DirectResp14ProviderProjectionPrepared
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: V3DirectSseContentConsumer::consume
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    callee_symbol: project_direct_typed_protocol_data
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.object_pipeline]
+      produces: [v3.sse.responses.semantic_tree, v3.sse.chat.semantic_tree]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-direct-typed-hook-catalog-01
+    from_node: V3ProviderResp14Raw
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: V3DirectSseContentConsumer::consume
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    callee_symbol: V3DirectSseTypedHookCatalog::with_responses
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.direct.typed_hook_catalog, v3.sse.responses.semantic_tree]
+      produces: [v3.sse.responses.hook_effect]
+      side_channel_reads: [v3.sse.direct.typed_hook_catalog]
+      side_channel_writes: []
+
+- chain_id: v3.runtime_restart_handoff_skeleton
+  owner_feature_id: v3.runtime_restart_handoff_skeleton
+  summary: Stable server response-body ownership drains or hands off in-flight requests across canonical Runtime Child replacement without changing the frozen execution plan or leaking provider frames.
+  manifest: docs/architecture/manifests/v3.runtime_restart_handoff_skeleton.yml
+  entry_contract:
+    node: V3Front01StableRequestOwner
+    owner_doc: docs/architecture/wiki/v3-runtime-restart-handoff-skeleton.md
+  edges:
+  - step_id: v3-runtime-restart-handoff-01
+    from_node: V3Front01StableRequestOwner
+    to_node: V3Front02RequestLeaseBound
+    caller_symbol: V3FrontRequestLease
+    caller_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    callee_symbol: V3FrontRequestLeaseKey
+    callee_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    status: design
+    owner_feature_id: v3.runtime_restart_handoff_skeleton
+    resource_flow:
+      consumes: [v3.front.request_lease]
+      produces: [v3.front.runtime_handoff_checkpoint]
+      side_channel_reads: []
+      side_channel_writes: [v3.front.request_lease]
+  - step_id: v3-runtime-restart-handoff-02
+    from_node: V3Front02RequestLeaseBound
+    to_node: V3Front08ClientTerminalOrError
+    caller_symbol: V3ServerAggregateHandle::prepare_for_exec
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3ServerRequestActivityGate::wait_for_quiescence
+    callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
+    status: source_controlled_runtime_pending_live_replay
+    owner_feature_id: v3.runtime_restart_handoff_skeleton
+    resource_flow:
+      consumes: [v3.front.request_activity_gate, v3.front.deadline_budget]
+      produces: [v3.error.chain]
+      side_channel_reads: [v3.front.request_activity_gate]
+      side_channel_writes: []
+
+- chain_id: v3.direct_sse_accept_skeleton
+  owner_feature_id: v3.direct_sse_accept_skeleton
+  summary: Responses SSE establishes a shared Front client transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only the runtime projected client frame crosses the channel.
+  manifest: docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
+  implementation_symbols: [V3FrontSseAcceptSkeleton, v3_request_wants_sse]
+  supporting_callers: [pending_endpoint_after_responses_admission, execute_responses_direct_server_outcome]
+  entry_contract:
+    node: V3DirectSseAccept01ClientChannel
+    owner_doc: docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
+  edges:
+  - step_id: v3-direct-sse-accept-skeleton-01
+    from_node: V3DirectSseAccept01ClientChannel
+    to_node: V3DirectSseAccept02RuntimeWorker
+    caller_symbol: pending_endpoint_after_responses_admission
+    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    callee_symbol: pending_endpoint_after_responses_admission_inner
+    callee_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    status: anchored
+    edge_kind: client_accept_to_background_runtime
+    owner_feature_id: v3.direct_sse_accept_skeleton
+    resource_flow:
+      consumes: [v3.sse.direct.accept_skeleton, v3.config.http_sse_keepalive_interval]
       produces: []
+      side_channel_reads: [v3.config.http_sse_keepalive_interval]
+      side_channel_writes: []
+  - step_id: v3-direct-sse-accept-skeleton-02
+    from_node: V3DirectSseAccept02RuntimeWorker
+    to_node: V3DirectSseAccept03ProjectedClientFrame
+    caller_symbol: pending_endpoint_after_responses_admission_inner
+    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    callee_symbol: v3_io_sse_body
+    callee_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
+    status: anchored
+    edge_kind: projected_client_frame_only
+    owner_feature_id: v3.direct_sse_accept_skeleton
+    resource_flow:
+      consumes: [v3.response.client_payload, v3.error.chain]
+      produces: []
+      side_channel_reads: [v3.error.chain]
+      side_channel_writes: []
+  - step_id: v3-direct-typed-hook-catalog-02
+    from_node: V3DirectResp14ProviderProjectionPrepared
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: execute_v3_responses_direct_runtime_kernel
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: V3HookRegistry::direct_sse_typed_hooks
+    callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.direct.typed_hook_catalog]
+      produces: [v3.sse.responses.hook_effect, v3.sse.chat.hook_effect]
+      side_channel_reads: [v3.sse.direct.typed_hook_catalog]
+      side_channel_writes: []
+  supporting_edges:
+  - step_id: v3-direct-sse-accept-skeleton-intent-01
+    from_node: V3DirectSseAccept01ClientChannel
+    to_node: V3DirectSseAccept01ClientChannel
+    caller_symbol: pending_endpoint_after_responses_admission
+    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    callee_symbol: v3_request_wants_sse
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    edge_kind: supporting_entry_intent_predicate
+    owner_feature_id: v3.direct_sse_accept_skeleton
+    resource_flow:
+      consumes: [v3.sse.direct.accept_skeleton]
+      produces: [v3.sse.direct.accept_skeleton]
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-build-domain-03
-    from_node: V3BuildDomain02AdmissionVerified
-    to_node: V3BuildDomain03LocalArtifactsProduced
-    caller_symbol: verify:ci
-    caller_file: v3/package.json
-    callee_symbol: run
-    callee_file: v3/scripts/build.mjs
+  - step_id: v3-direct-sse-accept-skeleton-intent-02
+    from_node: V3DirectSseAccept02RuntimeWorker
+    to_node: V3DirectSseAccept02RuntimeWorker
+    caller_symbol: execute_responses_direct_server_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+    callee_symbol: v3_request_wants_sse
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
     status: anchored
-    owner_feature_id: v3.build.independent_domain
-    semantic_contract:
-    - Compilation, tests, assembly, and package staging write only under V3-owned mutable roots.
-    - External CARGO_TARGET_DIR, temp, dist, artifact, or staging overrides fail instead of escaping V3.
+    edge_kind: supporting_runtime_intent_predicate
+    owner_feature_id: v3.direct_sse_accept_skeleton
     resource_flow:
-      consumes:
-      - v3.build.node_dependency_lock
-      - v3.build.cargo_dependency_lock
-      - v3.build.rust_toolchain_contract
-      - v3.build.architecture_admission
-      - v3.build.version_truth
-      - v3.build.dependency_cache
-      produces:
-      - v3.build.ordinary_cargo_target
-      - v3.build.install_target
-      - v3.build.pack_staging
-      - v3.build.assembled_binary
-      - v3.build.test_artifact_store
-      side_channel_reads: []
-      side_channel_writes: []
-  - step_id: v3-build-domain-04
-    from_node: V3BuildDomain03LocalArtifactsProduced
-    to_node: V3BuildDomain04ReleaseSurfaceReady
-    caller_symbol: install
-    caller_file: v3/package.json
-    callee_symbol: main
-    callee_file: v3/scripts/install-cli.mjs
-    status: anchored
-    owner_feature_id: v3.build.independent_domain
-    semantic_contract:
-    - Packaging writes final packages only under v3/artifacts/pack.
-    - Global installation is an explicit atomic publication of the already-built verified binary.
-    resource_flow:
-      consumes:
-      - v3.build.assembled_binary
-      - v3.build.pack_staging
-      produces:
-      - v3.build.release_artifacts
-      - v3.global_binary_install
+      consumes: [v3.sse.direct.accept_skeleton]
+      produces: [v3.sse.direct.accept_skeleton]
       side_channel_reads: []
       side_channel_writes: []

@@ -153,10 +153,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     }
     let mut direct_stopless_control_prepared = false;
     let mut direct_stopless_request_state: Option<V3StoplessCenterState> = None;
-    let previous_response_id = standardized.protocol_context.previous_response_id.clone();
+    let previous_response_id = standardized
+        .body
+        .get("previous_response_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
     let continuation_disabled = crate::shared::v3_responses_continuation_disabled_for_server(
         manifest,
-        &standardized.protocol_context.server_id,
+        &standardized.server_id,
     );
     let pinned = match (
         &previous_response_id,
@@ -227,7 +231,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     let target = V3TargetInterpreter::default();
     let direct_failure_session_scope = match (&previous_response_id, continuation_scope.as_ref()) {
         (Some(_), Some(scope)) => match V3ProviderFailureSessionScope::new(
-            &standardized.protocol_context.server_id,
+            &standardized.server_id,
             &scope.key.routing_group,
             &scope.key.session_id,
         ) {
@@ -240,7 +244,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                 )
             }
         },
-        _ => standardized.protocol_context.failure_session_scope.clone(),
+        _ => standardized.failure_session_scope.clone(),
     };
     let provider_health =
         provider_health.unwrap_or_else(|| V3ProviderFailureRuntimeHealth::from_manifest(manifest));
@@ -302,7 +306,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
         };
         Some(routecodex_v3_target::V3Target10ConcreteProviderSelected {
             route: routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce {
-                server_id: standardized.protocol_context.server_id.clone(),
+                server_id: standardized.server_id.clone(),
                 routing_group_id,
                 pool_id: "continuation_exact_pin".to_string(),
                 target_index: 0,
@@ -330,17 +334,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     let route_policy_state = crate::route_policy::V3RoutePolicyRuntimeState::process_shared();
     let mut route_policy_scope = match continuation_scope.as_ref() {
         Some(scope) => crate::route_policy::V3RoutePolicyScope::without_conversation(
-            &standardized.protocol_context.server_id,
+            &standardized.server_id,
             &scope.key.routing_group,
             direct_failure_session_scope.session_id(),
             scope.key.port.to_string(),
         )
         .with_conversation(scope.key.conversation_id.clone()),
         None => crate::route_policy::V3RoutePolicyScope::without_conversation(
-            &standardized.protocol_context.server_id,
+            &standardized.server_id,
             direct_failure_session_scope.routing_group(),
             direct_failure_session_scope.session_id(),
-            &standardized.protocol_context.server_id,
+            &standardized.server_id,
         )
         .with_conversation(direct_failure_session_scope.session_id()),
     };
@@ -354,8 +358,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
         let router = V3VirtualRouter::process_shared();
         let classified = match router.classify_request_with_facts(
             manifest,
-            &standardized.protocol_context.server_id,
-            &standardized.protocol_context.endpoint,
+            &standardized.server_id,
+            &standardized.endpoint,
             routing_facts,
         ) {
             Ok(value) => value,
@@ -376,7 +380,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             manifest,
             classified,
             route_policy_scope.clone(),
-            &standardized.protocol_context.request_id,
+            &standardized.request_id,
             route_policy_observation,
         ) {
             Ok(value) => value,
@@ -389,11 +393,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             }
         };
         let request_is_compaction = standardized
-            .protocol_context
             .request_purpose
             .is_compaction()
             || standardized
-                .protocol_context
                 .endpoint
                 .trim_end_matches('/')
                 .ends_with("/responses/compact");
@@ -459,8 +461,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             )
         }
     };
-    let standardized_request_id = standardized.protocol_context.request_id.clone();
-    let standardized_server_id = standardized.protocol_context.server_id.clone();
+    let standardized_request_id = standardized.request_id.clone();
+    let standardized_server_id = standardized.server_id.clone();
     let commit_route_policy = || -> Result<(), String> {
         route_policy_state.commit_request(
             &route_policy_scope,
@@ -477,7 +479,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     let mut pending_provider_action_recovery = None;
     let mut continuation_provider_action_lookup = previous_response_id.is_some();
     let allowed_modes =
-        direct_runtime_allowed_execution_modes(manifest, &standardized.protocol_context.server_id);
+        direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
     loop {
         let selected = match pinned_selected.take() {
             Some(selected) => selected,
@@ -784,7 +786,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             }
             if let Err(source) = clear_v3_responses_direct_stopless_control_on_pre_resp03_terminal(
                 manifest,
-                &standardized.protocol_context.server_id,
+                &standardized.server_id,
                 stopless_control.as_deref(),
                 stopless_scope.as_ref(),
                 direct_stopless_request_state.as_ref(),
@@ -816,11 +818,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
         if !direct_stopless_control_prepared {
             match prepare_v3_responses_direct_stopless_control_request(
                 manifest,
-                &standardized.protocol_context.server_id,
+                &standardized.server_id,
                 stopless_control.as_deref(),
                 stopless_scope.as_ref(),
                 &mut standardized.body,
-                &standardized.protocol_context.request_id,
+                &standardized.request_id,
                 now_epoch_ms,
                 &mut trace,
             ) {
@@ -928,11 +930,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                 return error_output(source, trace, &hook_registry);
             }
         };
-        let context = &standardized.protocol_context;
         let handoff_scope = match (
-            context.pipeline_id.clone(),
-            context.port,
-            context
+            standardized.pipeline_id.clone(),
+            standardized.port,
+            standardized
                 .failure_session_scope
                 .transport_handoff_scope()
                 .map(|(_, _, generation)| generation),
@@ -940,13 +941,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             (Some(pipeline_id), Some(port), Some(runtime_generation)) => {
                 routecodex_v3_provider_responses::V3ProviderTransportHandoffScope {
                     pipeline_id,
-                    server_id: context.server_id.clone(),
+                    server_id: standardized.server_id.clone(),
                     port,
                     session_scope: format!(
                         "{}:{}:{}",
-                        context.failure_session_scope.server_id(),
-                        context.failure_session_scope.routing_group(),
-                        context.failure_session_scope.session_id()
+                        standardized.failure_session_scope.server_id(),
+                        standardized.failure_session_scope.routing_group(),
+                        standardized.failure_session_scope.session_id()
                     ),
                     runtime_generation,
                 }
@@ -995,7 +996,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             // （reselect 切 provider + health 记录 + 3 次拉黑 15 分钟），避免客户端
             // 无限重试命中同一挂起 provider；错误只反映 provider 行为。
             Err(V3ProviderError::Transport {
-                request_id: standardized.protocol_context.request_id.clone(),
+                request_id: standardized.request_id.clone(),
                 provider_id: policy.target.candidate.provider_id.clone(),
                 reason: V3_DIRECT_TRANSPORT_HANG_REASON.to_string(),
             })
@@ -1352,7 +1353,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
         if let V3ProviderAttemptBody::Json(body) = &mut response_projection.attempt_payload.body {
             if crate::shared::v3_strip_client_response_id_enabled_for_server(
                 manifest,
-                &standardized.protocol_context.server_id,
+                &standardized.server_id,
             ) {
                 crate::shared::strip_v3_response_id_from_json_body(body);
             }
@@ -1365,17 +1366,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             );
             if v3_responses_direct_stopless_center_enabled_for_server(
                 manifest,
-                &standardized.protocol_context.server_id,
+                &standardized.server_id,
             ) {
                 match apply_v3_responses_direct_stopless_json_response_control(
                     V3ResponsesDirectStoplessJsonResponseControlInput {
                         manifest,
-                        server_id: &standardized.protocol_context.server_id,
+                        server_id: &standardized.server_id,
                         stopless_control: stopless_control.as_deref(),
                         stopless_scope: stopless_scope.as_ref(),
                         request_stopless_state: direct_stopless_request_state.as_ref(),
                         request_web_search_state: direct_web_search_request_state.as_ref(),
-                        transition_request_id: &standardized.protocol_context.request_id,
+                        transition_request_id: &standardized.request_id,
                         transition_updated_at: now_epoch_ms,
                         payload: body,
                     },
@@ -1422,13 +1423,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                                 );
                             match crate::hub_v1::execute_local_web_search_hop(
                                 manifest,
-                                &standardized.protocol_context.server_id,
+                                &standardized.server_id,
                                 &direct_failure_session_scope,
                                 &provider_health,
                                 backend_binding.as_deref(),
                                 &state,
                                 transport,
-                                &standardized.protocol_context.request_id,
+                                &standardized.request_id,
                                 true,
                             )
                             .await
@@ -1516,7 +1517,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                             runtime_timing.clone(),
                             crate::shared::v3_strip_client_response_id_enabled_for_server(
                                 manifest,
-                                &standardized.protocol_context.server_id,
+                                &standardized.server_id,
                             ),
                             retain_response_cipher,
                             response_projection.compat_plan.provider_protocol,
@@ -1536,41 +1537,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                                 .copied()
                                 .unwrap_or(true),
                             Some(direct_failure_session_scope.session_id().to_owned()),
-                            Some(standardized.protocol_context.request_id.clone()),
+                            Some(standardized.request_id.clone()),
                             Some(policy.target.candidate.model_id.clone()),
                             true,
                         );
-                    let committed = match commit_direct_sse_stream(projected).await {
-                        Ok(stream) => stream,
-                        Err(source) => {
-                            if !matches!(
-                                source.source_kind,
-                                routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
-                            ) {
-                                return error_output(source, trace, &hook_registry);
-                            }
-                            if let Err(error) = runtime_timing.finish_external() {
-                                return error_output(
-                                    runtime_source("V3RuntimeTimingExternal", error),
-                                    trace,
-                                    &hook_registry,
-                                );
-                            }
-                            drop(provider_action_permit.take());
-                            let provider_id = source
-                                .external_error
-                                .as_ref()
-                                .and_then(|error| error.provider_id.clone());
-                            return committed_sse_provider_failure_output(
-                                source,
-                                provider_id,
-                                trace,
-                                &hook_registry,
-                                None,
-                            );
-                        }
-                    };
-                    if let (
+                    let client_stream = commit_direct_sse_stream(projected);
+                    let client_stream = if let (
                         false,
                         V3RemoteContinuationObservation::Streaming { state },
                         Some(scope),
@@ -1579,23 +1551,21 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                         &response_projection.remote_continuation,
                         continuation_scope.as_ref(),
                     ) {
-                        let observation = V3RemoteContinuationObservation::Streaming {
-                            state: state.clone(),
-                        };
-                        if let Err(source) = persist_v3_direct_continuation_lifecycle(
-                            continuation_state.as_deref(),
-                            scope,
-                            &observation,
-                            previous_response_id.as_deref(),
-                            &selected_pin,
-                            &selected_capability_revision,
+                        wrap_v3_direct_sse_continuation_lifecycle(
+                            client_stream,
+                            state.clone(),
+                            continuation_state.clone(),
+                            Some(scope.clone()),
+                            previous_response_id.clone(),
+                            selected_pin.clone(),
+                            selected_capability_revision.clone(),
                             now_epoch_ms,
-                        ) {
-                            return error_output(source, trace, &hook_registry);
-                        }
-                    }
+                        )
+                    } else {
+                        client_stream
+                    };
                     drop(provider_action_permit.take());
-                    client_sse = Some(committed);
+                    client_sse = Some(client_stream);
                     V3ProviderAttemptBody::Bytes(Vec::new())
                 }
                 other => other,
@@ -1605,10 +1575,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             &mut response_projection.attempt_payload.body,
             V3ProviderAttemptBody::Bytes(Vec::new()),
         );
-        let committed_client_sse = client_sse.is_some();
+        let committed_client_sse = false;
         let client_body = match (client_sse, attempt_body) {
             (Some(stream), V3ProviderAttemptBody::Bytes(bytes)) if bytes.is_empty() => {
-                V3ClientBody::CommittedSse(stream)
+                V3ClientBody::Sse(stream)
             }
             (None, V3ProviderAttemptBody::Json(body)) => V3ClientBody::Json(body),
             (None, V3ProviderAttemptBody::Bytes(body)) => V3ClientBody::Bytes(body),

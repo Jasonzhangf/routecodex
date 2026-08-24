@@ -232,13 +232,13 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
     }
 
     fn server_id(standardized: &Self::Standardized) -> &str {
-        &standardized.protocol_context.server_id
+        &standardized.server_id
     }
     fn endpoint(standardized: &Self::Standardized) -> &str {
-        &standardized.protocol_context.endpoint
+        &standardized.endpoint
     }
     fn request_id(standardized: &Self::Standardized) -> &str {
-        &standardized.protocol_context.request_id
+        &standardized.request_id
     }
     fn body(standardized: &Self::Standardized) -> &serde_json::Value {
         &standardized.body
@@ -259,10 +259,10 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         crate::nodes::build_v3_router_request_facts_for_entry_and_endpoint(
             &standardized.body,
             "responses",
-            &standardized.protocol_context.endpoint,
+            &standardized.endpoint,
             crate::configured_v3_longcontext_threshold_tokens(
                 manifest,
-                &standardized.protocol_context.server_id,
+                &standardized.server_id,
             ),
             Some(manifest),
         )
@@ -297,23 +297,22 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
     fn provider_transport_handoff_scope(
         standardized: &Self::Standardized,
     ) -> Result<routecodex_v3_provider_responses::V3ProviderTransportHandoffScope, String> {
-        let context = &standardized.protocol_context;
         Ok(
             routecodex_v3_provider_responses::V3ProviderTransportHandoffScope {
-                pipeline_id: context.pipeline_id.clone().ok_or_else(|| {
+                pipeline_id: standardized.pipeline_id.clone().ok_or_else(|| {
                     "provider transport handoff pipeline_id is missing".to_string()
                 })?,
-                server_id: context.server_id.clone(),
-                port: context
+                server_id: standardized.server_id.clone(),
+                port: standardized
                     .port
                     .ok_or_else(|| "provider transport handoff port is missing".to_string())?,
                 session_scope: format!(
                     "{}:{}:{}",
-                    context.failure_session_scope.server_id(),
-                    context.failure_session_scope.routing_group(),
-                    context.failure_session_scope.session_id()
+                    standardized.failure_session_scope.server_id(),
+                    standardized.failure_session_scope.routing_group(),
+                    standardized.failure_session_scope.session_id()
                 ),
-                runtime_generation: context
+                runtime_generation: standardized
                     .failure_session_scope
                     .transport_handoff_scope()
                     .map(|(_, _, generation)| generation)
@@ -343,6 +342,15 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         let enabled = crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id);
         if standardized.tool_thinking_turn_context.enabled_flag() {
             return Ok(true);
+        }
+        if crate::hub_v1::is_v3_tool_thinking_output_continuation(
+            &standardized.body,
+            standardized
+                .body
+                .get("previous_response_id")
+                .and_then(Value::as_str),
+        ) {
+            return Ok(false);
         }
         let current_payload_start = crate::hub_v1::current_v3_tool_thinking_payload_start(
             &standardized.body,
@@ -395,7 +403,7 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         _control: &Self::Control,
         standardized: &Self::Standardized,
     ) -> routecodex_v3_error::V3ProviderFailureSessionScope {
-        standardized.protocol_context.failure_session_scope.clone()
+        standardized.failure_session_scope.clone()
     }
 }
 
@@ -418,13 +426,13 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
     }
 
     fn server_id(standardized: &Self::Standardized) -> &str {
-        &standardized.protocol_context.server_id
+        &standardized.server_id
     }
     fn endpoint(standardized: &Self::Standardized) -> &str {
-        &standardized.protocol_context.endpoint
+        &standardized.endpoint
     }
     fn request_id(standardized: &Self::Standardized) -> &str {
-        &standardized.protocol_context.request_id
+        &standardized.request_id
     }
     fn body(standardized: &Self::Standardized) -> &serde_json::Value {
         &standardized.body
@@ -474,23 +482,22 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
     fn provider_transport_handoff_scope(
         standardized: &Self::Standardized,
     ) -> Result<routecodex_v3_provider_responses::V3ProviderTransportHandoffScope, String> {
-        let context = &standardized.protocol_context;
         Ok(
             routecodex_v3_provider_responses::V3ProviderTransportHandoffScope {
-                pipeline_id: context.pipeline_id.clone().ok_or_else(|| {
+                pipeline_id: standardized.pipeline_id.clone().ok_or_else(|| {
                     "provider transport handoff pipeline_id is missing".to_string()
                 })?,
-                server_id: context.server_id.clone(),
-                port: context
+                server_id: standardized.server_id.clone(),
+                port: standardized
                     .port
                     .ok_or_else(|| "provider transport handoff port is missing".to_string())?,
                 session_scope: format!(
                     "{}:{}:{}",
-                    context.failure_session_scope.server_id(),
-                    context.failure_session_scope.routing_group(),
-                    context.failure_session_scope.session_id()
+                    standardized.failure_session_scope.server_id(),
+                    standardized.failure_session_scope.routing_group(),
+                    standardized.failure_session_scope.session_id()
                 ),
-                runtime_generation: context
+                runtime_generation: standardized
                     .failure_session_scope
                     .transport_handoff_scope()
                     .map(|(_, _, generation)| generation)
@@ -572,6 +579,6 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
         _control: &Self::Control,
         standardized: &Self::Standardized,
     ) -> routecodex_v3_error::V3ProviderFailureSessionScope {
-        standardized.protocol_context.failure_session_scope.clone()
+        standardized.failure_session_scope.clone()
     }
 }

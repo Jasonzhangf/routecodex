@@ -35,7 +35,7 @@ edges:
     split_binding_id: null
     resource_flow:
       consumes:
-        - v3.request.protocol_context
+        - v3.request.protocol_fields
         - v3.runtime.responses_observability
       produces:
         - v3.debug.artifact
@@ -431,3 +431,4 @@ verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map
     - npm run verify:architecture-mainline-manifest-sync
+    - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_lines --lib -- --nocapture

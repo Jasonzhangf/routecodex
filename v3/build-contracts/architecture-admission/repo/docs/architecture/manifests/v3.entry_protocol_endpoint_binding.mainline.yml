@@ -43,7 +43,7 @@ edges:
     status: anchored
 entry_protocol_bindings:
   - entry_protocol: responses
-    endpoint_patterns: [/v1/responses]
+    endpoint_patterns: [/v1/responses, /v1/responses/compact]
     execution_mode: direct
     implementation_status: implemented
     owner_feature_id: v3.responses_direct_mvp_architecture

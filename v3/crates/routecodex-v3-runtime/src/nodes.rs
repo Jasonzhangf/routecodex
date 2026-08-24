@@ -146,7 +146,15 @@ pub fn build_v3_server_03_http_request_raw_with_purpose_and_scope(
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Req04StandardizedResponses {
     pub body: Value,
-    pub protocol_context: V3ProtocolContext,
+    pub server_id: String,
+    pub port: Option<u16>,
+    pub pipeline_id: Option<String>,
+    pub failure_session_scope: V3ProviderFailureSessionScope,
+    pub request_id: String,
+    pub execution_id: String,
+    pub endpoint: String,
+    pub method: String,
+    pub request_purpose: V3RequestPurpose,
     pub tool_thinking_turn_context:
         crate::hub_v1::V3ToolThinkingTurnContext,
 }
@@ -157,7 +165,15 @@ pub struct V3Req04StandardizedResponses {
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Req04StandardizedChat {
     pub body: Value,
-    pub protocol_context: V3ProtocolContext,
+    pub server_id: String,
+    pub port: Option<u16>,
+    pub pipeline_id: Option<String>,
+    pub failure_session_scope: V3ProviderFailureSessionScope,
+    pub request_id: String,
+    pub execution_id: String,
+    pub endpoint: String,
+    pub method: String,
+    pub request_purpose: V3RequestPurpose,
     pub tool_thinking_turn_context:
         crate::hub_v1::V3ToolThinkingTurnContext,
 }
@@ -176,23 +192,9 @@ pub fn build_v3_chat_direct_11_policy_from_v3_target_10(
 ) -> V3ChatDirect11Policy {
     V3ChatDirect11Policy {
         target: selected,
-        request_id: standardized.protocol_context.request_id.clone(),
+        request_id: standardized.request_id.clone(),
         request_body: standardized.body.clone(),
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ProtocolContext {
-    pub server_id: String,
-    pub port: Option<u16>,
-    pub pipeline_id: Option<String>,
-    pub failure_session_scope: V3ProviderFailureSessionScope,
-    pub request_id: String,
-    pub execution_id: String,
-    pub endpoint: String,
-    pub method: String,
-    pub request_purpose: V3RequestPurpose,
-    pub previous_response_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -200,7 +202,6 @@ pub struct V3ResponsesDirect11Policy {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     pub request_id: String,
     pub request_body: Value,
-    pub previous_response_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,10 +220,6 @@ pub struct V3Execution11ProtocolDecision {
 
 pub type V3ClientSseStream =
     Pin<Box<dyn Stream<Item = Result<Vec<u8>, V3Error01SourceRaised>> + Send>>;
-
-/// Provider-attempt stream.  This is deliberately a distinct carrier from
-/// `V3ClientSseStream`: provider bytes/errors cannot be passed to a
-/// client-facing owner without an explicit runtime projection step.
 pub(crate) struct V3ProviderAttemptSseStream {
     inner: V3ClientSseStream,
 }
@@ -401,7 +398,7 @@ impl fmt::Debug for V3ClientBody {
                 .debug_struct("Bytes")
                 .field("byte_len", &bytes.len())
                 .finish(),
-            Self::Sse(_) => formatter.write_str("Sse(<live-event-stream>)"),
+            Self::Sse(_) => formatter.write_str("Sse(<runtime-client-stream>)"),
             Self::CommittedSse(_) => formatter.write_str("CommittedSse(<front-event-stream>)"),
         }
     }
@@ -423,7 +420,7 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
         ));
     }
     let mut body = raw.body;
-    let previous_response_id = match body.get("previous_response_id") {
+    match body.get("previous_response_id") {
         None | Some(Value::Null) => None,
         Some(Value::String(value)) => {
             let value = value.trim();
@@ -436,27 +433,19 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
             return Err("previous_response_id must be null or a non-empty string".to_string())
         }
     };
-    if body.get("previous_response_id").is_some() {
-        body.as_object_mut()
-            .ok_or_else(|| "Responses request payload must be an object".to_string())?
-            .remove("previous_response_id");
-    }
     // 与 chat direct / relay req_inbound 一致：历史轮图片占位符做语义等价归一化
     // （只清理历史轮图片引用，不影响当前轮输入；禁止在不可变区做任何修补）。
     crate::hub_v1::normalize_v3_history_image_placeholders(&mut body);
     Ok(V3Req04StandardizedResponses {
-        protocol_context: V3ProtocolContext {
-            server_id: raw.server_id,
-            port: raw.port,
-            pipeline_id: raw.pipeline_id,
-            failure_session_scope: raw.failure_session_scope,
-            request_id: raw.request_id,
-            execution_id: raw.execution_id,
-            endpoint: raw.path,
-            method: raw.method,
-            request_purpose: raw.request_purpose,
-            previous_response_id,
-        },
+        server_id: raw.server_id,
+        port: raw.port,
+        pipeline_id: raw.pipeline_id,
+        failure_session_scope: raw.failure_session_scope,
+        request_id: raw.request_id,
+        execution_id: raw.execution_id,
+        endpoint: raw.path,
+        method: raw.method,
+        request_purpose: raw.request_purpose,
         body,
         tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext::disabled(),
     })
@@ -476,18 +465,15 @@ pub fn build_v3_chat_req_04_standardized_from_v3_server_03(
     }
     crate::hub_v1::normalize_v3_history_image_placeholders(&mut body);
     Ok(V3Req04StandardizedChat {
-        protocol_context: V3ProtocolContext {
-            server_id: raw.server_id,
-            port: raw.port,
-            pipeline_id: raw.pipeline_id,
-            failure_session_scope: raw.failure_session_scope,
-            request_id: raw.request_id,
-            execution_id: raw.execution_id,
-            endpoint: raw.path,
-            method: raw.method,
-            request_purpose: raw.request_purpose,
-            previous_response_id: None,
-        },
+        server_id: raw.server_id,
+        port: raw.port,
+        pipeline_id: raw.pipeline_id,
+        failure_session_scope: raw.failure_session_scope,
+        request_id: raw.request_id,
+        execution_id: raw.execution_id,
+        endpoint: raw.path,
+        method: raw.method,
+        request_purpose: raw.request_purpose,
         body,
         tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext::disabled(),
     })
@@ -502,14 +488,13 @@ pub fn build_v3_router_request_facts_from_v3_req_04_chat(
         "openai_chat",
         configured_v3_longcontext_threshold_tokens(
             manifest,
-            &standardized.protocol_context.server_id,
+            &standardized.server_id,
         ),
         false,
         standardized
-            .protocol_context
             .request_purpose
             .is_compaction()
-            || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
+            || is_v3_compaction_endpoint(&standardized.endpoint),
         Some(manifest),
     )
 }
@@ -523,21 +508,19 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
         "responses",
         configured_v3_longcontext_threshold_tokens(
             manifest,
-            &standardized.protocol_context.server_id,
+            &standardized.server_id,
         ),
         false,
         standardized
-            .protocol_context
             .request_purpose
             .is_compaction()
-            || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
+            || is_v3_compaction_endpoint(&standardized.endpoint),
         Some(manifest),
     );
     if standardized
-        .protocol_context
         .request_purpose
         .is_compaction()
-        || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint)
+        || is_v3_compaction_endpoint(&standardized.endpoint)
     {
         facts.client_model = None;
     }
@@ -861,9 +844,8 @@ pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
 ) -> V3ResponsesDirect11Policy {
     V3ResponsesDirect11Policy {
         target: selected,
-        request_id: standardized.protocol_context.request_id.clone(),
+        request_id: standardized.request_id.clone(),
         request_body: standardized.body.clone(),
-        previous_response_id: standardized.protocol_context.previous_response_id.clone(),
     }
 }
 
@@ -1002,9 +984,9 @@ mod tests {
         );
         let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
             .expect("Responses inbound must preserve typed scope");
-        assert_eq!(normalized.protocol_context.port, Some(7777));
+        assert_eq!(normalized.port, Some(7777));
         assert_eq!(
-            normalized.protocol_context.pipeline_id.as_deref(),
+            normalized.pipeline_id.as_deref(),
             Some("responses-pipeline-1")
         );
         assert!(normalized.body.get("port").is_none());
@@ -1034,11 +1016,7 @@ mod tests {
         assert!(normalized.body.get("messages").is_none());
         assert!(normalized.body.get("input").is_some());
         assert_eq!(normalized.body["include"][0], "reasoning.encrypted_content");
-        assert!(normalized.body.get("previous_response_id").is_none());
-        assert_eq!(
-            normalized.protocol_context.previous_response_id.as_deref(),
-            Some("resp_typed_1")
-        );
+        assert_eq!(normalized.body["previous_response_id"], "resp_typed_1");
     }
 
     #[test]
@@ -1061,8 +1039,7 @@ mod tests {
         let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
             .expect("null previous_response_id is semantically absent");
 
-        assert!(normalized.protocol_context.previous_response_id.is_none());
-        assert!(normalized.body.get("previous_response_id").is_none());
+        assert!(normalized.body["previous_response_id"].is_null());
         assert_eq!(normalized.body["model"], "gpt-5.5");
     }
 

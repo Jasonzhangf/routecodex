@@ -1,18 +1,38 @@
 version: 1
 status: active
 modules:
+  - module_id: v3-entry-protocol-config
+    owner_feature_id: v3.entry_protocol_registry_contract
+    owned_paths:
+    allowed_dependencies:
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-runtime
+    forbidden_paths:
+      - ~/.rcc
+      - src
+      - sharedmodule
+    required_gates:
+      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config
+      - npm run verify:v3-entry-protocol-endpoint-binding
+      - npm run verify:v3-module-boundaries
+
   - module_id: v3-global-binary-install
     owner_feature_id: v3.global_binary_install
     owned_paths:
-      - v3/scripts/install-cli.mjs
-      - v3/tests/scripts/v3-cli-distribution.spec.mjs
-      - v3/tests/scripts/install-cli-target-cleanup.spec.mjs
+      - scripts/install-v3-cli.mjs
+      - scripts/ensure-cli-command-shim.mjs
+      - scripts/install-global.sh
+      - tests/scripts/v3-cli-distribution.spec.mjs
+      - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
+      - package.json
+      - package-lock.json
+      - src/build-info.ts
     allowed_dependencies:
       - v3/crates/routecodex-v3-cli
       - v3/dist/bin/rccv3
       - ~/.local/bin/rccv3
     forbidden_paths:
-      - src
+      - sharedmodule
       - ~/.rcc/install
     required_gates:
       - npm --prefix v3 run test:distribution
@@ -41,6 +61,7 @@ modules:
     forbidden_paths:
       - v3/crates
       - src
+      - sharedmodule
       - ~/.rcc
     required_gates:
       - npm --prefix v3 run verify:v3-build-test-artifact-budget
@@ -88,9 +109,27 @@ modules:
       - target
       - dist
       - artifacts
+      - sharedmodule/llmswitch-core/rust-core/target
     required_gates:
       - npm --prefix v3 run verify:isolation
       - npm --prefix v3 run test:isolation:red
       - npm --prefix v3 run verify:admission
       - npm --prefix v3 run test:admission:red
       - npm --prefix v3 run verify:ci
+
+  - module_id: v3-admin-webui-static
+    status: active
+    owner_feature_id: v3.server_internal_observability_projection
+    owned_paths:
+      - v3/admin-webui/**
+    referenced_paths:
+      - v3/crates/routecodex-v3-admin/**
+    allowed_dependencies:
+      - routecodex-v3-admin
+      - browser:fetch
+    forbidden_paths:
+      - request.normal_payload
+      - response.client_payload
+      - provider.wire_payload
+    required_gates:
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin --test l4_admin_api

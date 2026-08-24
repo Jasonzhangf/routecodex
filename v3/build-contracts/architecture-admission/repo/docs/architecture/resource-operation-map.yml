@@ -24,6 +24,31 @@ resources:
   may_enter_client_body: false
   required_gates:
   - npm run verify:repo-sanity
+- resource_id: architecture.v3_contract_map_set
+  resource_kind: architecture_contract_map_set
+  lifecycle: architecture.v3_contract_maps
+  identity:
+  - map_path
+  - owner_feature_id
+  - verification_gate
+  owner_feature_id: architecture.repository_filesystem_governance
+  owner_node: ArchitectureContractMapAuthoring01
+  allowed_readers:
+  - ArchitectureContractMapVerification02
+  - ArchitectureReviewSurface
+  - V3ArchitectureFeatureBinding
+  allowed_writers:
+  - ArchitectureContractMapAuthoring01
+  forbidden_writers:
+  - ProviderReqOutbound06WirePayload
+  - HubRespOutbound04ClientSemantic
+  - ServerRespOutbound05ClientFrame
+  - MetaReq04RuntimeControlBound
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  required_gates:
+  - npm run verify:v3-contract-map-owner
+  - npm run verify:v3-resource-map
 - resource_id: architecture.agent_collab_protocol_contract
   resource_kind: governance_contract
   lifecycle: architecture.collaboration_protocol
@@ -121,8 +146,8 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   required_gates: []
-- resource_id: request.protocol_context
-  resource_kind: protocol_context
+- resource_id: request.protocol_fields
+  resource_kind: protocol_fields
   lifecycle: request.mainline
   identity:
   - requestId
@@ -3326,7 +3351,7 @@ mainline_resource_flows:
 - chain_id: request.mainline
   step_id: req-00
   consumes:
-  - request.protocol_context
+  - request.protocol_fields
   produces:
   - request.normal_payload
   - metadata.request_truth
@@ -3336,7 +3361,7 @@ mainline_resource_flows:
 - chain_id: request.mainline
   step_id: req-01
   consumes:
-  - request.protocol_context
+  - request.protocol_fields
   - request.normal_payload
   produces:
   - metadata.request_truth
@@ -3721,7 +3746,7 @@ mainline_resource_flows:
 - chain_id: debug.pipeline_dry_run_loop.mainline
   step_id: ddr-01
   consumes:
-  - request.protocol_context
+  - request.protocol_fields
   produces:
   - dryrun.provider_request_probe
   side_channel_reads: []
@@ -4071,7 +4096,7 @@ mainline_resource_flows:
 - chain_id: metadata.center.mainline
   step_id: mtc-01
   consumes:
-  - request.protocol_context
+  - request.protocol_fields
   produces:
   - metadata.request_truth
   side_channel_reads: []

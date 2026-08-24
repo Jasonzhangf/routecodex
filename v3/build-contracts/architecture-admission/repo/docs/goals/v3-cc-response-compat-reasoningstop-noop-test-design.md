@@ -1,27 +1,27 @@
-# V3 cc Response Compat ReasoningStop No-op Test Design
+# V3 cc Response Compat Semantic Preservation Test Design
 
 ## Scope
 
-- Feature: `v3.cc_response_compat_reasoningstop_noop`
-- Providers: `cc`, `cc-sol`
-- Profile: `responses:cc`
+- Feature: `v3.cc_response_compat_semantic_preservation`
+- Providers: `cc`, `cc-sol`, and the `chat:minimax` response family
+- Profiles: `responses:cc` and `chat:minimax`
 - Owner: `provider-compat-core` response profile, consumed by V2 NAPI thin adapter and V3 `ProviderRespCompat02ProviderCompat`
 - Mainline: `V3ProviderRespInbound01Raw -> ProviderRespCompat02ProviderCompat -> V3HubRespInbound02Normalized -> V3HubRespChatProcess03Governed`
 
 ## Lifecycle
 
-1. Provider response enters with profile `responses:cc`.
-2. Compat detects the known diagnostic template in response text.
-3. Compat removes the diagnostic payload and emits an empty `completed` response with `finish_reason=stop`.
-4. Resp03 stopless governance, when active, projects the existing no-input `routecodex hook run reasoningStop` no-op.
-5. Resp04 stores the governed non-terminal continuation.
+1. Provider response enters with its configured compatibility profile.
+2. `responses:cc` preserves provider response text and status verbatim; it never fabricates an empty completed response.
+3. `chat:minimax` converts paired `<thinking>...</thinking>` text into a Responses reasoning item with `content` only (`reasoning_text`), preserving continuation round-trip; unmatched delimiters remain unchanged.
+4. Resp03/Resp04 consume the resulting response normally; compat does not create a reasoningStop no-op.
 
 ## Positive Tests
 
-- Pure compat: Chinese routing marker normalizes to empty natural stop.
+- Pure compat: Chinese routing marker and diagnostic template remain in the `responses:cc` provider response.
+- Pure compat: paired Minimax thinking tags leave no literal tag in visible output and produce a content-only reasoning item.
 - V2 NAPI adapter: `responses:cc` delegates to the shared pure compat owner.
 - V3 node: ProviderRespCompat02 receives and applies `responses:cc`.
-- V3 module blackbox: active stopless converts normalized empty stop to exactly one reasoningStop no-op.
+- V3 module blackbox: a reasoning item with `content` only encodes to Anthropic `thinking` and can be restored on continuation.
 - Config: both `cc` and `cc-sol` compile to `responses:cc`.
 
 ## Negative Tests
@@ -29,8 +29,8 @@
 - Normal cc response text remains unchanged.
 - A single generic deadlock sentence does not match the full diagnostic template.
 - Passthrough profile never applies cc cleanup.
-- Disabled stopless keeps an ordinary completed response terminal.
-- Provider compat does not directly create tool calls; Resp03 remains the only reasoningStop projection owner.
+- Unmatched opening and closing thinking delimiters are preserved rather than silently deleted.
+- Provider compat does not directly create tool calls or stopless transitions.
 
 ## Project Blackbox
 
@@ -38,8 +38,8 @@
 - Run V3 config check against the live config.
 - Managed restart the aggregate V3 server once.
 - Verify all configured listener health endpoints.
-- Replay the original cc diagnostic response through the 5555 entry when the provider reproduces it; confirm client receives the reasoningStop no-op without diagnostic text.
+- Replay the original cc diagnostic response through the live entry when the provider reproduces it; confirm the client receives the original provider diagnostic semantics, not a fabricated empty success.
 
 ## Known Gap
 
-- The upstream diagnostic response is provider-controlled and may not reproduce on demand. Without a captured provider response replay at the live entry, source and controlled runtime evidence do not prove the current upstream will emit the same template.
+- The upstream diagnostic response is provider-controlled and may not reproduce on demand. A captured provider response fixture is required before claiming live reproduction.

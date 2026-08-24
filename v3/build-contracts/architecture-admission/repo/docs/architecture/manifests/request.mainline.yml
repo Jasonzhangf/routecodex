@@ -23,7 +23,7 @@ edges:
     split_binding_id: null
     resource_flow:
       consumes:
-        - request.protocol_context
+        - request.protocol_fields
       produces:
         - request.normal_payload
         - metadata.request_truth
@@ -39,7 +39,7 @@ edges:
     split_binding_id: null
     resource_flow:
       consumes:
-        - request.protocol_context
+        - request.protocol_fields
         - request.normal_payload
       produces:
         - metadata.request_truth

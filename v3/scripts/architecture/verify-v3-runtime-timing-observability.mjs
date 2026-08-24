@@ -46,6 +46,14 @@ const directCorePath = path.join(
   root,
   "v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs",
 );
+const nodesPath = path.join(
+  root,
+  "v3/crates/routecodex-v3-runtime/src/nodes.rs",
+);
+const serverExecutorsPath = path.join(
+  root,
+  "v3/crates/routecodex-v3-server/src/executors.rs",
+);
 const providerSseJsonCodecPath = path.join(
   root,
   "v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs",
@@ -153,6 +161,8 @@ const runtimeObservability = relayRuntime.slice(
 );
 const kernel = readRequired(kernelPath);
 const directCore = readRequired(directCorePath);
+const nodes = readRequired(nodesPath);
+const serverExecutors = readRequired(serverExecutorsPath);
 const directState = readRequired(directStatePath);
 const directSseOutcome = readRequired(directSseRuntimePath)
   + '\n'
@@ -329,8 +339,8 @@ requireMatch(
 );
 requireMatch(
   directRuntimeHelpers,
-  /commit_direct_sse_stream[\s\S]*seal_after_validated_terminal\(\)/,
-  "Direct SSE Runtime must seal only a fully validated terminal stream before Resp15",
+  /commit_direct_sse_stream[\s\S]*V3ProviderAttemptSseStream[\s\S]*V3ClientSseStream/,
+  "Direct SSE Runtime must hand off a typed provider attempt to the client broker without full-stream draining",
 );
 requireMatch(
   kernel,
@@ -339,13 +349,33 @@ requireMatch(
 );
 requireMatch(
   kernel,
-  /V3ClientBody::CommittedSse\(stream\)/,
-  "Direct SSE Resp15 must expose only the Runtime-committed stream type",
+  /V3ClientBody::Sse\(stream\)/,
+  "Direct SSE Resp15 must expose the incremental client broker stream",
 );
 requireMatch(
   directCore,
-  /V3ClientBody::CommittedSse\(stream\)/,
-  "Direct SSE core must expose only the Runtime-committed stream type",
+  /V3ClientBody::Sse\(stream\)/,
+  "Direct SSE core must expose the incremental client broker stream",
+);
+forbidMatch(
+  nodes,
+  /type\s+V3ProviderAttemptSseStream\s*=\s*V3ClientSseStream/,
+  "Provider-attempt SSE and client SSE must not be type aliases",
+);
+forbidMatch(
+  directRuntimeHelpers,
+  /commit_direct_sse_stream[\s\S]*while\s+let\s+Some\(frame\)\s*=\s*stream\.next\(\)\.await/,
+  "Direct SSE broker must not drain the provider stream before Resp15",
+);
+requireMatch(
+  directSseOutcome,
+  /V3ProviderSseSemanticObject[\s\S]*project_direct_client_data/,
+  "Direct SSE must cross an explicit provider-semantic to client-projection type boundary",
+);
+requireMatch(
+  serverExecutors,
+  /project_v3_responses_relay_stream_error_frame_if_requested/,
+  "Relay SSE error projection must use the Relay-owned projector",
 );
 const directSseFinishRuntimeCalls =
   directSseOutcomeWrapper.match(/\.finish_runtime\(\)/g) ?? [];

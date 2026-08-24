@@ -32,6 +32,40 @@ fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
 }
 
 #[test]
+fn responses_tool_output_continuation_is_not_a_new_tool_thinking_user_turn() {
+    let payload = json!({
+        "previous_response_id": "resp_previous",
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "done"
+        }]
+    });
+
+    assert!(is_v3_tool_thinking_output_continuation(
+        &payload,
+        payload["previous_response_id"].as_str()
+    ));
+}
+
+#[test]
+fn fresh_responses_user_input_is_not_a_tool_output_continuation() {
+    let payload = json!({
+        "previous_response_id": "resp_previous",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "continue"}]
+        }]
+    });
+
+    assert!(!is_v3_tool_thinking_output_continuation(
+        &payload,
+        payload["previous_response_id"].as_str()
+    ));
+}
+
+#[test]
 fn req04_tool_thinking_guidance_uses_one_external_tool_anchor_only() {
     let mut payload = json!({
         "tools": [
