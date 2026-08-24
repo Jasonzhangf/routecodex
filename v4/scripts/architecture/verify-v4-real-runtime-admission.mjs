@@ -9,11 +9,11 @@ import http from 'node:http';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const admissionPath = path.join(root, 'contracts/real-runtime-admission.manifest.json');
-const resourceMapPath = path.join(root, '.appsdk/maps/resource-map.json');
-const functionMapPath = path.join(root, '.appsdk/maps/function-map.json');
-const mainlineMapPath = path.join(root, '.appsdk/maps/mainline-call-map.json');
+const resourceMapPath = path.join(root, 'docs/architecture/maps/resource-map.json');
+const functionMapPath = path.join(root, 'docs/architecture/maps/function-map.json');
+const mainlineMapPath = path.join(root, 'docs/architecture/maps/mainline-call-map.json');
 const moduleMapPath = path.join(root, '.appsdk/maps/module-registry.json');
-const verificationMapPath = path.join(root, '.appsdk/maps/verification-map.json');
+const verificationMapPath = path.join(root, 'docs/architecture/maps/verification-map.json');
 const cargoPath = path.join(root, 'Cargo.toml');
 const runtimePath = path.join(root, 'crates/routecodex-v4-runtime/src/lib.rs');
 const providerPath = path.join(root, 'crates/routecodex-v4-provider/src/lib.rs');

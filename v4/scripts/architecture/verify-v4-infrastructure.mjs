@@ -107,9 +107,9 @@ function validate(input) {
 
 const input = {
   modules: readJson('.appsdk/maps/module-registry.json'),
-  functions: readJson('.appsdk/maps/function-map.json'),
-  resources: readJson('.appsdk/maps/resource-map.json'),
-  verification: readJson('.appsdk/maps/verification-map.json'),
+  functions: readJson('docs/architecture/maps/function-map.json'),
+  resources: readJson('docs/architecture/maps/resource-map.json'),
+  verification: readJson('docs/architecture/maps/verification-map.json'),
   cargo: read('Cargo.toml'),
   cli: fs.existsSync(path.join(root, 'crates/routecodex-v4-cli/src/lib.rs')) ? read('crates/routecodex-v4-cli/src/lib.rs') : '',
   config: read('crates/routecodex-v4-config/src/lib.rs'),

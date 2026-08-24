@@ -307,9 +307,9 @@ function loadState() {
   return {
     moduleRegistry: readJson('.appsdk/maps/module-registry.json'),
     project: readJson('.appsdk/project.json'),
-    verificationMap: readJson('.appsdk/maps/verification-map.json'),
-    functionMap: readJson('.appsdk/maps/function-map.json'),
-    mainline: readJson('.appsdk/maps/mainline-call-map.json'),
+    verificationMap: readJson('docs/architecture/maps/verification-map.json'),
+    functionMap: readJson('docs/architecture/maps/function-map.json'),
+    mainline: readJson('docs/architecture/maps/mainline-call-map.json'),
     consumerRegistry: readJson('contracts/active-link/frozen-consumer-registry.json'),
     source: readText('crates/routecodex-v4-cordis-bridge/src/lib.rs'),
     tests: readText('crates/routecodex-v4-cordis-bridge/tests/l2_bridge.rs'),

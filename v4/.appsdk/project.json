@@ -94,7 +94,8 @@
       "contract_paths": [
         ".appsdk/contracts/**",
         "contracts/records/goal-clarification-record.schema.json",
-        "contracts/goal-clarification-state-machine.json"
+        "contracts/goal-clarification-state-machine.json",
+        "docs/architecture/maps/**"
       ],
       "dependency_modules": [],
       "generated_outputs": [
@@ -104,6 +105,9 @@
       "owned_paths": [
         ".appsdk/**",
         "contracts/**",
+        "docs/**",
+        "scripts/**",
+        ".gitignore",
         "playground/**"
       ],
       "regression": {
@@ -118,7 +122,10 @@
         },
         "input_paths": [
           "contracts/**",
-          ".appsdk/**"
+          ".appsdk/**",
+          "docs/**",
+          "scripts/**",
+          ".gitignore"
         ],
         "minimum_test_count": 1,
         "ordinary_mode_after_freeze": "disabled",

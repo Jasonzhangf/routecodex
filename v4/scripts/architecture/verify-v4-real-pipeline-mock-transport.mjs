@@ -52,9 +52,9 @@ const base = {
   resourceYaml: readText('docs/architecture/v4-resource-operation-map.yml'),
   runtime: readText('crates/routecodex-v4-runtime/src/lib.rs'),
   server: readText('crates/routecodex-v4-server/src/lib.rs'),
-  functionMap: readJson('.appsdk/maps/function-map.json'),
-  resourceMap: readJson('.appsdk/maps/resource-map.json'),
-  mainline: readJson('.appsdk/maps/mainline-call-map.json'),
+  functionMap: readJson('docs/architecture/maps/function-map.json'),
+  resourceMap: readJson('docs/architecture/maps/resource-map.json'),
+  mainline: readJson('docs/architecture/maps/mainline-call-map.json'),
 };
 
 function validate(input) {

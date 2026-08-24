@@ -25,6 +25,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import yaml from 'js-yaml';
 import { v4Root, runCapture } from './_common.mjs';
@@ -47,6 +48,7 @@ const IGNORED_DIRS = new Set([
 
 const FORBIDDEN_PATH_PATTERNS = [
   { pattern: /docs\/architecture\/v3-(?:function-map|resource-operation-map|mainline-call-map|verification-map)\.yml/, label: 'live V3 map read' },
+  { pattern: /\.appsdk\/maps\/(?:function-map|resource-map|mainline-call-map|verification-map)\.json/, label: 'SDK skeleton used as V4 product map' },
   { pattern: /--manifest-path\s+v4\//, label: 'root-relative --manifest-path v4/' },
   { pattern: /--manifest-path["']?\s*,\s*["']v4\//, label: 'root-relative --manifest-path v4/ (array form)' },
   { pattern: /--root\s+v4\b/, label: 'root-relative --root v4' },
@@ -54,6 +56,15 @@ const FORBIDDEN_PATH_PATTERNS = [
   { pattern: /--manifest-path\s+\.\.\//, label: 'manifest path escaping v4' },
   { pattern: /\b(?:cargo|rustc|node|npm)\b[^\n]*\b(?:sharedmodule|v3\/crates|src\/)\//, label: 'V3/root/sharedmodule compile input' },
 ];
+
+const PRODUCT_MAP_REVIEW_CUTOVER = Date.parse('2026-08-23T00:00:00Z');
+const PRODUCT_MAP_REVIEW_ROOT = 'docs/architecture/maps';
+const PRODUCT_MAP_HASH_FIELDS = {
+  function_map_hash: 'function-map.json',
+  resource_map_hash: 'resource-map.json',
+  mainline_call_map_hash: 'mainline-call-map.json',
+  verification_map_hash: 'verification-map.json',
+};
 
 const ALLOWED_OUTPUT_PREFIXES = [
   'target',
@@ -153,6 +164,41 @@ function scanForbiddenReferences(files, base = v4Root) {
   return out;
 }
 
+function sha256File(file) {
+  return `sha256:${createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+}
+
+function checkProductReviewBindings(
+  recordsDir = path.join(v4Root, '.appsdk/records'),
+  productMapDir = path.join(v4Root, PRODUCT_MAP_REVIEW_ROOT),
+) {
+  const out = [];
+  if (!fs.existsSync(recordsDir)) return out;
+  const expected = Object.fromEntries(
+    Object.entries(PRODUCT_MAP_HASH_FIELDS).map(([field, file]) => [
+      field,
+      sha256File(path.join(productMapDir, file)),
+    ]),
+  );
+  for (const file of fs.readdirSync(recordsDir).filter((name) => /^review-record-.*\.json$/.test(name))) {
+    const record = JSON.parse(fs.readFileSync(path.join(recordsDir, file), 'utf8'));
+    const createdAt = Date.parse(String(record.created_at ?? ''));
+    if (!Number.isFinite(createdAt) || createdAt < PRODUCT_MAP_REVIEW_CUTOVER) continue;
+    if (record.reviewer?.adapter !== 'dsh') {
+      out.push(`${file}: post-cutover architecture review must use DSH`);
+    }
+    if (record.v4_product_map_root !== PRODUCT_MAP_REVIEW_ROOT) {
+      out.push(`${file}: v4_product_map_root must be ${PRODUCT_MAP_REVIEW_ROOT}`);
+    }
+    for (const [field, hash] of Object.entries(expected)) {
+      if (record.v4_product_map_hashes?.[field] !== hash) {
+        out.push(`${file}: stale or wrong-surface v4_product_map_hashes.${field}`);
+      }
+    }
+  }
+  return out;
+}
+
 function escapeViolation(target) {
   const stripped = target.replace(/^["']|["']$/g, '');
   if (stripped.startsWith('/') && !stripped.startsWith(`${v4Root}/`)) {
@@ -231,7 +277,7 @@ function checkModuleCoverage(registry, files) {
   return out;
 }
 
-function checkMainlineEdges(mainlinePath = path.join(v4Root, '.appsdk/maps/mainline-call-map.json')) {
+function checkMainlineEdges(mainlinePath = path.join(v4Root, 'docs/architecture/maps/mainline-call-map.json')) {
   const out = [];
   const mainline = JSON.parse(fs.readFileSync(mainlinePath, 'utf8'));
   const allowedOwners = new Set(['appsdk::goal', 'appsdk::lifecycle', 'appsdk::regression_gate', 'appsdk::compiler', 'appsdk::publisher', 'appsdk::freezer', 'appsdk::verifier', 'appsdk::workspace', 'appsdk::init', 'appsdk::verify', 'appsdk::build_domain', 'routecodex-v4-build-link', 'routecodex-v4-edge::validate_edge', 'routecodex-v4-control::metadata_center', 'routecodex-v4-error::error_chain', 'routecodex-v4-base-node::BaseNode', 'routecodex-v4-config::config_node', 'routecodex-v4-config::validate_edges', 'routecodex-v4-config::parse_v4_config_02_from_v4_config_01', 'routecodex-v4-config::validate_v4_config_03_from_v4_config_02', 'routecodex-v4-config::build_v4_config_04_from_v4_config_03', 'routecodex-v4-config::publish_v4_config_05_from_v4_config_04', 'routecodex-v4-runtime::ExecutionContext', 'routecodex-v4-runtime::SkeletonRuntime', 'routecodex-v4-runtime::scope_session_from_control', 'routecodex-v4-plugin-plan::compile_node_plan', 'routecodex-v4-plugin-catalog::register', 'routecodex-v4-cordis-bridge::compile_node', 'routecodex-v4-cordis-bridge::execute_plan']);
@@ -545,11 +591,15 @@ if (ciArchFailures.length > 0) {
   failures.push(`CI runner arch:\n${ciArchFailures.join('\n')}`);
 }
 const bindingFailures = checkDeclaredExecutedBinding(
-  path.join(v4Root, '.appsdk/maps/verification-map.json'),
+  path.join(v4Root, 'docs/architecture/maps/verification-map.json'),
   path.join(v4Root, 'scripts/architecture'),
 );
 if (bindingFailures.length > 0) {
   failures.push(`declared vs executed gate binding:\n${bindingFailures.join('\n')}`);
+}
+const productReviewFailures = checkProductReviewBindings();
+if (productReviewFailures.length > 0) {
+  failures.push(`product-map review binding:\n${productReviewFailures.join('\n')}`);
 }
 reportAndExit('positive');
 
@@ -825,6 +875,42 @@ const rootPkgDriftProblems = checkRootDispatchers(
   path.join(rootPkgDriftDir, 'v4-package.json'),
 );
 expectReject('root dispatcher name-semantic drift', () => rootPkgDriftProblems);
+
+// R14: V4 product-map consumers must not read the AppSDK skeleton surface.
+const productMapReadDir = path.join(redDir, 'scripts/isolation-red/sdk-product-map-read');
+fs.mkdirSync(productMapReadDir, { recursive: true });
+fs.writeFileSync(
+  path.join(productMapReadDir, 'verify-v4-product-map-red-fixture.mjs'),
+  "import fs from 'node:fs';\nfs.readFileSync('.appsdk/maps/function-map.json');\n",
+);
+const productMapReadProblems = scanForbiddenReferences(
+  walkFiles(productMapReadDir, 'scripts/isolation-red/sdk-product-map-read'),
+  redDir,
+);
+expectReject('SDK skeleton used as V4 product map', () => productMapReadProblems);
+
+// R15: post-cutover review records must use DSH and bind current product maps.
+const productReviewDir = path.join(redDir, 'product-review-binding');
+const productReviewRecordsDir = path.join(productReviewDir, 'records');
+fs.mkdirSync(productReviewRecordsDir, { recursive: true });
+fs.writeFileSync(
+  path.join(productReviewRecordsDir, 'review-record-red.json'),
+  JSON.stringify({
+    created_at: '2026-08-23T00:00:00Z',
+    reviewer: { adapter: 'codex', identity: 'codex-gpt-5.5' },
+    v4_product_map_root: '.appsdk/maps',
+    v4_product_map_hashes: {
+      function_map_hash: 'sha256:stale',
+      resource_map_hash: 'sha256:stale',
+      mainline_call_map_hash: 'sha256:stale',
+      verification_map_hash: 'sha256:stale',
+    },
+  }),
+);
+expectReject('post-cutover product-map review binding drift', () => checkProductReviewBindings(
+  productReviewRecordsDir,
+  path.join(v4Root, PRODUCT_MAP_REVIEW_ROOT),
+));
 
 if (redFail > 0) {
   console.error(`[v4 isolation] red fixtures failed: ${redFail}`);

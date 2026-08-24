@@ -74,8 +74,8 @@ the baseline-red gate with implementation-specific positive and negative gates.
 
 - `v4/contracts/real-runtime-admission.manifest.json`
 - `v4/docs/goals/v4-real-runtime-admission-plan.md`
-- `v4/.appsdk/maps/resource-map.json`
-- `v4/.appsdk/maps/function-map.json`
-- `v4/.appsdk/maps/mainline-call-map.json`
+- `v4/docs/architecture/maps/resource-map.json`
+- `v4/docs/architecture/maps/function-map.json`
+- `v4/docs/architecture/maps/mainline-call-map.json`
 - `v4/.appsdk/maps/module-registry.json`
-- `v4/.appsdk/maps/verification-map.json`
+- `v4/docs/architecture/maps/verification-map.json`

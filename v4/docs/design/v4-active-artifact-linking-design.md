@@ -6,9 +6,17 @@ Date: 2026-08-15
 Plan: `docs/goals/v4-active-artifact-linking-plan.md`
 Goal: Active-only artifact linking Phase 1, BaseNode first consumer (`routecodex-v4-edge`).
 
+Path note (2026-08-23): AppSDK 0.1.5 reserves `.appsdk/maps/*` for its canonical
+skeleton. Current V4 product maps live under `v4/docs/architecture/maps/`;
+`.appsdk/maps/module-registry.json` remains the SDK-owned module registry. Paths
+and baseline counts below are preserved as the historical design-date evidence.
+
 ## 1. Facts baseline (evidence table)
 
-Source of truth: `v4/.appsdk/project.json`, `v4/.appsdk/maps/*.json`, freeze/promotion/review/evidence records, `v4/active/lib/*/artifact.json`, workspace Cargo manifests.
+Source of truth at the design date: `v4/.appsdk/project.json`, `v4/.appsdk/maps/*.json`,
+freeze/promotion/review/evidence records, `v4/active/lib/*/artifact.json`, workspace Cargo
+manifests. Since the 2026-08-23 AppSDK 0.1.5 cutover, current V4 product maps are under
+`v4/docs/architecture/maps/`; only `.appsdk/maps/module-registry.json` remains SDK-owned.
 
 | module | stage | source owner | Active version | artifact_hash | public_api_hash | source commit | deps (artifact hashes) | current Cargo path edges | regression gate |
 |---|---|---|---|---|---|---|---|---|---|
@@ -19,7 +27,8 @@ Source of truth: `v4/.appsdk/project.json`, `v4/.appsdk/maps/*.json`, freeze/pro
 | routecodex-v4-error | frozen | routecodex-v4-error | active-v2 | 23e7b9950e…5bb1 | 161e6ca746…eac6f | dc52f4772 | base-node 036daf45… | error -> base-node (Cargo path) | v4_error_l2_regression (23) |
 | routecodex-v4-config | source_implemented | routecodex-v4-config | none | - | - | - | base-node, edge | config -> base-node, config -> edge (Cargo path) | v4_config_l2_regression (15) |
 
-Cargo consumer edges (from `v4/.appsdk/maps/mainline-call-map.json`, all `status: active`):
+Cargo consumer edges (from the design-date product mainline map, all `status: active`;
+current path is `docs/architecture/maps/mainline-call-map.json`):
 
 | caller | callee | manifest/symbol edge | owner |
 |---|---|---|---|

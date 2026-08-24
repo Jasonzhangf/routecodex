@@ -8,11 +8,11 @@ const sourcePath = path.join(root, 'crates/routecodex-v4-cli-plugin/src/lib.rs')
 const contractPath = path.join(root, 'contracts/cli-plugin.contract.json');
 const moduleRegistryPath = path.join(root, '.appsdk/maps/module-registry.json');
 const projectPath = path.join(root, '.appsdk/project.json');
-const functionMapPath = path.join(root, '.appsdk/maps/function-map.json');
-const verificationMapPath = path.join(root, '.appsdk/maps/verification-map.json');
-const resourceMapPath = path.join(root, '.appsdk/maps/resource-map.json');
+const functionMapPath = path.join(root, 'docs/architecture/maps/function-map.json');
+const verificationMapPath = path.join(root, 'docs/architecture/maps/verification-map.json');
+const resourceMapPath = path.join(root, 'docs/architecture/maps/resource-map.json');
 const resourceOperationMapPath = path.join(root, 'docs/architecture/v4-resource-operation-map.yml');
-const mainlineCallMapPath = path.join(root, '.appsdk/maps/mainline-call-map.json');
+const mainlineCallMapPath = path.join(root, 'docs/architecture/maps/mainline-call-map.json');
 const red = process.argv.includes('--red-self-test');
 
 const source = fs.readFileSync(sourcePath, 'utf8');

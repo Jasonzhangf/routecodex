@@ -246,9 +246,9 @@ function runSelfTest() {
     'v4-plugin-catalog': readJson('contracts/plugin-catalog.contract.json'),
   };
   const moduleRegistry = readJson('.appsdk/maps/module-registry.json');
-  const verificationMap = readJson('.appsdk/maps/verification-map.json');
-  const functionMap = readJson('.appsdk/maps/function-map.json');
-  const resourceMap = readJson('.appsdk/maps/resource-map.json');
+  const verificationMap = readJson('docs/architecture/maps/verification-map.json');
+  const functionMap = readJson('docs/architecture/maps/function-map.json');
+  const resourceMap = readJson('docs/architecture/maps/resource-map.json');
 
   const cases = [
     ['contract status downgraded', (state) => {
@@ -340,9 +340,9 @@ if (isRedSelfTest) {
       'v4-plugin-catalog': readJson('contracts/plugin-catalog.contract.json'),
     },
     readJson('.appsdk/maps/module-registry.json'),
-    readJson('.appsdk/maps/verification-map.json'),
-    readJson('.appsdk/maps/function-map.json'),
-    readJson('.appsdk/maps/resource-map.json'),
+    readJson('docs/architecture/maps/verification-map.json'),
+    readJson('docs/architecture/maps/function-map.json'),
+    readJson('docs/architecture/maps/resource-map.json'),
   );
   if (failures.length > 0) {
     console.error('[v4_parity_gate_plugin_plan] FAIL');

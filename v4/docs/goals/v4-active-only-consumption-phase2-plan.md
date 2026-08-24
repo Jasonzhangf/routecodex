@@ -125,7 +125,8 @@ Design ID: `V4-ACTIVE-LINK-002`（本计划）；上游设计：`v4/docs/design/
    负向 rustc 门 `negative_error_classify_without_witness_compile_fails`
    （`v4/crates/routecodex-v4-build-link/tests/resolver_red_tests.rs`）：
    无 witness 调 `chain.classify()` 必须编译失败，带 witness 的正向片段必须编译成功。
-   `v4_error_compile_fail_regression` 已恢复至 `v4/.appsdk/maps/verification-map.json`，
+   `v4_error_compile_fail_regression` 已恢复至产品 verification map；2026-08-23 后路径为
+   `docs/architecture/maps/verification-map.json`（AppSDK skeleton map 不承载产品真源），
    命令改为 `cargo test -p routecodex-v4-build-link --test resolver_red_tests
    negative_error_classify_without_witness_compile_fails --manifest-path Cargo.toml`；
    function-map `v4.error.mainline` 对该 gate 的引用随之恢复有效，不删除。

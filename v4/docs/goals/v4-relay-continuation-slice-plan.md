@@ -87,7 +87,8 @@ error chain / MetadataCenter / Config v2 / Responses Direct compat 已闭环）�
   response_continuation 角色、continuation_save_only_at、
   continuation_immutable_interval_semantics: forbidden）。
 - 资源登记：`v4/docs/architecture/v4-resource-operation-map.yml`（32 条
-  design 中本 slice 子集）+ `.appsdk/maps/resource-map.json`。
+  design 中本 slice 子集）+ 产品 resource map JSON（当前路径
+  `docs/architecture/maps/resource-map.json`）。
 - feature 映射：`v4/docs/architecture/v4-v3-feature-mapping.yml`
   （relay/continuation feature 已逐条 mapped：remote_continuation_contract_store、
   responses_direct_remote_continuation_integration、anthropic_relay_local_
@@ -105,9 +106,9 @@ error chain / MetadataCenter / Config v2 / Responses Direct compat 已闭环）�
   1) 六面 compat 机器锁（missing/extra/duplicate/unexplained）；
   2) continuation 不可变区红测（save 后 restore 前语义转换必红）；
   3) Direct/Relay 隔离红测（协议/owner/session 三键）；
-  4) 资源双源一致（本 slice 资源 anchored 准入与 .appsdk 一致）；
+  4) 资源双源一致（本 slice 资源 anchored 准入与产品 resource map 一致）；
   `--red-self-test` 全负类覆盖。
-- `v4/.appsdk/maps/verification-map.json`：注册
+- `docs/architecture/maps/verification-map.json`：注册
   `v4_compat_gate_relay_continuation`。
 - `package.json`：`verify:v4-foundation`（现 9 gates -> 10）与
   `verify:v4-foundation-red`（现 2 -> 3 gate）追加。
