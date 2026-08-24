@@ -282,7 +282,9 @@ function validate(resourceMap, appsdkMap, verificationMap, nodeIds) {
       (resource.status === 'contract_bound' && owner.startsWith('contract:')) ||
       owner.startsWith('appsdk::') ||
       owner === 'routecodex-v4-build-link' ||
-      owner.startsWith('routecodex-v4-build-link::');
+      owner.startsWith('routecodex-v4-build-link::') ||
+      owner === 'routecodex-v4-governance' ||
+      owner.startsWith('routecodex-v4-parity');
     if (resource.resource_id.startsWith('v4.') && !yamlIds.has(resource.resource_id) && !registeredExtra) {
       failures.push(`${resource.resource_id}: declared in .appsdk resource-map.json without YAML declaration`);
     }

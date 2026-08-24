@@ -2552,6 +2552,156 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
+- resource_id: v4.cordis.mount_candidate
+  axis: control
+  verification_gate:
+  - v4_runtime_004_mount_positive
+  - v4_runtime_004_mount_boundary
+  resource_kind: cordis_mount_candidate
+  lifecycle: v4.cordis_bridge
+  owner_crate: routecodex-v4-cordis-bridge
+  owner_node: CordisMountCandidate
+  owner_symbols:
+  - CordisMountCandidate
+  allowed_writers:
+  - routecodex-v4-cordis-bridge
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-runtime
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.runtime.node_plan_bundle
+  axis: control
+  verification_gate:
+  - v4_runtime_003_plan_bundle_positive
+  - v4_runtime_003_plan_bundle_boundary
+  resource_kind: node_plugin_plan_bundle
+  lifecycle: v4.plugin_plan
+  owner_crate: routecodex-v4-plugin-plan
+  owner_node: NodePluginPlanBundle
+  owner_symbols:
+  - NodePluginPlanBundle
+  allowed_writers:
+  - routecodex-v4-plugin-plan
+  allowed_readers:
+  - routecodex-v4-node-container
+  forbidden_writers:
+  - routecodex-v4-runtime
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.plugin.request.responses_normalize
+  axis: data
+  verification_gate:
+  - v4_plugin_request_positive
+  - v4_plugin_request_boundary
+  resource_kind: normal_payload
+  lifecycle: v4.plugin.standard_library
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubReqInbound03Normalized
+  owner_symbols:
+  - StandardPlugin
+  - StandardHandleRegistry
+  allowed_writers:
+  - V4HubReqInbound03Normalized
+  allowed_readers:
+  - V4HubReqInbound03Normalized
+  - V4HubReqChatProcess04Governed
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.plugin.request.chat_to_responses
+  axis: data
+  verification_gate:
+  - v4_plugin_request_positive
+  - v4_plugin_request_boundary
+  resource_kind: normal_payload
+  lifecycle: v4.plugin.standard_library
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubReqInbound03Normalized
+  owner_symbols:
+  - StandardPlugin
+  - StandardHandleRegistry
+  allowed_writers:
+  - V4HubReqInbound03Normalized
+  allowed_readers:
+  - V4HubReqInbound03Normalized
+  - V4HubReqChatProcess04Governed
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.plugin.request.governance
+  axis: data
+  verification_gate:
+  - v4_plugin_request_positive
+  - v4_plugin_request_boundary
+  resource_kind: normal_payload
+  lifecycle: v4.plugin.standard_library
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubReqChatProcess04Governed
+  owner_symbols:
+  - StandardPlugin
+  - StandardHandleRegistry
+  allowed_writers:
+  - V4HubReqChatProcess04Governed
+  allowed_readers:
+  - V4HubReqChatProcess04Governed
+  - V4HubReqOutbound05ProviderSemantic
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.plugin.request.provider_semantic
+  axis: data
+  verification_gate:
+  - v4_plugin_request_positive
+  - v4_plugin_request_boundary
+  resource_kind: provider_semantic
+  lifecycle: v4.plugin.standard_library
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubReqOutbound05ProviderSemantic
+  owner_symbols:
+  - StandardPlugin
+  - StandardHandleRegistry
+  allowed_writers:
+  - V4HubReqOutbound05ProviderSemantic
+  allowed_readers:
+  - V4ProviderReqCompat06Compat
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.plugin.request.responses_wire_build
+  axis: data
+  verification_gate:
+  - v4_plugin_request_positive
+  - v4_plugin_request_boundary
+  resource_kind: provider_wire
+  lifecycle: v4.plugin.standard_library
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4ProviderReqCompat06Compat
+  owner_symbols:
+  - StandardPlugin
+  - StandardHandleRegistry
+  semantic_contract:
+    control_fields_forbidden: true
+  allowed_writers:
+  - V4ProviderReqCompat06Compat
+  allowed_readers:
+  - V4ProviderSseOut07WireBoundary
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
 forbidden_direct_edges:
 - from: v4.config.manifest
   to: v4.request.normal_payload
