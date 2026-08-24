@@ -98,16 +98,13 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                         state.strip_client_response_id,
                         state.retain_response_cipher,
                         &mut state.content_consumer,
-                    )
-                    .map(|out| out.unwrap_or(chunk));
-                    if result.is_ok() {
-                        let terminal_observed = state
-                            .stream_observation
-                            .snapshot()
-                            .ok()
-                            .and_then(|snapshot| snapshot.response_status)
-                            .as_deref()
-                            == Some("completed");
+                    );
+                    let terminal_observed = result
+                        .as_ref()
+                        .map(|(_, terminal_observed)| *terminal_observed)
+                        .unwrap_or(false);
+                    let result = result.map(|(out, _)| out.unwrap_or(chunk));
+                    if result.is_ok() && terminal_observed {
                         if terminal_observed
                             && !state.runtime_timing.is_finished().unwrap_or(false)
                         {
@@ -235,19 +232,29 @@ fn record_direct_sse_provider_event_json_chunk(
     strip_client_response_id: bool,
     retain_response_cipher: bool,
     content_consumer: &mut V3DirectSseContentConsumer,
-) -> Result<Option<Vec<u8>>, V3Error01SourceRaised> {
+) -> Result<(Option<Vec<u8>>, bool), V3Error01SourceRaised> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
         .map_err(build_v3_sse_transport_error_source)?;
     if frames.is_empty() {
-        return Ok(None);
+        return Ok((None, false));
     }
     let mut rewritten = Vec::new();
     let mut any_rewritten = false;
+    let mut terminal_observed = false;
     for frame in frames {
         let data = collect_v3_provider_sse_json_data(frame.frame().fields());
         if is_v3_provider_sse_keepalive_text(&data) {
             continue;
+        }
+        if serde_json::from_str::<Value>(&data)
+            .ok()
+            .and_then(|event| event.get("type").and_then(Value::as_str).map(str::to_owned))
+            .is_some_and(|event_type| {
+                matches!(event_type.as_str(), "response.completed" | "response.done")
+            })
+        {
+            terminal_observed = true;
         }
         record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
         let original =
@@ -267,9 +274,9 @@ fn record_direct_sse_provider_event_json_chunk(
         rewritten.extend_from_slice(&projected);
     }
     if any_rewritten {
-        Ok(Some(rewritten))
+        Ok((Some(rewritten), terminal_observed))
     } else {
-        Ok(None)
+        Ok((None, terminal_observed))
     }
 }
 
