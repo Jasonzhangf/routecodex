@@ -11,6 +11,7 @@ import {
 import { parseCargoWorkspace } from '../architecture/lib/feature-layer-batch-cargo.mjs';
 import { createGitTruth } from '../architecture/lib/feature-layer-batch-git.mjs';
 import { validateTaskSourceGraph } from '../architecture/lib/feature-layer-batch-graph.mjs';
+import { runAllReadyAdmissionFixture } from './feature-layer-batch-admission-fixture.mjs';
 
 const fixtureV4Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -329,7 +330,12 @@ export function runFeatureLayerBatchSelfTest({
   } catch (error) {
     failures.push(failure('SOURCE_GRAPH_FORMS_SELF_TEST', error.message));
   }
-  return result(4 - failures.length, 4, failures);
+  try {
+    runAllReadyAdmissionFixture({ canonicalInput, validate, now: productionContext.now });
+  } catch (error) {
+    failures.push(failure('ALL_READY_ADMISSION_SELF_TEST', error.message));
+  }
+  return result(5 - failures.length, 5, failures);
 }
 
 export function runFeatureLayerBatchBoundarySelfTest({
