@@ -44,6 +44,31 @@ modules:
   - provider.wire_payload
   - response.client_payload
   - metadata.runtime_control
+- module_id: architecture.v3_contract_maps
+  owner_feature_id: architecture.v3_contract_maps
+  status: implementation_active
+  contract_kind: shared_v3_architecture_contract_maps
+  owned_paths:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+  contract_writers:
+  - v3.direct_sse_accept_skeleton
+  - v3.virtual_router_target_interpreter
+  - v3.direct_response_hooks
+  contract_readers:
+  - all_v3_features
+  allowed_edges:
+  - from: V3ContractMapAuthoring01FeatureBinding
+    to: V3ContractMapVerification02GateBinding
+  - from: V3ContractMapVerification02GateBinding
+    to: V3ContractMapRuntime03ReleaseEvidence
+  forbidden_paths:
+  - request.normal_payload
+  - provider.wire_payload
+  - response.client_payload
+  - metadata.runtime_control
 - module_id: v3.virtual_router_target_interpreter
   owner_feature_id: v3.virtual_router_target_interpreter
   status: implementation_active
@@ -58,10 +83,6 @@ modules:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/nodes.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
-  - docs/architecture/v3-resource-operation-map.yml
-  - docs/architecture/v3-function-map.yml
-  - docs/architecture/v3-mainline-call-map.yml
-  - docs/architecture/v3-verification-map.yml
   - docs/goals/v3-target-priority-context-heuristic-test-design.md
   forbidden_paths:
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
@@ -133,10 +154,6 @@ modules:
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
   - v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
   allowed_paths:
-  - docs/architecture/v3-resource-operation-map.yml
-  - docs/architecture/v3-function-map.yml
-  - docs/architecture/v3-mainline-call-map.yml
-  - docs/architecture/v3-verification-map.yml
   - v3/.appsdk/**
   - config/v3-file-size-policy.json
   - docs/architecture/manifests/v3.stage_protocol_shape_contract.yml
