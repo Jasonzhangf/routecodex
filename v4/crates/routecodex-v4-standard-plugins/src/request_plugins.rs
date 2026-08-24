@@ -1,6 +1,7 @@
 //! Request-side P0 plugins.  Each handler owns one adjacent semantic step;
 //! no handler reads control state or performs production dispatch.
 //! The request lane remains independently executable until integration opens.
+//! Its candidate boundary is fixed before any production dispatcher wiring.
 
 use routecodex_v4_cordis_bridge::ExecCtx;
 use serde_json::{json, Map, Value};
