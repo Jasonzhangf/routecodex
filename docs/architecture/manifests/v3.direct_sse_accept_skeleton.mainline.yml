@@ -5,6 +5,9 @@ status: source_controlled_runtime_pending_live_replay
 implementation_symbols:
   - V3FrontSseAcceptSkeleton
   - v3_request_wants_sse
+supporting_callers:
+  - pending_endpoint_after_responses_admission
+  - execute_responses_direct_server_outcome
 entrypoint:
   node_id: V3DirectSseAccept01ClientChannel
   call_map_chain_id: v3.direct_sse_accept_skeleton
@@ -25,6 +28,17 @@ edges:
     owner_feature_id: v3.direct_sse_accept_skeleton
     status: anchored
     contract: only the existing Direct or Relay runtime client projection is forwarded; provider raw SSE is never forwarded
+supporting_edges:
+  - step_id: v3-direct-sse-accept-skeleton-intent-01
+    caller: pending_endpoint_after_responses_admission
+    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    callee: v3_request_wants_sse
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+  - step_id: v3-direct-sse-accept-skeleton-intent-02
+    caller: execute_responses_direct_server_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+    callee: v3_request_wants_sse
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
 return_path:
   precommit_provider_failure: Error01 -> Error03 -> Error04 -> Error05 -> reselect; client channel remains open
   committed_provider_failure: current stream emits the existing post-commit error projection and closes; no current-request reroute

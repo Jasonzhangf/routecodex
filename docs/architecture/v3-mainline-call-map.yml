@@ -7810,6 +7810,7 @@ chains:
   summary: Responses SSE establishes a shared Front client transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only the runtime projected client frame crosses the channel.
   manifest: docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
   implementation_symbols: [V3FrontSseAcceptSkeleton, v3_request_wants_sse]
+  supporting_callers: [pending_endpoint_after_responses_admission, execute_responses_direct_server_outcome]
   entry_contract:
     node: V3DirectSseAccept01ClientChannel
     owner_doc: docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
@@ -7857,4 +7858,35 @@ chains:
       consumes: [v3.sse.direct.typed_hook_catalog]
       produces: [v3.sse.responses.hook_effect, v3.sse.chat.hook_effect]
       side_channel_reads: [v3.sse.direct.typed_hook_catalog]
+      side_channel_writes: []
+  supporting_edges:
+  - step_id: v3-direct-sse-accept-skeleton-intent-01
+    from_node: V3DirectSseAccept01ClientChannel
+    to_node: V3DirectSseAccept01ClientChannel
+    caller_symbol: pending_endpoint_after_responses_admission
+    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    callee_symbol: v3_request_wants_sse
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    edge_kind: supporting_entry_intent_predicate
+    owner_feature_id: v3.direct_sse_accept_skeleton
+    resource_flow:
+      consumes: [v3.sse.direct.accept_skeleton]
+      produces: [v3.sse.direct.accept_skeleton]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-direct-sse-accept-skeleton-intent-02
+    from_node: V3DirectSseAccept02RuntimeWorker
+    to_node: V3DirectSseAccept02RuntimeWorker
+    caller_symbol: execute_responses_direct_server_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+    callee_symbol: v3_request_wants_sse
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    edge_kind: supporting_runtime_intent_predicate
+    owner_feature_id: v3.direct_sse_accept_skeleton
+    resource_flow:
+      consumes: [v3.sse.direct.accept_skeleton]
+      produces: [v3.sse.direct.accept_skeleton]
+      side_channel_reads: []
       side_channel_writes: []
