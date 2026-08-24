@@ -11,7 +11,7 @@
   "owner":"routecodex-v4-runtime",
   "scope_hash":"sha256:353b0c8ec4dde2cb5061b282a0337cb344f10556ecbf5d389d6ae721edf9278c",
   "changed_paths":["v4/Cargo.lock","v4/Cargo.toml","v4/crates/routecodex-v4-control/Cargo.toml","v4/crates/routecodex-v4-error/Cargo.toml","v4/crates/routecodex-v4-runtime/Cargo.toml","v4/crates/routecodex-v4-runtime/src/lib.rs","v4/crates/routecodex-v4-runtime/src/request_port.rs","v4/crates/routecodex-v4-runtime/src/response_error_port.rs","v4/crates/routecodex-v4-runtime/tests/l2_ports.rs"],
-  "verification_evidence_ids":["positive","red-gate","boundary-audit","plane-isolation"],
+  "verification_evidence_ids":["boundary-audit","plane-isolation","positive","red-gate"],
   "created_at":"2026-08-24T05:30:00Z",
   "batch_id":"F",
   "task_ids":["V4-RUNTIME-005","V4-RUNTIME-006"]
