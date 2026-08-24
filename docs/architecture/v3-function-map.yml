@@ -982,6 +982,7 @@ features:
   mainline_bindings:
   - v3-provider-compat-profile-request-01
   - v3-provider-compat-profile-response-01
+  - v3-provider-compat-profile-request-invalid-source-01
   entry_symbols:
   - run_req_outbound_stage3_compat
   - run_resp_inbound_stage3_compat

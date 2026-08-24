@@ -183,21 +183,26 @@ chains:
       produces: [v3.hub.provider_wire_payload]
       side_channel_reads: [v3.hub.resolved_target, v3.hub.provider_protocol]
       side_channel_writes: []
-  - step_id: v3-provider-compat-profile-request-invalid-01
+  
+- chain_id: v3.provider_compat.request_invalid_error_source
+  owner_feature_id: v3.provider_compat_profile_loading
+  summary: Request-shape compatibility failures enter the canonical typed Error01 source chain before relay policy and client projection.
+  edges:
+  - step_id: v3-provider-compat-profile-request-invalid-source-01
     from_node: ProviderReqCompat06ProviderCompat
-    to_node: V3Error06ClientProjected
+    to_node: V3Error01SourceRaised
     caller_symbol: provider_request_relay_failure
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
-    callee_symbol: V3ErrorHandlingCenter::project_terminal
-    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    callee_symbol: provider_request_payload_source
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs
     status: anchored
-    binding_kind: request_invalid_error_projection
+    binding_kind: request_invalid_error_source
     owner_feature_id: v3.provider_compat_profile_loading
     resource_flow:
-      consumes: [v3.provider_compat.payload_boundary_contract, v3.error.chain]
-      produces: [v3.error.chain]
+      consumes: [v3.provider_compat.payload_boundary_contract]
+      produces: [v3.error.source]
       side_channel_reads: []
-      side_channel_writes: []
+      side_channel_writes: [v3.error.source]
 - chain_id: v3.provider_compat_profile.response
   owner_feature_id: v3.provider_compat_profile_loading
   summary: The response provider-compat node consumes only the adjacent provider-raw payload, validates the normal-payload boundary, and applies the selected provider-family response profile before Hub response normalization.
