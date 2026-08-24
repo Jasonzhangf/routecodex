@@ -65,17 +65,66 @@
     {
       "batch_id": "A",
       "conditional": false,
-      "owner_binding_status": "pending",
-      "owner_function_id": null,
-      "module_ids": [],
-      "owned_paths": [],
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.parity.product_ledger",
+      "module_ids": ["routecodex-v4-parity"],
+      "owned_paths": [
+        "scripts/architecture/verify-v4-product-differential.mjs",
+        "scripts/architecture/verify-v4-product-parity-ledger.mjs",
+        "scripts/architecture/verify-v4-product-parity-status.mjs",
+        "scripts/architecture/verify-v4-v3-baseline-delta.mjs"
+      ],
       "source_dependencies": [],
-      "status": "pending",
+      "status": "source_green",
       "tasks": [
-        {"task_id":"V4-PARITY-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
-        {"task_id":"V4-PARITY-002","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
-        {"task_id":"V4-PARITY-003","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
-        {"task_id":"V4-PARITY-HARNESS-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
+        {
+          "task_id":"V4-PARITY-001","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate.json",
+          "function_ids":["v4.parity.product_ledger"],"resource_ids":["v4.parity.product_ledger"],
+          "source_paths":["scripts/architecture/verify-v4-product-parity-ledger.mjs"],"support_paths":[],
+          "required_gate_ids":["v4_parity_ledger_positive","v4_parity_ledger_red","v4_parity_ledger_boundary","v4_parity_ledger_plane"],"mainline_binding":"forbidden_before_integration",
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_parity_ledger_positive","path":"docs/evidence/feature-completion/M1/V4-PARITY-001/positive.json"},
+            {"role":"red_gate","gate_id":"v4_parity_ledger_red","path":"docs/evidence/feature-completion/M1/V4-PARITY-001/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_parity_ledger_boundary","path":"docs/evidence/feature-completion/M1/V4-PARITY-001/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_parity_ledger_plane","path":"docs/evidence/feature-completion/M1/V4-PARITY-001/plane-isolation.json"}
+          ]
+        },
+        {
+          "task_id":"V4-PARITY-002","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate.json",
+          "function_ids":["v4.parity.baseline_delta"],"resource_ids":["v4.parity.baseline_delta"],
+          "source_paths":["scripts/architecture/verify-v4-v3-baseline-delta.mjs"],"support_paths":[],
+          "required_gate_ids":["v4_parity_ledger_positive","v4_parity_ledger_red","v4_parity_ledger_boundary","v4_parity_ledger_plane"],"mainline_binding":"forbidden_before_integration",
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_parity_ledger_positive","path":"docs/evidence/feature-completion/M1/V4-PARITY-002/positive.json"},
+            {"role":"red_gate","gate_id":"v4_parity_ledger_red","path":"docs/evidence/feature-completion/M1/V4-PARITY-002/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_parity_ledger_boundary","path":"docs/evidence/feature-completion/M1/V4-PARITY-002/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_parity_ledger_plane","path":"docs/evidence/feature-completion/M1/V4-PARITY-002/plane-isolation.json"}
+          ]
+        },
+        {
+          "task_id":"V4-PARITY-003","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate.json",
+          "function_ids":["v4.parity.status_gate"],"resource_ids":["v4.parity.status_gate"],
+          "source_paths":["scripts/architecture/verify-v4-product-parity-status.mjs"],"support_paths":[],
+          "required_gate_ids":["v4_parity_ledger_positive","v4_parity_ledger_red","v4_parity_ledger_boundary","v4_parity_ledger_plane"],"mainline_binding":"forbidden_before_integration",
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_parity_ledger_positive","path":"docs/evidence/feature-completion/M1/V4-PARITY-003/positive.json"},
+            {"role":"red_gate","gate_id":"v4_parity_ledger_red","path":"docs/evidence/feature-completion/M1/V4-PARITY-003/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_parity_ledger_boundary","path":"docs/evidence/feature-completion/M1/V4-PARITY-003/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_parity_ledger_plane","path":"docs/evidence/feature-completion/M1/V4-PARITY-003/plane-isolation.json"}
+          ]
+        },
+        {
+          "task_id":"V4-PARITY-HARNESS-001","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate.json",
+          "function_ids":["v4.parity.differential_harness"],"resource_ids":["v4.parity.differential_harness"],
+          "source_paths":["scripts/architecture/verify-v4-product-differential.mjs"],"support_paths":[],
+          "required_gate_ids":["v4_parity_ledger_positive","v4_parity_ledger_red","v4_parity_ledger_boundary","v4_parity_ledger_plane"],"mainline_binding":"forbidden_before_integration",
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_parity_ledger_positive","path":"docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/positive.json"},
+            {"role":"red_gate","gate_id":"v4_parity_ledger_red","path":"docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_parity_ledger_boundary","path":"docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_parity_ledger_plane","path":"docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/plane-isolation.json"}
+          ]
+        }
       ]
     },
     {
