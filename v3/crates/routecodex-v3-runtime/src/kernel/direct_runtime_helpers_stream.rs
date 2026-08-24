@@ -121,18 +121,74 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                     state.content_consumer.finalize_toolreason_observation();
                     match decoder_result {
                         Ok(()) if state.runtime_timing.is_finished().unwrap_or(false) => None,
-                        Ok(()) => match state.runtime_timing.finish_external_if_active() {
-                            Ok(_) => None,
-                            Err(error) => {
-                                Some((Err(runtime_source("V3RuntimeTimingExternal", error)), state))
+                        Ok(()) => {
+                            if let Err(error) = state.runtime_timing.finish_external_if_active() {
+                                return Some((
+                                    Err(runtime_source("V3RuntimeTimingExternal", error)),
+                                    state,
+                                ));
                             }
-                        },
+                            let timing = match state.runtime_timing.finish_runtime() {
+                                Ok(timing) => timing,
+                                Err(error) => {
+                                    return Some((
+                                        Err(runtime_source("V3RuntimeTimingTerminal", error)),
+                                        state,
+                                    ));
+                                }
+                            };
+                            if let Err(error) = state.stream_observation.record_timing(timing) {
+                                return Some((
+                                    Err(runtime_source("V3RuntimeTimingObservation", error)),
+                                    state,
+                                ));
+                            }
+                            None
+                        }
                         Err(error) => Some((Err(error), state)),
                     }
                 }
             }
         },
     ))
+}
+
+#[cfg(test)]
+mod direct_sse_timing_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn clean_eof_finishes_runtime_and_publishes_typed_timing() {
+        let observation = V3RuntimeStreamObservation::default();
+        let runtime_timing = V3RuntimeTimingState::start();
+        runtime_timing.start_external().unwrap();
+        let source = Box::pin(stream::iter(vec![Ok(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
+                .to_vec(),
+        )]));
+        let mut observed = wrap_direct_sse_provider_event_json_observation_stream(
+            source,
+            observation.clone(),
+            runtime_timing,
+            false,
+            false,
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        );
+
+        while let Some(chunk) = observed.next().await {
+            chunk.expect("clean Direct SSE must not fail");
+        }
+
+        let timing = observation
+            .snapshot()
+            .expect("stream observation snapshot")
+            .timing
+            .expect("clean EOF must publish runtime timing");
+        assert_eq!(
+            timing.internal.checked_add(timing.external),
+            Some(timing.runtime_total)
+        );
+    }
 }
 
 /// Usage-observation-only SSE wrap：只把 provider SSE 事件 JSON 写入
