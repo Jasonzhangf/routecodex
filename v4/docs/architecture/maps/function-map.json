@@ -1064,6 +1064,12 @@
     },
     {
       "function_id":"v4.runtime.response_error_port","status":"active","feature_id":"V4-RUNTIME-006","owner":"routecodex-v4-runtime","entry_symbols":["consume_response","consume_error","ResponsePortReceipt"],"resource_ids":["v4.runtime.response_error_port"],"source_paths":["crates/routecodex-v4-runtime/src/response_error_port.rs"],"required_gates":["v4_runtime_006_response_error_positive","v4_runtime_006_response_error_red","v4_runtime_006_response_error_boundary","v4_runtime_006_response_error_plane"]
+    },
+    {
+      "function_id":"v4.governance.feature_layer_gate_contract","status":"active","feature_id":"V4-GATE-001","owner":"routecodex-v4-governance","entry_symbols":["validateFeatureLayerBatchAdmission"],"resource_ids":["v4.governance.feature_layer_gate_contract"],"source_paths":["scripts/architecture/verify-v4-feature-layer-batches.mjs"],"required_gates":["v4_feature_layer_batches","v4_feature_layer_batches_self_test","v4_feature_layer_batches_boundary","v4_feature_layer_batches_red"]
+    },
+    {
+      "function_id":"v4.governance.feature_layer_product_lockstep","status":"active","feature_id":"V4-LAYER-GATE-001","owner":"routecodex-v4-governance","entry_symbols":["validateSourceGreenClaims"],"resource_ids":["v4.governance.feature_layer_product_lockstep"],"source_paths":["scripts/architecture/lib/feature-layer-batch-source.mjs"],"required_gates":["v4_feature_layer_batches","v4_feature_layer_batches_self_test","v4_feature_layer_batches_boundary","v4_feature_layer_batches_red"]
     }
   ]
 }

@@ -266,8 +266,8 @@
       "source_dependencies": [],
       "status": "pending",
       "tasks": [
-        {"task_id":"V4-GATE-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
-        {"task_id":"V4-LAYER-GATE-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
+        {"task_id":"V4-GATE-001","status":"pending","candidate_record":null,"function_ids":["v4.governance.feature_layer_gate_contract"],"resource_ids":["v4.governance.feature_layer_gate_contract"],"source_paths":["scripts/architecture/verify-v4-feature-layer-batches.mjs"],"support_paths":[],"required_gate_ids":["v4_feature_layer_batches","v4_feature_layer_batches_self_test","v4_feature_layer_batches_boundary","v4_feature_layer_batches_red"],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-LAYER-GATE-001","status":"pending","candidate_record":null,"function_ids":["v4.governance.feature_layer_product_lockstep"],"resource_ids":["v4.governance.feature_layer_product_lockstep"],"source_paths":["scripts/architecture/lib/feature-layer-batch-source.mjs"],"support_paths":[],"required_gate_ids":["v4_feature_layer_batches","v4_feature_layer_batches_self_test","v4_feature_layer_batches_boundary","v4_feature_layer_batches_red"],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
       ]
     },
     {
