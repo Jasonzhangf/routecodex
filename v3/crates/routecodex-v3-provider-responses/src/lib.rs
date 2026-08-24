@@ -1,13 +1,11 @@
 pub mod adaptive_concurrency;
 mod error;
-pub mod global_cooldown;
 #[cfg_attr(not(test), allow(dead_code))]
 mod health;
 pub mod key_health;
 pub mod probe;
 mod probe_backoff;
 mod provider_cooldown_probe;
-pub mod provider_global_health;
 pub mod raw_response;
 mod shared;
 pub mod transport;
@@ -15,24 +13,17 @@ pub mod transport_handoff;
 pub mod wire;
 
 pub use error::{V3ProviderError, V3ProviderHttpFailure};
-pub use global_cooldown::{
-    V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass, V3ProviderCooldownObservation,
-};
 pub use health::{
     V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
     V3ProviderAvailabilityRegistry, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
-    V3ProviderFailureRecord, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
+    V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
+    V3ProviderGlobalSubscriptionPolicy, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
 };
 pub use key_health::{
     V3ProviderKeyHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
     V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
 };
 pub use probe::build_v3_provider_global_probe_request;
-pub use provider_global_health::{
-    V3ProviderGlobalAvailability, V3ProviderGlobalProbePermit,
-    V3ProviderGlobalSubscriptionDecision, V3ProviderGlobalSubscriptionHealthStore,
-    V3ProviderGlobalSubscriptionPolicy,
-};
 pub use raw_response::{
     V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseBodyKind,
     V3ProviderResponseHeader, V3ProviderSseStream,
@@ -41,15 +32,15 @@ pub use routecodex_v3_error::{
     V3ProviderFailureAction, V3ProviderHealthScope, V3ProviderRecoveryKind,
 };
 pub use transport::{
-    build_v3_anthropic_provider_request_header,
+    ProviderResponsesTransport, ReqwestResponsesTransport, ResponsesTransport,
+    V3ProviderCancellation, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
+    V3Transport13ResponsesRequest, build_v3_anthropic_provider_request_header,
     build_v3_transport_13_responses_http_request_from_parts,
     build_v3_transport_13_responses_http_request_from_parts_with_timeout,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
     build_v3_transport_13_responses_request_from_v3_provider_12,
-    is_v3_anthropic_provider_request_header_name, ProviderResponsesTransport,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderCancellation, V3ProviderRequestHeader,
-    V3Transport13ResponsesHttpRequest, V3Transport13ResponsesRequest,
+    is_v3_anthropic_provider_request_header_name,
 };
 pub use transport_handoff::{
     V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptKey,
@@ -57,8 +48,8 @@ pub use transport_handoff::{
     V3ProviderTransportHandoffScope, V3ProviderTransportKind,
 };
 pub use wire::{
-    apply_v3_response_cipher_policy, build_v3_provider_12_responses_wire_payload,
-    find_v3_routecodex_control_payload_key, V3Provider12ResponsesWirePayload, V3ProviderAuthHandle,
+    V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS, V3Provider12ResponsesWirePayload, V3ProviderAuthHandle,
     V3ProviderAuthSecretHandle, V3ResponsesProviderTarget, V3ResponsesRequestEndpoint,
-    V3ResponsesStreamIntent, V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS,
+    V3ResponsesStreamIntent, apply_v3_response_cipher_policy,
+    build_v3_provider_12_responses_wire_payload, find_v3_routecodex_control_payload_key,
 };

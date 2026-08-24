@@ -308,15 +308,13 @@ fn http_transport_request(
     url: String,
     cancellation: Option<V3ProviderCancellation>,
 ) -> V3Transport13ResponsesRequest {
-    let auth_env = "RCCV3_TEST_HTTP_STATUS_KEY";
-    std::env::set_var(auth_env, "sk-test-http-status");
     let request = build_v3_transport_13_responses_http_request_from_parts(
         request_id,
         "http-status-provider",
         url,
         V3ProviderAuthHandle {
             alias: "key1".into(),
-            secret: V3ProviderAuthSecretHandle::Environment(auth_env.into()),
+            secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-http-status".into()),
         },
         V3ResponsesStreamIntent::Json,
         json!({"model":"status-model","input":"hello","stream":false}),
@@ -350,8 +348,6 @@ async fn transport_http_status_preserves_body_when_read_succeeds() {
         .send(request)
         .await
         .expect_err("HTTP error response must fail");
-    std::env::remove_var("RCCV3_TEST_HTTP_STATUS_KEY");
-
     match error {
         V3ProviderError::HttpStatus { response } => {
             assert_eq!(response.status, 429);
@@ -381,8 +377,6 @@ async fn transport_http_status_preserves_real_code_on_body_decode_failure() {
         .send(request)
         .await
         .expect_err("HTTP error response must fail");
-    std::env::remove_var("RCCV3_TEST_HTTP_STATUS_KEY");
-
     match error {
         V3ProviderError::HttpStatus { response } => {
             assert_eq!(response.status, 502);
@@ -424,7 +418,6 @@ async fn transport_http_status_body_read_cancellation_remains_client_disconnect(
         .await
         .unwrap()
         .expect_err("cancelled HTTP error body read must fail");
-    std::env::remove_var("RCCV3_TEST_HTTP_STATUS_KEY");
     server.abort();
 
     match error {

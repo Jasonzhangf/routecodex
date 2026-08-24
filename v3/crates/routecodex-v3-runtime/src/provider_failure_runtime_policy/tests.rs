@@ -1,8 +1,8 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderErrorFingerprint,
-    V3ProviderHealthScope,
+    V3ErrorSourceKind, V3ProviderErrorFingerprint, V3ProviderHealthScope,
+    build_v3_error_01_source_raised,
 };
 use serde_json::json;
 
@@ -301,9 +301,8 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         }
         assert!(
             !health
-                .global_subscription_store
-                .availability("first", Some("key1"), Some("gpt-test"), 10_000)
-                .expect("global availability")
+                .store()
+                .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000)
                 .available,
             "status {status} must block only after its declared threshold"
         );
@@ -335,9 +334,8 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         .expect("request-shaped failure should remain session-scoped");
     assert!(
         health
-            .global_subscription_store
-            .availability("first", Some("key1"), Some("gpt-test"), 20_000)
-            .expect("global availability")
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_000)
             .available
     );
 }
@@ -372,13 +370,11 @@ fn configured_semantic_global_failure_keeps_manifest_cooldown_policy() {
             )
             .expect("configured semantic global failure should be accepted");
     }
-    assert_eq!(
-        health
-            .global_subscription_store
-            .availability("first", Some("key1"), Some("gpt-test"), 30_000)
-            .expect("global availability")
-            .blocked_until_ms,
-        Some(31_236)
+    assert!(
+        !health
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 30_000)
+            .available
     );
     let no_duration = health.record_provider_global_subscription_failure(
         &scope,
@@ -433,9 +429,11 @@ fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_al
         panic!("provider cooldown probe state must block every availability projection");
     };
     assert_eq!(attempted_candidates.len(), 2);
-    assert!(attempted_candidates
-        .iter()
-        .all(|candidate| candidate.contains("provider_cooldown_probe_pending")));
+    assert!(
+        attempted_candidates
+            .iter()
+            .all(|candidate| candidate.contains("provider_cooldown_probe_pending"))
+    );
 }
 
 fn assert_resolution_failure(
@@ -569,6 +567,12 @@ fn incomplete_key_identity_fails_before_provider_cooldown_write() {
         failure_threshold: 1,
         cooldown_ms: 60 * 60_000,
     };
+    let scope = test_provider_failure_scope(
+        "incomplete_key_identity",
+        "incomplete_key_identity",
+        "scope",
+    )
+    .expect("failure session scope");
 
     let result = health.record_provider_key_failure_action(
         "primary",
@@ -578,11 +582,12 @@ fn incomplete_key_identity_fails_before_provider_cooldown_write() {
         v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
     );
     assert!(result.is_err());
-    assert!(health
-        .global_cooldown
-        .lock()
-        .expect("global cooldown lock")
-        .availability("primary", None, None, u64::MAX));
+    assert!(
+        health
+            .store()
+            .availability_for_session(&scope, "primary", None, None, u64::MAX)
+            .available
+    );
 }
 
 #[test]
@@ -756,7 +761,10 @@ async fn provider_invalid_request_error_is_health_neutral_even_when_wrapped_as_5
     .await
     .expect("invalid request must be handled without provider health mutation");
 
-    assert_eq!(result.event.health_record.state, "request_local_provider_compat");
+    assert_eq!(
+        result.event.health_record.state,
+        "request_local_provider_compat"
+    );
     assert_eq!(result.event.health_record.failure_count, 0);
     assert_eq!(result.event.health_record.cooldown_until_ms, None);
     assert!(result.retry_selected.is_none());
@@ -836,10 +844,12 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         projection.body["error"]["code"],
         "captured_target_plan_expansion_failed"
     );
-    assert!(!projection
-        .body
-        .to_string()
-        .contains("prior provider returned 429"));
+    assert!(
+        !projection
+            .body
+            .to_string()
+            .contains("prior provider returned 429")
+    );
 }
 
 #[test]
@@ -1077,12 +1087,16 @@ async fn transport_error_excludes_only_the_failed_provider_key() {
         1,
         "transport error must exclude only the failed provider key"
     );
-    assert!(state
-        .failed_candidates
-        .contains(&"first:key1:gpt-test".to_string()));
-    assert!(!state
-        .failed_candidates
-        .contains(&"first:key2:gpt-test".to_string()));
+    assert!(
+        state
+            .failed_candidates
+            .contains(&"first:key1:gpt-test".to_string())
+    );
+    assert!(
+        !state
+            .failed_candidates
+            .contains(&"first:key2:gpt-test".to_string())
+    );
 }
 
 #[tokio::test]

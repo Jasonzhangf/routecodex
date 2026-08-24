@@ -22,11 +22,11 @@ chains:
       side_channel_writes: [v3.provider.failure_action]
   - step_id: v3-provider-key-health-model-02
     from_node: V3ProviderFailureAction
-    to_node: V3ProviderKeyHealthStore
+    to_node: V3ProviderHealthStore
     caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_key_failure_action
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderKeyHealthStore::record_provider_failure_action
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/key_health.rs
+    callee_symbol: V3ProviderHealthStore::record_provider_failure_action
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: source_controlled
     owner_feature_id: v3.provider_key_health_model_granularity
     resource_flow:
@@ -40,7 +40,7 @@ chains:
     caller_symbol: V3TargetInterpreter::select_available_with_health
     caller_file: v3/crates/routecodex-v3-target/src/lib.rs
     callee_symbol: V3ProviderSchedulingReader::scheduling_projection
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/key_health.rs
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: source_controlled
     owner_feature_id: v3.virtual_router_target_interpreter
     resource_flow:
@@ -7218,12 +7218,12 @@ chains:
   manifest: docs/architecture/manifests/v3.provider_global_subscription_probe.mainline.yml
   edges:
   - step_id: v3-provider-global-probe-01
-    from_node: V3ProviderGlobalSubscriptionHealthStore
+    from_node: V3ProviderHealthStore
     to_node: V3ProviderGlobalProbePermit
     caller_symbol: V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+    callee_symbol: V3ProviderHealthStore::try_acquire_provider_cooldown_probe
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
@@ -7267,7 +7267,7 @@ chains:
     to_node: V3ProviderGlobalProbeExecution
     caller_symbol: spawn_v3_server_aggregate
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_persistent_cooldown_probes
+    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
@@ -7279,7 +7279,7 @@ chains:
 
   - step_id: v3-provider-global-probe-03
     from_node: V3Error02Classified
-    to_node: V3ProviderGlobalSubscriptionHealthStore
+    to_node: V3ProviderHealthStore
     caller_symbol: execute_v3_responses_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
@@ -7479,11 +7479,11 @@ chains:
       side_channel_writes: [v3.error.source]
   - step_id: v3-provider-global-probe-04
     from_node: V3ProviderGlobalSubscriptionFailureObservation
-    to_node: V3ProviderGlobalSubscriptionHealthStore
-    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_cooldown_failure
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+    callee_symbol: V3ProviderHealthStore::record_provider_failure_in_session_with_policy
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
@@ -7507,7 +7507,7 @@ chains:
       side_channel_writes: [v3.provider.global_subscription_health]
   - step_id: v3-provider-global-probe-06
     from_node: V3ProviderGlobalSubscriptionFailureObservation
-    to_node: V3ProviderGlobalSubscriptionHealthStore
+    to_node: V3ProviderHealthStore
     caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
@@ -7521,11 +7521,11 @@ chains:
       side_channel_writes: [v3.provider.global_subscription_health]
   - step_id: v3-provider-global-probe-07
     from_node: V3ProviderFailureRuntimeHealth
-    to_node: V3ProviderGlobalSubscriptionHealthStore
+    to_node: V3ProviderHealthStore
     caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderGlobalSubscriptionHealthStore::record_provider_success
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+    callee_symbol: V3ProviderHealthStore::record_provider_key_success
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
@@ -7563,7 +7563,7 @@ chains:
       side_channel_writes: [v3.error.classified]
   - step_id: v3-provider-global-probe-09
     from_node: V3ProviderGlobalSubscriptionFailureObservation
-    to_node: V3ProviderGlobalSubscriptionHealthStore
+    to_node: V3ProviderHealthStore
     caller_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error

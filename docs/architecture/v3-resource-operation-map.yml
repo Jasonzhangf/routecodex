@@ -934,20 +934,18 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v3.provider.key_health_state
-    resource_kind: side_channel_persistence
+    resource_kind: side_channel
     lifecycle: v3.provider_key_health_model_granularity
     owner_feature_id: v3.provider_key_health_model_granularity
     owner_crate: routecodex-v3-provider-responses
-    owner_node: V3ProviderKeyHealthStore
+    owner_node: V3ProviderHealthStore
     identity: [providerId, authAlias, modelId]
     semantic_contract:
       cross_session_same_model: shared
       cross_model_same_key: isolated
-      persistence_schema: 4
-      v3_migration: probeModelIdRequired
       revival_rule: only matching-model probe success removes cooldown
-    allowed_writers: [V3ProviderKeyHealthStore::record_provider_failure_action, V3ProviderKeyHealthStore::record_provider_success, V3ProviderKeyHealthStore::complete_probe_success, V3ProviderKeyHealthStore::complete_probe_failure]
-    allowed_readers: [V3ProviderKeyHealthStore::scheduling_projection, V3ProviderKeyHealthStore::provider_key_health_probe_keys, V3ProviderKeyHealthStore::acquire_provider_key_health_probe]
+    allowed_writers: [V3ProviderHealthStore::record_provider_failure_action, V3ProviderHealthStore::record_provider_success, V3ProviderHealthStore::complete_probe_success, V3ProviderHealthStore::complete_probe_failure]
+    allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::provider_key_health_probe_keys, V3ProviderHealthStore::acquire_provider_key_health_probe]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -977,27 +975,27 @@ resources:
     resource_kind: side_channel
     lifecycle: v3.debug_error_foundation.mainline
     owner_crate: routecodex-v3-provider-responses
-    owner_node: V3ProviderGlobalSubscriptionHealthStore
+    owner_node: V3ProviderHealthStore
     identity: [providerId, authAlias, modelId]
-    allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure, V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error, V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response, V3ProviderGlobalSubscriptionHealthStore::record_provider_success, V3ProviderGlobalSubscriptionHealthStore::complete_probe_success, V3ProviderGlobalSubscriptionHealthStore::complete_probe_failure, V3ProviderGlobalSubscriptionHealthStore::reset_after_restart]
-    allowed_readers: [V3ProviderGlobalSubscriptionHealthStore::availability, V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe]
+    allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure, V3ProviderHealthStore::record_provider_failure_in_session_with_policy, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at, V3ProviderHealthStore::complete_provider_cooldown_probe_failure]
+    allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::try_acquire_provider_cooldown_probe]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-server]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v3.provider.global_cooldown_persistence
-    resource_kind: side_channel_persistence
+    resource_kind: retired_side_channel_persistence
     lifecycle: v3.server.startup_and_provider_failure.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderGlobalCooldownPersistence
     identity: [providerId, authAlias, modelId, failureClass, cooldownUntilMs, nextProbeAtMs]
-    allowed_writers: [V3ProviderGlobalCooldownPersistence::persist, V3ProviderGlobalCooldownPersistence::load]
-    allowed_readers: [V3ProviderGlobalSubscriptionHealthStore, V3ProviderHealthStore, V3ServerAggregateLifecycle]
+    allowed_writers: []
+    allowed_readers: []
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
-    required_gates: [provider_global_cooldown_persistence_contract, provider_global_probe_startup_contract]
-    binding_status: design
+    required_gates: []
+    binding_status: retired
 
   - resource_id: v3.front.request_lease
     resource_kind: control_resource
@@ -1091,7 +1089,7 @@ resources:
       source_state: v3.provider.key_health_state
       cross_model_same_key: isolated
       forbidden_consumers: [request.normal_payload, response.client_payload, MetadataCenter]
-    allowed_writers: [V3ProviderKeyHealthStore::scheduling_projection]
+    allowed_writers: [V3ProviderHealthStore::scheduling_projection]
     allowed_readers: [V3TargetInterpreter::select_available_with_health]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target]
     may_enter_provider_body: false

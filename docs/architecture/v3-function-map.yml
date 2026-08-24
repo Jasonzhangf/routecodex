@@ -8,18 +8,19 @@ features:
   owner_crates:
   - routecodex-v3-provider-responses
   owner_files:
-  - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs
   resource_bindings:
   - v3.provider.key_health_state
   entry_symbols:
-  - V3ProviderKeyHealthStore::record_provider_failure_action
-  - V3ProviderKeyHealthStore::record_provider_success
-  - V3ProviderKeyHealthStore::complete_probe_success
-  - V3ProviderKeyHealthStore::complete_probe_failure
-  - V3ProviderKeyHealthStore::scheduling_projection
-  - V3ProviderKeyHealthStore::provider_key_health_probe_keys
+  - V3ProviderHealthStore::record_provider_failure_action
+  - V3ProviderHealthStore::record_provider_success
+  - V3ProviderHealthStore::complete_probe_success
+  - V3ProviderHealthStore::complete_probe_failure
+  - V3ProviderHealthStore::scheduling_projection
+  - V3ProviderHealthStore::provider_key_health_probe_keys
   allowed_paths:
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs
   - docs/architecture
@@ -38,8 +39,9 @@ features:
   - npm run test:v3-provider-key-health-model-binding-red-fixtures
   - git diff --check
 - feature_id: v3.provider_global_cooldown_persistence
+  status: retired
   owner_crate: routecodex-v3-provider-responses
-  owner_file: v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+  owner_file: null
   resource_bindings:
   - v3.provider.global_cooldown_persistence
   entry_symbols:
@@ -50,18 +52,11 @@ features:
   - V3ProviderCooldownCoordinator::apply_probe_success
   - V3ProviderCooldownCoordinator::apply_probe_failure
   - V3ProviderCooldownCoordinator::persist
-  allowed_paths:
-  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
-  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - v3/crates/routecodex-v3-server/src/lib.rs
-  - v3/.appsdk/**
+  allowed_paths: []
   forbidden_paths:
   - request.normal_payload
   - response.client_payload
-  required_gates:
-  - npm run test:v3-provider-global-cooldown-persistence
-  - npm run verify:v3-resource-map
-  - npm run verify:v3-module-boundaries
+  required_gates: []
 - feature_id: v3.managed_server_lifecycle
   owner_crate: routecodex-v3-lifecycle
   owner_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
@@ -418,13 +413,12 @@ features:
   - V3ProviderHealthStore::record_provider_success_in_session
   - V3ProviderHealthStore::availability
   - V3ProviderHealthStore::availability_for_session
-  - V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response
-  - V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
-  - V3ProviderGlobalSubscriptionHealthStore::complete_probe_success
-  - V3ProviderGlobalSubscriptionHealthStore::complete_probe_failure
-  - V3ProviderGlobalSubscriptionHealthStore::reset_after_restart
-  - V3ProviderGlobalSubscriptionHealthStore::record_provider_success
-  - V3ProviderFailureRuntimeHealth::record_provider_global_cooldown_failure
+  - V3ProviderHealthStore::record_provider_failure_in_session_with_policy
+  - V3ProviderHealthStore::try_acquire_provider_cooldown_probe
+  - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at
+  - V3ProviderHealthStore::complete_provider_cooldown_probe_failure
+  - V3ProviderHealthStore::record_provider_key_success
+  - V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
   - V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
   - configured_retry_budget_for_failure
   - configured_health_policy_for_failure
@@ -4812,7 +4806,7 @@ features:
 - feature_id: v3.provider_global_subscription_probe
   status: source_active_live_verification_required
   change_risk: critical
-  owner_kind: rust_v3_provider_global_health_lifecycle
+  owner_kind: rust_v3_provider_adaptive_health_lifecycle
   owner_crates:
   - routecodex-v3-error
   - routecodex-v3-provider-responses
@@ -4821,8 +4815,9 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-error/src/subscription.rs
-  - v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
-  - v3/crates/routecodex-v3-provider-responses/src/probe.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
+  - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
@@ -4840,16 +4835,14 @@ features:
   - build_v3_provider_global_failure_policy
   - V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
   - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
-  - V3ProviderGlobalSubscriptionHealthStore::record_provider_success
-  - V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
-  - V3ProviderFailureRuntimeHealth::record_provider_global_cooldown_failure
+  - V3ProviderHealthStore::record_provider_key_success
+  - V3ProviderHealthStore::try_acquire_provider_cooldown_probe
+  - V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
   - V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
-  - V3ProviderFailureRuntimeHealth::run_due_persistent_cooldown_probes
   - probe_v3_provider_global_target
   - spawn_v3_server_aggregate
   allowed_paths:
   - v3/crates/routecodex-v3-error/src/lib.rs
-  - v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_global_subscription_probe_contract.rs
@@ -5177,7 +5170,7 @@ features:
   status: source_controlled_runtime_pending_live_replay
   change_risk: critical
   owner_kind: rust_v3_provider_key_health_scoring
-  owner_scope: Provider-owned key score, failure/success streak, typed recovery action application, persisted cooldown/probe recovery, and Target same-priority scheduling projection.
+  owner_scope: Provider-owned key score, failure/success streak, typed recovery action application, process-local cooldown/probe recovery, and Target same-priority scheduling projection.
   owner_crates:
   - routecodex-v3-error
   - routecodex-v3-provider-responses
@@ -5185,9 +5178,7 @@ features:
   - routecodex-v3-runtime
   owner_files:
   - v3/crates/routecodex-v3-error/src/lib.rs
-  - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
-  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
   - v3/crates/routecodex-v3-provider-responses/src/lib.rs
   - v3/crates/routecodex-v3-target/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -5197,17 +5188,14 @@ features:
   - v3.provider.scheduling_projection
   entry_symbols:
   - build_v3_provider_failure_action_from_v3_error_02
-  - V3ProviderKeyHealthStore::record_provider_failure_action
-  - V3ProviderKeyHealthStore::record_provider_success
-  - V3ProviderKeyHealthStore::complete_probe_success
-  - V3ProviderKeyHealthStore::complete_probe_failure
-  - V3ProviderKeyHealthStore::complete_probe_success_at_generation
-  - V3ProviderKeyHealthStore::provider_key_health_probe_keys
-  - V3ProviderKeyHealthStore::acquire_provider_key_health_probe
-  - V3ProviderKeyHealthStore::new_persistent
-  - V3ProviderKeyHealthStore::load_persistent
-  - V3ProviderKeyHealthStore::persist
-  - V3ProviderKeyHealthStore::scheduling_projection
+  - V3ProviderHealthStore::record_provider_failure_action
+  - V3ProviderHealthStore::record_provider_success
+  - V3ProviderHealthStore::complete_probe_success
+  - V3ProviderHealthStore::complete_probe_failure
+  - V3ProviderHealthStore::complete_probe_success_at_generation
+  - V3ProviderHealthStore::provider_key_health_probe_keys
+  - V3ProviderHealthStore::acquire_provider_key_health_probe
+  - V3ProviderHealthStore::scheduling_projection
   - V3ProviderSchedulingReader
   - V3TargetInterpreter::select_available_with_health
   - V3TargetInterpreter::route_tier_index
@@ -5218,7 +5206,6 @@ features:
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
-  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
   - v3/crates/routecodex-v3-provider-responses/src/lib.rs
   - v3/crates/routecodex-v3-provider-responses/tests/**
   - v3/crates/routecodex-v3-target/src/lib.rs

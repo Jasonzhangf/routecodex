@@ -315,8 +315,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:54da53b0e0cccf67d1ee5631bd31c7e4fc8edfaad5b49938f28cbadf72205aac
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:79853ba6ff91f05131823e83e3dac6c5167984eedb8ca15acb802abb4d0dd487
+    last_manual_authorization_id: auth-20260823-v3-provider-adaptive-health-terminal-merge
   - item_id: chain:v3.protocol_conversion_field_parity
     chain_id: v3.protocol_conversion_field_parity
     status: audited_locked
@@ -451,8 +451,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:a0d809d8352e7215a2d9361de56480ee07ec5ec2b83199ca540405c8aebcac22
-    last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-provider-action
+    fingerprint: sha256:3c8d46790fab4b8241fe9f8b0357f2ff8023ab81985426bdca969c422af953cd
+    last_manual_authorization_id: auth-20260823-v3-provider-adaptive-health-action-gate
   - item_id: chain:v3.build_test_artifact_budget
     chain_id: v3.build_test_artifact_budget
     status: audited_locked
@@ -491,9 +491,30 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:5e3eaa3e922006e328161993b3c9ea67aff6f4111fab1556c7342b7a93bb565e
-    last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-global-probe
+    fingerprint: sha256:4015c43636de22ea0b61ad6cc0604f5b21bbde3178fbf2af5d242de8369f076c
+    last_manual_authorization_id: auth-20260823-v3-provider-adaptive-health-global-probe
 manual_authorizations:
+  - authorization_id: auth-20260823-v3-provider-adaptive-health-terminal-merge
+    item_id: chain:v3.responses_provider_event.terminal_merge
+    approved_by: Jason
+    approved_at: '2026-08-23T00:00:00-07:00'
+    reason: "Jason authorized the provider adaptive health/cooldown/probe implementation, consolidation under V3ProviderHealthStore, and synchronized canonical maps/wiki/manifest required by the task. This refresh records the current checked-in terminal-merge chain fingerprint after canonical regeneration."
+    fingerprint_before: sha256:54da53b0e0cccf67d1ee5631bd31c7e4fc8edfaad5b49938f28cbadf72205aac
+    fingerprint_after: sha256:79853ba6ff91f05131823e83e3dac6c5167984eedb8ca15acb802abb4d0dd487
+  - authorization_id: auth-20260823-v3-provider-adaptive-health-action-gate
+    item_id: chain:v3.provider_action_gate.mainline
+    approved_by: Jason
+    approved_at: '2026-08-23T00:00:00-07:00'
+    reason: "Jason authorized the provider adaptive health/cooldown/probe implementation, consolidation under V3ProviderHealthStore, and synchronized canonical maps/wiki/manifest required by the task. This refresh records the current checked-in provider-action chain fingerprint after canonical regeneration."
+    fingerprint_before: sha256:a0d809d8352e7215a2d9361de56480ee07ec5ec2b83199ca540405c8aebcac22
+    fingerprint_after: sha256:3c8d46790fab4b8241fe9f8b0357f2ff8023ab81985426bdca969c422af953cd
+  - authorization_id: auth-20260823-v3-provider-adaptive-health-global-probe
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-23T00:00:00-07:00'
+    reason: "Jason authorized the provider adaptive health/cooldown/probe implementation, consolidation under V3ProviderHealthStore, and synchronized canonical maps/wiki/manifest required by the task. This refresh records the current checked-in provider-global-probe chain fingerprint after canonical regeneration."
+    fingerprint_before: sha256:5e3eaa3e922006e328161993b3c9ea67aff6f4111fab1556c7342b7a93bb565e
+    fingerprint_after: sha256:4015c43636de22ea0b61ad6cc0604f5b21bbde3178fbf2af5d242de8369f076c
   - authorization_id: auth-20260818-v3-provider-global-timeout-and-edge-correction
     item_id: chain:v3.provider_global_subscription_probe
     approved_by: Jason

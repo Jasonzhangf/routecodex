@@ -2845,9 +2845,9 @@ async fn completed_responses_sse_reaches_eof_without_late_keepalive_comments() {
 
 #[tokio::test]
 async fn io_sse_body_internal_error_is_explicit_599_not_silent_eof() {
-    let provider = futures_util::stream::iter(vec![Err::<Vec<u8>, io::Error>(
-        io::Error::other("response body transport failed"),
-    )]);
+    let provider = futures_util::stream::iter(vec![Err::<Vec<u8>, io::Error>(io::Error::other(
+        "response body transport failed",
+    ))]);
     let body = v3_io_sse_body(Box::pin(provider), None);
     let mut client = body.into_data_stream();
 
@@ -2860,7 +2860,10 @@ async fn io_sse_body_internal_error_is_explicit_599_not_silent_eof() {
     assert!(error.starts_with("event: error\n"), "{error}");
     assert!(error.contains("\"status\":599"), "{error}");
     assert!(error.contains("internal_response_stream_error"), "{error}");
-    assert!(client.next().await.is_none(), "error event must close the body");
+    assert!(
+        client.next().await.is_none(),
+        "error event must close the body"
+    );
 }
 
 #[tokio::test]

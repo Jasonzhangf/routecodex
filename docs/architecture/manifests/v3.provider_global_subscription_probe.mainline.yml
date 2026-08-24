@@ -1,6 +1,6 @@
 lifecycle_id: v3.provider_global_subscription_probe
 entrypoint: spawn_v3_server_aggregate
-return_path: V3ProviderGlobalSubscriptionHealthStore
+return_path: V3ProviderHealthStore
 owner_feature: v3.provider_global_subscription_probe
 canonical_docs:
   - docs/goals/v3-provider-error-disposition-path-config-plan.md
@@ -13,7 +13,7 @@ verification_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib configured_semantic_global_failure_keeps_manifest_cooldown_policy -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
 nodes:
-  - id: V3ProviderGlobalSubscriptionHealthStore
+  - id: V3ProviderHealthStore
     owner: routecodex-v3-provider-responses
   - id: V3ProviderGlobalProbePermit
     owner: routecodex-v3-provider-responses
@@ -30,14 +30,14 @@ nodes:
   - id: V3ProviderFailureRuntimeHealth
     owner: routecodex-v3-runtime
 edges:
-  - from: V3ProviderGlobalSubscriptionHealthStore
+  - from: V3ProviderHealthStore
     to: V3ProviderGlobalProbePermit
   - from: V3ServerAggregateLifecycle
     to: V3ProviderGlobalProbeExecution
   - from: V3ProviderGlobalSubscriptionFailureObservation
-    to: V3ProviderGlobalSubscriptionHealthStore
+    to: V3ProviderHealthStore
   - from: V3Error02Classified
-    to: V3ProviderGlobalSubscriptionHealthStore
+    to: V3ProviderHealthStore
   - from: V3Error01SourceRaised
     to: V3Error02Classified
   - from: V3ProviderFailureRuntimeHealth

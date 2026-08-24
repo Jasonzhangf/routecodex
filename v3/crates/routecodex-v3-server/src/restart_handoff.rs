@@ -1242,14 +1242,16 @@ mod tests {
             .register_front_socket(connection, socket.clone())
             .expect("front socket registration");
 
-    broker.close_active_client_transports();
+        broker.close_active_client_transports();
 
         assert!(socket.is_closed());
     }
 
     #[tokio::test]
     async fn broker_close_finishes_active_tcp_client_before_exec_replacement() {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
         let address = listener.local_addr().unwrap();
         let broker = V3FrontTransportBroker::new(0);
         let connection_identity = broker.allocate_connection_identity();
@@ -1294,10 +1296,13 @@ mod tests {
             Duration::from_secs(1),
             tokio::io::AsyncReadExt::read_to_end(&mut client, &mut response),
         )
-            .await
-            .expect("restart closeout must not leave a half-open client transport")
-            .expect("client EOF read must succeed");
-        assert!(response.is_empty(), "no HTTP response should be fabricated by closeout");
+        .await
+        .expect("restart closeout must not leave a half-open client transport")
+        .expect("client EOF read must succeed");
+        assert!(
+            response.is_empty(),
+            "no HTTP response should be fabricated by closeout"
+        );
         tokio::io::AsyncWriteExt::shutdown(&mut client)
             .await
             .expect("client write half shutdown");

@@ -44,7 +44,7 @@ const mutations = [
   ['unregistered scheduling writer', async (root) => replaceOnce(
     root,
     'docs/architecture/v3-resource-operation-map.yml',
-    'allowed_writers: [V3ProviderKeyHealthStore::scheduling_projection]',
+    'allowed_writers: [V3ProviderHealthStore::scheduling_projection]',
     'allowed_writers: [V3ProviderAvailabilityProjected]',
   )],
 ];

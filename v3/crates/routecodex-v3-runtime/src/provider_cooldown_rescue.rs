@@ -61,10 +61,11 @@ impl V3ProviderFailureRuntimeHealth {
                 match result {
                     Ok(()) => health
                         .store
-                        .complete_provider_cooldown_probe_success(
+                        .complete_provider_cooldown_probe_success_at(
                             &provider_id,
                             Some(&auth_alias),
                             Some(&model_id),
+                            v3_relay_provider_policy_now_epoch_ms()?,
                         )
                         .map_err(|error| error.to_string()),
                     Err(_error) => {

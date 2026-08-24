@@ -54,11 +54,11 @@ const expectedEdges = [
   {
     id: 'v3-provider-key-health-model-02',
     from: 'V3ProviderFailureAction',
-    to: 'V3ProviderKeyHealthStore',
+    to: 'V3ProviderHealthStore',
     callerFile: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
     callerSymbol: 'V3ProviderFailureRuntimeHealth::record_provider_key_failure_action',
-    calleeFile: 'v3/crates/routecodex-v3-provider-responses/src/key_health.rs',
-    calleeSymbol: 'V3ProviderKeyHealthStore::record_provider_failure_action',
+    calleeFile: 'v3/crates/routecodex-v3-provider-responses/src/health.rs',
+    calleeSymbol: 'V3ProviderHealthStore::record_provider_failure_action',
     owner: 'v3.provider_key_health_model_granularity',
     consumes: ['v3.provider.failure_action'],
     produces: ['v3.provider.key_health_state'],
@@ -69,7 +69,7 @@ const expectedEdges = [
     to: 'V3Target10ConcreteProviderSelected',
     callerFile: 'v3/crates/routecodex-v3-target/src/lib.rs',
     callerSymbol: 'V3TargetInterpreter::select_available_with_health',
-    calleeFile: 'v3/crates/routecodex-v3-provider-responses/src/key_health.rs',
+    calleeFile: 'v3/crates/routecodex-v3-provider-responses/src/health.rs',
     calleeSymbol: 'V3ProviderSchedulingReader::scheduling_projection',
     owner: 'v3.virtual_router_target_interpreter',
     consumes: ['v3.provider.scheduling_projection'],
@@ -104,8 +104,8 @@ for (const expected of expectedEdges) {
 
 for (const [resourceId, writers, readers] of [
   ['v3.provider.failure_action', ['build_v3_provider_failure_action_from_v3_error_02'], ['V3ProviderFailureRuntimeHealth::record_provider_key_failure_action']],
-  ['v3.provider.key_health_state', ['V3ProviderKeyHealthStore::record_provider_failure_action'], []],
-  ['v3.provider.scheduling_projection', ['V3ProviderKeyHealthStore::scheduling_projection'], ['V3TargetInterpreter::select_available_with_health']],
+    ['v3.provider.key_health_state', ['V3ProviderHealthStore::record_provider_failure_action'], []],
+  ['v3.provider.scheduling_projection', ['V3ProviderHealthStore::scheduling_projection'], ['V3TargetInterpreter::select_available_with_health']],
 ]) {
   const resource = resourceById.get(resourceId);
   if (!resource) continue;

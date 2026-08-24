@@ -510,7 +510,7 @@ pub async fn spawn_v3_server_aggregate(
                         }
                     };
                     let manifest_for_probe = Arc::clone(&probe_manifest);
-                    let result = probe_health.run_due_persistent_cooldown_probes(now_ms, move |provider_id, auth_alias, model_id| {
+                    let result = probe_health.run_due_global_subscription_probes(now_ms, move |provider_id, auth_alias, model_id| {
                         let manifest_for_probe = Arc::clone(&manifest_for_probe);
                         async move {
                             let target = build_v3_provider_global_probe_target(
@@ -523,7 +523,7 @@ pub async fn spawn_v3_server_aggregate(
                         }
                     }).await;
                     if let Err(error) = result {
-                        eprintln!("provider persistent cooldown probe cycle failed: {error}");
+                        eprintln!("adaptive provider cooldown probe cycle failed: {error}");
                     }
                     let key_manifest_for_probe = Arc::clone(&probe_manifest);
                     let key_result = probe_health.run_due_provider_key_health_probes(

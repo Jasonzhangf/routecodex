@@ -247,120 +247,120 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                 execution_mode,
             )
             .await
-        };
-        tokio::pin!(run);
-        loop {
-            tokio::select! {
-                biased;
-                result = &mut run => {
-                    // 完整链（VR 命中 → Relay → Provider → resp 转换）完成；空响应
-                    // 自动重试 3 次/错误链/reselect/502 投影已在 relay runtime 内完成
-                    // （错误链：handle_provider_failure → 3 次拉黑 15 分钟 → 切 provider），
-                    // server 只负责把转换结果喂给客户端（连接与心跳由 server 管理）。
-                    match result {
-                        Ok(output) => {
-                            let observability = output.observability.clone();
-                            let stream_observation = output.stream_observation.clone();
-                            let output_status = output.status;
-                            let node_trace = output.node_trace.clone();
-                            match output.client_body {
-                            V3OpenAiChatRelayClientBody::Sse(stream) => {
-                                // 与 endpoint_handlers relay 路径同一 closeout
-                                // 收口语义：流 Err → post-commit 502 provider SSE
-                                // 失败；干净 EOF → completed 打印；客户端断连 →
-                                // 499。禁止流失败后仍当成功收口（旧实现把 provider
-                                // 缺终帧误报成 500 runtime_observability_contract）。
-                                let stream_console_finalizer =
-                                    match (stream_observation, observability) {
-                                        (Some(stream_observation), Some(observability)) => {
-                                            Some(V3SseConsoleFinalizer {
-                                                context: console_context.clone(),
-                                                status: output_status,
-                                                node_trace,
-                                                observability,
-                                                stream_observation,
-                                                started_at,
-                                            })
+            };
+            tokio::pin!(run);
+            loop {
+                tokio::select! {
+                    biased;
+                    result = &mut run => {
+                        // 完整链（VR 命中 → Relay → Provider → resp 转换）完成；空响应
+                        // 自动重试 3 次/错误链/reselect/502 投影已在 relay runtime 内完成
+                        // （错误链：handle_provider_failure → 3 次拉黑 15 分钟 → 切 provider），
+                        // server 只负责把转换结果喂给客户端（连接与心跳由 server 管理）。
+                        match result {
+                            Ok(output) => {
+                                let observability = output.observability.clone();
+                                let stream_observation = output.stream_observation.clone();
+                                let output_status = output.status;
+                                let node_trace = output.node_trace.clone();
+                                match output.client_body {
+                                V3OpenAiChatRelayClientBody::Sse(stream) => {
+                                    // 与 endpoint_handlers relay 路径同一 closeout
+                                    // 收口语义：流 Err → post-commit 502 provider SSE
+                                    // 失败；干净 EOF → completed 打印；客户端断连 →
+                                    // 499。禁止流失败后仍当成功收口（旧实现把 provider
+                                    // 缺终帧误报成 500 runtime_observability_contract）。
+                                    let stream_console_finalizer =
+                                        match (stream_observation, observability) {
+                                            (Some(stream_observation), Some(observability)) => {
+                                                Some(V3SseConsoleFinalizer {
+                                                    context: console_context.clone(),
+                                                    status: output_status,
+                                                    node_trace,
+                                                    observability,
+                                                    stream_observation,
+                                                    started_at,
+                                                })
+                                            }
+                                            _ => None,
+                                        };
+                                    drain_v3_openai_chat_relay_sse_stream_to_client(
+                                        stream,
+                                        &tx,
+                                        stream_console_finalizer,
+                                    )
+                                    .await;
+                                }
+                                V3OpenAiChatRelayClientBody::Json(json) => {
+                                    // provider 以 JSON 完成（非 SSE）：包装为 SSE data 帧。
+                                    let bytes = match serde_json::to_vec(&json) {
+                                        Ok(bytes) => bytes,
+                                        Err(error) => {
+                                            let _ = tx
+                                                .send(v3_sse_error_event_chunk(
+                                                    599,
+                                                    "internal_response_projection_error",
+                                                    &format!(
+                                                        "internal response JSON projection failed: {error}"
+                                                    ),
+                                                ))
+                                                .await;
+                                            return;
                                         }
-                                        _ => None,
                                     };
-                                drain_v3_openai_chat_relay_sse_stream_to_client(
-                                    stream,
-                                    &tx,
-                                    stream_console_finalizer,
-                                )
-                                .await;
-                            }
-                            V3OpenAiChatRelayClientBody::Json(json) => {
-                                // provider 以 JSON 完成（非 SSE）：包装为 SSE data 帧。
-                                let bytes = match serde_json::to_vec(&json) {
-                                    Ok(bytes) => bytes,
-                                    Err(error) => {
-                                        let _ = tx
-                                            .send(v3_sse_error_event_chunk(
-                                                599,
-                                                "internal_response_projection_error",
-                                                &format!(
-                                                    "internal response JSON projection failed: {error}"
-                                                ),
-                                            ))
-                                            .await;
-                                        return;
+                                    let mut frame = Vec::with_capacity(bytes.len() + 8);
+                                    frame.extend_from_slice(b"data: ");
+                                    frame.extend_from_slice(&bytes);
+                                    frame.extend_from_slice(b"\n\n");
+                                    let _ = tx.send(frame).await;
+                                    emit_v3_relay_completed_console_after_stream(
+                                        &console_context,
+                                        output_status,
+                                        &node_trace,
+                                        observability,
+                                        stream_observation,
+                                        started_at,
+                                    );
+                                }
                                     }
-                                };
-                                let mut frame = Vec::with_capacity(bytes.len() + 8);
-                                frame.extend_from_slice(b"data: ");
-                                frame.extend_from_slice(&bytes);
-                                frame.extend_from_slice(b"\n\n");
-                                let _ = tx.send(frame).await;
-                                emit_v3_relay_completed_console_after_stream(
-                                    &console_context,
-                                    output_status,
-                                    &node_trace,
-                                    observability,
-                                    stream_observation,
-                                    started_at,
-                                );
-                            }
+                                }
+                                Err(error) => {
+                                    // 复用 runtime typed 投影（Error01-06 链），禁止
+                                    // handler 手拼错误帧旁路错误链。
+                                    let projected = project_v3_openai_chat_relay_runtime_failure(error);
+                                    let V3OpenAiChatRelayClientBody::Json(body) = projected.client_body
+                                    else {
+                                        // Error06 is a terminal JSON projection for this endpoint.
+                                        // Do not synthesize a second error payload here: that would
+                                        // hide a contract violation and make the accepted SSE task
+                                        // look successful to the client. The projector is the sole
+                                        // owner of the error shape.
+                                        panic!(
+                                            "V3 OpenAI Chat relay Error06 projected a non-JSON client body"
+                                        );
+                                    };
+                                    let bytes = serde_json::to_vec(&body)
+                                        .expect("typed V3 OpenAI Chat relay Error06 projection");
+                                    let mut data_frame = Vec::with_capacity(bytes.len() + 8);
+                                    data_frame.extend_from_slice(b"data: ");
+                                    data_frame.extend_from_slice(&bytes);
+                                    // Error06 is terminal for the already accepted
+                                    // client SSE connection.  Keep the provider error
+                                    // in the internal error chain, but always terminate
+                                    // the client stream explicitly.
+                                    let frame = append_v3_openai_chat_relay_sse_done(&data_frame);
+                                    let _ = tx.send(frame).await;
                                 }
                             }
-                            Err(error) => {
-                                // 复用 runtime typed 投影（Error01-06 链），禁止
-                                // handler 手拼错误帧旁路错误链。
-                                let projected = project_v3_openai_chat_relay_runtime_failure(error);
-                                let V3OpenAiChatRelayClientBody::Json(body) = projected.client_body
-                                else {
-                                    // Error06 is a terminal JSON projection for this endpoint.
-                                    // Do not synthesize a second error payload here: that would
-                                    // hide a contract violation and make the accepted SSE task
-                                    // look successful to the client. The projector is the sole
-                                    // owner of the error shape.
-                                    panic!(
-                                        "V3 OpenAI Chat relay Error06 projected a non-JSON client body"
-                                    );
-                                };
-                                let bytes = serde_json::to_vec(&body)
-                                    .expect("typed V3 OpenAI Chat relay Error06 projection");
-                                let mut data_frame = Vec::with_capacity(bytes.len() + 8);
-                                data_frame.extend_from_slice(b"data: ");
-                                data_frame.extend_from_slice(&bytes);
-                                // Error06 is terminal for the already accepted
-                                // client SSE connection.  Keep the provider error
-                                // in the internal error chain, but always terminate
-                                // the client stream explicitly.
-                                let frame = append_v3_openai_chat_relay_sse_done(&data_frame);
-                                let _ = tx.send(frame).await;
-                            }
-                        }
-                    return;
-                }
-                _ = interval.tick(), if !front_transport_owns_keepalive => {
-                    if tx.send(heartbeat.clone()).await.is_err() {
                         return;
+                    }
+                    _ = interval.tick(), if !front_transport_owns_keepalive => {
+                        if tx.send(heartbeat.clone()).await.is_err() {
+                            return;
+                        }
                     }
                 }
             }
-        }
         };
         if let Err(payload) = AssertUnwindSafe(worker).catch_unwind().await {
             let message = payload

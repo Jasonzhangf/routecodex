@@ -3114,14 +3114,15 @@ features:
 - feature_id: v3.provider_global_subscription_probe
   status: source_active_live_verification_required
   change_risk: critical
-  owner_kind: rust_v3_provider_global_health_lifecycle
+  owner_kind: rust_v3_provider_adaptive_health_lifecycle
   owner_modules:
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-error/src/subscription.rs
   - v3/crates/routecodex-v3-config/src/types.rs
   - v3/crates/routecodex-v3-config/src/validate/provider_error_policy.rs
-  - v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
-  - v3/crates/routecodex-v3-provider-responses/src/probe.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
+  - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
@@ -3130,6 +3131,7 @@ features:
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime configured_semantic_global_failure_keeps_manifest_cooldown_policy -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
@@ -3141,7 +3143,7 @@ features:
     source_controlled: true
     live_cutover: required
     global_install_restart: required
-    forbidden_claim: Do not claim hourly probe or provider-global recovery from state-only tests; live runtime evidence is required.
+    forbidden_claim: Do not claim adaptive recovery from state-only tests; live runtime evidence is required.
 
 - feature_id: v3.provider_response_error_policy_closeout
   status: implementation_in_progress
