@@ -1984,10 +1984,24 @@ async fn continuation_disabled_keeps_repeated_sse_response_ids_out_of_remote_sto
                 .is_none(),
             "live Direct SSE must not wait for provider EOF to finish runtime timing"
         );
+        let stream_observation = output
+            .stream_observation
+            .clone()
+            .expect("live Direct SSE must expose typed stream observation");
         let body = collect_sse_body_text(output.client_payload.body).await;
         assert!(body.contains("resp_http_sse_pending"));
         assert!(body.contains("call_http_sse_pending"));
         assert!(body.contains("[DONE]"));
+        let timing = stream_observation
+            .snapshot()
+            .expect("stream observation snapshot")
+            .timing
+            .expect("clean Direct SSE EOF must publish final runtime timing");
+        assert_eq!(
+            timing.internal.checked_add(timing.external),
+            Some(timing.runtime_total),
+            "published Direct SSE timing must preserve runtime identity"
+        );
         assert_eq!(
             state.len().unwrap(),
             0,
