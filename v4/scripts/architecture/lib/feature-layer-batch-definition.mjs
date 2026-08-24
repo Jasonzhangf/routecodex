@@ -194,10 +194,11 @@ function validateBatchSkeleton(manifest, registries, failures) {
         if (!module || module.status !== 'active' || module.owner !== moduleId) {
           addFailure(failures, 'BATCH_MODULE_BINDING', `batch ${batch.batch_id} module ${moduleId} is not an active unique owner`);
         }
-        if (claimedModules.has(moduleId)) {
-          addFailure(failures, 'DUPLICATE_BATCH_MODULE_OWNER', `${moduleId} is shared by batches ${claimedModules.get(moduleId)} and ${batch.batch_id}`);
-        }
-        claimedModules.set(moduleId, batch.batch_id);
+        // A registry module has one code owner, but a layer may partition that
+        // module into multiple independent batches.  Batch ownership is locked
+        // by non-overlapping owned_paths below, not by forbidding a shared
+        // module_id across layers.
+        if (!claimedModules.has(moduleId)) claimedModules.set(moduleId, batch.batch_id);
       }
       for (const ownedPath of batch.owned_paths ?? []) {
         if (!isOwnedPattern(ownedPath)) {

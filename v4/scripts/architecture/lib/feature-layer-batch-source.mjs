@@ -48,6 +48,16 @@ function selectedEntries(items, key, ids) {
   return selected.sort((left, right) => String(left[key]).localeCompare(String(right[key])));
 }
 
+function stableProjection(kind, entries) {
+  if (kind !== 'module') return entries;
+  return entries.map((entry) => ({
+    module_id: entry.module_id,
+    status: entry.status,
+    owner: entry.owner,
+    owned_paths: entry.owned_paths,
+  }));
+}
+
 function validateProjectionStability({
   task,
   batch,
@@ -63,8 +73,8 @@ function validateProjectionStability({
     ['module', candidateMaps.moduleRegistry.modules, input.moduleRegistry.modules, 'module_id', batch.module_ids ?? []],
   ];
   for (const [kind, candidateItems, currentItems, key, ids] of comparisons) {
-    const candidateProjection = selectedEntries(candidateItems, key, ids);
-    const currentProjection = selectedEntries(currentItems, key, ids);
+    const candidateProjection = stableProjection(kind, selectedEntries(candidateItems, key, ids));
+    const currentProjection = stableProjection(kind, selectedEntries(currentItems, key, ids));
     if (candidateProjection.length !== ids.length
         || currentProjection.length !== ids.length
         || canonicalJson(candidateProjection) !== canonicalJson(currentProjection)) {

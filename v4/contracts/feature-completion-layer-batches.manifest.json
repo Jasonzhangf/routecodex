@@ -195,7 +195,7 @@
       "owner_binding_status": "bound",
       "owner_function_id": "v4.plugin.request.responses_normalize",
       "module_ids": ["routecodex-v4-standard-plugins"],
-      "owned_paths": ["crates/routecodex-v4-standard-plugins/**"],
+      "owned_paths": ["crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs","crates/routecodex-v4-standard-plugins/src/provider_semantic.rs","crates/routecodex-v4-standard-plugins/src/request_governance.rs","crates/routecodex-v4-standard-plugins/src/request_normalize.rs","crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs"],
       "source_dependencies": [],
       "status": "source_green",
       "tasks": [
