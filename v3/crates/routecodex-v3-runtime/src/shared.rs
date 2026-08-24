@@ -1427,11 +1427,7 @@ fn observe_sse_frame_remote_continuation(
     if let Some(response_id) = semantic_response_id.as_ref() {
         *response_id_candidate = Some(response_id.clone());
     }
-    if event
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        == Some("response.created")
-    {
+    if event.get("type").and_then(serde_json::Value::as_str) == Some("response.created") {
         return Ok(semantic_response_id);
     }
     if matches!(
@@ -1850,42 +1846,6 @@ mod tests {
         let chunk = tokio::time::timeout(std::time::Duration::from_millis(100), stream.next())
             .await
             .expect("provider-attempt stream must start before provider EOF")
-            .expect("provider first chunk must be forwarded")
-            .expect("provider first chunk must be valid");
-        assert!(std::str::from_utf8(&chunk).unwrap().contains("early"));
-    }
-
-    #[tokio::test]
-    async fn direct_sse_projection_returns_before_provider_terminal_eof() {
-        let first = b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n";
-        let provider_stream = stream::once(async {
-            Ok::<Vec<u8>, V3ProviderError>(first.to_vec())
-        })
-        .chain(stream::pending::<Result<Vec<u8>, V3ProviderError>>());
-        let raw = V3ProviderResp14Raw::from_sse(
-            "req".to_string(),
-            "provider".to_string(),
-            200,
-            vec![V3ProviderResponseHeader {
-                name: "content-type".to_string(),
-                value: b"text/event-stream".to_vec(),
-            }],
-            Box::pin(provider_stream),
-        );
-
-        let projection = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            project_provider_raw_to_client_payload(raw),
-        )
-        .await
-        .expect("client projection must not wait for provider terminal EOF")
-        .expect("valid first semantic frame must project");
-        let V3ProviderAttemptBody::Sse(mut stream) = projection.attempt_payload.body else {
-            panic!("expected provider-attempt SSE body");
-        };
-        let chunk = tokio::time::timeout(std::time::Duration::from_millis(100), stream.next())
-            .await
-            .expect("projected stream must expose the first semantic frame")
             .expect("provider first chunk must be forwarded")
             .expect("provider first chunk must be valid");
         assert!(std::str::from_utf8(&chunk).unwrap().contains("early"));

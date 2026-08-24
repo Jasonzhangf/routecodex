@@ -25,8 +25,7 @@ use crate::remote_continuation::{
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
 use crate::shared::{
-    V3ProviderAttemptBody, V3RemoteContinuationObservation,
-    V3SseRemoteContinuationObservationState,
+    V3ProviderAttemptBody, V3RemoteContinuationObservation, V3SseRemoteContinuationObservationState,
 };
 use crate::sse_object_pipeline::process_sse_object_frame;
 use async_trait::async_trait;
@@ -1541,7 +1540,33 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                         );
                     let committed = match commit_direct_sse_stream(projected).await {
                         Ok(stream) => stream,
-                        Err(source) => return error_output(source, trace, &hook_registry),
+                        Err(source) => {
+                            if !matches!(
+                                source.source_kind,
+                                routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
+                            ) {
+                                return error_output(source, trace, &hook_registry);
+                            }
+                            if let Err(error) = runtime_timing.finish_external() {
+                                return error_output(
+                                    runtime_source("V3RuntimeTimingExternal", error),
+                                    trace,
+                                    &hook_registry,
+                                );
+                            }
+                            drop(provider_action_permit.take());
+                            let provider_id = source
+                                .external_error
+                                .as_ref()
+                                .and_then(|error| error.provider_id.clone());
+                            return committed_sse_provider_failure_output(
+                                source,
+                                provider_id,
+                                trace,
+                                &hook_registry,
+                                None,
+                            );
+                        }
                     };
                     if let (
                         false,

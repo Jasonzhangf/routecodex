@@ -105,8 +105,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                         .unwrap_or(false);
                     let result = result.map(|(out, _)| out.unwrap_or(chunk));
                     if result.is_ok() && terminal_observed {
-                        if terminal_observed
-                            && !state.runtime_timing.is_finished().unwrap_or(false)
+                        if terminal_observed && !state.runtime_timing.is_finished().unwrap_or(false)
                         {
                             if let Err(error) = state.runtime_timing.finish_external_if_active() {
                                 return Some((
@@ -614,6 +613,33 @@ pub(crate) fn projected_error_output_with_observability(
         error_chain: Some(projected.chain.to_vec()),
         protocol_relay_handoff: None,
     }
+}
+
+pub(crate) fn committed_sse_provider_failure_output(
+    source: V3Error01SourceRaised,
+    provider_id: Option<String>,
+    node_trace: Vec<&'static str>,
+    hook_registry: &V3HookRegistry,
+    observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesDirectRuntimeOutput {
+    let scope = provider_id.map(|provider_id| V3ErrorActionScope::ProviderInstance { provider_id });
+    let decision = hook_registry.run_error(
+        source,
+        scope.unwrap_or(V3ErrorActionScope::None),
+        0,
+        false,
+        false,
+        None,
+    );
+    assert!(
+        matches!(decision.action, V3Error05ExecutionAction::ProjectTerminal),
+        "committed SSE provider failures must terminate without retry or reselection"
+    );
+    projected_error_output_with_observability(
+        V3ErrorHandlingCenter::project_terminal(decision),
+        node_trace,
+        observability,
+    )
 }
 
 pub(crate) fn relay_handoff_output(

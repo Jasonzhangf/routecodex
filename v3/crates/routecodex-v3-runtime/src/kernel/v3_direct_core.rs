@@ -831,7 +831,37 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
             V3ProviderAttemptBody::Sse(stream) => {
                 let stream = match crate::kernel::direct_runtime_helpers_stream::commit_direct_sse_stream(stream).await {
                     Ok(stream) => stream,
-                    Err(source) => return error_output(source, trace, &crate::hooks::register_responses_direct_hooks()),
+                    Err(source) => {
+                        if !matches!(
+                            source.source_kind,
+                            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
+                        ) {
+                            return error_output(
+                                source,
+                                trace,
+                                &crate::hooks::register_responses_direct_hooks(),
+                            );
+                        }
+                        if let Err(error) = runtime_timing.finish_external() {
+                            return error_output(
+                                runtime_source("V3RuntimeTimingExternal", error),
+                                trace,
+                                &crate::hooks::register_responses_direct_hooks(),
+                            );
+                        }
+                        drop(provider_action_permit.take());
+                        let provider_id = source
+                            .external_error
+                            .as_ref()
+                            .and_then(|error| error.provider_id.clone());
+                        return committed_sse_provider_failure_output(
+                            source,
+                            provider_id,
+                            trace,
+                            &crate::hooks::register_responses_direct_hooks(),
+                            None,
+                        );
+                    }
                 };
                 drop(provider_action_permit.take());
                 V3ClientBody::CommittedSse(stream)
