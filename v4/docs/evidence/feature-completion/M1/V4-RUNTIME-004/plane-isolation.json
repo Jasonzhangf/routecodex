@@ -4,6 +4,7 @@
   "experiment_id": "v4-runtime-004-cordis-mount-candidate",
   "phase": "development_whitebox",
   "kind": "gate",
+  "execution_surface": "development_whitebox",
   "source_commit": "6c220209afd42162b16f070dafb60e3a432cb35c",
   "scope": {"feature_id": "V4-RUNTIME-004", "module_id": "routecodex-v4-cordis-bridge"},
   "producer": {"adapter": "cargo", "identity": "v4_runtime_004_mount_plane"},
