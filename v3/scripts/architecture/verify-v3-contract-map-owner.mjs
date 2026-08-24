@@ -56,6 +56,8 @@ function assertUniqueRegistryOwner(registry) {
     'npm run verify:v3-contract-map-owner',
     'npm run verify:v3-resource-map',
     'npm run verify:v3-direct-sse-accept-skeleton',
+    'npm run verify:sse-architecture-boundary',
+    'npm run verify:v3-architecture-ci',
   ]) {
     if (!owner.required_gates?.includes(gate)) failures.push(`registry: ${ownerFeatureId} missing gate ${gate}`);
   }
@@ -76,7 +78,7 @@ function assertCanonicalFeatureBindings(functionMap, resourceMap, mainlineMap, v
   if (!resource || resource.owner_feature_id !== ownerFeatureId) {
     failures.push('resource map: architecture.v3_contract_map_set must bind to the filesystem owner');
   }
-  const chain = mainlineMap.chains?.find((entry) => entry?.chain_id === 'architecture.repository_filesystem.mainline');
+  const chain = mainlineMap.chains?.find((entry) => entry?.chain_id === 'architecture.v3_contract_maps.mainline');
   const edge = chain?.edges?.find((entry) => entry?.step_id === 'architecture-v3-contract-map-01');
   if (!edge || edge.owner_feature_id !== ownerFeatureId) {
     failures.push('mainline map: contract-map verification edge is missing or has the wrong owner');
@@ -89,8 +91,12 @@ function assertCanonicalFeatureBindings(functionMap, resourceMap, mainlineMap, v
 
 function assertGateSource() {
   const source = readText('v3/scripts/architecture/verify-v3-contract-map-owner.mjs');
+  const architectureCi = readText('v3/scripts/architecture/verify-v3-architecture-ci.mjs');
   for (const symbol of ['function assertUniqueRegistryOwner', 'function assertCanonicalFeatureBindings']) {
     if (!source.includes(symbol)) failures.push(`gate source: missing ${symbol}`);
+  }
+  if (!architectureCi.includes("'verify:v3-contract-map-owner'")) {
+    failures.push('architecture CI: verify:v3-contract-map-owner is not wired into the V3 umbrella');
   }
 }
 

@@ -12,6 +12,7 @@ verification:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
+  - docs/architecture/manifests/architecture.v3_contract_maps.mainline.yml
   - docs/goals/root-generated-artifacts-governance-plan.md
   - docs/goals/repository-root-retirement-v4-v3-integration-plan.md
   integration:
@@ -25,6 +26,7 @@ verification:
   - npm run verify:v3-contract-map-owner
   - npm run verify:v3-direct-sse-accept-skeleton
   - npm run verify:sse-architecture-boundary
+  - npm run verify:v3-architecture-ci
   build:
   - npm run verify:repo-sanity
   notes:
