@@ -81,14 +81,30 @@
     {
       "batch_id": "B",
       "conditional": false,
-      "owner_binding_status": "pending",
-      "owner_function_id": null,
-      "module_ids": [],
-      "owned_paths": [],
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.runtime.node_plan_bundle",
+      "module_ids": ["routecodex-v4-plugin-plan"],
+      "owned_paths": ["crates/routecodex-v4-plugin-plan/**"],
       "source_dependencies": [],
-      "status": "pending",
+      "status": "source_green",
       "tasks": [
-        {"task_id":"V4-RUNTIME-003","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
+        {
+          "task_id":"V4-RUNTIME-003",
+          "status":"source_green",
+          "candidate_record":"docs/evidence/feature-completion/M1/V4-RUNTIME-003/fix-candidate.json",
+          "function_ids":["v4.runtime.node_plan_bundle"],
+          "resource_ids":["v4.runtime.node_plan_bundle"],
+          "source_paths":["crates/routecodex-v4-plugin-plan/src/lib.rs"],
+          "support_paths":[],
+          "required_gate_ids":["v4_runtime_003_plan_bundle_positive","v4_runtime_003_plan_bundle_red","v4_runtime_003_plan_bundle_boundary","v4_runtime_003_plan_bundle_plane"],
+          "mainline_binding":"forbidden_before_integration",
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_runtime_003_plan_bundle_positive","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-003/positive.json"},
+            {"role":"red_gate","gate_id":"v4_runtime_003_plan_bundle_red","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-003/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_runtime_003_plan_bundle_boundary","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-003/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_runtime_003_plan_bundle_plane","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-003/plane-isolation.json"}
+          ]
+        }
       ]
     },
     {

@@ -1,0 +1,23 @@
+{
+  "fix_candidate_id": "v4-runtime-003-plan-bundle-candidate",
+  "issue_id": "V4-RUNTIME-003",
+  "module_id": "routecodex-v4-plugin-plan",
+  "worktree_id": "v4-feature-completion-20260824T190611Z-Macstudio-v4branch",
+  "base_commit": "2518e7ec8db2c8bded0732b0f4745cedb3d0d3dc",
+  "head_commit": "897c712740d08a7e90ba80d2ee77102c235133f0",
+  "tree_hash": "b6ace4fdf2b989ba14f20e4f12d06dfc6c214ca1",
+  "diff_hash": "sha256:1f7d56b8a8cd05a09f2d82c1eeb6bf0e5173e5160c06d74a5d6f53043f3dca83",
+  "design_id": "v4-feature-completion-runtime-003a-plan-bundle",
+  "owner": "routecodex-v4-plugin-plan",
+  "scope_hash": "sha256:4a81c7ebe628fc64b6fc683471fd106741a98a86986dc81199e269774487deb8",
+  "changed_paths": [
+    "v4/crates/routecodex-v4-plugin-plan/src/lib.rs",
+    "v4/docs/architecture/maps/function-map.json",
+    "v4/docs/architecture/maps/resource-map.json",
+    "v4/docs/architecture/maps/verification-map.json"
+  ],
+  "verification_evidence_ids": ["positive", "red-gate", "boundary-audit", "plane-isolation"],
+  "created_at": "2026-08-24T05:10:00Z",
+  "batch_id": "B",
+  "task_ids": ["V4-RUNTIME-003"]
+}
