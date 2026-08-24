@@ -177,12 +177,17 @@ fn normalize_v3_responses_function_call_arguments_for_event(
             }
             return Ok(());
         };
-        if arguments.is_object() || arguments.is_array() {
+        if partial_function_call && arguments.is_null() {
+            *arguments = Value::String(String::new());
+            normalized = true;
+        } else if !arguments.is_string() {
+            // Responses function_call.arguments is JSON text. Providers may
+            // emit the JSON value itself (object/array/number/bool/null);
+            // serialize that value at the provider-response boundary without
+            // interpreting or repairing tool semantics. Missing terminal
+            // arguments remain invalid because there is no value to preserve.
             *arguments =
                 Value::String(serde_json::to_string(arguments).map_err(|error| error.to_string())?);
-            normalized = true;
-        } else if partial_function_call && arguments.is_null() {
-            *arguments = Value::String(String::new());
             normalized = true;
         }
         Ok(())
@@ -1603,6 +1608,29 @@ mod provider_sse_json_codec_tests {
                 .expect("classified outcome"),
                 V3ProviderResponsesJsonFrameOutcome::StartClientStream
             );
+        }
+    }
+
+    #[test]
+    fn responses_function_call_scalar_arguments_are_projected_as_json_string() {
+        for (raw, expected) in [("7", "7"), ("true", "true"), ("null", "null")] {
+            let data = format!(
+                r#"{{"type":"response.output_item.done","item":{{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":{raw}}}}}"#
+            );
+            let normalized = normalize_v3_provider_sse_json_data_with_event_name(
+                V3HubProviderWireProtocol::Responses,
+                &data,
+                None,
+            )
+            .expect("scalar function arguments must be normalized");
+            let value: Value = serde_json::from_str(&normalized).expect("normalized JSON");
+            assert_eq!(value["item"]["arguments"], expected);
+            assert!(classify_v3_provider_sse_json_data(
+                V3HubProviderWireProtocol::Responses,
+                &normalized
+            )
+            .expect("normalized scalar function_call must classify")
+            .is_some());
         }
     }
 
