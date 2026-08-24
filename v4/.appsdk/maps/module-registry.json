@@ -6,7 +6,15 @@
       "status": "active",
       "owner": "routecodex-v4-governance",
       "owned_paths": [
-        ".appsdk/**",
+        ".appsdk/goal.json",
+        ".appsdk/project.json",
+        ".appsdk/sdk.lock",
+        ".appsdk/maps/**",
+        ".appsdk/rules/**",
+        ".appsdk/skills/**",
+        ".appsdk/contracts/**",
+        ".appsdk/docs/**",
+        ".appsdk/sdk-resources.json",
         "contracts/**",
         "docs/**",
         "playground/**",
@@ -57,6 +65,30 @@
         "v4_active_link_resolver",
         "v4_active_index_verify",
         "v4_cargo_workspace_build"
+      ]
+    },
+    {
+      "module_id": "appsdk-record-graph",
+      "status": "active",
+      "owner": "appsdk::record_graph",
+      "owned_paths": [
+        ".appsdk/records/**"
+      ],
+      "forbidden_paths": [
+        "contracts/**",
+        "docs/**",
+        "scripts/**",
+        "crates/**",
+        "cordis/**",
+        "active/lib/**",
+        "protected/**",
+        "generated/**"
+      ],
+      "verification_gates": [
+        "record_graph",
+        "fix_lifecycle_graph",
+        "mainline_merge_identity",
+        "regression_report"
       ]
     },
     {
