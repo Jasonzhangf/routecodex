@@ -1,7 +1,7 @@
 {
   "ai_confidence": 0.94,
   "confidence_rationale": "Post-merge architecture re-audit confirms the migration candidate remains governance-only and the latest runtime control resources are owned by routecodex-v4-runtime, keyed by scope, explicit on error, and represented only as typed side-channel state. Current resource, function, call, and verification maps bind the real symbols without payload reconstruction or duplicate owners.",
-  "created_at": "2026-08-22T05:51:00Z",
+  "created_at": "2026-08-22T05:41:00Z",
   "evidence_ids": [
     "control-sdk013-candidate",
     "control-sdk013-positive",

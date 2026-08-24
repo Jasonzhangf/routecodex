@@ -1,0 +1,28 @@
+{
+  "fix_candidate_id": "v4-governance-product-map-candidate",
+  "issue_id": "v4.appsdk_product_map_alignment",
+  "module_id": "routecodex-v4-governance",
+  "worktree_id": "v4-governance-closeout-worktree",
+  "base_commit": "713878d87a1c221a41db731a74fecef1cf29eb8d",
+  "head_commit": "cbb1006d741f693df3f490bf9c092d989284e0dd",
+  "tree_hash": "f594307df49ce05fa5a7adb4087859af3967191d",
+  "diff_hash": "sha256:eac4bdb4b14e5eaf2875c96227cd8fc1e65742ad89180353c0b8b087072dd214",
+  "design_id": "v4-product-map-separation-v1",
+  "owner": "routecodex-v4-governance",
+  "scope_hash": "sha256:b9fbe0d93c2c5d6bb105b07b4471bf64acad32b31c371a4ab5329ec3adb13031",
+  "changed_paths": [
+    "v4/.appsdk/**",
+    "v4/docs/**",
+    "v4/scripts/**",
+    "v4/.gitignore"
+  ],
+  "verification_evidence_ids": [
+    "v4-governance-candidate",
+    "v4-governance-whitebox-positive",
+    "v4-governance-negative",
+    "v4-governance-install",
+    "v4-governance-restart",
+    "v4-governance-blackbox"
+  ],
+  "created_at": "2026-08-23T14:50:00Z"
+}

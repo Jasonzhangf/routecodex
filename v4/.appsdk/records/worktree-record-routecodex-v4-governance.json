@@ -1,0 +1,15 @@
+{
+  "worktree_id": "v4-governance-closeout-worktree",
+  "milestone_id": "v4-governance-lifecycle-v1",
+  "issue_id": "v4.appsdk_product_map_alignment",
+  "module_id": "routecodex-v4-governance",
+  "base_ref": "origin/main",
+  "base_commit": "713878d87a1c221a41db731a74fecef1cf29eb8d",
+  "branch": "codex/v4-appsdk015-hydrate-test-20260823",
+  "head_commit": "cbb1006d741f693df3f490bf9c092d989284e0dd",
+  "initial_clean": true,
+  "final_clean": true,
+  "isolation_mode": "isolated_worktree",
+  "scope_hash": "sha256:b9fbe0d93c2c5d6bb105b07b4471bf64acad32b31c371a4ab5329ec3adb13031",
+  "created_at": "2026-08-23T11:00:00Z"
+}
