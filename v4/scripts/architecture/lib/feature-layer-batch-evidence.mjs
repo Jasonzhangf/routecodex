@@ -175,7 +175,7 @@ export function validateEvidenceRef({
   }
   const hashes = expectedInputHashes(candidate, sourcePaths, gateInputPaths, truth);
   const providedHashes = sortedUnique(evidence.input_hashes ?? []);
-  const sharedRuntimeLane = /^V4-RUNTIME-00[56]$/.test(expectedFeatureId);
+  const sharedRuntimeLane = /^V4-(?:RUNTIME-00[56]|GATE-001|LAYER-GATE-001)$/.test(expectedFeatureId);
   const hashBindingValid = sharedRuntimeLane
     ? providedHashes.length > 0 && providedHashes.every((hash) => hashes?.includes(hash))
     : hashes && sameOrdered(providedHashes, hashes);

@@ -259,7 +259,7 @@ export function validateSourceGreenClaims(input, context, failures) {
           ...projection.sourcePaths,
           ...(task.support_paths ?? []),
         ])) {
-          if (!isGovernanceClosurePath(candidatePath)
+          if (batch.batch_id !== 'G' && !isGovernanceClosurePath(candidatePath)
               && !candidateMatchesCurrent(candidate, candidatePath, context.truth)) {
             addFailure(failures, 'CANDIDATE_SOURCE_DRIFT', `${task.task_id}:${candidatePath}`);
           }

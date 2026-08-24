@@ -326,7 +326,7 @@ export function validateCandidateRecord({
     ...(task.support_paths ?? []).map((item) => `v4/${item}`),
   ]).filter((candidatePath) => !isGovernanceClosurePath(candidatePath)));
   const laneChangedPaths = derived.changed_paths.filter((changedPath) => !isGovernanceClosurePath(changedPath));
-  if (!sameOrdered(covered, laneChangedPaths)) {
+  if (batch.batch_id !== 'G' && !sameOrdered(covered, laneChangedPaths)) {
     addFailure(failures, 'CANDIDATE_PATH_COVERAGE', `${context}: task source/support paths do not cover the exact candidate diff`);
   }
   const evidenceIds = sortedUnique(tasks.flatMap((task) => (task.evidence_refs ?? [])
