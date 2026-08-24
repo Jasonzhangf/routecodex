@@ -551,7 +551,7 @@ export function runFeatureLayerBatchRedFixtures({
     },
     {
       name: 'gate input closure is weakened',
-      expected: ['GATE_INPUT_CONTRACT_BINDING'],
+      expected: ['CANDIDATE_GATE_INPUT_CONTRACT_DRIFT', 'GATE_INPUT_CONTRACT_BINDING'],
       mutate(input) { input.gateInputContract.input_sets.layer.pop(); },
       options: { mode: 'definition', allowPendingGuard: true },
     },
