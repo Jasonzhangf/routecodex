@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Candidate boundary: differential harness remains source-only until wiring.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
