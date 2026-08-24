@@ -35,6 +35,7 @@ pub mod protocol;
 pub mod provider;
 pub mod response_inbound;
 pub mod response_outbound;
+pub mod request_plugins;
 pub mod routing;
 
 pub const STANDARD_LIBRARY_VERSION: &str = "0.1.0";
@@ -657,6 +658,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
     ];
     plugins.extend(response_inbound::protocol_decode_descriptors());
     plugins.extend(response_outbound::response_outbound_descriptors());
+    plugins.extend(request_plugins::descriptors());
     plugins
 }
 
@@ -1077,6 +1079,9 @@ impl StandardHandleRegistry {
         for (id, execute_fn) in response_outbound::response_outbound_handles() {
             handles.insert(id, MockHandle { execute_fn });
         }
+        for (id, execute_fn) in request_plugins::handles() {
+            handles.insert(id, MockHandle { execute_fn });
+        }
         Self { handles }
     }
 
@@ -1172,6 +1177,11 @@ mod tests {
             "v4.std.response.client_semantic_projection",
             "v4.std.response.sse_frame_boundary",
             "v4.std.response.frame_build",
+            "v4.std.request.responses_normalize",
+            "v4.std.request.chat_to_responses",
+            "v4.std.request.governance",
+            "v4.std.request.provider_semantic",
+            "v4.std.request.responses_wire_build",
         ];
         actual.sort_unstable();
         expected.sort_unstable();
