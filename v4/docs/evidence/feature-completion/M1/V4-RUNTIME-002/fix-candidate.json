@@ -1,0 +1,21 @@
+{
+  "fix_candidate_id": "v4-runtime-002-epoch-candidate",
+  "issue_id": "V4-RUNTIME-002",
+  "module_id": "routecodex-v4-node-container",
+  "worktree_id": "v4-runtime-002-candidate-final2-20260824T044500Z-Macstudio",
+  "base_commit": "3de5dda5e3a3246c980e31921c469b6903110efa",
+  "head_commit": "bbbf52ae84491d04ca25070968d8ebbcb9f56c20",
+  "tree_hash": "4bf7cdae21fef0abb47cd18839f390fd39872c8a",
+  "diff_hash": "71303d8b2d6efeea9f43fadaf0181de9ebf1df25f115fc45b84d744732eca799",
+  "design_id": "v4-feature-completion-r002-epoch-lifecycle",
+  "owner": "routecodex-v4-node-container",
+  "scope_hash": "7e5db24cd66e377325386bbf37fb42a49d3ae5d8c9f85dbd2394ec4b5d3c51a0",
+  "changed_paths": [
+    "v4/crates/routecodex-v4-node-container/src/lib.rs",
+    "v4/crates/routecodex-v4-node-container/tests/l2_epoch.rs"
+  ],
+  "verification_evidence_ids": ["boundary-audit", "plane-isolation", "positive", "red-gate"],
+  "created_at": "2026-08-24T04:45:00Z",
+  "batch_id": "H",
+  "task_ids": ["V4-RUNTIME-002"]
+}
