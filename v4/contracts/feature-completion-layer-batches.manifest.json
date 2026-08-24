@@ -63,12 +63,12 @@
     {
       "batch_id": "A",
       "conditional": false,
-      "owner_binding_status": "bound",
-      "owner_function_id": "v4.node_container.execution_epoch",
-      "module_ids": ["routecodex-v4-node-container"],
-      "owned_paths": ["crates/routecodex-v4-node-container/**"],
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
       "source_dependencies": [],
-      "status": "source_green",
+      "status": "pending",
       "tasks": [
         {"task_id":"V4-PARITY-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
         {"task_id":"V4-PARITY-002","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
@@ -186,12 +186,12 @@
     {
       "batch_id": "H",
       "conditional": true,
-      "owner_binding_status": "pending",
-      "owner_function_id": null,
-      "module_ids": [],
-      "owned_paths": [],
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.node_container.execution_epoch",
+      "module_ids": ["routecodex-v4-node-container"],
+      "owned_paths": ["crates/routecodex-v4-node-container/**"],
       "source_dependencies": [],
-      "status": "pending",
+      "status": "source_green",
       "tasks": [
         {
           "task_id":"V4-RUNTIME-002",
