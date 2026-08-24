@@ -317,11 +317,11 @@
       {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:da16e5e4019ffd41b87e6332a96dfd616fb24f53647b9a888ac6fb52135c8fb8"},
       {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:f9a194e35af2f30a8517a0f7998d0e44c2bf40c520ae30d8c16ad03d63b58d50"}
     ],
-    "wiring_started": true,
-    "wiring_edges": ["surface:contracts/active-link/frozen-consumer-registry.json:sha256:2808e91efca384cc1c1ebf229d66803e0ffe834800908c8eaac847d6507f56c1"],
+    "wiring_started": false,
+    "wiring_edges": [],
     "resource_refs": {
-      "merge_queue_state": ".appsdk/records/merge-queue-state.json",
-      "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"
+      "merge_queue_state": null,
+      "integration_candidate": null
     },
     "evidence_refs": []
   },
