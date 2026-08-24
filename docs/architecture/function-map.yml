@@ -15,6 +15,7 @@ owners:
   - verifyRepositoryFilesystemGovernance
   - verifyV3ContractMapOwner
   - assertCanonicalFeatureBindings
+  - verifyV3MainlineManifestSync
   allowed_paths:
   - .gitignore
   - scripts/ci/repo-sanity.mjs
