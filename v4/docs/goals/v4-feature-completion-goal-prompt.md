@@ -2,7 +2,7 @@
 
 ```text
 /goal
-目标：以当前 V4 worktree 基准 tree `7557b8825ac829a436193ddf865568c9091eda5b`（及其后继）为基线，一次性完成 V4 当前生产执行层全部独立组件，全部 source-green 后再由单一 integration owner 接线，关闭 M1 + M2 P0 的生产 NodeContainer 断点。
+目标：以执行开始时当前 V4 worktree 的 HEAD/tree hash（及其后继）为唯一基线，一次性完成 V4 当前生产执行层全部独立组件，全部 source-green 后再由单一 integration owner 接线，关闭 M1 + M2 P0 的生产 NodeContainer 断点。
 
 说明：本任务不需要再写新的提示词，直接按实现文档第 28 章执行。
 
