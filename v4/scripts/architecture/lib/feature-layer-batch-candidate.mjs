@@ -97,9 +97,11 @@ function resourceBindings(task, resourceMap, batch, failures) {
       continue;
     }
     const resource = matches[0];
+    const ownerMatchesModule = (batch.module_ids ?? []).some((moduleId) =>
+      resource.owner === moduleId || resource.owner?.startsWith(`${moduleId}::`));
     if (resource.status !== 'active'
         || resource.feature_id !== task.task_id
-        || !(batch.module_ids ?? []).includes(resource.owner)
+        || !ownerMatchesModule
         || !isMachinePath(resource.truth_store)) {
       addFailure(failures, 'TASK_RESOURCE_BINDING', `${task.task_id}: resource ${resourceId} binding is incomplete or foreign`);
       continue;
