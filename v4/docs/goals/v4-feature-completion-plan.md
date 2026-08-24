@@ -8,7 +8,7 @@
 目标版本：`V4.0 feature-complete / production-admissible`
 配套执行提示词：[`v4-feature-completion-goal-prompt.md`](v4-feature-completion-goal-prompt.md)
 
-当前执行续篇：以 Jason 提供的云端 `main@ef3899f` 为调度基线，执行顺序、批次边界和 review 解耦规则见 [第 28 章](#28-runtime-007-后的分层批量开发与接线计划)。第 28 章覆盖本文件第 4.1 节中“`V4-RUNTIME-007` 缺失”的旧本地快照、第 23/24 节逐任务串行 review 的旧执行顺序，并细化第 7 节的 M1/M2 依赖：只解除 M2 P0 插件的 source-development dependency，M2 production integration/status promotion 仍依赖 M1；未被第 28 章覆盖的产品范围和最终完成定义继续有效。
+当前执行续篇：以当前 V4 分支声明的基准 tree 为唯一开发基线，执行顺序、批次边界和 review 解耦规则见 [第 28 章](#28-runtime-007-后的分层批量开发与接线计划)。第 28 章覆盖本文件第 4.1 节中旧本地快照判断、第 23/24 节逐任务串行 review 的旧执行顺序，并细化第 7 节的 M1/M2 依赖：只解除 M2 P0 插件的 source-development dependency，M2 production integration/status promotion 仍依赖 M1；未被第 28 章覆盖的产品范围和最终完成定义继续有效。
 
 ## 0. 文档定位与真源关系
 
@@ -120,8 +120,8 @@ mapped
 - 本地主 tree 和全部本地 worktree 的 `v4/` 均无未提交改动；`origin/main..main` 的 9 个领先提交都是 V3 SSE/transport 修复，对 `v4/` 的 diff 为空。
 - `V4-RUNTIME-001` 已有 typed `ExecutionBinding` 实现和正向/binding-drift 测试；它只能证明 immutable binding slice，不能证明 M1 完成。
 - 该本地快照采集时，`ActiveExecutionEpoch` / `V4-RUNTIME-002` 及其 publish、in-flight pin、drain、dispose 生命周期尚未落地；当前 runtime 只有 `ExecutionBinding.plan_epoch` 字段。
-- 该本地快照采集时，云端提交 `ef3899f` 的 Git object 不可达，因此曾把 `V4-RUNTIME-007` 误列为待重做；Jason 后续已确认云端 `main@ef3899f` 完成该任务，本条旧判断作废。
-- 当前调度必须按第 28 章从 `ef3899f` 或其后继开始：同步并重放 R007 证据，审计其对 R002 合同的覆盖，禁止从旧本地 main 重做 epoch owner。
+- 该本地快照采集时曾依赖不可达的云端 commit；该外部锚点现已作废，后续以当前 V4 基准 tree 的真实源码、合同和测试作为唯一判断依据。
+- 当前调度从当前 V4 基准 tree 开始：先审计现有 runtime 对 R002 合同的覆盖；缺口由当前 tree 的唯一 owner 实现，不依赖不可达的外部 commit，也不建立重复 epoch owner。
 
 | 领域 | 当前基线 | V4.0 目标 |
 | --- | --- | --- |
@@ -1541,7 +1541,7 @@ dsh_review.p1 == 0
 
 状态：`current_execution_plan`
 
-调度基线：Jason 于 2026-08-23 提供的云端 `main@ef3899f`。该提交已完成 `V4-RUNTIME-007` epoch 并发与生命周期；当前本地 checkout 不含该 Git object，因此本章把它作为用户确认的调度事实，不冒充本机源码复验。任何执行 worker 必须从 `ef3899f` 或其后继提交开始；对象不可达时只做同步/交接，不得重写 `V4-RUNTIME-007`。
+调度基线：当前 V4 分支声明的基准 tree `7557b8825ac829a436193ddf865568c9091eda5b`。该 tree 是本批开发的唯一可复验输入；所有 source lane 直接基于该 tree 创建 candidate。若后续基准变更，必须更新 baseline commit、tree identity 和对应 evidence，不得引用不可达外部 commit 作为完成前置。
 
 ## 28.1 目标与验收标准
 
@@ -1622,7 +1622,7 @@ epoch、manifest、route、health、retry、continuation、scope、debug、secre
 | Task | 调度状态 | 下一动作 |
 | --- | --- | --- |
 | `V4-RUNTIME-001` | `implemented` | 保留 immutable binding 证据；纳入 integration 回归 |
-| `V4-RUNTIME-007` | `cloud_complete@ef3899f` | 同步后重放 gate/evidence；禁止重做 |
+| `V4-RUNTIME-007` | `current_tree_baseline` | 按当前 tree 现状审计；不得假设外部 cloud completion |
 | `V4-RUNTIME-002` | `closure_audit` | 证明其合同已被 R007 epoch owner 覆盖；只补确证缺口 |
 | `V4-RUNTIME-003` | `remaining_split` | 独立完成 003A compiler candidate；集成时执行 003B exact artifact binding |
 | `V4-RUNTIME-004` | `remaining_split` | 先完成 004A mount/publication candidate；集成时执行 004B epoch publish wiring |
@@ -1639,8 +1639,8 @@ epoch、manifest、route、health、retry、continuation、scope、debug、secre
 
 此层先完成，随后所有 Layer 1 lane 可并行/连续独立开发。
 
-1. 同步并确认 `ef3899f` 或其后继：核对 commit、tree、R007 contract/gate/evidence、48 个 L2 测试；本地缺对象时停止产品写入，只做精确同步。
-2. 在接口冻结前完成 `V4-RUNTIME-002` closure audit：逐项核对 active containers、plan epoch、graph/manifest hash、immutable execution identity、publish、in-flight pin、drain/dispose、passive failure record 和 restart rebuild。完全覆盖则记录 `epoch_closure_lane=not_needed_by_evidence`；存在缺口则只向同一 epoch owner 登记 conditional Lane H，禁止另建 epoch 实现。
+1. 锁定当前 V4 基准 tree：核对 commit、tree、现有 contract/gate/evidence 和 L2 测试；后续所有 candidate 必须从该 tree 派生。
+2. 在接口冻结前完成 `V4-RUNTIME-002` closure audit：逐项核对 active containers、plan epoch、graph/manifest hash、immutable execution identity、publish、in-flight pin、drain/dispose、passive failure record 和 restart rebuild。当前 tree 缺口由当前 tree 的唯一 owner 登记并实现；禁止引用不可达外部完成事实，也禁止建立重复 epoch owner。
 3. 更新产品 ledger：`RUNTIME-007=implemented/live_not_required`；`RUNTIME-002=closure_audit_pass|closure_gap_registered`；不得把 R007 重列为 backlog。
 4. 冻结本批 typed interfaces：ExecutionEpochSnapshot、immutable execution identity、NodePluginPlan input/output、request admission port、provider handoff、response/error terminal port；若 R002 有缺口，先把确证缺口纳入同一 epoch contract。同步冻结 P0 plugin ABI、immutable plugin IDs、descriptor/capability schema、selection group/order、contract/artifact identity 规则，使 compiler 与 plugin lanes 可分别 source-green。
 5. 建立 machine-readable batch manifest 与 barrier gate：
@@ -1831,7 +1831,7 @@ v4/docs/evidence/feature-completion/M1/**
 
 | 风险 | 规避 |
 | --- | --- |
-| 本地缺 `ef3899f` 后重复实现 | 基线 identity gate；不可达只同步，不写 R007 owner |
+| 外部 epoch commit 不可达 | current-tree baseline identity gate；直接审计并实现当前 tree 的唯一 owner |
 | 现有文档状态互相冲突 | 产品 ledger + newer snapshot；源码/contract/evidence 决定状态，不靠标题 |
 | 多 lane 共同改 monolith/registry | Layer 0 先拆 owner；每 lane 独占语义和 worktree |
 | keyless/mock 被当真实插件 | production handle + entrypoint + differential evidence 才能提升状态 |
@@ -1848,7 +1848,7 @@ v4/docs/evidence/feature-completion/M1/**
 当前 batch 只有全部成立才完成：
 
 ```text
-baseline.commit_is_ef3899f_or_descendant == true
+baseline.commit_is_declared_current_v4_tree == true
 runtime_007.replayed == pass
 runtime_002.closure_audit == pass
 epoch_closure_lane.status in {source_green, not_needed_by_evidence}
@@ -1882,6 +1882,6 @@ Review 未完成时状态只能是 `integration_verified_review_pending`，不�
 
 1. Product-map cutover 候选先把 resource/function/mainline-call/module-registry/verification 产品真源放入 `v4/docs/architecture/maps/`，并保留 `.appsdk/maps/` 作为 AppSDK skeleton。该候选已通过 foundation、isolation 和 contract admission；合并前还必须刷新已过期 lifecycle evidence，并在最终提交上重绑 governance candidate identity。
 2. Feature-layer batch gate 候选必须基于 Product-map cutover 重放。禁止把 `V4-LAYER-GATE-001` 的 owner/resource/gate 绑定写回 `.appsdk/maps/` skeleton；对应绑定只能进入产品 maps。其 definition/admission/build-guard 在 `guard_commit` 与 guarded surface scope hashes 绑定前都必须保持红。
-3. `V4-RUNTIME-007` 调度锚点仍是 `ef3899f` 或其后继。本地对象不可达时只允许同步和证据重放，不允许从旧基线重做 epoch owner。
+3. `V4-RUNTIME-007` 不再绑定不可达外部 commit；调度锚点是 manifest 声明的当前 V4 baseline tree，所有实现和证据必须从该 tree 派生。
 
 只有 Product-map cutover 合入主 tree、active 与 lifecycle evidence 全部同步、并修复 governance 收窄与 plugin-contract pre-review head 后，batch gate 候选才允许重新绑定 `guard_commit` / guarded surface scope hashes 并打开接线闸。

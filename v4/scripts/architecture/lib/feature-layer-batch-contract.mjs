@@ -4,8 +4,8 @@ export const OWNER_FEATURE_ID = 'v4.governance.feature_layer_batch_admission';
 export const OWNER_MODULE_ID = 'routecodex-v4-governance';
 export const RESOURCE_ID = 'feature_layer_batch_manifest';
 export const FUNCTION_ID = OWNER_FEATURE_ID;
-export const BASELINE_FEATURE_ID = 'V4-RUNTIME-007';
-export const BASELINE_ANCHOR = 'ef3899f';
+export const BASELINE_FEATURE_ID = 'V4-CURRENT-TREE';
+export const BASELINE_ANCHOR = '7557b8825ac829a436193ddf865568c9091eda5b';
 export const RUNTIME_MODULE_ID = 'routecodex-v4-runtime';
 export const PREREQUISITE_FEATURE_ID = 'V4-RUNTIME-002';
 export const TASK_READY_STATUS = 'source_green';
@@ -21,7 +21,7 @@ export const SELF_TEST_COMMAND = `${GATE_COMMAND} --self-test`;
 export const BOUNDARY_COMMAND = `${GATE_COMMAND} --boundary-self-test`;
 export const RED_COMMAND = `${GATE_COMMAND} --red-self-test`;
 export const PLAN_PATH = 'v4/docs/goals/v4-feature-completion-plan.md';
-export const PLAN_HASH = 'sha256:38bd0cc551ca343dfb0c7091eca9f89a386cf54baf7251466333d17d571b7e4a';
+export const PLAN_HASH = 'sha256:6aba7f5b86654599e9ab4d8d5dde0f2d6dba7ff5f3a96d07a000501ab0a84cf5';
 export const PLAN_ANCHORS = [
   '# 28. `RUNTIME-007` 后的分层批量开发与接线计划',
   '同层独立任务全部达到 `source_green` 后才允许 production wiring',

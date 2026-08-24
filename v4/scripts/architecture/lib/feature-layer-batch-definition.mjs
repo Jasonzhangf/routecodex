@@ -80,20 +80,15 @@ function validateBaseline(manifest, truth, failures) {
   if (baseline.feature_id !== BASELINE_FEATURE_ID
       || baseline.required_commit !== BASELINE_ANCHOR
       || baseline.runtime_module_id !== RUNTIME_MODULE_ID
-      || baseline.provenance !== 'user_confirmed_cloud'
-      || !['unavailable', 'reachable'].includes(baseline.object_status)
-      || !['pending', 'pass'].includes(baseline.replay_status)
+      || baseline.provenance !== 'current_v4_tree'
+      || baseline.object_status !== 'reachable'
+      || baseline.replay_status !== 'pass'
       || !Array.isArray(baseline.source_paths)
       || !Array.isArray(baseline.evidence_refs)) {
     addFailure(failures, 'BASELINE_CONTRACT', 'R007 anchor/owner/provenance/status drifted');
   }
-  if (resolved === null
-      && (baseline.object_status !== 'unavailable' || baseline.resolved_commit !== null || baseline.replay_status !== 'pending')) {
-    addFailure(failures, 'BASELINE_OBJECT_STATUS_DRIFT', 'R007 is unavailable in Git and cannot claim replay truth');
-  }
-  if (resolved !== null
-      && (baseline.object_status !== 'reachable' || baseline.resolved_commit !== resolved)) {
-    addFailure(failures, 'BASELINE_OBJECT_STATUS_DRIFT', 'R007 reachable object must be projected as the exact full commit');
+  if (resolved === null || baseline.resolved_commit !== resolved) {
+    addFailure(failures, 'BASELINE_OBJECT_STATUS_DRIFT', 'current V4 baseline must resolve to the exact declared tree commit');
   }
 }
 
