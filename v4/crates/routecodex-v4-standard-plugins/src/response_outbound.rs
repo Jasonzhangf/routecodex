@@ -79,10 +79,6 @@ pub(crate) fn client_semantic_projection_entry(ctx: &mut ExecCtx<'_>) -> Result<
         .map_err(|error| error.to_string())
 }
 
-pub(crate) fn client_semantic_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    client_semantic_projection_entry(ctx)
-}
-
 fn frame_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let data = ctx.read_data();
     let semantic = data
