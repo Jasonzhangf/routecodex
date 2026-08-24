@@ -10,8 +10,8 @@ use routecodex_v4_cordis_bridge::{
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
 use sha2::{Digest, Sha256};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeContainerState {
@@ -253,6 +253,294 @@ impl NodeContainer {
     }
 }
 
+/// Immutable identity carried by one executable epoch. The identity is
+/// created before publication and never changes while the epoch is live.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionEpochIdentity {
+    pub plan_epoch: u64,
+    pub manifest_hash: String,
+    pub execution_identity: String,
+}
+
+impl ExecutionEpochIdentity {
+    pub fn validate(&self) -> Result<(), EpochError> {
+        if self.manifest_hash.is_empty() || self.execution_identity.is_empty() {
+            return Err(EpochError::InvalidIdentity);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionEpochState {
+    Active,
+    Retired,
+    Disposed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionEpochSnapshot {
+    pub plan_epoch: u64,
+    pub manifest_hash: String,
+    pub execution_identity: String,
+    pub in_flight_leases: usize,
+    pub failure_count: u64,
+    pub state: ExecutionEpochState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EpochError {
+    InvalidIdentity,
+    CandidateNotAccepting,
+    PublishBusy,
+    LeaseUnavailable,
+    NotRetired,
+    InFlightLeases(usize),
+    Container(NodeContainerError),
+}
+
+impl std::fmt::Display for EpochError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidIdentity => write!(f, "execution epoch identity is incomplete"),
+            Self::CandidateNotAccepting => write!(f, "execution epoch candidate is not accepting"),
+            Self::PublishBusy => write!(f, "execution epoch publication is already in progress"),
+            Self::LeaseUnavailable => write!(f, "active execution epoch is unavailable"),
+            Self::NotRetired => write!(f, "execution epoch must be retired before disposal"),
+            Self::InFlightLeases(count) => write!(f, "cannot dispose execution epoch with {count} lease(s)"),
+            Self::Container(error) => write!(f, "execution epoch container failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for EpochError {}
+
+impl From<NodeContainerError> for EpochError {
+    fn from(error: NodeContainerError) -> Self {
+        Self::Container(error)
+    }
+}
+
+struct EpochInner {
+    identity: ExecutionEpochIdentity,
+    container: Mutex<Option<NodeContainer>>,
+    state: Mutex<ExecutionEpochState>,
+    leases: AtomicUsize,
+    failures: AtomicU64,
+}
+
+/// One immutable execution epoch. Admission pins this object with a lease;
+/// publication only changes the store pointer, never the epoch identity.
+#[derive(Clone)]
+pub struct ActiveExecutionEpoch {
+    inner: Arc<EpochInner>,
+}
+
+impl std::fmt::Debug for ActiveExecutionEpoch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActiveExecutionEpoch")
+            .field("snapshot", &self.snapshot())
+            .finish()
+    }
+}
+
+impl ActiveExecutionEpoch {
+    pub fn new(
+        container: NodeContainer,
+        identity: ExecutionEpochIdentity,
+    ) -> Result<Self, EpochError> {
+        identity.validate()?;
+        if container.state() != NodeContainerState::Accepting {
+            return Err(EpochError::CandidateNotAccepting);
+        }
+        Ok(Self {
+            inner: Arc::new(EpochInner {
+                identity,
+                container: Mutex::new(Some(container)),
+                state: Mutex::new(ExecutionEpochState::Active),
+                leases: AtomicUsize::new(0),
+                failures: AtomicU64::new(0),
+            }),
+        })
+    }
+
+    pub fn snapshot(&self) -> ExecutionEpochSnapshot {
+        let state = *self.inner.state.lock().expect("epoch state lock poisoned");
+        ExecutionEpochSnapshot {
+            plan_epoch: self.inner.identity.plan_epoch,
+            manifest_hash: self.inner.identity.manifest_hash.clone(),
+            execution_identity: self.inner.identity.execution_identity.clone(),
+            in_flight_leases: self.inner.leases.load(Ordering::Acquire),
+            failure_count: self.inner.failures.load(Ordering::Acquire),
+            state,
+        }
+    }
+
+    pub fn record_execution_failure(&self) -> ExecutionEpochSnapshot {
+        self.inner.failures.fetch_add(1, Ordering::AcqRel);
+        self.snapshot()
+    }
+
+    pub fn admit(&self) -> Result<EpochLease, EpochError> {
+        self.acquire()
+    }
+
+    fn acquire(&self) -> Result<EpochLease, EpochError> {
+        let state = self.inner.state.lock().expect("epoch state lock poisoned");
+        if *state != ExecutionEpochState::Active {
+            return Err(EpochError::LeaseUnavailable);
+        }
+        self.inner.leases.fetch_add(1, Ordering::AcqRel);
+        drop(state);
+        Ok(EpochLease {
+            epoch: self.clone(),
+            released: false,
+        })
+    }
+
+    fn retire(&self) -> Result<ExecutionEpochSnapshot, EpochError> {
+        let mut state = self.inner.state.lock().expect("epoch state lock poisoned");
+        if *state != ExecutionEpochState::Active {
+            return Err(EpochError::PublishBusy);
+        }
+        *state = ExecutionEpochState::Retired;
+        drop(state);
+        self.try_dispose()?;
+        Ok(self.snapshot())
+    }
+
+    fn release_lease(&self) -> Result<ExecutionEpochSnapshot, EpochError> {
+        let previous = self.inner.leases.fetch_sub(1, Ordering::AcqRel);
+        if previous == 0 {
+            self.inner.leases.fetch_add(1, Ordering::Release);
+            return Err(EpochError::LeaseUnavailable);
+        }
+        self.try_dispose()?;
+        Ok(self.snapshot())
+    }
+
+    fn try_dispose(&self) -> Result<(), EpochError> {
+        if *self.inner.state.lock().expect("epoch state lock poisoned")
+            != ExecutionEpochState::Retired
+        {
+            return Ok(());
+        }
+        let leases = self.inner.leases.load(Ordering::Acquire);
+        if leases != 0 {
+            return Ok(());
+        }
+        let mut container = self.inner.container.lock().expect("epoch container lock poisoned");
+        if let Some(container) = container.as_mut() {
+            container.drain()?;
+            container.dispose()?;
+        }
+        *container = None;
+        *self.inner.state.lock().expect("epoch state lock poisoned") =
+            ExecutionEpochState::Disposed;
+        Ok(())
+    }
+}
+
+pub struct EpochLease {
+    epoch: ActiveExecutionEpoch,
+    released: bool,
+}
+
+impl std::fmt::Debug for EpochLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EpochLease")
+            .field("snapshot", &self.epoch.snapshot())
+            .field("released", &self.released)
+            .finish()
+    }
+}
+
+impl EpochLease {
+    pub fn snapshot(&self) -> ExecutionEpochSnapshot {
+        self.epoch.snapshot()
+    }
+
+    pub fn release(mut self) -> Result<ExecutionEpochSnapshot, EpochError> {
+        if self.released {
+            return Err(EpochError::LeaseUnavailable);
+        }
+        self.released = true;
+        self.epoch.release_lease()
+    }
+}
+
+impl Drop for EpochLease {
+    fn drop(&mut self) {
+        if !self.released {
+            let _ = self.epoch.release_lease();
+            self.released = true;
+        }
+    }
+}
+
+/// Atomic active-pointer owner. Candidate publication retires the old epoch;
+/// only lease release can make the old physical container disposable.
+pub struct ActiveEpochStore {
+    active: RwLock<Option<ActiveExecutionEpoch>>,
+}
+
+impl std::fmt::Debug for ActiveEpochStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActiveEpochStore")
+            .field("active", &self.active_snapshot())
+            .finish()
+    }
+}
+
+impl ActiveEpochStore {
+    pub fn new(active: ActiveExecutionEpoch) -> Self {
+        Self {
+            active: RwLock::new(Some(active)),
+        }
+    }
+
+    pub fn active_snapshot(&self) -> Option<ExecutionEpochSnapshot> {
+        self.active
+            .read()
+            .expect("active epoch lock poisoned")
+            .as_ref()
+            .map(ActiveExecutionEpoch::snapshot)
+    }
+
+    pub fn admit(&self) -> Result<EpochLease, EpochError> {
+        let active = self
+            .active
+            .read()
+            .expect("active epoch lock poisoned")
+            .clone()
+            .ok_or(EpochError::LeaseUnavailable)?;
+        active.acquire()
+    }
+
+    pub fn record_execution_failure(&self) -> Result<ExecutionEpochSnapshot, EpochError> {
+        let active = self
+            .active
+            .read()
+            .expect("active epoch lock poisoned")
+            .clone()
+            .ok_or(EpochError::LeaseUnavailable)?;
+        Ok(active.record_execution_failure())
+    }
+
+    pub fn publish(&self, candidate: ActiveExecutionEpoch) -> Result<ExecutionEpochSnapshot, EpochError> {
+        let mut active = self.active.write().expect("active epoch lock poisoned");
+        if candidate.snapshot().state != ExecutionEpochState::Active {
+            return Err(EpochError::CandidateNotAccepting);
+        }
+        let previous = active.replace(candidate);
+        drop(active);
+        if let Some(previous) = previous {
+            previous.retire()?;
+        }
+        self.active_snapshot().ok_or(EpochError::LeaseUnavailable)
+    }
+}
+
 #[derive(Debug)]
 pub struct NodeExecutionGuard {
     in_flight: Arc<AtomicUsize>,
@@ -341,5 +629,101 @@ mod tests {
         container.dispose().unwrap();
         container.dispose().unwrap();
         assert_eq!(container.state(), NodeContainerState::Disposed);
+    }
+
+    fn accepting_container(node_id: &str) -> NodeContainer {
+        let plan = routecodex_v4_plugin_plan::NodePluginPlan {
+            node_id: node_id.into(),
+            position: 1,
+            role_id: "role".into(),
+            chain: "request".into(),
+            entries: vec![],
+            selection_groups: vec![],
+            hash: String::new(),
+        };
+        let hash = plan.plan_hash();
+        let mut container = NodeContainer::declare(
+            node_id,
+            routecodex_v4_plugin_plan::NodePluginPlan {
+                hash: hash.clone(),
+                ..plan
+            },
+            PlanBindings {
+                graph_hash: hash.clone(),
+                manifest_hash: hash.clone(),
+                loaded_plan_hash: hash,
+            },
+        )
+        .expect("valid binding");
+        container.context_created().unwrap();
+        container.plugins_mounted().unwrap();
+        container.publish().unwrap();
+        container
+    }
+
+    fn epoch(node_id: &str, plan_epoch: u64) -> ActiveExecutionEpoch {
+        ActiveExecutionEpoch::new(
+            accepting_container(node_id),
+            ExecutionEpochIdentity {
+                plan_epoch,
+                manifest_hash: format!("manifest-{plan_epoch}"),
+                execution_identity: format!("execution-{plan_epoch}"),
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn publish_keeps_old_epoch_until_last_lease_releases() {
+        let store = ActiveEpochStore::new(epoch("old", 1));
+        let old_lease = store.admit().unwrap();
+        let published = store.publish(epoch("new", 2)).unwrap();
+        assert_eq!(published.plan_epoch, 2);
+        assert_eq!(old_lease.snapshot().state, ExecutionEpochState::Retired);
+        assert_eq!(old_lease.snapshot().in_flight_leases, 1);
+        let released = old_lease.release().unwrap();
+        assert_eq!(released.state, ExecutionEpochState::Disposed);
+        assert_eq!(store.active_snapshot().unwrap().plan_epoch, 2);
+    }
+
+    #[test]
+    fn execution_failure_is_passive_and_does_not_change_active_epoch() {
+        let store = ActiveEpochStore::new(epoch("active", 7));
+        let active = store.active_snapshot().unwrap();
+        let lease = store.admit().unwrap();
+        let failure = store.record_execution_failure().unwrap();
+        assert_eq!(failure.failure_count, 1);
+        assert_eq!(failure.plan_epoch, active.plan_epoch);
+        assert_eq!(store.active_snapshot().unwrap().state, ExecutionEpochState::Active);
+        lease.release().unwrap();
+    }
+
+    #[test]
+    fn candidate_rejection_does_not_mutate_active_pointer() {
+        let store = ActiveEpochStore::new(epoch("active", 3));
+        let rejected = ActiveExecutionEpoch::new(
+            accepting_container("candidate"),
+            ExecutionEpochIdentity {
+                plan_epoch: 4,
+                manifest_hash: String::new(),
+                execution_identity: "candidate".into(),
+            },
+        );
+        assert!(matches!(rejected, Err(EpochError::InvalidIdentity)));
+        assert_eq!(store.active_snapshot().unwrap().plan_epoch, 3);
+    }
+
+    #[test]
+    fn rebuild_preserves_immutable_execution_identity() {
+        let identity = ExecutionEpochIdentity {
+            plan_epoch: 11,
+            manifest_hash: "manifest-stable".into(),
+            execution_identity: "execution-stable".into(),
+        };
+        let first = ActiveExecutionEpoch::new(accepting_container("first"), identity.clone()).unwrap();
+        let rebuilt = ActiveExecutionEpoch::new(accepting_container("rebuilt"), identity).unwrap();
+        assert_eq!(first.snapshot().plan_epoch, rebuilt.snapshot().plan_epoch);
+        assert_eq!(first.snapshot().manifest_hash, rebuilt.snapshot().manifest_hash);
+        assert_eq!(first.snapshot().execution_identity, rebuilt.snapshot().execution_identity);
     }
 }
