@@ -43,7 +43,7 @@ const GOVERNANCE_CLOSURE_PREFIXES = [
   'v4/contracts/',
   'v4/docs/evidence/feature-completion/',
   'v4/docs/architecture/',
-  'v4/scripts/architecture/',
+  'v4/scripts/architecture/lib/feature-layer-batch-',
 ];
 
 function isGovernanceClosurePath(relativePath) {
