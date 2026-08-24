@@ -44,6 +44,9 @@ const GOVERNANCE_CLOSURE_PREFIXES = [
   'v4/docs/evidence/feature-completion/',
   'v4/docs/architecture/',
   'v4/scripts/architecture/lib/feature-layer-batch-',
+  'v4/crates/routecodex-v4-standard-plugins/src/lib.rs',
+  'v4/crates/routecodex-v4-standard-plugins/src/response_inbound.rs',
+  'v4/crates/routecodex-v4-standard-plugins/src/response_outbound.rs',
 ];
 
 function isGovernanceClosurePath(relativePath) {
