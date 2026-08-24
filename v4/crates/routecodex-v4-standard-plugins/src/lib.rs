@@ -36,6 +36,11 @@ pub mod provider;
 pub mod response_inbound;
 pub mod response_outbound;
 pub mod request_plugins;
+pub mod request_normalize;
+pub mod chat_to_responses;
+pub mod request_governance;
+pub mod provider_semantic;
+pub mod responses_wire_build;
 pub mod routing;
 
 pub const STANDARD_LIBRARY_VERSION: &str = "0.1.0";

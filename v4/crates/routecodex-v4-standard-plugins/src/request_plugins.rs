@@ -29,7 +29,7 @@ fn require_object(ctx: &ExecCtx<'_>, name: &str) -> Result<Map<String, Value>, S
         .ok_or_else(|| format!("{name} requires an object request"))
 }
 
-fn request_normalize(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+pub(crate) fn request_normalize(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = require_object(ctx, "request_normalize")?;
     reject_control(&object)?;
     object.get("requestId").and_then(Value::as_str)
@@ -41,7 +41,7 @@ fn request_normalize(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     Ok(())
 }
 
-fn chat_to_responses(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+pub(crate) fn chat_to_responses(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = require_object(ctx, "chat_to_responses")?;
     reject_control(&object)?;
     let messages = object.get("messages").and_then(Value::as_array)
@@ -54,7 +54,7 @@ fn chat_to_responses(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     ctx.write_data(Value::Object(projected)).map_err(|error| error.to_string())
 }
 
-fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+pub(crate) fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = require_object(ctx, "request_governance")?;
     reject_control(&object)?;
     if let Some(tools) = object.get("tools") {
@@ -63,7 +63,7 @@ fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     ctx.write_data(Value::Object(object)).map_err(|error| error.to_string())
 }
 
-fn provider_semantic(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+pub(crate) fn provider_semantic(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = require_object(ctx, "provider_semantic")?;
     reject_control(&object)?;
     let model = object.get("model").and_then(Value::as_str)
@@ -75,7 +75,7 @@ fn provider_semantic(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn wire_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+pub(crate) fn wire_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = require_object(ctx, "wire_build")?;
     reject_control(&object)?;
     let model = object.get("model").and_then(Value::as_str)
