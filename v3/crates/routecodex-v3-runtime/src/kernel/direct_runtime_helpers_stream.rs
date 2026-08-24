@@ -9,6 +9,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
     runtime_timing: V3RuntimeTimingState,
     strip_client_response_id: bool,
     retain_response_cipher: bool,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> V3ProviderAttemptSseStream {
     wrap_direct_sse_provider_event_json_observation_stream_with_compat(
         source,
@@ -16,6 +17,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
         runtime_timing,
         strip_client_response_id,
         retain_response_cipher,
+        provider_protocol,
         false,
         false,
         V3DirectSseTypedHookCatalog::default(),
@@ -33,6 +35,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     runtime_timing: V3RuntimeTimingState,
     strip_client_response_id: bool,
     retain_response_cipher: bool,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     deepseek_console_go: bool,
     thinking_tags: bool,
     typed_hooks: V3DirectSseTypedHookCatalog,
@@ -69,6 +72,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
             retain_response_cipher,
             deepseek_console_go,
             content_consumer: V3DirectSseContentConsumer {
+                provider_protocol: Some(provider_protocol),
                 retain_response_cipher,
                 strip_client_response_id,
                 deepseek_console_go,

@@ -20,6 +20,9 @@ use routecodex_v3_sse::{SseTransportError, SseTransportErrorExport};
 /// client projection, so compatibility rewrites remain object-level.
 #[derive(Debug, Default)]
 pub(crate) struct V3DirectSseContentConsumer {
+    /// Provider protocol is fixed by the Direct execution plan before this
+    /// consumer is constructed.  It must never be inferred from response JSON.
+    pub(crate) provider_protocol: Option<V3HubProviderWireProtocol>,
     pub(crate) retain_response_cipher: bool,
     pub(crate) strip_client_response_id: bool,
     pub(crate) deepseek_console_go: bool,
@@ -201,6 +204,14 @@ fn noop_toolreason(
 }
 
 impl V3DirectSseContentConsumer {
+    pub(crate) fn with_provider_protocol(
+        mut self,
+        provider_protocol: V3HubProviderWireProtocol,
+    ) -> Self {
+        self.provider_protocol = Some(provider_protocol);
+        self
+    }
+
     pub(crate) fn with_typed_hooks(mut self, typed_hooks: V3DirectSseTypedHookCatalog) -> Self {
         self.typed_hooks = typed_hooks;
         self
@@ -304,8 +315,21 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
         let Some(data_json) = object.normalized_data_json() else {
             return Ok(SseObjectConsumerAction::Pass);
         };
+        let parsed: serde_json::Value =
+            serde_json::from_str(&data_json).map_err(|error| SseObjectError::Consumer {
+                message: error.to_string(),
+            })?;
+        if !parsed.is_object() {
+            return Ok(SseObjectConsumerAction::Pass);
+        }
+        let provider_protocol = self
+            .provider_protocol
+            .ok_or_else(|| SseObjectError::Consumer {
+                message: "Direct SSE provider protocol is missing from the execution plan"
+                    .to_owned(),
+            })?;
         let original: serde_json::Value = normalize_v3_provider_sse_json_data_with_event_name(
-            V3HubProviderWireProtocol::Responses,
+            provider_protocol,
             &data_json,
             object.event_name(),
         )
@@ -315,9 +339,6 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
                 message: error.to_string(),
             })
         })?;
-        if !original.is_object() {
-            return Ok(SseObjectConsumerAction::Pass);
-        }
         let is_anthropic_tool_event = original
             .get("type")
             .and_then(serde_json::Value::as_str)
@@ -348,7 +369,8 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
             self.finalize_toolreason_observation();
             return Ok(SseObjectConsumerAction::Pass);
         }
-        let mut rewritten = project_direct_typed_protocol_data(&original, &self.typed_hooks)?;
+        let mut rewritten =
+            project_direct_typed_protocol_data(&original, provider_protocol, &self.typed_hooks)?;
         if self.tool_thinking_enabled {
             crate::hub_v1::collect_v3_responses_sse_tool_name_at_resp03(
                 &rewritten,
@@ -456,48 +478,44 @@ fn is_direct_toolreason_terminal(value: &serde_json::Value) -> bool {
 
 fn project_direct_typed_protocol_data(
     value: &serde_json::Value,
+    provider_protocol: V3HubProviderWireProtocol,
     typed_hooks: &V3DirectSseTypedHookCatalog,
 ) -> Result<serde_json::Value, SseObjectError> {
-    let Some(object) = value.as_object() else {
-        return Ok(value.clone());
-    };
-    if object
-        .get("object")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|object_type| object_type == "chat.completion.chunk")
-    {
-        let mut semantic =
-            classify_v3_openai_chat_sse_chunk(value).map_err(|error| SseObjectError::Consumer {
-                message: error.to_string(),
+    match provider_protocol {
+        V3HubProviderWireProtocol::OpenAiChat => {
+            let mut semantic = classify_v3_openai_chat_sse_chunk(value).map_err(|error| {
+                SseObjectError::Consumer {
+                    message: error.to_string(),
+                }
             })?;
-        let transport = crate::hub_v1::V3OpenAiChatSseTransportObject::new(None, value.clone());
-        let protocol = semantic.protocol.clone();
-        typed_hooks
-            .apply_chat(&mut semantic, &transport, &protocol)
-            .map_err(|error| SseObjectError::Consumer {
-                message: error.to_string(),
+            let transport = crate::hub_v1::V3OpenAiChatSseTransportObject::new(None, value.clone());
+            let protocol = semantic.protocol.clone();
+            typed_hooks
+                .apply_chat(&mut semantic, &transport, &protocol)
+                .map_err(|error| SseObjectError::Consumer {
+                    message: error.to_string(),
+                })?;
+            Ok(project_v3_openai_chat_sse_chunk_json(&semantic))
+        }
+        V3HubProviderWireProtocol::Responses => {
+            let mut semantic = classify_v3_responses_sse_event(value).map_err(|error| {
+                SseObjectError::Consumer {
+                    message: error.to_string(),
+                }
             })?;
-        return Ok(project_v3_openai_chat_sse_chunk_json(&semantic));
+            let transport = crate::hub_v1::V3ResponsesSseTransportObject::new(None, value.clone());
+            let protocol = semantic.protocol.clone();
+            typed_hooks
+                .apply_responses(&mut semantic, &transport, &protocol)
+                .map_err(|error| SseObjectError::Consumer {
+                    message: error.to_string(),
+                })?;
+            Ok(project_v3_responses_sse_event_json(&semantic))
+        }
+        V3HubProviderWireProtocol::Anthropic | V3HubProviderWireProtocol::Gemini => {
+            Ok(value.clone())
+        }
     }
-    if object
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|event_type| event_type.starts_with("response."))
-    {
-        let mut semantic =
-            classify_v3_responses_sse_event(value).map_err(|error| SseObjectError::Consumer {
-                message: error.to_string(),
-            })?;
-        let transport = crate::hub_v1::V3ResponsesSseTransportObject::new(None, value.clone());
-        let protocol = semantic.protocol.clone();
-        typed_hooks
-            .apply_responses(&mut semantic, &transport, &protocol)
-            .map_err(|error| SseObjectError::Consumer {
-                message: error.to_string(),
-            })?;
-        return Ok(project_v3_responses_sse_event_json(&semantic));
-    }
-    Ok(value.clone())
 }
 
 /// Provider semantic-error observation as an SSE object consumer.
@@ -592,6 +610,7 @@ mod tests {
     #[test]
     fn direct_consumer_rewrites_only_configured_business_fields() {
         let mut consumer = V3DirectSseContentConsumer {
+            provider_protocol: Some(V3HubProviderWireProtocol::Responses),
             retain_response_cipher: false,
             strip_client_response_id: true,
             deepseek_console_go: false,
@@ -599,7 +618,7 @@ mod tests {
             ..Default::default()
         };
         let mut object = SseObjectFrame::from_json(
-            r#"{"response":{"id":"resp_1"},"encrypted_content":"rsn_secret","delta":"keep"}"#,
+            r#"{"type":"response.output_text.delta","response":{"id":"resp_1"},"encrypted_content":"rsn_secret","delta":"keep"}"#,
         )
         .unwrap();
         let action = consumer.consume(&mut object).unwrap();
@@ -613,6 +632,7 @@ mod tests {
     #[test]
     fn direct_consumer_passes_ordinary_json_without_reordering_semantics() {
         let mut consumer = V3DirectSseContentConsumer {
+            provider_protocol: Some(V3HubProviderWireProtocol::Responses),
             retain_response_cipher: true,
             strip_client_response_id: false,
             deepseek_console_go: false,
@@ -651,8 +671,39 @@ mod tests {
     }
 
     #[test]
+    fn direct_consumer_rejects_semantic_object_without_selected_protocol() {
+        let mut consumer = V3DirectSseContentConsumer::default();
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.output_text.delta","delta":"must not guess"}"#,
+        )
+        .unwrap();
+        assert!(consumer.consume(&mut object).is_err());
+    }
+
+    #[test]
+    fn direct_consumer_uses_selected_protocol_instead_of_shape_guessing() {
+        let mut responses_consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses);
+        let mut chat_shape = SseObjectFrame::from_json(
+            r#"{"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+        )
+        .unwrap();
+        assert!(responses_consumer.consume(&mut chat_shape).is_err());
+
+        let mut chat_consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::OpenAiChat);
+        let mut responses_shape = SseObjectFrame::from_json(
+            r#"{"type":"response.output_text.delta","delta":"must not reclassify"}"#,
+        )
+        .unwrap();
+        assert!(chat_consumer.consume(&mut responses_shape).is_err());
+    }
+
+    #[test]
     fn direct_consumer_observes_and_redacts_anthropic_toolreason_fields() {
-        let mut consumer = V3DirectSseContentConsumer::default().with_tool_thinking(true, false);
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::Anthropic)
+            .with_tool_thinking(true, false);
         let mut start = SseObjectFrame::from_json(
             r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"exec_command","input":{}}}"#,
         )
@@ -687,7 +738,9 @@ mod tests {
 
     #[test]
     fn direct_consumer_closes_anthropic_toolreason_at_message_stop() {
-        let mut consumer = V3DirectSseContentConsumer::default().with_tool_thinking(true, false);
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::Anthropic)
+            .with_tool_thinking(true, false);
         let mut start = SseObjectFrame::from_json(
             r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"exec_command","input":{}}}"#,
         )
@@ -706,7 +759,9 @@ mod tests {
 
     #[test]
     fn direct_consumer_redacts_anthropic_toolreason_fields_from_start_input() {
-        let mut consumer = V3DirectSseContentConsumer::default().with_tool_thinking(true, false);
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::Anthropic)
+            .with_tool_thinking(true, false);
         let mut start = SseObjectFrame::from_json(
             r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"exec_command","input":{"cmd":"pwd","reason":"确认目录","goal_alignment_confidence":100,"model_id":"m"}}}"#,
         )
@@ -733,7 +788,8 @@ mod tests {
 
     #[test]
     fn direct_consumer_projects_chat_chunk_from_typed_tree_and_preserves_extension() {
-        let mut consumer = V3DirectSseContentConsumer::default();
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::OpenAiChat);
         let mut object = SseObjectFrame::from_json(
             r#"{"id":"chat_1","object":"chat.completion.chunk","created":7,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}],"vendor_extension":{"x":1}}"#,
         )
@@ -751,7 +807,8 @@ mod tests {
 
     #[test]
     fn direct_consumer_projects_responses_event_from_typed_tree_and_preserves_extension() {
-        let mut consumer = V3DirectSseContentConsumer::default();
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses);
         let mut object = SseObjectFrame::from_json(
             r#"{"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","content_index":0,"delta":"ok","vendor_extension":{"x":1}}"#,
         )
@@ -768,7 +825,9 @@ mod tests {
     fn direct_consumer_mounts_business_rewrite_on_typed_responses_object() {
         let catalog = V3DirectSseTypedHookCatalog::new()
             .with_responses(noop_responses_notify, rewrite_direct_responses_text);
-        let mut consumer = V3DirectSseContentConsumer::default().with_typed_hooks(catalog);
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_typed_hooks(catalog);
         let mut object = SseObjectFrame::from_json(
             r#"{"type":"response.output_item.done","output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"original"}]}}"#,
         )
@@ -786,6 +845,7 @@ mod tests {
     #[test]
     fn direct_consumer_strips_tool_thinking_fields_inside_function_arguments() {
         let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
             .with_typed_hooks(
                 V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
             )
@@ -815,6 +875,7 @@ mod tests {
     #[test]
     fn direct_consumer_strips_and_projects_toolreason_from_chat_chunk_arguments() {
         let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::OpenAiChat)
             .with_typed_hooks(
                 V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
             )
@@ -841,6 +902,7 @@ mod tests {
     #[test]
     fn direct_responses_client_projects_chat_provider_toolreason_as_responses_item() {
         let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::OpenAiChat)
             .with_typed_hooks(
                 V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
             )
@@ -864,6 +926,7 @@ mod tests {
     #[test]
     fn direct_consumer_strips_invalid_chat_auxiliary_fields_without_changing_command() {
         let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::OpenAiChat)
             .with_typed_hooks(
                 V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
             )
@@ -883,6 +946,7 @@ mod tests {
     #[test]
     fn direct_consumer_closes_missing_chat_toolreason_observation() {
         let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::OpenAiChat)
             .with_typed_hooks(
                 V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
             )

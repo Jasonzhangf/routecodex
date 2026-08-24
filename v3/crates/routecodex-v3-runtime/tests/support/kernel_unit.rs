@@ -215,6 +215,7 @@ async fn direct_sse_strip_client_response_id_empties_nested_response_id() {
         runtime_timing.clone(),
         true,
         true,
+        V3HubProviderWireProtocol::Responses,
     );
     let mut first = observed.next().await.unwrap().unwrap();
     assert!(
@@ -245,6 +246,7 @@ async fn direct_sse_strip_disabled_passes_chunk_through_unchanged() {
         runtime_timing.clone(),
         false,
         false,
+        V3HubProviderWireProtocol::Responses,
     );
     let first = observed.next().await.unwrap().unwrap();
     assert!(
@@ -266,6 +268,7 @@ async fn direct_sse_strips_encrypted_content_when_retain_false() {
         runtime_timing.clone(),
         false,
         false,
+        V3HubProviderWireProtocol::Responses,
     );
     let first = observed.next().await.unwrap().unwrap();
     let text = String::from_utf8_lossy(&first);
@@ -293,6 +296,7 @@ async fn direct_sse_keeps_encrypted_content_when_retain_true() {
         runtime_timing.clone(),
         false,
         true,
+        V3HubProviderWireProtocol::Responses,
     );
     let first = observed.next().await.unwrap().unwrap();
     let text = String::from_utf8_lossy(&first);
@@ -314,6 +318,7 @@ async fn direct_sse_retain_false_passes_cipher_free_frames_byte_for_byte() {
         runtime_timing.clone(),
         false,
         true,
+        V3HubProviderWireProtocol::Responses,
     );
     let first = observed.next().await.unwrap().unwrap();
     assert_eq!(

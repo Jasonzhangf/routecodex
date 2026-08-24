@@ -1513,6 +1513,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                             &standardized.protocol_context.server_id,
                         ),
                         retain_response_cipher,
+                        response_projection.compat_plan.provider_protocol,
                         policy.target.candidate.compatibility_profile.as_deref()
                             == Some("responses:deepseek-console-go"),
                         policy.target.candidate.compatibility_profile.as_deref()
