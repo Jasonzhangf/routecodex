@@ -1071,7 +1071,7 @@
       "argv": ["node", "scripts/architecture/verify-v4-product-parity-ledger.mjs"],
       "producer": {"adapter": "node", "identity": "v4_parity_ledger_positive"},
       "evidence_role": "positive",
-      "input_paths": ["scripts/architecture/verify-v4-product-parity-ledger.mjs"],
+      "input_paths": ["scripts/architecture/verify-v4-product-differential.mjs","scripts/architecture/verify-v4-product-parity-ledger.mjs","scripts/architecture/verify-v4-product-parity-status.mjs","scripts/architecture/verify-v4-v3-baseline-delta.mjs"],
       "required_for": ["source_green"]
     },
     {
@@ -1083,7 +1083,7 @@
       "argv": ["node", "scripts/architecture/verify-v4-product-parity-ledger.mjs", "--red-self-test"],
       "producer": {"adapter": "node", "identity": "v4_parity_ledger_red"},
       "evidence_role": "red_gate",
-      "input_paths": ["scripts/architecture/verify-v4-product-parity-ledger.mjs"],
+      "input_paths": ["scripts/architecture/verify-v4-product-differential.mjs","scripts/architecture/verify-v4-product-parity-ledger.mjs","scripts/architecture/verify-v4-product-parity-status.mjs","scripts/architecture/verify-v4-v3-baseline-delta.mjs"],
       "required_for": ["source_green"]
     },
     {
@@ -1095,7 +1095,7 @@
       "argv": ["node", "scripts/architecture/verify-v4-v3-baseline-delta.mjs"],
       "producer": {"adapter": "node", "identity": "v4_parity_ledger_boundary"},
       "evidence_role": "boundary_audit",
-      "input_paths": ["scripts/architecture/verify-v4-v3-baseline-delta.mjs"],
+      "input_paths": ["scripts/architecture/verify-v4-product-differential.mjs","scripts/architecture/verify-v4-product-parity-ledger.mjs","scripts/architecture/verify-v4-product-parity-status.mjs","scripts/architecture/verify-v4-v3-baseline-delta.mjs"],
       "required_for": ["source_green"]
     },
     {
@@ -1107,7 +1107,7 @@
       "argv": ["node", "scripts/architecture/verify-v4-product-parity-status.mjs"],
       "producer": {"adapter": "node", "identity": "v4_parity_ledger_plane"},
       "evidence_role": "plane_isolation",
-      "input_paths": ["scripts/architecture/verify-v4-product-parity-status.mjs"],
+      "input_paths": ["scripts/architecture/verify-v4-product-differential.mjs","scripts/architecture/verify-v4-product-parity-ledger.mjs","scripts/architecture/verify-v4-product-parity-status.mjs","scripts/architecture/verify-v4-v3-baseline-delta.mjs"],
       "required_for": ["source_green"]
     }
   ]

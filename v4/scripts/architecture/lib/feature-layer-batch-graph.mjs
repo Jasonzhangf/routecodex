@@ -10,7 +10,13 @@ import {
 function moduleForPath(moduleRegistry, relativePath) {
   const matches = (moduleRegistry.modules ?? []).filter((module) => module.status === 'active'
     && (module.owned_paths ?? []).some((pattern) => pathMatchesPattern(relativePath, pattern)));
-  return { module_id: matches.length === 1 ? matches[0].module_id : null, count: matches.length };
+  if (matches.length <= 1) return { module_id: matches[0]?.module_id ?? null, count: matches.length };
+  const specificity = (module) => Math.max(...module.owned_paths
+    .filter((pattern) => pathMatchesPattern(relativePath, pattern))
+    .map((pattern) => pattern.replace(/\*\*/g, '').length));
+  const max = Math.max(...matches.map(specificity));
+  const owners = matches.filter((module) => specificity(module) === max);
+  return { module_id: owners.length === 1 ? owners[0].module_id : null, count: owners.length };
 }
 
 function batchOwnership(manifest) {
