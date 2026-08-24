@@ -10,14 +10,20 @@ owners:
   owner_module: scripts/architecture/verify-repository-filesystem-governance.mjs
   canonical_types:
   - RepositoryFilesystemContract
+  - V3ArchitectureContractMapSet
   canonical_builders:
   - verifyRepositoryFilesystemGovernance
+  - verifyV3ContractMapOwner
+  - assertCanonicalFeatureBindings
   allowed_paths:
   - .gitignore
   - scripts/ci/repo-sanity.mjs
   - scripts/ci/mempalace-scan-artifact-audit.mjs
   - scripts/architecture/verify-repository-filesystem-governance.mjs
   - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+  - v3/scripts/architecture/verify-v3-contract-map-owner.mjs
+  - package.json
+  - v3/package.json
   - v3/README.md
   - README.md
   - tsconfig.json
@@ -25,6 +31,11 @@ owners:
   - .agents/skills/rcc-dev-skills/references
   - .agents/skills/rcc-v3-architecture/SKILL.md
   - docs/architecture/repository-filesystem-module-registry.yml
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+  - docs/architecture/manifests/architecture.repository_filesystem.mainline.yml
   - docs/audits/repository-root-layout-v3-v2-audit.md
   - docs/audits/v2-to-v3-migration-audit-2026-08-04.md
   - docs/architecture/v3-control-plane-data-plane-audit-2026-08-10.md
@@ -52,15 +63,21 @@ owners:
   - scripts/architecture/verify-repository-filesystem-governance.mjs
   - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
   - scripts/ci/repo-sanity.mjs
+  - v3/scripts/architecture/verify-v3-contract-map-owner.mjs
   required_gates:
   - npm run verify:repo-sanity
   - npm run verify:v3-resource-map
+  - npm run verify:v3-contract-map-owner
+  - npm run verify:v3-direct-sse-accept-skeleton
+  - npm run verify:sse-architecture-boundary
   migration_target: none
   resource_bindings:
     writes:
     - architecture.repository_filesystem_contract@RepoFilesystemAuthoring01Policy
+    - architecture.v3_contract_map_set@ArchitectureContractMapAuthoring01
     reads:
     - architecture.repository_filesystem_contract@RepoFilesystemVerify02Gate
+    - architecture.v3_contract_map_set@ArchitectureContractMapVerification02
     forbidden:
     - request.normal_payload@HubReqInbound02Standardized
     - provider.wire_payload@ProviderReqOutbound06WirePayload

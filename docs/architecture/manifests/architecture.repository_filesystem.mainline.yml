@@ -7,6 +7,8 @@ entrypoint:
   wiki_page: null
   call_map_chain_id: architecture.repository_filesystem.mainline
 node_ids:
+  - ArchitectureContractMapAuthoring01
+  - ArchitectureContractMapVerification02
   - RepoFilesystemAuthoring01Policy
   - RepoFilesystemVerify02Gate
 edges:
@@ -22,6 +24,20 @@ edges:
         - architecture.repository_filesystem_contract
       produces:
         - architecture.repository_filesystem_contract
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: architecture-v3-contract-map-01
+    from_node: ArchitectureContractMapAuthoring01
+    to_node: ArchitectureContractMapVerification02
+    status: anchored
+    owner_feature_id: architecture.repository_filesystem_governance
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - architecture.v3_contract_map_set
+      produces:
+        - architecture.v3_contract_map_set
       side_channel_reads: []
       side_channel_writes: []
 verification:
