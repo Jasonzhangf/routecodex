@@ -96,7 +96,7 @@ const REQUIRED_SOURCE = [
   'pub mod protocol',
   'pub mod chat_process',
   'pub mod routing',
-  'pub mod provider;',
+  'pub mod provider',
 ];
 
 const NODE_PERMISSIONS = new Map([
@@ -639,7 +639,7 @@ function runSelfTest() {
       state.source = `${source}\nuse routecodex_v4_base_node::BaseNode;`;
     }],
     ['category module removed', (state) => {
-      state.source = source.replace('pub mod provider;', 'mod provider;');
+      state.source = source.replace('pub mod provider', 'mod provider');
     }],
     ['response tool harvest descriptor removed', (state) => {
       state.source = source.replace(
