@@ -5,17 +5,26 @@ verification:
   unit:
   - scripts/architecture/verify-repository-filesystem-governance.mjs
   - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+  - v3/scripts/architecture/verify-v3-contract-map-owner.mjs
   contract:
   - docs/architecture/repository-filesystem-module-registry.yml
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
   - docs/goals/root-generated-artifacts-governance-plan.md
   - docs/goals/repository-root-retirement-v4-v3-integration-plan.md
   integration:
   - .gitignore
   - scripts/ci/repo-sanity.mjs
   - docs/architecture/mainline-call-map.yml
+  - docs/architecture/manifests/architecture.repository_filesystem.mainline.yml
   smoke:
   - npm run verify:repo-sanity
   - npm run verify:architecture-mainline-call-map
+  - npm run verify:v3-contract-map-owner
+  - npm run verify:v3-direct-sse-accept-skeleton
+  - npm run verify:sse-architecture-boundary
   build:
   - npm run verify:repo-sanity
   notes:

@@ -24,6 +24,31 @@ resources:
   may_enter_client_body: false
   required_gates:
   - npm run verify:repo-sanity
+- resource_id: architecture.v3_contract_map_set
+  resource_kind: architecture_contract_map_set
+  lifecycle: architecture.v3_contract_maps
+  identity:
+  - map_path
+  - owner_feature_id
+  - verification_gate
+  owner_feature_id: architecture.repository_filesystem_governance
+  owner_node: ArchitectureContractMapAuthoring01
+  allowed_readers:
+  - ArchitectureContractMapVerification02
+  - ArchitectureReviewSurface
+  - V3ArchitectureFeatureBinding
+  allowed_writers:
+  - ArchitectureContractMapAuthoring01
+  forbidden_writers:
+  - ProviderReqOutbound06WirePayload
+  - HubRespOutbound04ClientSemantic
+  - ServerRespOutbound05ClientFrame
+  - MetaReq04RuntimeControlBound
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  required_gates:
+  - npm run verify:v3-contract-map-owner
+  - npm run verify:v3-resource-map
 - resource_id: architecture.agent_collab_protocol_contract
   resource_kind: governance_contract
   lifecycle: architecture.collaboration_protocol

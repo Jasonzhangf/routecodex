@@ -8,6 +8,9 @@ modules:
   - scripts/ci/repo-sanity.mjs
   - scripts/architecture/verify-repository-filesystem-governance.mjs
   - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+  - v3/scripts/architecture/verify-v3-contract-map-owner.mjs
+  - package.json
+  - v3/package.json
   - v3/README.md
   - v3/fixtures
   - deprecated/v2
@@ -19,6 +22,7 @@ modules:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
+  - docs/architecture/manifests/architecture.repository_filesystem.mainline.yml
   - docs/goals/root-generated-artifacts-governance-plan.md
   - docs/goals/root-generated-artifacts-governance-execution-prompt.md
   allowed_paths:
@@ -43,11 +47,17 @@ modules:
     to: RepoFilesystemVerify02Gate
   - from: RepoFilesystemVerify02Gate
     to: RepoFilesystemBuild03Required
+  - from: ArchitectureContractMapAuthoring01
+    to: ArchitectureContractMapVerification02
   forbidden_resources:
   - request.normal_payload
   - provider.wire_payload
   - response.client_payload
   - metadata.runtime_control
+  required_gates:
+  - npm run verify:v3-contract-map-owner
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-direct-sse-accept-skeleton
 - module_id: v3.virtual_router_target_interpreter
   owner_feature_id: v3.virtual_router_target_interpreter
   status: implementation_active
