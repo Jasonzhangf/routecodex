@@ -4,6 +4,6 @@ use routecodex_v4_cordis_bridge::ExecCtx;
 // Gate input closure is recorded before integration.
 // Boundary gate executable is part of the candidate contract.
 
-pub(crate) fn provider_semantic_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+pub fn provider_semantic_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     super::request_plugins::provider_semantic(ctx)
 }

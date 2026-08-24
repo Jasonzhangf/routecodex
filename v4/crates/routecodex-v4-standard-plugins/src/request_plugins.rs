@@ -12,6 +12,8 @@ use serde_json::{json, Map, Value};
 
 use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, StandardPlugin};
 
+pub const REQUEST_NORMALIZE_PLUGIN_ID: &str = "v4.std.request.responses_normalize";
+
 const CONTROL_KEYS: &[&str] = &[
     "control", "metadata_center", "error_chain", "route_facts",
     "target_selection", "debug", "diagnostics", "snapshot", "providerId",
@@ -94,7 +96,7 @@ pub(crate) fn wire_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 pub(crate) fn descriptors() -> Vec<StandardPlugin> {
     vec![
         plugin(
-            "v4.std.request.responses_normalize",
+            REQUEST_NORMALIZE_PLUGIN_ID,
             PluginCategory::Protocol,
             "V4HubReqInbound03Normalized",
             "request_inbound",
@@ -163,7 +165,7 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
 
 pub(crate) fn handles() -> Vec<(&'static str, fn(&mut ExecCtx<'_>) -> Result<(), String>)> {
     vec![
-        ("v4.std.request.responses_normalize", request_normalize),
+        (REQUEST_NORMALIZE_PLUGIN_ID, request_normalize),
         ("v4.std.request.chat_to_responses", chat_to_responses),
         ("v4.std.request.governance", request_governance),
         ("v4.std.request.provider_semantic", provider_semantic),
