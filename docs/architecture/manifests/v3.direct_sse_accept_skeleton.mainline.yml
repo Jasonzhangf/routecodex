@@ -27,7 +27,7 @@ edges:
     to_node: V3DirectSseAccept03ProjectedClientFrame
     owner_feature_id: v3.direct_sse_accept_skeleton
     status: anchored
-    contract: only the existing Direct or Relay runtime client projection is forwarded; provider raw SSE is never forwarded
+    contract: Direct forwards a typed live client projection after first semantic admission; Relay forwards its sealed broker projection; provider raw SSE is never forwarded
 supporting_edges:
   - step_id: v3-direct-sse-accept-skeleton-intent-01
     caller: pending_endpoint_after_responses_admission
@@ -42,7 +42,7 @@ supporting_edges:
 return_path:
   precommit_provider_failure: Error01 -> Error03 -> Error04 -> Error05 -> reselect; client channel remains open
   committed_provider_failure: current stream emits the existing post-commit error projection and closes; no current-request reroute
-  success: projected client SSE bytes, transport keepalive, and EOF
+  success: projected client SSE bytes, transport keepalive, and EOF; Direct may reach this edge before provider terminal EOF
 forbidden_paths:
   - provider raw SSE -> client
   - direct accept layer -> provider semantic parser

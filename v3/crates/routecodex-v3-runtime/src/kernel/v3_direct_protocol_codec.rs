@@ -335,6 +335,9 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
             .get("tool_thinking")
             .copied()
             .unwrap_or(false);
+        if !enabled {
+            return Ok(false);
+        }
         let current_payload_start = crate::hub_v1::current_v3_tool_thinking_payload_start(
             &standardized.body,
         )
@@ -508,6 +511,9 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
             .get("tool_thinking")
             .copied()
             .unwrap_or(false);
+        if !enabled {
+            return Ok(false);
+        }
         let current_payload_start = crate::hub_v1::current_v3_tool_thinking_payload_start(
             &standardized.body,
         )

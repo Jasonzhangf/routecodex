@@ -558,6 +558,9 @@ fn client_payload_debug_value(payload: &V3Resp15ClientPayload) -> Value {
             "body_kind": "bytes",
             "byte_len": bytes.len()
         }),
+        V3ClientBody::Sse(_) => json!({
+            "body_kind": "sse_stream"
+        }),
         V3ClientBody::CommittedSse(_) => json!({
             "body_kind": "sse_stream"
         }),

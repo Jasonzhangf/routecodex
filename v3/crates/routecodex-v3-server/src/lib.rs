@@ -104,7 +104,8 @@ use routecodex_v3_runtime::{
     project_v3_virtual_router_status, register_responses_direct_hooks,
     resolve_v3_responses_previous_response_owner_execution_mode_at_req03,
     V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
-    V3ChatDirectCodec, V3ClientBody, V3CommittedClientSseStream, V3CommittedSseTerminal,
+    V3ChatDirectCodec, V3ClientBody, V3ClientSseStream, V3CommittedClientSseStream,
+    V3CommittedSseTerminal,
     V3Execution11ProtocolDecisionMode, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
     V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
     V3HubExecutionMode, V3OpenAiChatClientStream, V3OpenAiChatCommittedStream,
@@ -203,6 +204,7 @@ pub struct V3Server16HttpFrame {
 pub enum V3Server16Body {
     Json(serde_json::Value),
     Bytes(Vec<u8>),
+    Sse(V3ClientSseStream),
     CommittedSse(V3CommittedClientSseStream),
 }
 
@@ -214,6 +216,7 @@ impl fmt::Debug for V3Server16Body {
                 .debug_struct("Bytes")
                 .field("byte_len", &bytes.len())
                 .finish(),
+            Self::Sse(_) => formatter.write_str("Sse(<runtime-client-stream>)"),
             Self::CommittedSse(_) => formatter.write_str("CommittedSse(<runtime-sealed-replay>)"),
         }
     }
@@ -893,7 +896,9 @@ async fn pending_endpoint(
                     error_chain: &frame.error_chain,
                     body: match &frame.body {
                         V3Server16Body::Json(value) => Some(value),
-                        V3Server16Body::Bytes(_) | V3Server16Body::CommittedSse(_) => None,
+                        V3Server16Body::Bytes(_)
+                        | V3Server16Body::Sse(_)
+                        | V3Server16Body::CommittedSse(_) => None,
                     },
                     project_path: resolve_v3_console_project_path(&request_headers, &Value::Null)
                         .as_deref(),
@@ -1035,6 +1040,10 @@ fn request_accepts_sse(headers: &HeaderMap) -> bool {
 
 fn v3_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool {
     payload.get("stream").and_then(Value::as_bool) == Some(true) || request_accepts_sse(headers)
+}
+
+fn v3_entry_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool {
+    v3_request_wants_sse(headers, payload)
 }
 
 fn build_v3_provider_failure_session_scope_for_request(

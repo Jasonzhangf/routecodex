@@ -468,21 +468,6 @@ async fn process_direct_sse_stream(
         false,
         false,
     );
-    // Direct SSE is still a Front-owned stream, not a provider-owned socket.
-    // Materialize the complete provider attempt before returning Resp15 so a
-    // post-first-frame codec/EOF/timeout failure re-enters the Direct policy
-    // loop instead of becoming a client-visible stream error.  The server
-    // Front skeleton supplies keepalive while this await is in progress.
-    let mut client_stream = client_stream;
-    let mut collected = Vec::new();
-    while let Some(chunk) = client_stream.next().await {
-        collected.push(chunk?);
-    }
-    let client_stream = Box::pin(stream::iter(
-        collected
-            .into_iter()
-            .map(Ok::<Vec<u8>, V3Error01SourceRaised>),
-    ));
     Ok((
         client_stream,
         V3RemoteContinuationObservation::Streaming {
@@ -1277,6 +1262,16 @@ fn observe_sse_remote_continuation_chunk(
                     message,
                 )
             })?;
+        if let Some(V3ProviderResponsesJsonFrameOutcome::Failure { code, message }) =
+            classification.as_ref()
+        {
+            return Err(build_v3_error_01_source_raised(
+                V3ErrorSourceKind::ProviderFailure,
+                "V3ProviderResp14Raw",
+                code.clone(),
+                message.clone(),
+            ));
+        }
         semantic_observed |= classification.is_some();
         terminal_observed |= matches!(
             classification,
@@ -1820,6 +1815,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn direct_sse_projection_returns_before_provider_terminal_eof() {
+        let first = b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n";
+        let provider_stream = stream::once(async {
+            Ok::<Vec<u8>, V3ProviderError>(first.to_vec())
+        })
+        .chain(stream::pending::<Result<Vec<u8>, V3ProviderError>>());
+        let raw = V3ProviderResp14Raw::from_sse(
+            "req".to_string(),
+            "provider".to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(provider_stream),
+        );
+
+        let projection = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            project_provider_raw_to_client_payload(raw),
+        )
+        .await
+        .expect("client projection must not wait for provider terminal EOF")
+        .expect("valid first semantic frame must project");
+        let V3ProviderAttemptBody::Sse(mut stream) = projection.attempt_payload.body else {
+            panic!("expected provider-attempt SSE body");
+        };
+        let chunk = tokio::time::timeout(std::time::Duration::from_millis(100), stream.next())
+            .await
+            .expect("projected stream must expose the first semantic frame")
+            .expect("provider first chunk must be forwarded")
+            .expect("provider first chunk must be valid");
+        assert!(std::str::from_utf8(&chunk).unwrap().contains("early"));
+    }
+
+    #[tokio::test]
     async fn direct_sse_projection_does_not_turn_missing_terminal_into_silent_eof() {
         let first =
             b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec();
@@ -2157,7 +2188,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_sse_projection_rejects_post_first_frame_provider_error_before_commit() {
+    async fn direct_sse_projection_keeps_post_first_frame_provider_error_on_live_stream() {
         let first =
             b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec();
         let source: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
@@ -2178,9 +2209,18 @@ mod tests {
             }],
             source,
         );
-        let error = project_provider_raw_to_client_payload(raw)
+        let projection = project_provider_raw_to_client_payload(raw)
             .await
-            .expect_err("post-first-frame provider failure must be rejected before client commit");
+            .expect("first semantic frame admits the Direct client stream");
+        let V3ProviderAttemptBody::Sse(mut stream) = projection.attempt_payload.body else {
+            panic!("post-first-frame provider failure must remain on the live SSE stream");
+        };
+        assert!(stream.next().await.expect("first frame").is_ok());
+        let error = stream
+            .next()
+            .await
+            .expect("provider failure must not become silent EOF")
+            .expect_err("provider failure must remain typed after client admission");
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "provider_response_body_error");
     }

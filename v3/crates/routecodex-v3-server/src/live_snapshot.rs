@@ -936,6 +936,16 @@ pub(crate) fn capture_v3_responses_direct_response(
             "error_chain": frame.error_chain.clone(),
             "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
         }),
+        V3Server16Body::Sse(_) => json!({
+            "object": "routecodex.v3.client_response_snapshot",
+            "stage": "client-response",
+            "source": "live_server_direct_response_sse_stream",
+            "status": frame.status,
+            "bodyKind": "sse_stream",
+            "node_trace": frame.node_trace.clone(),
+            "error_chain": frame.error_chain.clone(),
+            "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
+        }),
         V3Server16Body::CommittedSse(_) => {
             let body = std::mem::replace(&mut frame.body, V3Server16Body::Bytes(Vec::new()));
             let V3Server16Body::CommittedSse(stream) = body else {

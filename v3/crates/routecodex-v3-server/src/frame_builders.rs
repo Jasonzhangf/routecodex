@@ -145,6 +145,11 @@ pub(crate) fn foundation_output_response(output: V3FoundationRuntimeOutput) -> R
             serde_json::to_vec(&value).expect("V3Server16 JSON projection")
         }
         V3Server16Body::Bytes(bytes) => bytes,
+        V3Server16Body::Sse(stream) => {
+            return builder
+                .body(v3_live_client_sse_body(stream, None))
+                .expect("typed response");
+        }
         V3Server16Body::CommittedSse(stream) => {
             return builder
                 .body(v3_client_sse_body(stream, None))
@@ -235,6 +240,17 @@ pub(crate) fn responses_direct_output_response_with_console(
             serde_json::to_vec(&value).expect("V3Server16 JSON projection")
         }
         V3Server16Body::Bytes(bytes) => bytes,
+        V3Server16Body::Sse(stream) => {
+            let stream = wrap_v3_direct_live_sse_console_stream(stream, stream_console_finalizer);
+            let keepalive = frame
+                .error_chain
+                .is_empty()
+                .then_some(keepalive_interval)
+                .flatten();
+            return builder
+                .body(v3_live_client_sse_body(stream, keepalive))
+                .expect("typed response");
+        }
         V3Server16Body::CommittedSse(stream) => {
             let stream =
                 wrap_v3_direct_committed_sse_console_stream(stream, stream_console_finalizer);
@@ -267,6 +283,58 @@ pub(crate) fn wrap_v3_direct_committed_sse_console_stream(
     }
 }
 
+pub(crate) fn wrap_v3_direct_live_sse_console_stream(
+    stream: V3ClientSseStream,
+    finalizer: Option<V3DirectSseConsoleFinalizer>,
+) -> V3ClientSseStream {
+    let Some(finalizer) = finalizer else {
+        return stream;
+    };
+    Box::pin(V3DirectLiveSseConsoleStream {
+        stream,
+        finalizer: Some(finalizer),
+    })
+}
+
+struct V3DirectLiveSseConsoleStream {
+    stream: V3ClientSseStream,
+    finalizer: Option<V3DirectSseConsoleFinalizer>,
+}
+
+impl futures_util::Stream for V3DirectLiveSseConsoleStream {
+    type Item = Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.stream.as_mut().poll_next(cx) {
+            std::task::Poll::Ready(Some(Ok(chunk))) => std::task::Poll::Ready(Some(Ok(chunk))),
+            std::task::Poll::Ready(Some(Err(error))) => {
+                if let Some(finalizer) = self.finalizer.take() {
+                    finalizer.emit_direct_sse_failure_console_line(599, error.clone());
+                }
+                std::task::Poll::Ready(Some(Err(error)))
+            }
+            std::task::Poll::Ready(None) => {
+                if let Some(finalizer) = self.finalizer.take() {
+                    finalizer.complete();
+                }
+                std::task::Poll::Ready(None)
+            }
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl Drop for V3DirectLiveSseConsoleStream {
+    fn drop(&mut self) {
+        if let Some(finalizer) = self.finalizer.take() {
+            finalizer.client_disconnected();
+        }
+    }
+}
+
 pub(crate) type V3IoSseStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, io::Error>> + Send>>;
 
@@ -282,6 +350,20 @@ pub(crate) fn v3_client_sse_body(
             Some(chunk) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
             None => None,
         }
+    }));
+    v3_io_sse_body(Box::pin(stream), keepalive_interval)
+}
+
+pub(crate) fn v3_live_client_sse_body(
+    stream: V3ClientSseStream,
+    keepalive_interval: Option<Duration>,
+) -> Body {
+    // The typed stream error has already gone to the runtime Error chain and
+    // console owner. Do not copy provider/internal detail into the client
+    // frame; the live Direct client projection is only a generic post-commit
+    // 599 closeout, never a provider-error passthrough.
+    let stream: V3IoSseStream = Box::pin(stream.map(|item| {
+        item.map_err(|_| io::Error::other("response stream terminated before completion"))
     }));
     v3_io_sse_body(Box::pin(stream), keepalive_interval)
 }
@@ -412,6 +494,69 @@ pub(crate) fn wrap_v3_committed_sse_dump_stream(
             }
         },
     )
+}
+
+pub(crate) fn wrap_v3_live_sse_dump_stream(
+    stream: V3ClientSseStream,
+    sse_dump_enabled: bool,
+    port: u16,
+    endpoint: &str,
+    request_id: &str,
+) -> V3ClientSseStream {
+    if !sse_dump_enabled {
+        return stream;
+    }
+    let Some(home) = std::env::var_os("HOME") else {
+        return stream;
+    };
+    let dump_dir = PathBuf::from(home.as_os_str())
+        .join(".rcc")
+        .join("sse-dumps")
+        .join(endpoint.trim_start_matches('/'))
+        .join("ports")
+        .join(port.to_string())
+        .join(request_id);
+    if let Err(error) = std::fs::create_dir_all(&dump_dir) {
+        eprintln!("[v3-sse-dump] create_dir_all failed: {error}");
+        return stream;
+    }
+    let mut file = match std::fs::File::create(dump_dir.join("sse-client-live.bin")) {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("[v3-sse-dump] create failed: {error}");
+            return stream;
+        }
+    };
+    if let Err(error) = file.write_all(
+        format!("# live sse dump start endpoint={endpoint} port={port} request_id={request_id}\n")
+            .as_bytes(),
+    ) {
+        eprintln!("[v3-sse-dump] header write failed: {error}");
+        return stream;
+    }
+    let file = Arc::new(std::sync::Mutex::new(file));
+    Box::pin(stream::unfold((stream, file), |(mut stream, file)| async move {
+        match stream.next().await {
+            Some(Ok(chunk)) => {
+                if let Ok(mut file) = file.lock() {
+                    let _ = file.write_all(&chunk);
+                }
+                Some((Ok(chunk), (stream, file)))
+            }
+            Some(Err(error)) => {
+                if let Ok(mut file) = file.lock() {
+                    let _ = file.write_all(format!("\n# live sse stream error: {error:?}\n").as_bytes());
+                }
+                Some((Err(error), (stream, file)))
+            }
+            None => {
+                if let Ok(mut file) = file.lock() {
+                    let _ = file.write_all(b"\n# live sse stream eof\n");
+                }
+                None
+            }
+        }
+    }))
 }
 
 pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<Duration>) -> Body {
@@ -554,7 +699,7 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_resp_15(
     let error_chain = error_chain.unwrap_or_default();
     let error_body = match &payload.body {
         V3ClientBody::Json(value) if !error_chain.is_empty() => Some(value.clone()),
-        V3ClientBody::Json(_) | V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => None,
+        V3ClientBody::Json(_) | V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => None,
     };
     V3Server16HttpFrame {
         status: payload.status,
@@ -562,6 +707,7 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_resp_15(
         body: match payload.body {
             V3ClientBody::Json(value) => V3Server16Body::Json(value),
             V3ClientBody::Bytes(bytes) => V3Server16Body::Bytes(bytes),
+            V3ClientBody::Sse(stream) => V3Server16Body::Sse(stream),
             V3ClientBody::CommittedSse(stream) => V3Server16Body::CommittedSse(stream),
         },
         debug_node: "V3Debug01NodeEventRegistered",

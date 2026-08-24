@@ -428,6 +428,9 @@ pub(crate) async fn send_responses_websocket_frame(
                 .unwrap_or("V3 Responses runtime error")
                 .to_string(),
             V3Server16Body::Bytes(bytes) => String::from_utf8_lossy(&bytes).to_string(),
+            V3Server16Body::Sse(_) => {
+                "V3 Responses runtime live SSE stream is not available on WebSocket".to_string()
+            }
             V3Server16Body::CommittedSse(_) => "V3 Responses runtime stream error".to_string(),
         };
         return send_responses_websocket_error(socket, "runtime_error", message).await;
@@ -451,6 +454,14 @@ pub(crate) async fn send_responses_websocket_frame(
             };
             let event = json!({"type": "response.completed", "response": value});
             send_responses_websocket_json(socket, &event).await
+        }
+        V3Server16Body::Sse(_) => {
+            send_responses_websocket_error(
+                socket,
+                "runtime_error",
+                "V3 Responses runtime live SSE stream is not available on WebSocket",
+            )
+            .await
         }
         V3Server16Body::CommittedSse(stream) => {
             send_responses_websocket_committed_sse_stream(socket, stream).await
