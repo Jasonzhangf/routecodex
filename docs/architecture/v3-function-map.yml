@@ -5070,6 +5070,7 @@ features:
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   resource_bindings: [v3.sse.direct.accept_skeleton]
   entry_symbols:
   - pending_endpoint_after_responses_admission
@@ -5079,10 +5080,12 @@ features:
   - V3DirectSseAccept03ProjectedClientFrame
   - V3FrontSseAcceptSkeleton
   - v3_request_wants_sse
+  - execute_responses_direct_server_outcome
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/scripts/architecture/verify-v3-direct-sse-accept-skeleton.mjs
   - docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml

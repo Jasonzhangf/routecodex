@@ -3271,6 +3271,7 @@ features:
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   contract:
   - docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
   - docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
