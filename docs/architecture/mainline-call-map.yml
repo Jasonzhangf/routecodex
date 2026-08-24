@@ -26,6 +26,12 @@ chains:
       side_channel_reads: []
       side_channel_writes: []
     status: anchored
+- chain_id: architecture.v3_contract_maps.mainline
+  summary: V3 architecture contract maps are owned, verified, and released as one synchronized map lifecycle.
+  entry_contract:
+    node: ArchitectureContractMapAuthoring01
+    owner_doc: docs/architecture/function-map.yml
+  edges:
   - step_id: architecture-v3-contract-map-01
     from_node: ArchitectureContractMapAuthoring01
     to_node: ArchitectureContractMapVerification02
