@@ -28,6 +28,21 @@ const SHARED_PROJECTION_PATHS = new Set([
   'scripts/_gate-matrix.mjs',
 ]);
 
+const GOVERNANCE_CLOSURE_PREFIXES = [
+  'contracts/',
+  'docs/evidence/feature-completion/',
+  'docs/architecture/',
+  'scripts/architecture/lib/feature-layer-batch-',
+  'crates/routecodex-v4-standard-plugins/src/lib.rs',
+  'crates/routecodex-v4-standard-plugins/src/response_inbound.rs',
+  'crates/routecodex-v4-standard-plugins/src/response_outbound.rs',
+];
+
+function isGovernanceClosurePath(relativePath) {
+  return SHARED_PROJECTION_PATHS.has(relativePath)
+    || GOVERNANCE_CLOSURE_PREFIXES.some((prefix) => relativePath.startsWith(prefix));
+}
+
 function readJsonAt(truth, commit, relativePath, failures, code, context) {
   const identity = truth.blobIdentity(commit, relativePath);
   const bytes = identity ? truth.blob(commit, relativePath) : null;
