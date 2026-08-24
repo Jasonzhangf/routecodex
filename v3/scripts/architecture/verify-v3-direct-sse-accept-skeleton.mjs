@@ -25,6 +25,7 @@ function readFirst(relativePaths, { required = true } = {}) {
 }
 
 const endpoint = read('crates/routecodex-v3-server/src/endpoint_handlers.rs');
+const serverLib = read('crates/routecodex-v3-server/src/lib.rs');
 const frameBuilders = read('crates/routecodex-v3-server/src/frame_builders.rs');
 const manifest = readFirst(admissionWorkspace
   ? ['docs/architecture/mainline-manifests/v3.direct_sse_accept_skeleton.mainline.yml', 'docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml']
@@ -53,16 +54,20 @@ for (const marker of [
   if (!endpoint.includes(marker)) failures.push(`endpoint_handlers.rs: missing fixed skeleton marker ${marker}`);
 }
 
+if (!serverLib.includes('fn v3_request_wants_sse(')) {
+  failures.push('lib.rs: canonical SSE intent helper owner is missing');
+}
+
 if (!frameBuilders.includes('v3_io_sse_body')) {
   failures.push('frame_builders.rs: direct SSE transport body owner is missing');
 }
 
 const canonicalMapMarkers = [
   ['manifest', manifest, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame', 'v3-direct-sse-accept-skeleton-01', 'v3-direct-sse-accept-skeleton-02']],
-  ['resource map', resourceMap, ['v3.sse.direct.accept_skeleton', 'V3DirectSseAccept01ClientChannel']],
-  ['function map', functionMap, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame']],
+  ['resource map', resourceMap, ['v3.sse.direct.accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3FrontSseAcceptSkeleton', 'v3_request_wants_sse']],
+  ['function map', functionMap, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame', 'V3FrontSseAcceptSkeleton', 'v3_request_wants_sse']],
   ['verification map', verificationMap, ['v3.direct_sse_accept_skeleton']],
-  ['mainline map', mainlineMap, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame', 'v3-direct-sse-accept-skeleton-01', 'v3-direct-sse-accept-skeleton-02']],
+  ['mainline map', mainlineMap, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame', 'V3FrontSseAcceptSkeleton', 'v3_request_wants_sse', 'v3-direct-sse-accept-skeleton-01', 'v3-direct-sse-accept-skeleton-02']],
 ];
 
 for (const [name, document, markers] of canonicalMapMarkers) {
