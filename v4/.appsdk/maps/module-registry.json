@@ -6,6 +6,11 @@
       "status": "active",
       "owner": "routecodex-v4-governance",
       "owned_paths": [
+        ".appsdk/**",
+        "contracts/**",
+        "docs/**",
+        "scripts/**",
+        "package.json",
         ".appsdk/goal.json",
         ".appsdk/project.json",
         ".appsdk/sdk.lock",
@@ -44,7 +49,15 @@
         "v4_isolation_positive",
         "v4_parity_gate_real_runtime_admission",
         "v4_parity_gate_real_runtime_admission_red",
-        "v4_real_runtime_admission_red"
+        "v4_real_runtime_admission_red",
+        "v4_feature_layer_batches",
+        "v4_feature_layer_batch_build_guard",
+        "v4_feature_layer_batches_self_test",
+        "v4_feature_layer_batch_admission",
+        "v4_feature_layer_batches_boundary",
+        "v4_feature_layer_batches_red",
+        "v4_parity_gate_plane_isolation",
+        "v4_parity_gate_plane_isolation_red"
       ]
     },
     {

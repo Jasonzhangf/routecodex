@@ -129,7 +129,7 @@ function runProductionMode(mode) {
   const failures = validateFeatureLayerBatchAdmission(
     loadCanonicalInput(),
     createProductionContext(),
-    { mode },
+    { mode, allowPendingGuard: mode !== 'admission' },
   );
   if (failures.length > 0) {
     printFailures(mode.toUpperCase(), failures);

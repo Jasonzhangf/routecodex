@@ -19,6 +19,7 @@
     {"resource_id":"mainline_receipt","owner":"appsdk::host_vcs","truth_store":".appsdk/records/mainline-receipt-record-<receipt_id>.json","allowed_operations":["read","validate","write"],"relations":{"must_reference":["integration_candidate","remote_repository"]}},
     {"resource_id":"remote_repository","owner":"appsdk::host_vcs","truth_store":"git ls-remote <remote> <ref>","allowed_operations":["observe"]},
     {"resource_id":"mainline_merge","owner":"appsdk::merge_queue","truth_store":".appsdk/records/merge-record-<module>.json","allowed_operations":["read","validate","write"]},
-    {"resource_id":"lifecycle_error","owner":"appsdk::record_graph","truth_store":"process error chain","allowed_operations":["emit"]}
+    {"resource_id":"lifecycle_error","owner":"appsdk::record_graph","truth_store":"process error chain","allowed_operations":["emit"]},
+    {"resource_id":"feature_layer_batch_manifest","status":"active","feature_id":"V4-LAYER-GATE-001","owner":"routecodex-v4-governance","truth_store":"contracts/feature-completion-layer-batches.manifest.json","allowed_operations":["read","validate","write"],"relations":{"must_reference":["merge_queue_state","integration_candidate"]},"forbidden_relations":["normal_payload","review_as_source_completion","cross_lane_source_dependency","early_production_wiring"]}
   ]
 }
