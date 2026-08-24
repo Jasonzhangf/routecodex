@@ -7,6 +7,7 @@ modules:
   - .gitignore
   - scripts/ci/repo-sanity.mjs
   - scripts/architecture/verify-repository-filesystem-governance.mjs
+  - scripts/architecture/verify-architecture-mainline-manifest-sync.mjs
   - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
   - v3/scripts/architecture/verify-v3-contract-map-owner.mjs
   - v3/scripts/architecture/verify-v3-architecture-ci.mjs
@@ -62,6 +63,7 @@ modules:
   - npm run verify:v3-direct-sse-accept-skeleton
   - npm run verify:sse-architecture-boundary
   - npm run verify:v3-architecture-ci
+  - npm run verify:architecture-mainline-manifest-sync
 - module_id: v3.virtual_router_target_interpreter
   owner_feature_id: v3.virtual_router_target_interpreter
   status: implementation_active
