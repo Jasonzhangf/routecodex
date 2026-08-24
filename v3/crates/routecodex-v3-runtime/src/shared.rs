@@ -112,6 +112,21 @@ impl V3SseRemoteContinuationObservationState {
             .pending_response_id = Some(response_id.to_string());
         Ok(())
     }
+
+    pub(crate) fn clear_pending_response_id(&self) -> Result<(), V3Error01SourceRaised> {
+        self.inner
+            .lock()
+            .map_err(|error| {
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3ProviderResp14Raw",
+                    "sse_remote_continuation_observer_poisoned",
+                    error.to_string(),
+                )
+            })?
+            .pending_response_id = None;
+        Ok(())
+    }
 }
 
 pub(crate) enum V3ProviderAttemptBody {
@@ -1280,6 +1295,25 @@ fn observe_sse_remote_continuation_chunk(
                     | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput,
             )
         );
+        if matches!(
+            classification,
+            Some(
+                V3ProviderResponsesJsonFrameOutcome::Terminal
+                    | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput,
+            )
+        ) {
+            let requires_action = serde_json::from_str::<serde_json::Value>(&data)
+                .ok()
+                .and_then(|value| value.get("response").cloned())
+                .as_ref()
+                .and_then(serde_json::Value::as_object)
+                .and_then(|response| response.get("status"))
+                .and_then(serde_json::Value::as_str)
+                == Some("requires_action");
+            if !requires_action {
+                observation_state.clear_pending_response_id()?;
+            }
+        }
     }
     Ok((terminal_observed, semantic_observed))
 }
@@ -1392,6 +1426,13 @@ fn observe_sse_frame_remote_continuation(
         .map(ToOwned::to_owned);
     if let Some(response_id) = semantic_response_id.as_ref() {
         *response_id_candidate = Some(response_id.clone());
+    }
+    if event
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        == Some("response.created")
+    {
+        return Ok(semantic_response_id);
     }
     if matches!(
         event

@@ -1559,12 +1559,47 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                         &hook_registry,
                     );
                 };
+                let mut stream = stream;
+                let first_frame = match stream.next().await {
+                    Some(Ok(frame)) => frame,
+                    Some(Err(source)) => return error_output(source, trace, &hook_registry),
+                    None => {
+                        return error_output(
+                            runtime_source(
+                                "V3DirectResp14ProviderCompat",
+                                "direct SSE ended after initial guard without a client frame",
+                            ),
+                            trace,
+                            &hook_registry,
+                        )
+                    }
+                };
+                if let (false, Some(continuation_runtime), Some(scope)) = (
+                    continuation_disabled,
+                    continuation_state.as_deref(),
+                    continuation_scope.as_ref(),
+                ) {
+                    let observation = V3RemoteContinuationObservation::Streaming {
+                        state: state.clone(),
+                    };
+                    if let Err(source) = persist_v3_direct_continuation_lifecycle(
+                        Some(continuation_runtime),
+                        scope,
+                        &observation,
+                        previous_response_id.as_deref(),
+                        &selected_pin,
+                        &selected_capability_revision,
+                        now_epoch_ms,
+                    ) {
+                        return error_output(source, trace, &hook_registry);
+                    }
+                }
                 // The first semantic frame was admitted by the direct SSE guard.
                 // Hand the live stream to Front immediately; post-commit stream
                 // errors remain typed on that stream and cannot re-enter policy.
                 drop(provider_action_permit.take());
                 client_sse = Some(wrap_v3_direct_sse_continuation_lifecycle(
-                    stream,
+                    Box::pin(stream::once(async move { Ok(first_frame) }).chain(stream)),
                     state.clone(),
                     (!continuation_disabled).then(|| continuation_state.clone()).flatten(),
                     (!continuation_disabled).then(|| continuation_scope.clone()).flatten(),
