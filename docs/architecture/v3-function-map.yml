@@ -2340,7 +2340,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
-  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-runtime/tests
   - docs/goals/v3-openai-chat-anthropic-sse-terminal-closeout-fix-design.md
@@ -4302,7 +4301,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
-  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   owner_scope: Runtime owns one timing state per Direct/Relay request; Direct SSE
     starts external timing in the kernel, closes it only after provider decoder clean
