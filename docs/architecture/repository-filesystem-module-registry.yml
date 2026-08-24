@@ -15,6 +15,10 @@ modules:
   - .agents/skills/rcc-dev-skills/references
   - .agents/skills/rcc-v3-architecture/SKILL.md
   - docs/architecture/repository-filesystem-module-registry.yml
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
   - docs/goals/root-generated-artifacts-governance-plan.md
   - docs/goals/root-generated-artifacts-governance-execution-prompt.md
   allowed_paths:
@@ -40,31 +44,6 @@ modules:
   - from: RepoFilesystemVerify02Gate
     to: RepoFilesystemBuild03Required
   forbidden_resources:
-  - request.normal_payload
-  - provider.wire_payload
-  - response.client_payload
-  - metadata.runtime_control
-- module_id: architecture.v3_contract_maps
-  owner_feature_id: architecture.v3_contract_maps
-  status: implementation_active
-  contract_kind: shared_v3_architecture_contract_maps
-  owned_paths:
-  - docs/architecture/v3-resource-operation-map.yml
-  - docs/architecture/v3-function-map.yml
-  - docs/architecture/v3-mainline-call-map.yml
-  - docs/architecture/v3-verification-map.yml
-  contract_writers:
-  - v3.direct_sse_accept_skeleton
-  - v3.virtual_router_target_interpreter
-  - v3.direct_response_hooks
-  contract_readers:
-  - all_v3_features
-  allowed_edges:
-  - from: V3ContractMapAuthoring01FeatureBinding
-    to: V3ContractMapVerification02GateBinding
-  - from: V3ContractMapVerification02GateBinding
-    to: V3ContractMapRuntime03ReleaseEvidence
-  forbidden_paths:
   - request.normal_payload
   - provider.wire_payload
   - response.client_payload
