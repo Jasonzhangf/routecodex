@@ -1103,6 +1103,7 @@
     },
     {
       "resource_id": "v4.runtime.node_plan_bundle",
+      "feature_id": "V4-RUNTIME-003",
       "owner": "routecodex-v4-plugin-plan::NodePluginPlanBundle",
       "truth_store": "crates/routecodex-v4-plugin-plan/src/lib.rs",
       "allowed_operations": [

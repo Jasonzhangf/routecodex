@@ -347,6 +347,7 @@
     },
     {
       "gate_id": "v4_runtime_003_plan_bundle_positive",
+      "status": "active",
       "command": "cargo test -p routecodex-v4-plugin-plan --manifest-path Cargo.toml --locked",
       "argv": ["cargo", "test", "-p", "routecodex-v4-plugin-plan", "--manifest-path", "Cargo.toml", "--locked"],
       "owner_module_id": "routecodex-v4-plugin-plan",
@@ -357,6 +358,7 @@
     },
     {
       "gate_id": "v4_runtime_003_plan_bundle_red",
+      "status": "active",
       "command": "cargo test -p routecodex-v4-plugin-plan --manifest-path Cargo.toml --locked",
       "argv": ["cargo", "test", "-p", "routecodex-v4-plugin-plan", "--manifest-path", "Cargo.toml", "--locked"],
       "owner_module_id": "routecodex-v4-plugin-plan",
@@ -367,6 +369,7 @@
     },
     {
       "gate_id": "v4_runtime_003_plan_bundle_boundary",
+      "status": "active",
       "command": "cargo test -p routecodex-v4-plugin-plan --manifest-path Cargo.toml --locked",
       "argv": ["cargo", "test", "-p", "routecodex-v4-plugin-plan", "--manifest-path", "Cargo.toml", "--locked"],
       "owner_module_id": "routecodex-v4-plugin-plan",
@@ -377,6 +380,7 @@
     },
     {
       "gate_id": "v4_runtime_003_plan_bundle_plane",
+      "status": "active",
       "command": "cargo test -p routecodex-v4-plugin-plan --manifest-path Cargo.toml --locked",
       "argv": ["cargo", "test", "-p", "routecodex-v4-plugin-plan", "--manifest-path", "Cargo.toml", "--locked"],
       "owner_module_id": "routecodex-v4-plugin-plan",
