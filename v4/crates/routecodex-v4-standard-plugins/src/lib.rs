@@ -35,6 +35,9 @@ pub mod protocol;
 pub mod provider;
 pub mod response_inbound;
 pub mod response_outbound;
+pub mod response_decode;
+pub mod response_governance;
+pub mod response_fault;
 pub mod request_plugins;
 pub mod request_normalize;
 pub mod chat_to_responses;
@@ -831,7 +834,7 @@ fn payload_cycle_record(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn error_intake(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+pub(crate) fn error_intake(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut error_chain = ctx
         .read_control_resource("v4.control.error_chain")
         .map_err(|error| error.to_string())?
@@ -878,7 +881,7 @@ fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     ctx.write_data(data).map_err(|error| error.to_string())
 }
 
-fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+pub(crate) fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     ctx.read_data()
         .as_object()
         .ok_or_else(|| "response governance requires an object".to_string())?;
@@ -886,7 +889,7 @@ fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     Ok(())
 }
 
-fn tool_harvest(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+pub(crate) fn tool_harvest(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = ctx
         .read_data()
         .as_object()

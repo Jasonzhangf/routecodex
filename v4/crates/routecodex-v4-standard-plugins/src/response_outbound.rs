@@ -59,7 +59,7 @@ pub(crate) fn response_outbound_descriptors() -> Vec<StandardPlugin> {
     ]
 }
 
-fn client_semantic_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+pub(crate) fn client_semantic_projection_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let data = ctx.read_data();
     let governed = data
         .as_object()
@@ -116,7 +116,7 @@ pub(crate) fn client_semantic_projection_handle(
 ) -> (&'static str, fn(&mut ExecCtx<'_>) -> Result<(), String>) {
     (
         CLIENT_SEMANTIC_ID,
-        client_semantic_projection as fn(&mut ExecCtx<'_>) -> Result<(), String>,
+        client_semantic_projection_entry as fn(&mut ExecCtx<'_>) -> Result<(), String>,
     )
 }
 
