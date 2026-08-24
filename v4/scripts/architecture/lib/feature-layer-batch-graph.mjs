@@ -250,7 +250,7 @@ function semanticWiringGraph(context, commit) {
     ...parseBuildEdges(readAt(context, commit, 'scripts/build.mjs')),
     ...parseConsumerRegressionEdges(readAt(context, commit, 'scripts/_gate-matrix.mjs')),
     ...parseFrozenEdges(readAt(context, commit, 'contracts/active-link/frozen-consumer-registry.json')),
-    ...parseMainlineEdges(readAt(context, commit, '.appsdk/maps/mainline-call-map.json')),
+    ...parseMainlineEdges(readAt(context, commit, 'docs/architecture/maps/mainline-call-map.json')),
   ]);
 }
 

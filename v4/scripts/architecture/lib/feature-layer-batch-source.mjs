@@ -17,10 +17,10 @@ import {
 import { canonicalJson } from './feature-layer-batch-git.mjs';
 
 const SHARED_PROJECTION_PATHS = new Set([
-  '.appsdk/maps/function-map.json',
+  'docs/architecture/maps/function-map.json',
   '.appsdk/maps/module-registry.json',
-  '.appsdk/maps/resource-map.json',
-  '.appsdk/maps/verification-map.json',
+  'docs/architecture/maps/resource-map.json',
+  'docs/architecture/maps/verification-map.json',
   'contracts/feature-completion-layer-batches.manifest.json',
   'contracts/data-control-boundary.contract.json',
   'docs/architecture/v4-resource-operation-map.yml',
@@ -117,13 +117,13 @@ export function validateSourceGreenClaims(input, context, failures) {
         'CANDIDATE_RECORD_INVALID_JSON', recordPath);
       const candidateMaps = record ? {
         functionMap: readJsonAt(context.truth, record.head_commit,
-          '.appsdk/maps/function-map.json', failures, 'CANDIDATE_MAP_INVALID', 'candidate function map'),
+          'docs/architecture/maps/function-map.json', failures, 'CANDIDATE_MAP_INVALID', 'candidate function map'),
         moduleRegistry: readJsonAt(context.truth, record.head_commit,
           '.appsdk/maps/module-registry.json', failures, 'CANDIDATE_MAP_INVALID', 'candidate module registry'),
         resourceMap: readJsonAt(context.truth, record.head_commit,
-          '.appsdk/maps/resource-map.json', failures, 'CANDIDATE_MAP_INVALID', 'candidate resource map'),
+          'docs/architecture/maps/resource-map.json', failures, 'CANDIDATE_MAP_INVALID', 'candidate resource map'),
         verificationMap: readJsonAt(context.truth, record.head_commit,
-          '.appsdk/maps/verification-map.json', failures, 'CANDIDATE_MAP_INVALID', 'candidate verification map'),
+          'docs/architecture/maps/verification-map.json', failures, 'CANDIDATE_MAP_INVALID', 'candidate verification map'),
         gateInputContract: readJsonAt(context.truth, record.head_commit,
           'contracts/feature-layer-gate-inputs.contract.json', failures,
           'CANDIDATE_GATE_INPUT_CONTRACT_INVALID', 'candidate gate input contract'),

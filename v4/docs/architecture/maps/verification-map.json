@@ -211,11 +211,16 @@
     },
     {
       "gate_id": "v4_parity_gate_plane_isolation",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-LAYER-GATE-001"],
+      "input_contract_path": "contracts/feature-layer-gate-inputs.contract.json",
+      "input_set_id": "plane",
       "command": "node scripts/architecture/verify-v4-plane-isolation.mjs",
-      "required_for": [
-        "routecodex-v4-skeleton:architecture_stable",
-        "routecodex-v4-runtime:architecture_stable"
-      ]
+      "argv": ["node", "scripts/architecture/verify-v4-plane-isolation.mjs"],
+      "producer": {"adapter": "node", "identity": "v4_parity_gate_plane_isolation"},
+      "evidence_role": "plane_isolation",
+      "required_for": ["source_green", "routecodex-v4-governance:architecture_stable"]
     },
     {
       "gate_id": "v4_parity_gate_execution_binding",
@@ -798,6 +803,97 @@
       "required_for": [
         "routecodex-v4-servertool:active"
       ]
+    },
+    {
+      "gate_id": "v4_feature_layer_batches",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-LAYER-GATE-001"],
+      "input_contract_path": "contracts/feature-layer-gate-inputs.contract.json",
+      "input_set_id": "layer",
+      "command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs",
+      "argv": ["node", "scripts/architecture/verify-v4-feature-layer-batches.mjs"],
+      "producer": {"adapter": "node", "identity": "v4_feature_layer_batches"},
+      "evidence_role": null,
+      "required_for": ["routecodex-v4-governance:architecture_stable"]
+    },
+    {
+      "gate_id": "v4_feature_layer_batch_build_guard",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-LAYER-GATE-001"],
+      "input_contract_path": "contracts/feature-layer-gate-inputs.contract.json",
+      "input_set_id": "layer",
+      "command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard",
+      "argv": ["node", "scripts/architecture/verify-v4-feature-layer-batches.mjs", "--build-guard"],
+      "producer": {"adapter": "node", "identity": "v4_feature_layer_batch_build_guard"},
+      "evidence_role": null,
+      "required_for": ["independent_source_build", "integration_build"]
+    },
+    {
+      "gate_id": "v4_feature_layer_batches_self_test",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-LAYER-GATE-001"],
+      "input_contract_path": "contracts/feature-layer-gate-inputs.contract.json",
+      "input_set_id": "layer",
+      "command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-feature-layer-batches.mjs", "--self-test"],
+      "producer": {"adapter": "node", "identity": "v4_feature_layer_batches_self_test"},
+      "evidence_role": "positive",
+      "required_for": ["source_green"]
+    },
+    {
+      "gate_id": "v4_feature_layer_batch_admission",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-LAYER-GATE-001"],
+      "input_contract_path": "contracts/feature-layer-gate-inputs.contract.json",
+      "input_set_id": "layer",
+      "command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
+      "argv": ["node", "scripts/architecture/verify-v4-feature-layer-batches.mjs", "--admission"],
+      "producer": {"adapter": "node", "identity": "v4_feature_layer_batch_admission"},
+      "evidence_role": null,
+      "required_for": ["integration_build", "product_wiring"]
+    },
+    {
+      "gate_id": "v4_feature_layer_batches_boundary",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-LAYER-GATE-001"],
+      "input_contract_path": "contracts/feature-layer-gate-inputs.contract.json",
+      "input_set_id": "layer",
+      "command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --boundary-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-feature-layer-batches.mjs", "--boundary-self-test"],
+      "producer": {"adapter": "node", "identity": "v4_feature_layer_batches_boundary"},
+      "evidence_role": "boundary_audit",
+      "required_for": ["source_green"]
+    },
+    {
+      "gate_id": "v4_feature_layer_batches_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-LAYER-GATE-001"],
+      "input_contract_path": "contracts/feature-layer-gate-inputs.contract.json",
+      "input_set_id": "layer",
+      "command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --red-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-feature-layer-batches.mjs", "--red-self-test"],
+      "producer": {"adapter": "node", "identity": "v4_feature_layer_batches_red"},
+      "evidence_role": "red_gate",
+      "required_for": ["source_green", "routecodex-v4-governance:architecture_stable"]
+    },
+    {
+      "gate_id": "v4_parity_gate_plane_isolation_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-LAYER-GATE-001"],
+      "input_contract_path": "contracts/feature-layer-gate-inputs.contract.json",
+      "input_set_id": "plane",
+      "command": "node scripts/architecture/verify-v4-plane-isolation.mjs --red-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-plane-isolation.mjs", "--red-self-test"],
+      "producer": {"adapter": "node", "identity": "v4_parity_gate_plane_isolation_red"},
+      "evidence_role": null,
+      "required_for": ["routecodex-v4-governance:architecture_stable"]
     }
   ]
 }

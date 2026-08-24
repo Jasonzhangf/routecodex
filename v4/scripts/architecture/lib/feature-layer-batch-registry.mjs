@@ -24,11 +24,11 @@ const PREFLIGHT_MARKER = '// V4-LAYER-PREFLIGHT-END\n';
 export const GATE_INPUT_CONTRACT_PATH = 'contracts/feature-layer-gate-inputs.contract.json';
 export const GATE_INPUT_SETS = {
   layer: [
-    '.appsdk/maps/function-map.json',
-    '.appsdk/maps/mainline-call-map.json',
+    'docs/architecture/maps/function-map.json',
+    'docs/architecture/maps/mainline-call-map.json',
     '.appsdk/maps/module-registry.json',
-    '.appsdk/maps/resource-map.json',
-    '.appsdk/maps/verification-map.json',
+    'docs/architecture/maps/resource-map.json',
+    'docs/architecture/maps/verification-map.json',
     'Cargo.toml',
     'contracts/active-link/frozen-consumer-registry.json',
     'contracts/feature-completion-layer-batches.manifest.json',

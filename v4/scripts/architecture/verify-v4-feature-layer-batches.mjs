@@ -50,11 +50,11 @@ function createIo() {
 export function loadCanonicalInput() {
   return {
     manifest: readJson(MANIFEST_PATH),
-    functionMap: readJson('.appsdk/maps/function-map.json'),
+    functionMap: readJson('docs/architecture/maps/function-map.json'),
     moduleRegistry: readJson('.appsdk/maps/module-registry.json'),
-    resourceMap: readJson('.appsdk/maps/resource-map.json'),
-    verificationMap: readJson('.appsdk/maps/verification-map.json'),
-    mainlineMap: readJson('.appsdk/maps/mainline-call-map.json'),
+    resourceMap: readJson('docs/architecture/maps/resource-map.json'),
+    verificationMap: readJson('docs/architecture/maps/verification-map.json'),
+    mainlineMap: readJson('docs/architecture/maps/mainline-call-map.json'),
     gateInputContract: readJson('contracts/feature-layer-gate-inputs.contract.json'),
     packageJson: readJson('package.json'),
     planSource: readText('docs/goals/v4-feature-completion-plan.md'),
@@ -97,7 +97,14 @@ export function validateFeatureLayerBatchAdmission(input, context, options = {})
       return failures;
     }
     if (!observed.readable) {
-      addFailure(failures, 'WIRING_GUARD_UNBOUND', 'build guard requires an exact source candidate');
+      // Before the first exact layer candidate exists, the production wiring
+      // graph is intentionally unbound.  Independent source builds must still
+      // be admitted; only an observed graph change is allowed to escalate into
+      // full candidate/evidence admission.  Admission mode remains strict.
+      if (input.manifest.integration.enforcement_binding_status !== 'pending_candidate'
+          || input.manifest.integration.wiring_started) {
+        addFailure(failures, 'WIRING_GUARD_UNBOUND', 'build guard requires an exact source candidate');
+      }
     } else if (observed.wiring_edges.length > 0) {
       validateFeatureLayerAdmission(input, context, failures, {
         requireIntegrationRecords: false,

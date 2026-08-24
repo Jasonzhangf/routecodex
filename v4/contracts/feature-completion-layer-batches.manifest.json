@@ -146,10 +146,10 @@
       "owner_function_id": "v4.governance.feature_layer_batch_admission",
       "module_ids": ["routecodex-v4-governance"],
       "owned_paths": [
-        ".appsdk/maps/function-map.json",
+        "docs/architecture/maps/function-map.json",
         ".appsdk/maps/module-registry.json",
-        ".appsdk/maps/resource-map.json",
-        ".appsdk/maps/verification-map.json",
+        "docs/architecture/maps/resource-map.json",
+        "docs/architecture/maps/verification-map.json",
         "contracts/data-control-boundary.contract.json",
         "contracts/feature-completion-layer-batches.manifest.json",
         "contracts/feature-layer-gate-inputs.contract.json",
@@ -202,7 +202,7 @@
       {"path":"scripts/compile-real-runtime-manifest.mjs","scope_hash":null},
       {"path":"contracts/real-runtime-admission.manifest.json","scope_hash":null},
       {"path":"contracts/active-link/frozen-consumer-registry.json","scope_hash":null},
-      {"path":".appsdk/maps/mainline-call-map.json","scope_hash":null},
+      {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":null},
       {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":null}
     ],
     "wiring_started": false,

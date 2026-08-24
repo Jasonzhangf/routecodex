@@ -77,7 +77,7 @@ export const GUARDED_WIRING_SURFACES = [
   'scripts/compile-real-runtime-manifest.mjs',
   'contracts/real-runtime-admission.manifest.json',
   'contracts/active-link/frozen-consumer-registry.json',
-  '.appsdk/maps/mainline-call-map.json',
+  'docs/architecture/maps/mainline-call-map.json',
   'crates/routecodex-v4-runtime-bin/**',
 ];
 export const FORBIDDEN_CANDIDATE_PREFIXES = [
