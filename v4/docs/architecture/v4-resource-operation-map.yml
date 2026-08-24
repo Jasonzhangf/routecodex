@@ -641,6 +641,67 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
+- resource_id: v4.runtime.request_port
+  axis: control
+  verification_gate:
+  - v4_runtime_005_request_port_positive
+  - v4_runtime_005_request_port_red
+  - v4_runtime_005_request_port_boundary
+  - v4_runtime_005_request_port_plane
+  resource_kind: typed_side_channel
+  lifecycle: v4.pipeline.request_cycle
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4HubReqChatProcess04Governed
+  owner_symbols:
+  - RequestPortLease::admit
+  - RequestPortLease::binding
+  identity:
+  - requestId
+  - planEpoch
+  - manifestHash
+  allowed_writers:
+  - RequestPortLease::admit
+  allowed_readers:
+  - ResponsePortReceipt::consume_response
+  - ResponsePortReceipt::consume_error
+  forbidden_writers:
+  - V4HubReqInbound03Normalized
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.runtime.response_error_port
+  axis: control
+  verification_gate:
+  - v4_runtime_006_response_error_positive
+  - v4_runtime_006_response_error_red
+  - v4_runtime_006_response_error_boundary
+  - v4_runtime_006_response_error_plane
+  resource_kind: typed_side_channel
+  lifecycle: v4.pipeline.response_cycle
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4HubRespInbound02Parsed
+  owner_symbols:
+  - consume_response
+  - consume_error
+  identity:
+  - requestId
+  - planEpoch
+  - manifestHash
+  allowed_writers:
+  - consume_response
+  - consume_error
+  allowed_readers:
+  - V4HubRespInbound02Parsed
+  - V4ErrorErr05ExecutionDecision
+  forbidden_writers:
+  - V4HubReqInbound03Normalized
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
 - resource_id: v4.pipeline.mainline
   axis: control
   verification_gate:

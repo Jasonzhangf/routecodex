@@ -339,6 +339,22 @@
       "status": "active"
     },
     {
+      "resource_id": "v4.runtime.request_port",
+      "owner": "routecodex-v4-runtime::RequestPortLease",
+      "truth_store": "v4/crates/routecodex-v4-runtime/src/request_port.rs",
+      "allowed_operations": ["read", "validate", "write"],
+      "status": "active",
+      "feature_id": "V4-RUNTIME-005"
+    },
+    {
+      "resource_id": "v4.runtime.response_error_port",
+      "owner": "routecodex-v4-runtime::ResponsePortReceipt",
+      "truth_store": "v4/crates/routecodex-v4-runtime/src/response_error_port.rs",
+      "allowed_operations": ["read", "validate", "write"],
+      "status": "active",
+      "feature_id": "V4-RUNTIME-006"
+    },
+    {
       "resource_id": "v4.scope.session",
       "owner": "routecodex-v4-runtime::V4ScopeRegistry",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
