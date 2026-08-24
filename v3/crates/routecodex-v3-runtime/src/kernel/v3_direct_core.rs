@@ -828,11 +828,8 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
         );
         let client_body = match attempt_body {
             V3ProviderAttemptBody::Sse(stream) => {
-                // The projection owner already admitted and replayed the first
-                // semantic frame. Direct must hand the live stream to Front
-                // now; draining it here binds client response startup to
-                // provider terminal EOF and reopens provider policy after the
-                // client has already committed to decoding.
+                // First semantic frame already admitted. Front owns live stream.
+                // Post-commit failures stay typed on stream; no policy re-entry.
                 drop(provider_action_permit.take());
                 V3ClientBody::Sse(stream)
             }

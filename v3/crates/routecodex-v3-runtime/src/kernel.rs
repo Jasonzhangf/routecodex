@@ -1544,7 +1544,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                 &mut response_projection.attempt_payload.body,
                 V3ProviderAttemptBody::Bytes(Vec::new()),
             );
-            let V3ProviderAttemptBody::Sse(stream) = attempt else {
+            let V3ProviderAttemptBody::Sse(mut stream) = attempt else {
                 return error_output(
                     runtime_source(
                         "V3DirectResp14ProviderCompat",
@@ -1554,10 +1554,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                     &hook_registry,
                 );
             };
-            // The first semantic frame was already admitted by the direct
-            // SSE guard. Keep the provider stream live behind the Front
-            // skeleton; draining it here couples client semantic timeout to
-            // provider terminal EOF and prevents the client from decoding.
+            // The first semantic frame was admitted by the direct SSE guard.
+            // Hand the live stream to Front immediately; post-commit stream
+            // errors remain typed on that stream and cannot re-enter policy.
             drop(provider_action_permit.take());
             client_sse = Some(wrap_v3_direct_sse_continuation_lifecycle(
                 stream,
@@ -1596,26 +1595,23 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             headers: std::mem::take(&mut response_projection.attempt_payload.headers),
             body: client_body,
         };
-        let live_client_sse = matches!(&client_payload.body, V3ClientBody::Sse(_));
-        if !live_client_sse {
-            if let (false, Some(_state), Some(scope)) = (
+        if let (false, Some(_state), Some(scope)) = (
             continuation_disabled,
             continuation_state.as_ref(),
             continuation_scope.as_ref(),
+        ) {
+            if let Err(projected) = commit_or_release_v3_direct_continuation(
+                continuation_state.as_deref(),
+                scope,
+                &response_projection.remote_continuation,
+                previous_response_id.as_deref(),
+                &selected_pin,
+                &selected_capability_revision,
+                now_epoch_ms,
+                &mut trace,
+                &hook_registry,
             ) {
-                if let Err(projected) = commit_or_release_v3_direct_continuation(
-                    continuation_state.as_deref(),
-                    scope,
-                    &response_projection.remote_continuation,
-                    previous_response_id.as_deref(),
-                    &selected_pin,
-                    &selected_capability_revision,
-                    now_epoch_ms,
-                    &mut trace,
-                    &hook_registry,
-                ) {
-                    return projected;
-                }
+                return projected;
             }
         }
         if !provider_health_neutral {
@@ -1637,18 +1633,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
         }
         trace.push("V3DirectResp15ClientPayloadReady");
         trace.push("V3Resp15ClientPayload");
-        let timing = if live_client_sse {
-            None
-        } else {
-            match runtime_timing.finish_runtime() {
-                Ok(timing) => Some(timing),
-                Err(error) => {
-                    return error_output(
-                        runtime_source("V3RuntimeTimingTerminal", error),
-                        trace,
-                        &hook_registry,
-                    )
-                }
+        let timing = match runtime_timing.finish_runtime() {
+            Ok(timing) => timing,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3RuntimeTimingTerminal", error),
+                    trace,
+                    &hook_registry,
+                )
             }
         };
         let mut observability = build_v3_direct_runtime_observability(
@@ -1661,7 +1653,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             direct_stopless_projected,
         );
         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
-        observability.timing = timing;
+        observability.timing = Some(timing);
 
         return V3ResponsesDirectRuntimeOutput {
             observability: Some(observability),
