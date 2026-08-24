@@ -430,6 +430,17 @@
       ]
     },
     {
+      "gate_id": "v4_node_container_epoch_closure_audit",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-runtime",
+      "feature_ids": ["V4-RUNTIME-002"],
+      "command": "cargo test -p routecodex-v4-node-container --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
+      "producer": {"adapter": "cargo", "identity": "v4_node_container_epoch_closure_audit"},
+      "evidence_role": "closure_audit",
+      "required_for": ["V4-RUNTIME-002:closure_audit"]
+    },
+    {
       "gate_id": "v4_node_container_test_consumer",
       "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-node-container --deps routecodex-v4-base-node --source-deps routecodex-v4-cordis-bridge,routecodex-v4-plugin-plan",
       "required_for": [

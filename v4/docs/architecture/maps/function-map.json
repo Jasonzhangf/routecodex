@@ -703,6 +703,38 @@
       ]
     },
     {
+      "function_id": "v4.node_container.execution_epoch",
+      "owner": "routecodex-v4-node-container",
+      "status": "active",
+      "entry_symbols": [
+        "ExecutionEpochIdentity",
+        "ExecutionEpochSnapshot",
+        "ExecutionEpochState",
+        "ActiveExecutionEpoch",
+        "ActiveExecutionEpoch::new",
+        "ActiveExecutionEpoch::admit",
+        "ActiveExecutionEpoch::record_execution_failure",
+        "ActiveExecutionEpoch::snapshot",
+        "EpochLease",
+        "EpochLease::release",
+        "ActiveEpochStore",
+        "ActiveEpochStore::admit",
+        "ActiveEpochStore::publish",
+        "ActiveEpochStore::record_execution_failure",
+        "ActiveEpochStore::active_snapshot"
+      ],
+      "entry_paths": [
+        "crates/routecodex-v4-node-container/src/lib.rs"
+      ],
+      "required_gates": [
+        "v4_node_container_l2_regression"
+      ],
+      "resource_bindings": [
+        "v4.node_container.execution_epoch"
+      ],
+      "mainline_binding": "forbidden_before_integration"
+    },
+    {
       "function_id": "v4.cordis.host_binding",
       "owner": "routecodex-v4-cordis-host",
       "entry_symbols": [
