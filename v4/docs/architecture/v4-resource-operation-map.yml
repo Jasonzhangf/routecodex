@@ -2003,6 +2003,37 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
+- resource_id: v4.node_container.execution_epoch
+  axis: control
+  verification_gate:
+  - v4_node_container_l2_regression
+  - v4_node_container_epoch_closure_audit
+  resource_kind: execution_epoch_lifecycle
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-node-container
+  owner_node: V4NodeContainer
+  owner_symbols:
+  - ExecutionEpochIdentity
+  - ExecutionEpochSnapshot
+  - ActiveExecutionEpoch
+  - EpochLease
+  - ActiveEpochStore
+  identity:
+  - planEpoch
+  - manifestHash
+  - executionIdentity
+  allowed_writers:
+  - V4NodeContainer
+  allowed_readers:
+  - V4RuntimeInspector
+  - V4Admin
+  forbidden_writers:
+  - V4AdminCommand
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
 - resource_id: v4.node_container.plan_bindings
   axis: control
   verification_gate:
