@@ -41,7 +41,9 @@
       "crates/routecodex-v4-node-container/src/lib.rs",
       "crates/routecodex-v4-runtime-bin/src/main.rs"
     ],
-    "evidence_refs": []
+    "evidence_refs": [
+      {"role":"baseline_replay","gate_id":"v4_current_tree_baseline_replay","path":"docs/evidence/feature-completion/M1/V4-CURRENT-TREE/baseline-replay.json"}
+    ]
   },
   "prerequisites": [
     {

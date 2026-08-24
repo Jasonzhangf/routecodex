@@ -489,6 +489,18 @@
       "required_for": ["V4-RUNTIME-002:closure_audit"]
     },
     {
+      "gate_id": "v4_current_tree_baseline_replay",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-runtime",
+      "feature_ids": ["V4-CURRENT-TREE"],
+      "command": "cargo test -p routecodex-v4-runtime --test l2_runtime --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-runtime", "--test", "l2_runtime", "--manifest-path", "Cargo.toml", "--locked"],
+      "producer": {"adapter": "cargo", "identity": "v4_current_tree_baseline_replay"},
+      "evidence_role": "baseline_replay",
+      "input_paths": ["crates/routecodex-v4-runtime/src/lib.rs", "crates/routecodex-v4-node-container/src/lib.rs", "crates/routecodex-v4-runtime-bin/src/main.rs"],
+      "required_for": ["V4-CURRENT-TREE:baseline_replay"]
+    },
+    {
       "gate_id": "v4_node_container_test_consumer",
       "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-node-container --deps routecodex-v4-base-node --source-deps routecodex-v4-cordis-bridge,routecodex-v4-plugin-plan",
       "required_for": [
