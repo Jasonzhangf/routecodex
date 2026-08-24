@@ -32,7 +32,7 @@ ARCHIVED_GOAL_DO_NOT_EXECUTE
 
 目标：按照 `v4/docs/goals/v4-feature-completion-plan.md` 完成 RouteCodex V4 的全部产品功能闭环，使 V4 在保留新架构的前提下对齐当前选定的 V3 冻结行为基线，并达到可灰度接管、可发布、可回滚的生产准入状态。
 
-当前审计基线：`main@2fda3f049190620511f2d2c6069a7bec0dd2871f`。开始执行时必须先读取当前 HEAD；若 HEAD 已变化，不得假设本提示词中的完成度仍然准确，先完成 baseline drift 审计并把差异写入产品 parity ledger 和 plan-deviation evidence，再继续执行。
+历史审计基线：`main@2fda3f049190620511f2d2c6069a7bec0dd2871f`（仅作封存记录，不是当前执行基线）。执行基线必须从当前 V4 worktree 的 HEAD 与 tree hash 解析；若 HEAD/tree 已变化，先完成 V4 baseline drift 审计并登记差异，再继续执行。
 
 本 goal 是长线分阶段目标，不是单个 slice，也不是要求一次提交完成。每个 milestone、每个任务必须独立计划、独立红测、独立实现、独立验证、独立 review、独立提交。前一 milestone 的硬退出条件未通过，不进入依赖它的后续 milestone。M3 fixture 提取可与 M1/M2 部分并行，但只有 production NodeContainer 路径接通后的 V4 差分结果才能作为产品完成证据。
 

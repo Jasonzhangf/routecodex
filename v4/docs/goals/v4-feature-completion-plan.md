@@ -3,7 +3,7 @@
 状态：`proposed_canonical`
 执行状态：`ready_for_review_and_execution`
 文档 ID：`V4-FEATURE-COMPLETION-20260822`
-审计基线：`main@2fda3f049190620511f2d2c6069a7bec0dd2871f`
+审计基线：当前 V4 worktree 基准 tree（启动时从 HEAD 与 tree hash 解析并固定；历史 `main@2fda3f049190620511f2d2c6069a7bec0dd2871f` 仅作封存记录）
 行为基线：V3 当前生产实现；V4 日常构建只读取经审核冻结的 V3 baseline
 目标版本：`V4.0 feature-complete / production-admissible`
 配套执行提示词：[`v4-feature-completion-goal-prompt.md`](v4-feature-completion-goal-prompt.md)
