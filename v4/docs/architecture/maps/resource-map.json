@@ -1018,6 +1018,7 @@
     {
       "resource_id": "v4.node_container.execution_epoch",
       "owner": "routecodex-v4-node-container::ActiveEpochStore",
+      "feature_id": "V4-RUNTIME-002",
       "truth_store": "crates/routecodex-v4-node-container/src/lib.rs",
       "allowed_operations": [
         "create",
