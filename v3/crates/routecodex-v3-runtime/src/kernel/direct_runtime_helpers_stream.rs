@@ -100,6 +100,40 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                         &mut state.content_consumer,
                     )
                     .map(|out| out.unwrap_or(chunk));
+                    if result.is_ok() {
+                        let terminal_observed = state
+                            .stream_observation
+                            .snapshot()
+                            .ok()
+                            .and_then(|snapshot| snapshot.response_status)
+                            .as_deref()
+                            == Some("completed");
+                        if terminal_observed
+                            && !state.runtime_timing.is_finished().unwrap_or(false)
+                        {
+                            if let Err(error) = state.runtime_timing.finish_external_if_active() {
+                                return Some((
+                                    Err(runtime_source("V3RuntimeTimingExternal", error)),
+                                    state,
+                                ));
+                            }
+                            let timing = match state.runtime_timing.finish_runtime() {
+                                Ok(timing) => timing,
+                                Err(error) => {
+                                    return Some((
+                                        Err(runtime_source("V3RuntimeTimingTerminal", error)),
+                                        state,
+                                    ));
+                                }
+                            };
+                            if let Err(error) = state.stream_observation.record_timing(timing) {
+                                return Some((
+                                    Err(runtime_source("V3RuntimeTimingObservation", error)),
+                                    state,
+                                ));
+                            }
+                        }
+                    }
                     if result.is_err() {
                         state.done = true;
                     }
