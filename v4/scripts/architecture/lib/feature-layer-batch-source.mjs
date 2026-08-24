@@ -182,6 +182,7 @@ export function validateSourceGreenClaims(input, context, failures) {
           moduleRegistry: input.moduleRegistry,
           batch,
           task,
+          baselineCommit: candidate.base_commit,
           candidateCommit: candidate.head_commit,
           truth: context.truth,
           failures,

@@ -29,6 +29,16 @@ const CANDIDATE_KEYS = [
   'task_ids',
 ];
 
+// Registry projections are deliberately shared governance surfaces.  They
+// are validated for exact candidate/current projection stability elsewhere;
+// they are not implementation blobs owned by the lane's runtime module.
+const SHARED_PROJECTION_PATHS = new Set([
+  'v4/docs/architecture/maps/function-map.json',
+  'v4/docs/architecture/maps/resource-map.json',
+  'v4/docs/architecture/maps/verification-map.json',
+  'v4/.appsdk/maps/module-registry.json',
+]);
+
 function nonEmptyString(value) {
   return typeof value === 'string' && value.length > 0;
 }
@@ -305,7 +315,8 @@ export function validateCandidateRecord({
     }
     const relativePath = changedPath.slice(3);
     const owners = moduleOwnersForPath(moduleRegistry, relativePath);
-    if (owners.length !== 1 || owners[0].module_id !== record.module_id) {
+    if (!SHARED_PROJECTION_PATHS.has(changedPath)
+        && (owners.length !== 1 || owners[0].module_id !== record.module_id)) {
       addFailure(failures, 'CANDIDATE_MODULE_OWNER_MISMATCH', `${context}: ${changedPath} must have exactly one candidate module owner`);
     }
   }

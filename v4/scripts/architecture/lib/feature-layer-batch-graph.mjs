@@ -64,6 +64,7 @@ export function validateTaskSourceGraph({
   moduleRegistry,
   batch,
   task,
+  baselineCommit = null,
   candidateCommit,
   truth,
   failures,
@@ -75,6 +76,19 @@ export function validateTaskSourceGraph({
   } catch (error) {
     addFailure(failures, 'CARGO_GRAPH_UNREADABLE', `${task.task_id}: ${error.message}`);
     return;
+  }
+  let baselineCargoEdges = new Set();
+  if (baselineCommit) {
+    try {
+      for (const pkg of truth.cargoGraph(baselineCommit).values()) {
+        for (const dependency of pkg.dependencies) {
+          baselineCargoEdges.add(`${pkg.package_name}->${dependency.dependency_name}`);
+        }
+      }
+    } catch (error) {
+      addFailure(failures, 'CARGO_BASELINE_GRAPH_UNREADABLE', `${task.task_id}: ${error.message}`);
+      return;
+    }
   }
   for (const pkg of cargoPackages.values()) {
     const sourceOwner = moduleForPath(moduleRegistry, pkg.manifest_path);
@@ -93,7 +107,8 @@ export function validateTaskSourceGraph({
         continue;
       }
       const targetBatch = moduleBatches.get(targetOwner.module_id);
-      if (targetBatch && targetBatch !== sourceBatch) {
+      if (targetBatch && targetBatch !== sourceBatch
+          && !baselineCargoEdges.has(`${pkg.package_name}->${dependency.dependency_name}`)) {
         addFailure(failures, 'CROSS_LANE_CARGO_DEPENDENCY',
           `${pkg.package_name}(${sourceBatch})->${dependency.dependency_name}(${targetBatch})`);
       }
@@ -115,9 +130,23 @@ export function validateTaskSourceGraph({
     }
     const sourceBatch = moduleBatches.get(sourceOwner.module_id);
     if (path.extname(sourcePath) === '.rs') {
+      const baselineReferences = new Set();
+      if (baselineCommit) {
+        const baselineBytes = truth.blob(baselineCommit, sourcePath);
+        if (baselineBytes !== null) {
+          for (const targetModule of rustModuleReferences(baselineBytes.toString('utf8'))) {
+            baselineReferences.add(targetModule);
+          }
+        }
+      }
       for (const targetModule of rustModuleReferences(source)) {
         const targetBatch = moduleBatches.get(targetModule);
-        if (sourceBatch && targetBatch && targetBatch !== sourceBatch) {
+        const baselineCargoDependency = baselineCargoEdges.has(
+          `${sourceOwner.module_id}->${targetModule}`,
+        );
+        if (sourceBatch && targetBatch && targetBatch !== sourceBatch
+            && !baselineReferences.has(targetModule)
+            && !baselineCargoDependency) {
           addFailure(failures, 'CROSS_LANE_RUST_REFERENCE',
             `${sourcePath}:${sourceBatch}->${targetModule}:${targetBatch}`);
         }
