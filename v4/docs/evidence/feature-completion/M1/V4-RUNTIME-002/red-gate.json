@@ -4,7 +4,7 @@
   "experiment_id": "v4-runtime-002-epoch-lifecycle",
   "phase": "negative_intervention",
   "kind": "red_test",
-  "source_commit": "bc5c25b31502669cfeee7a9895f12c9936071113",
+  "source_commit": "66e26f92ae66eaadf8fb803e257e6629b06c7f75",
   "scope": {"feature_id": "V4-RUNTIME-002", "module_id": "routecodex-v4-node-container"},
   "producer": {"adapter": "cargo", "identity": "v4_node_container_epoch_red"},
   "command_argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
