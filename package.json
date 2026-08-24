@@ -215,6 +215,7 @@
     "test:agent-collab-protocol-red-fixtures": "node scripts/tests/agent-collab-protocol-red-fixtures.mjs",
     "verify:v3-rust-only-server-entry": "npm --prefix v3 run verify:v3-rust-only-server-entry",
     "verify:build-script-tiering": "node scripts/architecture/verify-build-script-tiering.mjs",
+    "verify:install-release-contract": "node scripts/architecture/verify-install-release-contract.mjs",
     "triage:errorsamples": "node scripts/triage-errorsamples.mjs",
     "install:global": "./scripts/install-global.sh",
     "install:release": "./scripts/install-release.sh",

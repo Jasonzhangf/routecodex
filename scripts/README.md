@@ -26,7 +26,7 @@ Properties:
 - Owner: `scripts/install-release.sh`
 - Mode: release snapshot
 - Runtime source: `~/.rcc/install/current`
-- Verification: script itself performs isolated build, dependency preparation, `rcc restart --port ${ROUTECODEX_INSTALL_VERIFY_PORT:-5520}`, and `/health`
+- Verification: script itself performs isolated build, dependency preparation, one aggregate `rcc restart -c <config>`, and `/health` for every `[servers.*].port` in the V3 config. `ROUTECODEX_INSTALL_VERIFY_PORT=<port>` explicitly narrows the check to one listener.
 
 ## Removed Legacy Scripts
 
