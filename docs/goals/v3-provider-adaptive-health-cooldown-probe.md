@@ -3,7 +3,7 @@
 ## Goal
 
 Unify provider-key health, cooldown, and recovery probe into one Rust-owned,
-process-local state machine. A provider key enters cooldown after three
+provider-owned state machine. A provider key enters cooldown after three
 consecutive provider-health failures. Probe timing adapts to recent error rate
 and observed recovery time. Control state stays in the typed health side
 channel; it never enters request/response payload or protocol metadata.
@@ -17,7 +17,8 @@ channel; it never enters request/response payload or protocol metadata.
   are retired; runtime probe orchestration enters `V3ProviderHealthStore`.
 - `adaptive_probe_interval_ms` consumes error-rate, recovery EWMA, and probe-failure
   history for the bounded 1/5/15/60/180/300 minute ladder.
-- Managed runtime initialization uses a fresh default store; no cooldown file is read.
+- Managed runtime initialization loads the provider-owned cooldown pool before
+  listener readiness; malformed state fails startup explicitly.
 
 ## Design decision
 
@@ -51,8 +52,8 @@ Defaults are bounded and deterministic:
 - failed probe records another failure and recomputes the next interval;
 - successful probe records recovery duration, resets streak, and removes
   cooldown state;
-- state is process-local and cleared on managed restart; no cooldown file is
-  read or written.
+- state is persisted by the provider cooldown coordinator and loaded on managed
+  restart; a ready-time startup probe is required before re-admission.
 
 The score is a scheduling signal only. It never changes error classification,
 retry policy, payload, provider credentials, or route semantics.
@@ -71,7 +72,7 @@ White-box positive/negative pairs:
 6. failed probe keeps key blocked and reschedules; successful probe alone
    restores availability;
 7. concurrent probe acquisition is single-flight; stale completion fails;
-8. restart clears process-local health and never reads persistent cooldown;
+8. restart loads persistent cooldown and startup probes each loaded key once;
 9. malformed/zero policy fails fast; no silent default or fallback;
 10. typed state never appears in provider wire/client payload or metadata.
 
@@ -94,7 +95,8 @@ same-entry live replay. DSH Review starts only after all gates pass.
 8. Different keys/sessions cannot combine counters or revive each other.
 9. Classification stays in `routecodex-v3-error`; routing stays in Virtual Router; transport stays at probe boundary.
 10. Health control state never enters request/response payload, provider wire, client body, or protocol metadata.
-11. New state is process-local; retired persistent cooldown is not read/written.
+11. New state is persisted by the single provider cooldown coordinator;
+    malformed state is not silently discarded.
 
 ### Scope
 

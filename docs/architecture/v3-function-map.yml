@@ -39,9 +39,12 @@ features:
   - npm run test:v3-provider-key-health-model-binding-red-fixtures
   - git diff --check
 - feature_id: v3.provider_global_cooldown_persistence
-  status: retired
+  status: source_active_live_verification_required
   owner_crate: routecodex-v3-provider-responses
-  owner_file: null
+  owner_files:
+  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_global_cooldown_persistence_contract.rs
   resource_bindings:
   - v3.provider.global_cooldown_persistence
   entry_symbols:
@@ -52,11 +55,21 @@ features:
   - V3ProviderCooldownCoordinator::apply_probe_success
   - V3ProviderCooldownCoordinator::apply_probe_failure
   - V3ProviderCooldownCoordinator::persist
-  allowed_paths: []
+  allowed_paths:
+  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_global_cooldown_persistence_contract.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - docs/architecture
+  required_gates:
+  - npm run test:v3-provider-global-cooldown-persistence
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
   forbidden_paths:
   - request.normal_payload
   - response.client_payload
-  required_gates: []
 - feature_id: v3.managed_server_lifecycle
   owner_crate: routecodex-v3-lifecycle
   owner_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
