@@ -260,8 +260,7 @@
         "v4_runtime_003_plan_bundle_plane"
       ],
       "resource_bindings": [
-        "v4.config.manifest",
-        "v4.runtime.compiled_manifest"
+        "v4.runtime.node_plan_bundle"
       ]
     },
     {
