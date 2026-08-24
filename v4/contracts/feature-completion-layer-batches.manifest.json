@@ -51,7 +51,7 @@
       "status": "pass",
       "gap_detected": true,
       "epoch_closure_lane_status": "source_green",
-      "audit_commit": "ee1727492288d370c76c362b526e129092062918",
+      "audit_commit": "98a81f86aeb22b240d804b168ad18c076f584daf",
       "source_paths": [
         "crates/routecodex-v4-node-container/src/lib.rs",
         "crates/routecodex-v4-node-container/tests/l2_epoch.rs"
