@@ -345,9 +345,11 @@ features:
   required_positive:
   - Ordinary protocol and business fields remain unchanged through request and response compatibility.
   - Provider compatibility remains limited to registered provider-family wire projections.
+  - Request-shape compatibility failures project HTTP 400 and do not invoke provider transport.
   required_negative:
   - Top-level semantics, processed, and processingMetadata fail at both request and response compat entrypoints.
   - Compat does not strip, reconstruct, or route control state and does not own Chat Process or SSE semantics.
+  - Request-shape compatibility failures do not retry, switch provider, or mutate provider health.
   required_gates:
   - npm run test:v3-provider-compat-profile-loading
   - npm run verify:v3-architecture-docs

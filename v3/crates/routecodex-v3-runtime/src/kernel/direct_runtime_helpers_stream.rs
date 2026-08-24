@@ -289,6 +289,37 @@ fn extract_v3_provider_compat_boundary_field(reason: &str) -> Option<&'static st
     }
 }
 
+#[cfg(test)]
+mod request_invalid_compat_tests {
+    use super::*;
+
+    #[test]
+    fn direct_request_compat_invalid_enters_invalid_request_error_chain() {
+        let profile = crate::hub_v1::V3ProviderCompatProfileId::Passthrough;
+        let error = crate::hub_v1::classify_v3_provider_compat_error(
+            "request_protocol",
+            &profile,
+            "UnmappedOutboundFields target_protocol=anthropic paths=$.tools[0].parameters"
+                .to_string(),
+        );
+        let source = compat_source("V3HubReqOutbound07ProviderSemantic", &error);
+        assert_eq!(source.source_kind, V3ErrorSourceKind::InvalidRequest);
+        assert_eq!(source.code, "provider_request_payload_invalid");
+    }
+
+    #[test]
+    fn direct_response_compat_failure_does_not_become_invalid_request() {
+        let profile = crate::hub_v1::V3ProviderCompatProfileId::Passthrough;
+        let error = crate::hub_v1::classify_v3_provider_compat_error(
+            "response",
+            &profile,
+            "Anthropic codec malformed tools[].format".to_string(),
+        );
+        let source = compat_source("V3ProviderRespInbound01Raw", &error);
+        assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+    }
+}
+
 struct V3ExactPinAvailabilityExhaustion<'pin> {
     pin: &'pin V3RemoteContinuationPin,
     reason: String,

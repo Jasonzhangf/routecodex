@@ -648,6 +648,9 @@ resources:
     identity: [requestId, providerProtocol, direction, topLevelField]
     semantic_contract:
       normal_payload: Provider compatibility preserves registered protocol/business fields.
+      request_invalid_classification: Request-shape codec failures at request_protocol are
+        typed as InvalidRequest and projected as HTTP 400; they never enter provider health,
+        retry, or reselection.
       forbidden_payload: [semantics, processed, processingMetadata]
       control_isolation: RouteCodex control state remains in typed side-channel resources and is never reconstructed from these fields.
       violation: Provider compatibility fails before provider/client payload projection when a forbidden top-level field is present.
