@@ -346,6 +346,46 @@
       ]
     },
     {
+      "gate_id": "v4_runtime_003_plan_bundle_positive",
+      "command": "cargo test -p routecodex-v4-plugin-plan --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-plugin-plan", "--manifest-path", "Cargo.toml", "--locked"],
+      "owner_module_id": "routecodex-v4-plugin-plan",
+      "feature_ids": ["V4-RUNTIME-003"],
+      "evidence_role": "positive",
+      "input_paths": ["crates/routecodex-v4-plugin-plan/src/lib.rs"],
+      "required_for": ["V4-RUNTIME-003:source_green"]
+    },
+    {
+      "gate_id": "v4_runtime_003_plan_bundle_red",
+      "command": "cargo test -p routecodex-v4-plugin-plan --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-plugin-plan", "--manifest-path", "Cargo.toml", "--locked"],
+      "owner_module_id": "routecodex-v4-plugin-plan",
+      "feature_ids": ["V4-RUNTIME-003"],
+      "evidence_role": "red_gate",
+      "input_paths": ["crates/routecodex-v4-plugin-plan/src/lib.rs"],
+      "required_for": ["V4-RUNTIME-003:source_green"]
+    },
+    {
+      "gate_id": "v4_runtime_003_plan_bundle_boundary",
+      "command": "cargo test -p routecodex-v4-plugin-plan --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-plugin-plan", "--manifest-path", "Cargo.toml", "--locked"],
+      "owner_module_id": "routecodex-v4-plugin-plan",
+      "feature_ids": ["V4-RUNTIME-003"],
+      "evidence_role": "boundary_audit",
+      "input_paths": ["crates/routecodex-v4-plugin-plan/src/lib.rs"],
+      "required_for": ["V4-RUNTIME-003:source_green"]
+    },
+    {
+      "gate_id": "v4_runtime_003_plan_bundle_plane",
+      "command": "cargo test -p routecodex-v4-plugin-plan --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-plugin-plan", "--manifest-path", "Cargo.toml", "--locked"],
+      "owner_module_id": "routecodex-v4-plugin-plan",
+      "feature_ids": ["V4-RUNTIME-003"],
+      "evidence_role": "plane_isolation",
+      "input_paths": ["crates/routecodex-v4-plugin-plan/src/lib.rs"],
+      "required_for": ["V4-RUNTIME-003:source_green"]
+    },
+    {
       "gate_id": "v4_plugin_bridge_l2_regression",
       "command": "cargo test -p routecodex-v4-cordis-bridge --manifest-path Cargo.toml --locked",
       "required_for": [
