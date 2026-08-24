@@ -2,6 +2,35 @@ version: 2
 status: p6_source_and_local_live_verified_hub_v1_contract_defined
 scope: routecodex-v3
 chains:
+- chain_id: v3.provider_global_cooldown_persistence
+  owner_feature_id: v3.provider_global_cooldown_persistence
+  summary: Provider cooldown state is loaded before listeners bind, persisted on provider health mutation, and probed once after ready before re-admission.
+  edges:
+  - step_id: v3-provider-global-cooldown-01
+    from_node: V3Config05ManifestPublished
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::from_manifest
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderHealthStore::from_manifest
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    status: source_controlled
+    owner_feature_id: v3.provider_global_cooldown_persistence
+  - step_id: v3-provider-global-cooldown-02
+    from_node: V3ProviderHealthStore
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderHealthStore::from_manifest
+    callee_symbol: V3ProviderCooldownCoordinator::load
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+    status: source_controlled
+    owner_feature_id: v3.provider_global_cooldown_persistence
+  - step_id: v3-provider-global-cooldown-03
+    from_node: V3ServerStartup01ListenerSetPreflight
+    to_node: V3ProviderHealthStore
+    caller_symbol: spawn_v3_server_aggregate
+    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_key_health_probes
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: source_controlled
+    owner_feature_id: v3.provider_global_cooldown_persistence
 - chain_id: v3.provider_key_health_model_granularity
   owner_feature_id: v3.provider_key_health_model_granularity
   summary: Runtime passes the exact provider, auth alias, and model identity to the Provider-owned key health store; Target reads only the resulting per-model scheduling projection.

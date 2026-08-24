@@ -1,11 +1,12 @@
+use crate::global_cooldown::{V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass};
 use crate::key_health::{
     V3ProviderKeyHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderSchedulingProjection,
     V3ProviderSchedulingReader,
 };
 use crate::probe_backoff::{adaptive_probe_interval_ms, probe_backoff_ms};
 use crate::provider_cooldown_probe::{
-    V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS, V3ProviderCooldownProbeKey,
-    V3ProviderCooldownProbeState, provider_cooldown_probe_key,
+    provider_cooldown_probe_key, V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState,
+    V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
 };
 use routecodex_v3_config::{V3Config05ManifestPublished, V3ProviderDispositionStepManifest};
 use routecodex_v3_error::{
@@ -14,6 +15,7 @@ use routecodex_v3_error::{
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -205,6 +207,7 @@ impl V3ProviderAvailabilityReader for V3ProviderAvailabilityRegistry {
 
 #[derive(Debug, Default)]
 struct V3ProviderHealthState {
+    persistence: Option<V3ProviderCooldownCoordinator>,
     configured_disabled: BTreeSet<String>,
     health_disabled: BTreeSet<String>,
     failure_policies: BTreeMap<String, V3ProviderFailurePolicy>,
@@ -294,6 +297,24 @@ impl V3ProviderHealthStore {
     }
 
     pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
+        Self::from_manifest_with_persistence_path(manifest, provider_cooldown_state_path())
+    }
+
+    pub fn from_manifest_without_persistence(manifest: &V3Config05ManifestPublished) -> Self {
+        Self::from_manifest_internal(manifest, None)
+    }
+
+    pub fn from_manifest_with_persistence_path(
+        manifest: &V3Config05ManifestPublished,
+        persistence_path: PathBuf,
+    ) -> Self {
+        Self::from_manifest_internal(manifest, Some(persistence_path))
+    }
+
+    fn from_manifest_internal(
+        manifest: &V3Config05ManifestPublished,
+        persistence_path: Option<PathBuf>,
+    ) -> Self {
         let configured_disabled = manifest
             .providers
             .values()
@@ -327,13 +348,48 @@ impl V3ProviderHealthStore {
                 }
             }
         }
+        let mut state = V3ProviderHealthState {
+            configured_disabled,
+            health_disabled,
+            failure_policies,
+            ..V3ProviderHealthState::default()
+        };
+        let coordinator = persistence_path.map(|path| {
+            V3ProviderCooldownCoordinator::load(path, 5 * 60 * 60_000).unwrap_or_else(|error| {
+                panic!("provider cooldown persistence load failed: {error}")
+            })
+        });
+        for (key, blocked_until_ms, next_probe_at_ms) in coordinator
+            .as_ref()
+            .into_iter()
+            .flat_map(V3ProviderCooldownCoordinator::persisted_entries)
+        {
+            let probe_key = provider_cooldown_probe_key(
+                &key.provider_id,
+                key.auth_alias.as_deref(),
+                key.model_id.as_deref(),
+            );
+            state.provider_cooldown_probes.insert(
+                probe_key.clone(),
+                V3ProviderCooldownProbeState {
+                    blocked_until_ms: Some(blocked_until_ms),
+                    next_probe_at_ms: Some(next_probe_at_ms),
+                    probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+                    probe_failure_count: 0,
+                    observed_attempts: 3,
+                    observed_failures: 3,
+                    recovery_ewma_ms: None,
+                    cooldown_started_at_ms: blocked_until_ms,
+                    probe_in_flight: false,
+                    probe_model_id: probe_key.model_id.clone(),
+                    rescue_probe_attempted: false,
+                    completion: tokio::sync::watch::channel(false).0,
+                },
+            );
+        }
+        state.persistence = coordinator;
         Self {
-            state: Arc::new(RwLock::new(V3ProviderHealthState {
-                configured_disabled,
-                health_disabled,
-                failure_policies,
-                ..V3ProviderHealthState::default()
-            })),
+            state: Arc::new(RwLock::new(state)),
         }
     }
 
@@ -669,6 +725,7 @@ impl V3ProviderHealthStore {
         if let Some(until_ms) = cooldown_until_ms {
             upsert_provider_cooldown_probe(&mut state, provider_id, auth_alias, model_id, until_ms);
         }
+        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
         Ok(())
     }
 
@@ -697,6 +754,7 @@ impl V3ProviderHealthStore {
             model_id,
             blocked_until_ms,
         );
+        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
         let _ = reason;
         Ok(())
     }
@@ -752,6 +810,7 @@ impl V3ProviderHealthStore {
         }
         probe_state.probe_in_flight = true;
         probe_state.completion.send_replace(false);
+        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
         Ok(true)
     }
 
@@ -776,6 +835,7 @@ impl V3ProviderHealthStore {
         probe_state.probe_in_flight = true;
         probe_state.rescue_probe_attempted = true;
         probe_state.completion.send_replace(false);
+        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
         Ok(true)
     }
 
@@ -846,6 +906,7 @@ impl V3ProviderHealthStore {
         if let Some(completion) = completion {
             completion.send_replace(true);
         }
+        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
         Ok(())
     }
 
@@ -893,6 +954,7 @@ impl V3ProviderHealthStore {
         probe_state.next_probe_at_ms = Some(now_ms.saturating_add(probe_state.probe_interval_ms));
         probe_state.blocked_until_ms = probe_state.next_probe_at_ms;
         probe_state.completion.send_replace(true);
+        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
         Ok(())
     }
 
@@ -956,6 +1018,7 @@ impl V3ProviderHealthStore {
                 );
             }
         }
+        persist_cooldown_state(&mut state)?;
         Ok(key_health_projection(&state, &key, now_ms))
     }
 
@@ -1386,6 +1449,41 @@ fn default_failure_policy_from_manifest(
         until_restart,
         cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
     }
+}
+
+fn provider_cooldown_state_path() -> PathBuf {
+    if let Ok(path) = std::env::var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE") {
+        return PathBuf::from(path);
+    }
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".rcc")
+        .join("state")
+        .join("provider-cooldowns.json")
+}
+
+fn persist_cooldown_state(state: &mut V3ProviderHealthState) -> Result<(), String> {
+    let entries = state
+        .provider_cooldown_probes
+        .iter()
+        .filter_map(|(key, probe)| {
+            Some((
+                crate::global_cooldown::V3ProviderCooldownKey {
+                    provider_id: key.provider_id.clone(),
+                    auth_alias: key.auth_alias.clone(),
+                    model_id: probe.probe_model_id.clone(),
+                    failure_class: V3ProviderCooldownFailureClass::Semantic,
+                },
+                probe.blocked_until_ms?,
+                probe.next_probe_at_ms?,
+            ))
+        })
+        .collect();
+    if let Some(coordinator) = state.persistence.as_mut() {
+        coordinator.replace_entries(entries)?;
+    }
+    Ok(())
 }
 
 impl V3ProviderAvailabilityReader for V3ProviderHealthStore {
@@ -1945,12 +2043,10 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
             .unwrap();
         assert_eq!(second.state, "cooldown");
         assert_eq!(second.cooldown_until_ms, Some(60_101));
-        assert!(
-            store
-                .provider_cooldown_probe_keys_due(60_100)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(store
+            .provider_cooldown_probe_keys_due(60_100)
+            .unwrap()
+            .is_empty());
         assert_eq!(
             store.provider_cooldown_probe_keys_due(60_101).unwrap(),
             vec![(
@@ -2070,21 +2166,17 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
             "session-b success must clear only session-b state"
         );
         // probe 到期 → 通过 → provider 级冷却清除，全部 session 恢复。
-        assert!(
-            store
-                .provider_cooldown_probe_keys_due(103 + 900_000 + 15 * 60_000 + 1)
-                .unwrap()
-                .contains(&(
-                    "provider-a".to_string(),
-                    Some("key-a".to_string()),
-                    Some("gpt-5.5".to_string())
-                ))
-        );
-        assert!(
-            store
-                .try_acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
-                .unwrap()
-        );
+        assert!(store
+            .provider_cooldown_probe_keys_due(103 + 900_000 + 15 * 60_000 + 1)
+            .unwrap()
+            .contains(&(
+                "provider-a".to_string(),
+                Some("key-a".to_string()),
+                Some("gpt-5.5".to_string())
+            )));
+        assert!(store
+            .try_acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
+            .unwrap());
         store
             .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("gpt-5.5"))
             .unwrap();
@@ -2188,16 +2280,14 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                 900_000,
             )
             .unwrap();
-        assert!(
-            store
-                .provider_cooldown_probe_keys_due(100 + 900_000 + 1)
-                .unwrap()
-                .contains(&(
-                    "provider-a".to_string(),
-                    Some("key-a".to_string()),
-                    Some("gpt-5.5".to_string())
-                ))
-        );
+        assert!(store
+            .provider_cooldown_probe_keys_due(100 + 900_000 + 1)
+            .unwrap()
+            .contains(&(
+                "provider-a".to_string(),
+                Some("key-a".to_string()),
+                Some("gpt-5.5".to_string())
+            )));
         assert!(
             store
                 .try_acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))

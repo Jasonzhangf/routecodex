@@ -6,22 +6,22 @@ use routecodex_v3_config::{
     V3ProviderErrorActionPolicyManifest, V3ProviderErrorActionScope, V3ProviderErrorRetryMode,
 };
 use routecodex_v3_error::{
+    build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
+    build_v3_error_02_classified_from_v3_error_01,
+    build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_failure_policy,
     V3Error01SourceRaised, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
     V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
     V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
-    V3ProviderFailureSessionScope, build_v3_error_01_source_raised,
-    build_v3_error_01_source_raised_external, build_v3_error_02_classified_from_v3_error_01,
-    build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_failure_policy,
+    V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle,
-    V3ProviderAuthSecretHandle, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
-    V3ProviderError, V3ProviderFailureAction, V3ProviderFailureCooldownScope,
-    V3ProviderFailurePolicy, V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
-    V3ProviderGlobalSubscriptionPolicy, V3ProviderHealthStore, V3ProviderRecoveryKind,
-    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
-    V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
-    build_v3_provider_global_probe_request,
+    build_v3_provider_global_probe_request, ReqwestResponsesTransport, ResponsesTransport,
+    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderAvailabilityProjection,
+    V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureAction,
+    V3ProviderFailureCooldownScope, V3ProviderFailurePolicy, V3ProviderFailureRecord,
+    V3ProviderGlobalSubscriptionDecision, V3ProviderGlobalSubscriptionPolicy,
+    V3ProviderHealthStore, V3ProviderRecoveryKind, V3ProviderSchedulingProjection,
+    V3ProviderSchedulingReader, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
 use routecodex_v3_target::{
     V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
@@ -47,8 +47,8 @@ pub async fn probe_v3_provider_global_target(
 }
 
 pub(crate) use crate::provider_failure_runtime_helpers::{
-    V3_TRANSIENT_RETRY_BUDGET, build_v3_transient_failure_record,
-    build_v3_transient_recovery_witness,
+    build_v3_transient_failure_record, build_v3_transient_recovery_witness,
+    V3_TRANSIENT_RETRY_BUDGET,
 };
 
 pub(crate) fn provider_runtime_failure_stage(error: &V3ProviderError) -> &'static str {
@@ -309,7 +309,7 @@ impl V3ProviderAvailabilityReader for V3SessionGlobalAvailabilityReader {
 
 impl V3ProviderFailureRuntimeHealth {
     pub fn from_manifest_for_tests(manifest: &V3Config05ManifestPublished) -> Self {
-        let store = V3ProviderHealthStore::from_manifest(manifest);
+        let store = V3ProviderHealthStore::from_manifest_without_persistence(manifest);
         Self {
             store,
             action_gate: V3ProviderActionGate::process_shared(),

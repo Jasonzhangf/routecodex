@@ -195,6 +195,7 @@
     "test:v3-debug-payload-budget-red-fixtures": "node scripts/tests/v3-debug-payload-budget-red-fixtures.mjs",
     "test:v3-error-contract": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --test error_chain_contract -- --nocapture",
     "test:v3-provider-health-contract": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses health::tests -- --nocapture && node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_key_health_contract -- --nocapture",
+    "test:v3-provider-global-cooldown-persistence": "CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-provider-responses --test provider_global_cooldown_persistence_contract -- --nocapture",
     "test:v3-provider-responses": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test general_provider -- --nocapture",
     "test:v3-provider-adaptive-concurrency": "node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-provider-responses adaptive_concurrency -- --test-threads=1",
     "test:v3-p5-router-target": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-virtual-router -p routecodex-v3-target -- --nocapture",
