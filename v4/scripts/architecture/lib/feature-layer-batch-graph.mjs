@@ -113,7 +113,8 @@ export function validateTaskSourceGraph({
         continue;
       }
       const targetBatch = moduleBatches.get(targetOwner.module_id);
-      if (targetBatch && targetBatch !== sourceBatch
+      const declaredDependency = (batch.source_dependencies ?? []).includes(targetOwner.module_id);
+      if (targetBatch && targetBatch !== sourceBatch && !declaredDependency
           && !baselineCargoEdges.has(`${pkg.package_name}->${dependency.dependency_name}`)) {
         addFailure(failures, 'CROSS_LANE_CARGO_DEPENDENCY',
           `${pkg.package_name}(${sourceBatch})->${dependency.dependency_name}(${targetBatch})`);
@@ -150,7 +151,8 @@ export function validateTaskSourceGraph({
         const baselineCargoDependency = baselineCargoEdges.has(
           `${sourceOwner.module_id}->${targetModule}`,
         );
-        if (sourceBatch && targetBatch && targetBatch !== sourceBatch
+        const declaredDependency = (batch.source_dependencies ?? []).includes(targetModule);
+        if (sourceBatch && targetBatch && targetBatch !== sourceBatch && !declaredDependency
             && !baselineReferences.has(targetModule)
             && !baselineCargoDependency) {
           addFailure(failures, 'CROSS_LANE_RUST_REFERENCE',

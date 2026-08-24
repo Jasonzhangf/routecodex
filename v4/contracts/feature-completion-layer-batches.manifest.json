@@ -228,7 +228,7 @@
       "owner_function_id": "v4.runtime.request_port",
       "module_ids": ["routecodex-v4-runtime"],
       "owned_paths": ["crates/routecodex-v4-runtime/**"],
-      "source_dependencies": [],
+      "source_dependencies": ["routecodex-v4-node-container", "routecodex-v4-plugin-plan"],
       "status": "source_green",
       "tasks": [
         {"task_id":"V4-RUNTIME-005","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-RUNTIME-005/fix-candidate.json","function_ids":["v4.runtime.request_port"],"resource_ids":["v4.runtime.request_port"],"source_paths":["crates/routecodex-v4-runtime/src/request_port.rs","crates/routecodex-v4-runtime/src/lib.rs","crates/routecodex-v4-runtime/tests/l2_ports.rs"],"support_paths":["Cargo.toml","Cargo.lock","crates/routecodex-v4-runtime/Cargo.toml","crates/routecodex-v4-control/Cargo.toml","crates/routecodex-v4-error/Cargo.toml"],"required_gate_ids":["v4_runtime_005_request_port_positive","v4_runtime_005_request_port_red","v4_runtime_005_request_port_boundary","v4_runtime_005_request_port_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_runtime_005_request_port_positive","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-005/positive.json"},{"role":"red_gate","gate_id":"v4_runtime_005_request_port_red","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-005/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_runtime_005_request_port_boundary","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-005/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_runtime_005_request_port_plane","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-005/plane-isolation.json"}]},

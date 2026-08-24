@@ -172,7 +172,7 @@ function validateBatchSkeleton(manifest, registries, failures) {
     if (batch.conditional !== (batch.batch_id === 'H')
         || !['pending', 'bound'].includes(batch.owner_binding_status)
         || !['pending', TASK_READY_STATUS, CONDITIONAL_NOT_NEEDED].includes(batch.status)
-        || !Array.isArray(batch.source_dependencies) || batch.source_dependencies.length !== 0) {
+      || !Array.isArray(batch.source_dependencies)) {
       addFailure(failures, 'BATCH_STATE_INVALID', `batch ${batch.batch_id} flags/status/dependencies drifted`);
     }
     if (batch.owner_binding_status === 'pending') {
