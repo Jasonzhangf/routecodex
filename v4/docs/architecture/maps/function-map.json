@@ -998,6 +998,46 @@
         "v4_parity_gate_plane_isolation",
         "v4_parity_gate_plane_isolation_red"
       ]
+    },
+    {
+      "function_id": "v4.parity.product_ledger",
+      "status": "active",
+      "feature_id": "V4-PARITY-001",
+      "owner": "routecodex-v4-governance",
+      "entry_symbols": ["root"],
+      "resource_ids": ["v4.parity.product_ledger"],
+      "source_paths": ["scripts/architecture/verify-v4-product-parity-ledger.mjs"],
+      "required_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
+    },
+    {
+      "function_id": "v4.parity.baseline_delta",
+      "status": "active",
+      "feature_id": "V4-PARITY-002",
+      "owner": "routecodex-v4-governance",
+      "entry_symbols": ["root"],
+      "resource_ids": ["v4.parity.baseline_delta"],
+      "source_paths": ["scripts/architecture/verify-v4-v3-baseline-delta.mjs"],
+      "required_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
+    },
+    {
+      "function_id": "v4.parity.status_gate",
+      "status": "active",
+      "feature_id": "V4-PARITY-003",
+      "owner": "routecodex-v4-governance",
+      "entry_symbols": ["root"],
+      "resource_ids": ["v4.parity.status_gate"],
+      "source_paths": ["scripts/architecture/verify-v4-product-parity-status.mjs"],
+      "required_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
+    },
+    {
+      "function_id": "v4.parity.differential_harness",
+      "status": "active",
+      "feature_id": "V4-PARITY-HARNESS-001",
+      "owner": "routecodex-v4-governance",
+      "entry_symbols": ["root"],
+      "resource_ids": ["v4.parity.differential_harness"],
+      "source_paths": ["scripts/architecture/verify-v4-product-differential.mjs"],
+      "required_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
     }
   ]
 }

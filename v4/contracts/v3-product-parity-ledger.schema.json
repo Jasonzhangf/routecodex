@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["version", "status", "owner_feature_id", "features"],
+  "properties": {
+    "version": {"const": 1},
+    "status": {"const": "active"},
+    "owner_feature_id": {"const": "v4.product_parity"},
+    "features": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["feature_id", "contract_status", "implementation_status", "production_path_status", "differential_status", "live_status", "artifact_status", "evidence_paths"]}}
+  }
+}

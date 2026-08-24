@@ -1,0 +1,21 @@
+version: 1
+status: active
+owner_feature_id: v4.product_parity
+features:
+  - feature_id: v4.semantic_parity
+    v3_baseline_id: v3-semantic-parity-map
+    v3_baseline_commit: current-v3-baseline
+    v3_owner: routecodex-v3
+    v3_entrypoints: [semantic-map]
+    v3_fixture_ids: [semantic-parity-map]
+    v4_container: routecodex-v4-runtime
+    v4_plugin_owner: routecodex-v4-runtime
+    contract_status: mapped
+    implementation_status: mapped
+    production_path_status: source_only
+    differential_status: pending
+    live_status: pending
+    artifact_status: pending
+    intentional_differences: []
+    blocking_dependencies: [V4-RUNTIME-005, V4-RUNTIME-006]
+    evidence_paths: [docs/architecture/v3-v4-semantic-parity-map.yml]
