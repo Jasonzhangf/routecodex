@@ -29,6 +29,10 @@ const SHARED_PROJECTION_PATHS = new Set([
 ]);
 
 const GOVERNANCE_CLOSURE_PREFIXES = [
+  'Cargo.toml',
+  'Cargo.lock',
+  'crates/routecodex-v4-control/Cargo.toml',
+  'crates/routecodex-v4-error/Cargo.toml',
   'contracts/',
   'docs/evidence/feature-completion/',
   'docs/architecture/',
@@ -258,7 +262,7 @@ export function validateSourceGreenClaims(input, context, failures) {
           }
         }
         for (const inputPath of projection.gateInputPaths) {
-          if (!isGovernanceClosurePath(`v4/${inputPath}`)
+          if (!isGovernanceClosurePath(inputPath)
               && !commitPathMatchesCurrent(candidate.head_commit, inputPath, context.truth)) {
             addFailure(failures, 'CANDIDATE_GATE_INPUT_DRIFT', `${task.task_id}:${inputPath}`);
           }

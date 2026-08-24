@@ -40,6 +40,10 @@ const SHARED_PROJECTION_PATHS = new Set([
 ]);
 
 const GOVERNANCE_CLOSURE_PREFIXES = [
+  'v4/Cargo.toml',
+  'v4/Cargo.lock',
+  'v4/crates/routecodex-v4-control/Cargo.toml',
+  'v4/crates/routecodex-v4-error/Cargo.toml',
   'v4/contracts/',
   'v4/docs/evidence/feature-completion/',
   'v4/docs/architecture/',
