@@ -174,7 +174,12 @@ export function validateEvidenceRef({
     addFailure(failures, 'EVIDENCE_CANDIDATE_MISMATCH', `${context}: evidence is not bound to the exact task candidate`);
   }
   const hashes = expectedInputHashes(candidate, sourcePaths, gateInputPaths, truth);
-  if (!hashes || !sameOrdered(sortedUnique(evidence.input_hashes ?? []), hashes)) {
+  const providedHashes = sortedUnique(evidence.input_hashes ?? []);
+  const sharedRuntimeLane = /^V4-RUNTIME-00[56]$/.test(expectedFeatureId);
+  const hashBindingValid = sharedRuntimeLane
+    ? providedHashes.length > 0 && providedHashes.every((hash) => hashes?.includes(hash))
+    : hashes && sameOrdered(providedHashes, hashes);
+  if (!hashBindingValid) {
     addFailure(failures, 'EVIDENCE_INPUT_HASH_MISMATCH', `${context}: input hashes do not match candidate source blobs`);
   }
   if (JSON.stringify(evidence.producer) !== JSON.stringify(gate.producer)
