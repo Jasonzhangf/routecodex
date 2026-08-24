@@ -3,6 +3,7 @@ use super::common::V3ProviderCompatProfileId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3ProviderCompatErrorClassification {
     PayloadBoundaryViolation,
+    RequestPayloadInvalid,
     Other,
 }
 
@@ -50,9 +51,32 @@ pub(crate) fn classify_v3_provider_compat_error(
 ) -> V3ProviderCompatError {
     if reason.starts_with("ProviderCompatPayloadBoundaryViolation") {
         V3ProviderCompatError::new_payload_boundary(stage, profile.as_str().to_string(), reason)
+    } else if matches!(stage, "request" | "request_protocol")
+        && (reason.contains("MalformedOutboundField")
+            || reason.contains("UnmappedOutboundFields")
+            || reason.contains("codec malformed"))
+    {
+        V3ProviderCompatError {
+            stage,
+            profile: profile.as_str().to_string(),
+            reason,
+            classification: V3ProviderCompatErrorClassification::RequestPayloadInvalid,
+        }
     } else {
         V3ProviderCompatError::other(stage, profile.as_str().to_string(), reason)
     }
+}
+
+pub(crate) fn provider_request_payload_source(
+    source_stage: &'static str,
+    error: &V3ProviderCompatError,
+) -> routecodex_v3_error::V3Error01SourceRaised {
+    routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::InvalidRequest,
+        source_stage,
+        "provider_request_payload_invalid",
+        error.to_string(),
+    )
 }
 
 pub fn provider_compat_boundary_source(
@@ -84,4 +108,37 @@ pub fn extract_v3_provider_compat_boundary_field(reason: &str) -> Option<&'stati
         "provider" => "provider",
         _ => "control_like_top_level_field",
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_shape_compat_failures_are_client_invalid_request() {
+        let profile = V3ProviderCompatProfileId::Passthrough;
+        let error = classify_v3_provider_compat_error(
+            "request",
+            &profile,
+            "Anthropic codec malformed tools[].format".to_string(),
+        );
+        assert_eq!(
+            error.classification(),
+            V3ProviderCompatErrorClassification::RequestPayloadInvalid
+        );
+    }
+
+    #[test]
+    fn response_compat_failures_remain_non_request_errors() {
+        let profile = V3ProviderCompatProfileId::Passthrough;
+        let error = classify_v3_provider_compat_error(
+            "response",
+            &profile,
+            "Anthropic codec malformed tools[].format".to_string(),
+        );
+        assert_eq!(
+            error.classification(),
+            V3ProviderCompatErrorClassification::Other
+        );
+    }
 }

@@ -156,7 +156,7 @@ impl ResponsesTransport for RecordingChatTransport {
 }
 
 #[tokio::test]
-async fn target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider() {
+async fn target_protocol_unmapped_field_projects_client_400_without_switching_provider() {
     std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
     std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
     let manifest = anthropic_then_openai_chat_manifest();
@@ -193,24 +193,20 @@ async fn target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider
         None,
     )
     .await
-    .expect("unmapped target field must skip the incompatible candidate and continue");
+    .expect("unmapped target field must project as client request error");
 
-    assert_eq!(output.status, 200);
+    assert_eq!(output.status, 400);
+    assert!(!output
+        .node_trace
+        .iter()
+        .any(|node| *node == "V3TargetLocalReselected"));
     assert!(
-        output
-            .node_trace
-            .iter()
-            .any(|node| *node == "V3TargetLocalReselected"),
-        "target protocol projection failure must enter the typed provider-switch path"
-    );
-    assert_eq!(
         transport
             .provider_ids
             .lock()
             .expect("provider ids")
-            .as_slice(),
-        ["openai_second"],
-        "the incompatible Anthropic candidate must receive no wire request"
+            .is_empty(),
+        "a request-shape error must not send or switch provider"
     );
 }
 

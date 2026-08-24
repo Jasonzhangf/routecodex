@@ -186,6 +186,26 @@ pub(crate) fn provider_request_relay_failure(
                         ),
                     ))
                 }
+                V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
+                    Some(V3ErrorHandlingCenter::project_terminal(
+                        V3ErrorHandlingCenter::decide_provider(
+                            V3ErrorHandlingCenterInput {
+                                source: super::provider_request_payload_source(
+                                    "ProviderReqCompat06ProviderCompat",
+                                    &error,
+                                ),
+                                action_scope: V3ErrorActionScope::ProviderInstance {
+                                    provider_id: provider_id.to_string(),
+                                },
+                                candidates_remaining: 0,
+                                source_status: Some(400),
+                            },
+                            false,
+                            false,
+                            None,
+                        ),
+                    ))
+                }
                 V3ProviderCompatErrorClassification::Other => None,
             };
             (
@@ -425,5 +445,24 @@ mod tests {
             projected.body.get("response"),
             Some(&json!({"status":"completed"}))
         );
+    }
+
+    #[test]
+    fn request_shape_compat_failure_projects_400_without_provider_failure_status() {
+        let profile = V3ProviderCompatProfileId::Passthrough;
+        let error = classify_v3_provider_compat_error(
+            "request",
+            &profile,
+            "Anthropic codec malformed tools[].format".to_string(),
+        );
+        let failure = provider_request_relay_failure(
+            V3ResponsesRelayRuntimeError::ProviderCompat(error),
+            "provider-1",
+            None,
+        )
+        .expect("request compat failure must become terminal client error");
+        assert_eq!(failure.status, 400);
+        assert!(failure.terminal_projection.is_some());
+        assert_eq!(failure.policy_error_type, "provider_request_compat_error");
     }
 }

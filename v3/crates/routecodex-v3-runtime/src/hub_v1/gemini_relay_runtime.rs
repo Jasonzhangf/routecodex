@@ -468,6 +468,9 @@ pub fn project_v3_gemini_relay_runtime_failure(
             V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
                 super::provider_compat_boundary_source("ProviderRespCompat02ProviderCompat", &error)
             }
+            V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
+                super::provider_request_payload_source("ProviderReqCompat06ProviderCompat", &error)
+            }
             V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3HubRuntime",

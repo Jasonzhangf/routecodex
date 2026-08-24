@@ -264,6 +264,9 @@ pub(crate) fn compat_source(
                 error.reason.as_str(),
             )
         }
+        V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
+            crate::hub_v1::provider_request_payload_source(stage, error)
+        }
         V3ProviderCompatErrorClassification::Other => runtime_source(stage, error),
     }
 }

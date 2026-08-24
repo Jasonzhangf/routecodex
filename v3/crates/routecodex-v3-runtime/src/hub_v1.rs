@@ -23,8 +23,10 @@ mod provider_compat_error;
 pub(crate) use provider_compat_error::classify_v3_provider_compat_error;
 pub use provider_compat_error::{
     extract_v3_provider_compat_boundary_field, provider_compat_boundary_source,
-    V3ProviderCompatError, V3ProviderCompatErrorClassification,
+    V3ProviderCompatErrorClassification,
+    V3ProviderCompatError,
 };
+pub(crate) use provider_compat_error::provider_request_payload_source;
 
 mod side_channel;
 pub(crate) use side_channel::find_v3_hub_side_channel_key;
