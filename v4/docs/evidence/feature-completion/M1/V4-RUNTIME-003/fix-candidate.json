@@ -16,7 +16,7 @@
     "v4/docs/architecture/maps/resource-map.json",
     "v4/docs/architecture/maps/verification-map.json"
   ],
-  "verification_evidence_ids": ["positive", "red-gate", "boundary-audit", "plane-isolation"],
+  "verification_evidence_ids": ["boundary-audit", "plane-isolation", "positive", "red-gate"],
   "created_at": "2026-08-24T05:10:00Z",
   "batch_id": "B",
   "task_ids": ["V4-RUNTIME-003"]

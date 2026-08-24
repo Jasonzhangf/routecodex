@@ -95,7 +95,11 @@
           "function_ids":["v4.runtime.node_plan_bundle"],
           "resource_ids":["v4.runtime.node_plan_bundle"],
           "source_paths":["crates/routecodex-v4-plugin-plan/src/lib.rs"],
-          "support_paths":[],
+          "support_paths":[
+            "docs/architecture/maps/function-map.json",
+            "docs/architecture/maps/resource-map.json",
+            "docs/architecture/maps/verification-map.json"
+          ],
           "required_gate_ids":["v4_runtime_003_plan_bundle_positive","v4_runtime_003_plan_bundle_red","v4_runtime_003_plan_bundle_boundary","v4_runtime_003_plan_bundle_plane"],
           "mainline_binding":"forbidden_before_integration",
           "evidence_refs":[
