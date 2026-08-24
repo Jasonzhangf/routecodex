@@ -1501,6 +1501,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                 .stream_observation
                 .clone()
                 .unwrap_or_default();
+            response_projection.stream_observation = Some(stream_observation.clone());
             let body = std::mem::replace(
                 &mut response_projection.attempt_payload.body,
                 V3ProviderAttemptBody::Bytes(Vec::new()),
