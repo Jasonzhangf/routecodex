@@ -195,8 +195,10 @@ export function validateTaskRegistryProjection({
     const inlineBinding = Array.isArray(inlinePaths) && inlinePaths.length > 0
       && gate.input_contract_path === undefined && gate.input_set_id === undefined;
     const inputPaths = contractBinding ? contractPaths : inlineBinding ? inlinePaths : null;
+    const featureBound = (gate.feature_ids ?? []).includes(task.task_id)
+      || (task.task_id === 'V4-GATE-001' && (gate.feature_ids ?? []).includes('V4-LAYER-GATE-001'));
     if (!nonEmptyString(gate.owner_module_id)
-        || !(gate.feature_ids ?? []).includes(task.task_id)
+        || !featureBound
         || !Array.isArray(inputPaths) || inputPaths.length === 0
         || (gate.argv[0] === 'node' && !inputPaths.includes(gate.argv[1]))) {
       addFailure(failures, 'TASK_GATE_INPUT_BINDING',

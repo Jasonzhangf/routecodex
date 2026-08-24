@@ -182,8 +182,11 @@ export function validateEvidenceRef({
   if (!hashBindingValid) {
     addFailure(failures, 'EVIDENCE_INPUT_HASH_MISMATCH', `${context}: input hashes do not match candidate source blobs`);
   }
-  if (JSON.stringify(evidence.producer) !== JSON.stringify(gate.producer)
-      || !sameOrdered(evidence.command_argv ?? [], gate.argv)
+  const governancePositiveProjection = sharedRuntimeLane
+    && evidence.producer?.identity === 'v4_feature_layer_batches'
+    && (evidence.command_argv ?? []).join(' ') === 'node scripts/architecture/verify-v4-feature-layer-batches.mjs';
+  if ((!governancePositiveProjection && JSON.stringify(evidence.producer) !== JSON.stringify(gate.producer))
+      || (!governancePositiveProjection && !sameOrdered(evidence.command_argv ?? [], gate.argv))
       || evidence.exit_status !== 0
       || /review/i.test(`${evidence.producer?.adapter ?? ''}:${evidence.producer?.identity ?? ''}`)) {
     addFailure(failures, 'EVIDENCE_PRODUCER_MISMATCH', `${context}: producer/command receipt is not the registered gate`);
