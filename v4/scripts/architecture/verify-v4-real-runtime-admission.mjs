@@ -25,6 +25,14 @@ const COMPILED_MANIFEST = process.env.RCCV4_MANIFEST
   ?? path.join(process.env.HOME ?? '', '.rcc/v4/manifest.compiled.json');
 let RCCV4_HOST = process.env.RCCV4_LISTEN;
 let ADMISSION_MODEL = process.env.RCCV4_ADMISSION_MODEL;
+// Every live admission run needs a fresh continuation scope. Reusing a fixed
+// session after a prior run leaves an intentionally immutable pending binding
+// in the managed runtime and turns a new first turn into a false double-restore
+// failure. The direct pair below deliberately shares this run-scoped value.
+const admissionRun = `${Date.now()}-${process.pid}`;
+const directSession = `admission-direct-${admissionRun}`;
+const relayJsonSession = `admission-relay-json-${admissionRun}`;
+const relaySseSession = `admission-relay-sse-${admissionRun}`;
 
 const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 const readText = (file) => fs.readFileSync(file, 'utf8');
@@ -261,7 +269,7 @@ try {
     model: ADMISSION_MODEL,
     input: [{ role: 'user', content: 'say hi in 3 words' }],
   };
-  const jsonResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'x-rccv4-session-id': 'admission-direct' }, 60000);
+  const jsonResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'x-rccv4-session-id': directSession }, 60000);
   if (jsonResp.status !== 200) throw new Error(`responses JSON status ${jsonResp.status}, body=${jsonResp.body.substring(0, 200)}`);
   const jsonBody = JSON.parse(jsonResp.body);
   if (!jsonBody.id || !jsonBody.object) throw new Error('responses JSON missing id/object fields');
@@ -282,7 +290,7 @@ try {
     model: ADMISSION_MODEL,
     previous_response_id: directResponseId,
     input: [{ role: 'user', content: 'now say bye in 3 words' }],
-  }, { 'x-rccv4-session-id': 'admission-direct' }, 60000);
+  }, { 'x-rccv4-session-id': directSession }, 60000);
   if (continuation.status !== 200) throw new Error(`continuation status ${continuation.status}, body=${continuation.body.substring(0, 200)}`);
   const body = JSON.parse(continuation.body);
   if (!body.id || body.id === directResponseId) throw new Error('continuation did not produce a new response id');
@@ -320,7 +328,7 @@ try {
   const relay = await httpPost(RCCV4_HOST, '/v1/chat/completions', {
     model: ADMISSION_MODEL,
     messages: [{ role: 'user', content: 'say relay ok' }],
-  }, { 'x-rccv4-session-id': 'admission-relay-json' }, 60000);
+  }, { 'x-rccv4-session-id': relayJsonSession }, 60000);
   if (relay.status !== 200) throw new Error(`relay JSON status ${relay.status}, body=${relay.body.substring(0, 200)}`);
   const body = JSON.parse(relay.body);
   if (body.object !== 'chat.completion' || !Array.isArray(body.choices)) {
@@ -338,7 +346,7 @@ try {
     model: ADMISSION_MODEL,
     messages: [{ role: 'user', content: 'count 1,2,3' }],
     stream: true,
-  }, { 'x-rccv4-session-id': 'admission-relay-sse' }, 60000);
+  }, { 'x-rccv4-session-id': relaySseSession }, 60000);
   if (relay.status !== 200) throw new Error(`relay SSE status ${relay.status}, body=${relay.body.substring(0, 200)}`);
   if (!relay.body.includes('"object":"chat.completion.chunk"') || !relay.body.includes('data: [DONE]')) {
     throw new Error('relay SSE lacks chat chunks or terminal [DONE]');
