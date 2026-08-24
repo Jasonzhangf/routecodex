@@ -10,8 +10,8 @@
   "command_argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
   "exit_status": 0,
   "result": "pass",
-  "created_at": "2026-08-24T04:45:00Z",
-  "expires_at": "2026-08-30T04:45:00Z",
+  "created_at": "2026-08-24T04:40:00Z",
+  "expires_at": "2026-08-30T04:40:00Z",
   "input_hashes": ["sha256:345d1a5ffd94c7598fc081ceb1f52b2b5f5a4b3f9efbd2ed484c55c6c2273542", "sha256:f674b5cd0f8a1f00d3b0fda9ddc7159d17f08f6ea21acff42456ef8da5ac2621"],
-  "scope_hash": "sha256:f4ab42b7aa30eebc350b88d263ad81b171c864db65f9dc6d43ef1c74627befef"
+  "scope_hash": "sha256:e8452edac06a5c26f7bd3463be819f7600114a2c6db686fdd6c300e997544b28"
 }
