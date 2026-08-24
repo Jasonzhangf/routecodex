@@ -44,8 +44,14 @@ function nonEmptyString(value) {
 }
 
 function moduleOwnersForPath(moduleRegistry, relativePath) {
-  return (moduleRegistry.modules ?? []).filter((module) => module.status === 'active'
+  const owners = (moduleRegistry.modules ?? []).filter((module) => module.status === 'active'
     && (module.owned_paths ?? []).some((pattern) => pathMatchesPattern(relativePath, pattern)));
+  if (owners.length <= 1) return owners;
+  const specificity = (module) => Math.max(...module.owned_paths
+    .filter((pattern) => pathMatchesPattern(relativePath, pattern))
+    .map((pattern) => pattern.replace(/\*\*/g, '').length));
+  const max = Math.max(...owners.map(specificity));
+  return owners.filter((module) => specificity(module) === max);
 }
 
 function escapedPattern(value) {

@@ -642,6 +642,19 @@
         "v4_servertool_l2_regression",
         "v4_infrastructure_contract"
       ]
+    },
+    {
+      "module_id": "routecodex-v4-parity",
+      "status": "active",
+      "owner": "routecodex-v4-parity",
+      "owned_paths": [
+        "scripts/architecture/verify-v4-product-parity-ledger.mjs",
+        "scripts/architecture/verify-v4-v3-baseline-delta.mjs",
+        "scripts/architecture/verify-v4-product-parity-status.mjs",
+        "scripts/architecture/verify-v4-product-differential.mjs"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**"],
+      "verification_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
     }
   ]
 }

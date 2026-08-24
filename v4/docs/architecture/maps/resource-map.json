@@ -1241,7 +1241,7 @@
     },
     {
       "resource_id": "v4.parity.product_ledger",
-      "owner": "routecodex-v4-governance",
+      "owner": "routecodex-v4-parity",
       "truth_store": "docs/architecture/v3-v4-product-parity-ledger.yml",
       "allowed_operations": ["read", "validate", "write"],
       "status": "active",
@@ -1249,7 +1249,7 @@
     },
     {
       "resource_id": "v4.parity.baseline_delta",
-      "owner": "routecodex-v4-governance",
+      "owner": "routecodex-v4-parity",
       "truth_store": "docs/architecture/v3-v4-semantic-parity-map.yml",
       "allowed_operations": ["read", "validate", "write"],
       "status": "active",
@@ -1257,7 +1257,7 @@
     },
     {
       "resource_id": "v4.parity.status_gate",
-      "owner": "routecodex-v4-governance",
+      "owner": "routecodex-v4-parity",
       "truth_store": "docs/architecture/v3-v4-product-parity-ledger.yml",
       "allowed_operations": ["read", "validate"],
       "status": "active",
@@ -1265,7 +1265,7 @@
     },
     {
       "resource_id": "v4.parity.differential_harness",
-      "owner": "routecodex-v4-governance",
+      "owner": "routecodex-v4-parity",
       "truth_store": "docs/architecture/v3-v4-semantic-parity-map.yml",
       "allowed_operations": ["read", "validate"],
       "status": "active",
