@@ -1595,23 +1595,26 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             headers: std::mem::take(&mut response_projection.attempt_payload.headers),
             body: client_body,
         };
-        if let (false, Some(_state), Some(scope)) = (
-            continuation_disabled,
-            continuation_state.as_ref(),
-            continuation_scope.as_ref(),
-        ) {
-            if let Err(projected) = commit_or_release_v3_direct_continuation(
-                continuation_state.as_deref(),
-                scope,
-                &response_projection.remote_continuation,
-                previous_response_id.as_deref(),
-                &selected_pin,
-                &selected_capability_revision,
-                now_epoch_ms,
-                &mut trace,
-                &hook_registry,
+        let live_client_sse = matches!(&client_payload.body, V3ClientBody::Sse(_));
+        if !live_client_sse {
+            if let (false, Some(_state), Some(scope)) = (
+                continuation_disabled,
+                continuation_state.as_ref(),
+                continuation_scope.as_ref(),
             ) {
-                return projected;
+                if let Err(projected) = commit_or_release_v3_direct_continuation(
+                    continuation_state.as_deref(),
+                    scope,
+                    &response_projection.remote_continuation,
+                    previous_response_id.as_deref(),
+                    &selected_pin,
+                    &selected_capability_revision,
+                    now_epoch_ms,
+                    &mut trace,
+                    &hook_registry,
+                ) {
+                    return projected;
+                }
             }
         }
         if !provider_health_neutral {
@@ -1633,14 +1636,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
         }
         trace.push("V3DirectResp15ClientPayloadReady");
         trace.push("V3Resp15ClientPayload");
-        let timing = match runtime_timing.finish_runtime() {
-            Ok(timing) => timing,
-            Err(error) => {
-                return error_output(
-                    runtime_source("V3RuntimeTimingTerminal", error),
-                    trace,
-                    &hook_registry,
-                )
+        let timing = if live_client_sse {
+            None
+        } else {
+            match runtime_timing.finish_runtime() {
+                Ok(timing) => Some(timing),
+                Err(error) => {
+                    return error_output(
+                        runtime_source("V3RuntimeTimingTerminal", error),
+                        trace,
+                        &hook_registry,
+                    )
+                }
             }
         };
         let mut observability = build_v3_direct_runtime_observability(
@@ -1653,7 +1660,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             direct_stopless_projected,
         );
         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
-        observability.timing = Some(timing);
+        observability.timing = timing;
 
         return V3ResponsesDirectRuntimeOutput {
             observability: Some(observability),
