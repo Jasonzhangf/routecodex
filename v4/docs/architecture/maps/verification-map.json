@@ -1110,5 +1110,14 @@
       "input_paths": ["scripts/architecture/verify-v4-product-parity-status.mjs"],
       "required_for": ["source_green"]
     }
+    ,{
+      "gate_id":"v4_plugin_request_positive","status":"active","owner_module_id":"routecodex-v4-standard-plugins","feature_ids":["V4-PLUGIN-001","V4-PLUGIN-002","V4-PLUGIN-003","V4-PLUGIN-004","V4-PLUGIN-005"],"command":"cargo test -p routecodex-v4-standard-plugins --test l2_request_plugins --manifest-path Cargo.toml --locked","argv":["cargo","test","-p","routecodex-v4-standard-plugins","--test","l2_request_plugins","--manifest-path","Cargo.toml","--locked"],"producer":{"adapter":"cargo","identity":"v4_plugin_request_positive"},"evidence_role":"positive","input_paths":["crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/tests/l2_request_plugins.rs"],"required_for":["source_green"]
+    },{
+      "gate_id":"v4_plugin_request_red","status":"active","owner_module_id":"routecodex-v4-standard-plugins","feature_ids":["V4-PLUGIN-001","V4-PLUGIN-002","V4-PLUGIN-003","V4-PLUGIN-004","V4-PLUGIN-005"],"command":"cargo test -p routecodex-v4-standard-plugins --test l2_request_plugins --manifest-path Cargo.toml --locked","argv":["cargo","test","-p","routecodex-v4-standard-plugins","--test","l2_request_plugins","--manifest-path","Cargo.toml","--locked"],"producer":{"adapter":"cargo","identity":"v4_plugin_request_red"},"evidence_role":"red_gate","input_paths":["crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/tests/l2_request_plugins.rs"],"required_for":["source_green"]
+    },{
+      "gate_id":"v4_plugin_request_boundary","status":"active","owner_module_id":"routecodex-v4-standard-plugins","feature_ids":["V4-PLUGIN-001","V4-PLUGIN-002","V4-PLUGIN-003","V4-PLUGIN-004","V4-PLUGIN-005"],"command":"node scripts/architecture/verify-v4-standard-plugins.mjs","argv":["node","scripts/architecture/verify-v4-standard-plugins.mjs"],"producer":{"adapter":"node","identity":"v4_plugin_request_boundary"},"evidence_role":"boundary_audit","input_paths":["crates/routecodex-v4-standard-plugins/src/request_plugins.rs"],"required_for":["source_green"]
+    },{
+      "gate_id":"v4_plugin_request_plane","status":"active","owner_module_id":"routecodex-v4-standard-plugins","feature_ids":["V4-PLUGIN-001","V4-PLUGIN-002","V4-PLUGIN-003","V4-PLUGIN-004","V4-PLUGIN-005"],"command":"node scripts/architecture/verify-v4-standard-plugins.mjs --red-self-test","argv":["node","scripts/architecture/verify-v4-standard-plugins.mjs","--red-self-test"],"producer":{"adapter":"node","identity":"v4_plugin_request_plane"},"evidence_role":"plane_isolation","input_paths":["crates/routecodex-v4-standard-plugins/src/request_plugins.rs"],"required_for":["source_green"]
+    }
   ]
 }

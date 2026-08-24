@@ -1271,5 +1271,10 @@
       "status": "active",
       "feature_id": "V4-PARITY-HARNESS-001"
     }
+    ,{"resource_id":"v4.plugin.request.responses_normalize","owner":"routecodex-v4-standard-plugins","truth_store":"crates/routecodex-v4-standard-plugins/src/request_plugins.rs","allowed_operations":["read","validate"],"status":"active","feature_id":"V4-PLUGIN-001"}
+    ,{"resource_id":"v4.plugin.request.chat_to_responses","owner":"routecodex-v4-standard-plugins","truth_store":"crates/routecodex-v4-standard-plugins/src/request_plugins.rs","allowed_operations":["read","write","validate"],"status":"active","feature_id":"V4-PLUGIN-002"}
+    ,{"resource_id":"v4.plugin.request.governance","owner":"routecodex-v4-standard-plugins","truth_store":"crates/routecodex-v4-standard-plugins/src/request_plugins.rs","allowed_operations":["read","write","validate"],"status":"active","feature_id":"V4-PLUGIN-003"}
+    ,{"resource_id":"v4.plugin.request.provider_semantic","owner":"routecodex-v4-standard-plugins","truth_store":"crates/routecodex-v4-standard-plugins/src/request_plugins.rs","allowed_operations":["read","write","validate"],"status":"active","feature_id":"V4-PLUGIN-004"}
+    ,{"resource_id":"v4.plugin.request.responses_wire_build","owner":"routecodex-v4-standard-plugins","truth_store":"crates/routecodex-v4-standard-plugins/src/request_plugins.rs","allowed_operations":["read","write","validate"],"status":"active","feature_id":"V4-PLUGIN-005"}
   ]
 }
