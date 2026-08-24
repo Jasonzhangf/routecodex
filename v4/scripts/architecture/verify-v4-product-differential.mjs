@@ -13,7 +13,7 @@ if (missing.length > 0) {
   process.exit(1);
 }
 if (process.argv[2] === '--red-self-test') {
-  const mutated = map.replace('checkpoint_evidence:', 'checkpoint_evidence_removed:');
+  const mutated = map.replaceAll('checkpoint_evidence:', 'checkpoint_evidence_removed:');
   if (requiredStages.every((marker) => mutated.includes(marker))) {
     console.error('[V4-PARITY-HARNESS-001] RED FAIL mutation was not rejected');
     process.exit(1);
