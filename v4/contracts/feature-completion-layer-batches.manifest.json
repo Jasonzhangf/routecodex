@@ -342,6 +342,7 @@
       "added:workspace:member:crates/routecodex-v4-runtime-bin",
       "surface:Cargo.toml:sha256:5ce83c9e3837823b19aa44dfdc28948a0123973fcb5e853e385f42aff3add62e",
       "surface:contracts/active-link/frozen-consumer-registry.json:sha256:70df9fa89217c6bd7241788294cf3ded9a6922ea6bdd908e20468cda4d96f375",
+      "surface:contracts/feature-completion-layer-batches.manifest.json:sha256:aa6c8da3bdcadad29b66d2b389f260d57d07c9afa12b49a66ff9c0fa33b09b90",
       "surface:crates/routecodex-v4-runtime-bin/**:sha256:d2c372a28b2d1b417932664870b39fa15a2a558cb33f435d9c39f3e045639645",
       "surface:scripts/build.mjs:sha256:f8225fd59c8c81994fb84f67f082496ba143d2fc044a73a1776dc836b1c5da29",
       "surface:scripts/verify.mjs:sha256:2d34a8572f72d51206d854de57e525f82bb2b6286ae42ee72ffc583e940914ff"
