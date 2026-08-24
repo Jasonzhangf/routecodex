@@ -5,7 +5,7 @@
   "phase": "development_whitebox",
   "kind": "gate",
   "execution_surface": "development_whitebox",
-  "source_commit": "897c712740d08a7e90ba80d2ee77102c235133f0",
+  "source_commit": "37cf544e30f734c683401faa5d7fba227baee8a6",
   "scope": {"feature_id": "V4-RUNTIME-003", "module_id": "routecodex-v4-plugin-plan"},
   "producer": {"adapter": "cargo", "identity": "v4_runtime_003_plan_bundle_plane"},
   "command_argv": ["cargo", "test", "-p", "routecodex-v4-plugin-plan", "--manifest-path", "Cargo.toml", "--locked"],
@@ -14,5 +14,5 @@
   "created_at": "2026-08-24T05:10:00Z",
   "expires_at": "2026-08-31T05:10:00Z",
   "input_hashes": ["sha256:7dee7e58703f74d1aea3b40a5822ce584c943a61fc66a76f8dba3cb823b43af2"],
-  "scope_hash": "sha256:4a81c7ebe628fc64b6fc683471fd106741a98a86986dc81199e269774487deb8"
+  "scope_hash": "sha256:0fd0b71b188782844d975d2e6f6bc6876094b361e0b3788022d7df35e0d8500d"
 }
