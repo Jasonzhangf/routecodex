@@ -1494,9 +1494,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             }
         }
         let mut client_sse = None;
-        if let V3RemoteContinuationObservation::Streaming { state } =
-            &response_projection.remote_continuation
-        {
+        if matches!(
+            response_projection.attempt_payload.body,
+            V3ProviderAttemptBody::Sse(_)
+        ) {
             let stream_observation = response_projection
                 .stream_observation
                 .clone()
@@ -1507,8 +1508,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                 V3ProviderAttemptBody::Bytes(Vec::new()),
             );
             response_projection.attempt_payload.body = match body {
-                V3ProviderAttemptBody::Sse(stream) => {
-                    let stream = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
+                V3ProviderAttemptBody::Sse(stream) => V3ProviderAttemptBody::Sse(
+                    wrap_direct_sse_provider_event_json_observation_stream_with_compat(
                         stream,
                         stream_observation.clone(),
                         runtime_timing.clone(),
@@ -1536,39 +1537,42 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                         Some(direct_failure_session_scope.session_id().to_owned()),
                         Some(standardized.protocol_context.request_id.clone()),
                         true,
-                    );
-                    V3ProviderAttemptBody::Sse(stream)
-                }
+                    ),
+                ),
                 other => other,
             };
-            let attempt = std::mem::replace(
-                &mut response_projection.attempt_payload.body,
-                V3ProviderAttemptBody::Bytes(Vec::new()),
-            );
-            let V3ProviderAttemptBody::Sse(mut stream) = attempt else {
-                return error_output(
-                    runtime_source(
-                        "V3DirectResp14ProviderCompat",
-                        "streaming continuation did not retain a provider-attempt SSE stream",
-                    ),
-                    trace,
-                    &hook_registry,
+            if let V3RemoteContinuationObservation::Streaming { state } =
+                &response_projection.remote_continuation
+            {
+                let attempt = std::mem::replace(
+                    &mut response_projection.attempt_payload.body,
+                    V3ProviderAttemptBody::Bytes(Vec::new()),
                 );
-            };
-            // The first semantic frame was admitted by the direct SSE guard.
-            // Hand the live stream to Front immediately; post-commit stream
-            // errors remain typed on that stream and cannot re-enter policy.
-            drop(provider_action_permit.take());
-            client_sse = Some(wrap_v3_direct_sse_continuation_lifecycle(
-                stream,
-                state.clone(),
-                (!continuation_disabled).then(|| continuation_state.clone()).flatten(),
-                (!continuation_disabled).then(|| continuation_scope.clone()).flatten(),
-                previous_response_id.clone(),
-                selected_pin.clone(),
-                selected_capability_revision.clone(),
-                now_epoch_ms,
-            ));
+                let V3ProviderAttemptBody::Sse(stream) = attempt else {
+                    return error_output(
+                        runtime_source(
+                            "V3DirectResp14ProviderCompat",
+                            "streaming continuation did not retain a provider-attempt SSE stream",
+                        ),
+                        trace,
+                        &hook_registry,
+                    );
+                };
+                // The first semantic frame was admitted by the direct SSE guard.
+                // Hand the live stream to Front immediately; post-commit stream
+                // errors remain typed on that stream and cannot re-enter policy.
+                drop(provider_action_permit.take());
+                client_sse = Some(wrap_v3_direct_sse_continuation_lifecycle(
+                    stream,
+                    state.clone(),
+                    (!continuation_disabled).then(|| continuation_state.clone()).flatten(),
+                    (!continuation_disabled).then(|| continuation_scope.clone()).flatten(),
+                    previous_response_id.clone(),
+                    selected_pin.clone(),
+                    selected_capability_revision.clone(),
+                    now_epoch_ms,
+                ));
+            }
         }
         let attempt_body = std::mem::replace(
             &mut response_projection.attempt_payload.body,
