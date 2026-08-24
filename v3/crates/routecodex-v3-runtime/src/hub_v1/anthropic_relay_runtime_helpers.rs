@@ -1,6 +1,11 @@
 pub fn project_v3_anthropic_relay_runtime_failure(
     error: V3AnthropicRelayRuntimeError,
 ) -> V3AnthropicRelayRuntimeOutput {
+    let request_payload_invalid = matches!(
+        &error,
+        V3AnthropicRelayRuntimeError::ProviderCompat(error)
+            if error.classification() == V3ProviderCompatErrorClassification::RequestPayloadInvalid
+    );
     let source = match error {
         V3AnthropicRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
             V3ErrorSourceKind::ModelNotFound,
@@ -32,7 +37,12 @@ pub fn project_v3_anthropic_relay_runtime_failure(
             error.to_string(),
         ),
     };
-    error_output(source, 500, "none", Vec::new())
+    error_output(
+        source,
+        if request_payload_invalid { 400 } else { 500 },
+        "none",
+        Vec::new(),
+    )
 }
 
 fn provider_http_failure(status: u16, body: &[u8], _provider_id: &str) -> V3RelayProviderFailure {

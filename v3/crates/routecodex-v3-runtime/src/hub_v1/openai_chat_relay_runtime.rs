@@ -281,6 +281,11 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
 pub fn project_v3_openai_chat_relay_runtime_failure(
     error: V3OpenAiChatRelayRuntimeError,
 ) -> V3OpenAiChatRelayRuntimeOutput {
+    let request_payload_invalid = matches!(
+        &error,
+        V3OpenAiChatRelayRuntimeError::ProviderCompat(error)
+            if error.classification() == V3ProviderCompatErrorClassification::RequestPayloadInvalid
+    );
     let source = match error {
         V3OpenAiChatRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
             V3ErrorSourceKind::ModelNotFound,
@@ -309,7 +314,12 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
             error.to_string(),
         ),
     };
-    error_output(source, 500, "none", Vec::new())
+    error_output(
+        source,
+        if request_payload_invalid { 400 } else { 500 },
+        "none",
+        Vec::new(),
+    )
 }
 
 fn project_json_response(

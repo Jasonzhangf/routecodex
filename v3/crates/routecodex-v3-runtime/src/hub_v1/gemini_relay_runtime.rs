@@ -457,6 +457,11 @@ fn build_v3_gemini_transport_09(
 pub fn project_v3_gemini_relay_runtime_failure(
     error: V3GeminiRelayRuntimeError,
 ) -> V3GeminiRelayRuntimeOutput {
+    let request_payload_invalid = matches!(
+        &error,
+        V3GeminiRelayRuntimeError::ProviderCompat(error)
+            if error.classification() == V3ProviderCompatErrorClassification::RequestPayloadInvalid
+    );
     let source = match error {
         V3GeminiRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
             V3ErrorSourceKind::ModelNotFound,
@@ -485,7 +490,12 @@ pub fn project_v3_gemini_relay_runtime_failure(
             error.to_string(),
         ),
     };
-    let (projected, trace) = error_output(source, 500, "none", Vec::new());
+    let (projected, trace) = error_output(
+        source,
+        if request_payload_invalid { 400 } else { 500 },
+        "none",
+        Vec::new(),
+    );
     V3GeminiRelayRuntimeOutput {
         status: projected.status,
         client_body: V3GeminiRelayClientBody::Json(projected.body),
