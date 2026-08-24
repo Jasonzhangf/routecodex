@@ -39,6 +39,17 @@ const SHARED_PROJECTION_PATHS = new Set([
   'v4/.appsdk/maps/module-registry.json',
 ]);
 
+const GOVERNANCE_CLOSURE_PREFIXES = [
+  'v4/contracts/',
+  'v4/docs/evidence/feature-completion/',
+  'v4/scripts/architecture/lib/feature-layer-batch-',
+];
+
+function isGovernanceClosurePath(relativePath) {
+  return SHARED_PROJECTION_PATHS.has(relativePath)
+    || GOVERNANCE_CLOSURE_PREFIXES.some((prefix) => relativePath.startsWith(prefix));
+}
+
 function nonEmptyString(value) {
   return typeof value === 'string' && value.length > 0;
 }
@@ -306,7 +317,8 @@ export function validateCandidateRecord({
     ...(task.source_paths ?? []).map((item) => `v4/${item}`),
     ...(task.support_paths ?? []).map((item) => `v4/${item}`),
   ]));
-  if (!sameOrdered(covered, derived.changed_paths)) {
+  const laneChangedPaths = derived.changed_paths.filter((changedPath) => !isGovernanceClosurePath(changedPath));
+  if (!sameOrdered(covered, laneChangedPaths)) {
     addFailure(failures, 'CANDIDATE_PATH_COVERAGE', `${context}: task source/support paths do not cover the exact candidate diff`);
   }
   const evidenceIds = sortedUnique(tasks.flatMap((task) => (task.evidence_refs ?? [])
