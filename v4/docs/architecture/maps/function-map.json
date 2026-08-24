@@ -253,6 +253,12 @@
       "entry_paths": [
         "crates/routecodex-v4-plugin-plan/src/lib.rs"
       ],
+      "source_paths": [
+        "crates/routecodex-v4-plugin-plan/src/lib.rs"
+      ],
+      "resource_ids": [
+        "v4.runtime.node_plan_bundle"
+      ],
       "required_gates": [
         "v4_runtime_003_plan_bundle_positive",
         "v4_runtime_003_plan_bundle_red",
