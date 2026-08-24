@@ -1619,6 +1619,7 @@ features:
   - malformed provider event fails at provider codec, not transport/server.
   required_gates:
   - npm run verify:sse-architecture-boundary
+  - npm run test:v3-responses-function-call-arguments-regression
   - npm run verify:v3-provider-action-gate
   - npm run verify:v3-runtime-timing-observability
   - npm run test:v3-openai-chat-relay-runtime-integration
