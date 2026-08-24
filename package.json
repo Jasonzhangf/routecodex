@@ -210,6 +210,7 @@
     "verify:sse-architecture-boundary": "node scripts/architecture/verify-sse-architecture-boundary.mjs",
     "verify:v3-direct-sse-accept-skeleton": "npm --prefix v3 run verify:v3-direct-sse-accept-skeleton",
     "verify:v3-contract-map-owner": "npm --prefix v3 run verify:v3-contract-map-owner",
+    "verify:v3-mainline-manifest-sync": "npm --prefix v3 run verify:v3-mainline-manifest-sync",
     "test:v3-sse-transport-adapter": "npm --prefix v3 run test:v3-sse-transport-adapter",
     "test:agent-collab-protocol-red-fixtures": "node scripts/tests/agent-collab-protocol-red-fixtures.mjs",
     "verify:v3-rust-only-server-entry": "npm --prefix v3 run verify:v3-rust-only-server-entry",

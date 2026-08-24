@@ -58,7 +58,7 @@ function assertUniqueRegistryOwner(registry) {
     'npm run verify:v3-direct-sse-accept-skeleton',
     'npm run verify:sse-architecture-boundary',
     'npm run verify:v3-architecture-ci',
-    'npm run verify:architecture-mainline-manifest-sync',
+    'npm run verify:v3-mainline-manifest-sync',
   ]) {
     if (!owner.required_gates?.includes(gate)) failures.push(`registry: ${ownerFeatureId} missing gate ${gate}`);
   }

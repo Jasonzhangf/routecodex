@@ -2,11 +2,14 @@
 /**
  * verify:architecture-mainline-manifest-sync
  *
- * Every generated mainline manifest under docs/architecture/mainline-manifests/
- * or docs/architecture/manifests/ must reference a chain_id that exists in the
- * mainline call map, and the manifest's owner_feature_id must exist in the
- * function map. This keeps both manifest surfaces in sync with the canonical
- * call map.
+ * Every current architecture contract manifest under
+ * docs/architecture/manifests/architecture.*.mainline.yml must reference a
+ * chain_id that exists in the mainline call map, and its owner_feature_id must
+ * exist in the canonical function maps.
+ *
+ * Older V2/legacy manifests are outside this current architecture-contract
+ * gate. They remain owned by their existing migration checks until explicitly
+ * registered in the canonical maps.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,6 +21,7 @@ const manifestDirs = [
   path.join(root, 'docs', 'architecture', 'mainline-manifests'),
   path.join(root, 'docs', 'architecture', 'manifests'),
 ];
+const canonicalManifestDir = manifestDirs[1];
 const mainlinePath = path.join(root, 'docs', 'architecture', 'v3-mainline-call-map.yml');
 const functionPath = path.join(root, 'docs', 'architecture', 'v3-function-map.yml');
 
@@ -38,6 +42,13 @@ if (fs.existsSync(v2MainlinePath)) {
 const featureIds = new Set(
   (functionMap?.features ?? []).map((feature) => feature.feature_id)
 );
+const genericFunctionPath = path.join(root, 'docs', 'architecture', 'function-map.yml');
+if (fs.existsSync(genericFunctionPath)) {
+  const genericFunctionMap = YAML.parse(fs.readFileSync(genericFunctionPath, 'utf8'));
+  for (const owner of genericFunctionMap?.owners ?? []) {
+    if (owner.feature_id) featureIds.add(owner.feature_id);
+  }
+}
 
 for (const manifestDir of manifestDirs) {
   if (!fs.existsSync(manifestDir)) {
@@ -61,12 +72,15 @@ for (const manifestDir of manifestDirs) {
       failures.push(`${manifestPath}: missing chain_id/lifecycle_id/call_map_chain_id`);
       continue;
     }
+    const strictCanonicalArchitectureManifest =
+      manifestDir === canonicalManifestDir && file.startsWith('architecture.');
+    if (!strictCanonicalArchitectureManifest) continue;
     if (!chains.has(chainId)) {
-      console.warn(`${manifestPath}: chain id ${chainId} not found in call maps (V2 orphan manifest?)`);
+      failures.push(`${manifestPath}: chain id ${chainId} not found in call maps`);
     }
     const owner = manifest?.owner_feature_id;
     if (owner && !featureIds.has(owner)) {
-      console.warn(`${manifestPath}: owner_feature_id ${owner} not found in v3-function-map.yml (V2 manifest?)`);
+      failures.push(`${manifestPath}: owner_feature_id ${owner} not found in canonical function maps`);
     }
   }
 }

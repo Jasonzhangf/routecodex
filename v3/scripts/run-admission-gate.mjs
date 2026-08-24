@@ -13,6 +13,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = resolve(v3Root, '..');
 const admissionRepo = resolve(v3Root, 'build-contracts', 'architecture-admission', 'repo');
 const controlRoot = resolve(v3Root, 'build-control', 'admission-workspace');
 const requested = process.argv[2];
@@ -62,9 +63,12 @@ try {
     'architecture-wiki-lib.mjs',
     'mainline-call-map-lib.mjs',
     'wiki-html-lib.mjs',
+    'verify-architecture-mainline-manifest-sync.mjs',
   ]) {
     copyFileSync(
-      resolve(admissionRepo, 'scripts', 'architecture', name),
+      name === 'verify-architecture-mainline-manifest-sync.mjs'
+        ? resolve(repoRoot, 'scripts', 'architecture', name)
+        : resolve(admissionRepo, 'scripts', 'architecture', name),
       resolve(workspace, 'scripts', 'architecture', name),
     );
   }
