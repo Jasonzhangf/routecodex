@@ -826,14 +826,15 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
             &mut response_projection.attempt_payload.body,
             V3ProviderAttemptBody::Bytes(Vec::new()),
         );
+        let committed_client_sse = matches!(&attempt_body, V3ProviderAttemptBody::Sse(_));
         let client_body = match attempt_body {
             V3ProviderAttemptBody::Sse(stream) => {
-                // The first semantic frame has already been admitted by the
-                // Direct SSE projection boundary. Front owns the live stream
-                // now; post-commit provider errors stay on that stream and
-                // must never re-enter route selection or hardcoded exhaustion.
+                let stream = match crate::kernel::direct_runtime_helpers_stream::commit_direct_sse_stream(stream).await {
+                    Ok(stream) => stream,
+                    Err(source) => return error_output(source, trace, &crate::hooks::register_responses_direct_hooks()),
+                };
                 drop(provider_action_permit.take());
-                V3ClientBody::Sse(stream)
+                V3ClientBody::CommittedSse(stream)
             }
             V3ProviderAttemptBody::Json(body) => V3ClientBody::Json(body),
             V3ProviderAttemptBody::Bytes(body) => V3ClientBody::Bytes(body),
@@ -905,9 +906,29 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
             false,
         );
         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
-        // A live SSE keeps external timing open until its typed terminal event
-        // is observed by the stream wrapper. JSON/bytes can close timing here.
-        if !matches!(&client_payload.body, V3ClientBody::Sse(_)) {
+        if committed_client_sse {
+            observability.timing = match response_projection.stream_observation.as_ref() {
+                Some(observation) => match observation.snapshot() {
+                    Ok(snapshot) => snapshot.timing,
+                    Err(error) => return error_output(
+                        runtime_source("V3RuntimeTimingObservation", error),
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    ),
+                },
+                None => None,
+            };
+            if observability.timing.is_none() {
+                return error_output(
+                    runtime_source(
+                        "V3RuntimeTimingTerminal",
+                        "successful Direct SSE completed without typed timing",
+                    ),
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                );
+            }
+        } else {
             let _ = runtime_timing.finish_external();
             if let Ok(summary) = runtime_timing.finish_runtime() {
                 observability.timing = Some(summary);
