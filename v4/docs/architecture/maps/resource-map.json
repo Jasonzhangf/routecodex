@@ -1102,6 +1102,17 @@
       "status": "active"
     },
     {
+      "resource_id": "v4.runtime.node_plan_bundle",
+      "owner": "routecodex-v4-plugin-plan::NodePluginPlanBundle",
+      "truth_store": "crates/routecodex-v4-plugin-plan/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
       "resource_id": "v4.runtime.binary_identity",
       "owner": "routecodex-v4-runtime-bin::RCCV4_BINARY_IDENTITY",
       "truth_store": "crates/routecodex-v4-runtime-bin/src/main.rs",
