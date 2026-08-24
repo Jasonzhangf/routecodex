@@ -437,6 +437,7 @@
       "command": "cargo test -p routecodex-v4-node-container --manifest-path Cargo.toml --locked",
       "argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
       "producer": {"adapter": "cargo", "identity": "v4_node_container_epoch_positive"},
+      "input_paths": ["crates/routecodex-v4-node-container/src/lib.rs", "crates/routecodex-v4-node-container/tests/l2_epoch.rs"],
       "evidence_role": "positive",
       "required_for": ["V4-RUNTIME-002:source_green"]
     },
@@ -448,6 +449,7 @@
       "command": "cargo test -p routecodex-v4-node-container --manifest-path Cargo.toml --locked",
       "argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
       "producer": {"adapter": "cargo", "identity": "v4_node_container_epoch_red"},
+      "input_paths": ["crates/routecodex-v4-node-container/src/lib.rs", "crates/routecodex-v4-node-container/tests/l2_epoch.rs"],
       "evidence_role": "red_gate",
       "required_for": ["V4-RUNTIME-002:source_green"]
     },
@@ -459,6 +461,7 @@
       "command": "cargo test -p routecodex-v4-node-container --manifest-path Cargo.toml --locked",
       "argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
       "producer": {"adapter": "cargo", "identity": "v4_node_container_epoch_boundary"},
+      "input_paths": ["crates/routecodex-v4-node-container/src/lib.rs", "crates/routecodex-v4-node-container/tests/l2_epoch.rs"],
       "evidence_role": "boundary_audit",
       "required_for": ["V4-RUNTIME-002:source_green"]
     },
@@ -470,6 +473,7 @@
       "command": "cargo test -p routecodex-v4-node-container --manifest-path Cargo.toml --locked",
       "argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
       "producer": {"adapter": "cargo", "identity": "v4_node_container_epoch_plane"},
+      "input_paths": ["crates/routecodex-v4-node-container/src/lib.rs", "crates/routecodex-v4-node-container/tests/l2_epoch.rs"],
       "evidence_role": "plane_isolation",
       "required_for": ["V4-RUNTIME-002:source_green"]
     },
