@@ -28,6 +28,10 @@ const requiredMarkers = [
     'responses_function_call_scalar_arguments_are_projected_as_json_string',
   ],
   [
+    'classifier regression test remains present',
+    'responses_classifier_normalizes_raw_structured_function_call_arguments',
+  ],
+  [
     'terminal missing arguments stays strict',
     'responses_terminal_function_call_missing_arguments_still_fails',
   ],

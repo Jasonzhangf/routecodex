@@ -267,9 +267,16 @@ pub(crate) fn classify_v3_provider_sse_json_data(
     if is_v3_provider_sse_keepalive_text(data) {
         return Ok(None);
     }
-    let Some(event) = parse_v3_provider_sse_json_data(data)? else {
+    let Some(mut event) = parse_v3_provider_sse_json_data(data)? else {
         return Ok(None);
     };
+    if provider_protocol == V3HubProviderWireProtocol::Responses {
+        // This classifier is also called directly by the precommit observer,
+        // outside the normal direct consumer normalization pass. Keep the
+        // Responses wire compatibility rule at this codec owner so every
+        // caller validates the same provider shape.
+        normalize_v3_responses_function_call_arguments(&mut event)?;
+    }
     // A valid JSON scalar/array can be emitted by an upstream transport as a
     // control/settlement frame.  It is not a semantic event for any registered
     // provider protocol.  The shared relay codec already consumes these frames
@@ -1579,6 +1586,16 @@ mod provider_sse_json_codec_tests {
             classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
                 .expect("normalized function_call must classify")
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn responses_classifier_normalizes_raw_structured_function_call_arguments() {
+        let data = r#"{"type":"response.completed","response":{"id":"resp_1","output":[{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":{"cmd":"pwd"}}]}}"#;
+        assert_eq!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, data)
+                .expect("raw structured function_call arguments must be accepted at codec owner"),
+            Some(V3ProviderResponsesJsonFrameOutcome::Terminal)
         );
     }
 
