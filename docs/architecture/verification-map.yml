@@ -5,6 +5,7 @@ verification:
   unit:
   - scripts/architecture/verify-repository-filesystem-governance.mjs
   - scripts/architecture/verify-architecture-mainline-manifest-sync.mjs
+  - v3/scripts/architecture/verify-v3-mainline-manifest-sync.mjs
   - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
   - v3/scripts/architecture/verify-v3-contract-map-owner.mjs
   contract:
@@ -24,7 +25,7 @@ verification:
   smoke:
   - npm run verify:repo-sanity
   - npm run verify:architecture-mainline-call-map
-  - npm run verify:architecture-mainline-manifest-sync
+  - npm run verify:v3-mainline-manifest-sync
   - npm run verify:v3-contract-map-owner
   - npm run verify:v3-direct-sse-accept-skeleton
   - npm run verify:sse-architecture-boundary
