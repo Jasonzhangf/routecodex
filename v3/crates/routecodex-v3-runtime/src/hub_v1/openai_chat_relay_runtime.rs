@@ -1062,7 +1062,11 @@ fn project_responses_sse_as_openai_chat_stream(
                             if !event.is_object() {
                                 continue;
                             }
-                            let event = classify_v3_responses_sse_event(&event)
+                            let mut normalized = event;
+                            crate::hub_v1::normalize_v3_responses_function_call_arguments(
+                                &mut normalized,
+                            )?;
+                            let event = classify_v3_responses_sse_event(&normalized)
                                 .map(|semantic| project_v3_responses_sse_event_json(&semantic))
                                 .map_err(|error| error.to_string())?;
                             let event_type = event

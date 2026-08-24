@@ -345,7 +345,8 @@ fn v3_direct_sse_frame_semantic(
         SseField::Named { name, value } if name == "data" && value != "[DONE]" => Some(value),
         _ => None,
     })?;
-    let value: Value = serde_json::from_str(data).ok()?;
+    let mut value: Value = serde_json::from_str(data).ok()?;
+    crate::hub_v1::normalize_v3_responses_function_call_arguments(&mut value).ok()?;
     crate::hub_v1::classify_v3_responses_sse_event(&value).ok()
 }
 

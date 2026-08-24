@@ -494,7 +494,9 @@ fn observe_relay_client_sse_usage_chunk(
         }
         match protocol {
             V3HubEntryProtocol::Responses => {
-                let semantic = crate::hub_v1::classify_v3_responses_sse_event(event)
+                let mut normalized = event.clone();
+                crate::hub_v1::normalize_v3_responses_function_call_arguments(&mut normalized)?;
+                let semantic = crate::hub_v1::classify_v3_responses_sse_event(&normalized)
                     .map_err(|error| error.to_string())?;
                 observation.record_typed_object_type("responses", &semantic.protocol.event_type)?;
                 observation.record_provider_event_json(&semantic.to_normalized_value())?;

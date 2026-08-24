@@ -2201,6 +2201,8 @@ features:
   - scripts/tests/v3-anthropic-relay-local-continuation-red-fixtures.mjs
   forbidden_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_response_thinking_compat.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-provider-responses
   - v3/crates/routecodex-v3-server
@@ -2352,6 +2354,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_response_thinking_compat.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-runtime/tests
