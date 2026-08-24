@@ -42,7 +42,8 @@ const SHARED_PROJECTION_PATHS = new Set([
 const GOVERNANCE_CLOSURE_PREFIXES = [
   'v4/contracts/',
   'v4/docs/evidence/feature-completion/',
-  'v4/scripts/architecture/lib/feature-layer-batch-',
+  'v4/docs/architecture/',
+  'v4/scripts/architecture/',
 ];
 
 function isGovernanceClosurePath(relativePath) {
