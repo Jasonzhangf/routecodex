@@ -295,7 +295,11 @@
         "v4_response_inbound_outbound_l2",
         "v4_standard_plugins_test_consumer",
         "v4_parity_gate_standard_plugins",
-        "v4_parity_gate_standard_plugins_red"
+        "v4_parity_gate_standard_plugins_red",
+        "v4_plugin_response_positive",
+        "v4_plugin_response_red",
+        "v4_plugin_response_boundary",
+        "v4_plugin_response_plane"
       ]
     },
     {
