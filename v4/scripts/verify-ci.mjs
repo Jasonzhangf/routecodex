@@ -7,6 +7,8 @@
  */
 import { run } from './_common.mjs';
 
+run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
+// V4-LAYER-PREFLIGHT-END
 run('node scripts/test.mjs');
 run('node scripts/verify.mjs');
 run('node scripts/verify-red.mjs');

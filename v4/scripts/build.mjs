@@ -6,6 +6,8 @@
  */
 import { run } from './_common.mjs';
 
+run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
+// V4-LAYER-PREFLIGHT-END
 run('cargo build --release --manifest-path Cargo.toml --locked');
 run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-config --deps routecodex-v4-base-node,routecodex-v4-edge --out build-control/routecodex-v4-config/libroutecodex_v4_config.rlib');
 run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-provider --deps routecodex-v4-base-node --out build-control/routecodex-v4-provider/libroutecodex_v4_provider.rlib');

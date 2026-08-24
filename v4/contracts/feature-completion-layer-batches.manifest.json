@@ -1,0 +1,220 @@
+{
+  "schema_version": 2,
+  "manifest_id": "V4-LAYER-GATE-001",
+  "status": "active",
+  "owner_feature_id": "v4.governance.feature_layer_batch_admission",
+  "owner_module_id": "routecodex-v4-governance",
+  "canonical_contract": {
+    "path": "v4/docs/goals/v4-feature-completion-plan.md",
+    "sha256": "sha256:5ee9e6918f704466f5a461abae5a161df3bd5b6b6e95ffccc345a1d020ac6c2d",
+    "required_anchors": [
+      "# 28. `RUNTIME-007` 后的分层批量开发与接线计划",
+      "同层独立任务全部达到 `source_green` 后才允许 production wiring",
+      "A–G 全部 `source_green`，且 conditional H 为 `source_green` 或 `not_needed_by_evidence`",
+      "review 状态不参与 `source_green` 判定"
+    ]
+  },
+  "definition": {
+    "required_batch_ids": ["A", "B", "C", "D", "E", "F", "G"],
+    "conditional_batch_ids": ["H"],
+    "source_ready_status": "source_green",
+    "conditional_ready_statuses": ["source_green", "not_needed_by_evidence"],
+    "required_prerequisite_ids": ["V4-RUNTIME-002"],
+    "required_evidence_roles": ["positive", "red_gate", "boundary_audit", "plane_isolation"],
+    "integration_owner": "v4.feature_completion.integration",
+    "review_can_satisfy_source": false,
+    "normal_payload_carrier": "forbidden",
+    "source_dependency_policy": "shared_contract_modules_only_before_wiring",
+    "candidate_record_schema": "contracts/records/fix-candidate-record.schema.json",
+    "evidence_record_schema": "contracts/records/evidence-record.schema.json"
+  },
+  "baseline": {
+    "feature_id": "V4-RUNTIME-007",
+    "required_commit": "ef3899f",
+    "resolved_commit": null,
+    "runtime_module_id": "routecodex-v4-runtime",
+    "provenance": "user_confirmed_cloud",
+    "object_status": "unavailable",
+    "replay_status": "pending",
+    "source_paths": [],
+    "evidence_refs": []
+  },
+  "prerequisites": [
+    {
+      "feature_id": "V4-RUNTIME-002",
+      "status": "pending",
+      "gap_detected": null,
+      "epoch_closure_lane_status": "pending",
+      "audit_commit": null,
+      "source_paths": [],
+      "evidence_refs": []
+    }
+  ],
+  "batches": [
+    {
+      "batch_id": "A",
+      "conditional": false,
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
+      "source_dependencies": [],
+      "status": "pending",
+      "tasks": [
+        {"task_id":"V4-PARITY-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PARITY-002","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PARITY-003","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PARITY-HARNESS-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
+      ]
+    },
+    {
+      "batch_id": "B",
+      "conditional": false,
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
+      "source_dependencies": [],
+      "status": "pending",
+      "tasks": [
+        {"task_id":"V4-RUNTIME-003","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
+      ]
+    },
+    {
+      "batch_id": "C",
+      "conditional": false,
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
+      "source_dependencies": [],
+      "status": "pending",
+      "tasks": [
+        {"task_id":"V4-RUNTIME-004","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
+      ]
+    },
+    {
+      "batch_id": "D",
+      "conditional": false,
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
+      "source_dependencies": [],
+      "status": "pending",
+      "tasks": [
+        {"task_id":"V4-PLUGIN-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PLUGIN-002","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PLUGIN-003","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PLUGIN-004","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PLUGIN-005","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
+      ]
+    },
+    {
+      "batch_id": "E",
+      "conditional": false,
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
+      "source_dependencies": [],
+      "status": "pending",
+      "tasks": [
+        {"task_id":"V4-PLUGIN-006","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PLUGIN-007","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PLUGIN-008","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
+      ]
+    },
+    {
+      "batch_id": "F",
+      "conditional": false,
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
+      "source_dependencies": [],
+      "status": "pending",
+      "tasks": [
+        {"task_id":"V4-RUNTIME-005","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-RUNTIME-006","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
+      ]
+    },
+    {
+      "batch_id": "G",
+      "conditional": false,
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.governance.feature_layer_batch_admission",
+      "module_ids": ["routecodex-v4-governance"],
+      "owned_paths": [
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/module-registry.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json",
+        "contracts/data-control-boundary.contract.json",
+        "contracts/feature-completion-layer-batches.manifest.json",
+        "contracts/feature-layer-gate-inputs.contract.json",
+        "docs/goals/v4-feature-completion-goal-prompt.md",
+        "docs/goals/v4-feature-completion-plan.md",
+        "package.json",
+        "scripts/_gate-matrix.mjs",
+        "scripts/architecture/lib/**",
+        "scripts/architecture/verify-v4-feature-layer-batches.mjs",
+        "scripts/architecture/verify-v4-plane-isolation.mjs",
+        "scripts/build.mjs",
+        "scripts/compile-real-runtime-manifest.mjs",
+        "scripts/install-rccv4.mjs",
+        "scripts/tests/v4-feature-layer-batches-red-fixtures.mjs",
+        "scripts/verify.mjs",
+        "scripts/verify-ci.mjs"
+      ],
+      "source_dependencies": [],
+      "status": "pending",
+      "tasks": [
+        {"task_id":"V4-GATE-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-LAYER-GATE-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
+      ]
+    },
+    {
+      "batch_id": "H",
+      "conditional": true,
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
+      "source_dependencies": [],
+      "status": "pending",
+      "tasks": [
+        {"task_id":"V4-RUNTIME-002","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
+      ]
+    }
+  ],
+  "integration": {
+    "owner": "v4.feature_completion.integration",
+    "admission_command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
+    "enforcement_binding_status": "pending_candidate",
+    "guard_commit": null,
+    "guarded_surfaces": [
+      {"path":"Cargo.toml","scope_hash":null},
+      {"path":"scripts/build.mjs","scope_hash":null},
+      {"path":"scripts/verify.mjs","scope_hash":null},
+      {"path":"scripts/verify-ci.mjs","scope_hash":null},
+      {"path":"scripts/install-rccv4.mjs","scope_hash":null},
+      {"path":"scripts/compile-real-runtime-manifest.mjs","scope_hash":null},
+      {"path":"contracts/real-runtime-admission.manifest.json","scope_hash":null},
+      {"path":"contracts/active-link/frozen-consumer-registry.json","scope_hash":null},
+      {"path":".appsdk/maps/mainline-call-map.json","scope_hash":null},
+      {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":null}
+    ],
+    "wiring_started": false,
+    "wiring_edges": [],
+    "resource_refs": {
+      "merge_queue_state": null,
+      "integration_candidate": null
+    },
+    "evidence_refs": []
+  },
+  "review": {
+    "status": "not_started",
+    "evidence_refs": []
+  }
+}

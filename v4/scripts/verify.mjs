@@ -13,6 +13,9 @@ import path from 'node:path';
 import { v4Root, run } from './_common.mjs';
 import { ARCHITECTURE_GATES, CONSUMER_REGRESSIONS } from './_gate-matrix.mjs';
 
+run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
+// V4-LAYER-PREFLIGHT-END
+
 function restoreHermeticActive() {
   const fixture = path.join(v4Root, 'tests/resources/active-link-fixture/active/lib');
   const target = path.join(v4Root, 'active/lib');

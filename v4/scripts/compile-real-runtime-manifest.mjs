@@ -2,9 +2,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const admission = spawnSync(process.execPath, [
+  'scripts/architecture/verify-v4-feature-layer-batches.mjs',
+  '--admission',
+], { cwd: root, encoding: 'utf8' });
+if (admission.status !== 0) {
+  throw new Error(`V4 feature-layer admission failed: ${admission.stderr || admission.stdout}`);
+}
+// V4-LAYER-PREFLIGHT-END
 const output = path.join(root, 'generated/real-runtime-admission/manifest.compiled.json');
 const source = path.join(root, 'contracts/real-runtime-admission.manifest.json');
 
