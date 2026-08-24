@@ -272,6 +272,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v4-control"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-base-node",
+]
+
+[[package]]
 name = "routecodex-v4-cordis-bridge"
 version = "0.1.0"
 dependencies = [
@@ -279,6 +286,13 @@ dependencies = [
  "routecodex-v4-plugin-plan",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "routecodex-v4-error"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-base-node",
 ]
 
 [[package]]
@@ -340,6 +354,23 @@ name = "routecodex-v4-plugin-plan"
 version = "0.1.0"
 dependencies = [
  "routecodex-v4-plugin-contract",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "routecodex-v4-runtime"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-base-node",
+ "routecodex-v4-control",
+ "routecodex-v4-cordis-bridge",
+ "routecodex-v4-error",
+ "routecodex-v4-node-container",
+ "routecodex-v4-plugin-contract",
+ "routecodex-v4-plugin-plan",
+ "routecodex-v4-skeleton",
  "serde",
  "serde_json",
  "sha2",

@@ -9,7 +9,11 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
+routecodex-v4-base-node = { path = "../routecodex-v4-base-node" }
 routecodex-v4-cordis-bridge = { path = "../routecodex-v4-cordis-bridge" }
+routecodex-v4-control = { path = "../routecodex-v4-control" }
+routecodex-v4-error = { path = "../routecodex-v4-error" }
+routecodex-v4-node-container = { path = "../routecodex-v4-node-container" }
 routecodex-v4-plugin-contract = { path = "../routecodex-v4-plugin-contract" }
 routecodex-v4-skeleton = { path = "../routecodex-v4-skeleton" }
 serde = { version = "1", features = ["derive"] }
@@ -17,3 +21,4 @@ serde_json = "1"
 sha2 = "0.10"
 
 [dev-dependencies]
+routecodex-v4-plugin-plan = { path = "../routecodex-v4-plugin-plan" }

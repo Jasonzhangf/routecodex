@@ -36,6 +36,9 @@ use std::fmt;
 
 mod control_resources;
 
+pub mod request_port;
+pub mod response_error_port;
+
 pub use control_resources::*;
 // Single source of truth: `PluginKind` is owned by routecodex-v4-plugin-contract
 // (v4/contracts/node-plugin.contract.json kinds). The runtime never defines a
