@@ -243,7 +243,7 @@ export function validateSourceGreenClaims(input, context, failures) {
             expectedModuleIds: batch.module_ids,
             expectedGateId: roleGates[0],
             candidate,
-            sourcePaths: sortedUnique(tasks.flatMap((candidateTask) => [
+            sourcePaths: sortedUnique((batch.batch_id === 'F' ? tasks : [task]).flatMap((candidateTask) => [
               ...(candidateTask.source_paths ?? []),
               ...(candidateTask.support_paths ?? []),
             ])),
