@@ -107,6 +107,10 @@ export function validateFeatureLayerBatchAdmission(input, context, options = {})
   return failures;
 }
 
+export function allowPendingGuardForMode(mode) {
+  return mode !== 'admission';
+}
+
 function printFailures(label, failures) {
   console.error(`[V4-LAYER-GATE-001] ${label} FAIL`);
   for (const item of failures) console.error(`${item.code}: ${item.message}`);
@@ -129,7 +133,7 @@ function runProductionMode(mode) {
   const failures = validateFeatureLayerBatchAdmission(
     loadCanonicalInput(),
     createProductionContext(),
-    { mode, allowPendingGuard: mode !== 'admission' },
+    { mode, allowPendingGuard: allowPendingGuardForMode(mode) },
   );
   if (failures.length > 0) {
     printFailures(mode.toUpperCase(), failures);
