@@ -417,13 +417,13 @@ async fn provider_error_after_restore_does_not_release_or_project_success() {
     )
     .await
     .unwrap();
-    assert_eq!(output.status, 429);
+    assert_eq!(output.status, 502);
     assert_eq!(
         output.node_trace.last(),
         Some(&"V3Error06ClientProjected"),
         "provider error after continuation restore must reach typed Error06 projection"
     );
-    assert_eq!(output.client_response["error"]["message"], "retry later");
+    assert_eq!(output.client_response["error"]["message"], "provider_failure");
     assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
     assert_eq!(state.len().unwrap(), 1);
 }

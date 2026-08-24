@@ -601,6 +601,16 @@ fn internal_client_status(source: &V3Error01SourceRaised) -> u16 {
     }
 }
 
+fn client_error_message(source: &V3Error01SourceRaised) -> String {
+    match source.source_kind {
+        // Provider/runtime text is diagnostic side-channel data.  It may contain
+        // provider identity, request IDs, URLs, or upstream response bodies;
+        // Error06 exposes only the stable public reason code.
+        V3ErrorSourceKind::ProviderFailure => source.code.clone(),
+        _ => source.message.clone(),
+    }
+}
+
 pub fn build_v3_error_01_source_raised(
     source_kind: V3ErrorSourceKind,
     source_stage: &'static str,
@@ -919,7 +929,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         .then(|| execution.exhaustion.local_action.action.clone());
     let error = serde_json::json!({
         "code": source.code,
-        "message": source.message,
+        "message": client_error_message(source),
     });
     let body = routecodex_v3_debug::project_debug_value_verbatim(
         &routecodex_v3_debug::V3RedactionPolicy,

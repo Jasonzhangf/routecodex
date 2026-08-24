@@ -66,6 +66,11 @@ fn build_v3_webui_meta_for_context(
         entry_protocol: Some(context.entry_protocol.clone()),
         execution_mode: Some(observability.execution_mode.clone()),
         transport: Some(observability.transport.clone()),
+        provider_status: observability.provider_status,
+        response_status: observability.response_status.clone(),
+        finish_reason: observability.finish_reason.clone(),
+        error_category: None,
+        error_detail: None,
     }
 }
 
@@ -101,7 +106,7 @@ pub(crate) fn record_v3_webui_event_for_context(
     context
         .state
         .webui_observability
-        .record(event_type, &request_key, scope, meta)
+        .record_observed(event_type, &request_key, scope, meta, observability)
 }
 
 // Started projection: uses only scope + identity (route/model/provider unknown
@@ -125,6 +130,7 @@ fn record_v3_webui_started_for_context(context: &V3ConsoleEmissionContext) -> Re
         entry_protocol: Some(context.entry_protocol.clone()),
         execution_mode: None,
         transport: None,
+        ..Default::default()
     };
     context
         .state

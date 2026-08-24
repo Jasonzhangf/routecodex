@@ -427,7 +427,7 @@ async fn provider_error_enters_error_chain_not_success() {
     assert_eq!(output.error_chain.unwrap()[0], "V3Error01SourceRaised");
     match output.client_payload.body {
         V3ClientBody::Json(body) => {
-            assert!(body["error"]["message"].as_str().unwrap().contains("boom"))
+            assert_eq!(body["error"]["message"], "provider_transport_error")
         }
         V3ClientBody::Bytes(_) => panic!("error response must be JSON"),
         V3ClientBody::CommittedSse(_) => panic!("error response must be JSON"),
@@ -1215,12 +1215,7 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
         panic!("pool exhaustion must project one terminal Error06 JSON body: {output:?}");
     };
     assert_eq!(error["error"]["code"], "provider_response_sse_stream");
-    assert!(
-        error["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("without a terminal semantic event")),
-        "{error}"
-    );
+    assert_eq!(error["error"]["message"], "provider_response_sse_stream");
 }
 
 #[tokio::test]

@@ -488,10 +488,7 @@ async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() 
         "Anthropic SSE failure must reach typed Error06 projection"
     );
     let message = output.client_response["error"]["message"].as_str().unwrap();
-    assert!(
-        message.contains("Anthropic provider event stream ended without message_stop"),
-        "unexpected error: {message}"
-    );
+    assert_eq!(message, "provider_error");
     assert!(
         !message.contains("not implemented"),
         "runtime must execute the Anthropic provider SSE decoder, not the old unimplemented branch"
@@ -537,10 +534,7 @@ async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_
         "Anthropic codec failure must reach typed Error06 projection"
     );
     let message = output.client_response["error"]["message"].as_str().unwrap();
-    assert!(
-        message.contains("Anthropic codec malformed tool_use.name"),
-        "provider tool_use without name must fail-fast instead of inferring from tool_choice: {message}"
-    );
+    assert_eq!(message, "provider_error");
 }
 
 fn manifest(server_id: &str) -> routecodex_v3_config::V3Config05ManifestPublished {

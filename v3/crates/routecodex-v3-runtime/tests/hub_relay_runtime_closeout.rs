@@ -2463,7 +2463,7 @@ async fn provider_error_closeout_enters_error01_06_without_success_projection() 
     .unwrap();
     assert_eq!(output.status, 502);
     assert_eq!(output.client_response["error"]["code"], "rate_limit_error");
-    assert_eq!(output.client_response["error"]["message"], "controlled");
+    assert_eq!(output.client_response["error"]["message"], "rate_limit_error");
     assert_eq!(
         output.error_chain.as_ref().unwrap(),
         &V3_ERROR_CHAIN_NODE_IDS

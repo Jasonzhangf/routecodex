@@ -576,7 +576,7 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         V3OpenAiChatRelayClientBody::Json(value) => value,
         V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON error body"),
     };
-    assert_eq!(client_response["error"]["message"], "controlled rate limit");
+    assert_eq!(client_response["error"]["message"], "rate_limit_error");
     assert_eq!(client_response["error"]["code"], "rate_limit_error");
     assert!(
         client_response["error"].get("stage").is_none()

@@ -620,7 +620,7 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     assert_eq!(output.status, 502);
     assert_eq!(
         output.client_response["error"]["message"],
-        "controlled rate limit"
+        "rate_limit_error"
     );
     assert_eq!(output.client_response["error"]["code"], "rate_limit_error");
     assert!(

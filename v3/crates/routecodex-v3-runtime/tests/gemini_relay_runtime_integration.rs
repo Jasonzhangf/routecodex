@@ -364,7 +364,7 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         V3GeminiRelayClientBody::Json(value) => value,
         V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON error body"),
     };
-    assert_eq!(client_response["error"]["message"], "controlled rate limit");
+    assert_eq!(client_response["error"]["message"], "RESOURCE_EXHAUSTED");
     assert_eq!(client_response["error"]["code"], "RESOURCE_EXHAUSTED");
     assert_eq!(
         output

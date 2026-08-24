@@ -191,7 +191,7 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
         V3ResponsesRelayClientBody::Sse(_) => panic!("provider error must project as JSON"),
     };
     assert_eq!(body["error"]["code"], "rate_limit_error");
-    assert_eq!(body["error"]["message"], "controlled rate limit");
+    assert_eq!(body["error"]["message"], "rate_limit_error");
     assert!(
         body["error"].get("stage").is_none()
             && body["error"].get("class").is_none()

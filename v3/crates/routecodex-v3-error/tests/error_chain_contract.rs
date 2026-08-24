@@ -93,6 +93,39 @@ fn error_handling_center_owns_error01_06_and_projects_provider_failure_as_502() 
 }
 
 #[test]
+fn provider_error_client_projection_does_not_leak_runtime_details() {
+    let code = "provider_runtime_error";
+    let runtime_detail = "provider opencode-go transport failed for request req-secret-123: upstream URL and credential context";
+    let projected = project_exhausted_provider(
+        build_v3_error_01_source_raised_external(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderRespInbound01Raw",
+            code,
+            runtime_detail,
+            V3ExternalErrorLink {
+                kind: V3ExternalErrorKind::Provider,
+                status: Some(502),
+                code: Some(code.to_string()),
+                provider_id: Some("opencode-go".to_string()),
+                upstream_request_id: Some("upstream-secret-456".to_string()),
+                message: Some(runtime_detail.to_string()),
+            },
+        ),
+        V3ErrorActionScope::ProviderInstance {
+            provider_id: "opencode-go".to_string(),
+        },
+        Some(502),
+    );
+
+    assert_eq!(projected.body["error"]["code"], code);
+    assert_eq!(projected.body["error"]["message"], code);
+    let body = projected.body.to_string();
+    assert!(!body.contains("req-secret-123"));
+    assert!(!body.contains("upstream-secret-456"));
+    assert!(!body.contains("opencode-go transport failed"));
+}
+
+#[test]
 fn error_handling_center_never_projects_an_error_as_http_success() {
     let source = build_v3_error_01_source_raised_external(
         V3ErrorSourceKind::ProviderFailure,

@@ -69,6 +69,11 @@ pub(crate) struct V3ObsRequestMeta {
     pub entry_protocol: Option<String>,
     pub execution_mode: Option<String>,
     pub transport: Option<String>,
+    pub provider_status: Option<u16>,
+    pub response_status: Option<String>,
+    pub finish_reason: Option<String>,
+    pub error_category: Option<String>,
+    pub error_detail: Option<String>,
 }
 
 /// The mutable request projection (one row per requestKey).
@@ -77,12 +82,16 @@ pub(crate) struct V3ObsRequestRow {
     pub request_key: String,
     pub event_type: String,
     pub started_epoch_ms: u64,
+    pub updated_epoch_ms: u64,
+    pub finished_epoch_ms: Option<u64>,
     pub duration_ms: Option<u64>,
     pub meta: V3ObsRequestMeta,
     pub scope: V3ObsScope,
     pub result: Option<String>,
     pub attempts: u64,
+    pub failed_attempts: u64,
     pub switches: u64,
+    pub tokens_output: Option<u64>,
     // rawArtifactRef is a controlled reference only; never the full body.
     pub raw_artifact_ref: Option<String>,
 }
@@ -108,6 +117,49 @@ pub(crate) struct V3ObsStats {
     pub cancelled: u64,
     pub switches: u64,
     pub tokens_output: u64,
+    pub by_port: BTreeMap<u16, V3ObsPortStats>,
+    pub error_categories: BTreeMap<String, u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) struct V3ObsPortStats {
+    pub total: u64,
+    pub active: u64,
+    pub success: u64,
+    pub error: u64,
+    pub cancelled: u64,
+    pub switches: u64,
+    pub tokens_output: u64,
+}
+
+fn classify_v3_obs_error(
+    observability: &crate::V3RuntimeObservability,
+) -> (Option<String>, Option<String>) {
+    let Some(event) = observability.provider_failure_events.last() else {
+        if let Some(status) = observability.provider_status {
+            let category = if status >= 500 { "upstream" } else { "request" };
+            return (Some(category.to_string()), Some(format!("HTTP {status}")));
+        }
+        return (Some("runtime".to_string()), observability.response_status.clone());
+    };
+
+    let category = event
+        .error_type
+        .as_deref()
+        .or(event.external_error_kind.as_deref())
+        .map(str::to_string)
+        .unwrap_or_else(|| match event.status {
+            401 | 403 => "auth".to_string(),
+            429 => "rate_limit".to_string(),
+            500..=599 => "upstream".to_string(),
+            400..=499 => "request".to_string(),
+            _ => "provider".to_string(),
+        });
+    (Some(category), Some(event.message.clone()))
+}
+
+fn add_port_stats(stats: &mut V3ObsStats, port: u16, update: impl FnOnce(&mut V3ObsPortStats)) {
+    update(stats.by_port.entry(port).or_default());
 }
 
 /// Snapshot returned on the snapshot endpoint / reconnect.
@@ -175,6 +227,23 @@ impl V3WebuiObservability {
         scope: V3ObsScope,
         meta: V3ObsRequestMeta,
     ) -> Result<u64, String> {
+        self.record_observed(
+            event_type,
+            request_key,
+            scope,
+            meta,
+            &crate::V3RuntimeObservability::default(),
+        )
+    }
+
+    pub(crate) fn record_observed(
+        &self,
+        event_type: V3ObsEventType,
+        request_key: &str,
+        scope: V3ObsScope,
+        meta: V3ObsRequestMeta,
+        observability: &crate::V3RuntimeObservability,
+    ) -> Result<u64, String> {
         let now = Self::now_ms();
 
         let mut inner = self
@@ -206,6 +275,7 @@ impl V3WebuiObservability {
         row.event_type = event_type_str.clone();
         row.meta = meta;
         row.scope = scope.clone();
+        row.updated_epoch_ms = now;
         if row.started_epoch_ms == 0 {
             row.started_epoch_ms = now;
         }
@@ -213,33 +283,65 @@ impl V3WebuiObservability {
         // maintain attempt/switch counters and terminal result
         match event_type {
             V3ObsEventType::ProviderAttemptStarted => row.attempts += 1,
+            V3ObsEventType::ProviderAttemptFailed => {
+                row.failed_attempts += 1;
+                let (category, detail) = classify_v3_obs_error(observability);
+                row.meta.error_category = category;
+                row.meta.error_detail = detail;
+            }
             V3ObsEventType::ProviderSwitched => row.switches += 1,
             V3ObsEventType::Completed => {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
+                row.finished_epoch_ms = Some(now);
                 row.result = Some("success".to_string());
+                if let Some(usage) = observability.usage.as_ref() {
+                    row.tokens_output = usage.output_tokens;
+                }
                 inner.active.remove(request_key);
                 if !was_terminal {
                     inner.terminal_order.push_back(request_key.to_string());
                     inner.terminal_keys.insert(request_key.to_string());
                     inner.terminal_key_order.push_back(request_key.to_string());
                     inner.stats.success += 1;
+                    add_port_stats(&mut inner.stats, scope.port, |port| {
+                        port.success += 1;
+                    });
+                    if let Some(tokens) = row.tokens_output {
+                        inner.stats.tokens_output = inner.stats.tokens_output.saturating_add(tokens);
+                        add_port_stats(&mut inner.stats, scope.port, |port| {
+                            port.tokens_output = port.tokens_output.saturating_add(tokens);
+                        });
+                    }
                 }
                 inner.stats.active = inner.active.len() as u64;
             }
             V3ObsEventType::Failed => {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
+                row.finished_epoch_ms = Some(now);
                 row.result = Some("error".to_string());
+                if row.meta.error_category.is_none() {
+                    let (category, detail) = classify_v3_obs_error(observability);
+                    row.meta.error_category = category;
+                    row.meta.error_detail = detail;
+                }
                 inner.active.remove(request_key);
                 if !was_terminal {
                     inner.terminal_order.push_back(request_key.to_string());
                     inner.terminal_keys.insert(request_key.to_string());
                     inner.terminal_key_order.push_back(request_key.to_string());
                     inner.stats.error += 1;
+                    add_port_stats(&mut inner.stats, scope.port, |port| {
+                        port.error += 1;
+                    });
+                    if let Some(category) = row.meta.error_category.as_ref() {
+                        *inner.stats.error_categories.entry(category.clone()).or_default() += 1;
+                    }
                 }
                 inner.stats.active = inner.active.len() as u64;
             }
             V3ObsEventType::Cancelled => {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
+                row.finished_epoch_ms = Some(now);
                 row.result = Some("cancelled".to_string());
                 inner.active.remove(request_key);
                 if !was_terminal {
@@ -247,12 +349,18 @@ impl V3WebuiObservability {
                     inner.terminal_keys.insert(request_key.to_string());
                     inner.terminal_key_order.push_back(request_key.to_string());
                     inner.stats.cancelled += 1;
+                    add_port_stats(&mut inner.stats, scope.port, |port| {
+                        port.cancelled += 1;
+                    });
                 }
                 inner.stats.active = inner.active.len() as u64;
             }
             V3ObsEventType::Started => {
                 inner.active.insert(request_key.to_string());
                 inner.stats.total += 1;
+                add_port_stats(&mut inner.stats, scope.port, |port| {
+                    port.total += 1;
+                });
                 inner.stats.active = inner.active.len() as u64;
             }
             _ => {}
@@ -262,8 +370,9 @@ impl V3WebuiObservability {
             event_type,
             V3ObsEventType::Completed | V3ObsEventType::Failed | V3ObsEventType::Cancelled
         ) {
-            inner.active.remove(request_key);
-        }
+                inner.active.remove(request_key);
+                inner.stats.active = inner.active.len() as u64;
+            }
 
         let stats_snapshot = inner.stats.clone();
         inner.requests.insert(request_key.to_string(), row.clone());
@@ -307,6 +416,17 @@ impl V3WebuiObservability {
             .map_err(|_| "v3 webui observability state is poisoned".to_string())?;
         let requests = inner.requests.clone();
         let stats = inner.stats.clone();
+        let mut stats = stats;
+        for port_stats in stats.by_port.values_mut() {
+            port_stats.active = 0;
+        }
+        for row in requests.values() {
+            if row.result.is_none() {
+                if let Some(port_stats) = stats.by_port.get_mut(&row.scope.port) {
+                    port_stats.active += 1;
+                }
+            }
+        }
         Ok(V3ObsSnapshot {
             cursor: inner.next_sequence,
             requests,

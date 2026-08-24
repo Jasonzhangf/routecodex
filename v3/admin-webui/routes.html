@@ -4,39 +4,41 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RouteCodex — Routes</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111827'/%3E%3Cpath d='M9 23 23 9M9 9l14 14' stroke='%235b8cff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <header>
   <div class="brand">Route<span class="accent">Codex</span></div>
-  <nav>
+  <nav aria-label="Primary">
     <a href="/">Dashboard</a>
     <a href="/routes.html" class="active">Routes</a>
     <a href="/providers.html">Providers</a>
   </nav>
   <div class="spacer"></div>
-  <button class="btn" id="validate-btn">Validate</button>
-  <button class="btn primary" id="save-btn">Save</button>
-  <button class="btn primary" id="reload-btn">Reload</button>
+  <button class="btn" id="validate-btn" type="button">Validate</button>
+  <button class="btn primary" id="save-btn" type="button">Save</button>
+  <button class="btn primary" id="reload-btn" type="button">Reload</button>
 </header>
 <main>
   <h1>Routes</h1>
   <div class="sub">Port → Route Pool → Route Tier → Provider Member</div>
-  <div id="status-bar" class="status-bar" style="display:none"></div>
+  <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
   <div class="panel">
     <div class="tree" id="route-tree"><div class="loading">loading…</div></div>
   </div>
 </main>
 
-<div class="drawer" id="drawer">
-  <button class="btn close" id="drawer-close">✕</button>
+<div class="drawer-backdrop" id="drawer-backdrop"></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+  <button class="btn close" id="drawer-close" type="button" aria-label="Close editor">✕</button>
   <h2 id="drawer-title">Edit</h2>
   <div id="drawer-body"></div>
   <div class="actions">
-    <button class="btn" id="drawer-delete" style="display:none">Delete</button>
+    <button class="btn" id="drawer-delete" type="button" style="display:none">Delete</button>
     <div style="flex:1"></div>
-    <button class="btn" id="drawer-cancel">Cancel</button>
-    <button class="btn primary" id="drawer-save">Save</button>
+    <button class="btn" id="drawer-cancel" type="button">Cancel</button>
+    <button class="btn primary" id="drawer-save" type="button">Save</button>
   </div>
 </div>
 
@@ -248,7 +250,9 @@ function openMemberDrawer(group, port, pool, tier, member) {
 
 function field(id, label, value, onChange) {
   const wrapper = el("div", "field");
-  wrapper.appendChild(el("label", null, label));
+  const labelNode = el("label", null, label);
+  labelNode.htmlFor = id;
+  wrapper.appendChild(labelNode);
   const input = el("input");
   input.id = id;
   input.value = value;
@@ -259,7 +263,9 @@ function field(id, label, value, onChange) {
 
 function selectField(id, label, options, value, onChange) {
   const wrapper = el("div", "field");
-  wrapper.appendChild(el("label", null, label));
+  const labelNode = el("label", null, label);
+  labelNode.htmlFor = id;
+  wrapper.appendChild(labelNode);
   const select = el("select");
   select.id = id;
   for (const option of options) {
@@ -277,21 +283,20 @@ let drawerDelete = null;
 
 function openDrawer(title, build) {
   document.getElementById("drawer-title").textContent = title;
-  document.getElementById("drawer").classList.add("open");
   build();
   document.getElementById("drawer-delete").style.display = drawerDelete ? "inline-block" : "none";
+  openPanel();
 }
 
 function closeDrawer() {
-  document.getElementById("drawer").classList.remove("open");
   drawerSave = null;
   drawerDelete = null;
+  closePanel();
 }
 
 function setDrawerSave(handler) { drawerSave = handler; }
 function setDrawerDelete(handler) { drawerDelete = handler; }
 
-document.getElementById("drawer-close").addEventListener("click", closeDrawer);
 document.getElementById("drawer-cancel").addEventListener("click", closeDrawer);
 document.getElementById("drawer-save").addEventListener("click", () => { if (drawerSave) drawerSave(); });
 document.getElementById("drawer-delete").addEventListener("click", () => { if (drawerDelete) drawerDelete(); });

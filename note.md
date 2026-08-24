@@ -36019,3 +36019,14 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - 根因：OpenAI Chat Relay accept-SSE channel 将 provider stream `Err(String)` 映射为 `std::io::Error`，再经 `v3_io_sse_body` 直接断流；错误未进入 typed Error01 链。
 - 修复：accept-SSE channel 改为 `V3Error01SourceRaised`；provider stream 错误在 `V3ProviderRespInbound01Raw/provider_response_sse_stream` 建 typed source；client stream 使用既有 typed SSE closeout。客户端断连不改成 provider failure。
 - 验证：定向 relay SSE 测试通过；测试新增断言 source_stage/code；`git diff --check` 通过。未做 install/restart/live replay。
+
+# 2026-08-23 SSE provider Error06 client leak
+- 根因：`V3Error06ClientProjected` 直接把 ProviderFailure 的 `source.message` 投影到 client body；transport message 含 provider、requestId、URL 和上游 body 细节。
+- 修复：Error06 唯一 owner 对 ProviderFailure 只投影稳定公开 `code`；原始 message 留在 Error01-05/日志侧信道，不改 retry、health、reselect 或 payload。
+- 验证：Error crate all-targets 27/27；SSE/error architecture gates PASS；V3 build PASS 0.90.4574；7777/4444 live health PASS；7777 real `/v1/responses` SSE 两次均收到 `response.completed`、`response.done`、`data: [DONE]`。
+- Review：DSH unavailable；Codex oauth×2、cc×1 protocol failure `review_output_missing`，无 verdict，禁止当 PASS。安装脚本顶层/V4 version expectation mismatch 已在后续提交 `30d2633af` 修复；provider-error 变更此前仍未提交。
+
+# 2026-08-23 install:release V3 验证修复
+- 根因：`scripts/install-release.sh` 从根 `package.json` 读取 release version，并将 V4 的 5520 硬编码为 V3 默认 health 探针；根版本 `0.90.4601` 与 V3 版本 `0.90.4574` 不一致。
+- 修复：版本真源改为 `v3/package.json`；默认从 `VERIFY_CONFIG` 的 `[servers.*].port` 解析 V3 listener，缺失时 fail-fast；一次 aggregate restart 后逐 configured listener 验证。显式 `ROUTECODEX_INSTALL_VERIFY_PORT` 仍可收窄为单端口。
+- 验证：旧实现契约红测失败，修复后 `verify:install-release-contract`、shell syntax、V3 install/distribution、真实 `npm run install:release`、4444/7777 health 和 7777 Responses SSE (`response.completed`/`response.done`/`[DONE]`) 通过。`verify:build-script-tiering` 与 `verify:v3-build-admission-lockstep` 仍被既有基线/生成物漂移阻断，未改其范围。

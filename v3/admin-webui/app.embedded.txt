@@ -6,7 +6,8 @@ async function api(path, options) {
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) {
-    const message = body && (body.error || body.detail || JSON.stringify(body)) || `${response.status} ${response.statusText}`;
+    const detail = body?.error?.message || body?.error || body?.detail || body;
+    const message = detail ? (typeof detail === "string" ? detail : JSON.stringify(detail)) : `${response.status} ${response.statusText}`;
     throw new Error(message);
   }
   return body;
@@ -14,6 +15,7 @@ async function api(path, options) {
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
+  if (tag === "button") node.type = "button";
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
@@ -60,12 +62,65 @@ function showStatus(kind, message) {
   bar.className = `status-bar ${kind}`;
   bar.textContent = message;
   bar.style.display = "block";
+  if (kind === "err") {
+    bar.classList.remove("is-shaking");
+    void bar.offsetWidth;
+    bar.classList.add("is-shaking");
+    setTimeout(() => bar.classList.remove("is-shaking"), 320);
+  }
 }
 
-function esc(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+let lastPanelTrigger = null;
+
+function panelTransitionMs(name, fallback) {
+  const value = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+  return Number.isFinite(value) ? value : fallback;
 }
+
+function openPanel() {
+  const drawer = document.getElementById("drawer");
+  const backdrop = document.getElementById("drawer-backdrop");
+  if (!drawer) return;
+  lastPanelTrigger = document.activeElement;
+  clearTimeout(drawer._closeTimer);
+  drawer.classList.remove("is-closing");
+  drawer.classList.add("is-open");
+  backdrop?.classList.add("is-open");
+  document.getElementById("drawer-close")?.focus();
+}
+
+function closePanel() {
+  const drawer = document.getElementById("drawer");
+  const backdrop = document.getElementById("drawer-backdrop");
+  if (!drawer || !drawer.classList.contains("is-open")) return;
+  drawer.classList.remove("is-open");
+  drawer.classList.add("is-closing");
+  backdrop?.classList.remove("is-open");
+  drawer._closeTimer = setTimeout(() => drawer.classList.remove("is-closing"), panelTransitionMs("--modal-close-dur", 150));
+  if (lastPanelTrigger instanceof HTMLElement) lastPanelTrigger.focus();
+  lastPanelTrigger = null;
+}
+
+document.getElementById("drawer-close")?.addEventListener("click", closePanel);
+document.getElementById("drawer-backdrop")?.addEventListener("click", closePanel);
+document.addEventListener("keydown", (event) => {
+  const drawer = document.getElementById("drawer");
+  if (!drawer || !drawer.classList.contains("is-open")) return;
+  if (event.key === "Escape") {
+    closePanel();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = [...drawer.querySelectorAll("button, input, select, textarea, a[href], [tabindex]:not([tabindex='-1'])")]
+    .filter((node) => !node.disabled && node.offsetParent !== null);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+});

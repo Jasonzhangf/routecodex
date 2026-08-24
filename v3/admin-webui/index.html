@@ -4,24 +4,25 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RouteCodex — Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111827'/%3E%3Cpath d='M9 23 23 9M9 9l14 14' stroke='%235b8cff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <header>
   <div class="brand">Route<span class="accent">Codex</span></div>
-  <nav>
+  <nav aria-label="Primary">
     <a href="/" class="active">Dashboard</a>
     <a href="/routes.html">Routes</a>
     <a href="/providers.html">Providers</a>
   </nav>
   <div class="spacer"></div>
-  <button class="btn" id="refresh-btn">Refresh</button>
-  <button class="btn primary" id="reload-btn">Reload</button>
+  <button class="btn" id="refresh-btn" type="button">Refresh</button>
+  <button class="btn primary" id="reload-btn" type="button">Reload</button>
 </header>
 <main>
   <h1>Dashboard</h1>
   <div class="sub">Runtime status, ports, providers and traffic overview</div>
-  <div id="status-bar" class="status-bar" style="display:none"></div>
+  <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
   <div class="cards" id="summary-cards"></div>
   <div class="section">
     <h2>Ports</h2>
@@ -110,8 +111,11 @@ function renderTraffic(data) {
     const name = el("div", "name", target);
     name.appendChild(el("div", "meta", `${count.toLocaleString()} requests`));
     row.appendChild(name);
-    const bar = el("div", "meta", "▮".repeat(Math.max(1, Math.round((count / max) * 24))));
-    row.appendChild(bar);
+    const meter = el("div", "traffic-meter");
+    const fill = el("span");
+    fill.style.width = `${Math.max(4, Math.round((count / max) * 100))}%`;
+    meter.appendChild(fill);
+    row.appendChild(meter);
     panel.appendChild(row);
   }
 }
@@ -135,6 +139,7 @@ function renderRevisions(data) {
 }
 
 document.getElementById("refresh-btn").addEventListener("click", load);
+document.getElementById("reload-btn").addEventListener("click", reload);
 load();
 </script>
 </body>
