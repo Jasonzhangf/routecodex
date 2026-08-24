@@ -2,6 +2,7 @@
 //! no handler reads control state or performs production dispatch.
 //! Shared helper surface is included in the same candidate scope as its five typed entries.
 //! Candidate source scope is immutable until the integration owner opens wiring.
+//! Gate input closure covers each typed entry and this shared owner.
 //! The request lane remains independently executable until integration opens.
 //! Its candidate boundary is fixed before any production dispatcher wiring.
 
