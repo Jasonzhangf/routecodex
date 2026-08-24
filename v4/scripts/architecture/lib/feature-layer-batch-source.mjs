@@ -170,8 +170,10 @@ export function validateSourceGreenClaims(input, context, failures) {
           input,
           failures,
         });
-        if (projection.functions.some((fn) => fn.owner !== record.module_id)
-            || projection.resources.some((resource) => resource.owner !== record.module_id)) {
+        const ownerMatchesCandidate = (owner) => owner === record.module_id
+          || owner?.startsWith(`${record.module_id}::`);
+        if (projection.functions.some((fn) => !ownerMatchesCandidate(fn.owner))
+            || projection.resources.some((resource) => !ownerMatchesCandidate(resource.owner))) {
           addFailure(failures, 'CANDIDATE_PROJECTION_OWNER_MISMATCH',
             `${task.task_id}: function/resource owner differs from candidate owner`);
         }
