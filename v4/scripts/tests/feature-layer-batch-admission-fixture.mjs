@@ -208,6 +208,15 @@ export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Da
       }));
     }
     const manifest = input.manifest;
+    // This fixture validates all-ready source state before production wiring.
+    // Keep the temporary repository graph unbound; production admission
+    // exercises wiring receipts separately.
+    manifest.integration.wiring_started = false;
+    manifest.integration.wiring_edges = [];
+    manifest.integration.resource_refs = {
+      merge_queue_state: null,
+      integration_candidate: null,
+    };
     for (const batch of manifest.batches) {
       const entries = taskDescriptors.filter((entry) => entry.batchId === batch.batch_id);
       batch.owner_binding_status = 'bound';
