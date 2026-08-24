@@ -1,5 +1,5 @@
 [provider_action_defaults]
 action_isolated_delay_ms = 1000
 action_medium_delay_ms = 3000
-action_sustained_delay_ms = 1000
+action_sustained_delay_ms = 5000
 action_idle_ttl_ms = 600000

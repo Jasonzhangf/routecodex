@@ -351,7 +351,7 @@ async fn exact_provider_lookup_ignores_another_provider_recovery_lane() {
 }
 
 #[tokio::test]
-async fn second_failure_before_success_promotes_and_extends_the_sustained_deadline() {
+async fn consecutive_failures_extend_the_active_deadline() {
     let gate = V3ProviderActionGate::default();
     let scope = key("provider_http_500");
     gate.record_failure(&scope).expect("first failure");
@@ -360,7 +360,7 @@ async fn second_failure_before_success_promotes_and_extends_the_sustained_deadli
     let second_failure_at = Instant::now();
     let recorded = gate.record_failure(&scope).expect("second failure");
     assert_eq!(recorded.generation, 2);
-    assert_eq!(recorded.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(recorded.mode, V3ProviderActionGateMode::Medium);
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     let final_failure_at = Instant::now();

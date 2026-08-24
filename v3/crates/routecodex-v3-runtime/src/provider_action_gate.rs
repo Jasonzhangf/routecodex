@@ -13,7 +13,7 @@ use crate::internal::provider_action_defaults;
 
 pub const V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000;
 pub const V3_PROVIDER_ACTION_MEDIUM_DELAY_MS: u64 = 3_000;
-pub const V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 1_000;
+pub const V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 5_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct V3ProviderActionProviderScope {
@@ -552,10 +552,11 @@ impl V3ProviderActionGate {
         if consumed_success_transition {
             states.remove(key);
         }
-        let active_lane_generation = states
+        let active_sibling_lane_generation = states
             .iter()
             .filter(|(active_key, _)| {
-                active_key.provider_scope.server_id == key.provider_scope.server_id
+                *active_key != key
+                    && active_key.provider_scope.server_id == key.provider_scope.server_id
                     && active_key.provider_scope.routing_group == key.provider_scope.routing_group
                     && active_key.provider_scope.session_id == key.provider_scope.session_id
             })
@@ -567,9 +568,10 @@ impl V3ProviderActionGate {
                 && active_key.provider_scope.session_id == key.provider_scope.session_id
                 && state.admitted_generation == Some(state.generation)
         });
-        if active_lane_generation.is_some() {
+        if active_sibling_lane_generation.is_some() {
             for (_active_key, state) in states.iter_mut().filter(|(active_key, _)| {
-                active_key.provider_scope.server_id == key.provider_scope.server_id
+                *active_key != key
+                    && active_key.provider_scope.server_id == key.provider_scope.server_id
                     && active_key.provider_scope.routing_group == key.provider_scope.routing_group
                     && active_key.provider_scope.session_id == key.provider_scope.session_id
             }) {
@@ -592,9 +594,17 @@ impl V3ProviderActionGate {
                     state.admitted_generation = None;
                     state.admitted_action_scope = None;
                 }
-                state.mode = V3ProviderActionGateMode::Sustained;
                 state.consecutive_failures = state.consecutive_failures.saturating_add(1);
-                state.minimum_delay_ms = sustained_delay_ms().max(configured_minimum_delay_ms);
+                state.mode = if active_sibling_lane_generation.is_some() || active_admission_owned {
+                    V3ProviderActionGateMode::Sustained
+                } else {
+                    match state.consecutive_failures {
+                        1 => V3ProviderActionGateMode::Isolated,
+                        2 => V3ProviderActionGateMode::Medium,
+                        _ => V3ProviderActionGateMode::Sustained,
+                    }
+                };
+                state.minimum_delay_ms = mode_delay_ms(state.mode).max(configured_minimum_delay_ms);
                 state.next_admission_at = now + Duration::from_millis(state.minimum_delay_ms);
                 state.success_transition_generation = None;
                 state.terminal_transition_generation = None;
@@ -604,12 +614,12 @@ impl V3ProviderActionGate {
             }
             None => {
                 let (change_tx, _change_rx) = watch::channel(1);
-                let generation = match (active_lane_generation, active_admission_owned) {
+                let generation = match (active_sibling_lane_generation, active_admission_owned) {
                     (Some(generation), true) => generation,
                     (Some(generation), false) => generation.saturating_add(1),
                     (None, _) => 1,
                 };
-                let mode = if active_lane_generation.is_some() {
+                let mode = if active_sibling_lane_generation.is_some() || active_admission_owned {
                     V3ProviderActionGateMode::Sustained
                 } else {
                     V3ProviderActionGateMode::Isolated
