@@ -108,7 +108,7 @@ export function validateFeatureLayerBatchAdmission(input, context, options = {})
 }
 
 export function allowPendingGuardForMode(mode) {
-  return mode !== 'admission';
+  return mode === 'definition' || mode === 'build-guard';
 }
 
 function printFailures(label, failures) {
