@@ -1,0 +1,17 @@
+{
+  "evidence_id": "red-gate",
+  "issue_id": "V4-RUNTIME-004",
+  "experiment_id": "v4-runtime-004-cordis-mount-candidate",
+  "phase": "negative_intervention",
+  "kind": "red_test",
+  "source_commit": "96340e560bbe7b54ee297ec10c12b13aaa8fa10b",
+  "scope": {"feature_id": "V4-RUNTIME-004", "module_id": "routecodex-v4-cordis-bridge"},
+  "producer": {"adapter": "cargo", "identity": "v4_runtime_004_mount_red"},
+  "command_argv": ["cargo", "test", "-p", "routecodex-v4-cordis-bridge", "--manifest-path", "Cargo.toml", "--locked"],
+  "exit_status": 0,
+  "result": "pass",
+  "created_at": "2026-08-24T05:30:00Z",
+  "expires_at": "2026-08-31T05:30:00Z",
+  "input_hashes": ["sha256:92f5ab46c0d015afe4e3c8f1f08a082aefd38870a0bddd7895925029e2f8a13a"],
+  "scope_hash": "sha256:2937d1c0f24b1de91bc1d09a409259762b17914bb513ee9b4abcceb7cd199be6"
+}
