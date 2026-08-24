@@ -1,4 +1,5 @@
 use routecodex_v4_cordis_bridge::ExecCtx;
+// Independent source lane entry; production wiring remains forbidden here.
 
 pub(crate) fn chat_to_responses_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     super::request_plugins::chat_to_responses(ctx)
