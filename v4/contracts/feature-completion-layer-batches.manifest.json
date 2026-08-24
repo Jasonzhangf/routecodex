@@ -319,6 +319,8 @@
     ],
     "wiring_started": true,
     "wiring_edges": [
+      "added:build:deps:routecodex-v4-runtime->routecodex-v4-node-container",
+      "added:build:deps:routecodex-v4-runtime-bin->routecodex-v4-node-container",
       "added:cargo:path:routecodex-v4-config->routecodex-v4-base-node",
       "added:cargo:path:routecodex-v4-config->routecodex-v4-edge",
       "added:cargo:path:routecodex-v4-edge->routecodex-v4-base-node",
