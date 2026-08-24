@@ -1040,7 +1040,7 @@
       "required_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
     }
     ,{
-      "function_id":"v4.plugin.request.responses_normalize","status":"active","feature_id":"V4-PLUGIN-001","owner":"routecodex-v4-standard-plugins","entry_symbols":["request_normalize"],"resource_ids":["v4.plugin.request.responses_normalize"],"source_paths":["crates/routecodex-v4-standard-plugins/src/request_plugins.rs"],"required_gates":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"]
+      "function_id":"v4.plugin.request.responses_normalize","status":"active","feature_id":"V4-PLUGIN-001","owner":"routecodex-v4-standard-plugins","entry_symbols":["request_normalize","request_normalize_entry"],"resource_ids":["v4.plugin.request.responses_normalize"],"source_paths":["crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/src/request_normalize.rs"],"required_gates":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"]
     },{
       "function_id":"v4.plugin.request.chat_to_responses","status":"active","feature_id":"V4-PLUGIN-002","owner":"routecodex-v4-standard-plugins","entry_symbols":["chat_to_responses_entry"],"resource_ids":["v4.plugin.request.chat_to_responses"],"source_paths":["crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs"],"required_gates":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"]
     },{
