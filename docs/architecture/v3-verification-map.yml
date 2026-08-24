@@ -3077,14 +3077,17 @@ features:
   completion_rule:
     source: protocol_tables unit tests and architecture CI pass; tables fail-fast on schema violation and never enter provider/client payload.
 - feature_id: v3.history_image_cleanup
-  status: active_normalization
+  status: active_normalization_and_session_compat_projection
   change_risk: medium
   owner_kind: rust_project_v3_req_inbound_normalization
-  owner_scope: ReqInbound semantic-equivalent normalization of history-turn image placeholders (allowed inside continuation immutable interval; no repair).
+  owner_scope: ReqInbound history image normalization plus typed-target-gated session compatibility projection for selected non-multimodal targets; multimodal targets preserve image bytes.
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_applies_selected_target_image_session_compat
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_projects_image_to_session_placeholder
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib transient_stage_code_classifier
   - npm run verify:responses-continuation-immutable-boundary
   completion_rule:

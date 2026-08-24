@@ -4743,24 +4743,29 @@ features:
   runtime_status: source_controlled_runtime_boundary_verified
 
 - feature_id: v3.history_image_cleanup
-  status: active_normalization
+  status: active_normalization_and_session_compat_projection
   change_risk: medium
   owner_kind: rust_project_v3_req_inbound_normalization
-  owner_scope: ReqInbound semantic-equivalent normalization of history-turn image
-    placeholders (allowed inside the continuation immutable interval - only
-    semantic normalization, no history/tool repair, no restore). Shared by
-    responses / openai_chat / anthropic entry normalization.
+  owner_scope: ReqInbound history-turn image normalization plus the adjacent
+    ProviderReqCompat06 session-preserving compatibility projection for a
+    selected target without multimodal/vision capability. Image facts must
+    select multimodal first; the projection is allowed only after typed target
+    selection and preserves turn/tool/continuation structure.
   owner_crates:
   - routecodex-v3-runtime
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   forbidden_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_applies_selected_target_image_session_compat
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_projects_image_to_session_placeholder
   - npm run verify:responses-continuation-immutable-boundary
   runtime_status: source_controlled_runtime_boundary_verified
 

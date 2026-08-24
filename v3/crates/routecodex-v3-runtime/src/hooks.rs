@@ -1196,6 +1196,29 @@ mod tests {
     }
 
     #[test]
+    fn direct_responses_projection_applies_selected_target_image_session_compat() {
+        let mut policy = direct_policy_with_models(
+            "client-route-alias",
+            "canonical-provider-model",
+            "provider-wire-model",
+        );
+        policy.request_body = json!({
+            "model": "client-route-alias",
+            "input": [{
+                "type": "input_image",
+                "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+            }]
+        });
+        let catalog = default_v3_direct_request_key_hook_catalog();
+        let wire = responses_direct_request_projection_hook_with_key_catalog(&policy, &catalog)
+            .expect("Direct request projection must use the selected target compat owner");
+        assert_eq!(
+            wire.body()["input"][0],
+            json!({"type": "input_text", "text": "[Image]"})
+        );
+    }
+
+    #[test]
     fn direct_request_key_catalog_effect_reaches_chat_provider_wire_body() {
         let base = direct_policy_with_models(
             "client-route-alias",

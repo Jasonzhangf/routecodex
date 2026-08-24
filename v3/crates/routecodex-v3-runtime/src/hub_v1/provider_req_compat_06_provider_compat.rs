@@ -14,10 +14,10 @@ use provider_compat_core::req_outbound_stage3_compat::{
 };
 use serde_json::Value;
 
+use crate::hub_v1::{count_v3_payload_image_refs, normalize_v3_all_images_to_placeholder};
 use crate::selected_provider_model_binding::{
     bind_v3_selected_provider_model, V3SelectedProviderModelBinding,
 };
-use crate::hub_v1::{count_v3_payload_image_refs, normalize_v3_all_images_to_placeholder};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderReqCompat06ProviderCompat {
@@ -59,24 +59,28 @@ fn apply_v3_provider_req_compat(
         provider_req_compat_reasoning_effort_explicit(input.provider_semantic_payload());
     let mut payload = build_v3_provider_standard_protocol_payload_from_req07(input)
         .map_err(|reason| classify_v3_provider_compat_error("request_protocol", profile, reason))?;
-    // Images route to multimodal by default. If the already-selected target
-    // has no multimodal/vision capability, preserve the session structure by
-    // projecting media to the deterministic [Image] compatibility token.
-    if !input
-        .selected_target()
-        .model_capabilities
-        .iter()
-        .any(|capability| matches!(capability.as_str(), "multimodal" | "vision"))
-        && count_v3_payload_image_refs(&payload) > 0
-    {
-        normalize_v3_all_images_to_placeholder(&mut payload);
-    }
     apply_v3_provider_req_compat_to_provider_payload(
         payload,
         input.selected_target(),
         input.provider_protocol,
         profile,
     )
+}
+
+fn project_v3_images_for_selected_target_session_compat(
+    payload: &mut Value,
+    model_capabilities: &[String],
+) {
+    // Images route to multimodal by default. If the already-selected target
+    // has no multimodal/vision capability, preserve the session structure by
+    // projecting media to the deterministic [Image] compatibility token.
+    if !model_capabilities
+        .iter()
+        .any(|capability| matches!(capability.as_str(), "multimodal" | "vision"))
+        && count_v3_payload_image_refs(payload) > 0
+    {
+        normalize_v3_all_images_to_placeholder(payload);
+    }
 }
 
 pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> bool {
@@ -97,6 +101,10 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     provider_protocol: V3HubProviderWireProtocol,
     profile: &V3ProviderCompatProfileId,
 ) -> Result<Value, V3ProviderCompatError> {
+    project_v3_images_for_selected_target_session_compat(
+        &mut payload,
+        &selected.model_capabilities,
+    );
     project_reasoning_effort_for_selected_target(&mut payload, selected, provider_protocol)?;
     let provider_key = format!(
         "{}:{}:{}",
@@ -309,6 +317,9 @@ fn payload_is_thinking_mode(payload: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const VALID_1X1_PNG_DATA_URL: &str =
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
     use crate::hub_v1::{
         build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
         build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
@@ -992,5 +1003,45 @@ mod tests {
                 "{protocol:?} must not leak the client route alias into provider compat"
             );
         }
+    }
+
+    #[test]
+    fn multimodal_target_preserves_image_bytes_for_session_semantics() {
+        let mut payload = json!({
+            "messages": [{"role": "user", "content": [{
+                "type": "image_url",
+                "image_url": {"url": VALID_1X1_PNG_DATA_URL}
+            }]}]
+        });
+        project_v3_images_for_selected_target_session_compat(
+            &mut payload,
+            &[
+                "text".to_string(),
+                "multimodal".to_string(),
+                "vision".to_string(),
+            ],
+        );
+        assert_eq!(
+            payload["messages"][0]["content"][0]["image_url"]["url"],
+            VALID_1X1_PNG_DATA_URL
+        );
+    }
+
+    #[test]
+    fn non_multimodal_target_projects_image_to_session_placeholder() {
+        let mut payload = json!({
+            "messages": [{"role": "user", "content": [{
+                "type": "image_url",
+                "image_url": {"url": VALID_1X1_PNG_DATA_URL}
+            }]}]
+        });
+        project_v3_images_for_selected_target_session_compat(
+            &mut payload,
+            &["text".to_string(), "tools".to_string()],
+        );
+        assert_eq!(
+            payload["messages"][0]["content"][0],
+            json!({"type": "text", "text": "[Image]"})
+        );
     }
 }
