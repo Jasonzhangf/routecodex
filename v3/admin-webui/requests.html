@@ -48,6 +48,17 @@
     </div>
   </main>
 
+<div class="drawer-backdrop" id="drawer-backdrop"></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+  <button class="btn close" id="drawer-close" type="button" aria-label="Close details">&#10005;</button>
+  <h2 id="drawer-title">Details</h2>
+  <div id="drawer-body"></div>
+  <div class="actions">
+    <div style="flex:1"></div>
+    <button class="btn" id="drawer-cancel" type="button">Cancel</button>
+  </div>
+</div>
+
   <script src="/app.embedded.txt"></script>
   <script>
     let snapshot = { requests: {}, stats: {}, sources: [], recent_events: [] };
@@ -85,8 +96,14 @@
       if (sourceCursors.size) {
         params.set("sources", [...sourceCursors.entries()].sort(([a], [b]) => a - b).map(([port, cursor]) => `${port}:${cursor}`).join(","));
       }
-      const data = await api(`/api/observability/poll?${params}`);
-      applyPoll(data);
+      try {
+        const data = await api(`/api/observability/poll?${params}`);
+        applyPoll(data);
+      } catch (error) {
+        sourceCursors.clear();
+        const data = await api("/api/observability/poll");
+        applyPoll(data);
+      }
     }
 
     function schedulePoll() {
@@ -202,6 +219,8 @@
     function requestRow(row) {
       const status = statusOf(row);
       const tr = el("tr", `request-row status-${status}`);
+      tr.style.cursor = "pointer";
+      tr.addEventListener("click", () => openRequestDetail(row));
       tr.appendChild(el("td", null, status));
       tr.appendChild(el("td", "mono", row.request_key));
       tr.appendChild(el("td", null, `${metaValue(row, "endpoint")} · ${metaValue(row, "model")}`));
@@ -216,6 +235,14 @@
       details.appendChild(disclosure);
       tr.appendChild(details);
       return tr;
+    }
+
+    function openRequestDetail(row) {
+      const body = document.getElementById("drawer-body");
+      document.getElementById("drawer-title").textContent = `Request ${row.meta?.request_id || row.request_key}`;
+      body.innerHTML = "";
+      body.appendChild(detailGrid(row));
+      openPanel();
     }
 
     function renderRequests() {

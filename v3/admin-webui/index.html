@@ -40,6 +40,17 @@
     </div>
   </div>
 </main>
+
+<div class="drawer-backdrop" id="drawer-backdrop"></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+  <button class="btn close" id="drawer-close" type="button" aria-label="Close details">&#10005;</button>
+  <h2 id="drawer-title">Details</h2>
+  <div id="drawer-body"></div>
+  <div class="actions">
+    <div style="flex:1"></div>
+    <button class="btn" id="drawer-cancel" type="button">Cancel</button>
+  </div>
+</div>
 <script src="/app.embedded.txt"></script>
 <script>
 async function load() {
@@ -75,8 +86,60 @@ function renderSummary(data) {
     const valueNode = el("div", `value ${kind}`, value);
     card.appendChild(valueNode);
     card.appendChild(el("div", "hint", hint));
+    card.style.cursor = "pointer";
+    card.addEventListener("click", () => openDashboardDetail(label, data));
     cards.appendChild(card);
   }
+}
+
+function dashboardField(label, value) {
+  const wrapper = el("div", "field");
+  wrapper.appendChild(el("label", null, label));
+  wrapper.appendChild(el("span", "v", String(value ?? "\u2014")));
+  return wrapper;
+}
+
+function openDashboardDetail(label, data) {
+  const body = document.getElementById("drawer-body");
+  document.getElementById("drawer-title").textContent = label;
+  body.innerHTML = "";
+  const grid = el("div", "detail-grid");
+  if (label === "Runtime") {
+    const runtime = data.runtime.managed_instance;
+    grid.appendChild(dashboardField("State", runtime?.state || "unknown"));
+    grid.appendChild(dashboardField("Instance ID", runtime?.instance_id || "\u2014"));
+    if (runtime?.updated_at_epoch_ms) {
+      grid.appendChild(dashboardField("Updated", new Date(runtime.updated_at_epoch_ms).toLocaleString([], { hour12: false })));
+    }
+  } else if (label === "Ports") {
+    for (const port of data.runtime.ports) {
+      grid.appendChild(dashboardField(`${port.server_id} :${port.port}`, `${port.healthy ? "healthy" : "down"} \u00b7 http ${port.http_status || "unreachable"} \u00b7 ${port.endpoints.join(", ")}`));
+    }
+  } else if (label === "Providers") {
+    grid.appendChild(dashboardField("Total", data.providers.total));
+    grid.appendChild(dashboardField("Enabled", data.providers.enabled));
+    grid.appendChild(dashboardField("Disabled", data.providers.disabled));
+  } else if (label === "Requests (total)") {
+    grid.appendChild(dashboardField("Total requests", data.traffic.total_requests.toLocaleString()));
+    grid.appendChild(dashboardField("Daily requests", data.traffic.daily_requests.toLocaleString()));
+    if (data.traffic.last_request_at_epoch_ms) {
+      grid.appendChild(dashboardField("Last request", new Date(data.traffic.last_request_at_epoch_ms).toLocaleString([], { hour12: false })));
+    }
+  } else if (label === "Log tail received") {
+    grid.appendChild(dashboardField("Received", data.traffic.log_tail_received.toLocaleString()));
+    grid.appendChild(dashboardField("Source", `${data.traffic.log_sources?.length ?? 0} log files`));
+  } else if (label === "Provider errors") {
+    grid.appendChild(dashboardField("Errors", data.traffic.log_tail_provider_errors.toLocaleString()));
+    for (const [target, count] of Object.entries(data.traffic.route_targets || {}).sort(([, a], [, b]) => b - a)) {
+      grid.appendChild(dashboardField(target, count.toLocaleString()));
+    }
+  } else if (label === "Revisions") {
+    for (const rev of data.revisions.slice(0, 10)) {
+      grid.appendChild(dashboardField(`#${rev.seq}`, `${rev.action} \u2014 ${rev.reason}`));
+    }
+  }
+  body.appendChild(grid);
+  openPanel();
 }
 
 function renderPorts(data) {
