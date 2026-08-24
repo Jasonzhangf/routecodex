@@ -271,7 +271,14 @@ function checkModuleCoverage(registry, files) {
     if (matched.length === 0) {
       out.push(`${file}: no module owner (unregistered source/build file)`);
     } else if (matched.length > 1) {
-      out.push(`${file}: multiple module owners (${matched.map((m) => m.moduleId).join(',')})`);
+      const specificity = (pattern) => pattern.replaceAll('*', '').length;
+      const mostSpecific = Math.max(...matched.map((owner) => specificity(owner.pattern)));
+      const ownersAtSpecificity = matched
+        .filter((owner) => specificity(owner.pattern) === mostSpecific)
+        .map((owner) => owner.moduleId);
+      if (new Set(ownersAtSpecificity).size > 1) {
+        out.push(`${file}: multiple module owners (${ownersAtSpecificity.join(',')})`);
+      }
     }
   }
   return out;
