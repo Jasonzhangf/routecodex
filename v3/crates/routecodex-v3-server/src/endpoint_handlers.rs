@@ -51,8 +51,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     request_purpose: V3RequestPurpose,
     payload: Value,
 ) -> Response<Body> {
-    if v3_request_wants_sse(&request_headers, &payload) {
-        return V3FrontSseAcceptSkeleton::accept(
+    if v3_entry_request_wants_sse(&request_headers, &payload) {
+        return V3DirectSseAcceptSkeleton::accept(
             state,
             front_connection_identity,
             request_headers,
@@ -84,9 +84,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     .await
 }
 
-struct V3FrontSseAcceptSkeleton;
+struct V3DirectSseAcceptSkeleton;
 
-impl V3FrontSseAcceptSkeleton {
+impl V3DirectSseAcceptSkeleton {
     async fn accept(
         state: Arc<V3ListenerState>,
         front_connection_identity: Option<V3FrontConnectionIdentity>,
@@ -482,7 +482,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             state.server.id.clone(),
             state.server.port,
             provider_failure_session_scope.session_id().to_string(),
-            v3_request_wants_sse(&request_headers, &payload),
+            v3_entry_request_wants_sse(&request_headers, &payload),
             plan,
         );
         if front_transport_owns_keepalive {
