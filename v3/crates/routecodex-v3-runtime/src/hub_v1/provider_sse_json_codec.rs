@@ -100,13 +100,25 @@ pub(crate) fn normalize_v3_provider_sse_json_data_with_event_name(
     let Some(mut event) = parse_v3_provider_sse_json_data(data)? else {
         return Ok(data.to_owned());
     };
-    let arguments_normalized = normalize_v3_responses_function_call_arguments(&mut event)?;
+    let payload_event_name = event
+        .as_object()
+        .and_then(|object| {
+            object
+                .get("event")
+                .and_then(Value::as_str)
+                .or_else(|| object.get("event_name").and_then(Value::as_str))
+                .or_else(|| object.get("type").and_then(Value::as_str))
+        })
+        .map(ToOwned::to_owned);
+    let effective_event_name = event_name.map(ToOwned::to_owned).or(payload_event_name);
+    let arguments_normalized = normalize_v3_responses_function_call_arguments_for_event(
+        &mut event,
+        effective_event_name.as_deref(),
+    )?;
     let Some(object) = event.as_object_mut() else {
         return Ok(data.to_owned());
     };
-    let event_name = event_name
-        .or_else(|| object.get("event").and_then(Value::as_str))
-        .or_else(|| object.get("event_name").and_then(Value::as_str));
+    let event_name = effective_event_name.as_deref();
     let Some(event_name) = event_name else {
         if arguments_normalized {
             return serde_json::to_string(&event).map_err(|error| error.to_string());
@@ -136,7 +148,21 @@ pub(crate) fn normalize_v3_provider_sse_json_data_with_event_name(
 pub(crate) fn normalize_v3_responses_function_call_arguments(
     event: &mut Value,
 ) -> Result<bool, String> {
+    let event_name = event
+        .get("type")
+        .and_then(Value::as_str)
+        .or_else(|| event.get("event").and_then(Value::as_str))
+        .or_else(|| event.get("event_name").and_then(Value::as_str))
+        .map(ToOwned::to_owned);
+    normalize_v3_responses_function_call_arguments_for_event(event, event_name.as_deref())
+}
+
+fn normalize_v3_responses_function_call_arguments_for_event(
+    event: &mut Value,
+    event_name: Option<&str>,
+) -> Result<bool, String> {
     let mut normalized = false;
+    let partial_function_call = event_name == Some("response.output_item.added");
     let mut normalize_item = |item: &mut Value| -> Result<(), String> {
         let Some(object) = item.as_object_mut() else {
             return Ok(());
@@ -145,11 +171,18 @@ pub(crate) fn normalize_v3_responses_function_call_arguments(
             return Ok(());
         }
         let Some(arguments) = object.get_mut("arguments") else {
+            if partial_function_call {
+                object.insert("arguments".to_owned(), Value::String(String::new()));
+                normalized = true;
+            }
             return Ok(());
         };
         if arguments.is_object() || arguments.is_array() {
             *arguments =
                 Value::String(serde_json::to_string(arguments).map_err(|error| error.to_string())?);
+            normalized = true;
+        } else if partial_function_call && arguments.is_null() {
+            *arguments = Value::String(String::new());
             normalized = true;
         }
         Ok(())
@@ -1542,6 +1575,48 @@ mod provider_sse_json_codec_tests {
                 .expect("normalized function_call must classify")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn responses_partial_function_call_missing_arguments_is_empty_string() {
+        for arguments in ["missing", "null"] {
+            let item = if arguments == "missing" {
+                r#"{"type":"function_call","call_id":"call_1","name":"exec_command"}"#
+            } else {
+                r#"{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":null}"#
+            };
+            let data = format!(r#"{{"type":"response.output_item.added","item":{item}}}"#);
+            let normalized = normalize_v3_provider_sse_json_data_with_event_name(
+                V3HubProviderWireProtocol::Responses,
+                &data,
+                None,
+            )
+            .expect("partial function call must normalize");
+            let value: Value = serde_json::from_str(&normalized).expect("normalized JSON");
+            assert_eq!(value["item"]["arguments"], "");
+            assert_eq!(
+                classify_v3_provider_sse_json_data(
+                    V3HubProviderWireProtocol::Responses,
+                    &normalized
+                )
+                .expect("partial function call must classify")
+                .expect("classified outcome"),
+                V3ProviderResponsesJsonFrameOutcome::StartClientStream
+            );
+        }
+    }
+
+    #[test]
+    fn responses_terminal_function_call_missing_arguments_still_fails() {
+        let data = normalize_v3_provider_sse_json_data_with_event_name(
+            V3HubProviderWireProtocol::Responses,
+            r#"{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"exec_command"}}"#,
+            None,
+        )
+        .expect("terminal frame normalization must not guess arguments");
+        let error = classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
+            .expect_err("terminal function call without arguments must fail");
+        assert!(error.contains("arguments"), "unexpected error: {error}");
     }
 
     #[test]
