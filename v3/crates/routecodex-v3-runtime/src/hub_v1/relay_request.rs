@@ -495,9 +495,8 @@ impl V3HubRelayRequestHooks {
                     reason: error.to_string(),
                 },
             )?;
-            // 保险：restore 合并后的 payload 再次做历史轮图片占位清理——恢复的
-            // 上下文（即使 save 已全清）若含图片 base64，作为历史轮统一替换为
-            // [Image]，图片绝不重新注入 provider wire（context 400）。
+            // 会话保持兼容投影：恢复上下文若仍含图片，按历史轮规则生成稳定
+            // [Image] 占位符，避免把不可被目标模型理解的媒体字节重新注入 wire。
             let restored_payload = Arc::make_mut(&mut classified.previous.previous.payload.0);
             crate::hub_v1::normalize_v3_history_image_placeholders(restored_payload);
         }

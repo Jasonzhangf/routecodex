@@ -17,6 +17,7 @@ use serde_json::Value;
 use crate::selected_provider_model_binding::{
     bind_v3_selected_provider_model, V3SelectedProviderModelBinding,
 };
+use crate::hub_v1::{count_v3_payload_image_refs, normalize_v3_all_images_to_placeholder};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderReqCompat06ProviderCompat {
@@ -56,8 +57,20 @@ fn apply_v3_provider_req_compat(
 ) -> Result<Value, V3ProviderCompatError> {
     let reasoning_effort_explicit =
         provider_req_compat_reasoning_effort_explicit(input.provider_semantic_payload());
-    let payload = build_v3_provider_standard_protocol_payload_from_req07(input)
+    let mut payload = build_v3_provider_standard_protocol_payload_from_req07(input)
         .map_err(|reason| classify_v3_provider_compat_error("request_protocol", profile, reason))?;
+    // Images route to multimodal by default. If the already-selected target
+    // has no multimodal/vision capability, preserve the session structure by
+    // projecting media to the deterministic [Image] compatibility token.
+    if !input
+        .selected_target()
+        .model_capabilities
+        .iter()
+        .any(|capability| matches!(capability.as_str(), "multimodal" | "vision"))
+        && count_v3_payload_image_refs(&payload) > 0
+    {
+        normalize_v3_all_images_to_placeholder(&mut payload);
+    }
     apply_v3_provider_req_compat_to_provider_payload(
         payload,
         input.selected_target(),
