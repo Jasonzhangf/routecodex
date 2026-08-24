@@ -29,6 +29,9 @@ The skeleton owner is `routecodex-v3-server/src/endpoint_handlers.rs`:
 1. `V3DirectSseAccept01ClientChannel` is selected for Responses client SSE
    intent before provider execution completes. The request-stage execution
    plan owns Direct versus Relay; this Front boundary does not select it.
+   The concrete shared accept owner is `V3FrontSseAcceptSkeleton`; the
+   request-intent owner is the single `v3_request_wants_sse` helper in the
+   server entry module.
 2. The channel returns `text/event-stream` and owns the transport-only
    heartbeat through `v3_io_sse_body`.
 3. `V3DirectSseAccept02RuntimeWorker` runs the execution-plan-selected pipeline

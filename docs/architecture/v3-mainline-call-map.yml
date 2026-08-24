@@ -7809,6 +7809,7 @@ chains:
   owner_feature_id: v3.direct_sse_accept_skeleton
   summary: Responses SSE establishes a shared Front client transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only the runtime projected client frame crosses the channel.
   manifest: docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
+  implementation_symbols: [V3FrontSseAcceptSkeleton, v3_request_wants_sse]
   entry_contract:
     node: V3DirectSseAccept01ClientChannel
     owner_doc: docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
