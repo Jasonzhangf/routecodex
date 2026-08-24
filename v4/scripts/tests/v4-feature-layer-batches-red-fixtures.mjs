@@ -563,7 +563,7 @@ export function runFeatureLayerBatchRedFixtures({
     },
     {
       name: 'registered gate redirects its input set',
-      expected: ['GATE_REGISTRY_BINDING'],
+      expected: ['CANDIDATE_REGISTRY_PROJECTION_DRIFT', 'GATE_REGISTRY_BINDING'],
       mutate(input) {
         input.verificationMap.gates
           .find((gate) => gate.gate_id === 'v4_feature_layer_batches_self_test').input_set_id = 'plane';
