@@ -304,7 +304,7 @@
     "owner": "v4.feature_completion.integration",
     "admission_command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
     "enforcement_binding_status": "bound",
-    "guard_commit": "a7d07997b53243777417bad36fe8564ff09274b0",
+    "guard_commit": "5e108f06174deee70204744ea667bdd2c53742f5",
     "guarded_surfaces": [
       {"path":"Cargo.toml","scope_hash":"sha256:04ae8d949591da18a542702922a3e4612994707b6baedef64c79a70cce11e37e"},
       {"path":"scripts/build.mjs","scope_hash":"sha256:c8b0a604764630daa3e4604ef6af0d6996ba465a399bc4bbf95fd16998dabcba"},
@@ -313,15 +313,15 @@
       {"path":"scripts/install-rccv4.mjs","scope_hash":"sha256:f449b083e44fe025134eb48f84fefd964b7445e793ec8cad318c386ca003254e"},
       {"path":"scripts/compile-real-runtime-manifest.mjs","scope_hash":"sha256:a4756498aafa9d3c6726f1be982bbea76bec5daa5ddc4631c49666ba0e9902de"},
       {"path":"contracts/real-runtime-admission.manifest.json","scope_hash":"sha256:1dd63ba0bd84acbae162663b534bfe1c7d5f5315e66d5310822090a5121e863c"},
-      {"path":"contracts/active-link/frozen-consumer-registry.json","scope_hash":"sha256:c634e72afc64e3a0e385e840fd72fcec21bce04ddb990a01e7ec6243b4f50724"},
+      {"path":"contracts/active-link/frozen-consumer-registry.json","scope_hash":"sha256:2808e91efca384cc1c1ebf229d66803e0ffe834800908c8eaac847d6507f56c1"},
       {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:da16e5e4019ffd41b87e6332a96dfd616fb24f53647b9a888ac6fb52135c8fb8"},
       {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:f9a194e35af2f30a8517a0f7998d0e44c2bf40c520ae30d8c16ad03d63b58d50"}
     ],
-    "wiring_started": false,
-    "wiring_edges": [],
+    "wiring_started": true,
+    "wiring_edges": ["surface:contracts/active-link/frozen-consumer-registry.json:sha256:2808e91efca384cc1c1ebf229d66803e0ffe834800908c8eaac847d6507f56c1"],
     "resource_refs": {
-      "merge_queue_state": null,
-      "integration_candidate": null
+      "merge_queue_state": ".appsdk/records/merge-queue-state.json",
+      "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"
     },
     "evidence_refs": []
   },
