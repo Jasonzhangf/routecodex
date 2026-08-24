@@ -125,7 +125,7 @@ impl V3RoutePolicyRuntimeState {
             .cloned()
             .unwrap_or_else(|| V3RouteHistoryWindow::new(max_policy_window(&policies)));
         let mut history_with_current = history;
-        history_with_current.record_turn(observation);
+        history_with_current.record_turn(observation.clone());
         let action =
             evaluate_v3_route_policies(&policies, observation.clone(), &history_with_current)
                 .map_err(|error| format!("route policy evaluation failed: {error:?}"))?;
@@ -217,6 +217,8 @@ pub fn observe_route_turn(body: &Value, route_name: &str) -> V3RouteTurnObservat
         is_compaction: current.is_compaction || route_name == "compact",
         search_pool_hit: route_name == "search",
         tool_execution_error: current.has_current_turn_tool_execution_error,
+        tool_name: current.last_assistant_tool.map(|tool| tool.name),
+        route_pool: route_name.to_string(),
     }
 }
 
@@ -261,6 +263,7 @@ fn max_policy_window(policies: &[V3RoutePolicy]) -> usize {
         })
         .max()
         .unwrap_or(1)
+        .max(5)
 }
 
 #[cfg(test)]
@@ -357,7 +360,13 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         for request in 0..7 {
             let request_id = format!("search-{request}");
             state
-                .evaluate_request(&manifest, classified(), scope.clone(), &request_id, search)
+                .evaluate_request(
+                    &manifest,
+                    classified(),
+                    scope.clone(),
+                    &request_id,
+                    search.clone(),
+                )
                 .expect("evaluate");
             state
                 .commit_request(&scope, &request_id, &policies)
