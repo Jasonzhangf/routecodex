@@ -136,6 +136,60 @@ pub enum BridgeError {
     Protocol(String),
 }
 
+/// Source-side Cordis mount/publication candidate.  It proves graph,
+/// manifest, and loaded-plan identity before any runtime publication occurs;
+/// this type deliberately has no active-pointer or request-admission handle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CordisMountCandidate {
+    pub node_id: String,
+    pub plan: NodePluginPlan,
+    pub cordis_graph_hash: String,
+    pub manifest_hash: String,
+    pub loaded_plan_hash: String,
+}
+
+impl CordisMountCandidate {
+    pub fn verify(&self) -> bool {
+        self.plan.verify()
+            && !self.cordis_graph_hash.is_empty()
+            && self.cordis_graph_hash == self.manifest_hash
+            && self.manifest_hash == self.loaded_plan_hash
+            && self.loaded_plan_hash == self.plan.hash
+    }
+}
+
+/// Build a deterministic mount candidate without mutating Cordis or the
+/// ActiveExecutionEpoch.  Publication is owned by the lifecycle/container
+/// lane after this candidate is independently verified.
+pub fn mount_candidate(
+    node_id: &str,
+    plan: NodePluginPlan,
+    cordis_graph_hash: &str,
+    manifest_hash: &str,
+    loaded_plan_hash: &str,
+) -> Result<CordisMountCandidate, BridgeError> {
+    if node_id.trim().is_empty()
+        || cordis_graph_hash.trim().is_empty()
+        || manifest_hash.trim().is_empty()
+        || loaded_plan_hash.trim().is_empty()
+    {
+        return Err(BridgeError::Protocol(
+            "mount candidate identity fields must be non-empty".to_string(),
+        ));
+    }
+    let candidate = CordisMountCandidate {
+        node_id: node_id.to_string(),
+        plan,
+        cordis_graph_hash: cordis_graph_hash.to_string(),
+        manifest_hash: manifest_hash.to_string(),
+        loaded_plan_hash: loaded_plan_hash.to_string(),
+    };
+    if !candidate.verify() {
+        return Err(BridgeError::PlanHashMismatch);
+    }
+    Ok(candidate)
+}
+
 impl std::fmt::Display for BridgeError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -677,5 +731,49 @@ mod tests {
         .expect("chat relay scope command parses");
         assert_eq!(relay.entry_protocol, ScopeEntryProtocol::Chat);
         assert_eq!(relay.continuation_owner, ScopeContinuationOwner::Relay);
+    }
+
+    #[test]
+    fn mount_candidate_requires_three_way_identity_match() {
+        let mut plan = NodePluginPlan {
+            node_id: "V4HubReqChatProcess04Governed".to_string(),
+            position: 4,
+            role_id: "request_chat_process".to_string(),
+            chain: "request".to_string(),
+            entries: vec![],
+            selection_groups: vec![],
+            hash: String::new(),
+        };
+        plan.hash = plan.plan_hash();
+        let candidate = mount_candidate(
+            &plan.node_id,
+            plan.clone(),
+            &plan.hash,
+            &plan.hash,
+            &plan.hash,
+        )
+        .expect("matching mount identity must compile");
+        assert!(candidate.verify());
+    }
+
+    #[test]
+    fn mount_candidate_rejects_graph_or_plan_drift() {
+        let mut plan = NodePluginPlan {
+            node_id: "V4HubReqChatProcess04Governed".to_string(),
+            position: 4,
+            role_id: "request_chat_process".to_string(),
+            chain: "request".to_string(),
+            entries: vec![],
+            selection_groups: vec![],
+            hash: String::new(),
+        };
+        plan.hash = plan.plan_hash();
+        assert!(matches!(
+            mount_candidate(&plan.node_id, plan.clone(), "graph-drift", &plan.hash, &plan.hash),
+            Err(BridgeError::PlanHashMismatch)
+        ));
+        let mut drifted = plan.clone();
+        drifted.node_id = "V4HubRespChatProcess03Governed".to_string();
+        assert!(!drifted.verify());
     }
 }
