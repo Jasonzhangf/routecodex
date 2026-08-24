@@ -1508,79 +1508,78 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                 V3ProviderAttemptBody::Bytes(Vec::new()),
             );
             response_projection.attempt_payload.body = match body {
-                V3ProviderAttemptBody::Sse(stream) => V3ProviderAttemptBody::Sse(
-                    wrap_direct_sse_provider_event_json_observation_stream_with_compat(
-                        stream,
-                        stream_observation.clone(),
-                        runtime_timing.clone(),
-                        crate::shared::v3_strip_client_response_id_enabled_for_server(
-                            manifest,
-                            &standardized.protocol_context.server_id,
-                        ),
-                        retain_response_cipher,
-                        response_projection.compat_plan.provider_protocol,
-                        policy.target.candidate.compatibility_profile.as_deref()
-                            == Some("responses:deepseek-console-go"),
-                        policy.target.candidate.compatibility_profile.as_deref()
-                            == Some("responses:thinking-tags"),
-                        hook_registry.direct_sse_typed_hooks(),
-                        manifest
-                            .features
-                            .get("tool_thinking")
-                            .copied()
-                            .unwrap_or(false),
-                        manifest
-                            .features
-                            .get("toolreason_client_projection")
-                            .copied()
-                            .unwrap_or(true),
-                        Some(direct_failure_session_scope.session_id().to_owned()),
-                        Some(standardized.protocol_context.request_id.clone()),
-                        true,
-                    ),
-                ),
+                V3ProviderAttemptBody::Sse(stream) => {
+                    let projected =
+                        wrap_direct_sse_provider_event_json_observation_stream_with_compat(
+                            stream,
+                            stream_observation.clone(),
+                            runtime_timing.clone(),
+                            crate::shared::v3_strip_client_response_id_enabled_for_server(
+                                manifest,
+                                &standardized.protocol_context.server_id,
+                            ),
+                            retain_response_cipher,
+                            response_projection.compat_plan.provider_protocol,
+                            policy.target.candidate.compatibility_profile.as_deref()
+                                == Some("responses:deepseek-console-go"),
+                            policy.target.candidate.compatibility_profile.as_deref()
+                                == Some("responses:thinking-tags"),
+                            hook_registry.direct_sse_typed_hooks(),
+                            manifest
+                                .features
+                                .get("tool_thinking")
+                                .copied()
+                                .unwrap_or(false),
+                            manifest
+                                .features
+                                .get("toolreason_client_projection")
+                                .copied()
+                                .unwrap_or(true),
+                            Some(direct_failure_session_scope.session_id().to_owned()),
+                            Some(standardized.protocol_context.request_id.clone()),
+                            true,
+                        );
+                    let committed = match commit_direct_sse_stream(projected).await {
+                        Ok(stream) => stream,
+                        Err(source) => {
+                            return error_output(source, trace, &hook_registry);
+                        }
+                    };
+                    if let (false, V3RemoteContinuationObservation::Streaming { state }, Some(scope)) = (
+                        continuation_disabled,
+                        &response_projection.remote_continuation,
+                        continuation_scope.as_ref(),
+                    ) {
+                        let observation = V3RemoteContinuationObservation::Streaming {
+                            state: state.clone(),
+                        };
+                        if let Err(source) = persist_v3_direct_continuation_lifecycle(
+                            continuation_state.as_deref(),
+                            scope,
+                            &observation,
+                            previous_response_id.as_deref(),
+                            &selected_pin,
+                            &selected_capability_revision,
+                            now_epoch_ms,
+                        ) {
+                            return error_output(source, trace, &hook_registry);
+                        }
+                    }
+                    drop(provider_action_permit.take());
+                    client_sse = Some(committed);
+                    V3ProviderAttemptBody::Bytes(Vec::new())
+                }
                 other => other,
             };
-            if let V3RemoteContinuationObservation::Streaming { state } =
-                &response_projection.remote_continuation
-            {
-                let attempt = std::mem::replace(
-                    &mut response_projection.attempt_payload.body,
-                    V3ProviderAttemptBody::Bytes(Vec::new()),
-                );
-                let V3ProviderAttemptBody::Sse(stream) = attempt else {
-                    return error_output(
-                        runtime_source(
-                            "V3DirectResp14ProviderCompat",
-                            "streaming continuation did not retain a provider-attempt SSE stream",
-                        ),
-                        trace,
-                        &hook_registry,
-                    );
-                };
-                // The first semantic frame was admitted by the direct SSE guard.
-                // Hand the live stream to Front immediately; post-commit stream
-                // errors remain typed on that stream and cannot re-enter policy.
-                drop(provider_action_permit.take());
-                client_sse = Some(wrap_v3_direct_sse_continuation_lifecycle(
-                    stream,
-                    state.clone(),
-                    (!continuation_disabled).then(|| continuation_state.clone()).flatten(),
-                    (!continuation_disabled).then(|| continuation_scope.clone()).flatten(),
-                    previous_response_id.clone(),
-                    selected_pin.clone(),
-                    selected_capability_revision.clone(),
-                    now_epoch_ms,
-                ));
-            }
         }
         let attempt_body = std::mem::replace(
             &mut response_projection.attempt_payload.body,
             V3ProviderAttemptBody::Bytes(Vec::new()),
         );
+        let committed_client_sse = client_sse.is_some();
         let client_body = match (client_sse, attempt_body) {
             (Some(stream), V3ProviderAttemptBody::Bytes(bytes)) if bytes.is_empty() => {
-                V3ClientBody::Sse(stream)
+                V3ClientBody::CommittedSse(stream)
             }
             (None, V3ProviderAttemptBody::Json(body)) => V3ClientBody::Json(body),
             (None, V3ProviderAttemptBody::Bytes(body)) => V3ClientBody::Bytes(body),
@@ -1601,7 +1600,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
             body: client_body,
         };
         let live_client_sse = matches!(&client_payload.body, V3ClientBody::Sse(_));
-        if !live_client_sse {
+        if !live_client_sse && !committed_client_sse {
             if let (false, Some(_state), Some(scope)) = (
                 continuation_disabled,
                 continuation_state.as_ref(),
@@ -1641,7 +1640,21 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
         }
         trace.push("V3DirectResp15ClientPayloadReady");
         trace.push("V3Resp15ClientPayload");
-        let timing = if live_client_sse {
+        let timing = if committed_client_sse {
+            match response_projection.stream_observation.as_ref() {
+                Some(observation) => match observation.snapshot() {
+                    Ok(snapshot) => snapshot.timing,
+                    Err(error) => {
+                        return error_output(
+                            runtime_source("V3RuntimeTimingObservation", error),
+                            trace,
+                            &hook_registry,
+                        )
+                    }
+                },
+                None => None,
+            }
+        } else if live_client_sse {
             None
         } else {
             match runtime_timing.finish_runtime() {
@@ -1655,6 +1668,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                 }
             }
         };
+        if committed_client_sse && timing.is_none() {
+            return error_output(
+                runtime_source(
+                    "V3RuntimeTimingTerminal",
+                    "successful Direct SSE completed without typed timing",
+                ),
+                trace,
+                &hook_registry,
+            );
+        }
         let mut observability = build_v3_direct_runtime_observability(
             &policy.target,
             "responses",

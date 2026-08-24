@@ -184,6 +184,25 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     ))
 }
 
+/// Consume one Direct SSE provider attempt inside Runtime and seal only the
+/// fully validated client bytes for Front.  Timing and provider-stream errors
+/// therefore settle before Resp15 is returned; Front never owns a partially
+/// validated provider stream.
+pub(crate) async fn commit_direct_sse_stream(
+    mut stream: V3ProviderAttemptSseStream,
+) -> Result<V3CommittedClientSseStream, V3Error01SourceRaised> {
+    let mut committed = crate::nodes::V3CommittedClientSseBuilder::new();
+    while let Some(frame) = stream.next().await {
+        let frame = frame?;
+        committed
+            .push(frame)
+            .map_err(|error| runtime_source("V3DirectResp15ClientPayload", error))?;
+    }
+    committed
+        .seal_after_validated_terminal()
+        .map_err(|error| runtime_source("V3DirectResp15ClientPayload", error))
+}
+
 #[cfg(test)]
 mod direct_sse_timing_tests {
     use super::*;
