@@ -1541,7 +1541,7 @@ dsh_review.p1 == 0
 
 状态：`current_execution_plan`
 
-调度基线：当前 V4 分支声明的基准 tree `7557b8825ac829a436193ddf865568c9091eda5b`。该 tree 是本批开发的唯一可复验输入；所有 source lane 直接基于该 tree 创建 candidate。若后续基准变更，必须更新 baseline commit、tree identity 和对应 evidence，不得引用不可达外部 commit 作为完成前置。
+调度基线：以 manifest 声明的当前 V4 基准 tree 为唯一可复验输入；所有 source lane 直接基于该 tree 创建 candidate。若后续基准变更，必须更新 baseline commit、tree identity 和对应 evidence，不得引用不可达外部 commit 作为完成前置。
 
 ## 28.1 目标与验收标准
 

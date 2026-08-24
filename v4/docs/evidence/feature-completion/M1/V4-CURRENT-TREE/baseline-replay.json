@@ -1,21 +1,22 @@
 {
   "evidence_id": "baseline-replay",
   "issue_id": "V4-CURRENT-TREE",
-  "experiment_id": "v4-current-tree-baseline-replay",
+  "experiment_id": "v4-current-tree-runtime-007-replay",
   "phase": "baseline_reproduction",
   "kind": "sample_replay",
-  "source_commit": "7557b8825ac829a436193ddf865568c9091eda5b",
+  "execution_surface": "development_whitebox",
+  "source_commit": "dde0f292751df9d83cc9df817ba0f48057674703",
   "scope": {"feature_id": "V4-CURRENT-TREE", "module_id": "routecodex-v4-runtime"},
   "producer": {"adapter": "cargo", "identity": "v4_current_tree_baseline_replay"},
   "command_argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--test", "l2_epoch", "--manifest-path", "Cargo.toml", "--locked"],
   "exit_status": 0,
   "result": "pass",
-  "created_at": "2026-08-24T04:40:00Z",
-  "expires_at": "2026-08-30T04:40:00Z",
+  "created_at": "2026-08-24T08:00:00Z",
+  "expires_at": "2026-08-29T08:00:00Z",
   "input_hashes": [
-    "sha256:43480c2dc77d52aa05be36a0bddee888b763fdd7239c8957258d1b182849cd56",
+    "sha256:345d1a5ffd94c7598fc081ceb1f52b2b5f5a4b3f9efbd2ed484c55c6c2273542",
     "sha256:450d50d6502962747fdafe6ba85f42894a37a4049f8b379b1101c03175fc5f10",
-    "sha256:d0000d5720afe88c7bee29242e66abced17971a74b963714a04b61e18104b0d6"
+    "sha256:45f001775ca6aaa4607b6d5ebf2150568e735bc7e822fdb0cdd50571f1ba89c3"
   ],
-  "scope_hash": "sha256:18cbfba2bfe8bc378a59243066a873a3f8af3de094f88057b2ad4685f200440b"
+  "scope_hash": "sha256:d414df7b867de9aa142d99857a45db9bef7a70c26e09c20787446597529889cf"
 }

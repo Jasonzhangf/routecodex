@@ -6,7 +6,7 @@
   "owner_module_id": "routecodex-v4-governance",
   "canonical_contract": {
     "path": "v4/docs/goals/v4-feature-completion-plan.md",
-    "sha256": "sha256:f99fe0f653ae57e71a4c3f5dbbe48b49909d7feba84164c3d32613e1dc23abfb",
+    "sha256": "sha256:21dd9b6551048d900be523a325355e825c67ebb9f93e5b0bad34c3079abf32f0",
     "required_anchors": [
       "# 28. `RUNTIME-007` 后的分层批量开发与接线计划",
       "同层独立任务全部达到 `source_green` 后才允许 production wiring",
@@ -30,8 +30,8 @@
   },
   "baseline": {
     "feature_id": "V4-CURRENT-TREE",
-    "required_commit": "7557b8825ac829a436193ddf865568c9091eda5b",
-    "resolved_commit": "7557b8825ac829a436193ddf865568c9091eda5b",
+    "required_commit": "dde0f292751df9d83cc9df817ba0f48057674703",
+    "resolved_commit": "dde0f292751df9d83cc9df817ba0f48057674703",
     "runtime_module_id": "routecodex-v4-runtime",
     "provenance": "current_v4_tree",
     "object_status": "reachable",

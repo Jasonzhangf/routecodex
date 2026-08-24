@@ -1,6 +1,5 @@
 import path from 'node:path';
 import {
-  BASELINE_ANCHOR,
   BASELINE_FEATURE_ID,
   CONDITIONAL_BATCH_IDS,
   CONDITIONAL_NOT_NEEDED,
@@ -76,9 +75,10 @@ function validateBaseline(manifest, truth, failures) {
     'feature_id', 'required_commit', 'resolved_commit', 'runtime_module_id', 'provenance',
     'object_status', 'replay_status', 'source_paths', 'evidence_refs',
   ], failures, 'BASELINE_CONTRACT', 'baseline')) return;
-  const resolved = truth.resolveCommit(BASELINE_ANCHOR);
+  const resolved = truth.resolveCommit(baseline.required_commit);
   if (baseline.feature_id !== BASELINE_FEATURE_ID
-      || baseline.required_commit !== BASELINE_ANCHOR
+      || typeof baseline.required_commit !== 'string'
+      || baseline.required_commit.length !== 40
       || baseline.runtime_module_id !== RUNTIME_MODULE_ID
       || baseline.provenance !== 'current_v4_tree'
       || baseline.object_status !== 'reachable'

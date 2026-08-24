@@ -36,6 +36,7 @@ const GOVERNANCE_CLOSURE_PREFIXES = [
   'contracts/',
   'docs/evidence/feature-completion/',
   'docs/architecture/',
+  'docs/goals/v4-feature-completion-plan.md',
   'scripts/architecture/lib/feature-layer-batch-',
   'crates/routecodex-v4-standard-plugins/src/lib.rs',
   'crates/routecodex-v4-standard-plugins/src/response_inbound.rs',
