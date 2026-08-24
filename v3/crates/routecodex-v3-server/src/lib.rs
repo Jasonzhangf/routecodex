@@ -68,7 +68,8 @@ use routecodex_v3_error::{
     project_v3_post_commit_sse_source, project_v3_server_invalid_request,
     project_v3_server_runtime_failure, project_v3_server_websocket_error,
     raise_v3_debug_artifact_failure, raise_v3_runtime_observability_contract_failure,
-    raise_v3_sse_client_disconnect, raise_v3_sse_provider_failure, V3Error01SourceRaised,
+    raise_v3_sse_client_disconnect, raise_v3_sse_provider_failure,
+    raise_v3_sse_runtime_failure, V3Error01SourceRaised,
     V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{

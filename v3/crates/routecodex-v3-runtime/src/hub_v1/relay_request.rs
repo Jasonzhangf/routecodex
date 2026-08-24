@@ -6,7 +6,7 @@ use super::{
     govern_v3_servertool_request_at_req04, merge_v3_relay_restored_local_context_at_req04,
     V3HubContinuationOwnership, V3HubEntryProtocol, V3HubReqChatProcess04Governed,
     V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRequestSemanticProtocol,
-    V3StoplessCenterState, V3WebSearchCenterState,
+    V3StoplessCenterState, V3ToolThinkingTurnContext, V3WebSearchCenterState,
 };
 use crate::{
     V3LocalContinuationError, V3LocalContinuationReq04RestoreRequest, V3LocalContinuationScopeKey,
@@ -357,6 +357,8 @@ pub enum V3HubRelayRequestError {
         field: &'static str,
         reason: &'static str,
     },
+    #[error("tool-thinking schema is invalid: {reason}")]
+    ToolThinkingSchemaInvalid { reason: String },
     #[error("{protocol} tool identity is invalid at item {index}: {reason}")]
     ProtocolToolIdentityInvalid {
         protocol: &'static str,
@@ -374,6 +376,7 @@ pub struct V3HubRelayRequestOutcome {
     stopless_state: Option<V3StoplessCenterState>,
     web_search_state: Option<V3WebSearchCenterState>,
     tool_thinking_enabled: bool,
+    tool_thinking_turn_context: V3ToolThinkingTurnContext,
 }
 impl V3HubRelayRequestOutcome {
     pub fn payload(&self) -> &Value {
@@ -409,6 +412,9 @@ impl V3HubRelayRequestOutcome {
     }
     pub fn tool_thinking_enabled(&self) -> bool {
         self.tool_thinking_enabled
+    }
+    pub(crate) fn tool_thinking_turn_context(&self) -> &V3ToolThinkingTurnContext {
+        &self.tool_thinking_turn_context
     }
     pub fn into_governed(self) -> V3HubReqChatProcess04Governed {
         self.governed
@@ -503,7 +509,7 @@ impl V3HubRelayRequestHooks {
         if let Some(key) = find_v3_hub_side_channel_key(&classified.previous.previous.payload.0) {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });
         }
-        let (stopless_state, web_search_state) = govern_v3_servertool_request_at_req04(
+        let (stopless_state, web_search_state, tool_thinking_turn_context) = govern_v3_servertool_request_at_req04(
             Arc::make_mut(&mut classified.previous.previous.payload.0),
             current_payload_start,
             &mut events,
@@ -545,6 +551,7 @@ impl V3HubRelayRequestHooks {
             stopless_state,
             web_search_state,
             tool_thinking_enabled: profile.tool_thinking_enabled(),
+            tool_thinking_turn_context,
         })
     }
 }

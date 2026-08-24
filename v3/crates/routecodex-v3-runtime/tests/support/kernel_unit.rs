@@ -210,7 +210,7 @@ async fn direct_sse_strip_client_response_id_empties_nested_response_id() {
             .to_vec(),
     )]));
     let mut observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
+        V3ProviderAttemptSseStream::new(source),
         observation.clone(),
         runtime_timing.clone(),
         true,
@@ -241,7 +241,7 @@ async fn direct_sse_strip_disabled_passes_chunk_through_unchanged() {
             .to_vec(),
     )]));
     let mut observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
+        V3ProviderAttemptSseStream::new(source),
         observation.clone(),
         runtime_timing.clone(),
         false,
@@ -263,7 +263,7 @@ async fn direct_sse_strips_encrypted_content_when_retain_false() {
         b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"rsn_CIPHER\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"plain\"}]}}\n\n".to_vec(),
     )]));
     let mut observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
+        V3ProviderAttemptSseStream::new(source),
         observation.clone(),
         runtime_timing.clone(),
         false,
@@ -291,7 +291,7 @@ async fn direct_sse_keeps_encrypted_content_when_retain_true() {
         b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"rsn_KEEP\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"plain\"}]}}\n\n".to_vec(),
     )]));
     let mut observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
+        V3ProviderAttemptSseStream::new(source),
         observation.clone(),
         runtime_timing.clone(),
         false,
@@ -313,7 +313,7 @@ async fn direct_sse_retain_false_passes_cipher_free_frames_byte_for_byte() {
     let raw = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n".to_vec();
     let source = Box::pin(stream::iter(vec![Ok(raw.clone())]));
     let mut observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
+        V3ProviderAttemptSseStream::new(source),
         observation.clone(),
         runtime_timing.clone(),
         false,

@@ -5,6 +5,7 @@
 //! client payloads. Those operations remain adjacent stage owners.
 
 use crate::hub_v1::V3HubProviderWireProtocol;
+use crate::hub_v1::V3ToolThinkingTurnContext;
 use crate::runtime_timing::V3RuntimeTimingState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +45,7 @@ pub struct V3DirectResponseCompatContext {
     pub tool_thinking_enabled: bool,
     pub toolreason_client_projection: bool,
     pub toolreason_observation_session_id: Option<String>,
+    pub tool_thinking_turn_context: V3ToolThinkingTurnContext,
     pub(crate) runtime_timing: V3RuntimeTimingState,
 }
 

@@ -1164,6 +1164,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                     .copied()
                     .unwrap_or(true),
                 direct_failure_session_scope.session_id(),
+                standardized.tool_thinking_turn_context.clone(),
             ) {
                 Ok(context) => context,
                 Err(error) => {
@@ -1536,6 +1537,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                                 .unwrap_or(true),
                             Some(direct_failure_session_scope.session_id().to_owned()),
                             Some(standardized.protocol_context.request_id.clone()),
+                            Some(policy.target.candidate.model_id.clone()),
                             true,
                         );
                     let committed = match commit_direct_sse_stream(projected).await {

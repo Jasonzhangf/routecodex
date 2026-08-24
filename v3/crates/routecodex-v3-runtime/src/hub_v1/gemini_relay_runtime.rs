@@ -254,13 +254,10 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
 
     fn request_hook_profile(
         manifest: &V3Config05ManifestPublished,
+        server_id: &str,
         _payload: &Value,
     ) -> Result<V3HubServertoolRequestProfile, V3RelayCoreError> {
-        let enabled = manifest
-            .features
-            .get("tool_thinking")
-            .copied()
-            .unwrap_or(false);
+        let enabled = v3_tool_thinking_enabled_for_server(manifest, server_id);
         if enabled {
             Ok(
                 V3HubServertoolRequestProfile::enabled(["servertool.request"])
@@ -320,6 +317,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         _web_search_state: Option<&V3WebSearchCenterState>,
         retain_response_cipher: bool,
         tool_thinking_enabled: bool,
+        _expected_model_id: &str,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response(
             provider_value,

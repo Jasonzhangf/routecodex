@@ -250,7 +250,7 @@ pub(crate) fn register_responses_direct_hooks_with_key_catalog(
     }
 }
 
-fn apply_responses_toolreason_sse_hook(
+pub(crate) fn apply_responses_toolreason_sse_hook(
     value: &mut serde_json::Value,
     tool_names: &[String],
     pending_reasons: &mut Vec<Option<String>>,
@@ -258,9 +258,48 @@ fn apply_responses_toolreason_sse_hook(
     project_to_client: bool,
     session_id: Option<&str>,
     request_id: Option<&str>,
+    expected_model_id: Option<&str>,
     argument_buffers: &mut Vec<String>,
+    projection_authorized: &mut bool,
 ) {
-    crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
+    apply_relay_toolreason_sse_hook(
+        value,
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        project_to_client,
+        session_id,
+        request_id,
+        expected_model_id,
+        argument_buffers,
+        Some(projection_authorized),
+    );
+}
+
+pub(crate) fn apply_relay_toolreason_sse_hook(
+    value: &mut serde_json::Value,
+    tool_names: &[String],
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    project_to_client: bool,
+    session_id: Option<&str>,
+    request_id: Option<&str>,
+    expected_model_id: Option<&str>,
+    argument_buffers: &mut Vec<String>,
+    mut projection_authorized: Option<&mut bool>,
+) {
+    crate::hub_v1::strip_v3_tool_thinking_request_artifacts_at_resp03(value);
+    if projection_authorized.is_some()
+        && crate::hub_v1::v3_toolreason_projection_authorized_at_resp03(
+            value,
+            expected_model_id,
+        )
+    {
+        if let Some(authorized) = projection_authorized.as_deref_mut() {
+            *authorized = true;
+        }
+    }
+    crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_and_expected_model(
         value,
         true,
         tool_names,
@@ -270,7 +309,13 @@ fn apply_responses_toolreason_sse_hook(
         session_id,
         request_id,
         Some(argument_buffers),
+        expected_model_id,
     );
+    if pending_reasons.iter().any(Option::is_some) {
+        if let Some(authorized) = projection_authorized.as_deref_mut() {
+            *authorized = true;
+        }
+    }
 }
 
 fn responses_direct_route_hook(
@@ -526,15 +571,22 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
         .await?;
         if context.tool_thinking_enabled {
             if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
-                crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_and_context(
+                crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
                     payload,
                     true,
                     context.toolreason_client_projection,
+                    Some(context.canonical_model_id.as_str()),
                     crate::hub_v1::V3ToolreasonObservationContext {
                         session_id: context.toolreason_observation_session_id.as_deref(),
                         request_id: Some(request_id.as_str()),
                     },
                 );
+                if let Some(names) = context.tool_thinking_turn_context.original_custom_tool_names()
+                {
+                    crate::hub_v1::restore_v3_tool_thinking_custom_calls_in_payload_at_resp03(
+                        payload, names,
+                    );
+                }
             }
         }
         Ok(projection)
@@ -566,15 +618,22 @@ pub(crate) fn chat_direct_response_projection_hook(
         .await?;
         if context.tool_thinking_enabled {
             if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
-                crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_and_context(
+                crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
                     payload,
                     true,
                     context.toolreason_client_projection,
+                    Some(context.canonical_model_id.as_str()),
                     crate::hub_v1::V3ToolreasonObservationContext {
                         session_id: context.toolreason_observation_session_id.as_deref(),
                         request_id: Some(request_id.as_str()),
                     },
                 );
+                if let Some(names) = context.tool_thinking_turn_context.original_custom_tool_names()
+                {
+                    crate::hub_v1::restore_v3_tool_thinking_custom_calls_in_payload_at_resp03(
+                        payload, names,
+                    );
+                }
             }
         }
         Ok(projection)
@@ -1432,6 +1491,7 @@ mod tests {
                     tool_thinking_enabled: false,
                     toolreason_client_projection: true,
                     toolreason_observation_session_id: Some("session-test".to_string()),
+                    tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext::disabled(),
                     runtime_timing: crate::runtime_timing::V3RuntimeTimingState::start(),
                 },
             )
@@ -1543,3 +1603,10 @@ mod tests {
         assert_eq!(internal.node_id, "V3Provider12ResponsesWirePayload");
     }
 }
+    #[test]
+    fn relay_sse_runtime_does_not_own_toolreason_parser() {
+        let source = include_str!("hub_v1/openai_chat_relay_runtime.rs");
+        assert!(!source.contains("map_v3_toolreason_stream_event_at_resp03"));
+        let sse_source = include_str!("hub_v1/openai_chat_relay_runtime_sse.rs");
+        assert!(!sse_source.contains("map_v3_toolreason_stream_event_at_resp03"));
+    }

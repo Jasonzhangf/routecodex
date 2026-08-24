@@ -29,6 +29,125 @@ fn resp03_json_fields_are_removed_and_projected_without_changing_openai_argument
 }
 
 #[test]
+fn resp03_completed_response_strips_and_creates_one_reasoning_item() {
+    let mut payload = json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp_completed",
+            "output": [{
+                "id": "call_completed",
+                "type": "function_call",
+                "name": "exec_command",
+                "call_id": "call_completed",
+                "arguments": "{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\"}"
+            }]
+        }
+    });
+    let mut tool_names = Vec::new();
+    let mut pending_reasons = Vec::new();
+    let mut reason_emitted = false;
+    let mut argument_buffers = Vec::new();
+
+    collect_v3_responses_sse_tool_name_at_resp03(&payload, &mut tool_names);
+    map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
+        &mut payload,
+        true,
+        &tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        true,
+        Some("session-completed"),
+        Some("request-completed"),
+        Some(&mut argument_buffers),
+    );
+
+    let output = payload["response"]["output"].as_array().unwrap();
+    let function_call = output
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .expect("function call must remain in completed response");
+    assert_eq!(function_call["arguments"], "{\"cmd\":\"pwd\"}");
+    assert_eq!(
+        output
+            .iter()
+            .filter(|item| item["type"] == "reasoning")
+            .count(),
+        1
+    );
+    assert_eq!(
+        output
+            .iter()
+            .find(|item| item["type"] == "reasoning")
+            .unwrap()["summary"][0]["text"],
+        "调用工具 pwd：确认当前工作目录"
+    );
+    assert!(reason_emitted);
+}
+
+#[test]
+fn resp03_completed_non_tool_failure_does_not_become_toolreason_missing() {
+    let mut payload = json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp_network_error",
+            "status": "failed",
+            "output": []
+        }
+    });
+    let tool_names = vec!["exec_command".to_string()];
+    let mut pending_reasons = Vec::new();
+    let mut reason_emitted = false;
+    let mut argument_buffers = Vec::new();
+
+    map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
+        &mut payload,
+        true,
+        &tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        true,
+        Some("session-network-error"),
+        Some("request-network-error"),
+        Some(&mut argument_buffers),
+    );
+
+    assert!(!reason_emitted);
+    assert_eq!(payload["response"]["output"], json!([]));
+}
+
+#[test]
+fn resp03_strips_echoed_auxiliary_schema_fields_without_descriptions() {
+    let mut payload = json!({
+        "type": "response.completed",
+        "response": {
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "apply_patch",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "input": {"type": "string"},
+                            "goal_alignment_confidence": {"type": "integer"},
+                            "model_id": {"type": "string"}
+                        },
+                        "required": ["input", "goal_alignment_confidence", "model_id"]
+                    }
+                }
+            }]
+        }
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    let parameters = &payload["response"]["tools"][0]["function"]["parameters"];
+    assert!(parameters["properties"].get("input").is_some());
+    assert!(parameters["properties"].get("goal_alignment_confidence").is_none());
+    assert!(parameters["properties"].get("model_id").is_none());
+    assert_eq!(parameters["required"], json!(["input"]));
+}
+
+#[test]
 fn resp03_chat_json_appends_toolreason_after_provider_reasoning() {
     let mut payload = json!({
         "choices":[{"message":{
@@ -158,6 +277,119 @@ fn resp03_chat_delta_split_toolreason_is_buffered_before_projection() {
 }
 
 #[test]
+fn resp03_responses_argument_deltas_are_hidden_until_done_and_native_args_survive() {
+    let tool_names = vec!["pwd".to_string()];
+    let mut pending_reasons = Vec::new();
+    let mut argument_buffers = Vec::new();
+    let mut reason_emitted = false;
+    let fragments = [
+        r#"{"goal_alignment_confidence":100"#,
+        r#", "model_id":"x-preview-f-free""#,
+        r#", "reason":"确认当前工作目录"}"#,
+    ];
+
+    let mut projected = Vec::new();
+    for fragment in fragments {
+        let mut payload = json!({
+            "type": "response.function_call_arguments.delta",
+            "output_index": 0,
+            "delta": fragment
+        });
+        map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_and_expected_model(
+            &mut payload,
+            true,
+            &tool_names,
+            &mut pending_reasons,
+            &mut reason_emitted,
+            true,
+            Some("session-responses-delta"),
+            Some("request-responses-delta"),
+            Some(&mut argument_buffers),
+            Some("x-preview-f-free"),
+        );
+        projected.push(payload);
+    }
+
+    let mut done = json!({
+        "type": "response.function_call_arguments.done",
+        "output_index": 0,
+        "arguments": "{}"
+    });
+    map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_and_expected_model(
+        &mut done,
+        true,
+        &tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        true,
+        Some("session-responses-delta"),
+        Some("request-responses-delta"),
+        Some(&mut argument_buffers),
+        Some("x-preview-f-free"),
+    );
+
+    assert!(projected.iter().all(|payload| {
+        payload.get("delta") == Some(&json!(""))
+            && !payload.to_string().contains("goal_alignment_confidence")
+            && !payload.to_string().contains("model_id")
+            && !payload.to_string().contains("\"reason\"")
+    }));
+    assert_eq!(done["arguments"], "{}");
+    assert_eq!(pending_reasons.len(), 1);
+    assert!(!reason_emitted);
+}
+
+#[test]
+fn resp03_responses_missing_toolreason_restores_buffered_native_arguments() {
+    let tool_names = vec!["apply_patch".to_string()];
+    let mut pending_reasons = Vec::new();
+    let mut argument_buffers = Vec::new();
+    let mut reason_emitted = false;
+    let native_arguments = r#"{"patch":"*** Begin Patch\n*** Update File: README.md\n*** End Patch"}"#;
+
+    let mut delta = json!({
+        "type": "response.function_call_arguments.delta",
+        "output_index": 0,
+        "delta": native_arguments
+    });
+    map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_and_expected_model(
+        &mut delta,
+        true,
+        &tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        true,
+        Some("session-responses-missing"),
+        Some("request-responses-missing"),
+        Some(&mut argument_buffers),
+        Some("x-preview-f-free"),
+    );
+
+    let mut done = json!({
+        "type": "response.function_call_arguments.done",
+        "output_index": 0,
+        "arguments": "{}"
+    });
+    map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_and_expected_model(
+        &mut done,
+        true,
+        &tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        true,
+        Some("session-responses-missing"),
+        Some("request-responses-missing"),
+        Some(&mut argument_buffers),
+        Some("x-preview-f-free"),
+    );
+
+    assert_eq!(delta["delta"], "");
+    assert_eq!(done["arguments"], native_arguments);
+    assert!(pending_reasons.is_empty());
+    assert!(!reason_emitted);
+}
+
+#[test]
 fn resp03_json_fields_inside_openai_function_object_are_removed_without_touching_arguments() {
     let mut payload = json!({
         "choices":[{"message":{"tool_calls":[{"id":"call_nested","type":"function",
@@ -261,98 +493,47 @@ fn resp03_observation_label_contains_all_tools_in_one_turn() {
 }
 
 #[test]
-fn resp03_toolreason_maps_to_visible_reasoning_content_and_is_removed_from_text() {
+fn resp03_plain_control_text_is_not_a_json_v2_source() {
     let mut payload = json!({
         "choices":[{"message":{
             "role":"assistant",
-            "content":"<toolreason>{\"reason\":\"Need inspect the file.\",\"goal_alignment_confidence\":90}</toolreason>",
+            "content":"<legacy-control>{\"reason\":\"Need inspect the file.\",\"goal_alignment_confidence\":90}</legacy-control>",
             "tool_calls":[{"id":"call_1","type":"function","function":{"name":"exec","arguments":"{}"}}]
         }}]
     });
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
     let message = &payload["choices"][0]["message"];
+    assert_eq!(message["content"], "<legacy-control>{\"reason\":\"Need inspect the file.\",\"goal_alignment_confidence\":90}</legacy-control>");
     assert!(message.get("reasoning_content").is_none());
-    assert_eq!(message["content"], "");
-    assert!(!payload.to_string().contains("toolreason"));
 }
 
 #[test]
-fn resp03_toolreason_from_responses_output_text_maps_to_reasoning_item() {
+fn resp03_plain_responses_text_is_not_projected() {
     let mut payload = json!({
         "output": [
-            {"type":"output_text","text":"<toolreason>{\"reason\":\"Inspect the target file\",\"goal_alignment_confidence\":95,\"model_id\":\"x-preview-f-free\"}</toolreason>"},
+            {"type":"output_text","text":"<legacy-control>{\"reason\":\"Inspect the target file\",\"goal_alignment_confidence\":95,\"model_id\":\"x-preview-f-free\"}</legacy-control>"},
             {"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{}"}
         ]
     });
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
     assert_eq!(payload["output"][0]["type"], "output_text");
+    assert_eq!(payload["output"][0]["text"].as_str().unwrap().contains("<legacy-control>"), true);
     assert_eq!(payload["output"][1]["type"], "function_call");
-    assert_eq!(payload["output"][0]["text"], "");
-    assert!(!payload.to_string().contains("toolreason"));
 }
 
 #[test]
-fn resp03_toolreason_from_generic_text_output_item_is_stripped() {
+fn resp03_plain_generic_text_is_not_stripped() {
     let mut payload = json!({
         "output": [
-            {"type":"text","text":"<toolreason>{\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\"}</toolreason>"},
+            {"type":"text","text":"<legacy-control>{\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\"}</legacy-control>"},
             {"type":"function_call","call_id":"call_1","name":"pwd","arguments":"{}"}
         ]
     });
 
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
 
-    assert_eq!(payload["output"][0]["text"], "");
+    assert!(payload["output"][0]["text"].as_str().unwrap().contains("<legacy-control>"));
     assert_eq!(payload["output"][1]["type"], "function_call");
-    assert!(!payload.to_string().contains("toolreason"));
-}
-
-#[test]
-fn resp03_toolreason_never_rewrites_native_tool_arguments() {
-    let command = "printf '<toolreason>keep this command literal</toolreason>'";
-    let mut payload = json!({
-        "choices":[{"message":{
-            "content":"<toolreason>{\"reason\":\"Inspect the command\"}</toolreason>",
-            "tool_calls":[{"type":"function","function":{
-                "name":"exec_command",
-                "arguments":format!("{{\"cmd\":{}}}", serde_json::to_string(command).unwrap())
-            }}]
-        }}]
-    });
-    let original_arguments =
-        payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"].clone();
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-    assert_eq!(
-        payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"],
-        original_arguments
-    );
-    assert!(payload["choices"][0]["message"]
-        .get("reasoning_content")
-        .is_none());
-}
-
-#[test]
-fn resp03_toolreason_never_rewrites_gemini_function_call_args() {
-    let command = "printf '<toolreason>keep this command literal</toolreason>'";
-    let mut payload = json!({
-        "candidates":[{"content":{"parts":[
-            {"text":"<toolreason>{\"reason\":\"Inspect the command\"}</toolreason>"},
-            {"functionCall":{"name":"exec_command","args":{"cmd":command}}}
-        ]}}]
-    });
-    let original_args =
-        payload["candidates"][0]["content"]["parts"][1]["functionCall"]["args"].clone();
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-    assert_eq!(
-        payload["candidates"][0]["content"]["parts"][1]["functionCall"]["args"],
-        original_args
-    );
-    assert!(
-        payload["candidates"][0]["content"]["parts"][1]["functionCall"]["args"]["cmd"]
-            .as_str()
-            .unwrap()
-            .contains("<toolreason>keep this command literal</toolreason>")
-    );
 }
 
 #[test]
@@ -373,118 +554,13 @@ fn resp03_native_reasoning_is_not_toolreason() {
 }
 
 #[test]
-fn resp03_toolreason_debug_projection_off_keeps_console_observation_only() {
-    let mut payload = json!({
-        "choices": [{
-            "message": {
-                "content": "<toolreason>{\"reason\":\"Inspect file\",\"goal_alignment_confidence\":80}</toolreason>",
-                "tool_calls": [{"type":"function","function":{"name":"read_file"}}]
-            }
-        }]
-    });
-    map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(&mut payload, true, false);
-    let message = &payload["choices"][0]["message"];
-    assert_eq!(message["content"], "");
-    assert!(message.get("reasoning_content").is_none());
-    assert!(!payload.to_string().contains("toolreason"));
-}
-
-#[test]
-fn resp03_incomplete_toolreason_is_removed_without_guessing_reason() {
-    let mut payload = json!({
-        "choices":[{"message":{
-            "role":"assistant",
-            "content":"before <toolreason>Need inspect",
-            "tool_calls":[{"id":"call_1","type":"function","function":{"name":"exec","arguments":"{\"cmd\":\"cat secret\"}"}}]
-        }}]
-    });
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-    let message = &payload["choices"][0]["message"];
-    assert_eq!(message.get("reasoning_content"), None);
-    assert_eq!(message["content"], "before ");
-    assert!(!payload.to_string().contains("toolreason"));
-    assert!(payload.to_string().contains("cat secret"));
-}
-
-#[test]
-fn resp03_multiple_toolreasons_pair_by_tool_call_order_and_strip_duplicates() {
-    let mut payload = json!({
-        "choices":[{"message":{
-            "role":"assistant",
-            "content":"<toolreason>Inspect file.</toolreason><toolreason>Run test.</toolreason><toolreason>duplicate.</toolreason>",
-            "tool_calls":[
-                {"id":"call_1","type":"function","function":{"name":"cat","arguments":"{}"}},
-                {"id":"call_2","type":"function","function":{"name":"test","arguments":"{}"}}
-            ]
-        }}]
-    });
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-    let message = &payload["choices"][0]["message"];
-    assert!(message.get("reasoning_content").is_none());
-    assert_eq!(message["content"], "");
-    assert!(!payload.to_string().contains("toolreason"));
-    assert!(!payload.to_string().contains("duplicate."));
-}
-
-#[test]
-fn resp03_responses_post_call_toolreason_maps_once_and_preserves_calls() {
-    let mut payload = json!({
-        "id": "resp_post_reason",
-        "output": [
-            {"type":"function_call","call_id":"call_1","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"},
-            {"type":"function_call","call_id":"call_2","name":"read_file","arguments":"{\"path\":\"config.toml\"}"},
-            {"type":"message","role":"assistant","content":[
-                {"type":"output_text","text":"<toolreason>确认工具结果所需的工作状态</toolreason>"}
-            ]}
-        ]
-    });
-
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-
-    assert_eq!(payload["output"][2]["type"], "message");
-    assert_eq!(payload["output"][2]["content"][0]["text"], "");
-    assert_eq!(payload["output"][0]["name"], "exec_command");
-    assert_eq!(payload["output"][1]["name"], "read_file");
-    assert!(!payload.to_string().contains("toolreason"));
-}
-
-#[test]
-fn resp03_toolreason_label_deduplicates_shell_wrappers_and_commands() {
-    assert_eq!(
-        format_toolreason_tool_label(&[
-            "exec_command".to_string(),
-            "exec_command".to_string(),
-            "test".to_string(),
-            "sed".to_string(),
-            "sed".to_string(),
-            "rg".to_string(),
-        ]),
-        "test、sed、rg"
-    );
-}
-
-#[test]
-fn resp03_toolreason_uses_shell_command_as_display_tool_for_exec_command() {
-    let mut payload = json!({
-        "output": [
-            {"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"curl -fsS http://127.0.0.1:7777/health\"}"},
-            {"type":"message","content":[{"type":"output_text","text":"<toolreason>检查服务健康状态</toolreason>"}]}
-        ]
-    });
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-    assert_eq!(payload["output"][1]["type"], "message");
-    assert_eq!(payload["output"][1]["content"][0]["text"], "");
-    assert!(!payload.to_string().contains("调用工具 exec_command"));
-}
-
-#[test]
 fn resp03_duplicate_native_auxiliary_keys_are_invalid_and_not_projected() {
     let duplicate = r#"{"cmd":"pwd","reason":"确认当前目录","goal_alignment_confidence":100,"model_id":"x-preview-f-free","reason":"获取当前日期","goal_alignment_confidence":100,"model_id":"x-preview-f-free"}"#;
     assert!(json_object_has_duplicate_keys_at_resp03(duplicate));
     assert!(
         v3_tool_thinking_fields_from_parameter_value_at_resp03(&Value::String(
             duplicate.to_string()
-        ))
+        ), None)
         .is_none()
     );
 
@@ -507,295 +583,221 @@ fn resp03_duplicate_native_auxiliary_keys_are_invalid_and_not_projected() {
 }
 
 #[test]
-fn resp03_toolreason_strips_model_thinking_tags_before_projection() {
-    let mut payload = json!({
-        "output": [
-            {"type":"function_call","name":"cat","arguments":"{}"},
-            {"type":"message","content":[{"type":"output_text","text":"<toolreason>{\"reason\":\"***<think>检查目标文件</think>***\",\"goal_alignment_confidence\":100}</toolreason>"}]}
-        ]
-    });
-
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-
-    assert_eq!(payload["output"][1]["type"], "message");
-    assert_eq!(payload["output"][1]["content"][0]["text"], "");
-    assert!(!payload.to_string().contains("<think>"));
-    assert!(!payload.to_string().contains("</think>"));
-    assert!(!payload.to_string().contains("toolreason"));
-}
-
-#[test]
-fn resp03_strips_orphan_toolreason_close_and_responses_output_text_marker() {
-    let mut payload = json!({
-        "output_text": "visible</toolreason>",
-        "output": [{
-            "type": "message",
-            "content": [{"type": "output_text", "text": "answer<toolreason>inspect state"}]
-        }, {
-            "type": "function_call",
-            "name": "inspect_state"
-        }]
-    });
-
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-
-    assert_eq!(payload["output_text"], "visible");
-    assert_eq!(payload["output"][0]["content"][0]["text"], "answer");
-    assert!(!payload.to_string().contains("<toolreason>"));
-    assert!(!payload.to_string().contains("</toolreason>"));
-}
-
-#[test]
-fn resp03_toolreason_without_tool_call_is_hard_stripped_without_reasoning_guess() {
+fn resp03_wrong_wire_model_does_not_block_phase1_reason_projection() {
+    let arguments =
+        r#"{"cmd":"pwd","reason":"确认当前目录","goal_alignment_confidence":100,"model_id":"other-model"}"#;
     let mut payload = json!({
         "choices":[{"message":{
             "role":"assistant",
-            "content":"<toolreason>Do something.</toolreason>"
+            "tool_calls":[{"id":"call_model_mismatch","type":"function","function":{
+                "name":"exec_command","arguments":arguments
+            }}]
         }}]
     });
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-    let message = &payload["choices"][0]["message"];
-    assert_eq!(message["content"], "");
-    assert_eq!(message.get("reasoning_content"), None);
-    assert!(!payload.to_string().contains("toolreason"));
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("x-preview-f-free"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-model-mismatch"),
+            request_id: Some("request-model-mismatch"),
+        },
+    );
+
+    let call = &payload["choices"][0]["message"]["tool_calls"][0];
+    assert_eq!(call["function"]["arguments"], "{\"cmd\":\"pwd\"}");
+    assert_eq!(
+        payload["choices"][0]["message"]["reasoning_content"],
+        "调用工具 pwd：确认当前目录"
+    );
 }
 
 #[test]
-fn resp03_toolreason_placeholder_is_missing_not_visible_reasoning() {
+fn resp03_matching_wire_model_strips_and_projects() {
     let mut payload = json!({
-        "choices": [{
-            "message": {
-                "content": "<toolreason>...</toolreason>",
-                "tool_calls": [{"function": {"name": "exec_command"}}]
-            }
-        }]
+        "choices":[{"message":{
+            "role":"assistant",
+            "tool_calls":[{"id":"call_model_match","type":"function","function":{
+                "name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前目录\",\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\"}"
+            }}]
+        }}]
     });
 
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-
-    let message = &payload["choices"][0]["message"];
-    assert_eq!(message.get("reasoning_content"), None);
-    assert!(!payload.to_string().contains("toolreason"));
-}
-
-#[test]
-fn resp03_toolreason_prompt_fragment_and_mapped_reasoning_are_missing() {
-    for reason in [
-        "，填入这一次调用的真实当前动机，再输出结束标签",
-        "具体动机、结束标签",
-        "调用工具 exec_command：获取当前工作目录",
-    ] {
-        let mut payload = json!({
-            "choices": [{
-                "message": {
-                    "content": format!("<toolreason>{reason}</toolreason>"),
-                    "tool_calls": [{"function": {"name": "exec_command"}}]
-                }
-            }]
-        });
-
-        map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-
-        assert_eq!(
-            payload["choices"][0]["message"].get("reasoning_content"),
-            None
-        );
-    }
-}
-
-/* legacy fence/text contract removed: native tool-argument JSON is the only source */
-/*
-    let reason_frame = format!(
-        "data: {}\r\n\r\n",
-        json!({
-            "type": "response.output_text.done",
-            "output_index": 0,
-            "text": "<toolreason>确认当前工作目录</toolreason>"
-        })
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("x-preview-f-free"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-model-match"),
+            request_id: Some("request-model-match"),
+        },
     );
-    let first_tool_frame = format!(
-        "data: {}\n\n",
-        json!({
-            "type": "response.output_item.done",
-            "output_index": 0,
-            "item": {
-                "type": "function_call",
-                "call_id": "call_1",
-                "name": "exec_command",
-                "arguments": "{\"cmd\":\"pwd\"}"
-            }
-        })
-    );
-    let second_tool_frame = format!(
-        "data: {}\n\n",
-        json!({
-            "type": "response.output_item.done",
-            "output_index": 1,
-            "item": {
-                "type": "function_call",
-                "call_id": "call_2",
-                "name": "read_file",
-                "arguments": "{\"path\":\"config.toml\"}"
-            }
-        })
-    );
-    let split = reason_frame
-        .find("<toolreason>")
-        .expect("reason frame must contain the marker");
-    let mut buffer = Vec::new();
-    let mut tool_names = Vec::new();
-    let mut pending_reasons = Vec::new();
-    let mut reason_emitted = false;
-    let mut output = project_v3_toolreason_sse_chunk_at_resp03(
-        &mut buffer,
-        &mut tool_names,
-        &mut pending_reasons,
-        &mut reason_emitted,
-        reason_frame[..split].as_bytes(),
-    );
-    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
-        &mut buffer,
-        &mut tool_names,
-        &mut pending_reasons,
-        &mut reason_emitted,
-        reason_frame[split..].as_bytes(),
-    ));
-    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
-        &mut buffer,
-        &mut tool_names,
-        &mut pending_reasons,
-        &mut reason_emitted,
-        first_tool_frame.as_bytes(),
-    ));
-    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
-        &mut buffer,
-        &mut tool_names,
-        &mut pending_reasons,
-        &mut reason_emitted,
-        second_tool_frame.as_bytes(),
-    ));
 
-    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
-    assert!(!output.contains("toolreason"));
-    assert_eq!(output.matches("event: response.reasoning_summary_text.delta").count(), 1);
-    assert!(output.contains("\"type\":\"reasoning\""));
-    assert!(output.contains("\"summary\":[{\"text\":"));
-    assert!(output.contains("确认当前工作目录"));
-    assert!(output.contains("\"type\":\"function_call\""));
-    assert!(output.contains("\"call_id\":\"call_1\""));
-    assert!(output.contains("\"call_id\":\"call_2\""));
-    assert!(output.contains("{\\\"cmd\\\":\\\"pwd\\\"}"));
-    assert!(output.contains("{\\\"path\\\":\\\"config.toml\\\"}"));
-}
-
-#[test]
-fn direct_sse_post_call_toolreason_waits_past_tool_done_and_maps_once() {
-    let tool_frame = format!(
-        "data: {}\n\n",
-        json!({
-            "type": "response.output_item.done",
-            "output_index": 0,
-            "item": {
-                "type": "function_call",
-                "call_id": "call_post_1",
-                "name": "exec_command",
-                "arguments": "{\"cmd\":\"pwd\"}"
-            }
-        })
-    );
-    let message_frame = format!(
-        "data: {}\n\n",
-        json!({
-            "type": "response.output_item.done",
-            "output_index": 1,
-            "item": {
-                "type": "message",
-                "content": [{"type": "output_text", "text": "<toolreason>确认当前工作目录</toolreason>"}]
-            }
-        })
-    );
-    let mut buffer = Vec::new();
-    let mut tool_names = Vec::new();
-    let mut pending_reasons = Vec::new();
-    let mut reason_emitted = false;
-
-    let mut output = project_v3_toolreason_sse_chunk_at_resp03(
-        &mut buffer,
-        &mut tool_names,
-        &mut pending_reasons,
-        &mut reason_emitted,
-        tool_frame.as_bytes(),
-    );
-    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
-        &mut buffer,
-        &mut tool_names,
-        &mut pending_reasons,
-        &mut reason_emitted,
-        message_frame.as_bytes(),
-    ));
-
-    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
-    assert!(!output.contains("toolreason"));
+    let function = &payload["choices"][0]["message"]["tool_calls"][0]["function"];
+    assert_eq!(function["arguments"], "{\"cmd\":\"pwd\"}");
     assert_eq!(
-        output
-            .matches("event: response.reasoning_summary_text.delta")
-            .count(),
-        1
-    );
-    assert!(output.contains("确认当前工作目录"));
-    assert!(output.contains("call_post_1"));
-    assert!(
-        reason_emitted,
-        "post-call reason must be mapped when its message item closes"
+        payload["choices"][0]["message"]["reasoning_content"],
+        "调用工具 pwd：确认当前目录"
     );
 }
 
 #[test]
-fn direct_sse_terminal_toolreason_projects_when_reason_arrives_after_tool_done() {
-    let tool_frame = format!(
-        "data: {}\n\n",
-        json!({
-            "type": "response.output_item.done",
-            "output_index": 0,
-            "item": {"type": "function_call", "call_id": "call_terminal", "name": "cat", "arguments": "{}"}
-        })
+fn resp03_phase1_reason_only_projects_without_optional_diagnostics() {
+    let mut payload = json!({
+        "output":[{"type":"custom_tool_call","call_id":"call_reason_only",
+            "name":"apply_patch","input":"*** Begin Patch\n*** End Patch",
+            "reason":"应用用户要求的最小补丁"}]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("MiniMax-M3"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-reason-only"),
+            request_id: Some("request-reason-only"),
+        },
     );
-    let reason_frame = format!(
-        "data: {}\n\n",
-        json!({
-            "type": "response.output_text.delta",
-            "output_index": 1,
-            "delta": "<toolreason>读取目标文件</toolreason>"
-        })
+
+    assert_eq!(payload["output"][1]["input"], "*** Begin Patch\n*** End Patch");
+    assert_eq!(
+        payload["output"][0]["summary"][0]["text"],
+        "调用工具 apply_patch：应用用户要求的最小补丁"
     );
-    let completed_frame = format!(
-        "data: {}\n\n",
-        json!({
-            "type": "response.completed",
-            "response": {"output": [{"type": "function_call", "name": "cat", "arguments": "{}"}]}
-        })
-    );
-    let mut buffer = Vec::new();
-    let mut tool_names = Vec::new();
-    let mut pending_reasons = Vec::new();
-    let mut reason_emitted = false;
-    let mut output = project_v3_toolreason_sse_chunk_at_resp03(
-        &mut buffer, &mut tool_names, &mut pending_reasons, &mut reason_emitted, tool_frame.as_bytes()
-    );
-    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
-        &mut buffer, &mut tool_names, &mut pending_reasons, &mut reason_emitted, reason_frame.as_bytes()
-    ));
-    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
-        &mut buffer, &mut tool_names, &mut pending_reasons, &mut reason_emitted, completed_frame.as_bytes()
-    ));
-    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
-    assert!(output.contains("\"type\":\"reasoning\""));
-    assert!(output.contains("读取目标文件"));
-    assert!(!output.contains("toolreason"));
-    assert!(reason_emitted);
+    assert!(payload["output"][1].get("reason").is_none());
+    assert!(payload.get("reasoning_content").is_none());
 }
 
-*/
+#[test]
+fn resp03_custom_tool_wrapper_strips_only_toolreason_fields_and_preserves_raw_input() {
+    let raw_patch = "*** Begin Patch\n*** Add File: /tmp/toolreason-test.txt\n+ok\n*** End Patch";
+    let mut payload = json!({
+        "output":[{"type":"custom_tool_call","call_id":"call_custom_model_match",
+            "name":"apply_patch","input":raw_patch,
+            "reason":"写入最小补丁验证 custom tool",
+            "goal_alignment_confidence":100,
+            "model_id":"MiniMax-M3"}]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("MiniMax-M3"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-custom-model-match"),
+            request_id: Some("request-custom-model-match"),
+        },
+    );
+
+    assert_eq!(payload["output"][1]["input"], raw_patch);
+    assert!(payload["output"][1].get("reason").is_none());
+    assert!(payload["output"][1]
+        .get("goal_alignment_confidence")
+        .is_none());
+    assert!(payload["output"][1].get("model_id").is_none());
+    assert_eq!(
+        payload["output"][0]["summary"][0]["text"],
+        "调用工具 apply_patch：写入最小补丁验证 custom tool"
+    );
+}
+
+#[test]
+fn resp03_custom_tool_wrapper_model_mismatch_still_projects_and_preserves_raw_input() {
+    let raw_patch = "*** Begin Patch\n*** Add File: /tmp/toolreason-test.txt\n+ok\n*** End Patch";
+    let mut payload = json!({
+        "output":[{"type":"custom_tool_call","call_id":"call_custom_model_mismatch",
+            "name":"apply_patch","input":raw_patch,
+            "reason":"写入最小补丁验证 custom tool",
+            "goal_alignment_confidence":100,
+            "model_id":"other-model"}]
+    });
+    let before = payload.clone();
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("MiniMax-M3"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-custom-model-mismatch"),
+            request_id: Some("request-custom-model-mismatch"),
+        },
+    );
+
+    assert_ne!(payload, before);
+    assert_eq!(payload["output"][1]["input"], raw_patch);
+    assert_eq!(
+        payload["output"][0]["summary"][0]["text"],
+        "调用工具 apply_patch：写入最小补丁验证 custom tool"
+    );
+}
+
+#[test]
+fn resp03_custom_tool_nested_json_wrapper_projects_reason_and_restores_native_input() {
+    let raw_patch = "*** Begin Patch\n*** Update File: src/example.txt\n-old\n+new\n*** End Patch";
+    let wrapped_input = serde_json::to_string(&json!({
+        "input": raw_patch,
+        "reason": "更新用户指定文件",
+        "goal_alignment_confidence": 100,
+        "model_id": "x-preview-f-free"
+    }))
+    .expect("custom wrapper must serialize");
+    let mut payload = json!({
+        "output":[{"type":"custom_tool_call","call_id":"call_custom_nested",
+            "name":"apply_patch","input":wrapped_input}]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("x-preview-f-free"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-custom-nested"),
+            request_id: Some("request-custom-nested"),
+        },
+    );
+
+    assert_eq!(payload["output"][1]["input"], raw_patch);
+    assert!(payload["output"][1].get("reason").is_none());
+    assert!(payload["output"][1]
+        .get("goal_alignment_confidence")
+        .is_none());
+    assert!(payload["output"][1].get("model_id").is_none());
+    assert_eq!(
+        payload["output"][0]["summary"][0]["text"],
+        "调用工具 apply_patch：更新用户指定文件"
+    );
+}
+
+#[test]
+fn resp03_custom_tool_malformed_nested_wrapper_is_left_byte_semantically_unchanged() {
+    let wrapped_input = r#"{"input":"*** Begin Patch\n*** End Patch","reason":42}"#;
+    let mut payload = json!({
+        "output":[{"type":"custom_tool_call","call_id":"call_custom_invalid_nested",
+            "name":"apply_patch","input":wrapped_input}]
+    });
+    let before = payload.clone();
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("x-preview-f-free"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-custom-invalid-nested"),
+            request_id: Some("request-custom-invalid-nested"),
+        },
+    );
+
+    assert_eq!(payload, before);
+}
+
 #[test]
 fn direct_sse_native_reasoning_is_not_reprojected_as_toolreason() {
     let completed_frame = format!(
@@ -832,7 +834,7 @@ fn direct_sse_native_reasoning_is_not_reprojected_as_toolreason() {
 }
 
 #[test]
-fn direct_sse_reasoning_done_gets_client_reasoning_lifecycle_before_original_done() {
+fn direct_sse_native_reasoning_done_is_not_toolreason_source() {
     let reasoning_done = format!(
         "data: {}\n\n",
         json!({
@@ -862,21 +864,12 @@ fn direct_sse_reasoning_done_gets_client_reasoning_lifecycle_before_original_don
         reasoning_done.as_bytes(),
     );
     let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
-    let added = output
-        .find("event: response.output_item.added")
-        .expect("client reasoning lifecycle must start with output_item.added");
     let done_marker = "\"type\":\"response.output_item.done\"";
-    assert!(
-        output.matches(done_marker).count() >= 2,
-        "projected and original reasoning done frames must both be present: {output}"
-    );
-    let original_done = output
-        .rfind(done_marker)
-        .expect("original reasoning done frame must remain");
-    assert!(added < original_done);
-    assert!(output.contains("event: response.reasoning_summary_text.delta"));
+    assert_eq!(output.matches(done_marker).count(), 1);
+    assert!(!output.contains("event: response.output_item.added"));
+    assert!(!output.contains("event: response.reasoning_summary_text.delta"));
     assert!(output.contains("调用工具 cat：读取目标文件"));
-    assert!(!output.contains("<toolreason>"));
+    assert!(!output.contains("<legacy-control>"));
 }
 
 #[test]
@@ -922,79 +915,6 @@ fn direct_sse_plain_output_text_is_not_toolreason_without_fence() {
         reason_emitted,
         "the tool call still receives one missing observation"
     );
-}
-
-#[test]
-fn direct_sse_strips_legacy_toolreason_fence_from_message_item() {
-    let message_done = format!(
-        "data: {}\n\n",
-        json!({
-            "type": "response.output_item.done",
-            "output_index": 1,
-            "item": {
-                "type": "message",
-                "role": "assistant",
-                "content": [{
-                    "type": "output_text",
-                    "text": "<toolreason>{\"reason\":\"打印当前工作目录\",\"goal_alignment_confidence\":100}</toolreason>"
-                }]
-            }
-        })
-    );
-    let mut buffer = Vec::new();
-    let mut tool_names = vec!["exec_command".to_string()];
-    let mut pending_reasons = Vec::new();
-    let mut reason_emitted = false;
-
-    let output = project_v3_toolreason_sse_chunk_at_resp03(
-        &mut buffer,
-        &mut tool_names,
-        &mut pending_reasons,
-        &mut reason_emitted,
-        message_done.as_bytes(),
-    );
-    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
-
-    assert!(
-        !output.contains("<toolreason>"),
-        "legacy fence leaked: {output}"
-    );
-    assert!(
-        !output.contains("goal_alignment_confidence"),
-        "schema leaked: {output}"
-    );
-    assert!(
-        !output.contains("打印当前工作目录"),
-        "unmapped fence reason leaked: {output}"
-    );
-}
-
-#[test]
-fn direct_sse_toolreason_delta_is_stripped_before_client_projection() {
-    let delta_frame = format!(
-        "data: {}\n\n",
-        json!({
-            "type": "response.output_text.delta",
-            "delta": "<toolreason>Inspect workspace</toolreason>"
-        })
-    );
-    let mut buffer = Vec::new();
-    let mut tool_names = vec!["exec_command".to_string()];
-    let mut pending_reasons = Vec::new();
-    let mut reason_emitted = false;
-
-    let output = project_v3_toolreason_sse_chunk_at_resp03(
-        &mut buffer,
-        &mut tool_names,
-        &mut pending_reasons,
-        &mut reason_emitted,
-        delta_frame.as_bytes(),
-    );
-
-    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
-    assert!(!output.contains("toolreason"));
-    assert!(!output.contains("Inspect workspace"));
-    assert!(output.contains("\"delta\":\"\""));
 }
 
 #[test]
@@ -1046,43 +966,26 @@ fn direct_sse_toolreason_closeout_logs_missing_when_no_done_event_arrives() {
 }
 
 #[test]
-fn resp03_anthropic_text_toolreason_maps_against_tool_use() {
-    let mut payload = json!({
-        "role":"assistant",
-        "content":[
-            {"type":"text","text":"<toolreason>Need lookup.</toolreason>"},
-            {"type":"tool_use","id":"tool_1","name":"lookup","input":{}}
-        ]
-    });
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-    assert!(payload.get("reasoning_content").is_none());
-    assert_eq!(payload["content"][0]["text"], "");
-    assert!(!payload.to_string().contains("toolreason"));
-}
+fn resp03_terminal_observes_pending_toolreason_without_tool_name() {
+    let mut pending_reasons = vec![Some(
+        r#"{"cmd":"pwd","reason":"确认当前工作目录"}"#.to_string(),
+    )];
+    let mut reason_emitted = false;
 
-#[test]
-fn resp03_anthropic_thinking_fence_maps_without_replacing_native_thinking() {
-    let mut payload = json!({
-        "output": [
-            {
-                "type": "reasoning",
-                "summary": [{
-                    "type": "summary_text",
-                    "text": "先检查环境。<toolreason>{\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100}</toolreason>继续思考。"
-                }]
-            },
-            {"type":"function_call", "name":"pwd", "call_id":"call_pwd", "arguments":"{}"}
-        ]
-    });
-
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-
-    assert_eq!(
-        payload["output"][0]["summary"][0]["text"],
-        "先检查环境。继续思考。"
+    finalize_v3_toolreason_observation_at_resp03_with_context(
+        &[],
+        &mut pending_reasons,
+        &mut reason_emitted,
+        V3ToolreasonObservationContext {
+            session_id: Some("session_missing_tool_name"),
+            request_id: Some("request_missing_tool_name"),
+        },
     );
-    assert_eq!(payload["output"][1]["type"], "function_call");
-    assert!(!payload.to_string().contains("toolreason"));
+
+    assert!(
+        reason_emitted,
+        "a completed tool argument is still a governed turn when its display name is absent"
+    );
 }
 
 #[test]
@@ -1102,26 +1005,6 @@ fn resp03_anthropic_native_thinking_without_fence_stays_native() {
     assert_eq!(payload["output"].as_array().map(Vec::len), Some(2));
     assert_eq!(payload["output"][0]["summary"][0]["text"], "原生模型思考");
     assert!(!payload.to_string().contains("toolreason"));
-}
-
-#[test]
-fn resp03_rejects_prompt_placeholder_as_toolreason() {
-    let mut payload = json!({
-        "output": [
-            {"type":"message", "content":[{"type":"output_text", "text":"<toolreason>+ 一句真实、具体、简短的当前动机 +</toolreason>"}]},
-            {"type":"function_call", "name":"exec_command", "call_id":"call_placeholder", "arguments":"{}"}
-        ]
-    });
-
-    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
-
-    assert_eq!(payload.pointer("/output/0/reasoning_content"), None);
-    assert_eq!(
-        payload
-            .pointer("/output/0/content/0/text")
-            .and_then(Value::as_str),
-        Some("")
-    );
 }
 
 #[test]

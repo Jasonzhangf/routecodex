@@ -24,6 +24,20 @@ pub(crate) fn v3_responses_direct_stopless_center_enabled_for_server(
         )
 }
 
+pub(crate) fn v3_tool_thinking_enabled_for_server(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+) -> bool {
+    v3_feature_enabled_for_server(manifest, server_id, "tool_thinking", false)
+}
+
+pub(crate) fn v3_toolreason_client_projection_enabled_for_server(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+) -> bool {
+    v3_feature_enabled_for_server(manifest, server_id, "toolreason_client_projection", false)
+}
+
 pub(crate) fn v3_feature_enabled_for_server(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,

@@ -9,6 +9,7 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     pub(crate) manifest: &'a V3Config05ManifestPublished,
     pub(crate) server_id: &'a str,
     pub(crate) provider_id: Option<&'a str>,
+    pub(crate) expected_model_id: &'a str,
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
     pub(crate) provider_response_transport_intent: V3HubTransportIntent,
     pub(crate) compatibility_profile: Option<&'a str>,
@@ -22,6 +23,7 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     /// 候选时为 true），响应侧 Resp03 只消费此结果，不重复判定。
     pub(crate) retain_response_cipher: bool,
     pub(crate) tool_thinking_enabled: bool,
+    pub(crate) tool_thinking_turn_context: &'a V3ToolThinkingTurnContext,
 }
 
 pub(crate) fn run_json_response_hooks(
@@ -87,6 +89,8 @@ pub(crate) fn run_json_response_hooks(
         input.web_search_execution_mode,
         input.retain_response_cipher,
         input.tool_thinking_enabled,
+        input.expected_model_id,
+        input.tool_thinking_turn_context,
     );
     let response_hook_profile = match input.web_search_center_state {
         Some(state) => response_hook_profile.with_web_search_center_state(state),
@@ -179,11 +183,7 @@ pub(crate) fn responses_relay_request_hook_profile(
     transition_updated_at: u64,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
 ) -> V3HubServertoolRequestProfile {
-    let tool_thinking_enabled = manifest
-        .features
-        .get("tool_thinking")
-        .copied()
-        .unwrap_or(false);
+    let tool_thinking_enabled = v3_tool_thinking_enabled_for_server(manifest, server_id);
     let base = if web_search_execution_mode.is_metadata_center_local_search() {
         // Mode B：Req04 需在工具面含标准 web_search 声明时激活 websearch
         // ServerTool 实例（LocalToolSurfaceActive），供 Resp03 同轮拦截。
@@ -227,12 +227,11 @@ pub(crate) fn responses_relay_response_hook_profile(
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
+    expected_model_id: &str,
+    tool_thinking_turn_context: &V3ToolThinkingTurnContext,
 ) -> V3HubRelayResponseHookProfile {
-    let toolreason_client_projection = manifest
-        .features
-        .get("toolreason_client_projection")
-        .copied()
-        .unwrap_or(true);
+    let toolreason_client_projection =
+        v3_toolreason_client_projection_enabled_for_server(manifest, server_id);
     let profile = if web_search_execution_mode
         == routecodex_v3_config::V3WebSearchExecutionMode::NativeRemoteSearchToolMix
         || web_search_execution_mode.is_metadata_center_local_search()
@@ -243,6 +242,8 @@ pub(crate) fn responses_relay_response_hook_profile(
             .with_web_search_execution_mode(web_search_execution_mode)
             .with_retain_response_cipher(retain_response_cipher)
             .with_tool_thinking_enabled(tool_thinking_enabled)
+            .with_tool_thinking_turn_context(tool_thinking_turn_context)
+            .with_toolreason_expected_model_id(expected_model_id)
             .with_toolreason_client_projection(toolreason_client_projection)
     } else {
         // 未声明 web_search 执行模式的兼容路径：保持既有 exec_command 投影。
@@ -250,6 +251,8 @@ pub(crate) fn responses_relay_response_hook_profile(
             .with_servertool_name("web_search")
             .with_retain_response_cipher(retain_response_cipher)
             .with_tool_thinking_enabled(tool_thinking_enabled)
+            .with_tool_thinking_turn_context(tool_thinking_turn_context)
+            .with_toolreason_expected_model_id(expected_model_id)
             .with_toolreason_client_projection(toolreason_client_projection)
     };
     let profile = profile.with_toolreason_observation_request_id(request_id);

@@ -18,7 +18,7 @@ sequenceDiagram
   W->>P: provider attempt
   P-->>W: raw provider response
   W->>W: transport decode -> provider codec -> hooks -> client projection
-  W-->>A: live projected client stream after first semantic admission
+  W-->>A: projected client frame only
   A-->>C: client SSE frame / keepalive / EOF
 ```
 
@@ -38,9 +38,7 @@ The skeleton owner is `routecodex-v3-server/src/endpoint_handlers.rs`:
    in the background. It owns no provider semantics and does not select a
    provider.
 4. `V3DirectSseAccept03ProjectedClientFrame` forwards only the response already
-   projected by the selected runtime. Direct hands over the live typed stream
-   after its first semantic frame is admitted; Relay may hand over its sealed
-   broker stream. Provider raw SSE never crosses this edge.
+   projected by the selected runtime. Provider raw SSE never crosses this edge.
 
 The following are skeleton invariants and may not be changed by later hooks or
 compatibility features:
@@ -52,18 +50,10 @@ compatibility features:
   side-channel health, but it cannot reroute or rebuild the current response;
 - heartbeat is an SSE comment, never a Responses event, JSON payload, tool
   result, metadata field, or terminal marker;
-- the Front sends headers and heartbeat independently of provider terminal EOF;
-  client decode and client timeout are not held behind provider stream close;
-- Direct does not materialize the complete provider SSE attempt. The provider
-  attempt remains a child of the live client stream, and its post-admission
-  typed error/EOF is handled by the stream/error owner without reselecting the
-  current client response;
 - feature work may extend typed hooks inside the runtime projection boundary,
   but may not replace the accept channel, worker, or projected-frame edge;
-- Direct and Relay share this Front transport skeleton; Direct uses a live
-  projected stream after first semantic admission, while Relay keeps its
-  broker-sealed stream contract. Only their typed runtime codec/projector
-  differs behind the worker edge.
+- Direct and Relay share this Front transport skeleton; only their typed runtime
+  codec/projector differs behind the worker edge.
 
 ## Allowed extension points
 

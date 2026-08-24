@@ -18,7 +18,7 @@ pub(crate) fn wrap_v3_direct_responses_thinking_tag_consumer_stream(
         done: bool,
     }
 
-    Box::pin(stream::unfold(
+    V3ProviderAttemptSseStream::new(Box::pin(stream::unfold(
         V3DirectResponsesThinkingTagConsumerState {
             source,
             detector: SseIncrementalDecoder::new(SseTransportLimits::default()),
@@ -108,7 +108,7 @@ pub(crate) fn wrap_v3_direct_responses_thinking_tag_consumer_stream(
                 }
             }
         },
-    ))
+    )))
 }
 
 fn rewrite_v3_direct_thinking_tag_sse_bytes(input: &[u8]) -> Result<Vec<u8>, String> {

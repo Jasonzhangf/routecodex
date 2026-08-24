@@ -119,7 +119,7 @@ pub(crate) fn responses_relay_output_response(
                 observability: output.observability,
                 stream_observation: output.stream_observation,
             };
-            let frame = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
+            let frame = project_v3_responses_relay_stream_error_frame_if_requested(frame, true);
             match frame.body {
                 V3Server16Body::CommittedSse(stream) => v3_client_sse_body(stream, None),
                 V3Server16Body::Sse(stream) => v3_live_client_sse_body(stream, None),

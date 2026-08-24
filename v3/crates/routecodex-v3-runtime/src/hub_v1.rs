@@ -5,8 +5,9 @@ pub(crate) use crate::{
 mod common;
 pub(crate) use common::{
     v3_feature_enabled_for_server, v3_responses_direct_stopless_center_enabled_for_server,
-    v3_stopless_center_enabled_for_server, V3HubOpaquePayload, V3HubRelayCanonicalResponseContext,
-    V3HubResponsePayload, V3HubResponseToolCall,
+    v3_stopless_center_enabled_for_server, v3_tool_thinking_enabled_for_server,
+    v3_toolreason_client_projection_enabled_for_server, V3HubOpaquePayload,
+    V3HubRelayCanonicalResponseContext, V3HubResponsePayload, V3HubResponseToolCall,
 };
 pub use common::{
     V3HubContinuationCommit, V3HubContinuationOwnership, V3HubEntryProtocol, V3HubInvocationSource,
@@ -21,11 +22,12 @@ pub use common::{
 pub use common::{V3HubExecutionMode, V3HubProviderWireProtocol, V3StoplessCenterPhase};
 mod provider_compat_error;
 pub(crate) use provider_compat_error::classify_v3_provider_compat_error;
-pub(crate) use provider_compat_error::provider_request_payload_source;
 pub use provider_compat_error::{
     extract_v3_provider_compat_boundary_field, provider_compat_boundary_source,
-    V3ProviderCompatError, V3ProviderCompatErrorClassification,
+    V3ProviderCompatErrorClassification,
+    V3ProviderCompatError,
 };
+pub(crate) use provider_compat_error::provider_request_payload_source;
 
 mod side_channel;
 pub(crate) use side_channel::find_v3_hub_side_channel_key;

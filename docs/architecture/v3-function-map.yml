@@ -5034,7 +5034,7 @@ features:
   - npm run verify:v3-module-boundaries
   - git diff --check
   migration_target: rust
-  runtime_status: source_controlled_live_verified
+  runtime_status: source_controlled_runtime_pending_live_replay
 
 - feature_id: v3.runtime_restart_handoff_skeleton
   status: design
@@ -5249,7 +5249,7 @@ features:
   runtime_status: source_controlled_runtime_pending_live_replay
 
 - feature_id: v3.tool_thinking_hook_skeleton
-  status: design_locked_pending_implementation
+  status: source_controlled_pending_online_matrix
   change_risk: high
   owner_kind: rust_v3_chat_process_tool_thinking_hook
   owner_modules:
@@ -5257,11 +5257,36 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  typed_plumbing_files:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime_sse.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
+  test_files:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
   resource_bindings:
   - v3.request.normal_payload
+  - v3.request.tool_thinking_turn_context
+  - v3.response.tool_thinking_turn_result
   - v3.response.client_payload
   entry_symbols:
   - inject_v3_tool_thinking_guidance_at_req04
@@ -5271,41 +5296,83 @@ features:
   - strip_v3_tool_thinking_fields_from_json_at_resp03
   - V3ResponsesDirectCodec::prepare_before_send
   - V3ChatDirectCodec::prepare_before_send
+  - V3ToolThinkingTurnContext
+  - compile_v3_tool_thinking_turn_context_at_req04
+  - bind_v3_tool_thinking_guidance_to_wire_model_at_req04
+  - restore_v3_tool_thinking_custom_calls_in_payload_at_resp03
+  - finalize_v3_toolreason_observation_at_resp03_with_context
+  - project_v3_toolreason_sse_chunk_at_resp03_with_projection_and_context
+  pending_entry_symbols: []
+  legacy_entry_symbols_to_remove:
+  - strip_v3_toolreason_markers_at_resp03
+  - v3_json_contains_toolreason_marker_at_resp03
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime_sse.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
-  - v3/crates/routecodex-v3-error/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
   - docs/goals/v3-tool-thinking-hook-plan.md
   - docs/architecture
   forbidden_paths:
   - v3/crates/routecodex-v3-server/src
   - v3/crates/routecodex-v3-provider-responses/src
   - MetadataCenter
+  - generic SSE transport
+  - provider health
+  - routing and retry policy
+  - continuation stores
   contract_version: tool_thinking_json_v2
   contract_rules:
-  - Req04 adds optional auxiliary properties to each non-Gemini tool parameter schema
-  - model output may place fields in Anthropic input or JSON Responses/Chat arguments/args
-  - reason, goal_alignment_confidence, and model_id are stripped from the parameter container before client projection
-  - missing or malformed auxiliary fields never reject or mutate the native tool call
-  - legacy toolreason fences are compatibility-only and are not the active prompt or metric
-  - one synthesized reasoning_content item is emitted per turn at most
+  - Req04 adds required reason plus optional confidence/model diagnostic properties to each eligible non-Gemini structured tool schema and wraps free-form custom tools as request-local structured provider contracts
+  - Req04 records original custom-tool provenance only in v3.request.tool_thinking_turn_context; that resource never enters payload, metadata, history, or continuation
+  - Req04 compilation is atomic and runs once per execution; Direct retries reuse its typed context and may not recompile from an already governed tool list
+  - downstream protocol projection preserves the Req04 contract mechanically and never performs a second semantic injection
+  - RespInbound02 preserves the complete native parameter container; custom input is not unwrapped before Resp03
+  - protocol adapters retain exact complete native parameter JSON bytes so Resp03 can reject duplicate reserved keys without first-wins or last-wins collapse
+  - Resp03 alone classifies reason and any supplied diagnostics; only one valid non-empty reason authorizes all-or-nothing removal of supplied auxiliary keys and one typed turn result
+  - missing, invalid, duplicate, misplaced, incomplete, or malformed reason/diagnostic fields never authorize reasoning or any tool-call rewrite
+  - a parallel tool turn is OK only when every eligible native call is valid; mixed status produces one deterministic non-OK terminal result and no reasoning
+  - provenance-matched custom restoration is an independent mechanical inverse and preserves valid custom input for every terminal status
+  - the typed turn result projects one separate normal reasoning item before the first native tool call without changing provider-native reasoning
+  - visible IDs, 调用工具 text, ordinary reasoning, pending message text, and legacy fences are not identity or active sources; their parsers and replay paths are physically removed
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib req04_tool_thinking -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib resp03_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_toolreason -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib tool_thinking_custom -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs
   - git diff --check
 
 - feature_id: v3.server_internal_observability_projection
-  status: source_controlled_live_verified
+  status: source_controlled_runtime_pending_live_replay
   owner_crate: routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
-  - v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -5313,30 +5380,16 @@ features:
   - v3.server.internal_observability_projection
   entry_symbols:
   - V3WebuiObservability::record
-  - V3WebuiObservability::record_observed
   - V3WebuiObservability::snapshot
   - V3WebuiObservability::since
   - V3ObsSinceResult
-  - observability_snapshot
-  - observability_events
-  - record_v3_webui_projected_runtime_failure_for_context
   - emit_v3_request_console_observation
   - capture_v3_relay_provider_snapshots
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
-  - v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
-  - v3/crates/routecodex-v3-server/src/executors.rs
-  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
-  - v3/crates/routecodex-v3-admin/src/api/observability.rs
-  - v3/crates/routecodex-v3-admin/src/api/mod.rs
-  - v3/crates/routecodex-v3-admin/src/lib.rs
-  - v3/admin-webui/requests.html
-  - docs/architecture/v3-build-tool-module-registry.yml
-  - v3/scripts/install-cli.mjs
-  - v3/tests/scripts/v3-cli-distribution.spec.mjs
   forbidden_paths:
   - request.normal_payload
   - response.client_payload
@@ -5345,11 +5398,7 @@ features:
   - protocol.metadata
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
-  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin --test l4_admin_api -- --nocapture
-  - npm --prefix v3 run test:distribution
   - npm run verify:v3-resource-map
-  - npm run verify:v3-module-boundaries
-  - npm run verify:v3-mainline-caller-flow
   - git diff --check
   runtime_status: source_controlled_runtime_pending_live_replay
 

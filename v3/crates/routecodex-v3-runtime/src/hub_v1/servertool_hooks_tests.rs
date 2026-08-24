@@ -27,12 +27,12 @@ fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
     assert!(guidance.contains("Anthropic 的 `input`、Responses/Chat 的 `arguments`"));
     assert!(guidance.contains("goal_alignment_confidence"));
     assert!(guidance.contains("model_id"));
-    assert!(guidance.contains("不要省略字段，也不要用占位值"));
+    assert!(guidance.contains("可选字段不要用占位值"));
     assert_eq!(payload["tools"][1]["description"], "internal");
 }
 
 #[test]
-fn req04_tool_thinking_guidance_reaches_each_external_tool_but_not_internal_tools() {
+fn req04_tool_thinking_guidance_uses_one_external_tool_anchor_only() {
     let mut payload = json!({
         "tools": [
             {"type":"function","name":"first","description":"first"},
@@ -47,12 +47,26 @@ fn req04_tool_thinking_guidance_reaches_each_external_tool_but_not_internal_tool
         .as_str()
         .unwrap()
         .contains("工具调用协议"));
+    assert_eq!(payload["tools"][1]["description"], "second");
+    assert_eq!(payload["tools"][2]["description"], "internal");
+    assert_eq!(payload["tools"][3]["description"], "internal");
+}
+
+#[test]
+fn req04_tool_thinking_does_not_mutate_builtin_web_search_anchor() {
+    let mut payload = json!({
+        "tools": [
+            {"type":"web_search","external_web_access":true,"description":null},
+            {"type":"function","name":"pwd","description":"show cwd","parameters":{"type":"object"}}
+        ]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject into an eligible native tool");
+    assert_eq!(payload["tools"][0]["description"], Value::Null);
     assert!(payload["tools"][1]["description"]
         .as_str()
         .unwrap()
         .contains("工具调用协议"));
-    assert_eq!(payload["tools"][2]["description"], "internal");
-    assert_eq!(payload["tools"][3]["description"], "internal");
 }
 
 #[test]
@@ -188,7 +202,7 @@ fn req04_tool_thinking_reaches_anthropic_wire_system_field() {
         "wire: {wire}"
     );
     assert!(tool_description.contains("model_id"), "wire: {wire}");
-    assert!(!wire.to_string().contains("<toolreason>"));
+    assert!(!wire.to_string().contains("<legacy-control>"));
 }
 
 #[test]
@@ -214,13 +228,14 @@ fn req04_tool_thinking_injects_anthropic_tool_list_and_parameter_schema() {
         payload["tools"][0]["input_schema"]["properties"]["goal_alignment_confidence"].is_object()
     );
     assert!(payload["tools"][0]["input_schema"]["properties"]["model_id"].is_object());
-    for field in ["reason", "goal_alignment_confidence", "model_id"] {
-        assert!(payload["tools"][0]["input_schema"]["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|value| value.as_str() == Some(field)));
-    }
+    let required = payload["tools"][0]["input_schema"]["required"]
+        .as_array()
+        .unwrap();
+    assert!(required.iter().any(|value| value.as_str() == Some("reason")));
+    assert!(!required
+        .iter()
+        .any(|value| value.as_str() == Some("goal_alignment_confidence")));
+    assert!(!required.iter().any(|value| value.as_str() == Some("model_id")));
 }
 
 #[test]
@@ -242,20 +257,49 @@ fn req04_tool_thinking_injects_every_present_native_schema_shape() {
     ] {
         for field in ["reason", "goal_alignment_confidence", "model_id"] {
             assert!(schema["properties"][field].is_object(), "schema={schema}");
-            assert!(
-                schema["required"]
-                    .as_array()
-                    .is_some_and(|required| required
-                        .iter()
-                        .any(|value| value.as_str() == Some(field))),
-                "schema={schema} field={field}"
-            );
         }
+        assert!(schema["required"].as_array().is_some_and(|required| required
+            .iter()
+            .any(|value| value.as_str() == Some("reason"))));
+        assert!(!schema["required"].as_array().is_some_and(|required| required
+            .iter()
+            .any(|value| value.as_str() == Some("goal_alignment_confidence"))));
+        assert!(!schema["required"].as_array().is_some_and(|required| required
+            .iter()
+            .any(|value| value.as_str() == Some("model_id"))));
     }
 }
 
 #[test]
-fn req04_tool_thinking_custom_tool_keeps_freeform_input_and_adds_auxiliary_schema() {
+fn req04_tool_thinking_recurses_into_namespace_tools_before_provider_flattening() {
+    let mut payload = json!({
+        "tools": [{
+            "type": "namespace",
+            "name": "mcp__example",
+            "tools": [{
+                "type": "function",
+                "name": "apply_patch",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"input": {"type": "string"}},
+                    "required": ["input"]
+                }
+            }]
+        }]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("namespace child schema must be governed at Req04");
+    let schema = &payload["tools"][0]["tools"][0]["parameters"];
+    assert!(schema["properties"]["reason"].is_object());
+    assert!(schema["properties"]["goal_alignment_confidence"].is_object());
+    assert!(schema["properties"]["model_id"].is_object());
+    assert!(schema["required"]
+        .as_array()
+        .is_some_and(|required| required.iter().any(|value| value == "reason")));
+}
+
+#[test]
+fn req04_tool_thinking_custom_tool_compiles_provider_wrapper() {
     let mut payload = json!({
         "tools": [{
             "type": "custom",
@@ -266,11 +310,17 @@ fn req04_tool_thinking_custom_tool_keeps_freeform_input_and_adds_auxiliary_schem
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("custom tool guidance must inject");
-    assert!(payload["tools"][0]["description"]
-        .as_str()
-        .unwrap()
-        .contains("工具调用协议"));
-    assert!(payload["tools"][0].get("parameters").is_none());
+    assert_eq!(payload["tools"][0]["type"], "function");
+    assert_eq!(payload["tools"][0]["function"]["name"], "apply_patch");
+    let parameters = &payload["tools"][0]["function"]["parameters"];
+    assert_eq!(parameters["properties"]["input"]["type"], "string");
+    assert_eq!(parameters["properties"]["reason"]["type"], "string");
+    assert!(parameters["required"]
+        .as_array()
+        .is_some_and(|required| required.iter().any(|value| value == "input")));
+    assert!(parameters["required"]
+        .as_array()
+        .is_some_and(|required| required.iter().any(|value| value == "reason")));
 }
 
 #[test]
@@ -280,6 +330,28 @@ fn req04_tool_thinking_disabled_is_payload_identity() {
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, false)
         .expect("disabled tool-thinking must be a no-op");
     assert_eq!(payload, before);
+}
+
+#[test]
+fn req04_tool_thinking_preserves_native_reserved_field_collision_without_mutation() {
+    let mut payload = json!({
+        "tools": [{
+            "type": "function",
+            "name": "native_reason_tool",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {"type":"string", "description":"native meaning"},
+                    "path": {"type":"string"}
+                },
+                "required": ["path"]
+            }
+        }]
+    });
+    let before_schema = payload["tools"][0]["parameters"].clone();
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("native business fields must not make the request fail");
+    assert_eq!(payload["tools"][0]["parameters"], before_schema);
 }
 
 #[test]

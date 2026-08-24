@@ -45,6 +45,7 @@ pub(crate) fn build_direct_response_compat_context(
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
     toolreason_observation_session_id: &str,
+    tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext,
 ) -> Result<V3DirectResponseCompatContext, String> {
     Ok(V3DirectResponseCompatContext {
         provider_protocol: crate::hub_v1::provider_wire_protocol_for_selected_candidate(
@@ -56,6 +57,7 @@ pub(crate) fn build_direct_response_compat_context(
         tool_thinking_enabled,
         toolreason_client_projection,
         toolreason_observation_session_id: Some(toolreason_observation_session_id.to_owned()),
+        tool_thinking_turn_context,
         runtime_timing: crate::runtime_timing::V3RuntimeTimingState::start(),
     })
 }
@@ -77,6 +79,9 @@ pub trait V3DirectProtocolCodec {
     fn endpoint(standardized: &Self::Standardized) -> &str;
     fn request_id(standardized: &Self::Standardized) -> &str;
     fn body(standardized: &Self::Standardized) -> &serde_json::Value;
+    fn tool_thinking_turn_context(
+        standardized: &Self::Standardized,
+    ) -> &crate::hub_v1::V3ToolThinkingTurnContext;
     fn policy_target(policy: &Self::Policy) -> &V3Target10ConcreteProviderSelected;
 
     fn router_facts(
@@ -238,6 +243,11 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
     fn body(standardized: &Self::Standardized) -> &serde_json::Value {
         &standardized.body
     }
+    fn tool_thinking_turn_context(
+        standardized: &Self::Standardized,
+    ) -> &crate::hub_v1::V3ToolThinkingTurnContext {
+        &standardized.tool_thinking_turn_context
+    }
     fn policy_target(policy: &Self::Policy) -> &V3Target10ConcreteProviderSelected {
         &policy.target
     }
@@ -324,19 +334,15 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
     fn prepare_before_send(
         _control: &mut Self::Control,
         manifest: &routecodex_v3_config::V3Config05ManifestPublished,
-        _server_id: &str,
+        server_id: &str,
         standardized: &mut Self::Standardized,
         _request_id: &str,
         _now_epoch_ms: u64,
         _trace: &mut Vec<&'static str>,
     ) -> Result<bool, V3Error01SourceRaised> {
-        let enabled = manifest
-            .features
-            .get("tool_thinking")
-            .copied()
-            .unwrap_or(false);
-        if !enabled {
-            return Ok(false);
+        let enabled = crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id);
+        if standardized.tool_thinking_turn_context.enabled_flag() {
+            return Ok(true);
         }
         let current_payload_start = crate::hub_v1::current_v3_tool_thinking_payload_start(
             &standardized.body,
@@ -350,7 +356,7 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
                 V3InternalErrorCode::V3Req04StandardizedResponses,
             )
         })?;
-        crate::hub_v1::inject_v3_tool_thinking_guidance_at_req04(
+        standardized.tool_thinking_turn_context = crate::hub_v1::compile_v3_tool_thinking_turn_context_at_req04(
             &mut standardized.body,
             current_payload_start,
             enabled,
@@ -422,6 +428,11 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
     }
     fn body(standardized: &Self::Standardized) -> &serde_json::Value {
         &standardized.body
+    }
+    fn tool_thinking_turn_context(
+        standardized: &Self::Standardized,
+    ) -> &crate::hub_v1::V3ToolThinkingTurnContext {
+        &standardized.tool_thinking_turn_context
     }
     fn policy_target(policy: &Self::Policy) -> &V3Target10ConcreteProviderSelected {
         &policy.target
@@ -500,19 +511,15 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
     fn prepare_before_send(
         _control: &mut Self::Control,
         manifest: &routecodex_v3_config::V3Config05ManifestPublished,
-        _server_id: &str,
+        server_id: &str,
         standardized: &mut Self::Standardized,
         _request_id: &str,
         _now_epoch_ms: u64,
         _trace: &mut Vec<&'static str>,
     ) -> Result<bool, V3Error01SourceRaised> {
-        let enabled = manifest
-            .features
-            .get("tool_thinking")
-            .copied()
-            .unwrap_or(false);
-        if !enabled {
-            return Ok(false);
+        let enabled = crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id);
+        if standardized.tool_thinking_turn_context.enabled_flag() {
+            return Ok(true);
         }
         let current_payload_start = crate::hub_v1::current_v3_tool_thinking_payload_start(
             &standardized.body,
@@ -526,7 +533,7 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
                 V3InternalErrorCode::V3Req04StandardizedChat,
             )
         })?;
-        crate::hub_v1::inject_v3_tool_thinking_guidance_at_req04(
+        standardized.tool_thinking_turn_context = crate::hub_v1::compile_v3_tool_thinking_turn_context_at_req04(
             &mut standardized.body,
             current_payload_start,
             enabled,

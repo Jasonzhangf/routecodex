@@ -11,6 +11,7 @@ use servertool_core::cli_contract::{
     ServertoolCliProjectionToolArgumentsInput,
 };
 use servertool_core::outcome_contract::is_client_exec_cli_projection;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 const STOPLESS_CALL_ID: &str = "call_stopless_reasoning";
@@ -18,26 +19,71 @@ const STOPLESS_CLI_COMMAND: &str = "routecodex hook run reasoningStop";
 
 pub(crate) const V3_TOOL_THINKING_GUIDANCE: &str = r#"工具调用协议（只适用于本轮工具调用，不适用于普通回答）：
 
-每次发起工具调用时，必须在工具参数 JSON 对象本层增加以下字段，并立即输出工具调用：
+每次发起工具调用时，必须在工具参数 JSON 对象本层增加 `reason`，并立即输出工具调用：
 `reason`：现在调用该工具的唯一直接动机；短句，只说动机，不写计划、步骤、结果或工具参数。
-`goal_alignment_confidence`：以用户上一轮目标为标准，当前工具调用与目标的一致性评分；只能是 0 到 100 的整数，100 表示直接需要，0 表示完全无关。
-`model_id`：本次响应实际使用的模型 ID，填写精确值。
+`goal_alignment_confidence`：可选。以用户上一轮目标为标准，当前工具调用与目标的一致性评分；如提供，只能是 0 到 100 的整数，100 表示直接需要，0 表示完全无关。
+`model_id`：可选。如提供，填写本次响应实际使用的精确模型 ID。
 
 字段必须和原生工具参数处于同一个参数对象层级；对于 Anthropic 的 `input`、Responses/Chat 的 `arguments` 或其他参数容器，字段放在该容器对象的顶层。不要把字段嵌套到命令参数对象内部；RouteCodex 会在工具执行前剥离这三个辅助字段。
 
-正确：`{"name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\"}"}`
+正确：`{"name":"pwd","arguments":"{\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"<本次 provider-bound 请求的精确 model 值>\"}"}`
 错误：`{"name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"metadata\":{\"reason\":\"确认当前工作目录\"}}"}`
 
-同一轮多个工具调用时，每个工具调用对象分别填写字段；不要输出 fence、preamble、普通解释或第二份原因文本。不要省略字段，也不要用占位值；字段必须是本次调用的真实值。
+`<本次 provider-bound 请求的精确 model 值>` 只是格式示意，绝不能原样输出；模型只有在提供 `model_id` 时才填写本次请求实际使用的 provider-bound model 值。
+
+同一轮多个工具调用时，每个工具调用对象分别填写 `reason`；可选字段不要用占位值。不要输出 fence、preamble、普通解释或第二份原因文本。
 "#;
+
+pub(crate) const V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER: &str =
+    "<本次 provider-bound 请求的精确 model 值>";
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct V3ToolThinkingTurnContext {
+    enabled: bool,
+    original_custom_tool_names: BTreeSet<String>,
+}
+
+impl V3ToolThinkingTurnContext {
+    pub(crate) fn disabled() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn enabled(original_custom_tool_names: BTreeSet<String>) -> Self {
+        Self {
+            enabled: true,
+            original_custom_tool_names,
+        }
+    }
+
+    pub(crate) fn enabled_flag(&self) -> bool {
+        self.enabled
+    }
+
+    pub(crate) fn is_original_custom_tool(&self, name: &str) -> bool {
+        self.original_custom_tool_names.contains(name)
+    }
+
+    pub(crate) fn original_custom_tool_names(&self) -> Option<&BTreeSet<String>> {
+        self.enabled.then_some(&self.original_custom_tool_names)
+    }
+}
 
 pub(crate) fn inject_v3_tool_thinking_guidance_at_req04(
     payload: &mut Value,
     current_payload_start: usize,
     enabled: bool,
 ) -> Result<(), V3HubRelayRequestError> {
+    let _ = compile_v3_tool_thinking_turn_context_at_req04(payload, current_payload_start, enabled)?;
+    Ok(())
+}
+
+pub(crate) fn compile_v3_tool_thinking_turn_context_at_req04(
+    payload: &mut Value,
+    current_payload_start: usize,
+    enabled: bool,
+) -> Result<V3ToolThinkingTurnContext, V3HubRelayRequestError> {
     if !enabled {
-        return Ok(());
+        return Ok(V3ToolThinkingTurnContext::disabled());
     }
     // Gemini has a separate native functionCall contract and is explicitly
     // excluded from tool-thinking JSON injection in v1.
@@ -52,9 +98,11 @@ pub(crate) fn inject_v3_tool_thinking_guidance_at_req04(
                     .any(|tool| tool.get("function_declarations").is_some())
             })
     {
-        return Ok(());
+        return Ok(V3ToolThinkingTurnContext::disabled());
     }
-    inject_v3_tool_thinking_fields_into_tool_schemas(payload);
+    inject_v3_tool_thinking_fields_into_tool_schemas(payload)
+        .map_err(|reason| V3HubRelayRequestError::ToolThinkingSchemaInvalid { reason })?;
+    let original_custom_tool_names = wrap_v3_custom_tools_at_req04(payload)?;
     inject_tool_thinking_into_tool_list_guidance(payload);
     if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
         if current_payload_start > messages.len() {
@@ -64,7 +112,91 @@ pub(crate) fn inject_v3_tool_thinking_guidance_at_req04(
             });
         }
     }
+    Ok(V3ToolThinkingTurnContext::enabled(original_custom_tool_names))
+}
+
+fn wrap_v3_custom_tools_at_req04(
+    payload: &mut Value,
+) -> Result<BTreeSet<String>, V3HubRelayRequestError> {
+    let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
+        return Ok(BTreeSet::new());
+    };
+    let mut names = BTreeSet::new();
+    for (index, tool) in tools.iter_mut().enumerate() {
+        let Some(row) = tool.as_object() else { continue };
+        if row.get("type").and_then(Value::as_str) != Some("custom") {
+            continue;
+        }
+        let name = row
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| V3HubRelayRequestError::ToolThinkingSchemaInvalid {
+                reason: format!("custom tool at $.tools[{index}] has no non-empty name"),
+            })?
+            .to_string();
+        let mut parameters = json!({
+            "type":"object",
+            "properties":{
+                "input":{"type":"string","description":"原生 custom tool 的完整输入，原样填写"},
+                "reason":{"type":"string","description":"当前工具调用的唯一直接动机，只说动机，简短"},
+                "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100},
+                "model_id":{"type":"string"}
+            },
+            "required":["input","reason"],
+            "additionalProperties":false
+        });
+        // Keep the provider-facing wrapper owned by Req04. Existing custom
+        // declaration fields are copied only into the function surface; the
+        // original declaration is represented by typed provenance, not payload.
+        let mut function = serde_json::Map::new();
+        function.insert("name".to_string(), Value::String(name.clone()));
+        if let Some(description) = row.get("description") {
+            function.insert("description".to_string(), description.clone());
+        }
+        function.insert("parameters".to_string(), parameters.take());
+        *tool = json!({"type":"function","function":function});
+        names.insert(name);
+    }
+    Ok(names)
+}
+
+pub(crate) fn bind_v3_tool_thinking_guidance_to_wire_model_at_req04(
+    payload: &mut Value,
+    wire_model_id: &str,
+) -> Result<(), String> {
+    let wire_model_id = wire_model_id.trim();
+    if wire_model_id.is_empty() {
+        return Err("selected wire model id is empty".to_string());
+    }
+    let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for tool in tools {
+        replace_v3_tool_thinking_model_placeholder(tool, wire_model_id);
+    }
     Ok(())
+}
+
+fn replace_v3_tool_thinking_model_placeholder(value: &mut Value, wire_model_id: &str) {
+    match value {
+        Value::String(text) => {
+            if text.contains(V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER) {
+                *text = text.replace(V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER, wire_model_id);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                replace_v3_tool_thinking_model_placeholder(value, wire_model_id);
+            }
+        }
+        Value::Object(object) => {
+            for value in object.values_mut() {
+                replace_v3_tool_thinking_model_placeholder(value, wire_model_id);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
 }
 
 pub(crate) fn current_v3_tool_thinking_payload_start(payload: &Value) -> Result<usize, String> {
@@ -80,77 +212,106 @@ pub(crate) fn current_v3_tool_thinking_payload_start(payload: &Value) -> Result<
     Ok(0)
 }
 
-fn inject_v3_tool_thinking_fields_into_tool_schemas(payload: &mut Value) {
+fn inject_v3_tool_thinking_fields_into_tool_schemas(payload: &mut Value) -> Result<(), String> {
     let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
-        return;
+        return Ok(());
     };
     for tool in tools {
-        if let Some(schema) = tool.get_mut("input_schema") {
-            inject_v3_tool_thinking_fields_into_schema(schema);
-        }
-        if let Some(schema) = tool.get_mut("parameters") {
-            inject_v3_tool_thinking_fields_into_schema(schema);
-        }
-        if let Some(schema) = tool
-            .get_mut("function")
-            .and_then(Value::as_object_mut)
-            .and_then(|function| function.get_mut("parameters"))
-        {
-            inject_v3_tool_thinking_fields_into_schema(schema);
-        }
+        inject_v3_tool_thinking_fields_into_tool(tool)?;
     }
+    Ok(())
 }
 
-pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) {
-    let Some(schema) = schema.as_object_mut() else {
-        return;
-    };
-    let properties = schema
-        .entry("properties".to_string())
-        .or_insert_with(|| json!({}));
-    let Some(properties) = properties.as_object_mut() else {
-        return;
-    };
-    properties.entry("reason".to_string()).or_insert_with(|| {
-        json!({
-            "type": "string",
-            "description": "当前工具调用的唯一直接动机，只说动机，简短"
-        })
-    });
-    properties
-        .entry("goal_alignment_confidence".to_string())
-        .or_insert_with(|| {
-            json!({
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 100,
-                "description": "当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"
-            })
-        });
-    properties.entry("model_id".to_string()).or_insert_with(|| {
-        json!({
-            "type": "string",
-            "description": "本次响应实际使用的模型 ID"
-        })
-    });
-    let required = schema
-        .entry("required".to_string())
-        .or_insert_with(|| json!([]));
-    let Some(required) = required.as_array_mut() else {
-        return;
-    };
-    for field in ["reason", "goal_alignment_confidence", "model_id"] {
-        if !required.iter().any(|value| value.as_str() == Some(field)) {
-            required.push(Value::String(field.to_string()));
+fn inject_v3_tool_thinking_fields_into_tool(tool: &mut Value) -> Result<(), String> {
+    if let Some(schema) = tool.get_mut("input_schema") {
+        inject_v3_tool_thinking_fields_into_schema(schema)?;
+    }
+    if let Some(schema) = tool.get_mut("parameters") {
+        inject_v3_tool_thinking_fields_into_schema(schema)?;
+    }
+    if let Some(schema) = tool
+        .get_mut("function")
+        .and_then(Value::as_object_mut)
+        .and_then(|function| function.get_mut("parameters"))
+    {
+        inject_v3_tool_thinking_fields_into_schema(schema)?;
+    }
+    if let Some(children) = tool.get_mut("tools").and_then(Value::as_array_mut) {
+        for child in children {
+            inject_v3_tool_thinking_fields_into_tool(child)?;
         }
     }
+    Ok(())
+}
+
+pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> Result<(), String> {
+    let Some(schema) = schema.as_object_mut() else {
+        return Err("tool-thinking schema must be an object".to_string());
+    };
+    if let Some(properties) = schema.get("properties") {
+        let properties = properties
+            .as_object()
+            .ok_or_else(|| "tool-thinking schema properties must be an object".to_string())?;
+        for field in ["reason", "goal_alignment_confidence", "model_id"] {
+            if properties.contains_key(field) {
+                // A provider tool may already own one of these names as a
+                // business argument. Never overwrite or reinterpret that
+                // native field; leave this schema untouched and let Resp03
+                // classify any response as native data.
+                return Ok(());
+            }
+        }
+    }
+    if let Some(required) = schema.get("required") {
+        if !required.is_array() {
+            return Err("tool-thinking schema required must be an array".to_string());
+        }
+    }
+    if !schema.contains_key("properties") {
+        schema.insert("properties".to_string(), json!({}));
+    }
+    if !schema.contains_key("required") {
+        schema.insert("required".to_string(), json!([]));
+    }
+    {
+        let properties = schema
+            .get_mut("properties")
+            .and_then(Value::as_object_mut)
+            .expect("validated tool-thinking properties object");
+        properties.insert("reason".to_string(), json!({
+            "type": "string",
+            "description": "当前工具调用的唯一直接动机，只说动机，简短"
+        }));
+        properties.insert("goal_alignment_confidence".to_string(), json!({
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"
+        }));
+        properties.insert("model_id".to_string(), json!({
+            "type": "string",
+            "description": "本次响应实际使用的模型 ID"
+        }));
+    }
+    let required = schema
+        .get_mut("required")
+        .and_then(Value::as_array_mut)
+        .expect("validated tool-thinking required array");
+    if !required.iter().any(|value| value.as_str() == Some("reason")) {
+        required.push(Value::String("reason".to_string()));
+    }
+    Ok(())
 }
 
 fn inject_tool_thinking_into_tool_list_guidance(payload: &mut Value) {
     let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
         return;
     };
+    let mut guidance_injected = false;
     for tool in tools {
+        if guidance_injected || !is_v3_tool_thinking_guidance_anchor(tool) {
+            continue;
+        }
         let tool_name = tool
             .get("name")
             .and_then(Value::as_str)
@@ -160,6 +321,7 @@ fn inject_tool_thinking_into_tool_list_guidance(payload: &mut Value) {
         }) {
             continue;
         }
+        guidance_injected = true;
         if let Some(function) = tool.get_mut("function") {
             if let Some(description) = function.get_mut("description") {
                 append_v3_tool_thinking_guidance_to_text(description);
@@ -178,6 +340,22 @@ fn inject_tool_thinking_into_tool_list_guidance(payload: &mut Value) {
             );
         }
     }
+}
+
+fn is_v3_tool_thinking_guidance_anchor(tool: &Value) -> bool {
+    let Some(object) = tool.as_object() else {
+        return false;
+    };
+    if matches!(
+        object.get("type").and_then(Value::as_str),
+        Some("web_search" | "web_search_preview" | "namespace" | "tool_search")
+    ) {
+        return false;
+    }
+    object.get("function").is_some()
+        || object.get("input_schema").is_some()
+        || object.get("parameters").is_some()
+        || matches!(object.get("type").and_then(Value::as_str), Some("function" | "custom"))
 }
 
 fn append_v3_tool_thinking_guidance_to_text(value: &mut Value) {
@@ -281,6 +459,7 @@ pub(crate) fn govern_v3_servertool_request_at_req04(
     (
         Option<V3StoplessCenterState>,
         Option<V3WebSearchCenterState>,
+        V3ToolThinkingTurnContext,
     ),
     V3HubRelayRequestError,
 > {
@@ -323,12 +502,12 @@ pub(crate) fn govern_v3_servertool_request_at_req04(
     } else {
         None
     };
-    inject_v3_tool_thinking_guidance_at_req04(
+    let tool_thinking_context = compile_v3_tool_thinking_turn_context_at_req04(
         payload,
         current_payload_start,
         tool_thinking_enabled,
     )?;
-    Ok((stopless_state, web_search_state))
+    Ok((stopless_state, web_search_state, tool_thinking_context))
 }
 
 pub fn apply_v3_web_search_request_hook_at_req04(

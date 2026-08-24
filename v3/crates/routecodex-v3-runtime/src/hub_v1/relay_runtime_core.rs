@@ -320,6 +320,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
     /// 按请求 model 的编译期 mode 启用）。
     fn request_hook_profile(
         manifest: &V3Config05ManifestPublished,
+        server_id: &str,
         payload: &Value,
     ) -> Result<V3HubServertoolRequestProfile, V3RelayCoreError>;
 
@@ -372,6 +373,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         web_search_state: Option<&V3WebSearchCenterState>,
         retain_response_cipher: bool,
         tool_thinking_enabled: bool,
+        expected_model_id: &str,
     ) -> Result<Value, V3RelayCoreError>;
     /// 构建 SSE provider outcome。
     fn build_sse_outcome(
@@ -469,7 +471,7 @@ where
     };
     let requested_model = C::model_from_endpoint_path(endpoint_path)?;
     // 请求侧 hook profile（Mode B web-search 等）在 req01 之前计算，避免 payload move。
-    let request_hook_profile = C::request_hook_profile(manifest, &payload)?;
+    let request_hook_profile = C::request_hook_profile(manifest, server_id, &payload)?;
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         payload,
         C::ENTRY_PROTOCOL,
@@ -824,6 +826,7 @@ where
                     request_web_search_state.as_ref(),
                     retain_response_cipher,
                     request_tool_thinking_enabled,
+                    &selected_target_model_id,
                 ) {
                     Ok(client_response) => client_response,
                     // 治理层拦截但入口无投影路径：非 provider 失败，禁止进入失败

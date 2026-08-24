@@ -16,26 +16,10 @@ pub(super) fn project_openai_responses_custom_tools_to_function_schema(
             continue;
         };
         if row.get("type").and_then(Value::as_str) == Some("function") {
-            let is_apply_patch = row
-                .get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| function.get("name"))
-                .and_then(Value::as_str)
-                .is_some_and(|name| name.eq_ignore_ascii_case("apply_patch"));
-            if is_apply_patch {
-                let function = row
-                    .get_mut("function")
-                    .and_then(Value::as_object_mut)
-                    .ok_or_else(|| {
-                        format!(
-                            "MalformedOutboundField target_protocol=responses path=$.tools[{index}].function"
-                        )
-                    })?;
-                let parameters = function
-                    .entry("parameters".to_string())
-                    .or_insert_with(|| serde_json::json!({"type":"object"}));
-                super::servertool_hooks::inject_v3_tool_thinking_fields_into_schema(parameters);
-            }
+            // Req04 already owns Tool-Thinking schema compilation. This
+            // projection stage only preserves an already-governed function
+            // surface; injecting here would create a second semantic owner and
+            // collide with the reserved fields on custom wrappers.
             continue;
         }
         if row.get("type").and_then(Value::as_str) != Some("custom") {
@@ -419,38 +403,9 @@ fn normalize_openai_chat_function_tool(
     path: &str,
 ) -> Result<Value, String> {
     if row.get("function").and_then(Value::as_object).is_some() {
-        let mut normalized = row.clone();
-        let is_apply_patch = row
-            .get("function")
-            .and_then(Value::as_object)
-            .and_then(|function| function.get("name"))
-            .and_then(Value::as_str)
-            == Some("apply_patch");
-        if is_apply_patch {
-            let function = normalized
-                .get_mut("function")
-                .and_then(Value::as_object_mut)
-                .ok_or_else(|| {
-                    format!(
-                        "MalformedOutboundField target_protocol=openai_chat path={path}.function"
-                    )
-                })?;
-            let parameters = function
-                .get("parameters")
-                .and_then(Value::as_object)
-                .map(|parameters| parameters.len() <= 1)
-                .unwrap_or(true);
-            if parameters {
-                function.insert(
-                    "parameters".to_string(),
-                    openai_chat_freeform_custom_tool_parameters(),
-                );
-            }
-            if let Some(parameters) = function.get_mut("parameters") {
-                super::servertool_hooks::inject_v3_tool_thinking_fields_into_schema(parameters);
-            }
-        }
-        return Ok(Value::Object(normalized));
+        // Req04 owns the only Tool-Thinking schema compilation. This adapter
+        // preserves the already-governed function declaration verbatim.
+        return Ok(Value::Object(row.clone()));
     }
     let mut function = Map::new();
     for key in ["name", "description", "parameters", "strict"] {
@@ -465,7 +420,7 @@ fn normalize_openai_chat_function_tool(
 }
 
 fn openai_chat_freeform_custom_tool_parameters() -> Value {
-    let mut schema = serde_json::json!({
+    serde_json::json!({
         "type": "object",
         "properties": {
             "input": {
@@ -475,7 +430,5 @@ fn openai_chat_freeform_custom_tool_parameters() -> Value {
         },
         "required": ["input"],
         "additionalProperties": false
-    });
-    super::servertool_hooks::inject_v3_tool_thinking_fields_into_schema(&mut schema);
-    schema
+    })
 }

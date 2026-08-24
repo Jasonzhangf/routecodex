@@ -597,11 +597,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         } else {
             V3HubContinuationLookup::new(None, base_hub_scope)
         };
-        let tool_thinking_enabled = manifest
-            .features
-            .get("tool_thinking")
-            .copied()
-            .unwrap_or(false);
+        let tool_thinking_enabled =
+            v3_tool_thinking_enabled_for_server(manifest, &input.server_id);
         let request_hook_profile = if request_web_search_execution_mode
             .is_metadata_center_local_search()
             || tool_thinking_enabled
@@ -626,6 +623,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
     let mut response_hook_profile =
         response_hook_profile.with_tool_thinking_enabled(request_tool_thinking_enabled);
+    response_hook_profile = response_hook_profile
+        .with_tool_thinking_turn_context(request_outcome.tool_thinking_turn_context());
     if request_web_search_execution_mode.is_metadata_center_local_search() {
         response_hook_profile =
             response_hook_profile.with_web_search_execution_mode(request_web_search_execution_mode);
@@ -713,6 +712,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let selected_target_model_id = selected.candidate.model_id.clone();
         let selected_target_compatibility_profile =
             selected.candidate.compatibility_profile.clone();
+        response_hook_profile = response_hook_profile
+            .clone()
+            .with_toolreason_expected_model_id(&selected_target_model_id);
         // VR 路由决策时算好的"保留响应密文"标记：仅 gpt 模型 + 单一 provider 候选时
         // 保留（Codex 客户端需要官方密文重建 reasoning 历史），其余 Resp03 一律剥离。
         // 该标记写入响应侧 profile，响应侧只消费此结果，不重复判定。

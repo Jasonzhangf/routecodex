@@ -1,0 +1,375 @@
+version = 3
+
+[pipelines.hub_v1]
+skeleton = "hub_v1"
+
+[features]
+tool_thinking = false
+toolreason_client_projection = false
+responses_direct_stopless_center = false
+responses_direct = true
+debug_events = true
+strip_client_response_id = true
+responses_continuation_disabled = true
+
+[error]
+provider_error_default_path = [
+  { step = "wait_retry", retry_mode = "retry_same", max_attempts = 3, backoff_ms = 0 },
+  { step = "cooldown", scope = "provider_model", duration_ms = 900000, provider_global_failure = false },
+  { step = "project", status = 503, reason_code = "provider_failure", message_mode = "code_only" },
+]
+
+[[error.provider_error_action_policy]]
+policy_id = "account_http_401_two_errors"
+[error.provider_error_action_policy.match]
+http_status = 401
+[[error.provider_error_action_policy.path]]
+step = "wait_retry"
+retry_mode = "reselect_before_client_projection"
+max_attempts = 2
+backoff_ms = 1000
+[[error.provider_error_action_policy.path]]
+step = "cooldown"
+scope = "auth_key"
+duration_ms = 3600000
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 502
+reason_code = "provider_account_http_401"
+message_mode = "code_only"
+
+[[error.provider_error_action_policy]]
+policy_id = "account_http_403_two_errors"
+[error.provider_error_action_policy.match]
+http_status = 403
+[[error.provider_error_action_policy.path]]
+step = "wait_retry"
+retry_mode = "reselect_before_client_projection"
+max_attempts = 2
+backoff_ms = 1000
+[[error.provider_error_action_policy.path]]
+step = "cooldown"
+scope = "auth_key"
+duration_ms = 3600000
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 502
+reason_code = "provider_account_http_403"
+message_mode = "code_only"
+
+[[error.provider_error_action_policy]]
+policy_id = "glmrelay_openai_cpu_overloaded_200"
+[error.provider_error_action_policy.scope]
+provider_id = "glmrelay_openai"
+[error.provider_error_action_policy.match]
+http_status = 200
+content_contains_any = ["system cpu overloaded"]
+[[error.provider_error_action_policy.path]]
+step = "wait_retry"
+retry_mode = "reselect_before_client_projection"
+max_attempts = 2
+backoff_ms = 1000
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 502
+reason_code = "provider_system_cpu_overloaded"
+public_code = "upstream_overloaded"
+message_mode = "code_only"
+
+[[error.provider_error_action_policy]]
+policy_id = "glmrelay_openai_invalid_field_type_200"
+[error.provider_error_action_policy.scope]
+provider_id = "glmrelay_openai"
+[error.provider_error_action_policy.match]
+http_status = 200
+content_contains_any = ["Type invalid, should be set"]
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 400
+reason_code = "provider_invalid_field_type"
+public_code = "provider_invalid_field_type"
+message_mode = "code_only"
+
+# === 4444 compact 独立池：MiniMax primary；OpenCode Go DeepSeek V4 Flash backup ===
+[route_groups.routecodex_v3_4444]
+compact_route_object = "compact-default"
+
+[[route_groups.routecodex_v3_4444.route_policies]]
+id = "compact-purpose"
+precedence = 10
+condition = { kind = "current_compaction" }
+action = { select_route_pool = "compact" }
+
+
+
+
+
+[route_groups.routecodex_v3_4444.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
+  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 2 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4 },
+]
+
+[route_groups.routecodex_v3_4444.pools.compact]
+route_object = "compact-default"
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses" }
+targets = [
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 2 },
+]
+
+# multimodal / web_search 请求最高优先级路由到 MiniMax-M3（支持
+# multimodal + hosted web search；web_search 官方仅 Anthropic Messages API）。
+# 不限制 entry_protocol：openai_chat / anthropic / responses 入口都覆盖
+# （对齐 anthropic_v3_10000 已验证做法；能力信号与入口协议无关）。
+[route_groups.routecodex_v3_4444.pools.multimodal]
+selection = { strategy = "priority" }
+match = { precedence = 0, required_capabilities = ["multimodal"] }
+targets = [
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 2 },
+]
+
+[route_groups.routecodex_v3_4444.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 2 },
+]
+
+[route_groups.routecodex_v3_4444.pools.search]
+selection = { strategy = "priority" }
+match = { precedence = 21, entry_protocol = "responses" }
+targets = [
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
+  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 2 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4 },
+]
+
+# thinking / coding 请求路由到 deepseek-v4-flash（本地推理优先；不依赖
+# capabilities 集合——thinking/coding 是分类路由名，由 request 侧工具类别
+# （update_plan/read 等 thinking 工具、apply_patch/write 等 coding 工具）
+# 触发，required_capabilities 不包含 thinking/coding）。
+[route_groups.routecodex_v3_4444.pools.thinking]
+selection = { strategy = "priority" }
+match = { precedence = 2, entry_protocol = "responses" }
+targets = [
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
+  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 2 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4 },
+]
+
+[route_groups.routecodex_v3_4444.pools.coding]
+selection = { strategy = "priority" }
+match = { precedence = 3, entry_protocol = "responses" }
+targets = [
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
+  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 2 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4 },
+]
+
+[route_groups.routecodex_v3_4444.pools.tools]
+selection = { strategy = "priority" }
+match = { precedence = 30, required_capabilities = ["tools"] }
+targets = [
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
+  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 2 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4 },
+]
+
+[route_groups.routecodex_v3_4444.pools.longcontext]
+selection = { strategy = "priority" }
+match = { precedence = 1, min_input_tokens = 180000 }
+targets = [
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
+  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 2 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4 },
+]
+
+[debug]
+log_console = true
+log_file = "/Users/fanzhang/.rcc/logs/server-v3-10000-toolreason.log"
+snapshots = true
+snapshot_direct = true
+snapshot_stages = "client-request,provider-request,provider-response,client-response"
+dry_run = true
+retention = { raw_requests = 16, raw_responses = 16, events = 256 }
+
+# === 10000: OpenCode Go primary；MiniMax > Fable backup ===
+[route_groups.anthropic_v3_10000.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 2 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 3 },
+]
+
+# multimodal / web_search 请求最高优先级路由到 MiniMax-M3（支持 multimodal +
+# hosted web search；web_search 官方仅 Anthropic Messages API）。不限制
+# entry_protocol：10000 的 openai_chat 与 responses 入口都覆盖。
+[route_groups.anthropic_v3_10000.pools.multimodal]
+selection = { strategy = "priority" }
+match = { precedence = 0, required_capabilities = ["multimodal"] }
+targets = [
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 1 },
+]
+
+[route_groups.anthropic_v3_10000.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 1 },
+]
+
+[route_groups.anthropic_v3_10000.pools.tools]
+selection = { strategy = "priority" }
+match = { precedence = 30, models = ["deepseek-v4-flash"], required_capabilities = ["tools"] }
+targets = [
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 1, weight = 1 },
+]
+
+[route_groups.anthropic_v3_10000.pools.thinking]
+selection = { strategy = "priority" }
+match = { precedence = 2, entry_protocol = "responses", required_capabilities = ["thinking"] }
+targets = [
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 1, weight = 1 },
+]
+
+[route_groups.anthropic_v3_10000.pools.coding]
+selection = { strategy = "priority" }
+match = { precedence = 3, entry_protocol = "responses", required_capabilities = ["coding"] }
+targets = [
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 1, weight = 1 },
+]
+
+[route_groups.anthropic_v3_10000.pools.longcontext]
+selection = { strategy = "weighted" }
+match = { precedence = 1, models = ["deepseek-v4-flash"], min_input_tokens = 180000 }
+targets = [
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 1, weight = 1 },
+]
+
+[route_groups.responses_v3_7777.pools.anthropic_entry]
+selection = { strategy = "priority" }
+match = { precedence = 100, entry_protocol = "anthropic" }
+targets = [
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 2, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 3, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 4, weight = 1 },
+  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 5, weight = 1 },
+]
+
+# === 7777: Ox Alpha is explicit-model only while broad SSE compatibility is unstable ===
+[route_groups.responses_v3_7777.pools.ox_alpha_direct]
+selection = { strategy = "priority" }
+match = { precedence = -1, entry_protocol = "responses", models = ["x-preview-f-free"] }
+targets = [
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 1, weight = 1 },
+]
+
+[route_groups.responses_v3_7777.pools.longcontext]
+selection = { strategy = "priority" }
+match = { precedence = 1, entry_protocol = "responses", min_input_tokens = 180000 }
+targets = [
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 2, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 4, weight = 1 },
+  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 5, weight = 1 },
+]
+
+[route_groups.responses_v3_7777.pools.thinking]
+selection = { strategy = "weighted" }
+match = { precedence = 2, entry_protocol = "responses", required_capabilities = ["thinking"] }
+targets = [
+  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 1, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 2, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 3, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 5, weight = 1 },
+  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 6, weight = 1 },
+]
+
+[route_groups.responses_v3_7777.pools.coding]
+selection = { strategy = "weighted" }
+match = { precedence = 3, entry_protocol = "responses", required_capabilities = ["coding"] }
+targets = [
+  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 1, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 1, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 5, weight = 1 },
+  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 6, weight = 1 },
+]
+
+[route_groups.responses_v3_7777.pools.multimodal]
+selection = { strategy = "weighted" }
+match = { precedence = 0, entry_protocol = "responses", required_capabilities = ["multimodal"] }
+targets = [
+  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 1, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 1, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 3, weight = 1 },
+]
+
+[route_groups.responses_v3_7777.pools.web_search]
+selection = { strategy = "weighted" }
+match = { precedence = 20, entry_protocol = "responses", required_capabilities = ["web_search"] }
+targets = [
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 3, weight = 1 },
+  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 4, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 5, weight = 1 },
+]
+
+[route_groups.responses_v3_7777.pools.search]
+selection = { strategy = "weighted" }
+match = { precedence = 21, entry_protocol = "responses" }
+targets = [
+  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 1, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 1, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 3, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 4, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 5, weight = 1 },
+]
+
+[route_groups.responses_v3_7777.pools.tools]
+selection = { strategy = "weighted" }
+match = { precedence = 30, required_capabilities = ["tools"] }
+targets = [
+  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 1, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 1, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 3, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 4, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 5, weight = 1 },
+]
+
+[route_groups.responses_v3_7777.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 2, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 5, weight = 1 },
+  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 6, weight = 1 },
+]
+
+[servers.toolreason_test_10000]
+bind = "127.0.0.1"
+port = 10000
+routing_group = "anthropic_v3_10000"
+features = { stopless_center = false, responses_direct_stopless_center = false, tool_thinking = true, toolreason_client_projection = true }
+expose_models = ["deepseek-v4-flash"]
+
+[servers.toolreason_test_10000.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }

@@ -57,12 +57,10 @@ fn adaptive_provider_probe_starts_at_one_minute_after_three_same_key_failures() 
             .expect("same-key failure");
     }
 
-    assert!(
-        store
-            .provider_cooldown_probe_keys_due(60_101)
-            .expect("probe due query")
-            .is_empty()
-    );
+    assert!(store
+        .provider_cooldown_probe_keys_due(60_101)
+        .expect("probe due query")
+        .is_empty());
     assert_eq!(
         store
             .provider_cooldown_probe_keys_due(60_102)
@@ -240,12 +238,10 @@ fn recoverable_key_probe_is_single_flight_and_global_probe_is_not_duplicated() {
         .acquire_provider_key_health_probe("provider-a", "key-a", "model-a")
         .expect("probe acquisition")
         .expect("first probe owns key");
-    assert!(
-        store
-            .acquire_provider_key_health_probe("provider-a", "key-a", "model-a")
-            .expect("single-flight check")
-            .is_none()
-    );
+    assert!(store
+        .acquire_provider_key_health_probe("provider-a", "key-a", "model-a")
+        .expect("single-flight check")
+        .is_none());
     store
         .complete_probe_success_at_generation(
             permit.provider_id(),

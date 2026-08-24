@@ -298,6 +298,7 @@ mod tests {
             None,
             false,
             true,
+            "MiniMax-M3",
         )
         .expect("relay response hook must project without protocol failure");
 

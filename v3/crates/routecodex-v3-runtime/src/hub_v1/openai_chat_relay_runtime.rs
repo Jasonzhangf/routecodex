@@ -337,6 +337,7 @@ fn project_json_response(
     web_search_center_state: Option<&V3WebSearchCenterState>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
+    expected_model_id: &str,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
     // SSE 流式帧 / JSON 兜底：候选 Mode B 时，payload 内出现**本地** websearch
     // function tool call 必须 fail-fast（禁止静默透传——内部工具无客户端投影）。
@@ -413,6 +414,7 @@ fn project_json_response(
         .with_web_search_execution_mode(web_search_execution_mode)
         .with_retain_response_cipher(retain_response_cipher)
         .with_tool_thinking_enabled(tool_thinking_enabled)
+        .with_toolreason_expected_model_id(expected_model_id)
         // JSON projection is also used after a provider SSE has been
         // materialized for a non-streaming client response.  Observation must
         // remain enabled there; the live SSE path does not invoke this
@@ -776,16 +778,17 @@ fn enqueue_sse_client_chunks(
                 &payload,
                 &mut state.tool_names,
             );
-            crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
+            crate::hooks::apply_relay_toolreason_sse_hook(
                 &mut payload,
-                true,
                 &state.tool_names,
                 &mut state.pending_toolreasons,
                 &mut state.toolreason_emitted,
                 true,
                 Some(&state.session_id),
                 Some(state.request_id.as_str()),
-                Some(&mut state.toolreason_argument_buffers),
+                Some(state.provider_outcome.model_id.as_str()),
+                &mut state.toolreason_argument_buffers,
+                None,
             );
         }
         let transport_object = V3OpenAiChatSseTransportObject::new(
@@ -817,6 +820,7 @@ fn enqueue_sse_client_chunks(
             state.web_search_execution_mode,
             state.web_search_center_state.as_ref(),
             state.retain_response_cipher,
+            state.provider_outcome.model_id.as_str(),
         )
         .map_err(|error| match error {
             // 治理层拒绝（web_search Mode B 无投影路径）：不是 provider 流
@@ -1082,16 +1086,17 @@ fn project_responses_sse_as_openai_chat_stream(
                                         &payload,
                                         &mut toolreason.tool_names,
                                     );
-                                    crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
+                                    crate::hooks::apply_relay_toolreason_sse_hook(
                                         &mut payload,
-                                        true,
                                         &toolreason.tool_names,
                                         &mut toolreason.pending_reasons,
                                         &mut toolreason.reason_emitted,
                                         true,
                                         Some(session_id.as_str()),
                                         Some(request_id.as_str()),
-                                        Some(&mut toolreason.argument_buffers),
+                                        Some(provider_outcome.model_id.as_str()),
+                                        &mut toolreason.argument_buffers,
+                                        None,
                                     );
                                 }
                                 let governed = project_sse_event_payload(
@@ -1102,6 +1107,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                     web_search_execution_mode,
                                     web_search_center_state.as_ref(),
                                     retain_response_cipher,
+                                    provider_outcome.model_id.as_str(),
                                 )
                                 .map_err(|error| {
                                     match error {
@@ -1318,6 +1324,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
 
     fn request_hook_profile(
         manifest: &V3Config05ManifestPublished,
+        server_id: &str,
         payload: &Value,
     ) -> Result<V3HubServertoolRequestProfile, V3RelayCoreError> {
         // Mode B 判定用请求声明的 model 的编译期 mode（Req04 在 route 之前）。
@@ -1330,11 +1337,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             Some(model) => resolve_web_search_mode_and_backend(manifest, model).0,
             None => routecodex_v3_config::V3WebSearchExecutionMode::None,
         };
-        let tool_thinking_enabled = manifest
-            .features
-            .get("tool_thinking")
-            .copied()
-            .unwrap_or(false);
+        let tool_thinking_enabled = v3_tool_thinking_enabled_for_server(manifest, server_id);
         if request_web_search_execution_mode.is_metadata_center_local_search()
             || tool_thinking_enabled
         {
@@ -1423,6 +1426,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         web_search_state: Option<&V3WebSearchCenterState>,
         retain_response_cipher: bool,
         tool_thinking_enabled: bool,
+        expected_model_id: &str,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response(
             Some(request_id),
@@ -1437,6 +1441,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             web_search_state,
             retain_response_cipher,
             tool_thinking_enabled,
+            expected_model_id,
         )
         .map_err(|error| match error {
             V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {

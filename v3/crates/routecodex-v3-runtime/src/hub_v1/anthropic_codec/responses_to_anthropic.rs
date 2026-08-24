@@ -936,8 +936,6 @@ pub(super) fn responses_tool_as_anthropic_tool(
         })
         .cloned()
         .unwrap_or_else(|| json!({"type":"object"}));
-    let mut input_schema = input_schema;
-    super::super::servertool_hooks::inject_v3_tool_thinking_fields_into_schema(&mut input_schema);
     output.insert("input_schema".to_string(), input_schema);
     Ok(Value::Object(output))
 }
@@ -1028,7 +1026,6 @@ fn responses_custom_tool_as_anthropic_compatibility_tool(
         "required":["input"],
         "additionalProperties":false
     });
-    super::super::servertool_hooks::inject_v3_tool_thinking_fields_into_schema(&mut input_schema);
     Ok(json!({
         "name":name,
         "description":description,

@@ -674,6 +674,53 @@ resources:
     may_enter_client_body: false
     release_point: V3HubRespInbound02Normalized
     binding_status: anchored
+  - resource_id: v3.request.tool_thinking_turn_context
+    resource_kind: projection_resource
+    lifecycle: v3.tool_thinking_hook_skeleton.current_turn
+    owner_feature_id: v3.tool_thinking_hook_skeleton
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubReqChatProcess04Governed
+    identity: [requestId, pipelineId]
+    semantic_contract:
+      request_owner: Req04 compiles the request-local tool_thinking_json_v2 contract and records only original custom-tool provenance in this typed resource.
+      response_owner: Resp03 consumes the same-turn provenance after strict Phase 1 classification; only one valid nonempty reason authorizes all-or-nothing removal of supplied auxiliary keys and reasoning, while a valid custom input wrapper is mechanically restored for every terminal status.
+      parser_boundary: protocol and SSE adapters may carry complete native parameter containers but may not parse, strip, infer, or project Tool-Thinking semantics.
+      payload_boundary: this context is never serialized into request JSON, provider wire/options, protocol metadata, history, continuation, response JSON, or client SSE.
+      lifetime: request-local and immutable after Req04; released after Resp03/client projection for the same request.
+      retry_rule: Direct provider attempts reuse the context compiled before the first wire build; retries never rebuild provenance from the mutated tool list, while a Direct-to-Relay handoff recompiles from the untouched client request at Relay Req04.
+    allowed_writers: [compile_v3_tool_thinking_turn_context_at_req04]
+    allowed_readers: [V3DirectToolThinkingReq04Outcome, V3DirectResponseCompatContext, V3HubRelayRequestOutcome, V3HubRelayResponseHookProfile, V3HubRespChatProcess03Governed]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, MetadataCenter, provider_request_payload, provider_response_payload, client_response_payload, continuation_store, generic_sse_transport]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: V3HubRespChatProcess03Governed
+    required_gates: [tool_thinking_turn_context_payload_isolation, tool_thinking_custom_round_trip]
+    binding_status: source_controlled_pending_online_matrix
+  - resource_id: v3.response.tool_thinking_turn_result
+    resource_kind: projection_resource
+    lifecycle: v3.tool_thinking_hook_skeleton.current_turn
+    owner_feature_id: v3.tool_thinking_hook_skeleton
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubRespChatProcess03Governed
+    identity: [requestId, pipelineId]
+    semantic_contract:
+      producer: Resp03 finalizes exactly one typed status for an observed native tool-call turn after protocol completion.
+      valid_shape: Phase 1 OK carries a trimmed nonempty reason and one formatted projection text; confidence and model ID are optional diagnostics validated when present.
+      invalid_shape: MISSING, INVALID, and MISPLACED carry no projection text and authorize no redaction or reasoning.
+      projection_boundary: registered client-protocol projectors consume this typed result without inspecting visible IDs, prefixes, markers, ordinary reasoning, or history.
+      observation_boundary: exactly one canonical terminal observation consumes the same finalized result; projection diagnostics do not create a second terminal status.
+      payload_boundary: the typed result never enters provider/client payload, protocol metadata, history, continuation, debug payload, or MetadataCenter; only its registered normal reasoning projection may enter the client payload for OK.
+      lifetime: request-local; released after terminal observation and at-most-once client projection.
+    allowed_writers: [finalize_v3_tool_thinking_turn_at_resp03]
+    allowed_readers: [project_v3_tool_thinking_turn_result_at_resp03, log_v3_toolreason_observation_at_resp03_with_context]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, MetadataCenter, provider_request_payload, provider_response_payload, client_response_payload, continuation_store, generic_sse_transport, protocol_adapter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: V3HubRespChatProcess03Governed
+    required_gates: [tool_thinking_turn_result_payload_isolation, tool_thinking_one_terminal_one_projection]
+    binding_status: source_controlled_pending_online_matrix
   - resource_id: v3.hub.provider_wire_payload
     resource_kind: provider_wire
     lifecycle: v3.hub_pipeline.v1
@@ -697,6 +744,9 @@ resources:
       reused_wire_index_rule: a previously unseen non-empty id on an occupied wire index starts a new materialized call and must not concatenate arguments with the prior call
       continuation_rule: same-id and id-less deltas append to the active call for that wire index; a previously seen id on the same reused index reattaches to its original call
       cross_index_duplicate_rule: duplicate ids on different wire indices remain distinct inbound calls for Resp03 identity validation
+      tool_thinking_native_item_rule: protocol adapters preserve each complete native tool-call item, original native item, and exact parameter JSON bytes through RespInbound02 without inspecting auxiliary names
+      tool_thinking_duplicate_key_rule: Resp03 alone performs duplicate-aware strict parsing over retained parameter bytes; generic Value decoding may not erase duplicate-key evidence before the owner
+      tool_thinking_adapter_boundary: adapters may assemble protocol fragments and retain raw parameter bytes but may not classify, redact, restore custom shape, format reasoning, observe status, or project Tool-Thinking
     allowed_writers: [V3HubRespInbound02Normalized, V3HubRespChatProcess03Governed]
     allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespContinuation04Committed, V3HubRespOutbound05ClientSemantic]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3ServerRespOutbound06ClientFrame]
@@ -1908,21 +1958,15 @@ resources:
     owner_node: V3WebuiObservability
     identity: [port, requestKey, sequence]
     semantic_contract:
-      public_http_api: controlled_loopback_diagnostic_projection
-      listener_routes:
-      - /_routecodex/observability/snapshot
-      - /_routecodex/observability/events
-      listener_access: loopback_only
-      events_once_contract: terminal_json
-      admin_aggregation_route: /api/observability/poll
+      public_http_api: retired
       request_rows_max: 2048
       terminal_tombstones_max: 4096
       evicted_terminal_replay: explicit_resync_required
       event_log_cursor_gap: explicit_resync_required
       sequence_overflow: explicit_error
       control_state_in_payload: forbidden
-    allowed_writers: [record_v3_webui_started_for_context, record_v3_webui_event_for_context, record_v3_webui_projected_runtime_failure_for_context]
-    allowed_readers: [V3WebuiObservability::snapshot, V3WebuiObservability::since, observability_snapshot, observability_events, routecodex_v3_admin::api::observability::poll, v3.admin_webui.requests_page]
+    allowed_writers: [emit_v3_request_console_observation]
+    allowed_readers: [V3WebuiObservability::snapshot, V3WebuiObservability::since]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false

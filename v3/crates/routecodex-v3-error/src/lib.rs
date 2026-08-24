@@ -1178,6 +1178,19 @@ pub fn raise_v3_sse_provider_failure(
     )
 }
 
+pub fn raise_v3_sse_runtime_failure(
+    source_stage: &'static str,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> V3Error01SourceRaised {
+    build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        source_stage,
+        code,
+        message,
+    )
+}
+
 pub fn raise_v3_sse_client_disconnect() -> V3Error01SourceRaised {
     build_v3_error_01_source_raised(
         V3ErrorSourceKind::ClientDisconnect,
@@ -1311,6 +1324,21 @@ mod tests {
         assert_eq!(source.source_stage, "V3ProviderRespInbound01Raw");
         assert_eq!(source.code, "provider_response_sse_stream");
         assert_eq!(source.message, "provider broke");
+    }
+
+    #[test]
+    fn sse_runtime_failure_projects_through_the_complete_error_chain() {
+        let projected = project_v3_post_commit_sse_source(
+            raise_v3_sse_runtime_failure(
+                "V3ServerRespOutbound05ClientFrame",
+                "front_sse_response_empty",
+                "empty response",
+            ),
+            599,
+        );
+        assert_eq!(projected.status, 599);
+        assert_eq!(projected.chain, V3_ERROR_CHAIN_NODE_IDS);
+        assert_eq!(projected.body["error"]["code"], "front_sse_response_empty");
     }
 
     #[test]

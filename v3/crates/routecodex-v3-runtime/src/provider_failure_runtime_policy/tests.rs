@@ -1,8 +1,8 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::{
-    V3ErrorSourceKind, V3ProviderErrorFingerprint, V3ProviderHealthScope,
-    build_v3_error_01_source_raised,
+    build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderErrorFingerprint,
+    V3ProviderHealthScope,
 };
 use serde_json::json;
 
@@ -429,11 +429,9 @@ fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_al
         panic!("provider cooldown probe state must block every availability projection");
     };
     assert_eq!(attempted_candidates.len(), 2);
-    assert!(
-        attempted_candidates
-            .iter()
-            .all(|candidate| candidate.contains("provider_cooldown_probe_pending"))
-    );
+    assert!(attempted_candidates
+        .iter()
+        .all(|candidate| candidate.contains("provider_cooldown_probe_pending")));
 }
 
 fn assert_resolution_failure(
@@ -844,12 +842,10 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         projection.body["error"]["code"],
         "captured_target_plan_expansion_failed"
     );
-    assert!(
-        !projection
-            .body
-            .to_string()
-            .contains("prior provider returned 429")
-    );
+    assert!(!projection
+        .body
+        .to_string()
+        .contains("prior provider returned 429"));
 }
 
 #[test]
@@ -1087,16 +1083,12 @@ async fn transport_error_excludes_only_the_failed_provider_key() {
         1,
         "transport error must exclude only the failed provider key"
     );
-    assert!(
-        state
-            .failed_candidates
-            .contains(&"first:key1:gpt-test".to_string())
-    );
-    assert!(
-        !state
-            .failed_candidates
-            .contains(&"first:key2:gpt-test".to_string())
-    );
+    assert!(state
+        .failed_candidates
+        .contains(&"first:key1:gpt-test".to_string()));
+    assert!(!state
+        .failed_candidates
+        .contains(&"first:key2:gpt-test".to_string()));
 }
 
 #[tokio::test]

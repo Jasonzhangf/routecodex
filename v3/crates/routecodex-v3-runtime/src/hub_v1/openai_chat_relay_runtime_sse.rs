@@ -24,6 +24,7 @@ fn project_sse_event_payload(
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<&V3WebSearchCenterState>,
     retain_response_cipher: bool,
+    expected_model_id: &str,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
     let mut trace = Vec::new();
     project_json_response(
@@ -39,6 +40,7 @@ fn project_sse_event_payload(
         web_search_center_state,
         retain_response_cipher,
         false,
+        expected_model_id,
     )
 }
 
@@ -280,16 +282,17 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                             &payload,
                                             &mut toolreason.tool_names,
                                         );
-                                        crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
+                                        crate::hooks::apply_relay_toolreason_sse_hook(
                                             &mut payload,
-                                            true,
                                             &toolreason.tool_names,
                                             &mut toolreason.pending_reasons,
                                             &mut toolreason.reason_emitted,
                                             true,
                                             Some(session_id.as_str()),
                                             Some(request_id.as_str()),
-                                            Some(&mut toolreason.argument_buffers),
+                                            Some(provider_outcome.model_id.as_str()),
+                                            &mut toolreason.argument_buffers,
+                                            None,
                                         );
                                     }
                                     let governed = project_sse_event_payload(
@@ -300,6 +303,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                         web_search_execution_mode,
                                         web_search_center_state.as_ref(),
                                         retain_response_cipher,
+                                        provider_outcome.model_id.as_str(),
                                     )
                                     .map_err(|error| match error {
                                         V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {

@@ -3,10 +3,10 @@ use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde::Deserializer;
 use serde_json::{json, Map, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt;
 use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[derive(Clone, Copy)]
 pub(crate) struct V3ToolreasonObservationContext<'a> {
@@ -19,7 +19,26 @@ fn log_v3_toolreason_observation_at_resp03_with_context(
     stage: &str,
     context: V3ToolreasonObservationContext<'_>,
 ) {
-    let (status, fields) = classify_v3_toolreason_observation_at_resp03(reason);
+    log_v3_toolreason_observation_at_resp03_with_context_and_expected_model(
+        tool_name,
+        reason,
+        stage,
+        context,
+        None,
+    );
+}
+
+fn log_v3_toolreason_observation_at_resp03_with_context_and_expected_model(
+    tool_name: &str,
+    reason: Option<&str>,
+    stage: &str,
+    context: V3ToolreasonObservationContext<'_>,
+    expected_model_id: Option<&str>,
+) {
+    let (status, fields) = classify_v3_toolreason_observation_at_resp03_with_expected_model(
+        reason,
+        expected_model_id,
+    );
     let (label, color) = match status {
         V3ToolreasonObservationStatus::Ok => ("OK", "42"),
         V3ToolreasonObservationStatus::Missing => ("MISSING", "43"),
@@ -27,7 +46,7 @@ fn log_v3_toolreason_observation_at_resp03_with_context(
         V3ToolreasonObservationStatus::Misplaced => ("MISPLACED", "45"),
     };
     let line = format!(
-        "\x1b[1;{color};30m TOOLREASON {label} \x1b[0m stage={stage} session_id={} request_id={} tool={tool_name} confidence={} thinking={} model={}",
+        "\x1b[1;{color};30m TOOLREASON {label} \x1b[0m source=provider_raw_tool_arguments stage={stage} session_id={} request_id={} tool={tool_name} confidence={} thinking={} model={}",
         context.session_id.unwrap_or("<missing>"),
         context.request_id.unwrap_or("<missing>"),
         fields
@@ -57,6 +76,13 @@ enum V3ToolreasonObservationStatus {
 
 fn classify_v3_toolreason_observation_at_resp03(
     raw: Option<&str>,
+) -> (V3ToolreasonObservationStatus, Option<V3ToolreasonFields>) {
+    classify_v3_toolreason_observation_at_resp03_with_expected_model(raw, None)
+}
+
+fn classify_v3_toolreason_observation_at_resp03_with_expected_model(
+    raw: Option<&str>,
+    expected_model_id: Option<&str>,
 ) -> (V3ToolreasonObservationStatus, Option<V3ToolreasonFields>) {
     let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
         return (V3ToolreasonObservationStatus::Missing, None);
@@ -109,7 +135,7 @@ fn compact_v3_toolreason_observation_text(reason: &str) -> String {
 }
 
 /// Dry-run-only contract audit. It never enters the live request/response
-/// payload and does not repair either side; it only reports what each stage
+/// payload and does not alter either side; it only reports what each stage
 /// actually contained so request injection and response plumbing can be
 /// separated.
 pub(crate) fn audit_v3_toolreason_dry_run_payloads(
@@ -118,9 +144,12 @@ pub(crate) fn audit_v3_toolreason_dry_run_payloads(
     provider_response: &Value,
 ) -> Value {
     let provider_text = provider_request.to_string();
-    let request_guidance_present = ["reason", "goal_alignment_confidence", "model_id"]
-        .iter()
-        .all(|field| provider_text.contains(field));
+    // Phase 1 request coverage is authorized by the required field only.
+    // Confidence and model_id are optional diagnostics; their absence must
+    // never turn a valid reason-only request into a false injection failure.
+    let request_guidance_present = provider_text.contains("reason");
+    let optional_diagnostics_present = provider_text.contains("goal_alignment_confidence")
+        && provider_text.contains("model_id");
     let mut tool_call_count = 0usize;
     let mut toolreason_count = 0usize;
     collect_v3_toolreason_dry_run_counts(
@@ -140,6 +169,7 @@ pub(crate) fn audit_v3_toolreason_dry_run_payloads(
         "original_request_present": !original_request.is_null(),
         "provider_request_present": !provider_request.is_null(),
         "request_guidance_present": request_guidance_present,
+        "optional_diagnostics_present": optional_diagnostics_present,
         "provider_response_present": !provider_response.is_null(),
         "provider_response_tool_call_count": tool_call_count,
         "provider_response_toolreason_count": toolreason_count,
@@ -155,7 +185,7 @@ fn collect_v3_toolreason_dry_run_counts(
         Value::Object(object) => {
             if v3_is_tool_call_object_at_resp03(object) {
                 *tool_call_count += 1;
-                if v3_tool_thinking_fields_from_tool_call_at_resp03(object).is_some() {
+                if v3_tool_thinking_fields_from_tool_call_at_resp03(object, None).is_some() {
                     *toolreason_count += 1;
                 }
             }
@@ -179,27 +209,10 @@ struct V3ToolreasonFields {
     model_id: Option<String>,
 }
 
-fn sanitize_v3_toolreason_reason_at_resp03(reason: &str) -> String {
-    let mut sanitized = reason.trim().to_string();
-    for tagged_fence in [
-        "***<think>",
-        "***<thinking>",
-        "<think>",
-        "<thinking>",
-        "</think>***",
-        "</thinking>***",
-        "</think>",
-        "</thinking>",
-    ] {
-        sanitized = sanitized.replace(tagged_fence, "");
-    }
-    sanitized.trim().to_string()
-}
-
 fn parse_v3_toolreason_fields_at_resp03(reason: &str) -> Option<V3ToolreasonFields> {
     // Only native JSON in the native tool-call parameter container is a
-    // toolreason source. Legacy fences and ordinary reasoning are never
-    // accepted or guessed here.
+    // toolreason source. Only a native tool-call parameter object can
+    // authorize the JSON v2 fields; no other response surface is guessed.
     if json_object_has_duplicate_keys_at_resp03(reason.trim()) {
         return None;
     }
@@ -254,29 +267,36 @@ fn parse_v3_tool_thinking_fields_from_object_at_resp03(
     let reason = object
         .get("reason")
         .and_then(Value::as_str)
-        .map(sanitize_v3_toolreason_reason_at_resp03)
+        .map(str::trim)
+        .map(str::to_string)
         .filter(|value| !value.is_empty())
         .ok_or("reason")?;
     let confidence = match object.get("goal_alignment_confidence") {
-        Some(Value::Number(value)) => value
-            .as_u64()
-            .filter(|value| *value <= 100)
-            .map(|value| value as u8)
-            .ok_or("goal_alignment_confidence")?,
+        Some(Value::Number(value)) => Some(
+            value
+                .as_u64()
+                .filter(|value| *value <= 100)
+                .map(|value| value as u8)
+                .ok_or("goal_alignment_confidence")?,
+        ),
         Some(_) => return Err("goal_alignment_confidence"),
-        None => return Err("goal_alignment_confidence"),
+        None => None,
     };
-    let model_id = object
-        .get("model_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .ok_or("model_id")?;
+    let model_id = match object.get("model_id") {
+        Some(value) => Some(
+            value
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .ok_or("model_id")?,
+        ),
+        None => None,
+    };
     Ok(V3ToolreasonFields {
         reason,
-        goal_alignment_confidence: Some(confidence),
-        model_id: Some(model_id),
+        goal_alignment_confidence: confidence,
+        model_id,
     })
 }
 
@@ -288,18 +308,21 @@ fn v3_is_gemini_tool_call_object_at_resp03(object: &serde_json::Map<String, Valu
 
 fn v3_tool_thinking_object_reason_at_resp03(
     object: &serde_json::Map<String, Value>,
+    expected_model_id: Option<&str>,
 ) -> Option<V3ToolreasonFields> {
     if v3_is_gemini_tool_call_object_at_resp03(object) {
         return None;
     }
-    parse_v3_tool_thinking_fields_from_object_at_resp03(object).ok()
+    let fields = parse_v3_tool_thinking_fields_from_object_at_resp03(object).ok()?;
+    Some(fields)
 }
 
 fn v3_tool_thinking_fields_from_parameter_value_at_resp03(
     value: &Value,
+    expected_model_id: Option<&str>,
 ) -> Option<V3ToolreasonFields> {
     match value {
-        Value::Object(object) => parse_v3_tool_thinking_fields_from_object_at_resp03(object).ok(),
+        Value::Object(object) => v3_tool_thinking_object_reason_at_resp03(object, expected_model_id),
         Value::String(text) => {
             if json_object_has_duplicate_keys_at_resp03(text.trim()) {
                 return None;
@@ -307,7 +330,12 @@ fn v3_tool_thinking_fields_from_parameter_value_at_resp03(
             serde_json::from_str::<Value>(text)
                 .ok()
                 .as_ref()
-                .and_then(v3_tool_thinking_fields_from_parameter_value_at_resp03)
+                .and_then(|parsed| {
+                    v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                        parsed,
+                        expected_model_id,
+                    )
+                })
         }
         _ => None,
     }
@@ -315,9 +343,14 @@ fn v3_tool_thinking_fields_from_parameter_value_at_resp03(
 
 fn v3_tool_thinking_fields_from_tool_call_at_resp03(
     object: &serde_json::Map<String, Value>,
+    expected_model_id: Option<&str>,
 ) -> Option<V3ToolreasonFields> {
     if v3_is_gemini_tool_call_object_at_resp03(object) {
         return None;
+    }
+    if object.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
+        return v3_custom_tool_thinking_wrapper_at_resp03(object)
+            .map(|(fields, _native_input)| fields);
     }
     let parameter = if object.get("type").and_then(Value::as_str) == Some("tool_use") {
         object.get("input")
@@ -326,33 +359,110 @@ fn v3_tool_thinking_fields_from_tool_call_at_resp03(
     } else {
         object.get("arguments")
     }?;
-    v3_tool_thinking_fields_from_parameter_value_at_resp03(parameter)
+    v3_tool_thinking_fields_from_parameter_value_at_resp03(parameter, expected_model_id)
+}
+
+/// Custom/free-form tools carry their native input as a string.  The only
+/// governed wrapper accepted at Resp03 is an explicit JSON object inside that
+/// string: `{"input":"<native>","reason":"...",...}`.  A malformed or
+/// incomplete wrapper is deliberately not recovered.
+fn v3_custom_tool_thinking_wrapper_at_resp03(
+    object: &serde_json::Map<String, Value>,
+) -> Option<(V3ToolreasonFields, String)> {
+    if let Ok(fields) = parse_v3_tool_thinking_fields_from_object_at_resp03(object) {
+        let native_input = object.get("input")?.as_str()?.to_string();
+        return Some((fields, native_input));
+    }
+    let raw_input = object.get("input")?.as_str()?.trim();
+    if json_object_has_duplicate_keys_at_resp03(raw_input) {
+        return None;
+    }
+    let wrapper = serde_json::from_str::<Value>(raw_input).ok()?;
+    let wrapper = wrapper.as_object()?;
+    let fields = parse_v3_tool_thinking_fields_from_object_at_resp03(wrapper).ok()?;
+    let native_input = wrapper.get("input")?.as_str()?.to_string();
+    Some((fields, native_input))
+}
+
+fn v3_tool_thinking_raw_parameter_from_tool_call_at_resp03(
+    object: &serde_json::Map<String, Value>,
+) -> Option<String> {
+    if object.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
+        if v3_custom_tool_thinking_wrapper_at_resp03(object).is_some() {
+            return object.get("input").and_then(Value::as_str).map(str::to_string);
+        }
+        return serde_json::to_string(object).ok();
+    }
+    let parameter = if object.get("type").and_then(Value::as_str) == Some("tool_use") {
+        object.get("input")
+    } else if let Some(function) = object.get("function").and_then(Value::as_object) {
+        function.get("arguments")
+    } else {
+        object.get("arguments")
+    }?;
+    match parameter {
+        Value::String(raw) => Some(raw.clone()),
+        _ => serde_json::to_string(parameter).ok(),
+    }
 }
 
 fn strip_v3_tool_thinking_fields_from_object_at_resp03(
     object: &mut serde_json::Map<String, Value>,
+    expected_model_id: Option<&str>,
 ) {
     if v3_is_gemini_tool_call_object_at_resp03(object) {
         return;
     }
     if v3_is_tool_call_object_at_resp03(object) {
+        if object.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
+            if let Some((_fields, native_input)) =
+                v3_custom_tool_thinking_wrapper_at_resp03(object)
+            {
+                if object
+                    .get("input")
+                    .and_then(Value::as_str)
+                    .is_some_and(|input| input.trim_start().starts_with('{'))
+                {
+                    object.insert("input".to_string(), Value::String(native_input));
+                }
+                object.remove("reason");
+                object.remove("goal_alignment_confidence");
+                object.remove("model_id");
+            }
+            return;
+        }
         if object.get("type").and_then(Value::as_str) == Some("tool_use") {
             if let Some(value) = object.get_mut("input") {
-                strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(value);
+                strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                    value,
+                    expected_model_id,
+                );
             }
         } else if let Some(function) = object.get_mut("function").and_then(Value::as_object_mut) {
             if let Some(value) = function.get_mut("arguments") {
-                strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(value);
+                strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                    value,
+                    expected_model_id,
+                );
             }
         } else if let Some(value) = object.get_mut("arguments") {
-            strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(value);
+            strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                value,
+                expected_model_id,
+            );
         }
     }
 }
 
-fn strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(value: &mut Value) {
+fn strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
+    value: &mut Value,
+    expected_model_id: Option<&str>,
+) {
     match value {
         Value::Object(object) => {
+            if v3_tool_thinking_object_reason_at_resp03(object, expected_model_id).is_none() {
+                return;
+            }
             object.remove("reason");
             object.remove("goal_alignment_confidence");
             object.remove("model_id");
@@ -361,7 +471,17 @@ fn strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(value: &mut Valu
             let Ok(mut parsed) = serde_json::from_str::<Value>(text) else {
                 return;
             };
-            strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(&mut parsed);
+            let Some(parsed_object) = parsed.as_object() else {
+                return;
+            };
+            if v3_tool_thinking_object_reason_at_resp03(parsed_object, expected_model_id).is_none()
+            {
+                return;
+            }
+            strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                &mut parsed,
+                expected_model_id,
+            );
             if let Ok(serialized) = serde_json::to_string(&parsed) {
                 *text = serialized;
             }
@@ -370,16 +490,19 @@ fn strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(value: &mut Valu
     }
 }
 
-fn strip_v3_tool_thinking_fields_from_json_at_resp03(value: &mut Value) {
+fn strip_v3_tool_thinking_fields_from_json_at_resp03(
+    value: &mut Value,
+    expected_model_id: Option<&str>,
+) {
     match value {
         Value::Object(object) => {
             let is_gemini = v3_is_gemini_tool_call_object_at_resp03(object);
-            strip_v3_tool_thinking_fields_from_object_at_resp03(object);
+            strip_v3_tool_thinking_fields_from_object_at_resp03(object, expected_model_id);
             if is_gemini {
                 return;
             }
             if let Some(function) = object.get_mut("function") {
-                strip_v3_tool_thinking_fields_from_json_at_resp03(function);
+                strip_v3_tool_thinking_fields_from_json_at_resp03(function, expected_model_id);
             }
             for (key, child) in object.iter_mut() {
                 if matches!(
@@ -388,12 +511,12 @@ fn strip_v3_tool_thinking_fields_from_json_at_resp03(value: &mut Value) {
                 ) {
                     continue;
                 }
-                strip_v3_tool_thinking_fields_from_json_at_resp03(child);
+                strip_v3_tool_thinking_fields_from_json_at_resp03(child, expected_model_id);
             }
         }
         Value::Array(values) => {
             for child in values {
-                strip_v3_tool_thinking_fields_from_json_at_resp03(child);
+                strip_v3_tool_thinking_fields_from_json_at_resp03(child, expected_model_id);
             }
         }
         Value::String(_) | Value::Null | Value::Bool(_) | Value::Number(_) => {}
@@ -407,11 +530,67 @@ fn emit_v3_toolreason_observation_at_resp03_with_context(
     emitted: &mut bool,
     context: V3ToolreasonObservationContext<'_>,
 ) {
+    emit_v3_toolreason_observation_at_resp03_with_expected_model(
+        tool_name,
+        reason,
+        stage,
+        emitted,
+        context,
+        None,
+    );
+}
+
+fn emit_v3_toolreason_observation_at_resp03_with_expected_model(
+    tool_name: &str,
+    reason: Option<&str>,
+    stage: &str,
+    emitted: &mut bool,
+    context: V3ToolreasonObservationContext<'_>,
+    expected_model_id: Option<&str>,
+) {
     if *emitted {
         return;
     }
-    log_v3_toolreason_observation_at_resp03_with_context(tool_name, reason, stage, context);
+    if let Some(request_id) = context.request_id {
+        if !claim_v3_toolreason_turn_observation(request_id) {
+            *emitted = true;
+            return;
+        }
+    }
+    log_v3_toolreason_observation_at_resp03_with_context_and_expected_model(
+        tool_name,
+        reason,
+        stage,
+        context,
+        expected_model_id,
+    );
     *emitted = true;
+}
+
+/// Resp03 may be re-entered while one provider attempt is normalized through
+/// more than one registered response hook.  The observation is a control-side
+/// turn fact, not payload data, so claim it once by the canonical request id.
+/// Keep the process-local ledger bounded; request ids are unique per turn and
+/// are never used to reconstruct or alter a request/response payload.
+fn claim_v3_toolreason_turn_observation(request_id: &str) -> bool {
+    const MAX_TRACKED_REQUESTS: usize = 4096;
+    static CLAIMED: OnceLock<Mutex<(HashSet<String>, VecDeque<String>)>> = OnceLock::new();
+    let ledger = CLAIMED.get_or_init(|| Mutex::new((HashSet::new(), VecDeque::new())));
+    let Ok(mut ledger) = ledger.lock() else {
+        return false;
+    };
+    if ledger.0.contains(request_id) {
+        return false;
+    }
+    if ledger.1.len() >= MAX_TRACKED_REQUESTS {
+        if let Some(oldest) = ledger.1.pop_front() {
+            ledger.0.remove(&oldest);
+        }
+    }
+    let request_id = request_id.to_owned();
+    ledger.0.insert(request_id.clone());
+    ledger.1.push_back(request_id);
+    true
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -529,9 +708,11 @@ pub struct V3HubRelayResponseHookProfile {
     retain_response_cipher: bool,
     tool_thinking: bool,
     toolreason_client_projection: bool,
+    toolreason_expected_model_id: Option<String>,
     toolreason_observation_enabled: bool,
     toolreason_observation_session_id: Option<String>,
     toolreason_observation_request_id: Option<String>,
+    tool_thinking_original_custom_tool_names: BTreeSet<String>,
 }
 
 impl V3HubRelayResponseHookProfile {
@@ -554,9 +735,11 @@ impl V3HubRelayResponseHookProfile {
             retain_response_cipher: false,
             tool_thinking: false,
             toolreason_client_projection: true,
+            toolreason_expected_model_id: None,
             toolreason_observation_enabled: true,
             toolreason_observation_session_id: None,
             toolreason_observation_request_id: None,
+            tool_thinking_original_custom_tool_names: BTreeSet::new(),
         }
     }
 
@@ -611,6 +794,21 @@ impl V3HubRelayResponseHookProfile {
         self.tool_thinking
     }
 
+    pub(crate) fn with_tool_thinking_turn_context(
+        mut self,
+        context: &super::servertool_hooks::V3ToolThinkingTurnContext,
+    ) -> Self {
+        self.tool_thinking_original_custom_tool_names = context
+            .original_custom_tool_names()
+            .cloned()
+            .unwrap_or_default();
+        self
+    }
+
+    pub(crate) fn tool_thinking_original_custom_tool_names(&self) -> &BTreeSet<String> {
+        &self.tool_thinking_original_custom_tool_names
+    }
+
     pub fn with_toolreason_client_projection(mut self, enabled: bool) -> Self {
         self.toolreason_client_projection = enabled;
         self
@@ -618,6 +816,15 @@ impl V3HubRelayResponseHookProfile {
 
     pub fn toolreason_client_projection_enabled(&self) -> bool {
         self.toolreason_client_projection
+    }
+
+    pub fn with_toolreason_expected_model_id(mut self, model_id: impl Into<String>) -> Self {
+        self.toolreason_expected_model_id = Some(model_id.into());
+        self
+    }
+
+    pub fn toolreason_expected_model_id(&self) -> Option<&str> {
+        self.toolreason_expected_model_id.as_deref()
     }
 
     pub fn with_toolreason_observation_enabled(mut self, enabled: bool) -> Self {
@@ -825,15 +1032,26 @@ fn govern_v3_hub_relay_response(
     let mut input = harvest_v3_think_blocks_at_resp03(input);
     let payload = Arc::make_mut(&mut input.previous.previous.payload.0);
     if profile.toolreason_observation_enabled() {
-        map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_and_context(
-            payload,
-            profile.tool_thinking_enabled(),
-            profile.toolreason_client_projection_enabled(),
-            V3ToolreasonObservationContext {
-                session_id: profile.toolreason_observation_session_id(),
-                request_id: profile.toolreason_observation_request_id(),
-            },
-        );
+        let context = V3ToolreasonObservationContext {
+            session_id: profile.toolreason_observation_session_id(),
+            request_id: profile.toolreason_observation_request_id(),
+        };
+        if let Some(expected_model_id) = profile.toolreason_expected_model_id() {
+            map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+                payload,
+                profile.tool_thinking_enabled(),
+                profile.toolreason_client_projection_enabled(),
+                Some(expected_model_id),
+                context,
+            );
+        } else {
+            map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_and_context(
+                payload,
+                profile.tool_thinking_enabled(),
+                profile.toolreason_client_projection_enabled(),
+                context,
+            );
+        }
     } else {
         map_v3_toolreason_to_reasoning_content_at_resp03_without_observation(
             payload,
@@ -859,6 +1077,10 @@ fn govern_v3_hub_relay_response(
             } else {
                 project_v3_apply_patch_freeform_calls_at_resp03(tool_call_hook.input)
             };
+            restore_v3_tool_thinking_custom_calls_at_resp03(
+                &mut input,
+                profile.tool_thinking_original_custom_tool_names(),
+            );
             let mut governed_input = input;
             if profile.stopless_schema_guidance_active() {
                 // Client projection consumes the provider-side Stopless control
@@ -915,6 +1137,110 @@ fn govern_v3_hub_relay_response(
         control_transition: stopless_center_state,
         web_search_transition: web_search_center_state,
     })
+}
+
+fn restore_v3_tool_thinking_custom_calls_at_resp03(
+    input: &mut V3HubRespInbound02Normalized,
+    original_custom_tool_names: &BTreeSet<String>,
+) {
+    let payload = Arc::make_mut(input.provider_payload_mut());
+    restore_v3_tool_thinking_custom_calls_in_payload_at_resp03(
+        payload,
+        original_custom_tool_names,
+    );
+}
+
+pub(crate) fn restore_v3_tool_thinking_custom_calls_in_payload_at_resp03(
+    payload: &mut Value,
+    original_custom_tool_names: &BTreeSet<String>,
+) {
+    if original_custom_tool_names.is_empty() {
+        return;
+    }
+    if let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) {
+        for item in output {
+            let Some(row) = item.as_object_mut() else { continue };
+            if row.get("type").and_then(Value::as_str) != Some("function_call") {
+                continue;
+            }
+            let Some(name) = row.get("name").and_then(Value::as_str) else { continue };
+            if !original_custom_tool_names.contains(name) {
+                continue;
+            }
+            let Some(arguments) = row.get("arguments").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some((native_input, fields)) =
+                parse_v3_custom_tool_wrapper_for_resp03(arguments)
+            else {
+                continue;
+            };
+            row.insert("type".to_string(), Value::String("custom_tool_call".to_string()));
+            row.insert("input".to_string(), Value::String(native_input));
+            row.remove("arguments");
+            for (key, value) in fields {
+                row.insert(key, value);
+            }
+        }
+    }
+    if let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) {
+        for choice in choices {
+            let Some(tool_calls) = choice
+                .pointer_mut("/message/tool_calls")
+                .and_then(Value::as_array_mut)
+            else {
+                continue;
+            };
+            for call in tool_calls {
+                let Some(row) = call.as_object_mut() else { continue };
+                let Some(function) = row.get_mut("function").and_then(Value::as_object_mut)
+                else {
+                    continue;
+                };
+                let Some(name) = function.get("name").and_then(Value::as_str) else {
+                    continue;
+                };
+                if !original_custom_tool_names.contains(name) {
+                    continue;
+                }
+                let Some(arguments) = function.get("arguments").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some((native_input, _fields)) =
+                    parse_v3_custom_tool_wrapper_for_resp03(arguments)
+                else {
+                    continue;
+                };
+                function.insert(
+                    "arguments".to_string(),
+                    Value::String(serde_json::json!({"input": native_input}).to_string()),
+                );
+            }
+        }
+    }
+}
+
+fn parse_v3_custom_tool_wrapper_for_resp03(
+    arguments: &str,
+) -> Option<(String, Vec<(String, Value)>)> {
+    if json_object_has_duplicate_keys_at_resp03(arguments) {
+        return None;
+    }
+    let Value::Object(wrapper) = serde_json::from_str::<Value>(arguments).ok()? else {
+        return None;
+    };
+    if wrapper.keys().any(|key| {
+        !matches!(key.as_str(), "input" | "reason" | "goal_alignment_confidence" | "model_id")
+    }) {
+        return None;
+    }
+    let native_input = wrapper.get("input")?.as_str()?.to_owned();
+    wrapper.get("reason")?.as_str()?;
+    let fields = ["reason", "goal_alignment_confidence", "model_id"]
+        .into_iter()
+        .filter_map(|key| wrapper.get(key).cloned().map(|value| (key.to_string(), value)))
+        .collect();
+    Some((native_input, fields))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1572,6 +1898,7 @@ pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(
         true,
         None,
         None,
+        None,
     );
 }
 
@@ -1588,6 +1915,7 @@ pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_a
         true,
         None,
         request_id,
+        None,
     );
 }
 
@@ -1604,6 +1932,25 @@ pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_a
         true,
         context.session_id,
         context.request_id,
+        None,
+    );
+}
+
+pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+    payload: &mut Value,
+    enabled: bool,
+    project_to_client: bool,
+    expected_model_id: Option<&str>,
+    context: V3ToolreasonObservationContext<'_>,
+) {
+    map_v3_toolreason_to_reasoning_content_at_resp03_impl(
+        payload,
+        enabled,
+        project_to_client,
+        true,
+        context.session_id,
+        context.request_id,
+        expected_model_id,
     );
 }
 
@@ -1619,6 +1966,24 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_without_observation(
         false,
         None,
         None,
+        None,
+    );
+}
+
+fn map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_without_observation(
+    payload: &mut Value,
+    enabled: bool,
+    project_to_client: bool,
+    expected_model_id: Option<&str>,
+) {
+    map_v3_toolreason_to_reasoning_content_at_resp03_impl(
+        payload,
+        enabled,
+        project_to_client,
+        false,
+        None,
+        None,
+        expected_model_id,
     );
 }
 
@@ -1629,10 +1994,12 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
     observe: bool,
     session_id: Option<&str>,
     request_id: Option<&str>,
+    expected_model_id: Option<&str>,
 ) {
     if !enabled {
         return;
     }
+    strip_v3_tool_thinking_request_artifacts_at_resp03(payload);
     if observe {
         observe_v3_toolreason_json_at_resp03_with_context(
             payload,
@@ -1640,6 +2007,7 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
                 session_id,
                 request_id,
             },
+            expected_model_id,
         );
     }
     let mut json_tool_names = Vec::new();
@@ -1648,15 +2016,20 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
         payload,
         &mut json_tool_names,
         &mut json_reasons,
+        expected_model_id,
     );
     // Converted relay SSE reaches Resp03 as Chat delta frames rather than a
     // completed assistant message.  Govern that shape here as well: the
     // native tool arguments are still the only source, and only the three
     // registered tool-thinking fields are removed.
-    map_v3_openai_chat_toolreason_delta_at_resp03(payload, project_to_client);
+    map_v3_openai_chat_toolreason_delta_at_resp03_with_expected_model(
+        payload,
+        project_to_client,
+        expected_model_id,
+    );
     // Strip only the three auxiliary fields after harvesting them. This is the
     // sole response-side removal point; native tool arguments are skipped.
-    strip_v3_tool_thinking_fields_from_json_at_resp03(payload);
+    strip_v3_tool_thinking_fields_from_json_at_resp03(payload, expected_model_id);
     if let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) {
         for choice in choices {
             let Some(message) = choice.get_mut("message").and_then(Value::as_object_mut) else {
@@ -1768,15 +2141,6 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
             })
             .filter_map(|part| part.get("name").and_then(Value::as_str).map(str::to_owned))
             .collect::<Vec<_>>();
-        for part in content {
-            let Some(text) = part.get("text").and_then(Value::as_str).map(str::to_owned) else {
-                continue;
-            };
-            let visible = strip_v3_toolreason_markers_at_resp03(&text);
-            if let Some(object) = part.as_object_mut() {
-                object.insert("text".to_string(), Value::String(visible));
-            }
-        }
         if project_to_client && !json_reasons.is_empty() && !tool_names.is_empty() {
             if let Some(mapped) =
                 format_toolreason_reasoning_from_reason(&tool_names, &json_reasons[0])
@@ -1800,13 +2164,105 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
             }
         }
     }
-    // Legacy fences are compatibility input only: remove their markers from
-    // ordinary text, while the recursive walker explicitly skips native tool
-    // argument containers so command literals remain byte-stable.
-    strip_v3_toolreason_markers_from_json_at_resp03(payload);
+}
+
+/// Resp03 removes the request-local tool-list projection when a provider
+/// echoes the final provider-bound `tools` list in its response.  This is
+/// deliberately limited to the exact guidance text and the three injected
+/// schema properties; it never traverses native tool-call argument objects.
+pub(crate) fn strip_v3_tool_thinking_request_artifacts_at_resp03(payload: &mut Value) {
+    fn visit(value: &mut Value) {
+        match value {
+            Value::Object(object) => {
+                if let Some(tools) = object.get_mut("tools").and_then(Value::as_array_mut) {
+                    for tool in tools {
+                        strip_tool(tool);
+                    }
+                }
+                for child in object.values_mut() {
+                    visit(child);
+                }
+            }
+            Value::Array(values) => {
+                for value in values {
+                    visit(value);
+                }
+            }
+            Value::String(_) | Value::Null | Value::Bool(_) | Value::Number(_) => {}
+        }
+    }
+
+    fn strip_tool(tool: &mut Value) {
+        let Some(object) = tool.as_object_mut() else {
+            return;
+        };
+        strip_guidance(object.get_mut("description"));
+        if let Some(function) = object.get_mut("function").and_then(Value::as_object_mut) {
+            strip_guidance(function.get_mut("description"));
+            strip_schema(function.get_mut("parameters"));
+        }
+        strip_schema(object.get_mut("parameters"));
+        strip_schema(object.get_mut("input_schema"));
+    }
+
+    fn strip_guidance(value: Option<&mut Value>) {
+        let Some(Value::String(text)) = value else {
+            return;
+        };
+        let marker = "工具调用协议（只适用于本轮工具调用";
+        let Some(start) = text.find(marker) else {
+            return;
+        };
+        text.truncate(start);
+        while text.ends_with([' ', '\n', '\r']) {
+            text.pop();
+        }
+    }
+
+    fn strip_schema(value: Option<&mut Value>) {
+        let Some(schema) = value.and_then(Value::as_object_mut) else {
+            return;
+        };
+        let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) else {
+            return;
+        };
+        // Provider response echoes may preserve the request-local auxiliary
+        // field names while dropping their descriptions.  Req04 rejects
+        // native collisions before injection, so field names are the stable
+        // request-local identity at Resp03; description matching is not.
+        let injected = ["reason", "goal_alignment_confidence", "model_id"];
+        let mut removed = Vec::new();
+        for name in injected {
+            if properties.contains_key(name) {
+                properties.remove(name);
+                removed.push(name);
+            }
+        }
+        if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
+            required.retain(|field| {
+                !removed
+                    .iter()
+                    .any(|removed| field.as_str() == Some(*removed))
+            });
+        }
+    }
+
+    visit(payload);
 }
 
 fn map_v3_openai_chat_toolreason_delta_at_resp03(payload: &mut Value, project_to_client: bool) {
+    map_v3_openai_chat_toolreason_delta_at_resp03_with_expected_model(
+        payload,
+        project_to_client,
+        None,
+    );
+}
+
+fn map_v3_openai_chat_toolreason_delta_at_resp03_with_expected_model(
+    payload: &mut Value,
+    project_to_client: bool,
+    expected_model_id: Option<&str>,
+) {
     let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
         return;
     };
@@ -1832,11 +2288,17 @@ fn map_v3_openai_chat_toolreason_delta_at_resp03(payload: &mut Value, project_to
             let Ok(mut parameter) = serde_json::from_str::<Value>(arguments) else {
                 continue;
             };
-            let Some(fields) = v3_tool_thinking_fields_from_parameter_value_at_resp03(&parameter)
+            let Some(fields) = v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                &parameter,
+                expected_model_id,
+            )
             else {
                 continue;
             };
-            strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(&mut parameter);
+            strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                &mut parameter,
+                expected_model_id,
+            );
             let Ok(redacted_arguments) = serde_json::to_string(&parameter) else {
                 continue;
             };
@@ -1879,15 +2341,17 @@ pub(crate) fn map_v3_openai_chat_toolreason_delta_for_relay_projection(
 fn observe_v3_toolreason_json_at_resp03_with_context(
     payload: &Value,
     context: V3ToolreasonObservationContext<'_>,
+    expected_model_id: Option<&str>,
 ) {
     if let Some((tool_label, raw_object)) = first_v3_tool_thinking_object_at_resp03(payload) {
         let mut emitted = false;
-        emit_v3_toolreason_observation_at_resp03_with_context(
+        emit_v3_toolreason_observation_at_resp03_with_expected_model(
             &tool_label,
             Some(&raw_object),
             "resp03_json",
             &mut emitted,
             context,
+            expected_model_id,
         );
     }
 }
@@ -1987,9 +2451,8 @@ fn collect_v3_toolreason_json_observations_at_resp03(
     reasons: &mut Vec<String>,
 ) {
     match value {
-        // Text, including legacy fences and ordinary reasoning, is never a
-        // native toolreason source. Only the tool-call parameter object below
-        // may contribute a reason.
+        // Ordinary text is never a Tool-Thinking source. Only the native
+        // tool-call parameter object below may contribute a JSON v2 reason.
         Value::String(_) => {}
         Value::Array(values) => {
             for value in values {
@@ -2002,8 +2465,12 @@ fn collect_v3_toolreason_json_observations_at_resp03(
                 if let Some(name) = toolreason_display_name_from_object(object) {
                     tool_names.push(name);
                 }
-                if let Some(fields) = v3_tool_thinking_fields_from_tool_call_at_resp03(object) {
-                    reasons.push(fields.reason);
+                if v3_tool_thinking_fields_from_tool_call_at_resp03(object, None).is_some() {
+                    if let Some(raw_parameter) =
+                        v3_tool_thinking_raw_parameter_from_tool_call_at_resp03(object)
+                    {
+                        reasons.push(raw_parameter);
+                    }
                 }
             }
             if v3_is_gemini_tool_call_object_at_resp03(object) {
@@ -2020,10 +2487,29 @@ fn collect_v3_toolreason_json_observations_at_resp03(
     }
 }
 
+/// Returns the Resp03 authorization bit for a native tool-reason projection.
+/// The caller may carry this bit as typed hook state; it must not infer
+/// authorization from a visible reasoning item id or other client payload.
+pub(crate) fn v3_toolreason_projection_authorized_at_resp03(
+    value: &Value,
+    expected_model_id: Option<&str>,
+) -> bool {
+    let mut tool_names = Vec::new();
+    let mut reasons = Vec::new();
+    collect_v3_tool_thinking_json_fields_at_resp03(
+        value,
+        &mut tool_names,
+        &mut reasons,
+        expected_model_id,
+    );
+    !tool_names.is_empty() && !reasons.is_empty()
+}
+
 fn collect_v3_tool_thinking_json_fields_at_resp03(
     value: &Value,
     tool_names: &mut Vec<String>,
     reasons: &mut Vec<String>,
+    expected_model_id: Option<&str>,
 ) {
     match value {
         Value::Object(object) => {
@@ -2035,12 +2521,19 @@ fn collect_v3_tool_thinking_json_fields_at_resp03(
                 if let Some(name) = toolreason_display_name_from_object(object) {
                     tool_names.push(name);
                 }
-                if let Some(fields) = v3_tool_thinking_fields_from_tool_call_at_resp03(object) {
+                if let Some(fields) =
+                    v3_tool_thinking_fields_from_tool_call_at_resp03(object, expected_model_id)
+                {
                     reasons.push(fields.reason);
                 }
             }
             if let Some(function) = object.get("function") {
-                collect_v3_tool_thinking_json_fields_at_resp03(function, tool_names, reasons);
+                collect_v3_tool_thinking_json_fields_at_resp03(
+                    function,
+                    tool_names,
+                    reasons,
+                    expected_model_id,
+                );
             }
             for (key, child) in object {
                 if is_tool_call
@@ -2051,12 +2544,22 @@ fn collect_v3_tool_thinking_json_fields_at_resp03(
                 {
                     continue;
                 }
-                collect_v3_tool_thinking_json_fields_at_resp03(child, tool_names, reasons);
+                collect_v3_tool_thinking_json_fields_at_resp03(
+                    child,
+                    tool_names,
+                    reasons,
+                    expected_model_id,
+                );
             }
         }
         Value::Array(values) => {
             for child in values {
-                collect_v3_tool_thinking_json_fields_at_resp03(child, tool_names, reasons);
+                collect_v3_tool_thinking_json_fields_at_resp03(
+                    child,
+                    tool_names,
+                    reasons,
+                    expected_model_id,
+                );
             }
         }
         Value::String(_) | Value::Null | Value::Bool(_) | Value::Number(_) => {}
@@ -2073,6 +2576,7 @@ pub(crate) fn map_v3_anthropic_toolreason_stream_event_at_resp03(
     pending_reasons: &mut Vec<Option<String>>,
     _reason_emitted: &mut bool,
     _project_to_client: bool,
+    expected_model_id: Option<&str>,
 ) {
     let event_type = payload
         .get("type")
@@ -2108,7 +2612,14 @@ pub(crate) fn map_v3_anthropic_toolreason_stream_event_at_resp03(
                     return;
                 }
                 remember_v3_anthropic_toolreason_json(input, index, pending_reasons);
-                strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(input);
+                if v3_tool_thinking_fields_from_parameter_value_at_resp03(input, expected_model_id)
+                    .is_some()
+                {
+                    strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                        input,
+                        expected_model_id,
+                    );
+                }
             }
         }
         "content_block_delta" => {
@@ -2242,11 +2753,37 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
     request_id: Option<&str>,
     argument_buffers: Option<&mut Vec<String>>,
 ) {
+    map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_and_expected_model(
+        payload,
+        enabled,
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        project_to_client,
+        session_id,
+        request_id,
+        argument_buffers,
+        None,
+    );
+}
+
+pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_and_expected_model(
+    payload: &mut Value,
+    enabled: bool,
+    tool_names: &[String],
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    project_to_client: bool,
+    session_id: Option<&str>,
+    request_id: Option<&str>,
+    argument_buffers: Option<&mut Vec<String>>,
+    expected_model_id: Option<&str>,
+) {
     if !enabled {
         return;
     }
     if payload.get("object").and_then(Value::as_str) == Some("chat.completion.chunk") {
-        map_v3_openai_chat_toolreason_chunk_at_resp03(
+        map_v3_openai_chat_toolreason_chunk_at_resp03_with_expected_model(
             payload,
             tool_names,
             pending_reasons,
@@ -2255,6 +2792,7 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
             session_id,
             request_id,
             argument_buffers,
+            expected_model_id,
         );
         return;
     }
@@ -2270,38 +2808,158 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
         .get("type")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    match event_type {
-        "response.output_text.delta" | "response.content_part.delta" => {
-            if let Some(delta) = payload
-                .get("delta")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-            {
-                payload["delta"] = Value::String(strip_v3_toolreason_markers_at_resp03(&delta));
+    if event_type == "response.function_call_arguments.delta" {
+        let Some(delta) = payload.get("delta").and_then(Value::as_str) else {
+            return;
+        };
+        let output_index = payload
+            .get("output_index")
+            .and_then(Value::as_u64)
+            .and_then(|index| usize::try_from(index).ok())
+            .unwrap_or(0);
+        if let Some(buffers) = argument_buffers {
+            if buffers.len() <= output_index {
+                buffers.resize(output_index + 1, String::new());
             }
+            buffers[output_index].push_str(delta);
+            // Do not expose provider argument fragments. The complete
+            // native argument object is emitted only after Resp03 validates
+            // and strips the auxiliary fields at the corresponding `done`
+            // event.
+            payload["delta"] = Value::String(String::new());
         }
-        "response.output_text.done" => {
-            let text = payload
-                .get("text")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            if let Some(text) = text {
-                let visible = strip_v3_toolreason_markers_at_resp03(&text);
-                payload["text"] = Value::String(visible);
+        return;
+    }
+    if event_type == "response.function_call_arguments.done" {
+        let output_index = payload
+            .get("output_index")
+            .and_then(Value::as_u64)
+            .and_then(|index| usize::try_from(index).ok())
+            .unwrap_or(0);
+        let buffered_arguments = argument_buffers.as_deref().and_then(|buffers| {
+            buffers
+                .get(output_index)
+                .filter(|arguments| !arguments.is_empty())
+                .map(String::as_str)
+        });
+        let Some(arguments) = buffered_arguments
+            .or_else(|| payload.get("arguments").and_then(Value::as_str))
+        else {
+            return;
+        };
+        let arguments_were_buffered = buffered_arguments.is_some();
+        if json_object_has_duplicate_keys_at_resp03(arguments) {
+            if arguments_were_buffered {
+                payload["arguments"] = Value::String(arguments.to_string());
             }
+            return;
         }
-        "response.content_part.done" => {
-            let text = payload
-                .pointer("/part/text")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            if let Some(text) = text {
-                let visible = strip_v3_toolreason_markers_at_resp03(&text);
-                if let Some(part) = payload.get_mut("part").and_then(Value::as_object_mut) {
-                    part.insert("text".to_string(), Value::String(visible));
+        let Ok(mut parameter) = serde_json::from_str::<Value>(arguments) else {
+            if arguments_were_buffered {
+                payload["arguments"] = Value::String(arguments.to_string());
+            }
+            return;
+        };
+        let Some(_fields) = v3_tool_thinking_fields_from_parameter_value_at_resp03(
+            &parameter,
+            expected_model_id,
+        ) else {
+            if arguments_were_buffered {
+                payload["arguments"] = Value::String(arguments.to_string());
+            }
+            return;
+        };
+        let Ok(raw_parameter) = serde_json::to_string(&parameter) else {
+            return;
+        };
+        strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
+            &mut parameter,
+            expected_model_id,
+        );
+        let Ok(redacted_arguments) = serde_json::to_string(&parameter) else {
+            return;
+        };
+        payload["arguments"] = Value::String(redacted_arguments);
+        if pending_reasons.len() <= output_index {
+            pending_reasons.resize(output_index + 1, None);
+        }
+        pending_reasons[output_index] = Some(raw_parameter);
+        return;
+    }
+    if event_type == "response.completed" {
+        let Some(response) = payload.get_mut("response") else {
+            return;
+        };
+        let terminal_pending_reason = pending_reasons.iter_mut().find_map(Option::take);
+        let mut response_tools = Vec::new();
+        let mut _response_reasons = Vec::new();
+        collect_v3_toolreason_json_observations_at_resp03(
+            response,
+            &mut response_tools,
+            &mut _response_reasons,
+        );
+        if response_tools.is_empty() {
+            if let Some(output) = response.get("output").and_then(Value::as_array) {
+                for item in output {
+                    if let Some(object) = item.as_object() {
+                        if let Some(name) = toolreason_display_name_from_object(object) {
+                            response_tools.push(name);
+                        }
+                    }
                 }
             }
         }
+        if response_tools.is_empty() && terminal_pending_reason.is_some() {
+            response_tools.extend(
+                tool_names
+                    .iter()
+                    .filter_map(|name| toolreason_stream_display_name(name)),
+            );
+        }
+        let response_raw_reason = terminal_pending_reason.clone().or_else(|| {
+            let mut objects = Vec::new();
+            collect_v3_tool_thinking_objects_at_resp03(response, &mut objects);
+            objects.first().map(|(_, raw)| raw.clone())
+        });
+        map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_without_observation(
+            response,
+            true,
+            project_to_client,
+            expected_model_id,
+        );
+        if project_to_client {
+            if let Some(raw_reason) = response_raw_reason.as_deref() {
+                append_v3_toolreason_reasoning_item_at_resp03(
+                    response,
+                    &response_tools,
+                    raw_reason,
+                );
+            }
+        }
+        if !*reason_emitted
+            && (response_raw_reason.is_some() || !response_tools.is_empty())
+        {
+            let tool_label = format_toolreason_tool_label(&response_tools);
+            let tool_label = if tool_label.is_empty() {
+                "<missing>".to_string()
+            } else {
+                tool_label
+            };
+            emit_v3_toolreason_observation_at_resp03_with_expected_model(
+                &tool_label,
+                response_raw_reason.as_deref(),
+                "resp03_direct_sse",
+                reason_emitted,
+                V3ToolreasonObservationContext {
+                    session_id,
+                    request_id,
+                },
+                expected_model_id,
+            );
+        }
+        return;
+    }
+    match event_type {
         "response.output_item.done" => {
             let is_message =
                 payload.pointer("/item/type").and_then(Value::as_str) == Some("message");
@@ -2310,9 +2968,15 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
                     .get("item")
                     .and_then(Value::as_object)
                     .filter(|item| !v3_is_gemini_tool_call_object_at_resp03(item))
-                    .and_then(v3_tool_thinking_fields_from_tool_call_at_resp03);
+                    .and_then(|object| {
+                        v3_tool_thinking_fields_from_tool_call_at_resp03(object, expected_model_id)
+                    });
+                let raw_tool_reason = payload
+                    .get("item")
+                    .and_then(Value::as_object)
+                    .and_then(v3_tool_thinking_raw_parameter_from_tool_call_at_resp03);
                 if let Some(item) = payload.get_mut("item").and_then(Value::as_object_mut) {
-                    strip_v3_tool_thinking_fields_from_object_at_resp03(item);
+                    strip_v3_tool_thinking_fields_from_object_at_resp03(item, expected_model_id);
                 }
                 if let Some(fields) = json_tool_reason {
                     let tool_label = payload
@@ -2323,22 +2987,16 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
                         .unwrap_or_else(|| tool_names.to_vec());
                     let reasoning =
                         format_toolreason_reasoning_from_reason(&tool_label, &fields.reason);
-                    emit_v3_toolreason_observation_at_resp03_with_context(
+                    emit_v3_toolreason_observation_at_resp03_with_expected_model(
                         &format_toolreason_tool_label(&tool_label),
-                        Some(
-                            &serde_json::to_string(&json!({
-                                "reason": fields.reason,
-                                "goal_alignment_confidence": fields.goal_alignment_confidence,
-                                "model_id": fields.model_id,
-                            }))
-                            .unwrap_or_default(),
-                        ),
+                        raw_tool_reason.as_deref(),
                         "resp03_direct_sse",
                         reason_emitted,
                         V3ToolreasonObservationContext {
                             session_id,
                             request_id,
                         },
+                        expected_model_id,
                     );
                     if project_to_client {
                         if let Some(reasoning) = reasoning {
@@ -2367,7 +3025,7 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
                         .as_deref()
                         .and_then(|reason| format_toolreason_reasoning(tool_names, reason));
                     let tool_label = format_toolreason_tool_label(tool_names);
-                    emit_v3_toolreason_observation_at_resp03_with_context(
+                    emit_v3_toolreason_observation_at_resp03_with_expected_model(
                         &tool_label,
                         pending_raw.as_deref(),
                         "resp03_direct_sse",
@@ -2376,6 +3034,7 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
                             session_id,
                             request_id,
                         },
+                        expected_model_id,
                     );
                     if project_to_client {
                         if let Some(reasoning) = reasoning {
@@ -2394,23 +3053,6 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
             }
             let mut item_reasoning = None;
             let mut item_reason_raw = None;
-            {
-                let Some(parts) = payload
-                    .get_mut("item")
-                    .and_then(Value::as_object_mut)
-                    .and_then(|item| item.get_mut("content"))
-                    .and_then(Value::as_array_mut)
-                else {
-                    return;
-                };
-                for part in parts {
-                    let Some(text) = part.get("text").and_then(Value::as_str).map(str::to_owned)
-                    else {
-                        continue;
-                    };
-                    part["text"] = Value::String(strip_v3_toolreason_markers_at_resp03(&text));
-                }
-            }
             if item_reasoning.is_none() && tool_name.is_some() {
                 if let Some(index) = event_output_index {
                     item_reasoning = pending_reasons
@@ -2428,7 +3070,7 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
             // observation as MISSING and block the real client projection.
             if tool_name.is_some() {
                 let tool_label = format_toolreason_tool_label(tool_names);
-                emit_v3_toolreason_observation_at_resp03_with_context(
+                emit_v3_toolreason_observation_at_resp03_with_expected_model(
                     &tool_label,
                     item_reason_raw.as_deref(),
                     "resp03_direct_sse",
@@ -2437,6 +3079,7 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
                         session_id,
                         request_id,
                     },
+                    expected_model_id,
                 );
                 if project_to_client {
                     if let Some(reasoning) = item_reasoning {
@@ -2470,7 +3113,31 @@ fn map_v3_openai_chat_toolreason_chunk_at_resp03(
     project_to_client: bool,
     session_id: Option<&str>,
     request_id: Option<&str>,
+    argument_buffers: Option<&mut Vec<String>>,
+) {
+    map_v3_openai_chat_toolreason_chunk_at_resp03_with_expected_model(
+        payload,
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        project_to_client,
+        session_id,
+        request_id,
+        argument_buffers,
+        None,
+    );
+}
+
+fn map_v3_openai_chat_toolreason_chunk_at_resp03_with_expected_model(
+    payload: &mut Value,
+    tool_names: &[String],
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    project_to_client: bool,
+    session_id: Option<&str>,
+    request_id: Option<&str>,
     mut argument_buffers: Option<&mut Vec<String>>,
+    expected_model_id: Option<&str>,
 ) {
     let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
         return;
@@ -2524,9 +3191,17 @@ fn map_v3_openai_chat_toolreason_chunk_at_resp03(
                 let Ok(raw_parameter) = serde_json::to_string(&parameter) else {
                     continue;
                 };
-                let status = classify_v3_toolreason_observation_at_resp03(Some(&raw_parameter)).0;
-                let fields = v3_tool_thinking_fields_from_parameter_value_at_resp03(&parameter);
-                strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(&mut parameter);
+                let status = classify_v3_toolreason_observation_at_resp03_with_expected_model(
+                    Some(&raw_parameter),
+                    expected_model_id,
+                )
+                .0;
+                let fields =
+                    v3_tool_thinking_fields_from_parameter_value_at_resp03(&parameter, expected_model_id);
+                strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                    &mut parameter,
+                    expected_model_id,
+                );
                 let Ok(redacted_arguments) = serde_json::to_string(&parameter) else {
                     continue;
                 };
@@ -2539,7 +3214,7 @@ fn map_v3_openai_chat_toolreason_chunk_at_resp03(
                 }
                 if fields.is_some() && status == V3ToolreasonObservationStatus::Ok {
                     let tool_label = format_toolreason_tool_label(tool_names);
-                    emit_v3_toolreason_observation_at_resp03_with_context(
+                    emit_v3_toolreason_observation_at_resp03_with_expected_model(
                         &tool_label,
                         Some(&raw_parameter),
                         "resp03_relay_sse",
@@ -2548,6 +3223,7 @@ fn map_v3_openai_chat_toolreason_chunk_at_resp03(
                             session_id,
                             request_id,
                         },
+                        expected_model_id,
                     );
                 }
                 if project_to_client
@@ -2568,7 +3244,10 @@ fn map_v3_openai_chat_toolreason_chunk_at_resp03(
                 .find_map(|raw| serde_json::from_str::<Value>(raw).ok())
             {
                 if let Some(fields) =
-                    v3_tool_thinking_fields_from_parameter_value_at_resp03(&raw_pending)
+                    v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                        &raw_pending,
+                        expected_model_id,
+                    )
                 {
                     projected_reasoning =
                         format_toolreason_reasoning_from_reason(tool_names, &fields.reason);
@@ -2743,22 +3422,42 @@ pub(crate) fn project_v3_toolreason_sse_final_buffer_at_resp03_with_projection_a
     )
 }
 
-/// Resp03 唯一的 Direct SSE turn closeout。工具调用已经被观察但模型没有
-/// 提供可映射的 `<toolreason>` 时，也必须在流真正收口时记录 MISSING；不能
-/// 依赖某一种 `response.*.done` 事件，否则不同 provider 的 canonical SSE
-/// 事件形状会产生“没有打印”这一不可观测状态。
+/// Resp03's Direct SSE turn closeout. A missing JSON v2 field is observed only
+/// when the stream reaches its actual terminal boundary.
 pub(crate) fn finalize_v3_toolreason_observation_at_resp03_with_context(
     tool_names: &[String],
     pending_reasons: &mut Vec<Option<String>>,
     reason_emitted: &mut bool,
     context: V3ToolreasonObservationContext<'_>,
 ) {
-    if *reason_emitted || tool_names.is_empty() {
+    finalize_v3_toolreason_observation_at_resp03_with_expected_model(
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        context,
+        None,
+    );
+}
+
+pub(crate) fn finalize_v3_toolreason_observation_at_resp03_with_expected_model(
+    tool_names: &[String],
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    context: V3ToolreasonObservationContext<'_>,
+    expected_model_id: Option<&str>,
+) {
+    let has_pending_reason = pending_reasons.iter().any(Option::is_some);
+    if *reason_emitted || (tool_names.is_empty() && !has_pending_reason) {
         return;
     }
     let reason = pending_reasons.iter_mut().find_map(Option::take);
     let tool_label = format_toolreason_tool_label(tool_names);
-    emit_v3_toolreason_observation_at_resp03_with_context(
+    let tool_label = if tool_label.is_empty() {
+        "<missing>".to_string()
+    } else {
+        tool_label
+    };
+    emit_v3_toolreason_observation_at_resp03_with_expected_model(
         &tool_label,
         reason.as_deref().and_then(|reason| {
             let reason = reason.trim();
@@ -2767,6 +3466,7 @@ pub(crate) fn finalize_v3_toolreason_observation_at_resp03_with_context(
         "resp03_direct_sse",
         reason_emitted,
         context,
+        expected_model_id,
     );
 }
 
@@ -2817,11 +3517,6 @@ fn project_v3_toolreason_sse_frame_at_resp03(
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
-        let has_marker = v3_json_contains_toolreason_marker_at_resp03(&payload);
-        let is_toolreason_text_delta = matches!(
-            event_type.as_str(),
-            "response.output_text.delta" | "response.content_part.delta"
-        );
         let is_completed_with_tool_call =
             event_type == "response.completed" && v3_json_contains_tool_call_at_resp03(&payload);
         let has_pending_message_reason = event_type == "response.output_item.done"
@@ -2842,20 +3537,12 @@ fn project_v3_toolreason_sse_frame_at_resp03(
         let is_toolreason_reasoning_done = event_type == "response.output_item.done"
             && payload.pointer("/item/type").and_then(Value::as_str) == Some("reasoning")
             && payload
-                .pointer("/item/summary")
-                .and_then(Value::as_array)
-                .is_some_and(|summary| {
-                    summary.iter().any(|part| {
-                        part.get("text")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.starts_with("调用工具 "))
-                    })
-                });
-        if !has_marker
-            && !has_pending_message_reason
+                .pointer("/item/id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| id.starts_with("rcc_reason_"));
+        if !has_pending_message_reason
             && !is_tool_call_done
             && !is_completed_with_tool_call
-            && !is_toolreason_text_delta
             && !is_toolreason_reasoning_done
         {
             output.push_str(line);
@@ -3015,7 +3702,6 @@ fn project_v3_toolreason_sse_frame_at_resp03(
                 }
             }
         }
-        strip_v3_toolreason_markers_from_json_at_resp03(&mut payload);
         let Ok(encoded) = serde_json::to_string(&payload) else {
             output.push_str(line);
             continue;
@@ -3119,6 +3805,10 @@ pub(crate) fn build_v3_toolreason_reasoning_done_projection_at_resp03(
 ) -> Option<String> {
     if payload.get("type").and_then(Value::as_str) != Some("response.output_item.done")
         || payload.pointer("/item/type").and_then(Value::as_str) != Some("reasoning")
+        || !payload
+            .pointer("/item/id")
+            .and_then(Value::as_str)
+            .is_some_and(|id| id.starts_with("rcc_reason_"))
     {
         return None;
     }
@@ -3127,8 +3817,7 @@ pub(crate) fn build_v3_toolreason_reasoning_done_projection_at_resp03(
         .and_then(Value::as_array)
         .and_then(|summary| {
             summary.iter().find_map(|part| {
-                let text = part.get("text").and_then(Value::as_str)?;
-                text.starts_with("调用工具 ").then_some(text)
+                part.get("text").and_then(Value::as_str)
             })
         })?;
     Some(build_v3_toolreason_visible_text_sse_events_at_resp03(
@@ -3284,23 +3973,6 @@ fn collect_v3_tool_call_names_at_resp03(value: &Value, tool_names: &mut Vec<Stri
     }
 }
 
-fn v3_json_contains_toolreason_marker_at_resp03(value: &Value) -> bool {
-    match value {
-        Value::String(text) => text.contains("<toolreason>") || text.contains("</toolreason>"),
-        Value::Array(values) => values
-            .iter()
-            .any(v3_json_contains_toolreason_marker_at_resp03),
-        Value::Object(values) => {
-            let is_tool_call = v3_is_tool_call_object_at_resp03(values);
-            values.iter().any(|(key, value)| {
-                (!is_tool_call || !v3_is_tool_call_payload_key_at_resp03(key))
-                    && v3_json_contains_toolreason_marker_at_resp03(value)
-            })
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) => false,
-    }
-}
-
 fn v3_json_contains_tool_call_at_resp03(value: &Value) -> bool {
     match value {
         Value::Object(object) => {
@@ -3368,58 +4040,14 @@ fn v3_is_tool_call_object_at_resp03(object: &serde_json::Map<String, Value>) -> 
                 }))
 }
 
-/// Toolreason is an assistant-side protocol fence. Never inspect or rewrite
-/// native tool arguments while looking for, stripping, or observing that
-/// fence. A user command can legally contain the literal marker text.
+/// Toolreason is represented only by explicit JSON auxiliary fields inside a
+/// native tool-call argument object. Never inspect or rewrite native tool
+/// arguments while looking for fields outside that registered object surface.
 fn v3_is_tool_call_payload_key_at_resp03(key: &str) -> bool {
     matches!(
         key,
         "arguments" | "input" | "parameters" | "function" | "functionCall" | "args"
     )
-}
-
-fn strip_v3_toolreason_markers_from_json_at_resp03(value: &mut Value) {
-    match value {
-        Value::String(text) => *text = strip_v3_toolreason_markers_at_resp03(text),
-        Value::Array(values) => {
-            for value in values {
-                strip_v3_toolreason_markers_from_json_at_resp03(value);
-            }
-        }
-        Value::Object(values) => {
-            let is_tool_call = v3_is_tool_call_object_at_resp03(values);
-            for (key, value) in values.iter_mut() {
-                if is_tool_call && v3_is_tool_call_payload_key_at_resp03(key) {
-                    continue;
-                }
-                strip_v3_toolreason_markers_from_json_at_resp03(value);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) => {}
-    }
-}
-
-fn strip_v3_toolreason_markers_at_resp03(text: &str) -> String {
-    let text = text
-        .find("下面内容只说明工具调用部分，不适用于普通回答：")
-        .or_else(|| text.find("工具调用要求（请严格遵守）："))
-        .map(|start| &text[..start])
-        .unwrap_or(text);
-    let mut visible = String::with_capacity(text.len());
-    let mut remaining = text;
-    loop {
-        let Some(start) = remaining.find("<toolreason>") else {
-            visible.push_str(&remaining.replace("</toolreason>", ""));
-            break;
-        };
-        visible.push_str(&remaining[..start].replace("</toolreason>", ""));
-        let rest = &remaining[start + "<toolreason>".len()..];
-        let Some(end) = rest.find("</toolreason>") else {
-            break;
-        };
-        remaining = &rest[end + "</toolreason>".len()..];
-    }
-    visible
 }
 
 fn format_toolreason_reasoning(tool_names: &[String], reason: &str) -> Option<String> {
@@ -3433,7 +4061,7 @@ fn format_toolreason_reasoning(tool_names: &[String], reason: &str) -> Option<St
 
 fn format_toolreason_reasoning_from_reason(tool_names: &[String], reason: &str) -> Option<String> {
     let names = format_toolreason_tool_label(tool_names);
-    let reason = sanitize_v3_toolreason_reason_at_resp03(reason);
+    let reason = reason.trim().to_string();
     if names.is_empty() || reason.is_empty() || is_v3_toolreason_placeholder(&reason) {
         return None;
     }
@@ -3543,8 +4171,6 @@ fn is_v3_toolreason_placeholder(reason: &str) -> bool {
         || normalized.starts_with("#tool 调用工具")
         || normalized.starts_with("· 调用工具")
         || normalized.starts_with("🟢 调用工具")
-        || normalized.contains("<toolreason")
-        || normalized.contains("</toolreason")
         || normalized.contains("开始标签")
         || normalized.contains("结束标签")
         || normalized.contains("具体动机")
@@ -3739,6 +4365,19 @@ mod tests {
         assert_eq!(audit["diagnosis"], "raw_contract_present");
         assert_eq!(audit["provider_response_tool_call_count"], 1);
         assert_eq!(audit["provider_response_toolreason_count"], 1);
+        assert_eq!(audit["request_guidance_present"], true);
+        assert_eq!(audit["optional_diagnostics_present"], true);
+
+        let reason_only_provider_request =
+            json!({"tools": [{"description": "reason"}]});
+        let reason_only_audit = audit_v3_toolreason_dry_run_payloads(
+            &request,
+            &reason_only_provider_request,
+            &response,
+        );
+        assert_eq!(reason_only_audit["diagnosis"], "raw_contract_present");
+        assert_eq!(reason_only_audit["request_guidance_present"], true);
+        assert_eq!(reason_only_audit["optional_diagnostics_present"], false);
 
         let missing = audit_v3_toolreason_dry_run_payloads(
             &request,
@@ -3748,6 +4387,33 @@ mod tests {
         assert_eq!(
             missing["diagnosis"],
             "response_missing_toolreason_after_guidance"
+        );
+    }
+
+    #[test]
+    fn resp03_terminal_observation_retains_native_parameter_json() {
+        let payload = json!({
+            "output": [{
+                "type": "function_call",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\"}"
+            }]
+        });
+        let mut tool_names = Vec::new();
+        let mut reasons = Vec::new();
+        collect_v3_toolreason_json_observations_at_resp03(
+            &payload,
+            &mut tool_names,
+            &mut reasons,
+        );
+        assert_eq!(tool_names, vec!["pwd"]);
+        assert_eq!(
+            reasons,
+            vec!["{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\"}"]
+        );
+        assert_eq!(
+            classify_v3_toolreason_observation_at_resp03(Some(&reasons[0])).0,
+            V3ToolreasonObservationStatus::Ok
         );
     }
 

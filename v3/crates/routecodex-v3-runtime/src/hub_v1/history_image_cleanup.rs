@@ -856,5 +856,4 @@ mod tests {
             "cleaned tool image must become placeholder text"
         );
     }
-
 }

@@ -51,17 +51,17 @@ fn responses_wire_wraps_apply_patch_custom_tool_with_toolreason_schema() {
     assert_eq!(tool["function"]["name"], "apply_patch");
     assert_eq!(
         tool["function"]["parameters"]["required"],
-        json!(["input", "reason", "goal_alignment_confidence", "model_id"])
+        json!(["input"])
     );
     assert!(tool["function"]["parameters"]["properties"]
         .get("reason")
-        .is_some());
+        .is_none());
     assert!(tool["function"]["parameters"]["properties"]
         .get("goal_alignment_confidence")
-        .is_some());
+        .is_none());
     assert!(tool["function"]["parameters"]["properties"]
         .get("model_id")
-        .is_some());
+        .is_none());
 }
 
 #[test]
@@ -529,12 +529,9 @@ fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
         json!({
             "type":"object",
             "properties":{
-                "input":{"type":"string","description":"Raw free-form tool input."},
-                "reason":{"type":"string","description":"当前工具调用的唯一直接动机，只说动机，简短"},
-                "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100,"description":"当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"},
-                "model_id":{"type":"string","description":"本次响应实际使用的模型 ID"}
+                "input":{"type":"string","description":"Raw free-form tool input."}
             },
-            "required":["input","reason","goal_alignment_confidence","model_id"],
+            "required":["input"],
             "additionalProperties":false
         })
     );
@@ -548,7 +545,7 @@ fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
 }
 
 #[test]
-fn openai_chat_wire_repairs_preflattened_apply_patch_function_schema() {
+fn openai_chat_wire_preserves_preflattened_apply_patch_function_schema() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "patch"}],
@@ -563,21 +560,10 @@ fn openai_chat_wire_repairs_preflattened_apply_patch_function_schema() {
     });
 
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect("pre-flattened apply_patch must receive the freeform input contract");
-    assert_eq!(
-        request["tools"][0]["function"]["parameters"],
-        json!({
-            "type":"object",
-            "properties":{
-                "input":{"type":"string","description":"Raw free-form tool input."},
-                "reason":{"type":"string","description":"当前工具调用的唯一直接动机，只说动机，简短"},
-                "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100,"description":"当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"},
-                "model_id":{"type":"string","description":"本次响应实际使用的模型 ID"}
-            },
-            "required":["input","reason","goal_alignment_confidence","model_id"],
-            "additionalProperties":false
-        })
-    );
+        .expect("pre-flattened apply_patch must remain a legal function tool");
+    assert_eq!(request["tools"][0]["function"]["parameters"], json!({
+        "type":"object"
+    }));
 }
 
 #[test]
@@ -653,7 +639,9 @@ fn openai_chat_wire_flattens_custom_grammar_to_function_tool() {
         request["tools"][0]["function"]["parameters"],
         json!({
             "type":"object",
-            "properties":{"input":{"type":"string","description":"Raw free-form tool input."}},
+            "properties":{
+                "input":{"type":"string","description":"Raw free-form tool input."}
+            },
             "required":["input"],
             "additionalProperties":false
         }),
@@ -683,7 +671,9 @@ fn openai_chat_wire_flattens_any_custom_format_to_function_tool() {
         request["tools"][0]["function"]["parameters"],
         json!({
             "type":"object",
-            "properties":{"input":{"type":"string","description":"Raw free-form tool input."}},
+            "properties":{
+                "input":{"type":"string","description":"Raw free-form tool input."}
+            },
             "required":["input"],
             "additionalProperties":false
         })

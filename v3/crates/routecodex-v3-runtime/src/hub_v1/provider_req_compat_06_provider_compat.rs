@@ -130,6 +130,11 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     .map(|result| result.payload)
     .map_err(|reason| classify_v3_provider_compat_error("request", profile, reason))?;
     let mut result = result;
+    super::servertool_hooks::bind_v3_tool_thinking_guidance_to_wire_model_at_req04(
+        &mut result,
+        &selected.wire_model,
+    )
+    .map_err(|reason| classify_v3_provider_compat_error("request_tool_thinking", profile, reason))?;
     project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
     normalize_deepseek_thinking_stopless_tool_choice(&mut result, selected, provider_protocol);
     Ok(result)
@@ -145,6 +150,7 @@ fn project_reasoning_effort_for_selected_target(
         Some("chat:deepseek-max" | "responses:deepseek-console-go")
     );
     let is_minimax = selected.compatibility_profile.as_deref() == Some("chat:minimax");
+    let is_opencode_go_zen = selected.provider_id == "opencode-go-zen";
 
     let effort_path = match provider_protocol {
         V3HubProviderWireProtocol::Responses => "/reasoning/effort",
@@ -201,7 +207,37 @@ fn project_reasoning_effort_for_selected_target(
         return Ok(());
     }
 
-    let projected = if is_deepseek {
+    // Anthropic `output_config.effort` is a standard wire field. The
+    // protocol codec has already validated/projected it; only provider
+    // deviations belong in this compat owner. Do not rewrite the standard
+    // Anthropic value here.
+    if matches!(provider_protocol, V3HubProviderWireProtocol::Anthropic) {
+        return Ok(());
+    }
+
+    let projected = if is_opencode_go_zen {
+        match effort.as_str() {
+            "low" | "minimal" | "medium" => "low",
+            "high" | "xhigh" => "high",
+            "max" => "max",
+            // OpenCode Zen always thinks. Its provider contract rejects the
+            // standard `none` value and explicitly requires low/high/max;
+            // low is the deterministic provider-compatible representation.
+            "none" => "low",
+            _ => {
+                return Err(V3ProviderCompatError::other(
+                    "request_reasoning_effort_projection",
+                    selected
+                        .compatibility_profile
+                        .clone()
+                        .unwrap_or_else(|| "compat:passthrough".to_string()),
+                    format!(
+                        "opencode-go-zen does not support reasoning effort {effort}; supported values are low/high/max"
+                    ),
+                ));
+            }
+        }
+    } else if is_deepseek {
         match effort.as_str() {
             "none" => "none",
             "xhigh" | "max" => "max",
@@ -216,11 +252,7 @@ fn project_reasoning_effort_for_selected_target(
                     _ => "medium",
                 }
             }
-            V3HubProviderWireProtocol::Anthropic => match effort.as_str() {
-                "none" | "minimal" => "low",
-                "low" | "medium" | "high" | "xhigh" | "max" => effort.as_str(),
-                _ => "medium",
-            },
+            V3HubProviderWireProtocol::Anthropic => unreachable!(),
             V3HubProviderWireProtocol::Gemini => unreachable!(),
         }
     };
@@ -239,14 +271,9 @@ fn project_reasoning_effort_for_selected_target(
                 );
             }
         }
-        V3HubProviderWireProtocol::Anthropic => {
-            if let Some(output_config) = payload
-                .get_mut("output_config")
-                .and_then(Value::as_object_mut)
-            {
-                output_config.insert("effort".to_string(), Value::String(projected.to_string()));
-            }
-        }
+        V3HubProviderWireProtocol::Anthropic => unreachable!(
+            "standard Anthropic effort returned before provider compat projection"
+        ),
         V3HubProviderWireProtocol::Gemini => unreachable!(),
     }
     Ok(())
@@ -460,6 +487,50 @@ mod tests {
         assert_eq!(
             req_compat.provider_semantic_payload()["messages"][0]["role"],
             "user"
+        );
+    }
+
+    #[test]
+    fn anthropic_standard_effort_is_not_rewritten_by_provider_compat() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "reasoning": {"effort": "max"}
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("standard Anthropic effort must remain provider-valid");
+        assert_eq!(
+            req_compat.provider_semantic_payload()["output_config"]["effort"],
+            "max"
+        );
+        assert!(req_compat.provider_semantic_payload().get("thinking").is_none());
+    }
+
+    #[test]
+    fn minimax_anthropic_effort_uses_registered_provider_compat() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "reasoning": {"effort": "medium"}
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+        req07.previous.selected_target.provider_id = "minimax_anthropic".to_string();
+        req07.previous.selected_target.compatibility_profile = Some("chat:minimax".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("MiniMax Anthropic compat must produce adaptive thinking");
+        assert!(req_compat.provider_semantic_payload().get("output_config").is_none());
+        assert_eq!(
+            req_compat.provider_semantic_payload()["thinking"]["type"],
+            "adaptive"
         );
     }
 
@@ -901,6 +972,81 @@ mod tests {
         assert_eq!(
             req_compat.provider_semantic_payload()["reasoning_effort"],
             "high"
+        );
+    }
+
+    #[test]
+    fn opencode_go_zen_provider_compat_projects_medium_to_supported_low_effort() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "reasoning": {"effort": "medium"}
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_id = "opencode-go-zen".to_string();
+        req07.previous.selected_target.model_id = "x-preview-f-free".to_string();
+        req07.previous.selected_target.wire_model = "x-preview-f-free".to_string();
+        req07.previous.selected_target.compatibility_profile =
+            Some("compat:passthrough".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("OpenCode Zen provider compat must emit a supported effort value");
+
+        assert_eq!(
+            req_compat.provider_semantic_payload()["reasoning_effort"],
+            "low"
+        );
+
+        let mut responses_req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "reasoning": {"effort": "max"}
+            }),
+            V3HubProviderWireProtocol::Responses,
+        );
+        responses_req07.previous.selected_target.provider_id = "opencode-go-zen".to_string();
+        responses_req07.previous.selected_target.model_id = "x-preview-f-free".to_string();
+        responses_req07.previous.selected_target.wire_model = "x-preview-f-free".to_string();
+        responses_req07.previous.selected_target.compatibility_profile =
+            Some("compat:passthrough".to_string());
+
+        let responses_compat =
+            build_provider_req_compat_06_from_v3_hub_req_outbound_07(responses_req07)
+                .expect("OpenCode Zen Responses compat must preserve supported max effort");
+        assert_eq!(
+            responses_compat.provider_semantic_payload()["reasoning"]["effort"],
+            "max"
+        );
+    }
+
+    #[test]
+    fn opencode_go_zen_provider_compat_projects_none_to_supported_low_effort() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "reasoning": {"effort": "none"}
+            }),
+            V3HubProviderWireProtocol::Responses,
+        );
+        req07.previous.selected_target.provider_id = "opencode-go-zen".to_string();
+        req07.previous.selected_target.model_id = "x-preview-f-free".to_string();
+        req07.previous.selected_target.wire_model = "x-preview-f-free".to_string();
+        req07.previous.selected_target.compatibility_profile =
+            Some("compat:passthrough".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("OpenCode Zen must receive a provider-supported effort value");
+
+        assert_eq!(
+            req_compat.provider_semantic_payload()["reasoning"]["effort"],
+            "low"
         );
     }
 

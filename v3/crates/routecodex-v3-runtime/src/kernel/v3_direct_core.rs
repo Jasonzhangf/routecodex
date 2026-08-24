@@ -283,7 +283,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
         }
         let server_id = C::server_id(&standardized).to_string();
         let request_id = C::request_id(&standardized).to_string();
-        if let Err(source) = C::prepare_before_send(
+        let tool_thinking_enabled = match C::prepare_before_send(
             &mut control,
             manifest,
             &server_id,
@@ -292,12 +292,15 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
             now_epoch_ms,
             &mut trace,
         ) {
-            return error_output(
-                source,
-                trace,
-                &crate::hooks::register_responses_direct_hooks(),
-            );
-        }
+            Ok(enabled) => enabled,
+            Err(source) => {
+                return error_output(
+                    source,
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                )
+            }
+        };
         let policy = C::run_route(selected.clone(), &standardized);
         trace.push(C::POLICY_STAGE);
         let wire = match C::run_request_projection(&policy, request_key_catalog) {
@@ -687,13 +690,13 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
         let provider_status = provider_raw.status();
         let response_projection_context = match crate::kernel::v3_direct_protocol_codec::build_direct_response_compat_context(
             C::policy_target(&policy),
-            manifest.features.get("tool_thinking").copied().unwrap_or(false),
-            manifest
-                .features
-                .get("toolreason_client_projection")
-                .copied()
-                .unwrap_or(true),
+            tool_thinking_enabled,
+            crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
+                manifest,
+                C::server_id(&standardized),
+            ),
             direct_failure_session_scope.session_id(),
+            C::tool_thinking_turn_context(&standardized).clone(),
         ) {
             Ok(context) => context,
             Err(error) => {
@@ -828,7 +831,30 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
         );
         let committed_client_sse = matches!(&attempt_body, V3ProviderAttemptBody::Sse(_));
         let client_body = match attempt_body {
-            V3ProviderAttemptBody::Sse(stream) => {
+            V3ProviderAttemptBody::Sse(mut stream) => {
+                stream = crate::kernel::wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook(
+                    stream,
+                    response_projection
+                        .stream_observation
+                        .clone()
+                        .unwrap_or_default(),
+                    runtime_timing.clone(),
+                    false,
+                    true,
+                    response_projection.compat_plan.provider_protocol,
+                    false,
+                    false,
+                    crate::hooks::register_responses_direct_hooks().direct_sse_typed_hooks(),
+                    tool_thinking_enabled,
+                    crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
+                        manifest,
+                        C::server_id(&standardized),
+                    ),
+                    Some(direct_failure_session_scope.session_id().to_owned()),
+                    Some(C::request_id(&standardized).to_owned()),
+                    Some(C::policy_target(&policy).candidate.model_id.clone()),
+                    true,
+                );
                 let stream = match crate::kernel::direct_runtime_helpers_stream::commit_direct_sse_stream(stream).await {
                     Ok(stream) => stream,
                     Err(source) => {

@@ -68,7 +68,14 @@ pub(super) fn anthropic_tool_use_as_responses_call(
     if context.is_governed_custom_tool(name) {
         let wrapper = input
             .as_object()
-            .filter(|wrapper| wrapper.len() == 1)
+            .filter(|wrapper| {
+                wrapper.keys().all(|key| {
+                    matches!(
+                        key.as_str(),
+                        "input" | "reason" | "goal_alignment_confidence" | "model_id"
+                    )
+                })
+            })
             .ok_or(V3AnthropicCodecError::MalformedField {
                 field: "custom tool_use.input wrapper",
             })?;
@@ -77,12 +84,20 @@ pub(super) fn anthropic_tool_use_as_responses_call(
                 field: "custom tool_use.input.input",
             },
         )?;
-        return Ok(json!({
+        let mut output = json!({
             "type":"custom_tool_call",
             "call_id":call_id,
             "name":name,
             "input":raw
-        }));
+        });
+        if let Some(output) = output.as_object_mut() {
+            for key in ["reason", "goal_alignment_confidence", "model_id"] {
+                if let Some(value) = wrapper.get(key) {
+                    output.insert(key.to_string(), value.clone());
+                }
+            }
+        }
+        return Ok(output);
     }
     Ok(json!({
         "type":"function_call",

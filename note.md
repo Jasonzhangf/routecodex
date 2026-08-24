@@ -36030,3 +36030,7 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - 根因：`scripts/install-release.sh` 从根 `package.json` 读取 release version，并将 V4 的 5520 硬编码为 V3 默认 health 探针；根版本 `0.90.4601` 与 V3 版本 `0.90.4574` 不一致。
 - 修复：版本真源改为 `v3/package.json`；默认从 `VERIFY_CONFIG` 的 `[servers.*].port` 解析 V3 listener，缺失时 fail-fast；一次 aggregate restart 后逐 configured listener 验证。显式 `ROUTECODEX_INSTALL_VERIFY_PORT` 仍可收窄为单端口。
 - 验证：旧实现契约红测失败，修复后 `verify:install-release-contract`、shell syntax、V3 install/distribution、真实 `npm run install:release`、4444/7777 health 和 7777 Responses SSE (`response.completed`/`response.done`/`[DONE]`) 通过。`verify:build-script-tiering` 与 `verify:v3-build-admission-lockstep` 仍被既有基线/生成物漂移阻断，未改其范围。
+# 2026-08-24 DeepSeek 400 tool-only restore regression
+- 根因：commit `4b862c3` 删除 `relay_request` Req04 restore 后的 tool-only 图片全量占位兜底；Responses→Chat canonical payload 无 user carrier 时，`normalize_v3_history_image_placeholders` 无边界可推导，恢复历史工具截图继续进入 provider wire，触发 HTTP 400。
+- 修复：Req04 restore 后若 `messages` 无 user，调用唯一图片清洗 owner `normalize_v3_all_images_to_placeholder`；新增 `local_tool_only_restore_replaces_images_before_provider_wire` 回归，锁 provider wire 不含 `data:image/` 且含 `[Image]`。
+- 证据：定向测试通过；`git diff --check` 通过。更广 lib 测试被既有 dirty direct-SSE 改动阻断：多个 `V3ClientBody` match 未覆盖 `Sse`，非本次变更。

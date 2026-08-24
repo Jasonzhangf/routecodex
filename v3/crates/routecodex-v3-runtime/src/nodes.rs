@@ -147,6 +147,8 @@ pub fn build_v3_server_03_http_request_raw_with_purpose_and_scope(
 pub struct V3Req04StandardizedResponses {
     pub body: Value,
     pub protocol_context: V3ProtocolContext,
+    pub tool_thinking_turn_context:
+        crate::hub_v1::V3ToolThinkingTurnContext,
 }
 
 /// Chat 入口标准化（与 V3Req04StandardizedResponses 同构，协议不同）：
@@ -156,6 +158,8 @@ pub struct V3Req04StandardizedResponses {
 pub struct V3Req04StandardizedChat {
     pub body: Value,
     pub protocol_context: V3ProtocolContext,
+    pub tool_thinking_turn_context:
+        crate::hub_v1::V3ToolThinkingTurnContext,
 }
 
 /// Chat direct 执行策略节点（与 V3ResponsesDirect11Policy 同构）。
@@ -215,7 +219,33 @@ pub struct V3Execution11ProtocolDecision {
 
 pub type V3ClientSseStream =
     Pin<Box<dyn Stream<Item = Result<Vec<u8>, V3Error01SourceRaised>> + Send>>;
-pub(crate) type V3ProviderAttemptSseStream = V3ClientSseStream;
+
+/// Provider-attempt stream.  This is deliberately a distinct carrier from
+/// `V3ClientSseStream`: provider bytes/errors cannot be passed to a
+/// client-facing owner without an explicit runtime projection step.
+pub(crate) struct V3ProviderAttemptSseStream {
+    inner: V3ClientSseStream,
+}
+
+impl V3ProviderAttemptSseStream {
+    pub(crate) fn new(inner: V3ClientSseStream) -> Self {
+        Self { inner }
+    }
+}
+
+impl Stream for V3ProviderAttemptSseStream {
+    type Item = Result<Vec<u8>, V3Error01SourceRaised>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.inner).poll_next(cx)
+    }
+}
+
+impl fmt::Debug for V3ProviderAttemptSseStream {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("V3ProviderAttemptSseStream(<provider-attempt>)")
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3CommittedSseTerminal {
@@ -371,7 +401,7 @@ impl fmt::Debug for V3ClientBody {
                 .debug_struct("Bytes")
                 .field("byte_len", &bytes.len())
                 .finish(),
-            Self::Sse(_) => formatter.write_str("Sse(<runtime-client-stream>)"),
+            Self::Sse(_) => formatter.write_str("Sse(<live-event-stream>)"),
             Self::CommittedSse(_) => formatter.write_str("CommittedSse(<front-event-stream>)"),
         }
     }
@@ -428,6 +458,7 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
             previous_response_id,
         },
         body,
+        tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext::disabled(),
     })
 }
 
@@ -458,6 +489,7 @@ pub fn build_v3_chat_req_04_standardized_from_v3_server_03(
             previous_response_id: None,
         },
         body,
+        tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext::disabled(),
     })
 }
 

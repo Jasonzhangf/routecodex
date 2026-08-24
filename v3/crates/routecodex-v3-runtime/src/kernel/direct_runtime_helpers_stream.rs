@@ -25,6 +25,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
         false,
         None,
         None,
+        None,
         false,
     )
 }
@@ -43,6 +44,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     toolreason_client_projection: bool,
     session_id: Option<String>,
     request_id: Option<String>,
+    expected_model_id: Option<String>,
     client_responses_projection: bool,
 ) -> V3ProviderAttemptSseStream {
     struct StreamState {
@@ -62,7 +64,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     } else {
         source
     };
-    Box::pin(stream::unfold(
+    V3ProviderAttemptSseStream::new(Box::pin(stream::unfold(
         StreamState {
             source,
             decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
@@ -78,6 +80,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                 deepseek_console_go,
                 session_id,
                 request_id,
+                expected_model_id,
                 ..Default::default()
             }
             .with_typed_hooks(typed_hooks)
@@ -180,7 +183,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                 }
             }
         },
-    ))
+    )))
 }
 
 /// Consume one Direct SSE provider attempt inside Runtime and seal only the
@@ -207,6 +210,30 @@ mod direct_sse_timing_tests {
     use super::*;
 
     #[tokio::test]
+    async fn direct_sse_broker_hands_off_before_provider_eof() {
+        let provider = V3ProviderAttemptSseStream::new(Box::pin(stream::unfold(
+            0usize,
+            |index| async move {
+                if index == 0 {
+                    return Some((
+                        Ok(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\n".to_vec()),
+                        1,
+                    ));
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                None
+            },
+        )));
+        let mut client = commit_direct_sse_stream(provider);
+        let first = tokio::time::timeout(std::time::Duration::from_millis(100), client.next())
+            .await
+            .expect("broker must not wait for provider EOF")
+            .expect("first client frame")
+            .expect("first provider frame must remain typed-success");
+        assert!(String::from_utf8_lossy(&first).contains("response.output_text.delta"));
+    }
+
+    #[tokio::test]
     async fn clean_eof_finishes_runtime_and_publishes_typed_timing() {
         let observation = V3RuntimeStreamObservation::default();
         let runtime_timing = V3RuntimeTimingState::start();
@@ -216,7 +243,7 @@ mod direct_sse_timing_tests {
                 .to_vec(),
         )]));
         let mut observed = wrap_direct_sse_provider_event_json_observation_stream(
-            source,
+            V3ProviderAttemptSseStream::new(source),
             observation.clone(),
             runtime_timing,
             false,

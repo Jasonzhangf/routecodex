@@ -845,7 +845,7 @@ fn observed_sse_client_stream_with_protocol(
         session_id: Option<String>,
     }
 
-    Box::pin(stream::unfold(
+    V3ProviderAttemptSseStream::new(Box::pin(stream::unfold(
         ObservedState {
             stream,
             decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
@@ -1076,7 +1076,7 @@ fn observed_sse_client_stream_with_protocol(
                 }
             }
         },
-    ))
+    )))
 }
 
 fn apply_cc_sol_thinking_tags_to_sse_chunk(chunk: &[u8]) -> Vec<u8> {

@@ -91,7 +91,7 @@ async fn direct_sse_thinking_tag_consumer_buffers_split_transport_chunks_until_t
         .map(|chunk| Ok(chunk.to_vec()))
         .collect::<Vec<_>>();
     let mut output = wrap_v3_direct_responses_thinking_tag_consumer_stream(
-        Box::pin(futures_util::stream::iter(chunks)),
+        V3ProviderAttemptSseStream::new(Box::pin(futures_util::stream::iter(chunks))),
     );
 
     let first = output.next().await.expect("terminal output").unwrap();
@@ -103,9 +103,11 @@ async fn direct_sse_thinking_tag_consumer_buffers_split_transport_chunks_until_t
 
 #[tokio::test]
 async fn direct_sse_thinking_tag_consumer_exports_transport_decode_error() {
-    let mut output = wrap_v3_direct_responses_thinking_tag_consumer_stream(Box::pin(
-        futures_util::stream::iter(vec![Ok(vec![0xff])]),
-    ));
+    let mut output = wrap_v3_direct_responses_thinking_tag_consumer_stream(
+        V3ProviderAttemptSseStream::new(Box::pin(futures_util::stream::iter(vec![Ok(
+            vec![0xff]
+        )]))),
+    );
 
     let error = output.next().await.expect("transport error").unwrap_err();
     assert_eq!(error.source_stage, "V3DirectResp14ProviderProjectionPrepared");

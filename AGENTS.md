@@ -2,6 +2,8 @@
 
 ## 核心架构概要（Project Essence — 先记忆，再路由）
 
+默认 review 通道为 `agy-review` MCP：使用 `agy --dangerously-skip-permissions`（YOLO）执行结构化、可观测 review；DSH/Codex 不再作为默认 review，也不得绕过 AGY 的 FAIL。
+
 本项目本质是一个**多协议、多入口的代理网关（Proxy）**，核心原则：**保持原意，只做必要修改**。
 
 - **不重写历史**：对话历史不可显式扭曲/篡改——历史轮的任何修改在下一轮仍会原样重现，修改既无意义也有害；既有历史污染不可逆，不做清理。
