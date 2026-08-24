@@ -145,15 +145,15 @@ export function validateSourceGreenClaims(input, context, failures) {
       const record = readJsonAt(context.truth, integrationCommit, recordPath, failures,
         'CANDIDATE_RECORD_INVALID_JSON', recordPath);
       const candidateMaps = record ? {
-        functionMap: readJsonAt(context.truth, record.head_commit,
+        functionMap: readJsonAt(context.truth, integrationCommit,
           'docs/architecture/maps/function-map.json', failures, 'CANDIDATE_MAP_INVALID', 'candidate function map'),
-        moduleRegistry: readJsonAt(context.truth, record.head_commit,
+        moduleRegistry: readJsonAt(context.truth, integrationCommit,
           '.appsdk/maps/module-registry.json', failures, 'CANDIDATE_MAP_INVALID', 'candidate module registry'),
-        resourceMap: readJsonAt(context.truth, record.head_commit,
+        resourceMap: readJsonAt(context.truth, integrationCommit,
           'docs/architecture/maps/resource-map.json', failures, 'CANDIDATE_MAP_INVALID', 'candidate resource map'),
-        verificationMap: readJsonAt(context.truth, record.head_commit,
+        verificationMap: readJsonAt(context.truth, integrationCommit,
           'docs/architecture/maps/verification-map.json', failures, 'CANDIDATE_MAP_INVALID', 'candidate verification map'),
-        gateInputContract: readJsonAt(context.truth, record.head_commit,
+        gateInputContract: readJsonAt(context.truth, integrationCommit,
           'contracts/feature-layer-gate-inputs.contract.json', failures,
           'CANDIDATE_GATE_INPUT_CONTRACT_INVALID', 'candidate gate input contract'),
       } : null;
