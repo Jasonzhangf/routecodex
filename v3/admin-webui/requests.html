@@ -22,7 +22,7 @@
 
   <main>
     <h1>Requests</h1>
-    <div class="sub">Realtime request lifecycle, errors and port distribution</div>
+    <div class="sub">Persistent request records with usage, routing, errors and lifecycle</div>
     <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
 
     <div class="section">
@@ -37,10 +37,20 @@
     <div class="toolbar">
       <label>Status<select id="status-filter"><option value="all">all</option><option value="active">active</option><option value="retrying">retrying</option><option value="success">success</option><option value="error">error</option><option value="cancelled">cancelled</option></select></label>
       <label>Port<select id="port-filter"><option value="all">all ports</option></select></label>
+      <label>Provider<input id="provider-filter" type="search" placeholder="provider"></label>
+      <label>Model<input id="model-filter" type="search" placeholder="model"></label>
+      <label>Route<input id="route-filter" type="search" placeholder="route"></label>
+      <label>Protocol<select id="protocol-filter"><option value="all">all</option></select></label>
+      <label>Mode<select id="mode-filter"><option value="all">all</option><option value="direct">direct</option><option value="relay">relay</option></select></label>
       <label>Search<input id="search-filter" type="search" placeholder="request, model, provider, route, error"></label>
-      <label>Sort by<select id="sort-field"><option value="updated_epoch_ms">Updated</option><option value="started_epoch_ms">Started</option><option value="finished_epoch_ms">Finished</option><option value="duration_ms">Duration</option><option value="attempts">Attempts</option><option value="failed_attempts">Failures</option><option value="switches">Switches</option></select></label>
+      <label>Sort by<select id="sort-field"><option value="started_epoch_ms">Started</option><option value="updated_epoch_ms">Updated</option><option value="finished_epoch_ms">Finished</option><option value="duration_ms">Duration</option><option value="attempts">Attempts</option><option value="failed_attempts">Failures</option><option value="switches">Switches</option><option value="usage_input_tokens">Input tokens</option><option value="usage_output_tokens">Output tokens</option><option value="usage_total_tokens">Total tokens</option><option value="usage_cached_tokens">Cached tokens</option></select></label>
       <label>Order<select id="sort-order"><option value="desc">Descending</option><option value="asc">Ascending</option></select></label>
-      <label class="checkbox"><input id="group-toggle" type="checkbox" checked> Group by port</label>
+    </div>
+
+    <div class="pagination">
+      <button class="btn" id="page-prev" type="button">&#8592; Prev</button>
+      <span id="page-info" class="muted">page — of — · — records</span>
+      <button class="btn" id="page-next" type="button">Next &#8594;</button>
     </div>
 
     <div class="section">
@@ -61,20 +71,39 @@
 
   <script src="/app.embedded.txt"></script>
   <script>
-    let snapshot = { requests: {}, stats: {}, sources: [], recent_events: [] };
-    let paused = false;
-    let pollTimer = null;
-    const sourceCursors = new Map();
-    const requestEvents = new Map();
-    let selectedRequestKey = null;
-    let resyncing = false;
+    const PAGE_SIZE = 50;
+    const state = {
+      records: [],
+      page: 1,
+      total: 0,
+      stats: {},
+      facets: { ports: {}, providers: {}, models: {}, routes: {}, sessions: {}, response_types: {}, error_categories: {} },
+      selected: null,
+      loading: false,
+      eventLog: new Map(),
+      sourceCursors: new Map(),
+      recentEvents: [],
+      resyncing: false,
+      pollTimer: null,
+      paused: false,
+    };
 
     function statusOf(row) {
-      if (row.result === "success") return "success";
-      if (row.result === "error") return "error";
-      if (row.result === "cancelled") return "cancelled";
+      const r = row.result;
+      if (r === "success") return "success";
+      if (r === "error") return "error";
+      if (r === "cancelled") return "cancelled";
       if (row.event_type === "request.provider_attempt_failed") return "retrying";
       return "active";
+    }
+    function usageText(usage) {
+      if (!usage) return "—";
+      const parts = [];
+      if (usage.input_tokens != null) parts.push(`in ${Number(usage.input_tokens).toLocaleString()}`);
+      if (usage.output_tokens != null) parts.push(`out ${Number(usage.output_tokens).toLocaleString()}`);
+      if (usage.cached_tokens != null) parts.push(`cache ${Number(usage.cached_tokens).toLocaleString()}`);
+      if (usage.total_tokens != null) parts.push(`total ${Number(usage.total_tokens).toLocaleString()}`);
+      return parts.length ? parts.join(" / ") : "—";
     }
 
     function timeText(value) {
@@ -88,56 +117,82 @@
 
     function applyPoll(data) {
       if (!data || typeof data !== "object") throw new Error("invalid observability poll");
-      for (const source of data.sources || []) sourceCursors.set(source.port, source.cursor);
+      for (const source of data.sources || []) state.sourceCursors.set(source.port, source.cursor);
       for (const event of data.recent_events || []) {
-        requestEvents.set(`${event.row?.scope?.port}:${event.sequence}`, event);
+        state.eventLog.set(`${event.row?.scope?.port}:${event.sequence}`, event);
       }
-      while (requestEvents.size > 2048) requestEvents.delete(requestEvents.keys().next().value);
-      snapshot = data;
-      render();
-      showConnection();
+      while (state.eventLog.size > 2048) state.eventLog.delete(state.eventLog.keys().next().value);
+      state.recentEvents = data.recent_events || [];
+      renderStats(data.stats || {});
     }
 
-    async function poll(allowResync = true) {
+    async function loadRecords() {
+      if (state.loading) return;
+      state.loading = true;
+      try {
+        const params = new URLSearchParams();
+        params.set("page", String(state.page));
+        params.set("page_size", String(PAGE_SIZE));
+        params.set("sort_by", document.getElementById("sort-field").value);
+        params.set("sort_order", document.getElementById("sort-order").value);
+        const status = document.getElementById("status-filter").value;
+        if (status !== "all") {
+          const map = { success: "success", error: "error", cancelled: "cancelled", active: "", retrying: "" };
+          const serverStatus = map[status];
+          if (serverStatus) params.set("status", serverStatus);
+        }
+        const port = document.getElementById("port-filter").value;
+        if (port !== "all") params.set("port", port);
+        const provider = document.getElementById("provider-filter").value.trim();
+        if (provider) params.set("provider", provider);
+        const model = document.getElementById("model-filter").value.trim();
+        if (model) params.set("model", model);
+        const route = document.getElementById("route-filter").value.trim();
+        if (route) params.set("route", route);
+        const protocol = document.getElementById("protocol-filter").value;
+        if (protocol !== "all") params.set("entry_protocol", protocol);
+        const mode = document.getElementById("mode-filter").value;
+        if (mode !== "all") params.set("execution_mode", mode);
+        const search = document.getElementById("search-filter").value.trim();
+        if (search) params.set("search", search);
+        const response = await api(`/api/observability/records?${params}`);
+        state.records = response.records || [];
+        state.total = response.total || 0;
+        state.stats = response.stats || {};
+        state.facets = response.facets || state.facets;
+        renderAll();
+      } catch (error) {
+        showStatus("err", `records query failed: ${error.message}`);
+      } finally {
+        state.loading = false;
+      }
+    }
+
+    async function pollLifecycle() {
       const params = new URLSearchParams();
-      if (sourceCursors.size) {
-        params.set("sources", [...sourceCursors.entries()].sort(([a], [b]) => a - b).map(([port, cursor]) => `${port}:${cursor}`).join(","));
+      if (state.sourceCursors.size) {
+        params.set("sources", [...state.sourceCursors.entries()].sort(([a], [b]) => a - b).map(([port, cursor]) => `${port}:${cursor}`).join(","));
       }
       const data = await api(`/api/observability/poll?${params}`);
       applyPoll(data);
     }
 
-    async function pollOrResync() {
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        try {
-          await poll();
-          return;
-        } catch (error) {
-          if (error.code !== "observability_resync_required" || resyncing || attempt === 2) throw error;
-        }
-        resyncing = true;
-        try {
-          await load();
-        } finally {
-          resyncing = false;
-        }
-      }
-    }
-
     function schedulePoll() {
-      if (pollTimer) clearTimeout(pollTimer);
-      pollTimer = setTimeout(async () => {
-          pollTimer = null;
-        if (!paused) {
-          try { await pollOrResync(); } catch (error) { showStatus("err", `observability failed: ${error.message}`); }
+      if (state.pollTimer) clearTimeout(state.pollTimer);
+      state.pollTimer = setTimeout(async () => {
+        state.pollTimer = null;
+        if (!state.paused) {
+          try { await pollLifecycle(); } catch (error) { showStatus("err", `observability failed: ${error.message}`); }
+          await loadRecords();
         }
         schedulePoll();
-      }, 1000);
+      }, 2000);
     }
 
     async function load() {
-      sourceCursors.clear();
-      await poll();
+      state.sourceCursors.clear();
+      try { await pollLifecycle(); } catch (error) { /* ignore */ }
+      await loadRecords();
     }
 
     function showConnection() {
@@ -174,8 +229,8 @@
       });
     }
 
-    function renderStats() {
-      const stats = snapshot.stats || {};
+    function renderStats(stats) {
+      stats = stats || {};
       const cards = document.getElementById("summary-cards");
       cards.replaceChildren();
       const values = [["Total", stats.total], ["Active", stats.active], ["Success", stats.success], ["Error", stats.error], ["Cancelled", stats.cancelled], ["Switches", stats.switches], ["Output tokens", stats.tokens_output]];
@@ -198,11 +253,10 @@
         portBody.replaceChildren(el("tr", null, cell));
       }
       const errorBody = document.querySelector("#errors-table tbody");
-      const categories = Object.entries(stats.error_categories || {}).sort(([, a], [, b]) => b - a);
+      const categories = Object.entries(state.facets.error_categories || {}).sort(([, a], [, b]) => b - a);
       errorBody.replaceChildren(...categories.map(([category, count]) => {
-        const latest = [...Object.values(snapshot.requests || {})].filter((row) => metaValue(row, "error_category") === category).reduce((latest, row) => Math.max(latest, row.updated_epoch_ms || 0), 0);
         const row = el("tr", "status-error");
-        row.append(el("td", null, category), numberCell(count), el("td", "muted", timeText(latest)));
+        row.append(el("td", null, category), numberCell(count));
         return row;
       }));
       if (!categories.length) {
@@ -214,10 +268,20 @@
       const selected = portSelect.value;
       const allPorts = el("option", null, "all ports");
       allPorts.value = "all";
-      portSelect.replaceChildren(allPorts, ...ports.map(([port]) => {
+      portSelect.replaceChildren(allPorts, ...Object.entries(state.facets.ports || {}).sort(([a],[b])=>Number(a)-Number(b)).map(([port]) => {
         const option = el("option", null, String(port)); option.value = String(port); return option;
       }));
       portSelect.value = [...portSelect.options].some((option) => option.value === selected) ? selected : "all";
+      populateFacetSelect("protocol-filter", state.facets.response_types || {});
+    }
+    function populateFacetSelect(id, facet) {
+      const select = document.getElementById(id);
+      const selected = select.value;
+      const all = el("option", null, "all"); all.value = "all";
+      select.replaceChildren(all, ...Object.entries(facet).sort(([,a],[,b])=>b-a).map(([value]) => {
+        const option = el("option", null, String(value)); option.value = String(value); return option;
+      }));
+      select.value = [...select.options].some((option) => option.value === selected) ? selected : "all";
     }
 
     function numberCell(value) {
@@ -227,16 +291,29 @@
 
     function detailGrid(row) {
       const grid = el("div", "detail-grid");
+      const usage = row.usage || {};
       const fields = [
-        ["request key", row.request_key], ["event", row.event_type], ["request id", row.meta?.request_id],
-        ["protocol", row.meta?.entry_protocol], ["endpoint", row.meta?.endpoint], ["mode", row.meta?.execution_mode],
-        ["transport", row.meta?.transport], ["session", row.scope?.session], ["workdir", row.scope?.workdir],
-        ["route", row.meta?.route], ["model", row.meta?.model], ["provider", row.meta?.provider],
+        ["request key", row.request_key], ["request id", row.meta?.request_id],
+        ["port", row.scope?.port], ["protocol", row.meta?.entry_protocol], ["endpoint", row.meta?.endpoint],
+        ["mode", row.meta?.execution_mode], ["transport", row.meta?.transport],
+        ["session", row.scope?.session], ["workdir", row.scope?.workdir],
+        ["route", row.meta?.route], ["routing group", row.meta?.routing_group], ["pool", row.meta?.pool],
+        ["model", row.meta?.model], ["wire model", row.meta?.wire_model], ["provider", row.meta?.provider],
+        ["provider id", row.meta?.provider_id], ["provider type", row.meta?.provider_type],
         ["attempts", row.attempts], ["failed attempts", row.failed_attempts], ["switches", row.switches],
-        ["provider status", row.meta?.provider_status], ["response status", row.meta?.response_status], ["finish reason", row.meta?.finish_reason],
-        ["error category", row.meta?.error_category], ["error detail", row.meta?.error_detail], ["output tokens", row.tokens_output],
+        ["provider status", row.meta?.provider_status], ["response status", row.meta?.response_status],
+        ["finish reason", row.meta?.finish_reason],
+        ["servertool", row.servertool ? "yes" : "no"], ["stopless", row.stopless ? "yes" : "no"],
+        ["error category", row.meta?.error_category], ["error detail", row.meta?.error_detail],
+        ["usage in", usage.input_tokens != null ? Number(usage.input_tokens).toLocaleString() : "—"],
+        ["usage out", usage.output_tokens != null ? Number(usage.output_tokens).toLocaleString() : "—"],
+        ["usage cache", usage.cached_tokens != null ? Number(usage.cached_tokens).toLocaleString() : "—"],
+        ["usage total", usage.total_tokens != null ? Number(usage.total_tokens).toLocaleString() : "—"],
+        ["internal time", row.timing_internal_ms != null ? `${row.timing_internal_ms} ms` : "—"],
+        ["external time", row.timing_external_ms != null ? `${row.timing_external_ms} ms` : "—"],
+        ["duration", fmtMs(row.duration_ms)],
         ["artifact", row.raw_artifact_ref],
-        ["started", timeText(row.started_epoch_ms)], ["updated", timeText(row.updated_epoch_ms)], ["finished", timeText(row.finished_epoch_ms)]
+        ["started", timeText(row.started_epoch_ms)], ["updated", timeText(row.updated_epoch_ms)], ["finished", timeText(row.finished_epoch_ms)],
       ];
       for (const [label, value] of fields) {
         const item = el("span");
@@ -247,7 +324,7 @@
     }
 
     function requestTimeline(requestKey) {
-      const events = [...requestEvents.values()]
+      const events = [...state.eventLog.values()]
         .filter((event) => event.row?.request_key === requestKey)
         .sort((left, right) => left.sequence - right.sequence);
       const section = el("section", "request-timeline");
@@ -276,36 +353,30 @@
       tr.dataset.requestKey = row.request_key;
       tr.style.cursor = "pointer";
       tr.addEventListener("click", () => openRequestDetail(row));
-      tr.appendChild(el("td", null, status));
-      tr.appendChild(el("td", "mono", row.request_key));
+      const usage = row.usage || {};
+      tr.appendChild(el("td", "status-cell", status));
+      tr.appendChild(el("td", "mono", `${row.scope?.port ?? "?"}:${row.meta?.request_id ?? row.request_key}`));
       tr.appendChild(el("td", null, `${metaValue(row, "endpoint")} · ${metaValue(row, "model")}`));
       tr.appendChild(el("td", null, `${metaValue(row, "route")} · ${metaValue(row, "provider")}`));
       tr.appendChild(el("td", "num", `${row.attempts || 0}/${row.failed_attempts || 0}`));
       tr.appendChild(el("td", "num", fmtMs(row.duration_ms)));
+      tr.appendChild(el("td", "mono", usageText(usage)));
       tr.appendChild(el("td", "muted", timeText(status === "success" || status === "error" || status === "cancelled" ? row.finished_epoch_ms : row.updated_epoch_ms)));
-      const details = el("td");
-      const disclosure = document.createElement("details");
-      disclosure.addEventListener("click", (e) => e.stopPropagation());
-      disclosure.appendChild(el("summary", null, "details"));
-      disclosure.appendChild(detailGrid(row));
-      details.appendChild(disclosure);
-      tr.appendChild(details);
       return tr;
     }
 
     function openRequestDetail(row) {
-      selectedRequestKey = row.request_key;
+      state.selected = row;
       renderRequestDetail();
       openPanel();
     }
 
     function renderRequestDetail() {
-      if (!selectedRequestKey) return;
-      const row = snapshot.requests?.[selectedRequestKey];
+      const row = state.selected;
       const body = document.getElementById("drawer-body");
       if (!row) {
-        document.getElementById("drawer-title").textContent = "Request unavailable";
-        body.replaceChildren(el("div", "muted", "Request is no longer retained"));
+        document.getElementById("drawer-title").textContent = "Details";
+        body.replaceChildren();
         return;
       }
       document.getElementById("drawer-title").textContent = `Request ${row.meta?.request_id || row.request_key}`;
@@ -314,49 +385,87 @@
 
     function renderRequests() {
       const panel = document.getElementById("requests-panel");
-      const rows = sortRows(Object.values(snapshot.requests || {}).filter(matches));
+      const rows = state.records;
       if (!rows.length) { panel.replaceChildren(el("div", "loading", "no matching requests")); return; }
       const table = el("table", "request-table");
       const head = el("tr");
-      ["Status", "Request / Port", "Endpoint · Model", "Route · Provider", "Try/Fail", "Duration", "Time", ""].forEach((label) => head.appendChild(el("th", null, label)));
+      ["Status", "Port · Request", "Endpoint · Model", "Route · Provider", "Try/Fail", "Duration", "Usage", "Time"].forEach((label) => head.appendChild(el("th", null, label)));
       const tableHead = document.createElement("thead");
       tableHead.appendChild(head);
       table.appendChild(tableHead);
       const body = document.createElement("tbody");
       body.className = "request-body is-updating";
-      if (document.getElementById("group-toggle").checked) {
-        let lastPort = null;
-        for (const row of rows) {
-          const port = String(row.scope?.port ?? "?");
-          if (port !== lastPort) {
-            const group = el("tr", "group-row");
-            group.appendChild(el("td", null, `Port ${port}`));
-            group.firstChild.colSpan = 8;
-            body.appendChild(group);
-            lastPort = port;
-          }
-          body.appendChild(requestRow(row));
-        }
-      } else {
-        rows.forEach((row) => body.appendChild(requestRow(row)));
-      }
+      rows.forEach((row) => body.appendChild(requestRow(row)));
       table.appendChild(body);
       panel.replaceChildren(table);
       requestAnimationFrame(() => body.classList.remove("is-updating"));
     }
 
-    function render() { renderStats(); renderRequests(); renderRequestDetail(); }
+    function renderStatsCards() {
+      const stats = state.stats || {};
+      const cards = document.getElementById("summary-cards");
+      cards.replaceChildren();
+      const total = Number(stats.count || 0);
+      const values = [
+        ["Total", total],
+        ["Input tokens", Number(stats.input_tokens || 0)],
+        ["Output tokens", Number(stats.output_tokens || 0)],
+        ["Cached tokens", Number(stats.cached_tokens || 0)],
+        ["Avg cache hit", stats.cache_hit_rate_percent != null ? `${Number(stats.cache_hit_rate_percent).toFixed(1)}%` : "—"],
+        ["Avg duration", stats.avg_duration_ms != null ? `${Math.round(Number(stats.avg_duration_ms))} ms` : "—"],
+      ];
+      for (const [label, value] of values) {
+        const card = el("div", `card stat-${label.toLowerCase().replace(/\s+/g, "-")}`);
+        card.appendChild(el("div", "label", label));
+        card.appendChild(el("div", "value", String(value)));
+        cards.appendChild(card);
+      }
+    }
+
+    function renderPagination() {
+      const pages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+      const info = document.getElementById("page-info");
+      info.textContent = `page ${state.page} of ${pages} · ${state.total.toLocaleString()} records`;
+      document.getElementById("page-prev").disabled = state.page <= 1;
+      document.getElementById("page-next").disabled = state.page >= pages;
+    }
+
+    function renderAll() {
+      renderStatsCards();
+      renderStats({});
+      renderRequests();
+      renderPagination();
+      renderRequestDetail();
+    }
+
+    function render() { renderAll(); }
 
     document.getElementById("reload-btn").addEventListener("click", () => load().catch((error) => showStatus("err", error.message)));
     document.getElementById("pause-btn").addEventListener("click", (event) => {
-      paused = !paused;
-      event.currentTarget.textContent = paused ? "Resume" : "Pause";
-      if (!paused) pollOrResync().catch((error) => showStatus("err", error.message));
+      state.paused = !state.paused;
+      event.currentTarget.textContent = state.paused ? "Resume" : "Pause";
     });
-    ["status-filter", "port-filter", "search-filter", "sort-field", "sort-order", "group-toggle"].forEach((id) => {
-      document.getElementById(id).addEventListener("input", render);
+    ["status-filter","port-filter","provider-filter","model-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
+      const input = document.getElementById(id);
+      let timer = null;
+      input.addEventListener("input", () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { state.page = 1; loadRecords(); }, 400);
+      });
+      if (input.tagName === "SELECT") input.addEventListener("change", () => { state.page = 1; loadRecords(); });
+    });
+    ["sort-field","sort-order"].forEach((id) => {
+      document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });
+    });
+    document.getElementById("page-prev").addEventListener("click", () => {
+      if (state.page > 1) { state.page -= 1; loadRecords(); }
+    });
+    document.getElementById("page-next").addEventListener("click", () => {
+      const pages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+      if (state.page < pages) { state.page += 1; loadRecords(); }
     });
     document.getElementById("drawer-cancel")?.addEventListener("click", closePanel);
+    document.getElementById("drawer-close")?.addEventListener("click", closePanel);
 
     load().catch((error) => showStatus("err", `observability failed: ${error.message}`));
     schedulePoll();

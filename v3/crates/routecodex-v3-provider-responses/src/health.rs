@@ -1412,6 +1412,112 @@ impl V3ProviderHealthStore {
     }
 }
 
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct V3CooldownPoolEntry {
+    pub provider_id: String,
+    pub auth_alias: Option<String>,
+    pub model_id: Option<String>,
+    pub state: String,
+    pub until_ms: Option<u64>,
+    pub remaining_ms: Option<i64>,
+    pub reason: Option<String>,
+    pub failure_count: Option<u32>,
+    pub kind: String,
+}
+
+impl V3ProviderHealthStore {
+    /// Returns all current cooldown entries (session + auth_key + provider-level probes).
+    /// Entries with no remaining time are excluded.
+    pub fn cooldown_entries(&self, now_ms: u64) -> Vec<V3CooldownPoolEntry> {
+        let state = match self.state.read() {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let mut entries = Vec::new();
+
+        // Session cooldowns
+        for (key, cooldown) in &state.cooldowns {
+            let remaining = cooldown.until_ms.map(|u| u.saturating_sub(now_ms) as i64);
+            if remaining.is_some_and(|r| r <= 0) {
+                continue;
+            }
+            let failure_count = state.consecutive_failures.get(key).map(|f| f.failure_count);
+            entries.push(V3CooldownPoolEntry {
+                provider_id: key.provider_runtime_identity.split(':').next().unwrap_or(&key.provider_runtime_identity).to_string(),
+                auth_alias: key
+                    .provider_runtime_identity
+                    .split(':')
+                    .nth(1)
+                    .map(str::to_string),
+                model_id: None,
+                state: "session_cooldown".to_string(),
+                until_ms: cooldown.until_ms,
+                remaining_ms: remaining,
+                reason: Some(cooldown.reason.clone()),
+                failure_count,
+                kind: "session".to_string(),
+            });
+        }
+
+        // Auth-key cooldowns
+        for (key, cooldown) in &state.auth_key_cooldowns {
+            let remaining = cooldown.until_ms.map(|u| u.saturating_sub(now_ms) as i64);
+            if remaining.is_some_and(|r| r <= 0) {
+                continue;
+            }
+            let failure_count = state.auth_key_consecutive_failures.get(key).map(|f| f.failure_count);
+            entries.push(V3CooldownPoolEntry {
+                provider_id: key.provider_id.clone(),
+                auth_alias: key.auth_alias.clone(),
+                model_id: key.model_id.clone(),
+                state: "auth_key_cooldown".to_string(),
+                until_ms: cooldown.until_ms,
+                remaining_ms: remaining,
+                reason: Some(cooldown.reason.clone()),
+                failure_count,
+                kind: "auth_key".to_string(),
+            });
+        }
+
+        // Provider cooldown probes (global)
+        for (key, probe) in &state.provider_cooldown_probes {
+            if !probe.blocked_until_ms.is_some_and(|u| u > now_ms)
+                && !probe.next_probe_at_ms.is_some_and(|n| n > now_ms)
+                && probe.blocked_until_ms.is_some()
+                && probe.blocked_until_ms.is_some_and(|u| u <= now_ms)
+                && probe.next_probe_at_ms.is_some_and(|n| n <= now_ms)
+            {
+                continue;
+            }
+            let blocked = probe.blocked_until_ms.is_some_and(|u| u > now_ms);
+            let probing = probe.probe_in_flight || probe.next_probe_at_ms.is_some_and(|n| n > now_ms);
+            let state_str = if probe.probe_in_flight {
+                "probing".to_string()
+            } else if blocked {
+                "blocked".to_string()
+            } else if probing {
+                "waiting".to_string()
+            } else {
+                continue;
+            };
+            entries.push(V3CooldownPoolEntry {
+                provider_id: key.provider_id.clone(),
+                auth_alias: key.auth_alias.clone(),
+                model_id: key.model_id.clone(),
+                state: state_str,
+                until_ms: probe.blocked_until_ms.filter(|u| *u > now_ms),
+                remaining_ms: probe.blocked_until_ms.map(|u| u.saturating_sub(now_ms) as i64),
+                reason: None,
+                failure_count: Some(u32::from(probe.probe_failure_count)),
+                kind: "probe".to_string(),
+            });
+        }
+
+        entries
+    }
+}
+
 fn default_failure_policy_from_manifest(
     manifest: &V3Config05ManifestPublished,
 ) -> V3ProviderFailurePolicy {

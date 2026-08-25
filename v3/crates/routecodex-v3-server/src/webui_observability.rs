@@ -10,10 +10,12 @@
 // explicit and are never recovered into success.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::fs;
+use std::io::Write;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Unique request key: `<port>:<requestId>`.
 pub(crate) fn build_v3_obs_request_key(port: u16, request_id: &str) -> String {
@@ -49,7 +51,7 @@ impl V3ObsEventType {
 }
 
 /// scope carried on every event for grouping/filtering.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct V3ObsScope {
     pub port: u16,
     pub workdir: Option<String>,
@@ -57,12 +59,18 @@ pub(crate) struct V3ObsScope {
 }
 
 /// Request identity fields shown in the main table + collapsible identity detail.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct V3ObsRequestMeta {
     pub request_id: String,
     pub endpoint: String,
     pub model: Option<String>,
     pub route: Option<String>,
+    pub routing_group: Option<String>,
+    pub pool: Option<String>,
+    pub provider_id: Option<String>,
+    pub auth_alias: Option<String>,
+    pub provider_type: Option<String>,
+    pub wire_model: Option<String>,
     pub provider: Option<String>,
     pub entry_protocol: Option<String>,
     pub execution_mode: Option<String>,
@@ -75,7 +83,7 @@ pub(crate) struct V3ObsRequestMeta {
 }
 
 /// The mutable request projection (one row per requestKey).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct V3ObsRequestRow {
     pub request_key: String,
     pub event_type: String,
@@ -89,9 +97,100 @@ pub(crate) struct V3ObsRequestRow {
     pub attempts: u64,
     pub failed_attempts: u64,
     pub switches: u64,
-    pub tokens_output: Option<u64>,
+    pub usage: Option<V3ObsUsageSummary>,
+    pub timing_internal_ms: Option<u64>,
+    pub timing_external_ms: Option<u64>,
+    pub servertool: bool,
+    pub stopless: bool,
     // rawArtifactRef is a controlled reference only; never the full body.
     pub raw_artifact_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct V3ObsUsageSummary {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    pub cached_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct V3ObsQuery {
+    pub page: u64,
+    pub page_size: u64,
+    pub sort_by: V3ObsSortField,
+    pub sort_desc: bool,
+    pub time_from_ms: Option<u64>,
+    pub time_to_ms: Option<u64>,
+    pub port: Option<u16>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub route: Option<String>,
+    pub entry_protocol: Option<String>,
+    pub execution_mode: Option<String>,
+    pub transport: Option<String>,
+    pub status: Option<String>,
+    pub response_type: Option<String>,
+    pub error_category: Option<String>,
+    pub session: Option<String>,
+    pub search: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3ObsSortField {
+    Started,
+    Updated,
+    Finished,
+    Duration,
+    Attempts,
+    FailedAttempts,
+    Switches,
+    InputTokens,
+    OutputTokens,
+    TotalTokens,
+    CachedTokens,
+}
+
+impl V3ObsSortField {
+    fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "started_epoch_ms" => Self::Started,
+            "updated_epoch_ms" => Self::Updated,
+            "finished_epoch_ms" => Self::Finished,
+            "duration_ms" => Self::Duration,
+            "attempts" => Self::Attempts,
+            "failed_attempts" => Self::FailedAttempts,
+            "switches" => Self::Switches,
+            "usage_input_tokens" | "input_tokens" => Self::InputTokens,
+            "usage_output_tokens" | "output_tokens" => Self::OutputTokens,
+            "usage_total_tokens" | "total_tokens" => Self::TotalTokens,
+            "usage_cached_tokens" | "cached_tokens" => Self::CachedTokens,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct V3ObsFacetCounts(pub BTreeMap<String, u64>);
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct V3ObsRecordStats {
+    pub count: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: u64,
+    pub cache_hit_rate_percent: f64,
+    pub avg_duration_ms: f64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct V3ObsRecordsPage {
+    pub records: Vec<V3ObsRequestRow>,
+    pub total: u64,
+    pub page: u64,
+    pub page_size: u64,
+    pub stats: V3ObsRecordStats,
+    pub facets: BTreeMap<&'static str, Vec<(String, u64)>>,
 }
 
 /// One incremental lifecycle event.
@@ -170,6 +269,7 @@ pub(crate) struct V3ObsSinceResult {
 #[derive(Debug, Clone)]
 pub(crate) struct V3WebuiObservability {
     inner: Arc<std::sync::Mutex<V3WebuiObservabilityInner>>,
+    persistence_path: Option<Arc<std::path::PathBuf>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -186,6 +286,12 @@ struct V3WebuiObservabilityInner {
     active: std::collections::BTreeSet<String>,
 }
 
+#[derive(Deserialize)]
+struct V3ObsPersistedRowEnvelope {
+    schema_version: u8,
+    row: V3ObsRequestRow,
+}
+
 impl Default for V3WebuiObservability {
     fn default() -> Self {
         Self::new()
@@ -194,9 +300,47 @@ impl Default for V3WebuiObservability {
 
 impl V3WebuiObservability {
     pub(crate) fn new() -> Self {
+        Self::with_persistence_path(None)
+    }
+
+    pub(crate) fn with_persistence_path(path: Option<std::path::PathBuf>) -> Self {
         Self {
             inner: Arc::new(std::sync::Mutex::new(V3WebuiObservabilityInner::default())),
+            persistence_path: path.map(Arc::new),
         }
+    }
+
+    pub(crate) fn load_persisted(path: &std::path::Path) -> Result<Self, String> {
+        let handle = Self::with_persistence_path(Some(path.to_path_buf()));
+        if !path.exists() {
+            return Ok(handle);
+        }
+        let content = fs::read_to_string(path)
+            .map_err(|error| format!("read observability store {}: {error}", path.display()))?;
+        let mut rows = Vec::new();
+        for (line_number, line) in content.lines().enumerate().filter(|(_, line)| !line.trim().is_empty()) {
+            let envelope: V3ObsPersistedRowEnvelope = serde_json::from_str(line).map_err(|error| {
+                format!("invalid observability record {}:{}: {error}", path.display(), line_number + 1)
+            })?;
+            if envelope.schema_version != 1 {
+                return Err(format!(
+                    "unsupported observability record schema {} in {}",
+                    envelope.schema_version,
+                    path.display()
+                ));
+            }
+            rows.push(envelope.row);
+        }
+        rows.sort_by_key(|row| row.started_epoch_ms);
+        let mut inner = handle
+            .inner
+            .lock()
+            .map_err(|_| "v3 webui observability state is poisoned".to_string())?;
+        for row in rows {
+            inner.requests.insert(row.request_key.clone(), row);
+        }
+        drop(inner);
+        Ok(handle)
     }
 
     fn now_ms() -> u64 {
@@ -294,8 +438,17 @@ impl V3WebuiObservability {
                 row.finished_epoch_ms = Some(now);
                 row.result = Some("success".to_string());
                 if let Some(usage) = observability.usage.as_ref() {
-                    row.tokens_output = usage.output_tokens;
+                    row.usage = Some(V3ObsUsageSummary {
+                        input_tokens: usage.input_tokens,
+                        output_tokens: usage.output_tokens,
+                        total_tokens: usage.total_tokens,
+                        cached_tokens: usage.cached_tokens,
+                    });
                 }
+                row.timing_internal_ms = observability.timing.as_ref().map(|t| t.internal.as_millis() as u64);
+                row.timing_external_ms = observability.timing.as_ref().map(|t| t.external.as_millis() as u64);
+                row.servertool = false;
+                row.stopless = observability.stopless_activation;
                 inner.active.remove(request_key);
                 if !was_terminal {
                     inner.terminal_order.push_back(request_key.to_string());
@@ -305,7 +458,9 @@ impl V3WebuiObservability {
                     add_port_stats(&mut inner.stats, scope.port, |port| {
                         port.success += 1;
                     });
-                    if let Some(tokens) = row.tokens_output {
+                    if let Some(tokens) =
+                        row.usage.as_ref().and_then(|usage| usage.output_tokens)
+                    {
                         inner.stats.tokens_output =
                             inner.stats.tokens_output.saturating_add(tokens);
                         add_port_stats(&mut inner.stats, scope.port, |port| {
@@ -380,6 +535,11 @@ impl V3WebuiObservability {
 
         let stats_snapshot = inner.stats.clone();
         inner.requests.insert(request_key.to_string(), row.clone());
+        if is_terminal && !was_terminal {
+            if let Some(path) = self.persistence_path.as_deref() {
+                Self::append_persisted_row(path, &row)?;
+            }
+        }
         while inner.requests.len() > 2048 {
             let Some(eviction_key) = inner.terminal_order.pop_front() else {
                 break;
@@ -438,6 +598,140 @@ impl V3WebuiObservability {
         })
     }
 
+    pub(crate) fn persist_terminal(
+        &self,
+        request_key: &str,
+        path: &std::path::Path,
+    ) -> Result<(), String> {
+        let row = self
+            .snapshot(0)?
+            .requests
+            .get(request_key)
+            .cloned()
+            .ok_or_else(|| format!("request {request_key} is not present"))?;
+        if row.result.is_none() {
+            return Err(format!("request {request_key} is not terminal"));
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("create observability store directory failed: {error}"))?;
+        }
+        Self::append_persisted_row(path, &row)
+    }
+
+    fn append_persisted_row(path: &std::path::Path, row: &V3ObsRequestRow) -> Result<(), String> {
+        let payload = serde_json::json!({"schema_version": 1u8, "row": row});
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|error| format!("open observability store failed: {error}"))?;
+        let mut writer = std::io::BufWriter::new(file);
+        serde_json::to_writer(&mut writer, &payload)
+            .map_err(|error| format!("encode observability record failed: {error}"))?;
+        writer.write_all(b"\n")
+            .map_err(|error| format!("write observability record failed: {error}"))?;
+        writer.flush().map_err(|error| error.to_string())
+    }
+
+    fn matches_query(row: &V3ObsRequestRow, query: &V3ObsQuery) -> bool {
+        if query.time_from_ms.is_some_and(|from| row.started_epoch_ms < from) { return false; }
+        if query.time_to_ms.is_some_and(|to| row.started_epoch_ms > to) { return false; }
+        if query.port.is_some_and(|port| row.scope.port != port) { return false; }
+        if query.provider.as_deref().is_some_and(|value| row.meta.provider.as_deref() != Some(value)) { return false; }
+        if query.model.as_deref().is_some_and(|value| row.meta.model.as_deref() != Some(value)) { return false; }
+        if query.route.as_deref().is_some_and(|value| row.meta.route.as_deref() != Some(value)) { return false; }
+        if query.entry_protocol.as_deref().is_some_and(|value| row.meta.entry_protocol.as_deref() != Some(value)) { return false; }
+        if query.execution_mode.as_deref().is_some_and(|value| row.meta.execution_mode.as_deref() != Some(value)) { return false; }
+        if query.transport.as_deref().is_some_and(|value| row.meta.transport.as_deref() != Some(value)) { return false; }
+        if query.status.as_deref().is_some_and(|value| row.result.as_deref() != Some(value)) { return false; }
+        if query.response_type.as_deref().is_some_and(|value| row.meta.response_status.as_deref() != Some(value)) { return false; }
+        if query.error_category.as_deref().is_some_and(|value| row.meta.error_category.as_deref() != Some(value)) { return false; }
+        if query.session.as_deref().is_some_and(|value| row.scope.session.as_deref() != Some(value)) { return false; }
+        if let Some(search) = query.search.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+            let search = search.to_lowercase();
+            let values = [
+                Some(&row.request_key), Some(&row.meta.request_id), Some(&row.meta.endpoint),
+                row.meta.model.as_ref(), row.meta.route.as_ref(), row.meta.provider.as_ref(),
+                row.scope.session.as_ref(), row.scope.workdir.as_ref(), row.meta.error_category.as_ref(),
+                row.meta.error_detail.as_ref(),
+            ];
+            if !values.iter().flatten().any(|value| value.to_lowercase().contains(&search)) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn sort_value(row: &V3ObsRequestRow, field: V3ObsSortField) -> u64 {
+        match field {
+            V3ObsSortField::Started => row.started_epoch_ms,
+            V3ObsSortField::Updated => row.updated_epoch_ms,
+            V3ObsSortField::Finished => row.finished_epoch_ms.unwrap_or(u64::MAX),
+            V3ObsSortField::Duration => row.duration_ms.unwrap_or(u64::MAX),
+            V3ObsSortField::Attempts => row.attempts,
+            V3ObsSortField::FailedAttempts => row.failed_attempts,
+            V3ObsSortField::Switches => row.switches,
+            V3ObsSortField::InputTokens => row.usage.as_ref().and_then(|u| u.input_tokens).unwrap_or(0),
+            V3ObsSortField::OutputTokens => row.usage.as_ref().and_then(|u| u.output_tokens).unwrap_or(0),
+            V3ObsSortField::TotalTokens => row.usage.as_ref().and_then(|u| u.total_tokens).unwrap_or(0),
+            V3ObsSortField::CachedTokens => row.usage.as_ref().and_then(|u| u.cached_tokens).unwrap_or(0),
+        }
+    }
+
+    fn facet(name: &'static str, value: Option<&str>, target: &mut BTreeMap<&'static str, BTreeMap<String, u64>>) {
+        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+            *target.entry(name).or_default().entry(value.to_string()).or_default() += 1;
+        }
+    }
+
+    pub(crate) fn records(&self, query: &V3ObsQuery) -> Result<V3ObsRecordsPage, String> {
+        let inner = self.inner.lock().map_err(|_| "...".to_string())?;
+        let mut filtered: Vec<_> = inner.requests.values()
+            .filter(|row| Self::matches_query(row, query))
+            .cloned().collect();
+        let direction = if query.sort_desc { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
+        filtered.sort_by(|left, right| {
+            direction.then(Self::sort_value(left, query.sort_by).cmp(&Self::sort_value(right, query.sort_by)))
+                .then_with(|| left.request_key.cmp(&right.request_key))
+        });
+        let total = filtered.len() as u64;
+        let offset = ((query.page - 1) * query.page_size) as usize;
+        let end = (offset + query.page_size as usize).min(filtered.len());
+        let records = filtered.get(offset..end).unwrap_or_default().to_vec();
+        let mut facet_values = BTreeMap::new();
+        let mut stats = V3ObsRecordStats::default();
+        for row in inner.requests.values().filter(|row| Self::matches_query(row, query)) {
+            stats.count += 1;
+            if let Some(duration) = row.duration_ms { stats.avg_duration_ms += duration as f64; }
+            if let Some(usage) = &row.usage {
+                stats.input_tokens += usage.input_tokens.unwrap_or(0);
+                stats.output_tokens += usage.output_tokens.unwrap_or(0);
+                stats.cached_tokens += usage.cached_tokens.unwrap_or(0);
+            }
+            Self::facet("ports", Some(&row.scope.port.to_string()), &mut facet_values);
+            Self::facet("providers", row.meta.provider.as_deref(), &mut facet_values);
+            Self::facet("models", row.meta.model.as_deref(), &mut facet_values);
+            Self::facet("routes", row.meta.route.as_deref(), &mut facet_values);
+            Self::facet("sessions", row.scope.session.as_deref(), &mut facet_values);
+            Self::facet("response_types", row.meta.response_status.as_deref(), &mut facet_values);
+            Self::facet("error_categories", row.meta.error_category.as_deref(), &mut facet_values);
+        }
+        if stats.count > 0 && stats.input_tokens > 0 {
+            stats.cache_hit_rate_percent = stats.cached_tokens as f64 / stats.input_tokens as f64 * 100.0;
+        }
+        if stats.count > 0 {
+            stats.avg_duration_ms /= stats.count as f64;
+        }
+        Ok(V3ObsRecordsPage {
+            records, total, page: query.page, page_size: query.page_size,
+            stats,
+            facets: facet_values.into_iter().map(|(name, values)| {
+                (name, values.into_iter().collect::<Vec<_>>())
+            }).collect(),
+        })
+    }
+
     /// Incremental delta since a cursor; rejects stale events (sequence <= cursor).
     pub(crate) fn since(&self, cursor: u64) -> Result<V3ObsSinceResult, String> {
         let inner = self
@@ -474,6 +768,100 @@ mod tests {
             workdir: Some("/w".to_string()),
             session: Some("s1".to_string()),
         }
+    }
+
+    fn meta_with_full(req: &str) -> V3ObsRequestMeta {
+        V3ObsRequestMeta {
+            request_id: req.to_string(),
+            endpoint: "/v1/chat/completions".to_string(),
+            model: Some("gpt-test".to_string()),
+            route: Some("grp.pool".to_string()),
+            provider: Some("prov".to_string()),
+            entry_protocol: Some("openai-chat".to_string()),
+            execution_mode: Some("direct".to_string()),
+            transport: Some("sse".to_string()),
+            provider_status: Some(200),
+            response_status: Some("completed".to_string()),
+            finish_reason: Some("stop".to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn terminal_persists_and_reloads_terminal_records() {
+        let dir = std::env::temp_dir().join(format!(
+            "v3-webui-records-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("records.jsonl");
+        let key = build_v3_obs_request_key(5555, "r-persist");
+        let first = V3WebuiObservability::with_persistence_path(Some(path.clone()));
+        first
+            .record(V3ObsEventType::Started, &key, scope(5555), meta_with_full("r-persist"))
+            .unwrap();
+        first
+            .record(V3ObsEventType::Completed, &key, scope(5555), meta_with_full("r-persist"))
+            .unwrap();
+        assert!(path.exists(), "terminal record must be persisted");
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("r-persist"), "persisted body must contain request id");
+
+        let second = V3WebuiObservability::load_persisted(&path).unwrap();
+        let snapshot = second.snapshot(0).unwrap();
+        assert_eq!(snapshot.requests.len(), 1, "persisted record must reload");
+        let row = snapshot.requests.get(&key).expect("reloaded row");
+        assert_eq!(row.result.as_deref(), Some("success"));
+        assert!(row.duration_ms.is_some());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn query_filters_sort_facets_and_stats_match_filtered_rows() {
+        let o = V3WebuiObservability::new();
+        for (idx, port) in [5555u16, 7777u16, 5555u16].iter().copied().enumerate() {
+            let req = format!("r-query-{idx}");
+            let key = build_v3_obs_request_key(port, &req);
+            o.record(V3ObsEventType::Started, &key, scope(port), meta_with_full(&req))
+                .unwrap();
+            o.record(V3ObsEventType::Completed, &key, scope(port), meta_with_full(&req))
+                .unwrap();
+        }
+        let key = build_v3_obs_request_key(5555, "r-query-err");
+        let mut err_meta = meta_with_full("r-query-err");
+        err_meta.error_category = Some("provider_429".to_string());
+        o.record(V3ObsEventType::Started, &key, scope(5555), err_meta.clone()).unwrap();
+        o.record(V3ObsEventType::Failed, &key, scope(5555), err_meta).unwrap();
+
+        let query = V3ObsQuery {
+            page: 1,
+            page_size: 10,
+            sort_by: V3ObsSortField::Started,
+            sort_desc: true,
+            time_from_ms: None,
+            time_to_ms: None,
+            port: Some(5555),
+            provider: None,
+            model: None,
+            route: None,
+            entry_protocol: None,
+            execution_mode: None,
+            transport: None,
+            status: None,
+            response_type: None,
+            error_category: None,
+            session: None,
+            search: None,
+        };
+        let page = o.records(&query).unwrap();
+        assert_eq!(page.total, 3, "port filter must keep all three port=5555 rows");
+        assert!(page.facets.get("providers").is_some());
+        assert_eq!(page.stats.count, 3);
+        let error_query = V3ObsQuery { status: Some("error".to_string()), ..query.clone() };
+        let error_page = o.records(&error_query).unwrap();
+        assert_eq!(error_page.total, 1, "status=error must keep only the failed row");
+        assert_eq!(error_page.stats.count, 1);
     }
 
     fn meta(req: &str) -> V3ObsRequestMeta {

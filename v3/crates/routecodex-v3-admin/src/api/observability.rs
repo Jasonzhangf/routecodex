@@ -5,14 +5,18 @@ use crate::AppState;
 use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
+use axum::extract::RawQuery;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 const SOURCE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) fn routes() -> axum::Router<crate::AppState> {
-    axum::Router::new().route("/api/observability/poll", axum::routing::get(poll))
+    axum::Router::new()
+        .route("/api/observability/poll", axum::routing::get(poll))
+        .route("/api/observability/records", axum::routing::get(records))
 }
 
 #[derive(Debug, Deserialize)]
@@ -20,7 +24,7 @@ pub(crate) struct PollQuery {
     pub sources: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub(crate) struct SourceScope {
     pub port: u16,
     #[serde(default)]
@@ -126,6 +130,156 @@ pub(crate) struct AggregatePoll {
     pub stats: SourceStats,
     pub sources: Vec<SourceCursor>,
     pub recent_events: Vec<SourceEvent>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RecordQuery {
+    page: u64,
+    page_size: u64,
+    sort_by: String,
+    sort_desc: bool,
+    time_from_ms: Option<u64>,
+    time_to_ms: Option<u64>,
+    port: Option<u16>,
+    provider: Option<String>,
+    model: Option<String>,
+    route: Option<String>,
+    entry_protocol: Option<String>,
+    execution_mode: Option<String>,
+    transport: Option<String>,
+    status: Option<String>,
+    response_type: Option<String>,
+    error_category: Option<String>,
+    session: Option<String>,
+    search: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct QueryRow {
+    request_key: String,
+    event_type: String,
+    started_epoch_ms: u64,
+    updated_epoch_ms: u64,
+    finished_epoch_ms: Option<u64>,
+    duration_ms: Option<u64>,
+    meta: serde_json::Value,
+    scope: SourceScope,
+    result: Option<String>,
+    attempts: u64,
+    failed_attempts: u64,
+    switches: u64,
+    usage: Option<serde_json::Value>,
+    timing_internal_ms: Option<u64>,
+    timing_external_ms: Option<u64>,
+    servertool: bool,
+    stopless: bool,
+    raw_artifact_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct RecordsResponse {
+    records: Vec<QueryRow>,
+    total: u64,
+    page: u64,
+    page_size: u64,
+    stats: serde_json::Value,
+    facets: BTreeMap<String, BTreeMap<String, u64>>,
+}
+
+impl RecordQuery {
+    fn from_params(params: &std::collections::HashMap<String, String>) -> Result<Self, String> {
+        let mut query = Self {
+            page: 1,
+            page_size: 50,
+            sort_by: "started_epoch_ms".to_string(),
+            sort_desc: true,
+            ..Self::default()
+        };
+        for (key, value) in params {
+            let value = value.trim();
+            if value.is_empty() { continue; }
+            match key.as_str() {
+                "page" => query.page = value.parse().map_err(|_| format!("invalid page: {value}"))?,
+                "page_size" => query.page_size = value.parse().map_err(|_| format!("invalid page_size: {value}"))?,
+                "sort_by" => {
+                    if !matches!(value, "started_epoch_ms" | "updated_epoch_ms" | "finished_epoch_ms" | "duration_ms" | "attempts" | "failed_attempts" | "switches" | "usage_input_tokens" | "usage_output_tokens" | "usage_total_tokens" | "usage_cached_tokens") {
+                        return Err(format!("invalid sort field: {value}"));
+                    }
+                    query.sort_by = value.to_string();
+                }
+                "sort_order" => query.sort_desc = match value { "asc" => false, "desc" => true, _ => return Err(format!("invalid sort order: {value}")) },
+                "time_from_ms" => query.time_from_ms = Some(value.parse().map_err(|_| format!("invalid time_from_ms: {value}"))?),
+                "time_to_ms" => query.time_to_ms = Some(value.parse().map_err(|_| format!("invalid time_to_ms: {value}"))?),
+                "port" => query.port = Some(value.parse().map_err(|_| format!("invalid port: {value}"))?),
+                "provider" => query.provider = Some(value.to_string()),
+                "model" => query.model = Some(value.to_string()),
+                "route" => query.route = Some(value.to_string()),
+                "entry_protocol" => query.entry_protocol = Some(value.to_string()),
+                "execution_mode" => query.execution_mode = Some(value.to_string()),
+                "transport" => query.transport = Some(value.to_string()),
+                "status" => query.status = Some(value.to_string()),
+                "response_type" => query.response_type = Some(value.to_string()),
+                "error_category" => query.error_category = Some(value.to_string()),
+                "session" => query.session = Some(value.to_string()),
+                "search" => query.search = Some(value.to_string()),
+                _ => {}
+            }
+        }
+        if query.page == 0 || query.page_size == 0 || query.page_size > 200 { return Err("page and page_size must be between 1..200".to_string()); }
+        Ok(query)
+    }
+
+    fn matches(&self, row: &QueryRow) -> bool {
+        if self.time_from_ms.is_some_and(|from| row.started_epoch_ms < from) { return false; }
+        if self.time_to_ms.is_some_and(|to| row.started_epoch_ms > to) { return false; }
+        if self.port.is_some_and(|port| row.scope.port != port) { return false; }
+        let meta_value = |name: &str| row.meta.get(name).and_then(serde_json::Value::as_str);
+        if self.provider.as_deref().is_some_and(|value| meta_value("provider") != Some(value)) { return false; }
+        if self.model.as_deref().is_some_and(|value| meta_value("model") != Some(value)) { return false; }
+        if self.route.as_deref().is_some_and(|value| meta_value("route") != Some(value)) { return false; }
+        if self.entry_protocol.as_deref().is_some_and(|value| meta_value("entry_protocol") != Some(value)) { return false; }
+        if self.execution_mode.as_deref().is_some_and(|value| meta_value("execution_mode") != Some(value)) { return false; }
+        if self.transport.as_deref().is_some_and(|value| meta_value("transport") != Some(value)) { return false; }
+        if self.response_type.as_deref().is_some_and(|value| meta_value("response_status") != Some(value)) { return false; }
+        if self.error_category.as_deref().is_some_and(|value| meta_value("error_category") != Some(value)) { return false; }
+        if self.session.as_deref().is_some_and(|value| row.scope.session.as_deref() != Some(value)) { return false; }
+        if let Some(status) = &self.status { if row.result.as_deref() != Some(status) { return false; } }
+        if let Some(search) = self.search.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+            let search = search.to_lowercase();
+            let haystacks = [Some(row.request_key.clone()), row.meta.get("request_id").and_then(Value::as_str).map(str::to_string), row.meta.get("model").and_then(Value::as_str).map(str::to_string), row.meta.get("provider").and_then(Value::as_str).map(str::to_string), row.meta.get("error_detail").and_then(Value::as_str).map(str::to_string), row.scope.workdir.clone(), row.scope.session.clone()];
+            if !haystacks.iter().flatten().any(|value| value.to_lowercase().contains(&search)) { return false; }
+        }
+        true
+    }
+
+    fn sort_key(&self, row: &QueryRow) -> (u64, u64) {
+        let usage_number = |field: &str| -> u64 {
+            row.usage.as_ref()
+                .and_then(|usage| usage.get(field))
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        };
+        let primary = match self.sort_by.as_str() {
+            "updated_epoch_ms" => row.updated_epoch_ms,
+            "finished_epoch_ms" => row.finished_epoch_ms.unwrap_or(u64::MAX),
+            "duration_ms" => row.duration_ms.unwrap_or(u64::MAX),
+            "attempts" => row.attempts,
+            "failed_attempts" => row.failed_attempts,
+            "switches" => row.switches,
+            "usage_input_tokens" => usage_number("input_tokens"),
+            "usage_output_tokens" => usage_number("output_tokens"),
+            "usage_total_tokens" => usage_number("total_tokens"),
+            "usage_cached_tokens" => usage_number("cached_tokens"),
+            _ => row.started_epoch_ms,
+        };
+        (primary, row.updated_epoch_ms)
+    }
+}
+
+fn facet_add(facets: &mut BTreeMap<String, BTreeMap<String, u64>>, name: &str, value: Option<&str>) {
+    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+        *facets.entry(name.to_string()).or_default().entry(value.to_string()).or_default() += 1;
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -247,6 +401,103 @@ fn merge_stats(target: &mut SourceStats, source: &SourceStats) {
     for (category, count) in &source.error_categories {
         *target.error_categories.entry(category.clone()).or_default() += count;
     }
+}
+
+async fn records(axum::extract::State(state): axum::extract::State<AppState>, raw_query: RawQuery) -> Response {
+    let params: std::collections::HashMap<String, String> =
+        raw_query
+            .0
+            .map(|query| parse_query_params(&query))
+            .unwrap_or_default();
+    let query = match RecordQuery::from_params(&params) {
+        Ok(query) => query,
+        Err(error) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response(),
+    };
+    let ports = match configured_ports(&state) {
+        Ok(ports) => ports,
+        Err(error) => return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response(),
+    };
+    let client = reqwest::Client::new();
+    let mut rows = Vec::new();
+    for port in ports {
+        match fetch_snapshot(&client, port).await {
+            Ok(snapshot) => {
+                for (_key, row) in snapshot.requests { rows.push(row); }
+            }
+            Err(error) => {
+                return (StatusCode::BAD_GATEWAY, Json(json!({
+                    "error": format!("observability source {port} unavailable: {error}")
+                }))).into_response();
+            }
+        }
+    }
+    let rows: Vec<QueryRow> = rows
+        .into_iter()
+        .filter_map(|row| serde_json::to_value(row).ok())
+        .filter_map(|value| serde_json::from_value(value).ok())
+        .collect();
+    let mut filtered: Vec<QueryRow> = rows.into_iter().filter(|row| query.matches(row)).collect();
+    filtered.sort_by_cached_key(|row| {
+        let key = query.sort_key(row);
+        std::cmp::Reverse(key)
+    });
+    let total = filtered.len() as u64;
+    let offset = ((query.page - 1) * query.page_size) as usize;
+    let end = (offset + query.page_size as usize).min(filtered.len());
+    let page_rows: &[QueryRow] = if offset < filtered.len() { &filtered[offset..end] } else { &[] };
+    let mut stats = json!({"count":0,"input_tokens":0,"output_tokens":0,"cached_tokens":0,"cache_hit_rate_percent":0f64,"avg_duration_ms":0f64});
+    let mut facets = BTreeMap::new();
+    let count = filtered.len() as f64;
+    let mut input=0; let mut output=0; let mut cached=0; let mut durations=0u64; let mut with_duration=0u64;
+    for row in &filtered {
+        input += row.usage.as_ref().and_then(|u| u.get("input_tokens")).and_then(Value::as_u64).unwrap_or(0);
+        output += row.usage.as_ref().and_then(|u| u.get("output_tokens")).and_then(Value::as_u64).unwrap_or(0);
+        cached += row.usage.as_ref().and_then(|u| u.get("cached_tokens")).and_then(Value::as_u64).unwrap_or(0);
+        if let Some(duration)=row.duration_ms { durations+=duration; with_duration+=1; }
+        facet_add(&mut facets, "ports", Some(&row.scope.port.to_string()));
+        facet_add(&mut facets, "providers", row.meta.get("provider").and_then(Value::as_str));
+        facet_add(&mut facets, "models", row.meta.get("model").and_then(Value::as_str));
+        facet_add(&mut facets, "routes", row.meta.get("route").and_then(Value::as_str));
+        facet_add(&mut facets, "sessions", row.scope.session.as_deref());
+        facet_add(&mut facets, "response_types", row.meta.get("response_status").and_then(Value::as_str));
+        facet_add(&mut facets, "error_categories", row.meta.get("error_category").and_then(Value::as_str));
+    }
+    stats["count"]=json!(count as u64); stats["input_tokens"]=json!(input); stats["output_tokens"]=json!(output); stats["cached_tokens"]=json!(cached);
+    if input>0 { stats["cache_hit_rate_percent"]=json!((cached as f64 / input as f64)*100f64); }
+    if with_duration>0 { stats["avg_duration_ms"]=json!(durations as f64/with_duration as f64); }
+    Json(RecordsResponse { records:page_rows.to_vec(),total,page:query.page,page_size:query.page_size,stats,facets }).into_response()
+}
+
+fn parse_query_params(raw: &str) -> std::collections::HashMap<String, String> {
+    raw.split('&')
+        .filter(|part| !part.is_empty())
+        .map(|part| match part.split_once('=') {
+            Some((key, value)) => (urldecode_component(key), urldecode_component(value)),
+            None => (urldecode_component(part), String::new()),
+        })
+        .collect()
+}
+
+fn urldecode_component(value: &str) -> String {
+    let mut bytes = Vec::new();
+    let source = value.as_bytes();
+    let mut index = 0;
+    while index < source.len() {
+        match source[index] {
+            b'+' => bytes.push(b' '),
+            b'%' if index + 2 < source.len() => {
+                if let Ok(byte) = u8::from_str_radix(&value[index + 1..index + 3], 16) {
+                    bytes.push(byte);
+                    index += 2;
+                } else {
+                    bytes.push(source[index]);
+                }
+            }
+            byte => bytes.push(byte),
+        }
+        index += 1;
+    }
+    String::from_utf8(bytes).unwrap_or_else(|_| value.to_string())
 }
 
 pub(crate) async fn poll(

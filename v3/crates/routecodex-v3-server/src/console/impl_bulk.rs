@@ -59,6 +59,12 @@ fn build_v3_webui_meta_for_context(
             .clone()
             .or_else(|| observability.wire_model.clone()),
         route: Some(resolve_v3_console_route_projection(observability).label),
+        routing_group: observability.routing_group_id.clone(),
+        pool: observability.pool_id.clone(),
+        provider_id: observability.provider_id.clone(),
+        auth_alias: observability.auth_alias.clone(),
+        provider_type: observability.provider_type.clone(),
+        wire_model: observability.wire_model.clone(),
         provider: observability
             .provider_key
             .clone()

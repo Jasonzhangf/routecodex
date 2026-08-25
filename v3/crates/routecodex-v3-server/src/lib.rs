@@ -371,6 +371,13 @@ pub async fn spawn_v3_server_aggregate(
     let mut listeners = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
+        let observability_store_path = observability_store_path_for_listener(
+            manifest.debug.log_file.as_deref().map(std::path::Path::new),
+            server.port,
+        );
+        let webui_observability =
+            V3WebuiObservability::load_persisted(&observability_store_path)
+                .map_err(std::io::Error::other)?;
         let app = build_v3_listener_router(V3ListenerState {
             server,
             manifest_version: preflight.manifest_version,
@@ -389,7 +396,7 @@ pub async fn spawn_v3_server_aggregate(
             responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
             request_activity_gate: Arc::clone(&request_activity_gate),
             front_transport_broker: front_transport_broker.clone(),
-            webui_observability: V3WebuiObservability::new(),
+            webui_observability,
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let connection_broker = front_transport_broker.clone();
@@ -557,6 +564,14 @@ pub async fn spawn_v3_server_aggregate(
     })
 }
 
+fn observability_store_path_for_listener(log_path: Option<&std::path::Path>, port: u16) -> std::path::PathBuf {
+    const DEFAULT_LOG_PATH: &str = "server.log";
+    match log_path {
+        Some(path) => path.with_extension("request-records.jsonl"),
+        None => std::path::PathBuf::from(format!("{DEFAULT_LOG_PATH}.port-{port}.request-records.jsonl")),
+    }
+}
+
 pub async fn serve_v3_server_aggregate_until_shutdown(
     manifest: V3Config05ManifestPublished,
 ) -> Result<(), std::io::Error> {
@@ -615,6 +630,10 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         .route(
             "/_routecodex/diagnostics/virtual-router/dry-run",
             post(virtual_router_dry_run),
+        )
+        .route(
+            "/_routecodex/health/cooldown-pool",
+            get(webui_observability_endpoints::cooldown_pool),
         )
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(path_not_found)
