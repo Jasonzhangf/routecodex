@@ -757,7 +757,7 @@ fs.writeFileSync(
     gates: [
       { gate_id: 'g1', command: 'node scripts/architecture/verify-v4-declared-only.mjs' },
       { gate_id: 'g2', command: 'node scripts/architecture/verify-v4-executed.mjs' },
-      { gate_id: 'g3', command: 'cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-cordis-bridge,routecodex-v4-skeleton,routecodex-v4-plugin-contract,routecodex-v4-standard-plugins' },
+      { gate_id: 'g3', command: 'cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-skeleton,routecodex-v4-plugin-contract,routecodex-v4-standard-plugins' },
     ],
   }),
 );

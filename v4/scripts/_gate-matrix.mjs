@@ -61,7 +61,7 @@ export const CONSUMER_REGRESSIONS = [
   ['routecodex-v4-config', 'routecodex-v4-base-node,routecodex-v4-edge'],
   ['routecodex-v4-control', 'routecodex-v4-base-node'],
   ['routecodex-v4-error', 'routecodex-v4-base-node'],
-  ['routecodex-v4-runtime', 'routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control', '--source-deps', 'routecodex-v4-cordis-bridge,routecodex-v4-skeleton,routecodex-v4-plugin-contract'],
+  ['routecodex-v4-runtime', 'routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control', '--source-deps', 'routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-skeleton,routecodex-v4-plugin-contract'],
   ['routecodex-v4-debug', 'routecodex-v4-base-node'],
   ['routecodex-v4-router', 'routecodex-v4-base-node,routecodex-v4-edge', '--rlib-deps', 'routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib'],
   ['routecodex-v4-provider', 'routecodex-v4-base-node'],

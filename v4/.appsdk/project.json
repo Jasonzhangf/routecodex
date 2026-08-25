@@ -853,7 +853,7 @@
       "build": {
         "args": [
           "-c",
-          "cargo build --release -p routecodex-v4-skeleton && cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-cordis-bridge,routecodex-v4-skeleton,routecodex-v4-plugin-contract --out generated/modules/routecodex-v4-runtime/lib/libroutecodex_v4_runtime.rlib"
+          "cargo build --release -p routecodex-v4-skeleton && cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-skeleton,routecodex-v4-plugin-contract --out generated/modules/routecodex-v4-runtime/lib/libroutecodex_v4_runtime.rlib"
         ],
         "program": "sh",
         "working_directory": "."
@@ -896,7 +896,7 @@
             "--deps",
             "routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control",
             "--source-deps",
-            "routecodex-v4-cordis-bridge,routecodex-v4-skeleton,routecodex-v4-plugin-contract"
+            "routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-skeleton,routecodex-v4-plugin-contract"
           ],
           "program": "cargo",
           "working_directory": "."
