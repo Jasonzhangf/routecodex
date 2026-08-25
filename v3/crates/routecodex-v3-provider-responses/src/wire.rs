@@ -206,13 +206,15 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
         // 未经证明的条目。
         if deepseek_compat
             && target.compatibility_profile.as_deref() == Some("responses:deepseek-console-go")
-            && v3_wire_payload_is_thinking_mode(&body)
         {
             // 先做 call/output 配对归一（Console Go Chat 降级契约），再做
             // junction reasoning 合成；两者同属已证实的 opencode-go/Console Go
-            // 网关契约，deepseek-v4-flash + thinking 模式为已证实载体。
+            // 网关契约。call/output 配对约束与 reasoning effort 无关；reasoning
+            // junction 仍只在 thinking 模式开启。
             normalize_v3_deepseek_console_go_tool_output_pairing(&mut body);
-            insert_v3_deepseek_interleaved_tool_segment_reasoning(&mut body);
+            if v3_wire_payload_is_thinking_mode(&body) {
+                insert_v3_deepseek_interleaved_tool_segment_reasoning(&mut body);
+            }
         }
     }
     Ok(V3Provider12ResponsesWirePayload {

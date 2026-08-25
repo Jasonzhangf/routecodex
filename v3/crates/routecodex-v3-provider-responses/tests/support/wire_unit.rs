@@ -1032,6 +1032,35 @@ mod tests {
     }
 
     #[test]
+    fn wire_moves_console_go_interleaved_assistant_without_reasoning_effort() {
+        let mut target = target();
+        target.provider_id = "opencode-go".into();
+        target.provider_type = "responses".into();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        target.wire_model = "deepseek-v4-flash".into();
+        target.compatibility_profile = Some("responses:deepseek-console-go".into());
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-deepseek-non-thinking-pairing",
+            target,
+            json!({
+                "model": "deepseek-v4-flash",
+                "input": [
+                    {"type":"function_call", "call_id":"call_1", "name":"exec_command", "arguments":"{}"},
+                    {"type":"message", "role":"assistant", "content":[{"type":"output_text", "text":"note"}]},
+                    {"type":"function_call_output", "call_id":"call_1", "output":"ok"},
+                    {"type":"message", "role":"user", "content":[{"type":"input_text", "text":"continue"}]}
+                ]
+            }),
+        )
+        .unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        assert_eq!(input[0]["type"], "function_call");
+        assert_eq!(input[1]["type"], "function_call_output");
+        assert_eq!(input[2]["type"], "message");
+        assert_eq!(input[2]["role"], "assistant");
+    }
+
+    #[test]
     fn wire_keeps_interleaved_assistant_untouched_for_unproven_provider() {
         // 配对重排与 junction reasoning 同门控：只属于已证实的
         // opencode-go/Console Go 网关；其他持 deepseek-v4-flash 模型的
