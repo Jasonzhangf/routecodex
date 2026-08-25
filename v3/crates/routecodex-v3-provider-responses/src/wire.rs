@@ -375,8 +375,8 @@ fn join_v3_reasoning_plain_text(obj: &Map<String, Value>) -> String {
 /// 只有 Console Go 的 Chat 降级不接受）。把每个工具 run（一个或多个连续
 /// calls + 其 outputs，窗口内只含 calls/outputs/assistant 文本消息）内的
 /// assistant 消息移动到该 run 最后一个 output 之后，保持消息相对顺序；
-/// calls 与 outputs 原序不动。纯函数、确定性，同一请求反复构建 wire 输出
-/// 字节不变。
+/// calls 与 outputs 原序不动；run 内的 assistant 文本和 reasoning 仍保留但后移。
+/// 纯函数、确定性，同一请求反复构建 wire 输出字节不变。
 fn normalize_v3_deepseek_console_go_tool_output_pairing(body: &mut Value) {
     let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
         return;
@@ -406,12 +406,15 @@ fn normalize_v3_deepseek_console_go_tool_output_pairing(body: &mut Value) {
                     index += tail_len;
                 }
             }
-            Some("message") => {
+            Some("message" | "reasoning") => {
                 let role = input[index]
                     .get("role")
                     .and_then(Value::as_str)
                     .map(str::to_string);
-                if role.as_deref() == Some("assistant") && pending_calls > 0 {
+                let is_assistant_message =
+                    kind == Some("message") && role.as_deref() == Some("assistant");
+                let is_reasoning = kind == Some("reasoning");
+                if pending_calls > 0 && (is_assistant_message || is_reasoning) {
                     let message = input.remove(index);
                     run_assistant.push(message);
                     // 索引不前进：后续条目前移，继续扫描同一位置。
