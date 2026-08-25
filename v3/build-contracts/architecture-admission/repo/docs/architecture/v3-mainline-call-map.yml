@@ -7914,7 +7914,7 @@ chains:
 
 - chain_id: v3.runtime_restart_handoff_skeleton
   owner_feature_id: v3.runtime_restart_handoff_skeleton
-  summary: Stable server response-body ownership drains or hands off in-flight requests across canonical Runtime Child replacement without changing the frozen execution plan or leaking provider frames.
+  summary: Stable server response-body ownership drains or hands off in-flight requests across canonical Runtime Child replacement; every HTTP keep-alive request owns a fresh closeout cycle without changing the frozen execution plan or leaking provider frames.
   manifest: docs/architecture/manifests/v3.runtime_restart_handoff_skeleton.yml
   entry_contract:
     node: V3Front01StableRequestOwner
@@ -7944,9 +7944,9 @@ chains:
     status: source_controlled_runtime_pending_live_replay
     owner_feature_id: v3.runtime_restart_handoff_skeleton
     resource_flow:
-      consumes: [v3.front.request_activity_gate, v3.front.deadline_budget]
+      consumes: [v3.front.request_activity_gate, v3.front.deadline_budget, v3.front.client_closeout_frame]
       produces: [v3.error.chain]
-      side_channel_reads: [v3.front.request_activity_gate]
+      side_channel_reads: [v3.front.request_activity_gate, v3.front.client_closeout_frame]
       side_channel_writes: []
 
 - chain_id: v3.direct_sse_accept_skeleton

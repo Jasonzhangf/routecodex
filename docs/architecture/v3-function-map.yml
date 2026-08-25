@@ -5071,6 +5071,7 @@ features:
   required_gates:
   - npm run verify:v3-direct-sse-full-attempt-commit
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_direct_sse_ -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check

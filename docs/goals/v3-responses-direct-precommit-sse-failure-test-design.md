@@ -13,7 +13,7 @@ Design ID: `CCSOL-SSE-PRECOMMIT-EMPTY-20260816-01`
 - Anthropic `message_start`, content blocks, and deltas remain buffered until a valid `message_stop` terminal.
 - OpenAI Chat role-only/empty deltas, content/reasoning/tool deltas, and finish chunks remain buffered until the protocol terminal is validated.
 - Protocol selection is an explicit argument. A frame belonging to another protocol fails classification; no JSON shape auto-detection or second classification pass is allowed.
-- Each protocol maps its own provider error event to typed `Failure`; keepalive and `[DONE]` frames remain non-semantic.
+- Each protocol maps its own provider error event to typed `Failure`; keepalive remains non-semantic, while OpenAI Chat `[DONE]` is accepted only after a terminal `finish_reason` and fails closed when received before it.
 - Error, malformed/empty terminal, and EOF after lifecycle-only frames return provider Error01 before Resp15.
 
 ## Module black box
