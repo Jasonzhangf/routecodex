@@ -81,9 +81,10 @@ impl V3CodexSampleStore {
         // 样本含敏感请求/错误载荷：目录 0700、文件 0600（不依赖 umask）。
         let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
         let path = dir.join(file_name);
+        let payload = merge_provider_snapshot_attempts(&path, file_name, payload)?;
         let mut file = fs::File::create(&path).map_err(|error| error.to_string())?;
         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-        serde_json::to_writer_pretty(&mut file, payload).map_err(|error| error.to_string())?;
+        serde_json::to_writer_pretty(&mut file, &payload).map_err(|error| error.to_string())?;
         file.write_all(b"\n").map_err(|error| error.to_string())?;
         enforce_v3_codex_sample_global_retention(&samples_root, Some(&dir), self.retention)?;
         Ok(())
@@ -100,6 +101,55 @@ impl V3CodexSampleStore {
     pub fn enforce_listener_retention(&self, _port: u16) -> Result<(), String> {
         self.enforce_retention()
     }
+}
+
+fn merge_provider_snapshot_attempts(
+    path: &Path,
+    file_name: &str,
+    incoming: &Value,
+) -> Result<Value, String> {
+    let is_provider_snapshot = matches!(
+        file_name,
+        "provider-request.json" | "provider-response.json"
+    );
+    if !is_provider_snapshot || !incoming.is_object() || !path.is_file() {
+        return Ok(incoming.clone());
+    }
+    let existing_text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let mut existing: Value =
+        serde_json::from_str(&existing_text).map_err(|error| error.to_string())?;
+    let (Some(existing_object), Some(incoming_object)) =
+        (existing.as_object_mut(), incoming.as_object())
+    else {
+        return Ok(incoming.clone());
+    };
+    if existing_object.get("object") != incoming_object.get("object")
+        || existing_object.get("stage") != incoming_object.get("stage")
+        || existing_object
+            .get("attempts")
+            .and_then(Value::as_array)
+            .is_none()
+        || incoming_object
+            .get("attempts")
+            .and_then(Value::as_array)
+            .is_none()
+    {
+        return Ok(incoming.clone());
+    }
+    let existing_attempts = existing_object
+        .get_mut("attempts")
+        .and_then(Value::as_array_mut)
+        .expect("provider snapshot attempts validated above");
+    for attempt in incoming_object
+        .get("attempts")
+        .and_then(Value::as_array)
+        .expect("provider snapshot attempts validated above")
+    {
+        if !existing_attempts.iter().any(|known| known == attempt) {
+            existing_attempts.push(attempt.clone());
+        }
+    }
+    Ok(existing)
 }
 
 fn resolve_v3_codex_samples_root() -> Result<PathBuf, String> {
@@ -281,6 +331,72 @@ mod tests {
             assert!(written.contains("deepseek-v4-flash"));
             assert!(written.contains("hello"));
             assert!(!written.contains("ROUTECODEX_DEBUG"));
+        });
+    }
+
+    #[test]
+    fn persist_merges_distinct_provider_snapshot_attempts_without_duplicates() {
+        with_test_home(|home_base| {
+            let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
+            let first = json!({
+                "object": "routecodex.v3.provider_request_snapshots",
+                "stage": "provider-request",
+                "attempts": [{"attempt": 1, "request": {"providerId": "opencode-go"}}]
+            });
+            let second = json!({
+                "object": "routecodex.v3.provider_request_snapshots",
+                "stage": "provider-request",
+                "attempts": [{"attempt": 1, "request": {"providerId": "opencode-go-zen"}}]
+            });
+            store
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    "req-merge",
+                    "provider-request.json",
+                    &first,
+                    false,
+                    None,
+                )
+                .unwrap();
+            store
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    "req-merge",
+                    "provider-request.json",
+                    &second,
+                    false,
+                    None,
+                )
+                .unwrap();
+            store
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    "req-merge",
+                    "provider-request.json",
+                    &second,
+                    false,
+                    None,
+                )
+                .unwrap();
+            let path = sample_dir(home_base)
+                .join("req-merge")
+                .join("provider-request.json");
+            let written: Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+            assert_eq!(written["attempts"].as_array().unwrap().len(), 2);
+            assert_eq!(
+                written["attempts"][0]["request"]["providerId"],
+                "opencode-go"
+            );
+            assert_eq!(
+                written["attempts"][1]["request"]["providerId"],
+                "opencode-go-zen"
+            );
         });
     }
 
