@@ -3255,7 +3255,8 @@ features:
   required_negative:
   - provider raw SSE is never projected directly to the client.
   - response shape never reselects Direct or Relay.
-  - restart never silently drops an in-flight request or emits duplicate terminal frames.
+  - restart never silently drops an accepted request before response headers; it emits one explicit `server_restart_in_progress` HTTP 503 terminal.
+  - restart does not fabricate that pre-header terminal for an unstarted request or an already-started response.
   required_gates:
   - npm run verify:v3-runtime-restart-handoff
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server restart_handoff --lib -- --nocapture
