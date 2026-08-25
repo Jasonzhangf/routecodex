@@ -36034,3 +36034,8 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - 根因：commit `4b862c3` 删除 `relay_request` Req04 restore 后的 tool-only 图片全量占位兜底；Responses→Chat canonical payload 无 user carrier 时，`normalize_v3_history_image_placeholders` 无边界可推导，恢复历史工具截图继续进入 provider wire，触发 HTTP 400。
 - 修复：Req04 restore 后若 `messages` 无 user，调用唯一图片清洗 owner `normalize_v3_all_images_to_placeholder`；新增 `local_tool_only_restore_replaces_images_before_provider_wire` 回归，锁 provider wire 不含 `data:image/` 且含 `[Image]`。
 - 证据：定向测试通过；`git diff --check` 通过。更广 lib 测试被既有 dirty direct-SSE 改动阻断：多个 `V3ClientBody` match 未覆盖 `Sse`，非本次变更。
+
+# 2026-08-25 V3 restart SSE silent-failure closeout
+- 真实样本 `openai-responses-router-gpt-5.5-20260824T220049612-949103-14053` 证明 aggregate exec restart 在 accepted request、response headers 前直接关闭 Front socket，客户端收到 EOF，未进入 Error06。
+- 合并 `4d943f533`、`5adced262` 到 main：HTTP pre-header restart 返回 `503 server_restart_in_progress`；Responses SSE 已开始时发送 typed `response.failed` terminal；新增 restart closeout regression gate 与正反测试。
+- 定向 `routecodex-v3-server restart_handoff` 19/19；resource/module/restart gates 通过；CLI debug/release build、npm install、无查询参数 `routecodex restart`、7777/4444 health 和在线 Responses SSE 通过。完整 build admission 仍被既有 `console/impl_bulk.rs` 1708 > 1675 shrink-only ratchet 阻断。

@@ -5779,3 +5779,9 @@ Tags: #v3 #historical-samples #error-samples #provider-debug
 - Relay provider responses such as MiniMax `HTTP 429` with body code `rate_limit_error` must be classified as `Recoverable`, not as transient/request-local compatibility. The unique config owner is `v3/crates/routecodex-v3-config/src/internal.toml` plus `classify_v3_internal_provider_error` in `internal.rs`.
 - The typed provider failure action owner must map ordinary 429 rate-limit failures to `RecoverableCounted / GlobalProviderKey` with threshold 3. `insufficient_quota` and other account-disabled/auth markers may remain the stricter irrecoverable class.
 - Verified live after commit `789b077ed`: MiniMax key recorded 429 failure counts 1, 2, 3, then `health=cooldown`; persisted key health showed `failure_streak=4`, `probe_required=true`, and a future `cooldown_until_ms`. Intermediate provider attempts did not produce client projection; Error06 appeared only after route/default exhaustion.
+
+## 2026-08-25 - Aggregate restart must emit client SSE terminal
+
+- Accepted client requests could silently EOF during `prepare_for_exec` because `close_active_client_transports` closed Front sockets without an Error06/client terminal; the regression was introduced by `8798f9800` and was locked by an old empty-response assertion.
+- Canonical owner is `routecodex-v3-server` Front transport plus Responses SSE accept owner: pre-header restart emits HTTP 503 `server_restart_in_progress`; started Responses SSE emits typed `response.failed`; unstarted requests and client disconnects do not receive fabricated restart errors.
+- Verified on main `5adced262`: 19 restart-handoff tests, architecture/resource/module gates, CLI debug/release build, global install, parameterless `routecodex restart`, 7777/4444 health, and live 7777 Responses SSE. Full build admission still has unrelated pre-existing `console/impl_bulk.rs` shrink-only ratchet failure.
