@@ -845,10 +845,8 @@ where
         let committed_client_sse = matches!(&attempt_body, V3ProviderAttemptBody::Sse(_));
         let client_body = match attempt_body {
             V3ProviderAttemptBody::Sse(mut stream) => {
-                let target_observation = response_projection
-                    .stream_observation
-                    .clone()
-                    .unwrap_or_default();
+                let target_observation =
+                    bind_direct_sse_stream_observation(&mut response_projection.stream_observation);
                 stream = crate::kernel::wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook(
                     stream,
                     target_observation.clone(),
@@ -1080,4 +1078,12 @@ where
             protocol_relay_handoff: None,
         };
     }
+}
+
+pub(crate) fn bind_direct_sse_stream_observation(
+    observation: &mut Option<V3RuntimeStreamObservation>,
+) -> V3RuntimeStreamObservation {
+    let bound = observation.clone().unwrap_or_default();
+    *observation = Some(bound.clone());
+    bound
 }

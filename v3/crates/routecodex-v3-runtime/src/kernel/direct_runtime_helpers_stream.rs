@@ -500,6 +500,28 @@ where
 mod direct_sse_timing_tests {
     use super::*;
 
+    #[test]
+    fn direct_sse_missing_projection_observation_is_bound_before_stream_closeout() {
+        let mut projection_observation = None;
+        let target = crate::kernel::bind_direct_sse_stream_observation(&mut projection_observation);
+        target
+            .record_timing(V3RuntimeTimingSummary {
+                runtime_total: std::time::Duration::from_millis(3),
+                external: std::time::Duration::from_millis(2),
+                internal: std::time::Duration::from_millis(1),
+            })
+            .unwrap();
+        assert_eq!(
+            projection_observation
+                .as_ref()
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .timing,
+            target.snapshot().unwrap().timing,
+        );
+    }
+
     #[tokio::test]
     async fn direct_sse_provider_error_after_partial_attempt_handoffs_without_client_error() {
         let source: V3ClientSseStream = Box::pin(stream::iter([
