@@ -65,6 +65,9 @@
     let paused = false;
     let pollTimer = null;
     const sourceCursors = new Map();
+    const requestEvents = new Map();
+    let selectedRequestKey = null;
+    let resyncing = false;
 
     function statusOf(row) {
       if (row.result === "success") return "success";
@@ -86,32 +89,47 @@
     function applyPoll(data) {
       if (!data || typeof data !== "object") throw new Error("invalid observability poll");
       for (const source of data.sources || []) sourceCursors.set(source.port, source.cursor);
+      for (const event of data.recent_events || []) {
+        requestEvents.set(`${event.row?.scope?.port}:${event.sequence}`, event);
+      }
+      while (requestEvents.size > 2048) requestEvents.delete(requestEvents.keys().next().value);
       snapshot = data;
       render();
       showConnection();
     }
 
-    async function poll() {
+    async function poll(allowResync = true) {
       const params = new URLSearchParams();
       if (sourceCursors.size) {
         params.set("sources", [...sourceCursors.entries()].sort(([a], [b]) => a - b).map(([port, cursor]) => `${port}:${cursor}`).join(","));
       }
-      try {
-        const data = await api(`/api/observability/poll?${params}`);
-        applyPoll(data);
-      } catch (error) {
-        sourceCursors.clear();
-        const data = await api("/api/observability/poll");
-        applyPoll(data);
+      const data = await api(`/api/observability/poll?${params}`);
+      applyPoll(data);
+    }
+
+    async function pollOrResync() {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          await poll();
+          return;
+        } catch (error) {
+          if (error.code !== "observability_resync_required" || resyncing || attempt === 2) throw error;
+        }
+        resyncing = true;
+        try {
+          await load();
+        } finally {
+          resyncing = false;
+        }
       }
     }
 
     function schedulePoll() {
       if (pollTimer) clearTimeout(pollTimer);
       pollTimer = setTimeout(async () => {
-        pollTimer = null;
+          pollTimer = null;
         if (!paused) {
-          try { await poll(); } catch (error) { showStatus("err", `observability failed: ${error.message}`); }
+          try { await pollOrResync(); } catch (error) { showStatus("err", `observability failed: ${error.message}`); }
         }
         schedulePoll();
       }, 1000);
@@ -141,7 +159,13 @@
     function sortRows(rows) {
       const field = document.getElementById("sort-field").value;
       const direction = document.getElementById("sort-order").value === "asc" ? 1 : -1;
+      const grouped = document.getElementById("group-toggle").checked;
       return rows.sort((left, right) => {
+        if (grouped) {
+          const portOrder = Number(left.scope?.port ?? Number.MAX_SAFE_INTEGER) -
+            Number(right.scope?.port ?? Number.MAX_SAFE_INTEGER);
+          if (portOrder) return portOrder;
+        }
         let a = left[field];
         let b = right[field];
         if (field === "finished_epoch_ms") { a = a ?? Number.MAX_SAFE_INTEGER; b = b ?? Number.MAX_SAFE_INTEGER; }
@@ -188,7 +212,9 @@
       }
       const portSelect = document.getElementById("port-filter");
       const selected = portSelect.value;
-      portSelect.replaceChildren(el("option", null, "all ports"), ...ports.map(([port]) => {
+      const allPorts = el("option", null, "all ports");
+      allPorts.value = "all";
+      portSelect.replaceChildren(allPorts, ...ports.map(([port]) => {
         const option = el("option", null, String(port)); option.value = String(port); return option;
       }));
       portSelect.value = [...portSelect.options].some((option) => option.value === selected) ? selected : "all";
@@ -202,10 +228,14 @@
     function detailGrid(row) {
       const grid = el("div", "detail-grid");
       const fields = [
-        ["request id", row.meta?.request_id], ["protocol", row.meta?.entry_protocol], ["mode", row.meta?.execution_mode],
+        ["request key", row.request_key], ["event", row.event_type], ["request id", row.meta?.request_id],
+        ["protocol", row.meta?.entry_protocol], ["endpoint", row.meta?.endpoint], ["mode", row.meta?.execution_mode],
         ["transport", row.meta?.transport], ["session", row.scope?.session], ["workdir", row.scope?.workdir],
+        ["route", row.meta?.route], ["model", row.meta?.model], ["provider", row.meta?.provider],
+        ["attempts", row.attempts], ["failed attempts", row.failed_attempts], ["switches", row.switches],
         ["provider status", row.meta?.provider_status], ["response status", row.meta?.response_status], ["finish reason", row.meta?.finish_reason],
         ["error category", row.meta?.error_category], ["error detail", row.meta?.error_detail], ["output tokens", row.tokens_output],
+        ["artifact", row.raw_artifact_ref],
         ["started", timeText(row.started_epoch_ms)], ["updated", timeText(row.updated_epoch_ms)], ["finished", timeText(row.finished_epoch_ms)]
       ];
       for (const [label, value] of fields) {
@@ -216,9 +246,34 @@
       return grid;
     }
 
+    function requestTimeline(requestKey) {
+      const events = [...requestEvents.values()]
+        .filter((event) => event.row?.request_key === requestKey)
+        .sort((left, right) => left.sequence - right.sequence);
+      const section = el("section", "request-timeline");
+      section.appendChild(el("h3", null, "Lifecycle"));
+      if (!events.length) {
+        section.appendChild(el("div", "muted", "No lifecycle events retained"));
+        return section;
+      }
+      const list = el("ol");
+      for (const event of events) {
+        const item = el("li", `status-${statusOf(event.row)}`);
+        item.append(
+          el("time", "muted", timeText(event.timestamp_epoch_ms)),
+          el("strong", null, event.row.event_type),
+          el("span", "muted", `${event.row.meta?.provider || "—"} · ${event.row.meta?.route || "—"}`)
+        );
+        list.appendChild(item);
+      }
+      section.appendChild(list);
+      return section;
+    }
+
     function requestRow(row) {
       const status = statusOf(row);
       const tr = el("tr", `request-row status-${status}`);
+      tr.dataset.requestKey = row.request_key;
       tr.style.cursor = "pointer";
       tr.addEventListener("click", () => openRequestDetail(row));
       tr.appendChild(el("td", null, status));
@@ -239,11 +294,22 @@
     }
 
     function openRequestDetail(row) {
-      const body = document.getElementById("drawer-body");
-      document.getElementById("drawer-title").textContent = `Request ${row.meta?.request_id || row.request_key}`;
-      body.innerHTML = "";
-      body.appendChild(detailGrid(row));
+      selectedRequestKey = row.request_key;
+      renderRequestDetail();
       openPanel();
+    }
+
+    function renderRequestDetail() {
+      if (!selectedRequestKey) return;
+      const row = snapshot.requests?.[selectedRequestKey];
+      const body = document.getElementById("drawer-body");
+      if (!row) {
+        document.getElementById("drawer-title").textContent = "Request unavailable";
+        body.replaceChildren(el("div", "muted", "Request is no longer retained"));
+        return;
+      }
+      document.getElementById("drawer-title").textContent = `Request ${row.meta?.request_id || row.request_key}`;
+      body.replaceChildren(detailGrid(row), requestTimeline(row.request_key));
     }
 
     function renderRequests() {
@@ -279,13 +345,13 @@
       requestAnimationFrame(() => body.classList.remove("is-updating"));
     }
 
-    function render() { renderStats(); renderRequests(); }
+    function render() { renderStats(); renderRequests(); renderRequestDetail(); }
 
     document.getElementById("reload-btn").addEventListener("click", () => load().catch((error) => showStatus("err", error.message)));
     document.getElementById("pause-btn").addEventListener("click", (event) => {
       paused = !paused;
       event.currentTarget.textContent = paused ? "Resume" : "Pause";
-      if (!paused) poll().catch((error) => showStatus("err", error.message));
+      if (!paused) pollOrResync().catch((error) => showStatus("err", error.message));
     });
     ["status-filter", "port-filter", "search-filter", "sort-field", "sort-order", "group-toggle"].forEach((id) => {
       document.getElementById(id).addEventListener("input", render);

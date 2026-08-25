@@ -220,6 +220,20 @@ tr.status-retrying > td:first-child,
 tr.status-success > td:first-child,
 .card.status-success { border-left: 3px solid var(--green); }
 .detail-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.request-timeline { margin-top: 24px; }
+.request-timeline h3 { font-size: 13px; text-transform: uppercase; color: var(--text-dim); }
+.request-timeline ol { display: grid; gap: 10px; padding-left: 0; list-style: none; }
+.request-timeline li {
+  display: grid;
+  gap: 2px;
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+}
+.request-timeline li.status-error { border-left-color: var(--red); }
+.request-timeline li.status-active,
+.request-timeline li.status-retrying { border-left-color: var(--blue); }
+.request-timeline li.status-success { border-left-color: var(--green); }
+.request-timeline time { font-size: 12px; }
 .request-row {
   transition: background-color var(--transition-fast) var(--ease-state),
     border-color var(--transition-fast) var(--ease-state);

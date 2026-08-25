@@ -60,6 +60,7 @@ async fn static_serve(State(state): State<AppState>, uri: axum::http::Uri) -> Re
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, content_type)
+        .header(header::CACHE_CONTROL, "no-store")
         .body(Body::from(content))
         .expect("response")
 }

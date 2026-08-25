@@ -8,7 +8,9 @@ async function api(path, options) {
   if (!response.ok) {
     const detail = body?.error?.message || body?.error || body?.detail || body;
     const message = detail ? (typeof detail === "string" ? detail : JSON.stringify(detail)) : `${response.status} ${response.statusText}`;
-    throw new Error(message);
+    const error = new Error(message);
+    if (body?.error_code) error.code = body.error_code;
+    throw error;
   }
   return body;
 }

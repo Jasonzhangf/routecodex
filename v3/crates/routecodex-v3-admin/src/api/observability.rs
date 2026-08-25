@@ -271,10 +271,7 @@ pub(crate) async fn poll(
         recent_events: Vec::new(),
     };
     for (port, cursor) in cursors {
-        let (snapshot_result, events_result) = tokio::join!(
-            fetch_snapshot(&client, port),
-            fetch_events(&client, port, cursor)
-        );
+        let snapshot_result = fetch_snapshot(&client, port).await;
         let snapshot = match snapshot_result {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -287,6 +284,8 @@ pub(crate) async fn poll(
                     .into_response();
             }
         };
+        let event_cursor = if cursor == 0 { snapshot.cursor } else { cursor };
+        let events_result = fetch_events(&client, port, event_cursor).await;
         merge_stats(&mut aggregate.stats, &snapshot.stats);
         aggregate.requests.extend(snapshot.requests);
         aggregate.sources.push(SourceCursor {
@@ -299,7 +298,8 @@ pub(crate) async fn poll(
                     return (
                         StatusCode::BAD_GATEWAY,
                         Json(serde_json::json!({
-                            "error": format!("observability source {port} requires resync")
+                            "error": format!("observability source {port} requires resync"),
+                            "error_code": "observability_resync_required"
                         })),
                     )
                         .into_response();
