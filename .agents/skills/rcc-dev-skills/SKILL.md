@@ -201,6 +201,13 @@ Provider SSE 的兼容修复只能修复传输语法和格式，不得根据响�
 - 验证通过不等于闭环完成；架构 review 不过，仍视为未完成。
 - RouteCodex 结案汇报必须短但完整：问题来源、验证根因、唯一 owner/节点、解决了什么、为什么符合 V3 架构、source gate、install/restart/live 证据、剩余风险。禁止只报“测试通过/已修复”。
 
+### OpenCode `InvalidHTTPResponse` / restart keep-alive 定位锁
+
+- 先把 OpenCode UTC 错误时间与 `server-v3-<port>.log` 的本地时间对齐，再查同秒 `startup/listening`、body-read error 和 request record；restart 同秒的 `413 body_too_large: error reading a body from connection` 可能只是 Front 关闭读侧的伴生误分类，不能据此改 body limit、provider 或 Chat codec。
+- HTTP/1.1 connection identity 可跨请求复用，但 `request_started`、`response_started` 和 protocol closeout frame 必须按 request cycle 隔离。若第二请求继承第一请求的 response phase，exec restart 会跳过 pre-header 503，客户端只见 EOF/`InvalidHTTPResponse`。
+- 最小红测必须模拟同一 closeout state 上“第一请求完成并登记旧 SSE frame -> 第二请求开始 -> restart”，断言第二请求只收到完整 `HTTP/1.1 503 server_restart_in_progress`，且不继承旧 frame。
+- 在线 replay 必须用同一 HTTP/1.1 keep-alive 连接：第一轮 Chat 完整 200；第二轮 body 完整上传、尚未收到 response headers 时执行聚合 `routecodex restart`；验收为完整 503 + `connection: close`。上传中途限速触发的客户端 `Broken pipe` 不属于该状态，不能算正反证据。
+
 ## 全局安装 / release 验证硬规则
 
 - 交付顺序固定：定向测试 -> 编译构建 -> 全局安装 -> 聚合重启 -> 全部成员 health -> 真实旧样本/同入口在线 replay -> Codex review -> 精准 commit/push。禁止在全局安装和在线验证前运行交付 review；review 后若代码、测试、构建或运行配置发生变化，旧 PASS 作废，必须从受影响验证重新跑到在线 replay，再重新 review。

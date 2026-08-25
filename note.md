@@ -36011,6 +36011,12 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - Added runtime route-policy lifecycle tests: completed request commits current turn once, discarded request does not pollute history, provider failure-shaped content is excluded from tool-error facts, compact observation selects independent compact pool.
 - Bound runtime route-policy owner files, entry symbols, mainline edges, resource action writer, and verification gates in architecture maps.
 
+# 2026-08-25 OpenCode Chat keep-alive restart closeout
+- 两次 OpenCode `InvalidHTTPResponse` 与 exec restart 同秒；Chat provider-bound/JSON/SSE 正常，request record 锁定 `openai_chat + relay + provider_status=200`。历史 `4d943f533/5adced262` 的 closeout 状态为 connection 级，未重置 keep-alive 第二请求的 `response_started` 与旧 SSE frame。
+- `V3FrontTransportCloseoutState` 改为单 mutex 的 request-cycle state；第二请求开始原子清 frame/reset response phase。新增第二请求红测与 architecture/resource/verification gate。
+- main 定向 restart tests、server/CLI check、resource/restart gates、dirty-main Cargo build 通过；canonical install `0.90.4600` hash `d29547f0ac322b78c678b10ffb01432dd50bbe444862de717baaa206328490cd`。真实同连接第一轮 Chat 200，第二轮完整上传等待时 restart 收到完整 HTTP 503 `server_restart_in_progress`；7777/4444 health 和重启后 Chat SSE `[DONE]` 通过。OpenCode 新日志无新的 `InvalidHTTPResponse`，restart 窗口无 413 body-read 误投。
+- 完整 architecture admission 仍被并发 main 的 file-size ratchet 漂移阻断；admin lifecycle 并发改动还暴露并修正了 omitted `[admin_webui]` 的派生 Default 空 bind/0 port 与 CLI init 漏字段，均不属于本 closeout 提交范围。
+
 2026-08-20 DSH review repair
 - Origin/main server baseline was restored in `f509e2b70`: registered the existing typed WebUI observability store module, fixed console emission context initialization, and aligned startup provider-global probe invocation with the current runtime owner.
 - Installed binary hash after the first complete install/restart was `e54f4cc1c1988a6abf6cfae5d584c1e8d8174742b0820ae1e98f789739ab91ec`; all configured listener health endpoints returned build `0.90.4574`, manifest 3.

@@ -5797,3 +5797,16 @@ Tags: #v3 #historical-samples #error-samples #provider-debug
 - Responses Front 先接住客户端连接并维持 transport heartbeat；Runtime 完整缓存、校验 provider SSE，只有 semantic terminal 已验证后才 seal 并把 committed client stream 交给 Front。provider 业务帧在 seal 前不得越过 client edge。
 - 回归 `e7aa62392` 把 `poll_next(None)` 误当唯一完成证据，导致客户端读到 `response.completed` 后因未消费 trailing `ping`/EOF 而被误报 499。正确 owner 是 Runtime validator + typed committed carrier：记录首次 semantic terminal frame index；该帧交付后 Drop 是完成，标记前 Drop 仍是 health-neutral client disconnect。
 - Server/Front、handler、console finalizer 和 outbound 不得重新解析 SSE event 文本重建 terminal，也不得补偿成功。验证必须成对覆盖 terminal 前 Drop=499、terminal 后 trailing tail 未消费=completed，并在线确认 provider failure events 不受客户端断连污染。
+
+## 2026-08-25 - DeepSeek Direct SSE terminal closeout owner correction
+
+- DeepSeek Console Go 的 `/v1/responses` exact-pin 是 Direct；路径真源是 `node_trace` 中的 `V3ResponsesDirect11Policy -> V3DirectResp14ProviderProjectionPrepared -> V3DirectResp15ClientPayloadReady`，不能根据 provider/model 名推测 Direct/Relay。Relay 的 `CommittedSse` terminal-index 修复不能证明 Direct 已覆盖。
+- 当前 Direct client body 是 `V3ClientBody::Sse`。Runtime 通过 `V3RuntimeStreamObservation` 拥有 semantic terminal 真相；Front `V3DirectSseConsoleFinalizer::client_disconnected` 只能消费 typed `Success|Failure|None`：Success 正常完成，Failure 保留既有失败真相，None 才投影 health-neutral 499。Front 禁止重新解析 SSE 字节。
+- Main `1858125d1` 已锁正反测试：completed 后 trailing ping 未消费不再 499；terminal 前 Drop 仍为 499；failure terminal 不改写成 client disconnect。安装版 `0.90.4597` 的 exact-pin live 请求 `openai-responses-router-opencode-go.deepseek-v4-flash-20260825T083012763-958167-6707` 在客户端读到 `response.completed` 后立即关闭，证据为 Direct、provider 200、`response_status=completed`、`provider_failure_events=[]`、零 499/client_disconnect。
+
+## 2026-08-25 - Restart closeout state is request-cycle scoped
+
+- OpenCode `InvalidHTTPResponse` 两次都与 aggregate exec restart 的 `startup/listening` 精确重合；正常 Chat JSON/SSE curl 和 request records 均证明 `/v1/chat/completions` 走 Relay 且 provider 200。根因不是 provider/DeepSeek/Chat codec，而是历史 restart closeout 只按 connection 保存 `response_started`/SSE frame，keep-alive 第二请求继承第一请求完成态后被静默关 socket。
+- `routecodex-v3-server` Front transport 是唯一 owner：connection identity 保持稳定，每次 `mark_request_started` 必须原子清旧 frame、置当前轮 request started 并重置 response phase。restart 在当前轮 headers 前生成完整 HTTP 503 `server_restart_in_progress`；headers 后只可使用当前轮已登记协议 terminal。
+- 回归必须包含同一 state 的第二请求白盒红测和真实同连接在线 replay。普通新连接 curl 不能替代；上传未完成时的 `Broken pipe` 也不能证明 closeout。安装版 `0.90.4600` 在线证明第一轮 Chat 200、第二轮完整上传等待时 restart 得到完整 503/connection-close，重启后 7777/4444 health 与 Chat SSE `[DONE]` 通过。
+Tags: #v3 #restart #keepalive #InvalidHTTPResponse #front-closeout #request-cycle
