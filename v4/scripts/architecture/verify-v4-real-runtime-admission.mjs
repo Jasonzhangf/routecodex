@@ -202,6 +202,14 @@ if (contractFailures.length > 0) {
   process.exit(1);
 }
 
+// Live transport requires admitted host resources (provider fixtures and a
+// managed rccv4 listener). CI runs the contract surface explicitly; hosts that
+// own provider fixtures still run the full live matrix by omitting this mode.
+if (process.env.RCCV4_REAL_RUNTIME_ADMISSION_MODE === 'contract') {
+  console.log('[v4_real_runtime_admission] CONTRACT-ONLY OK (live transport gated to admitted host)');
+  process.exit(0);
+}
+
 // Binary existence
 if (!fs.existsSync(BINARY_PATH)) {
   console.error(`[v4_real_runtime_admission] FAIL: binary not found at ${BINARY_PATH}`);
