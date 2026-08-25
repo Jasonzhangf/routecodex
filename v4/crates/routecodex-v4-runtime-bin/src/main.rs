@@ -967,9 +967,7 @@ fn handle_responses(
             &target.provider_id,
         );
     }
-    let normalized_body = if target.protocol == "responses" {
-        raw.body.clone()
-    } else {
+    let normalized_body = if raw.content_type.to_ascii_lowercase().contains("json") {
         let provider_value: serde_json::Value = serde_json::from_slice(&raw.body).map_err(|error| {
             project_fault(
                 request,
@@ -991,6 +989,8 @@ fn handle_responses(
                 502,
             )
         })?
+    } else {
+        raw.body.clone()
     };
     let normalized_content_type = if target.protocol == "responses" {
         raw.content_type.as_str()

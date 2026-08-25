@@ -811,7 +811,7 @@ pub fn send_anthropic_messages_streaming(
 /// stays here; chat/handler layers never repair upstream payloads.
 pub fn normalize_provider_response(protocol: &str, body: &Value) -> Result<Value, ProviderTransportError> {
     match protocol {
-        "responses" => Ok(body.clone()),
+        "responses" => normalize_responses_response(body),
         "openai" | "chat" => normalize_openai_response(body),
         "anthropic" => normalize_anthropic_response(body),
         other => Err(ProviderTransportError {
@@ -820,6 +820,49 @@ pub fn normalize_provider_response(protocol: &str, body: &Value) -> Result<Value
             status: None,
         }),
     }
+}
+
+/// Consume the upstream gateway envelope before response-inbound processing.
+/// `extra_fields` is a provider transport/diagnostic side channel; it is not
+/// part of the Responses client semantic payload and must never cross the
+/// provider boundary. Unknown envelope members fail closed so a new control
+/// field cannot silently become client-visible business data.
+fn normalize_responses_response(body: &Value) -> Result<Value, ProviderTransportError> {
+    let mut object = body.as_object().cloned().ok_or_else(|| ProviderTransportError {
+        code: "provider_json_shape".to_string(),
+        message: "Responses provider JSON must be an object".to_string(),
+        status: None,
+    })?;
+    if let Some(extra_fields) = object.remove("extra_fields") {
+        let Some(extra_fields) = extra_fields.as_object() else {
+            return Err(ProviderTransportError {
+                code: "provider_response_control_envelope".to_string(),
+                message: "Responses extra_fields envelope must be an object".to_string(),
+                status: None,
+            });
+        };
+        const KNOWN_DIAGNOSTIC_FIELDS: &[&str] = &[
+            "chunk_index",
+            "dropped_compat_plugin_params",
+            "latency",
+            "original_model_requested",
+            "provider",
+            "provider_response_headers",
+            "request_type",
+            "resolved_model_used",
+        ];
+        if let Some(unknown) = extra_fields
+            .keys()
+            .find(|key| !KNOWN_DIAGNOSTIC_FIELDS.contains(&key.as_str()))
+        {
+            return Err(ProviderTransportError {
+                code: "provider_response_control_envelope".to_string(),
+                message: format!("unknown Responses extra_fields member {unknown}"),
+                status: None,
+            });
+        }
+    }
+    Ok(Value::Object(object))
 }
 
 /// Normalize one complete non-Responses SSE frame into the V4 Responses SSE

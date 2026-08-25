@@ -252,6 +252,42 @@ fn provider_response_normalizers_preserve_text_tools_and_usage() {
 }
 
 #[test]
+fn responses_normalizer_consumes_gateway_diagnostics_before_client_projection() {
+    let normalized = normalize_provider_response(
+        "responses",
+        &json!({
+            "id": "resp-1",
+            "status": "completed",
+            "output": [],
+            "extra_fields": {
+                "provider": "openai",
+                "provider_response_headers": {"x-request-id": "upstream"},
+                "latency": 12,
+                "resolved_model_used": "gpt-wire"
+            }
+        }),
+    )
+    .expect("known gateway diagnostics are consumed at provider boundary");
+    assert!(normalized.get("extra_fields").is_none());
+    assert_eq!(normalized["id"], "resp-1");
+}
+
+#[test]
+fn responses_normalizer_rejects_unknown_gateway_diagnostics() {
+    let error = normalize_provider_response(
+        "responses",
+        &json!({
+            "id": "resp-1",
+            "status": "completed",
+            "output": [],
+            "extra_fields": {"unregistered_control": true}
+        }),
+    )
+    .expect_err("unknown control fields must fail closed");
+    assert_eq!(error.code, "provider_response_control_envelope");
+}
+
+#[test]
 fn provider_sse_normalizers_project_text_and_terminal_events() {
     let openai = normalize_provider_sse_frame(
         "openai",
