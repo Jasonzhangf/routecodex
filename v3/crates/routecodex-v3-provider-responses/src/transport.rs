@@ -640,6 +640,10 @@ pub fn build_v3_transport_13_responses_http_request_from_v3_provider_12(
 
 #[async_trait]
 pub trait ResponsesTransport: Send + Sync {
+    fn handoff_handle(&self) -> Option<Arc<dyn ResponsesTransport>> {
+        None
+    }
+
     async fn send(
         &self,
         request: V3Transport13ResponsesRequest,
@@ -695,6 +699,10 @@ impl ProviderResponsesTransport {
 
 #[async_trait]
 impl ResponsesTransport for Arc<dyn ResponsesTransport> {
+    fn handoff_handle(&self) -> Option<Arc<dyn ResponsesTransport>> {
+        self.as_ref().handoff_handle()
+    }
+
     async fn send(
         &self,
         request: V3Transport13ResponsesRequest,
@@ -707,6 +715,10 @@ pub type ReqwestResponsesTransport = ProviderResponsesTransport;
 
 #[async_trait]
 impl ResponsesTransport for ProviderResponsesTransport {
+    fn handoff_handle(&self) -> Option<Arc<dyn ResponsesTransport>> {
+        Some(Arc::new(self.clone()))
+    }
+
     async fn send(
         &self,
         request: V3Transport13ResponsesRequest,
