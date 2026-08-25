@@ -5086,6 +5086,8 @@ features:
   owner_crate: routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
+  - v3/crates/routecodex-v3-server/src/restart_closeout.rs
+  - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -5108,6 +5110,8 @@ features:
   - V3ServerAggregateHandle::prepare_for_exec
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
+  - v3/crates/routecodex-v3-server/src/restart_closeout.rs
+  - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs

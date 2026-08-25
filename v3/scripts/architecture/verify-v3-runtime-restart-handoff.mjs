@@ -2,11 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "../..");
-const sourcePath = path.join(
-  root,
+const sourcePaths = [
   "crates/routecodex-v3-server/src/restart_handoff.rs",
-);
-const source = fs.readFileSync(sourcePath, "utf8");
+  "crates/routecodex-v3-server/src/restart_closeout.rs",
+  "crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs",
+];
+const source = sourcePaths
+  .map((relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8"))
+  .join("\n");
 
 const requiredContracts = [
   "close_active_client_transports",
