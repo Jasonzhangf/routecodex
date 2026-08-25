@@ -159,6 +159,9 @@ pub fn apply_product_error_policy(
     status: u16,
     response_body: &str,
 ) -> Option<ProductErrorDecision> {
+    if status < 400 {
+        return None;
+    }
     let policy = product.error_policies.iter().find(|policy| {
         policy
             .scope_provider_id

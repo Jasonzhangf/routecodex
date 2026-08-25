@@ -5,9 +5,9 @@ providerId = "cc-sol"
 id = "cc-sol"
 enabled = true
 type = "responses"
-baseURL = "https://api.openai.com/v1"
+baseURL = "https://api.anyint.ai/openai/v1"
 defaultModel = "gpt-5.6-sol"
-compatibilityProfile = "responses:openai"
+compatibilityProfile = "responses:thinking-tags"
 
 [provider.responses]
 process = "direct"

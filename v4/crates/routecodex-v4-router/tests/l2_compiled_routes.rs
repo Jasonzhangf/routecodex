@@ -205,5 +205,6 @@ fn product_error_policy_produces_typed_retry_cooldown_projection_facts() {
     assert!(decision.cooldown);
     assert_eq!(decision.project_status, Some(502));
     assert_eq!(decision.reason_code.as_deref(), Some("provider_account_http_401"));
+    assert!(apply_product_error_policy(&product, "product-provider", 200, "completed").is_none());
     assert!(apply_product_error_policy(&product, "other", 500, "failed").is_none());
 }
