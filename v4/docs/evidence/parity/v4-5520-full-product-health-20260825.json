@@ -1,0 +1,16 @@
+{
+  "evidence_id": "v4-5520-full-product-health-20260825",
+  "execution_surface": "rccv4_global_live_5520",
+  "source_commit": "d6e331fbf96c211031242029b1b6c9fe77365e40",
+  "binary_sha256": "ff5cdf93868f480ccbfb10f89fb62af7a5a9290e0dcf2ba2ffab09d790ff4473",
+  "manifest_digest": "sha256:0afe104f2ca1a62ad3aa4281ec60570f25d94b9c8b4cca8489fe7e488c7aa7c8",
+  "listener": "127.0.0.1:5520",
+  "health": {"status": 200, "runtime_identity": "rccv4", "version": "0.1.0-v4"},
+  "models": {
+    "status": 200,
+    "count": 6,
+    "ids": ["MiniMax-M3", "claude-fable-5", "deepseek-v4-flash", "glm-5.2", "gpt-5.6-sol", "x-preview-f-free"]
+  },
+  "compiled_product": {"providers": 6, "route_groups": 1, "listeners": 1},
+  "result": "pass"
+}

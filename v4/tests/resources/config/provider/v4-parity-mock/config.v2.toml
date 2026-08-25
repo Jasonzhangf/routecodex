@@ -1,0 +1,19 @@
+version = "2.0.0"
+providerId = "v4-parity-mock"
+
+[provider]
+id = "v4-parity-mock"
+enabled = true
+type = "responses"
+baseURL = "http://127.0.0.1:17771/v1"
+defaultModel = "parity-model"
+responsesContinuation = "relay"
+
+[provider.auth]
+type = "apikey"
+selection = { strategy = "priority" }
+entries = [{ alias = "default", secretFile = "/tmp/rccv4-parity-token.conf", secretKey = "parity.key" }]
+
+[provider.models."parity-model"]
+supportsStreaming = true
+capabilities = ["text", "reasoning", "tools"]

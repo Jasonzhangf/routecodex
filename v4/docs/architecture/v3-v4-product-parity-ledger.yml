@@ -11,11 +11,14 @@ features:
     v4_container: routecodex-v4-runtime
     v4_plugin_owner: routecodex-v4-runtime
     contract_status: mapped
-    implementation_status: mapped
-    production_path_status: source_only
-    differential_status: pending
-    live_status: pending
-    artifact_status: pending
+    implementation_status: active
+    production_path_status: active
+    differential_status: pass
+    live_status: pass
+    artifact_status: verified
     intentional_differences: []
     blocking_dependencies: [V4-RUNTIME-005, V4-RUNTIME-006]
-    evidence_paths: [docs/architecture/v3-v4-semantic-parity-map.yml]
+    evidence_paths:
+      - docs/architecture/v3-v4-semantic-parity-map.yml
+      - docs/evidence/parity/v3-v4-normalized-differential-20260825.json
+      - docs/evidence/parity/v4-5520-full-product-health-20260825.json
