@@ -7,6 +7,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const map = fs.readFileSync(path.join(root, 'docs/architecture/v3-v4-semantic-parity-map.yml'), 'utf8');
 const evidencePath = path.join(root, 'docs/evidence/parity/v3-v4-normalized-differential-20260825.json');
 const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+const healthEvidencePath = path.join(root, 'docs/evidence/parity/v4-5520-full-product-health-20260825.json');
+const healthEvidence = JSON.parse(fs.readFileSync(healthEvidencePath, 'utf8'));
 const requiredStages = ['request:', 'response:', 'error:', 'config:', 'verification_gates:', 'checkpoint_evidence:'];
 const missing = requiredStages.filter((marker) => !map.includes(marker));
 if (missing.length > 0) {
@@ -23,7 +25,12 @@ if (evidence.status !== 'pass'
   || !Array.isArray(evidence.normalized_differential?.unexplained_differences)
   || evidence.normalized_differential.unexplained_differences.length !== 0
   || evidence.segments.provider_bound_request.control_fields_present !== false
-  || evidence.verification?.live_health !== 'pass') {
+  || evidence.verification?.live_health !== 'pass'
+  || healthEvidence.result !== 'pass'
+  || healthEvidence.listener !== '127.0.0.1:5520'
+  || healthEvidence.health?.status !== 200
+  || healthEvidence.models?.count !== 6
+  || healthEvidence.compiled_product?.providers !== 6) {
   console.error(`V4-PARITY-HARNESS-001 FAIL live differential evidence incomplete: ${missingSegments.join(',')}`);
   process.exit(1);
 }
