@@ -87,7 +87,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
 }
 
 struct V3FrontSseAcceptSkeleton;
-
 impl V3FrontSseAcceptSkeleton {
     async fn accept(
         state: Arc<V3ListenerState>,
@@ -224,16 +223,7 @@ impl V3FrontSseAcceptSkeleton {
             rx.recv().await.map(|item| (item, rx))
         });
         let body = v3_io_sse_body(Box::pin(client_stream), Some(keepalive_interval));
-        if let Some(connection_identity) = front_connection_identity {
-            if let Some(front_socket) = front_transport_broker.front_socket(connection_identity)
-            {
-                front_socket.set_exec_closeout_frame(v3_responses_sse_error_event_chunk(
-                    503,
-                    "server_restart_in_progress",
-                    "RouteCodex restarted before this response completed",
-                ));
-            }
-        }
+        if let Some(identity) = front_connection_identity { front_transport_broker.front_socket(identity).map(|socket| socket.set_exec_closeout_frame(v3_responses_sse_error_event_chunk(503, "server_restart_in_progress", "RouteCodex restarted before this response completed"))); }
         Response::builder()
             .status(axum::http::StatusCode::OK)
             .header("content-type", "text/event-stream")
@@ -248,7 +238,6 @@ impl V3FrontSseAcceptSkeleton {
             .expect("Direct SSE accept response")
     }
 }
-
 pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     state: Arc<V3ListenerState>,
     front_connection_identity: Option<V3FrontConnectionIdentity>,

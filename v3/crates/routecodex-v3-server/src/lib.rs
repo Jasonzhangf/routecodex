@@ -9,6 +9,7 @@ mod models_catalog;
 mod request_id;
 mod responses_direct_server_outcome;
 mod restart_handoff;
+mod restart_closeout;
 mod scope_metadata;
 mod session_admission;
 mod websocket;
