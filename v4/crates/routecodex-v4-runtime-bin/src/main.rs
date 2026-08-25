@@ -11,6 +11,7 @@ use routecodex_v4_config::{
     RuntimeInitOptions,
 };
 use routecodex_v4_error::ErrorChain;
+use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
     exec_managed_restart, request_restart, request_stop, start_managed, status_managed,
     ManagedAction, ManagedControlPlane, ManagedInstanceRecord, ManagedSpawnOptions,
@@ -19,13 +20,20 @@ use routecodex_v4_lifecycle::{
 use routecodex_v4_node_container::{NodeContainer, PlanBindings};
 use routecodex_v4_standard_plugins::{compile_standard_plan, StandardHandleRegistry};
 use routecodex_v4_provider::{
-    send_responses, send_responses_streaming, write_provider_profile, ProviderInitAuth,
-    ProviderInitOptions, ProviderResponseStream,
+    build_protocol_wire, send_responses, send_responses_streaming, write_provider_profile,
+    normalize_provider_response, normalize_provider_sse_frame, send_anthropic_messages,
+    send_anthropic_messages_streaming, send_openai_chat, send_openai_chat_streaming,
+    validate_auth_alias, ProviderInitAuth, ProviderInitOptions, ProviderResponseStream,
+    V4Availability01SessionScoped,
 };
-use routecodex_v4_router::select_target;
+use routecodex_v4_router::{
+    apply_product_error_policy, select_product_target_with_unavailable,
+    select_target,
+};
 use routecodex_v4_runtime::{
-    build_responses_wire_request, parse_responses_provider_payload,
-    project_chat_request_to_responses, project_runtime_fault, ResponsesProviderPayload,
+    parse_responses_provider_payload,
+    project_chat_request_to_responses, project_runtime_fault, project_runtime_fault_with_policy,
+    ResponsesProviderPayload,
     RuntimeFault, SkeletonRuntime,
 };
 use routecodex_v4_server::{HttpHandler, HttpRequest, HttpResponse, ResponseStream, V4HttpServer};
@@ -388,6 +396,7 @@ struct PipelineHandler {
     request_node: Arc<Mutex<NodeContainer>>,
     response_node: Arc<Mutex<NodeContainer>>,
     plugin_registry: Arc<StandardHandleRegistry>,
+    availability: Arc<Mutex<V4Availability01SessionScoped>>,
 }
 
 fn publish_node_container(
@@ -443,6 +452,7 @@ impl PipelineHandler {
                 response_plan,
             )?)),
             plugin_registry: Arc::new(StandardHandleRegistry::new()),
+            availability: Arc::new(Mutex::new(V4Availability01SessionScoped::new())),
         })
     }
 
@@ -490,6 +500,7 @@ impl HttpHandler for PipelineHandler {
                 &self.runtime,
                 &self.response_node,
                 &self.plugin_registry,
+                &self.availability,
                 &request,
                 "responses",
                 "direct",
@@ -501,6 +512,7 @@ impl HttpHandler for PipelineHandler {
                     &self.runtime,
                     &self.response_node,
                     &self.plugin_registry,
+                    &self.availability,
                     &request,
                     "chat",
                     "relay",
@@ -517,11 +529,19 @@ impl HttpHandler for PipelineHandler {
 }
 
 fn models_response(manifest: &RuntimeConfigManifest) -> HttpResponse {
-    let mut models = manifest
-        .routes
-        .iter()
-        .flat_map(|route| route.models.iter())
-        .collect::<Vec<_>>();
+    let mut models = if let Some(product) = &manifest.product {
+        product
+            .providers
+            .iter()
+            .flat_map(|provider| provider.models.iter().map(|model| model.model_id.as_str()))
+            .collect::<Vec<_>>()
+    } else {
+        manifest
+            .routes
+            .iter()
+            .flat_map(|route| route.models.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+    };
     models.sort();
     models.dedup();
     json_response(
@@ -542,6 +562,7 @@ fn handle_responses(
     runtime: &Arc<Mutex<SkeletonRuntime>>,
     response_node: &Arc<Mutex<NodeContainer>>,
     plugin_registry: &Arc<StandardHandleRegistry>,
+    availability: &Arc<Mutex<V4Availability01SessionScoped>>,
     request: &HttpRequest,
     entry_protocol: &str,
     continuation_owner: &str,
@@ -602,7 +623,61 @@ fn handle_responses(
         })
         .transpose()?
         .unwrap_or(false);
-    let target = select_target(&manifest.providers, &manifest.routes, model).map_err(|error| {
+    let unavailable_provider_ids = if let Some(product) = &manifest.product {
+        let group = product.route_groups.first().ok_or_else(|| {
+            project_fault(
+                request,
+                RuntimeFault::new("product_route_group_missing", "product manifest has no route group"),
+                500,
+            )
+        })?;
+        let availability_guard = availability.lock().map_err(|_| {
+            project_fault(
+                request,
+                RuntimeFault::new("availability_lock", "provider availability lock poisoned"),
+                500,
+            )
+        })?;
+        product
+            .providers
+            .iter()
+            .filter(|provider| {
+                !availability_guard.is_eligible(
+                    &request.port.to_string(),
+                    &group.route_group_id,
+                    session_scope,
+                    &provider.provider_id,
+                )
+            })
+            .map(|provider| provider.provider_id.clone())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let mut target = if let Some(product) = &manifest.product {
+        let route_group = product
+            .route_groups
+            .first()
+            .ok_or_else(|| {
+                project_fault(
+                    request,
+                    RuntimeFault::new("product_route_group_missing", "product manifest has no route group"),
+                    500,
+                )
+            })?;
+        select_product_target_with_unavailable(
+            product,
+            &route_group.route_group_id,
+            model,
+            entry_protocol,
+            &[],
+            0,
+            &unavailable_provider_ids.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+    } else {
+        select_target(&manifest.providers, &manifest.routes, model)
+    }
+    .map_err(|error| {
         project_fault(
             request,
             RuntimeFault::new("model_unavailable", error.to_string()),
@@ -611,18 +686,22 @@ fn handle_responses(
     })?;
     let provider_body = client_to_responses_request(&body, entry_protocol)
         .map_err(|fault| project_fault(request, fault, 400))?;
-    let wire = build_responses_wire_request(&provider_body, &target.wire_model, stream_mode)
-        .map_err(|fault| project_fault(request, fault, 400))?;
-    let wire_body: serde_json::Value = serde_json::from_slice(&wire.body).map_err(|error| {
+    let wire_body = build_protocol_wire(
+        &target.protocol,
+        &provider_body,
+        &target.wire_model,
+        stream_mode,
+    )
+    .map_err(|error| {
         project_fault(
             request,
-            RuntimeFault::new("provider_wire_encode", error.to_string()),
-            500,
+            RuntimeFault::new(&error.code, error.message),
+            error.status.unwrap_or(400),
         )
     })?;
     if stream_mode {
-        let stream = send_responses_streaming(&target.config_path, &target.wire_model, &wire_body)
-            .map_err(|error| {
+        let mut stream = send_target_streaming(&target, &wire_body)
+        .map_err(|error| {
                 project_fault(
                     request,
                     RuntimeFault::new(error.code.as_str(), error.message)
@@ -630,16 +709,79 @@ fn handle_responses(
                     error.status.unwrap_or(502),
                 )
             })?;
+        if stream.status() >= 400 {
+            if let Some(product) = manifest.product.as_ref() {
+                if let Some(policy) = apply_product_error_policy(
+                    product,
+                    &target.provider_id,
+                    stream.status(),
+                    "",
+                ) {
+                    record_provider_failure(
+                        availability,
+                        request,
+                        product.route_groups.first().map(|group| group.route_group_id.as_str()),
+                        session_scope,
+                        &target.provider_id,
+                        policy.cooldown,
+                        policy.failure_threshold,
+                    )?;
+                    if policy.retry {
+                        if let Some(group) = product.route_groups.first() {
+                            let mut excluded = unavailable_provider_ids.clone();
+                            excluded.push(target.provider_id.clone());
+                            if let Ok(candidate) = select_product_target_with_unavailable(
+                                product,
+                                &group.route_group_id,
+                                model,
+                                entry_protocol,
+                                &[],
+                                0,
+                                &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
+                            ) {
+                                let retry_body = build_protocol_wire(
+                                    &candidate.protocol,
+                                    &provider_body,
+                                    &candidate.wire_model,
+                                    true,
+                                )
+                                .map_err(|error| {
+                                    project_fault(
+                                        request,
+                                        RuntimeFault::new(&error.code, error.message),
+                                        error.status.unwrap_or(400),
+                                    )
+                                })?;
+                                target = candidate;
+                                stream = send_target_streaming(&target, &retry_body).map_err(|error| {
+                                    project_provider_fault(
+                                        request,
+                                        RuntimeFault::new(&error.code, error.message),
+                                        error.status.unwrap_or(502),
+                                        manifest.product.as_ref(),
+                                        &target.provider_id,
+                                        "",
+                                    )
+                                })?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let status = stream.status();
         if status >= 400 {
-            return Err(project_fault(
+            return Err(project_provider_fault(
                 request,
                 RuntimeFault::new(
                     "provider_http_error",
-                    format!("upstream Responses returned HTTP {status}"),
+                    format!("upstream provider returned HTTP {status}"),
                 )
                 .with_status(status),
                 status,
+                manifest.product.as_ref(),
+                &target.provider_id,
+                "",
             ));
         }
         if !stream
@@ -669,22 +811,164 @@ fn handle_responses(
                 request.port,
                 entry_protocol.to_string(),
                 continuation_owner.to_string(),
+                target.protocol.clone(),
                 session_scope.to_string(),
                 conversation_scope.to_string(),
             )),
         ));
     }
-    let raw = send_responses(&target.config_path, &target.wire_model, &wire_body, false).map_err(
-        |error| {
+    let mut raw = send_target_nonstream(&target, &wire_body).map_err(|error| {
+        project_provider_fault(
+            request,
+            RuntimeFault::new(error.code.as_str(), error.message),
+            error.status.unwrap_or(502),
+            manifest.product.as_ref(),
+            &target.provider_id,
+            "",
+        )
+    })?;
+    let mut matched_policy = manifest.product.as_ref().and_then(|product| {
+        apply_product_error_policy(
+            product,
+            &target.provider_id,
+            raw.status,
+            &String::from_utf8_lossy(&raw.body),
+        )
+    });
+    let mut reselected = false;
+    if let Some(product) = manifest.product.as_ref() {
+        if let Some(policy) = matched_policy.as_ref() {
+                record_provider_failure(
+                    availability,
+                    request,
+                    product.route_groups.first().map(|group| group.route_group_id.as_str()),
+                    session_scope,
+                    &target.provider_id,
+                    policy.cooldown,
+                    policy.failure_threshold,
+                )?;
+                if policy.retry {
+                    if let Some(group) = product.route_groups.first() {
+                        let mut excluded = unavailable_provider_ids.clone();
+                        excluded.push(target.provider_id.clone());
+                        if let Ok(candidate) = select_product_target_with_unavailable(
+                            product,
+                            &group.route_group_id,
+                            model,
+                            entry_protocol,
+                            &[],
+                            0,
+                            &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
+                        ) {
+                            let retry_body = build_protocol_wire(
+                                &candidate.protocol,
+                                &provider_body,
+                                &candidate.wire_model,
+                                false,
+                            )
+                            .map_err(|error| {
+                                project_fault(
+                                    request,
+                                    RuntimeFault::new(&error.code, error.message),
+                                    error.status.unwrap_or(400),
+                                )
+                            })?;
+                            target = candidate;
+                            reselected = true;
+                            raw = send_target_nonstream(&target, &retry_body).map_err(|error| {
+                                project_provider_fault(
+                                    request,
+                                    RuntimeFault::new(&error.code, error.message),
+                                    error.status.unwrap_or(502),
+                                    manifest.product.as_ref(),
+                                    &target.provider_id,
+                                    "",
+                                )
+                            })?;
+                            matched_policy = apply_product_error_policy(
+                                product,
+                                &target.provider_id,
+                                raw.status,
+                                &String::from_utf8_lossy(&raw.body),
+                            );
+                        }
+                    }
+                }
+        }
+    }
+    if raw.status >= 400 || (matched_policy.is_some() && !reselected) {
+        return Err(project_provider_fault(
+            request,
+            RuntimeFault::new(
+                "provider_http_error",
+                format!("upstream provider returned HTTP {}", raw.status),
+            )
+            .with_status(raw.status),
+            raw.status,
+            manifest.product.as_ref(),
+            &target.provider_id,
+            String::from_utf8_lossy(&raw.body).as_ref(),
+        ));
+    }
+    if let Some(product) = manifest.product.as_ref() {
+        let _ = availability.lock().map_err(|_| {
             project_fault(
                 request,
-                RuntimeFault::new(error.code.as_str(), error.message),
+                RuntimeFault::new("availability_lock", "provider availability lock poisoned"),
+                500,
+            )
+        })?.mark_success(
+            &request.port.to_string(),
+            product
+                .route_groups
+                .first()
+                .map(|group| group.route_group_id.as_str())
+                .unwrap_or("default"),
+            session_scope,
+            &target.provider_id,
+        );
+    }
+    let normalized_body = if target.protocol == "responses" {
+        raw.body.clone()
+    } else {
+        let provider_value: serde_json::Value = serde_json::from_slice(&raw.body).map_err(|error| {
+            project_fault(
+                request,
+                RuntimeFault::new("provider_json_parse", error.to_string()),
+                502,
+            )
+        })?;
+        let normalized = normalize_provider_response(&target.protocol, &provider_value).map_err(|error| {
+            project_fault(
+                request,
+                RuntimeFault::new(&error.code, error.message),
                 error.status.unwrap_or(502),
             )
-        },
-    )?;
-    match parse_responses_provider_payload(raw.status, &raw.content_type, &raw.body, false)
-        .map_err(|fault| project_fault(request, fault, 502))?
+        })?;
+        serde_json::to_vec(&normalized).map_err(|error| {
+            project_fault(
+                request,
+                RuntimeFault::new("provider_json_encode", error.to_string()),
+                502,
+            )
+        })?
+    };
+    let normalized_content_type = if target.protocol == "responses" {
+        raw.content_type.as_str()
+    } else {
+        "application/json"
+    };
+    match parse_responses_provider_payload(raw.status, normalized_content_type, &normalized_body, false)
+        .map_err(|fault| {
+            project_provider_fault(
+                request,
+                fault,
+                if raw.status == 0 { 502 } else { raw.status },
+                manifest.product.as_ref(),
+                &target.provider_id,
+                String::from_utf8_lossy(&raw.body).as_ref(),
+            )
+        })?
     {
         ResponsesProviderPayload::Json(value) => {
             let response_node_guard = response_node.lock().map_err(|_| {
@@ -804,6 +1088,7 @@ impl ProviderSseSource for ProviderResponseStream {
     fn wait(&mut self) -> Result<(), String> {
         ProviderResponseStream::wait(self).map_err(|error| error.to_string())
     }
+
 }
 
 struct ResponsesSseStream<S = ProviderResponseStream> {
@@ -813,6 +1098,7 @@ struct ResponsesSseStream<S = ProviderResponseStream> {
     port: u16,
     entry_protocol: String,
     continuation_owner: String,
+    provider_protocol: String,
     session_scope: String,
     conversation_scope: String,
     frame_sequence: u64,
@@ -830,6 +1116,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
         port: u16,
         entry_protocol: String,
         continuation_owner: String,
+        provider_protocol: String,
         session_scope: String,
         conversation_scope: String,
     ) -> Self {
@@ -840,6 +1127,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
             port,
             entry_protocol,
             continuation_owner,
+            provider_protocol,
             session_scope,
             conversation_scope,
             frame_sequence: 0,
@@ -866,6 +1154,13 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
 
     fn project_frame(&mut self, frame: &[u8], terminal: bool) -> Result<(), RuntimeFault> {
         self.frame_sequence += 1;
+        let normalized_frame = if self.provider_protocol == "responses" {
+            frame.to_vec()
+        } else {
+            normalize_provider_sse_frame(&self.provider_protocol, frame).map_err(|error| {
+                RuntimeFault::new(&error.code, error.message)
+            })?
+        };
         let owner = if terminal {
             self.continuation_owner.as_str()
         } else {
@@ -878,7 +1173,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
                 RuntimeFault::new("response_runtime_lock", "response runtime lock poisoned")
             })?
             .execute_provider_response_scoped(
-                std::str::from_utf8(frame)
+                std::str::from_utf8(&normalized_frame)
                     .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?,
                 &format!("{}:sse:{}", self.request_id, self.frame_sequence),
                 self.port,
@@ -985,6 +1280,143 @@ fn project_fault(request: &HttpRequest, fault: RuntimeFault, status: u16) -> Htt
             ),
         ),
     }
+}
+
+fn project_provider_fault(
+    request: &HttpRequest,
+    fault: RuntimeFault,
+    status: u16,
+    product: Option<&routecodex_v4_config::RuntimeProductConfig>,
+    provider_id: &str,
+    response_body: &str,
+) -> HttpResponse {
+    let Some(product) = product else {
+        return project_fault(request, fault, status);
+    };
+    let Some(policy) = apply_product_error_policy(product, provider_id, status, response_body) else {
+        return project_fault(request, fault, status);
+    };
+    let action = if policy.retry {
+        DecisionAction::Reroute
+    } else if policy.cooldown {
+        DecisionAction::Cooldown
+    } else {
+        DecisionAction::Terminal
+    };
+    let scope = Scope::new(&request.request_id, "v4-pipeline", request.port, "", "");
+    let mut chain = ErrorChain::new(scope);
+    let projection = project_runtime_fault_with_policy(
+        &mut chain,
+        fault.clone(),
+        RetryPolicy {
+            policy_id: policy.policy_id.clone(),
+            provider_scope: provider_id.to_string(),
+            matcher: format!("http_status={status}"),
+            action_class: if policy.retry { "retry" } else { "terminal" }.to_string(),
+            reason_code: policy
+                .reason_code
+                .clone()
+                .unwrap_or_else(|| fault.code.clone()),
+        },
+        ExecutionDecision {
+            decision_id: format!("decision.{}", policy.policy_id),
+            action,
+            reason_code: policy
+                .reason_code
+                .clone()
+                .unwrap_or_else(|| fault.code.clone()),
+        },
+    );
+    match projection {
+        Ok(value) => HttpResponse::error(policy.project_status.unwrap_or(status), value.message),
+        Err(error) => HttpResponse::error(
+            500,
+            format!("provider error policy projection failed: {error:?}"),
+        ),
+    }
+}
+
+fn send_target_nonstream(
+    target: &routecodex_v4_router::SelectedTarget,
+    wire_body: &serde_json::Value,
+) -> Result<routecodex_v4_provider::ProviderRawResponse, routecodex_v4_provider::ProviderTransportError>
+{
+    validate_auth_alias(&target.config_path, target.auth_alias.as_deref())?;
+    match target.protocol.as_str() {
+        "responses" => send_responses(&target.config_path, &target.wire_model, wire_body, false),
+        "openai" | "chat" => send_openai_chat(&target.config_path, wire_body),
+        "anthropic" => send_anthropic_messages(&target.config_path, wire_body),
+        other => Err(routecodex_v4_provider::ProviderTransportError {
+            code: "provider_protocol_unsupported".to_string(),
+            message: format!("provider protocol {other} has no transport owner"),
+            status: None,
+        }),
+    }
+}
+
+fn send_target_streaming(
+    target: &routecodex_v4_router::SelectedTarget,
+    wire_body: &serde_json::Value,
+) -> Result<ProviderResponseStream, routecodex_v4_provider::ProviderTransportError> {
+    validate_auth_alias(&target.config_path, target.auth_alias.as_deref())?;
+    match target.protocol.as_str() {
+        "responses" => send_responses_streaming(&target.config_path, &target.wire_model, wire_body),
+        "openai" | "chat" => send_openai_chat_streaming(&target.config_path, wire_body),
+        "anthropic" => send_anthropic_messages_streaming(&target.config_path, wire_body),
+        other => Err(routecodex_v4_provider::ProviderTransportError {
+            code: "provider_protocol_unsupported".to_string(),
+            message: format!("provider protocol {other} has no streaming transport owner"),
+            status: None,
+        }),
+    }
+}
+
+fn record_provider_failure(
+    availability: &Arc<Mutex<V4Availability01SessionScoped>>,
+    request: &HttpRequest,
+    route_group: Option<&str>,
+    session_scope: &str,
+    provider_id: &str,
+    cooldown_policy: bool,
+    failure_threshold: u64,
+) -> Result<(), HttpResponse> {
+    let Some(route_group) = route_group else {
+        return Ok(());
+    };
+    let mut guard = availability.lock().map_err(|_| {
+        project_fault(
+            request,
+            RuntimeFault::new("availability_lock", "provider availability lock poisoned"),
+            500,
+        )
+    })?;
+    let previous = guard
+        .get(
+            &request.port.to_string(),
+            route_group,
+            session_scope,
+            provider_id,
+        )
+        .map(|record| record.consecutive_errors)
+        .unwrap_or(0);
+    let consecutive_errors = previous.saturating_add(1);
+    let cooldown = cooldown_policy && consecutive_errors >= failure_threshold;
+    guard
+        .mark_failure(
+            &request.port.to_string(),
+            route_group,
+            session_scope,
+            provider_id,
+            cooldown,
+            consecutive_errors,
+        )
+        .map_err(|error| {
+            project_fault(
+                request,
+                RuntimeFault::new("availability_record", error.to_string()),
+                500,
+            )
+        })
 }
 
 fn json_response(status: u16, value: serde_json::Value) -> HttpResponse {
@@ -1101,6 +1533,7 @@ targets = ["mock"]
         fn wait(&mut self) -> Result<(), String> {
             self.wait_result.clone()
         }
+
     }
 
     fn runtime() -> Arc<Mutex<SkeletonRuntime>> {
@@ -1128,6 +1561,7 @@ targets = ["mock"]
             17777,
             entry_protocol.to_string(),
             continuation_owner.to_string(),
+            "responses".to_string(),
             "session-1".to_string(),
             "conversation-1".to_string(),
         )

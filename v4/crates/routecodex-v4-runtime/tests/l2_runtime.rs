@@ -4,9 +4,10 @@
 
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::{ControlError, ControlSignal, ControlSignalKind, MetadataOperation};
-use routecodex_v4_error::{ErrorChain, ErrorStage};
+use routecodex_v4_error::{DecisionAction, ErrorChain, ErrorStage, ExecutionDecision, RetryPolicy};
 use routecodex_v4_runtime::{
     assert_no_control_leak, bind_scope_via_bridge, execution_binding, project_runtime_fault,
+    project_runtime_fault_with_policy,
     release_scope_via_bridge, select_relay_operator, ContinuationFacts, ContinuationKey,
     ExecutionBinding, ExecutionContext, NodePluginPlan, PayloadCycleError, PayloadCycleRegistry,
     PayloadCycleState, RelayOperator, ScopeError, ScopeRegistry, SkeletonRuntime,
@@ -673,6 +674,33 @@ fn red_invalid_input_flows_typed_error_path_to_terminal_projection() {
         !projection.message.contains("continuation_scope"),
         "client projection must not carry control fields"
     );
+}
+
+#[test]
+fn provider_policy_decision_enters_error_chain_without_payload_control() {
+    let mut chain = ErrorChain::new(scope("r-error-policy"));
+    let projection = project_runtime_fault_with_policy(
+        &mut chain,
+        routecodex_v4_runtime::RuntimeFault::new("provider_http_401", "upstream unauthorized"),
+        RetryPolicy {
+            policy_id: "account_http_401_two_errors".to_string(),
+            provider_scope: "auth_key".to_string(),
+            matcher: "http_status=401".to_string(),
+            action_class: "retry_then_cooldown".to_string(),
+            reason_code: "provider_account_http_401".to_string(),
+        },
+        ExecutionDecision {
+            decision_id: "decision.reselect".to_string(),
+            action: DecisionAction::Reroute,
+            reason_code: "provider_account_http_401".to_string(),
+        },
+    )
+    .expect("policy decision projects");
+    assert_eq!(projection.code, "provider_http_401");
+    assert_eq!(chain.current_stage(), Some(ErrorStage::ClientProjected));
+    assert!(chain.records().any(|record| {
+        record.detail.as_deref() == Some("account_http_401_two_errors")
+    }));
 }
 
 #[test]

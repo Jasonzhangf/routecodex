@@ -151,10 +151,17 @@
         "build_v2_registry",
         "publish_v2_manifest",
         "compile_v2",
-        "ConfigManifestV2::verify"
+        "ConfigManifestV2::verify",
+        "RuntimeProductConfig",
+        "RuntimeProductProvider",
+        "RuntimeProductRouteGroup",
+        "RuntimeProductPool",
+        "RuntimeProductErrorPolicy",
+        "compile_runtime_config"
       ],
       "required_gates": [
-        "v4_config_l2_regression"
+        "v4_config_l2_regression",
+        "v4_config_product_parity_regression"
       ]
     },
     {
@@ -388,6 +395,7 @@
         "SkeletonRuntime::claim",
         "SkeletonRuntime::release",
         "project_runtime_fault",
+        "project_runtime_fault_with_policy",
         "NodePluginPlan::build",
         "ExecutionContext::new",
         "ExecutionContext::scope",
@@ -495,17 +503,71 @@
       ]
     },
     {
+      "function_id": "v4.router.product_selection",
+      "owner": "routecodex-v4-router",
+      "entry_symbols": [
+        "select_product_target",
+        "select_product_target_with_unavailable"
+      ],
+      "required_gates": [
+        "v4_router_product_selection_regression",
+        "v4_parity_gate_resource_binding",
+        "v4_parity_gate_plane_isolation"
+      ]
+    },
+    {
+      "function_id": "v4.router.product_error_policy",
+      "owner": "routecodex-v4-router",
+      "entry_symbols": [
+        "apply_product_error_policy"
+      ],
+      "required_gates": [
+        "v4_router_product_error_policy_regression",
+        "v4_parity_gate_resource_binding",
+        "v4_parity_gate_plane_isolation"
+      ]
+    },
+    {
       "function_id": "v4.provider.availability",
       "owner": "routecodex-v4-provider",
       "entry_symbols": [
         "V4Availability01SessionScoped::new",
         "V4Availability01SessionScoped::record",
         "V4Availability01SessionScoped::get",
-        "V4Availability01SessionScoped::records"
+        "V4Availability01SessionScoped::records",
+        "V4Availability01SessionScoped::mark_failure",
+        "V4Availability01SessionScoped::mark_success",
+        "V4Availability01SessionScoped::is_eligible"
       ],
       "required_gates": [
         "v4_provider_l2_regression",
         "v4_parity_gate_resource_binding",
+        "v4_parity_gate_plane_isolation"
+      ]
+    },
+    {
+      "function_id": "v4.provider.v3_profile_boundary",
+      "owner": "routecodex-v4-provider",
+      "entry_symbols": [
+        "load_profile",
+        "validate_auth_alias",
+        "resolve_model",
+        "verify_profile_auth",
+        "build_openai_chat_wire",
+        "build_anthropic_messages_wire",
+        "build_protocol_wire",
+        "send_responses",
+        "send_openai_chat",
+        "send_anthropic_messages",
+        "send_openai_chat_streaming",
+        "send_anthropic_messages_streaming",
+        "normalize_provider_response",
+        "normalize_provider_sse_frame",
+        "send_responses_streaming"
+      ],
+      "required_gates": [
+        "v4_provider_l2_regression",
+        "v4_provider_v3_profile_regression",
         "v4_parity_gate_plane_isolation"
       ]
     },
@@ -910,12 +972,36 @@
       ]
     },
     {
+      "function_id": "v4.runtime.provider_error_projection",
+      "owner": "routecodex-v4-runtime-bin",
+      "status": "active",
+      "binding_status": "binding",
+      "entry_symbols": [
+        "project_provider_fault",
+        "send_target_nonstream",
+        "send_target_streaming",
+        "record_provider_failure"
+      ],
+      "entry_paths": [
+        "crates/routecodex-v4-runtime-bin/src/main.rs"
+      ],
+      "required_gates": [
+        "v4_runtime_l2_regression",
+        "v4_router_product_error_policy_regression"
+      ],
+      "resource_bindings": [
+        "v4.control.route_policy_live",
+        "v4.runtime.compiled_manifest"
+      ]
+    },
+    {
       "function_id": "v4.config.runtime_manifest",
       "owner": "routecodex-v4-config",
       "status": "active",
       "binding_status": "binding",
       "entry_symbols": [
         "compile_runtime_config",
+        "compile_product_config_file",
         "RuntimeConfigManifest::verify",
         "write_runtime_authoring",
         "write_runtime_manifest_atomic"
@@ -925,6 +1011,7 @@
       ],
       "required_gates": [
         "v4_config_l2_regression",
+        "v4_config_product_parity_regression",
         "v4_infrastructure_contract"
       ],
       "resource_bindings": [

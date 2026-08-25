@@ -1,0 +1,23 @@
+version = 4
+
+product_config_path = "v3-responses-7777-product.toml"
+
+[runtime]
+id = "rccv4"
+
+[[listeners]]
+id = "primary"
+address = "127.0.0.1:5520"
+
+[[providers]]
+provider_id = "canary"
+config_path = "provider/canary/config.v2.toml"
+protocol = "responses"
+wire_model = "deepseek-v4-flash"
+priority = 1
+entry_models = ["deepseek-v4-flash"]
+
+[[routes]]
+id = "canary"
+models = ["deepseek-v4-flash"]
+targets = ["canary"]

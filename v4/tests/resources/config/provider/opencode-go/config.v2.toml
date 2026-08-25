@@ -1,0 +1,24 @@
+version = "2.0.0"
+providerId = "opencode-go"
+
+[provider]
+id = "opencode-go"
+enabled = true
+type = "responses"
+baseURL = "https://opencode.ai/zen/go/v1"
+defaultModel = "deepseek-v4-flash"
+compatibilityProfile = "responses:deepseek-console-go"
+
+[provider.responses]
+process = "direct"
+streaming = "always"
+
+[provider.auth]
+type = "apikey"
+selection = { strategy = "priority" }
+entries = [{ alias = "default", secretFile = "/Volumes/extension/.rcc/secrets/v3/opencode-go.conf", secretKey = "opencode-go.key1" }]
+
+[provider.models."deepseek-v4-flash"]
+supportsStreaming = true
+supportsThinking = true
+capabilities = ["text", "reasoning", "thinking", "tools", "web_search", "longcontext"]

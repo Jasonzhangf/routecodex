@@ -817,6 +817,30 @@ pub enum RuntimeConfigError {
     RouteTargetUnknown { route_id: String, target: String },
     #[error("route {route_id} model {model} is not declared by any target")]
     RouteModelUnserved { route_id: String, model: String },
+    #[error("product config source must be non-empty")]
+    ProductSourceInvalid,
+    #[error("product config must use exactly one source: inline product or product_config_path")]
+    ProductConfigSourcesExclusive,
+    #[error("product config read failed for {path}: {message}")]
+    ProductConfigRead { path: String, message: String },
+    #[error("product provider id/protocol/config path must be non-empty")]
+    ProductProviderInvalid,
+    #[error("product provider ids must be unique")]
+    ProductProviderDuplicate,
+    #[error("product provider auth handle must use env: or token_file:")]
+    ProductAuthHandleInvalid,
+    #[error("product provider model id/wire name must be non-empty")]
+    ProductModelInvalid,
+    #[error("product provider model ids must be unique within a provider")]
+    ProductModelDuplicate,
+    #[error("product route group/pool/target identity must be non-empty")]
+    ProductRouteInvalid,
+    #[error("product route group and pool ids must be unique")]
+    ProductRouteDuplicate,
+    #[error("product route target references an unknown provider or model")]
+    ProductTargetUnknown,
+    #[error("product error policy id must be non-empty and unique")]
+    ProductPolicyInvalid,
     #[error("runtime manifest encode failed: {0}")]
     Encode(String),
     #[error("runtime manifest digest drift: expected {expected}, actual {actual}")]
@@ -833,6 +857,10 @@ struct RuntimeAuthoring {
     listeners: Vec<RuntimeListener>,
     providers: Vec<RuntimeProviderCandidate>,
     routes: Vec<RuntimeRoute>,
+    #[serde(default)]
+    product: Option<RuntimeProductConfig>,
+    #[serde(default)]
+    product_config_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -867,6 +895,118 @@ pub struct RuntimeRoute {
     pub targets: Vec<String>,
 }
 
+/// Product-level declarations imported from a reviewed V3 baseline.  These
+/// declarations are compiled and retained in the V4 manifest; runtime route
+/// selection consumes them only after its own owner-level migration gate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeProductConfig {
+    pub source: String,
+    pub providers: Vec<RuntimeProductProvider>,
+    pub route_groups: Vec<RuntimeProductRouteGroup>,
+    #[serde(default)]
+    pub default_error_path: Vec<RuntimeProductPolicyAction>,
+    #[serde(default)]
+    pub error_policies: Vec<RuntimeProductErrorPolicy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeProductProvider {
+    pub provider_id: String,
+    pub protocol: String,
+    pub config_path: String,
+    pub models: Vec<RuntimeProductModel>,
+    #[serde(default)]
+    pub auth_handles: Vec<RuntimeProductAuthHandle>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeProductModel {
+    pub model_id: String,
+    pub wire_name: String,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeProductAuthHandle {
+    pub alias: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeProductRouteGroup {
+    pub route_group_id: String,
+    pub pools: Vec<RuntimeProductPool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeProductPool {
+    pub pool_id: String,
+    pub selection: String,
+    #[serde(default)]
+    pub precedence: Option<i32>,
+    #[serde(default)]
+    pub entry_protocol: Option<String>,
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default)]
+    pub min_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub required_capabilities: Vec<String>,
+    pub targets: Vec<RuntimeProductTarget>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeProductTarget {
+    pub provider_id: String,
+    pub model_id: String,
+    pub priority: u32,
+    #[serde(default)]
+    pub weight: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeProductErrorPolicy {
+    pub policy_id: String,
+    #[serde(default)]
+    pub scope_provider_id: Option<String>,
+    pub match_status: Option<u16>,
+    #[serde(default)]
+    pub match_content_contains_any: Vec<String>,
+    pub reason_code: Option<String>,
+    pub actions: Vec<RuntimeProductPolicyAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeProductPolicyAction {
+    pub step: String,
+    pub retry_mode: Option<String>,
+    pub max_attempts: Option<u32>,
+    pub backoff_ms: Option<u64>,
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub provider_global_failure: Option<bool>,
+    pub status: Option<u16>,
+    #[serde(default)]
+    pub reason_code: Option<String>,
+    #[serde(default)]
+    pub public_code: Option<String>,
+    #[serde(default)]
+    pub message_mode: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfigManifest {
@@ -876,6 +1016,8 @@ pub struct RuntimeConfigManifest {
     pub listeners: Vec<RuntimeListener>,
     pub providers: Vec<RuntimeProviderCandidate>,
     pub routes: Vec<RuntimeRoute>,
+    #[serde(default)]
+    pub product: Option<RuntimeProductConfig>,
     pub manifest_digest: String,
 }
 
@@ -887,6 +1029,7 @@ struct UnsignedRuntimeConfigManifest<'a> {
     listeners: &'a [RuntimeListener],
     providers: &'a [RuntimeProviderCandidate],
     routes: &'a [RuntimeRoute],
+    product: &'a Option<RuntimeProductConfig>,
 }
 
 impl RuntimeConfigManifest {
@@ -898,6 +1041,7 @@ impl RuntimeConfigManifest {
             &self.listeners,
             &self.providers,
             &self.routes,
+            &self.product,
         )?;
         if actual != self.manifest_digest {
             return Err(RuntimeConfigError::DigestDrift {
@@ -925,7 +1069,37 @@ pub fn compile_runtime_config_file(path: &Path) -> Result<RuntimeConfigManifest,
         path: path.display().to_string(),
         message: error.to_string(),
     })?;
-    compile_runtime_config(&raw, path.parent())
+    let absolute_path = fs::canonicalize(path).map_err(|error| RuntimeConfigError::Read {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    compile_runtime_config(&raw, absolute_path.parent())
+}
+
+/// Compile a product configuration fixture independently of the live runtime
+/// authoring file. This is the V3-baseline import boundary; it returns only
+/// typed declarations and never starts or reads a V3 runtime.
+pub fn compile_product_config(
+    raw: &str,
+    config_dir: Option<&Path>,
+) -> Result<RuntimeProductConfig, RuntimeConfigError> {
+    let mut product: RuntimeProductConfig = toml::from_str(raw)
+        .map_err(|error| RuntimeConfigError::Parse(error.to_string()))?;
+    validate_product_config(&product)?;
+    normalize_product_config(&mut product, config_dir)?;
+    Ok(product)
+}
+
+pub fn compile_product_config_file(path: &Path) -> Result<RuntimeProductConfig, RuntimeConfigError> {
+    let raw = fs::read_to_string(path).map_err(|error| RuntimeConfigError::ProductConfigRead {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    let absolute_path = fs::canonicalize(path).map_err(|error| RuntimeConfigError::ProductConfigRead {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    compile_product_config(&raw, absolute_path.parent())
 }
 
 pub fn compile_runtime_config(
@@ -938,9 +1112,33 @@ pub fn compile_runtime_config(
         return Err(RuntimeConfigError::RuntimeIdentity);
     }
     validate_runtime_authoring(&authoring)?;
+    if authoring.product.is_some() && authoring.product_config_path.is_some() {
+        return Err(RuntimeConfigError::ProductConfigSourcesExclusive);
+    }
+    if let Some(value) = &authoring.product {
+        validate_product_config(value)?;
+    }
     let mut listeners = authoring.listeners;
     let mut providers = authoring.providers;
     let mut routes = authoring.routes;
+    let mut product = match (authoring.product, authoring.product_config_path) {
+        (Some(product), None) => Some(product),
+        (None, Some(path)) => {
+            let product_path = resolve_authoring_path(&path, config_dir)?;
+            let raw = fs::read_to_string(&product_path).map_err(|error| {
+                RuntimeConfigError::ProductConfigRead {
+                    path: product_path.display().to_string(),
+                    message: error.to_string(),
+                }
+            })?;
+            let product: RuntimeProductConfig = toml::from_str(&raw)
+                .map_err(|error| RuntimeConfigError::Parse(error.to_string()))?;
+            validate_product_config(&product)?;
+            Some(product)
+        }
+        (None, None) => None,
+        (Some(_), Some(_)) => unreachable!("validated product sources are exclusive"),
+    };
     for provider in &mut providers {
         provider.config_path = resolve_authoring_path(&provider.config_path, config_dir)?
             .display()
@@ -953,6 +1151,9 @@ pub fn compile_runtime_config(
         route.models.sort();
     }
     routes.sort_by(|left, right| left.id.cmp(&right.id));
+    if let Some(value) = &mut product {
+        normalize_product_config(value, config_dir)?;
+    }
     let manifest_digest = runtime_manifest_digest(
         authoring.version,
         RUNTIME_CONFIG_CHAIN_VERSION,
@@ -960,6 +1161,7 @@ pub fn compile_runtime_config(
         &listeners,
         &providers,
         &routes,
+        &product,
     )?;
     Ok(RuntimeConfigManifest {
         schema_version: authoring.version,
@@ -968,6 +1170,7 @@ pub fn compile_runtime_config(
         listeners,
         providers,
         routes,
+        product,
         manifest_digest,
     })
 }
@@ -1057,6 +1260,8 @@ pub fn write_runtime_authoring(
             models: vec![options.model.clone()],
             targets: vec![options.provider_id.clone()],
         }],
+        product: None,
+        product_config_path: None,
     };
     let mut bytes = toml::to_string_pretty(&authoring)
         .map_err(|error| RuntimeConfigError::Encode(error.to_string()))?
@@ -1160,6 +1365,128 @@ fn validate_runtime_authoring(authoring: &RuntimeAuthoring) -> Result<(), Runtim
     Ok(())
 }
 
+fn validate_product_config(product: &RuntimeProductConfig) -> Result<(), RuntimeConfigError> {
+    if product.source.trim().is_empty() {
+        return Err(RuntimeConfigError::ProductSourceInvalid);
+    }
+    let mut provider_ids = BTreeSet::new();
+    for provider in &product.providers {
+        if provider.provider_id.trim().is_empty()
+            || provider.protocol.trim().is_empty()
+            || provider.config_path.trim().is_empty()
+            || !provider_ids.insert(provider.provider_id.as_str())
+        {
+            return Err(if provider.provider_id.trim().is_empty()
+                || provider.protocol.trim().is_empty()
+                || provider.config_path.trim().is_empty()
+            {
+                RuntimeConfigError::ProductProviderInvalid
+            } else {
+                RuntimeConfigError::ProductProviderDuplicate
+            });
+        }
+        let mut model_ids = BTreeSet::new();
+        for model in &provider.models {
+            if model.model_id.trim().is_empty() || model.wire_name.trim().is_empty() {
+                return Err(RuntimeConfigError::ProductModelInvalid);
+            }
+            if !model_ids.insert(model.model_id.as_str()) {
+                return Err(RuntimeConfigError::ProductModelDuplicate);
+            }
+        }
+        for handle in &provider.auth_handles {
+            if handle.alias.trim().is_empty()
+                || !(handle.source.starts_with("env:")
+                    || handle.source.starts_with("token_file:"))
+            {
+                return Err(RuntimeConfigError::ProductAuthHandleInvalid);
+            }
+        }
+    }
+    let provider_model_exists = |provider_id: &str, model_id: &str| {
+        product.providers.iter().any(|provider| {
+            provider.provider_id == provider_id
+                && provider.models.iter().any(|model| model.model_id == model_id)
+        })
+    };
+    let mut group_ids = BTreeSet::new();
+    for group in &product.route_groups {
+        if group.route_group_id.trim().is_empty() || !group_ids.insert(group.route_group_id.as_str())
+        {
+            return Err(RuntimeConfigError::ProductRouteDuplicate);
+        }
+        let mut pool_ids = BTreeSet::new();
+        for pool in &group.pools {
+            if pool.pool_id.trim().is_empty()
+                || pool.selection.trim().is_empty()
+                || pool.targets.is_empty()
+                || !pool_ids.insert(pool.pool_id.as_str())
+            {
+                return Err(if pool.pool_id.trim().is_empty()
+                    || pool.selection.trim().is_empty()
+                    || pool.targets.is_empty()
+                {
+                    RuntimeConfigError::ProductRouteInvalid
+                } else {
+                    RuntimeConfigError::ProductRouteDuplicate
+                });
+            }
+            for target in &pool.targets {
+                if target.provider_id.trim().is_empty()
+                    || target.model_id.trim().is_empty()
+                    || !provider_model_exists(&target.provider_id, &target.model_id)
+                {
+                    return Err(RuntimeConfigError::ProductTargetUnknown);
+                }
+            }
+        }
+    }
+    let mut policy_ids = BTreeSet::new();
+    for policy in &product.error_policies {
+        if policy.policy_id.trim().is_empty()
+            || !policy_ids.insert(policy.policy_id.as_str())
+        {
+            return Err(RuntimeConfigError::ProductPolicyInvalid);
+        }
+    }
+    Ok(())
+}
+
+fn normalize_product_config(
+    product: &mut RuntimeProductConfig,
+    config_dir: Option<&Path>,
+) -> Result<(), RuntimeConfigError> {
+    for provider in &mut product.providers {
+        provider.config_path = resolve_authoring_path(&provider.config_path, config_dir)?
+            .display()
+            .to_string();
+        provider.models.sort_by(|left, right| left.model_id.cmp(&right.model_id));
+        for model in &mut provider.models {
+            model.capabilities.sort();
+        }
+        provider.auth_handles.sort_by(|left, right| left.alias.cmp(&right.alias));
+    }
+    product.providers.sort_by(|left, right| left.provider_id.cmp(&right.provider_id));
+    for group in &mut product.route_groups {
+        for pool in &mut group.pools {
+            pool.required_capabilities.sort();
+            pool.targets.sort_by(|left, right| {
+                left.priority
+                    .cmp(&right.priority)
+                    .then_with(|| left.provider_id.cmp(&right.provider_id))
+                    .then_with(|| left.model_id.cmp(&right.model_id))
+            });
+        }
+        group.pools.sort_by(|left, right| left.pool_id.cmp(&right.pool_id));
+    }
+    product.route_groups.sort_by(|left, right| left.route_group_id.cmp(&right.route_group_id));
+    for policy in &mut product.error_policies {
+        policy.actions.sort_by(|left, right| left.step.cmp(&right.step));
+    }
+    product.error_policies.sort_by(|left, right| left.policy_id.cmp(&right.policy_id));
+    Ok(())
+}
+
 fn resolve_authoring_path(value: &str, config_dir: Option<&Path>) -> Result<PathBuf, RuntimeConfigError> {
     if let Some(rest) = value.strip_prefix("~/") {
         return std::env::var_os("HOME")
@@ -1171,7 +1498,18 @@ fn resolve_authoring_path(value: &str, config_dir: Option<&Path>) -> Result<Path
     if path.is_absolute() {
         Ok(path)
     } else {
-        Ok(config_dir.unwrap_or_else(|| Path::new(".")).join(path))
+        let base = config_dir.unwrap_or_else(|| Path::new("."));
+        let absolute_base = if base.is_absolute() {
+            base.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|error| RuntimeConfigError::Read {
+                    path: base.display().to_string(),
+                    message: error.to_string(),
+                })?
+                .join(base)
+        };
+        Ok(absolute_base.join(path))
     }
 }
 
@@ -1182,6 +1520,7 @@ fn runtime_manifest_digest(
     listeners: &[RuntimeListener],
     providers: &[RuntimeProviderCandidate],
     routes: &[RuntimeRoute],
+    product: &Option<RuntimeProductConfig>,
 ) -> Result<String, RuntimeConfigError> {
     let unsigned = UnsignedRuntimeConfigManifest {
         schema_version,
@@ -1190,6 +1529,7 @@ fn runtime_manifest_digest(
         listeners,
         providers,
         routes,
+        product,
     };
     let bytes = serde_json::to_vec(&unsigned)
         .map_err(|error| RuntimeConfigError::Encode(error.to_string()))?;

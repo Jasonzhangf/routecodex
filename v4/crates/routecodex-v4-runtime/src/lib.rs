@@ -2310,6 +2310,34 @@ pub fn project_runtime_fault(
     chain: &mut ErrorChain,
     fault: RuntimeFault,
 ) -> Result<ClientProjection, ErrorChainError> {
+    let reason_code = fault.code.clone();
+    project_runtime_fault_with_policy(
+        chain,
+        fault,
+        RetryPolicy {
+            policy_id: "policy.no-retry.terminal".to_string(),
+            provider_scope: "all".to_string(),
+            matcher: "runtime-fault".to_string(),
+            action_class: "terminal".to_string(),
+            reason_code: reason_code.clone(),
+        },
+        ExecutionDecision {
+            decision_id: "decision.terminal".to_string(),
+            action: DecisionAction::Terminal,
+            reason_code,
+        },
+    )
+}
+
+/// Project a runtime fault through the fixed ErrorErr01-06 chain with a
+/// typed policy and execution decision supplied by the owning policy layer.
+/// The policy is side-channel data; payload content is never inspected.
+pub fn project_runtime_fault_with_policy(
+    chain: &mut ErrorChain,
+    fault: RuntimeFault,
+    policy: RetryPolicy,
+    decision: ExecutionDecision,
+) -> Result<ClientProjection, ErrorChainError> {
     let scope = chain.scope().clone();
     let mut center = ErrorCenter::new(scope);
     let node = fault.node_id.as_deref().unwrap_or("unknown");
@@ -2321,18 +2349,8 @@ pub fn project_runtime_fault(
     let captured = chain.capture()?;
     let witness = center.classify(captured)?;
     chain.classify(witness)?;
-    chain.apply_policy(RetryPolicy {
-        policy_id: "policy.no-retry.terminal".to_string(),
-        provider_scope: "all".to_string(),
-        matcher: "runtime-fault".to_string(),
-        action_class: "terminal".to_string(),
-        reason_code: fault.code.clone(),
-    })?;
-    chain.decide(ExecutionDecision {
-        decision_id: "decision.terminal".to_string(),
-        action: DecisionAction::Terminal,
-        reason_code: fault.code.clone(),
-    })?;
+    chain.apply_policy(policy)?;
+    chain.decide(decision)?;
     chain.project(&fault.message)
 }
 

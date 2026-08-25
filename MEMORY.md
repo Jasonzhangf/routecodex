@@ -5765,3 +5765,7 @@ Tags: #v3 #historical-samples #error-samples #provider-debug
 ## 2026-08-22 - Current protocol excludes legacy toolreason fences
 
 - The retired `<toolreason>` fence syntax is not part of the current protocol or acceptance criteria. Do not restore, parse, emit, or use legacy fence tests to drive runtime SSE/Resp03 changes; current validation uses native JSON/tool-call shapes and registered semantic projections.
+## 2026-08-24 V4 completion-claim correction
+- V4 active-link, layer-batch, release build, install, managed restart, health, and one live Responses replay were completed, but that is only independent runtime admission/integration evidence. It is not V4 product completion or V3 parity.
+- V4 currently requires `version = 4`, `runtime.id = "rccv4"`, and a compiled manifest; V3 7777 uses `version = 3` with route groups, multiple pools, multiple protocols, and provider-specific policies. V4 does not yet consume or compile the V3 config and cannot claim equivalent routing/provider/config behavior.
+- Completion claims must follow the product definition in `v4/docs/goals/v4-feature-completion-plan.md`: all selected V3 features must reach differential/live parity, not merely mapped/source/production-canary states. Keep the V4 independent runtime admission milestone explicitly separate from the V4 product-parity milestone.

@@ -432,6 +432,17 @@
       "status": "active"
     },
     {
+      "resource_id": "v4.config.product_parity",
+      "owner": "routecodex-v4-config::RuntimeProductConfig",
+      "truth_store": "crates/routecodex-v4-config/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
       "resource_id": "v4.artifact.compiled_index",
       "owner": "routecodex-v4-config::ConfigManifest",
       "truth_store": "generated/compiled-index.json",

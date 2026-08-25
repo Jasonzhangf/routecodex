@@ -1,0 +1,19 @@
+version = "2.0.0"
+providerId = "minimax_anthropic"
+
+[provider]
+id = "minimax_anthropic"
+enabled = true
+type = "anthropic"
+baseURL = "https://api.minimaxi.com/anthropic"
+defaultModel = "MiniMax-M3"
+compatibilityProfile = "chat:minimax"
+
+[provider.auth]
+type = "apikey"
+entries = [{ alias = "key1", secretFile = "/Volumes/extension/.rcc/secrets/v3/opencode-go.conf", secretKey = "minimax.key1" }]
+
+[provider.models."MiniMax-M3"]
+wireName = "MiniMax-M3"
+capabilities = ["text", "reasoning", "tools", "web_search", "multimodal", "vision", "longcontext"]
+supportsStreaming = true
