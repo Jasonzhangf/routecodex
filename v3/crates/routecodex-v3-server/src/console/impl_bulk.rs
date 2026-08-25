@@ -1006,7 +1006,10 @@ pub(crate) fn emit_v3_direct_frame_console_lines(
         );
     }
     let observability = observability?;
-    let is_sse = matches!(frame.body, V3Server16Body::CommittedSse(_));
+    let is_sse = matches!(
+        frame.body,
+        V3Server16Body::Sse(_) | V3Server16Body::CommittedSse(_)
+    );
     // Typed WebUI projection: terminal for non-SSE frames (Completed/Failed).
     // SSE streams defer terminal ownership to their console finalizer so the
     // final outcome (Completed/Failed/Cancelled) reflects stream closeout.

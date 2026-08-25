@@ -2338,8 +2338,8 @@ async fn direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_a
 }
 
 #[tokio::test]
-async fn direct_sse_console_clean_eof_does_not_project_missing_runtime_timing_as_failure() {
-    let log_file = test_v3_console_log_file("direct-console-sse-clean-eof-missing-timing");
+async fn direct_live_sse_console_closeout_waits_for_runtime_timing() {
+    let log_file = test_v3_console_log_file("direct-console-live-sse-timing-closeout");
     let _ = std::fs::remove_file(&log_file);
     let state = test_v3_listener_state(&log_file, 4444);
     let headers = test_direct_console_headers();
@@ -2347,14 +2347,19 @@ async fn direct_sse_console_clean_eof_does_not_project_missing_runtime_timing_as
         &state,
         "responses",
         "/v1/responses",
-        "req-direct-console-sse-clean-eof-missing-timing",
+        "req-direct-console-live-sse-timing-closeout",
         &headers,
         &json!({"model":"gpt-5.5","stream":true}),
     );
     let frame = V3Server16HttpFrame {
         status: 201,
         content_type: "text/event-stream".to_string(),
-        body: V3Server16Body::CommittedSse(test_committed_responses_sse()),
+        body: V3Server16Body::Sse(Box::pin(futures_util::stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec(),
+        )]))),
         debug_node: "V3Debug01NodeEventRegistered",
         error_node: "none",
         error_chain: Vec::new(),
@@ -2368,9 +2373,22 @@ async fn direct_sse_console_clean_eof_does_not_project_missing_runtime_timing_as
             timing: None,
             ..test_direct_observability(Vec::new())
         }),
-        stream_observation: Some(test_runtime_stream_observation_from_provider_event_json(
-            json!({"type":"response.completed","response":{"status":"completed"}}),
-        )),
+        stream_observation: Some({
+            let observation = test_runtime_stream_observation_from_provider_event_json(
+                json!({"type":"response.completed","response":{"status":"completed"}}),
+            );
+            observation
+                .merge_snapshot(&routecodex_v3_runtime::hub_v1::V3RuntimeStreamObservationSnapshot {
+                    timing: Some(routecodex_v3_runtime::V3RuntimeTimingSummary {
+                        runtime_total: Duration::from_millis(3),
+                        external: Duration::from_millis(2),
+                        internal: Duration::from_millis(1),
+                    }),
+                    ..Default::default()
+                })
+                .unwrap();
+            observation
+        }),
     };
     let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
     let response = responses_direct_output_response_with_console(
@@ -2384,13 +2402,12 @@ async fn direct_sse_console_clean_eof_does_not_project_missing_runtime_timing_as
         .contains("response.completed"));
 
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
-    assert!(log.contains("event=completed_observation_warning"), "{log}");
+    assert!(log.contains("event=completed"), "{log}");
     assert!(!log.contains("event=failed"), "{log}");
     assert!(!log.contains("status=500"), "{log}");
-    assert!(
-        log.contains("successful V3 Runtime observability is missing timing"),
-        "{log}"
-    );
+    assert!(!log.contains("completed_observation_warning"), "{log}");
+    assert!(log.contains("time_i="), "{log}");
+    assert!(log.contains("time_e="), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
 
