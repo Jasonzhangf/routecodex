@@ -1,0 +1,21 @@
+version = 4
+product_config_path = "v4-parity-product.toml"
+[[providers]]
+provider_id = "v4-parity-mock"
+config_path = "provider/v4-parity-mock/config.v2.toml"
+protocol = "responses"
+wire_model = "parity-model"
+priority = 1
+entry_models = ["parity-model"]
+
+[[routes]]
+id = "parity"
+models = ["parity-model"]
+targets = ["v4-parity-mock"]
+
+[runtime]
+id = "rccv4"
+
+[[listeners]]
+id = "parity"
+address = "127.0.0.1:5520"

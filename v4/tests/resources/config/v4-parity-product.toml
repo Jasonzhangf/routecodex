@@ -1,0 +1,30 @@
+source = "v3-baseline:responses_v3_7777"
+
+default_error_path = [
+  { step = "project", status = 503, reason_code = "provider_failure", message_mode = "code_only" },
+]
+
+[[providers]]
+provider_id = "v4-parity-mock"
+protocol = "responses"
+config_path = "provider/v4-parity-mock/config.v2.toml"
+[[providers.models]]
+model_id = "parity-model"
+wire_name = "parity-model"
+capabilities = ["text", "reasoning", "tools"]
+[[providers.auth_handles]]
+alias = "default"
+source = "token_file:/tmp/rccv4-parity-token.conf#parity.key"
+
+[[route_groups]]
+route_group_id = "parity_replay"
+[[route_groups.pools]]
+pool_id = "default"
+selection = "priority"
+precedence = 1
+entry_protocol = "responses"
+[[route_groups.pools.targets]]
+provider_id = "v4-parity-mock"
+model_id = "parity-model"
+priority = 1
+weight = 1

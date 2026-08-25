@@ -1,0 +1,65 @@
+{
+  "evidence_id": "v3-v4-normalized-differential-20260825",
+  "status": "pass",
+  "execution_surface": "rccv4_global_live_5520",
+  "source_commit": "76f9a270af09c49ef38e8f67a35944ce3925d6c6",
+  "binary_sha256": "9dcd22829629bb6504b90438a9211ca2c7d5691b973fa761cc29f35e8ec5c619",
+  "manifest_digest": "sha256:283996ad46552c269231826b090ec24994c6d0f145652c7267ed1203ed734de8",
+  "listener": "127.0.0.1:5520",
+  "request_id": "127.0.0.1:5520-2026-08-25-00000001",
+  "session_scope": "parity-session",
+  "conversation_scope": "parity-conversation",
+  "entry_protocol": "responses",
+  "continuation_owner": "relay",
+  "segments": {
+    "raw_request": {
+      "sha256": "0ce0d381739cbc10182d690a35da784d1b37486aab0f3f22fff0a9c598c5d0ae",
+      "body": {
+        "model": "parity-model",
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": "reply parity"}]}],
+        "stream": false
+      }
+    },
+    "provider_bound_request": {
+      "body": {
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": "reply parity"}]}],
+        "model": "parity-model",
+        "stream": false
+      },
+      "control_fields_present": false
+    },
+    "raw_provider_response": {
+      "sha256": "5265e9d67b53172d0572eaf7643c89be0a7d506e5fcc159bf29ecac921890b52",
+      "body": {
+        "id": "resp_parity_0001",
+        "object": "response",
+        "status": "completed",
+        "model": "parity-model",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "parity"}]}]
+      }
+    },
+    "client_projection": {
+      "status": 200,
+      "body": {
+        "id": "resp_parity_0001",
+        "object": "response",
+        "status": "completed",
+        "model": "parity-model",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "parity"}]}]
+      }
+    }
+  },
+  "normalized_differential": {
+    "baseline": "v3-responses-7777-product",
+    "v4_manifest_product": "v4-parity-product",
+    "unexplained_differences": [],
+    "intentional_differences": []
+  },
+  "verification": {
+    "config_compiler": "pass",
+    "provider_wire_projection": "pass",
+    "response_projection": "pass",
+    "control_payload_isolation": "pass",
+    "live_health": "pass"
+  }
+}
