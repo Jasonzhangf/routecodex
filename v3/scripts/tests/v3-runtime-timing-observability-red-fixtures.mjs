@@ -210,8 +210,8 @@ const cases = [
     path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
     mutate: (source) =>
       source.replace(
-        "seal_after_validated_terminal()",
-        "seal_after_validated_terminal_removed()",
+        "commit_direct_sse_attempt_after_terminal(",
+        "commit_direct_sse_attempt_after_terminal_removed(",
       ),
     diagnostic: /must seal only a fully validated terminal stream before Resp15/u,
   },
@@ -220,8 +220,8 @@ const cases = [
     path: "v3/crates/routecodex-v3-runtime/src/kernel.rs",
     mutate: (source) =>
       source.replace(
-        "V3ClientBody::CommittedSse(stream)",
-        "V3ClientBody::Sse(stream)",
+        "direct_runtime_helpers_stream::commit_direct_sse_attempt_after_terminal(",
+        "direct_runtime_helpers_stream::commit_direct_sse_attempt_after_terminal_removed(",
       ),
     diagnostic: /must expose only the Runtime-committed stream type/u,
   },

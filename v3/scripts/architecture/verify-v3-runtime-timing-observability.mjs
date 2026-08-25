@@ -339,7 +339,7 @@ requireMatch(
 );
 requireMatch(
   directRuntimeHelpers,
-  /commit_direct_sse_stream[\s\S]*V3ProviderAttemptSseStream[\s\S]*V3ClientSseStream/,
+  /commit_direct_sse_attempt_after_terminal[\s\S]*V3ProviderAttemptSseStream[\s\S]*V3ClientSseStream/,
   "Direct SSE Runtime must hand off a typed provider attempt to the client broker without full-stream draining",
 );
 requireMatch(
@@ -364,7 +364,7 @@ forbidMatch(
 );
 forbidMatch(
   directRuntimeHelpers,
-  /commit_direct_sse_stream[\s\S]*while\s+let\s+Some\(frame\)\s*=\s*stream\.next\(\)\.await/,
+  /commit_direct_sse_attempt_after_terminal[\s\S]*while\s+let\s+Some\(frame\)\s*=\s*stream\.next\(\)\.await/,
   "Direct SSE broker must not drain the provider stream before Resp15",
 );
 requireMatch(
