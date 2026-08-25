@@ -20,10 +20,7 @@ use crate::provider_failure_runtime_policy::{
     V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};
-use crate::{
-    build_v3_execution_11_protocol_decision_from_v3_target_10, project_v3_debug_failure,
-    V3Execution11ProtocolDecisionMode, V3ResponsesProtocolExecutionPlan,
-};
+use crate::{project_v3_debug_failure, V3ResponsesProtocolExecutionPlan};
 use futures_util::StreamExt;
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ProviderErrorActionPolicyManifest,
@@ -508,18 +505,6 @@ pub(crate) struct V3ResponsesRelayStoplessControlExecution<'state> {
     pub(crate) control: &'state V3ResponsesRelayStoplessControlState,
     pub(crate) scope: V3ResponsesRelayStoplessControlScope,
     pub(crate) commit_effects: bool,
-}
-
-fn responses_relay_protocol_switch_allowed(
-    payload: &Value,
-    tool_output_ids: &V3ResponsesRelayToolOutputIds,
-) -> bool {
-    payload
-        .get("previous_response_id")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .is_none()
-        && tool_output_ids.restore_ids.is_empty()
 }
 
 async fn handle_v3_responses_relay_provider_failure(
