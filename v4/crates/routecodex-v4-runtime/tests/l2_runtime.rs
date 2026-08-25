@@ -340,6 +340,38 @@ fn local_continuation_store_requires_exact_response_locator_and_context() {
 }
 
 #[test]
+fn responses_relay_terminal_frame_commits_ordered_context_in_runtime_store() {
+    let runtime = SkeletonRuntime::load(&contract_json()).expect("skeleton plan");
+    let frame = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-local\",\"output\":[{\"type\":\"message\"}]}}\n\n";
+    let report = runtime
+        .execute_provider_response_scoped_with_seed(
+            frame,
+            "r-local-terminal",
+            5520,
+            "session-local-terminal",
+            "conversation-local-terminal",
+            "responses",
+            "relay",
+            Some(r#"[{"role":"user","content":"hello"}]"#.to_string()),
+        )
+        .expect("responses + relay terminal frame must commit at response chat process");
+    assert!(report.continuation_committed);
+    let key = ContinuationKey::new(
+        "responses",
+        "relay",
+        5520,
+        "session-local-terminal",
+        "conversation-local-terminal",
+    );
+    let record = runtime
+        .load_local_continuation(&key, "resp-local")
+        .expect("terminal frame must be visible through the runtime-owned store");
+    let context: serde_json::Value =
+        serde_json::from_str(&record.ordered_context).expect("ordered context JSON");
+    assert_eq!(context.as_array().expect("ordered context").len(), 2);
+}
+
+#[test]
 fn responses_local_owner_override_is_typed_before_request_classification() {
     let runtime = SkeletonRuntime::load(&contract_json()).expect("skeleton plan");
     let report = runtime
