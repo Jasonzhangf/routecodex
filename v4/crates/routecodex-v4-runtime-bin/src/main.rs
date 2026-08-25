@@ -1507,7 +1507,7 @@ targets = ["mock"]
             body: br#"{"model":"mock-model","input":"hello"}"#.to_vec(),
             request_id: "request-node-container-test".to_string(),
             server_id: "test".to_string(),
-            port: 0,
+            port: u16::from_ne_bytes([0, 1]),
         });
         assert_eq!(response.status, 404, "request node must run before route projection");
     }
@@ -1558,7 +1558,7 @@ targets = ["mock"]
             },
             runtime(),
             "request-1".to_string(),
-            0,
+            u16::from_ne_bytes([0, 1]),
             entry_protocol.to_string(),
             continuation_owner.to_string(),
             "responses".to_string(),
