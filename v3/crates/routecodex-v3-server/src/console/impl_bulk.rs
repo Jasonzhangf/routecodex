@@ -1242,6 +1242,33 @@ impl V3DirectSseConsoleFinalizer {
                 &self.observability,
                 error,
             );
+            return;
+        }
+        let semantic_terminal = match self
+            .stream_observation
+            .as_ref()
+            .map(routecodex_v3_runtime::hub_v1::V3RuntimeStreamObservation::semantic_terminal)
+            .transpose()
+        {
+            Ok(terminal) => terminal.flatten(),
+            Err(error) => {
+                emit_v3_runtime_observability_contract_failure(
+                    &self.context,
+                    &self.observability,
+                    error,
+                );
+                return;
+            }
+        };
+        match semantic_terminal {
+            Some(routecodex_v3_runtime::hub_v1::V3RuntimeSemanticTerminal::Success) => {
+                self.emit_direct_sse_complete_console_lines();
+                return;
+            }
+            Some(routecodex_v3_runtime::hub_v1::V3RuntimeSemanticTerminal::Failure) => {
+                return;
+            }
+            None => {}
         }
         // Typed WebUI projection: client disconnect => Cancelled.
         if let Err(error) = record_v3_webui_event_for_context(

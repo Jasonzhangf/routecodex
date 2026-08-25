@@ -2412,6 +2412,188 @@ async fn direct_live_sse_console_closeout_waits_for_runtime_timing() {
 }
 
 #[tokio::test]
+async fn direct_live_sse_drop_after_completed_before_ping_is_completed() {
+    let log_file = test_v3_console_log_file("direct-live-sse-drop-after-completed-before-ping");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 7777);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-live-sse-drop-after-completed-before-ping",
+        &headers,
+        &json!({"model":"opencode-go.deepseek-v4-flash","stream":true}),
+    );
+    let observation = test_runtime_stream_observation_from_provider_event_json(json!({
+        "type":"response.completed",
+        "response":{"status":"completed"}
+    }));
+    observation
+        .merge_snapshot(
+            &routecodex_v3_runtime::hub_v1::V3RuntimeStreamObservationSnapshot {
+                timing: Some(routecodex_v3_runtime::V3RuntimeTimingSummary {
+                    runtime_total: Duration::from_millis(27),
+                    external: Duration::from_millis(26),
+                    internal: Duration::from_millis(1),
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "text/event-stream".to_string(),
+        body: V3Server16Body::Sse(Box::pin(futures_util::stream::iter(vec![
+            Ok::<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>(
+                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec(),
+            ),
+            Ok(b"event: ping\ndata: {\"type\":\"ping\"}\n\n".to_vec()),
+        ]))),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        node_trace: vec!["V3DirectResp15ClientPayloadReady"],
+        observability: Some(V3RuntimeObservability {
+            transport: "sse".to_string(),
+            response_status: Some("streaming".to_string()),
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: Some(observation),
+    };
+    let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+    let mut stream = wrap_v3_direct_live_sse_console_stream(
+        match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        },
+        finalizer,
+    );
+    let chunk = stream.next().await.unwrap().unwrap();
+    assert!(std::str::from_utf8(&chunk)
+        .unwrap()
+        .contains("response.completed"));
+    drop(stream);
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(log.contains("event=completed"), "{log}");
+    assert!(!log.contains("status=499"), "{log}");
+    assert!(!log.contains("subcode=client_disconnect"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[tokio::test]
+async fn direct_live_sse_drop_before_terminal_remains_client_disconnect() {
+    let log_file = test_v3_console_log_file("direct-live-sse-drop-before-terminal");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 7777);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-live-sse-drop-before-terminal",
+        &headers,
+        &json!({"model":"opencode-go.deepseek-v4-flash","stream":true}),
+    );
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "text/event-stream".to_string(),
+        body: V3Server16Body::Sse(Box::pin(futures_util::stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec(),
+        )]))),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        node_trace: vec!["V3DirectResp15ClientPayloadReady"],
+        observability: Some(V3RuntimeObservability {
+            transport: "sse".to_string(),
+            response_status: Some("streaming".to_string()),
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: Some(V3RuntimeStreamObservation::default()),
+    };
+    let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+    let mut stream = wrap_v3_direct_live_sse_console_stream(
+        match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        },
+        finalizer,
+    );
+    assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
+    drop(stream);
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(log.contains("event=failed"), "{log}");
+    assert!(log.contains("status=499"), "{log}");
+    assert!(log.contains("subcode=client_disconnect"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[tokio::test]
+async fn direct_live_sse_drop_after_failure_terminal_does_not_become_client_disconnect() {
+    let log_file = test_v3_console_log_file("direct-live-sse-drop-after-failure-terminal");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 7777);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-live-sse-drop-after-failure-terminal",
+        &headers,
+        &json!({"model":"opencode-go.deepseek-v4-flash","stream":true}),
+    );
+    let observation = test_runtime_stream_observation_from_provider_event_json(json!({
+        "type":"response.failed",
+        "response":{"status":"failed"}
+    }));
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "text/event-stream".to_string(),
+        body: V3Server16Body::Sse(Box::pin(futures_util::stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(
+            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}\n\n".to_vec(),
+        )]))),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        node_trace: vec!["V3DirectResp15ClientPayloadReady"],
+        observability: Some(V3RuntimeObservability {
+            transport: "sse".to_string(),
+            response_status: Some("streaming".to_string()),
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: Some(observation),
+    };
+    let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+    let mut stream = wrap_v3_direct_live_sse_console_stream(
+        match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        },
+        finalizer,
+    );
+    assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
+    drop(stream);
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(!log.contains("status=499"), "{log}");
+    assert!(!log.contains("subcode=client_disconnect"), "{log}");
+    assert!(!log.contains("event=completed"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[tokio::test]
 async fn direct_committed_sse_console_closeout_keeps_499_on_client_drop() {
     let log_file = test_v3_console_log_file("direct-console-sse-drop-before-terminal");
     let _ = std::fs::remove_file(&log_file);

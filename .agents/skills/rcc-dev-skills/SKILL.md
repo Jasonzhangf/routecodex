@@ -42,7 +42,7 @@ NO FALLBACK! FUCK FALLBACK!!!
 
 这是所有 provider、SSE、响应形状、切换和客户端断流问题的**第一诊断动作**，优先级高于 console 摘要、7777/4444 在线重放、先改 SSE/handler、先改路由，以及“同入口最小请求”。没有完成本门禁，不得下 provider、请求构造、解析或客户端投影归因。
 
-1. 先锁定失败请求的 `requestId`、入口协议、目标 provider/model、端口和 `direct|relay`；从 canonical 样本/日志取同一次尝试的 `request.json`、实际 `provider-request.json`、`provider-response.json` 和 client projection。只看 console 摘要不算证据。
+1. 先锁定失败请求的 `requestId`、入口协议、目标 provider/model、端口和 `direct|relay`；`node_trace` / execution decision 是 Direct/Relay 的真源，provider 名、model 名和历史习惯都不能代替路径证据。确认 Direct 后只追 Direct runtime/Front，确认 Relay 后只追 Relay owner，禁止把一条路径的修复或测试当成另一条路径已覆盖。从 canonical 样本/日志取同一次尝试的 `request.json`、实际 `provider-request.json`、`provider-response.json` 和 client projection。只看 console 摘要不算证据。
 2. 先做 provider 直连对照，再做代理请求：
    - **A**：同 provider/model/key 的最小直连请求，只证明 provider 基线是否可用；
    - **B**：把该失败 `requestId` 生成的完整 `provider-request.json` 原样直连同一 provider；

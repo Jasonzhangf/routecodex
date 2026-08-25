@@ -242,6 +242,12 @@ pub struct V3RuntimeStreamObservation {
     inner: Arc<Mutex<V3RuntimeStreamObservationSnapshot>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3RuntimeSemanticTerminal {
+    Success,
+    Failure,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct V3RuntimeStreamObservationSnapshot {
     pub response_status: Option<String>,
@@ -299,23 +305,21 @@ impl V3RuntimeStreamObservation {
     }
 
     pub(crate) fn has_semantic_terminal(&self) -> Result<bool, String> {
-        Ok(self
-            .snapshot()?
-            .response_status
-            .as_deref()
-            .is_some_and(|status| {
-                matches!(
-                    status.trim(),
-                    "completed"
-                        | "requires_action"
-                        | "done"
-                        | "failed"
-                        | "incomplete"
-                        | "cancelled"
-                        | "canceled"
-                        | "error"
-                )
-            }))
+        Ok(self.semantic_terminal()?.is_some())
+    }
+
+    pub fn semantic_terminal(&self) -> Result<Option<V3RuntimeSemanticTerminal>, String> {
+        Ok(
+            match self.snapshot()?.response_status.as_deref().map(str::trim) {
+                Some("completed" | "requires_action" | "done") => {
+                    Some(V3RuntimeSemanticTerminal::Success)
+                }
+                Some("failed" | "incomplete" | "cancelled" | "canceled" | "error") => {
+                    Some(V3RuntimeSemanticTerminal::Failure)
+                }
+                _ => None,
+            },
+        )
     }
 
     pub fn merge_snapshot(
