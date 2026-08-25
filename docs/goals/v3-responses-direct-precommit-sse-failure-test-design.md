@@ -4,14 +4,14 @@ Design ID: `CCSOL-SSE-PRECOMMIT-EMPTY-20260816-01`
 
 ## Lifecycle under test
 
-`V3ProviderResp14Raw` may contain HTTP 2xx SSE lifecycle frames before any client-visible business output. The Direct protocol codec must pass its already-decided provider wire protocol into one protocol-aware precommit classifier. Only a replay-unsafe business frame for that protocol may authorize `V3DirectResp15ClientPayloadReady`. Error, malformed/empty terminal, timeout, or EOF while only lifecycle frames have arrived must remain precommit and enter Error01→05 so the existing retry/reselection state machine can act.
+`V3ProviderResp14Raw` may contain HTTP 2xx SSE lifecycle frames before any client-visible business output. The Direct runtime must buffer the complete provider attempt until a protocol-valid terminal event. Error, malformed/empty terminal, timeout, or EOF before terminal must remain precommit and enter Error01→05 so the existing retry/reselection state machine can act.
 
 ## White-box contracts
 
-- Responses `response.created`, `response.in_progress`, and empty in-progress message/reasoning items remain precommit; a real output/tool frame authorizes client commit. `reasoning_text`/`summary_text` content and non-empty encrypted reasoning are registered business output, including in `response.output_item.done` and terminal `response.completed` snapshots.
+- Responses `response.created`, `response.in_progress`, output items, reasoning, tool calls, and deltas remain in the runtime-owned attempt buffer; only a complete protocol-valid terminal event authorizes client commit.
 - Responses `response.completed` with `output=[]` or no `output` is an empty terminal: it raises Error01 `provider_response_sse_empty` before Resp15 and is consumed by the existing retry/reselect chain.
-- Anthropic `message_start` remains precommit, `content_block_delta`/non-empty content blocks authorize client commit, and `message_stop` without earlier business output is an empty terminal.
-- OpenAI Chat role-only/empty deltas remain precommit, content/reasoning/tool deltas authorize client commit, and a finish-only chunk without earlier business output is an empty terminal.
+- Anthropic `message_start`, content blocks, and deltas remain buffered until a valid `message_stop` terminal.
+- OpenAI Chat role-only/empty deltas, content/reasoning/tool deltas, and finish chunks remain buffered until the protocol terminal is validated.
 - Protocol selection is an explicit argument. A frame belonging to another protocol fails classification; no JSON shape auto-detection or second classification pass is allowed.
 - Each protocol maps its own provider error event to typed `Failure`; keepalive and `[DONE]` frames remain non-semantic.
 - Error, malformed/empty terminal, and EOF after lifecycle-only frames return provider Error01 before Resp15.
@@ -26,10 +26,11 @@ The Direct runtime kernel receives three transient attempts whose provider strea
 - The captured 2026-08-19 05:34 opencode-go Direct stream with a `reasoning_text` item must finish normally; it must not become `provider_response_sse_event_invalid` or a terminal 502 after partial output.
 - The captured session `01a01316-a601-7e62-a8d5-1ee3699e6264` 05:58 and 06:00 empty-completed 200 responses must be rejected before Resp15 instead of producing a client-visible task-complete with no item.
 - A controlled old failure shape must log provider-error and switch before any failed-attempt Resp15 client commit.
-- Final client response must come from the replacement provider or, only after candidate exhaustion, Error06 502.
+- The failed attempt's buffered frames must never be concatenated with the replacement attempt.
+- Final client response must come from the complete replacement provider or, only after candidate exhaustion, Error06 502; no partial provider bytes may reach the client.
 
 ## Paired risks
 
 - Positive tests prevent empty/error SSE and foreign-protocol frames from being silently committed.
-- Reverse tests prove the first genuine Responses, Anthropic, and OpenAI Chat output/tool frame still commits without materializing the stream.
-- Existing post-business-output failure tests continue to require explicit post-commit 502 without transparent reselection, preventing duplicate mixed-provider output.
+- Reverse tests prove complete terminal Responses, Anthropic, and OpenAI Chat attempts commit with byte-stable buffered projection.
+- Failure tests prove a network error after arbitrary buffered business frames still reselects before client semantic commit; no post-business-output reroute is allowed after the client has actually received bytes.

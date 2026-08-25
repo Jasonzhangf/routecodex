@@ -5036,6 +5036,50 @@ features:
   migration_target: rust
   runtime_status: source_controlled_runtime_pending_live_replay
 
+- feature_id: v3.responses_direct_full_attempt_commit
+  status: design
+  change_risk: critical
+  owner_crate: routecodex-v3-runtime
+  owner_files:
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs
+  resource_bindings: [v3.sse.direct.full_attempt_buffer, v3.error.chain]
+  entry_symbols:
+  - V3DirectSseAttemptBuffer
+  - commit_direct_sse_attempt_after_terminal
+  - wrap_direct_sse_provider_handoff_stream
+  allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs
+  - v3/scripts/architecture/verify-v3-direct-sse-full-attempt-commit.mjs
+  - docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
+  - docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
+  - docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+  forbidden_paths:
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-server/src/frame_builders.rs
+  - request.normal_payload
+  - response.client_payload
+  - provider.wire_payload
+  - MetadataCenter
+  required_gates:
+  - npm run verify:v3-direct-sse-full-attempt-commit
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_boundary:
+    source_controlled: pending
+    live_cutover: required
+    global_install_restart: required
+    dsh_review: required
+
 - feature_id: v3.runtime_restart_handoff_skeleton
   status: design
   change_risk: critical

@@ -15,6 +15,7 @@ import { spawnSync } from 'node:child_process';
 
 const STEPS = [
   ['verify:v3-direct-sse-accept-skeleton', 'Direct SSE client accept/worker skeleton remains frozen'],
+  ['verify:v3-direct-sse-full-attempt-commit', 'Direct SSE provider attempts remain fully buffered until terminal success'],
   ['verify:v3-contract-map-owner', 'V3 contract-map owner and lifecycle bindings remain synchronized'],
   ['verify:v3-mainline-manifest-sync', 'Generated architecture manifests remain bound to canonical call maps'],
   ['verify:v3-rust-only', 'V3 runtime crates must be Rust-only'],

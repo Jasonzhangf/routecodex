@@ -3287,18 +3287,22 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
-  - Responses SSE establishes the client channel and transport-only heartbeat before provider attempt completion for both Direct and Relay.
-  - Provider failure before semantic client commitment remains in the existing Error chain and can reselect without closing the client channel.
+  - Responses SSE may establish the transport channel and transport-only heartbeat before provider attempt completion for both Direct and Relay, but no provider business frame crosses the client edge before a complete terminal attempt.
+  - Direct provider failure at any point before semantic client commitment remains in the existing Error chain and can reselect without exposing the failed attempt buffer.
+  - A replacement provider must complete a protocol-valid terminal attempt before client semantic commit.
   - Only execution-plan-selected runtime projected client frames cross the channel; raw provider SSE does not.
   required_negative:
   - Relay and Direct requests enter the same Front skeleton; the Front does not choose between them.
   - The accept skeleton does not parse provider business events or own routing, health, retry, or continuation.
-  - A post-commit provider failure does not reroute or rebuild the current response.
+  - A post-commit provider failure does not reroute or rebuild the current response; the lifecycle makes provider failure post-commit unreachable by withholding semantic commit until terminal success.
+  - Failed-attempt frames are discarded and cannot be concatenated with replacement-attempt frames.
   - New features cannot replace the accept channel, runtime worker, or projected-frame edge.
   required_gates:
   - npm run verify:v3-direct-sse-accept-skeleton
+  - npm run verify:v3-direct-sse-full-attempt-commit
   - npm run verify:v3-architecture-ci
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_guard_rejects_typed_responses_shape_before_client_commit -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib direct_sse_http_projection_injects_keepalive_and_preserves_provider_bytes -- --nocapture
   - npm run verify:sse-architecture-boundary
   - npm run verify:v3-resource-map

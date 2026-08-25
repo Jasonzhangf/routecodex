@@ -25,6 +25,7 @@
     "test:cargo": "node scripts/run-v3-cargo-test.mjs",
     "verify:v3-architecture-ci": "node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-architecture-ci.mjs",
     "verify:v3-direct-sse-accept-skeleton": "node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-direct-sse-accept-skeleton.mjs",
+    "verify:v3-direct-sse-full-attempt-commit": "node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-direct-sse-full-attempt-commit.mjs",
     "verify:v3-contract-map-owner": "node scripts/architecture/verify-v3-contract-map-owner.mjs",
     "verify:v3-mainline-manifest-sync": "node scripts/architecture/verify-v3-mainline-manifest-sync.mjs",
     "verify:v3-runtime-restart-handoff": "node scripts/architecture/verify-v3-runtime-restart-handoff.mjs",

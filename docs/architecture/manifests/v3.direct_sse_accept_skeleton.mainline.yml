@@ -1,6 +1,7 @@
 version: 1
 lifecycle_id: v3.direct_sse_accept_skeleton.mainline
 owner_feature_id: v3.direct_sse_accept_skeleton
+commit_contract_owner_feature_id: v3.responses_direct_full_attempt_commit
 status: source_controlled_runtime_pending_live_replay
 implementation_symbols:
   - V3FrontSseAcceptSkeleton
@@ -39,10 +40,16 @@ supporting_edges:
     caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
     callee: v3_request_wants_sse
     callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+commit_contract:
+  client_transport_accept: may establish the HTTP/SSE channel and transport-only keepalive before provider completion
+  client_semantic_commit: forbidden until one provider attempt has a complete, protocol-valid terminal event
+  attempt_buffer: provider projected frames remain runtime-owned and are not exposed to the client while the attempt is pending
+  failed_attempt_disposition: discard the failed attempt buffer, enter Error01 -> Error03 -> Error04 -> Error05, and reselect within the same request
 return_path:
-  precommit_provider_failure: Error01 -> Error03 -> Error04 -> Error05 -> reselect; client channel remains open
-  committed_provider_failure: current stream emits the existing post-commit error projection and closes; no current-request reroute
-  success: projected client SSE bytes, transport keepalive, and EOF
+  precommit_provider_failure: Error01 -> Error03 -> Error04 -> Error05 -> reselect; client semantic channel remains uncommitted
+  replacement_success: only the complete replacement attempt crosses V3DirectSseAccept03ProjectedClientFrame; no mixed-provider prefix is allowed
+  candidate_exhaustion: Error06 client projection; no partial provider attempt is exposed
+  unexpected_post_commit_failure: only transport/client disconnect after semantic commit; provider failure after commit is forbidden by this lifecycle
 forbidden_paths:
   - provider raw SSE -> client
   - direct accept layer -> provider semantic parser
@@ -61,7 +68,9 @@ canonical_docs:
   - docs/architecture/v3-verification-map.yml
 verification_gates:
   - npm run verify:v3-direct-sse-accept-skeleton
+  - npm run verify:v3-direct-sse-full-attempt-commit
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_guard_rejects_typed_responses_shape_before_client_commit -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib direct_sse_http_projection_injects_keepalive_and_preserves_provider_bytes -- --nocapture
   - npm run verify:sse-architecture-boundary
   - git diff --check
