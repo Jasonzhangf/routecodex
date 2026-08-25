@@ -290,6 +290,7 @@ where
         decoder: SseIncrementalDecoder,
         attempt: V3DirectSseAttemptBuffer,
         client_released: bool,
+        done_seen: bool,
         done: bool,
     }
 
@@ -308,6 +309,7 @@ where
         protocol: V3HubProviderWireProtocol,
         chunk: &[u8],
         decoder: &mut SseIncrementalDecoder,
+        done_seen: &mut bool,
     ) -> Result<(bool, bool), V3Error01SourceRaised> {
         let frames = decoder
             .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
@@ -325,7 +327,21 @@ where
                         message,
                     )
                 })?;
-            if data.trim() == "[DONE]" || is_v3_provider_sse_keepalive_text(&data) {
+            if data.trim() == "[DONE]" {
+                if protocol == V3HubProviderWireProtocol::OpenAiChat {
+                    if !terminal {
+                        return Err(build_v3_error_01_source_raised(
+                            V3ErrorSourceKind::ProviderFailure,
+                            "V3ProviderResp14Raw",
+                            "provider_response_sse_stream",
+                            "OpenAI Chat SSE emitted [DONE] before terminal finish_reason",
+                        ));
+                    }
+                    *done_seen = true;
+                }
+                continue;
+            }
+            if is_v3_provider_sse_keepalive_text(&data) {
                 continue;
             }
             if let Some(outcome) = classify_v3_provider_sse_json_data(protocol, &data).map_err(
@@ -338,6 +354,17 @@ where
                     )
                 },
             )? {
+                if protocol == V3HubProviderWireProtocol::OpenAiChat
+                    && *done_seen
+                    && !matches!(outcome, V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
+                {
+                    return Err(build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::ProviderFailure,
+                        "V3ProviderResp14Raw",
+                        "provider_response_sse_stream",
+                        "OpenAI Chat SSE emitted a semantic frame after [DONE]",
+                    ));
+                }
                 match outcome {
                     V3ProviderResponsesJsonFrameOutcome::StartClientStream => admitted = true,
                     V3ProviderResponsesJsonFrameOutcome::Terminal => terminal = true,
@@ -373,6 +400,7 @@ where
             decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
             attempt: V3DirectSseAttemptBuffer::new(),
             client_released: false,
+            done_seen: false,
             done: false,
         },
         |mut state| async move {
@@ -396,6 +424,7 @@ where
                             state.provider_protocol,
                             &chunk,
                             &mut state.decoder,
+                            &mut state.done_seen,
                         ) {
                             Ok((_admitted, terminal)) if terminal => {
                                 state.attempt.finish_terminal();
@@ -410,6 +439,7 @@ where
                                         Ok(Some(next)) => {
                                             state.source = next;
                                             state.decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+                                            state.done_seen = false;
                                             state.client_released = false;
                                             continue;
                                         }
@@ -432,6 +462,7 @@ where
                                 Ok(Some(next)) => {
                                     state.source = next;
                                     state.decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+                                    state.done_seen = false;
                                     state.client_released = false;
                                     continue;
                                 }
@@ -474,6 +505,7 @@ where
                                     Ok(Some(next)) => {
                                         state.source = next;
                                         state.decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+                                        state.done_seen = false;
                                         state.client_released = false;
                                         continue;
                                     }
@@ -552,6 +584,51 @@ mod direct_sse_timing_tests {
         assert!(frames.iter().all(Result::is_ok));
         let text = String::from_utf8(frames[0].as_ref().unwrap().clone()).unwrap();
         assert!(text.contains("recovered"));
+    }
+
+    #[tokio::test]
+    async fn openai_chat_direct_sse_rejects_done_before_finish_reason() {
+        let source = Box::pin(stream::iter([
+            Ok(b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\ndata: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n".to_vec()),
+        ]));
+        let frames = wrap_direct_sse_provider_handoff_stream(
+            Box::pin(source),
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            |_| async { Ok(None) },
+            Some(0),
+        )
+        .collect::<Vec<_>>()
+        .await;
+
+        assert_eq!(frames.len(), 1);
+        let error = frames[0]
+            .as_ref()
+            .expect_err("pre-terminal [DONE] must not release a client frame");
+        assert_eq!(error.code, "provider_response_sse_stream");
+        assert!(error
+            .message
+            .contains("[DONE] before terminal finish_reason"));
+    }
+
+    #[tokio::test]
+    async fn openai_chat_direct_sse_releases_only_after_finish_reason_and_done() {
+        let source = Box::pin(stream::iter([
+            Ok(b"data: {\"id\":\"chatcmpl_direct\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".to_vec()),
+        ]));
+        let frames = wrap_direct_sse_provider_handoff_stream(
+            Box::pin(source),
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            |_| async { Ok(None) },
+            Some(0),
+        )
+        .collect::<Vec<_>>()
+        .await;
+
+        assert_eq!(frames.len(), 1);
+        assert!(frames[0].is_ok());
+        assert!(String::from_utf8(frames[0].as_ref().unwrap().clone())
+            .unwrap()
+            .contains("finish_reason"));
     }
 
     #[tokio::test]

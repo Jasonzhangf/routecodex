@@ -3252,10 +3252,13 @@ features:
   - response Body ownership keeps active JSON/SSE requests alive until terminal, Error chain outcome, client disconnect, or timeout before canonical exec.
   - Request lease scope, frame sequence, execution mode, continuation owner, and deadline are typed control resources and never enter normal payloads.
   - restart/reattach preserves frozen execution mode and monotonically decreases absolute and idle deadlines.
+  - a second request on one HTTP/1.1 keep-alive connection starts a fresh closeout cycle and receives the explicit pre-header restart terminal.
   required_negative:
   - provider raw SSE is never projected directly to the client.
   - response shape never reselects Direct or Relay.
-  - restart never silently drops an in-flight request or emits duplicate terminal frames.
+  - restart never silently drops an accepted request before response headers; it emits one explicit `server_restart_in_progress` HTTP 503 terminal.
+  - restart does not fabricate that pre-header terminal for an unstarted request or an already-started response.
+  - a new keep-alive request cannot inherit the previous request's response-started phase or protocol-specific SSE closeout frame.
   required_gates:
   - npm run verify:v3-runtime-restart-handoff
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server restart_handoff --lib -- --nocapture
@@ -3265,6 +3268,37 @@ features:
   - git diff --check
   completion_boundary:
     source_controlled: pending
+    live_cutover: required
+    global_install_restart: required
+    live_evidence: required
+    dsh_review: required
+
+- feature_id: v3.responses_direct_full_attempt_commit
+  status: source_controlled_runtime_pending_live_replay
+  change_risk: critical
+  owner_kind: rust_v3_runtime_direct_sse_attempt_commit
+  owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  contract:
+  - docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - OpenAI Chat [DONE] after terminal finish_reason commits the complete attempt.
+  - A failed pre-commit attempt is discarded before any replacement attempt is exposed.
+  required_negative:
+  - OpenAI Chat [DONE] before terminal finish_reason enters the typed provider response error chain.
+  - Semantic frames after [DONE] do not become a successful client stream.
+  required_gates:
+  - npm run verify:v3-direct-sse-full-attempt-commit
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_direct_sse_ -- --nocapture
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_boundary:
+    source_controlled: true
     live_cutover: required
     global_install_restart: required
     live_evidence: required
@@ -3303,6 +3337,7 @@ features:
   - npm run verify:v3-architecture-ci
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_guard_rejects_typed_responses_shape_before_client_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_direct_sse_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib direct_sse_http_projection_injects_keepalive_and_preserves_provider_bytes -- --nocapture
   - npm run verify:sse-architecture-boundary
   - npm run verify:v3-resource-map

@@ -5071,6 +5071,7 @@ features:
   required_gates:
   - npm run verify:v3-direct-sse-full-attempt-commit
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_direct_sse_ -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
@@ -5086,6 +5087,9 @@ features:
   owner_crate: routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
+  - v3/crates/routecodex-v3-server/src/restart_closeout.rs
+  - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
@@ -5094,17 +5098,23 @@ features:
   - v3.front.request_lease
   - v3.front.runtime_handoff_checkpoint
   - v3.front.client_frame_sequence
+  - v3.front.client_closeout_frame
   - v3.front.deadline_budget
   - v3.front.request_activity_gate
   entry_symbols:
   - V3FrontRequestLease
   - V3RuntimeHandoffCheckpoint
   - V3FrontFrameSequence
+  - V3FrontTransportCloseoutState
+  - V3StableFrontSocket::set_exec_closeout_frame
   - V3FrontDeadlineBudget
   - V3ServerRequestActivityGate
   - V3ServerAggregateHandle::prepare_for_exec
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
+  - v3/crates/routecodex-v3-server/src/restart_closeout.rs
+  - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
@@ -5417,6 +5427,7 @@ features:
   owner_crate: routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  - v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -5427,10 +5438,12 @@ features:
   - V3WebuiObservability::snapshot
   - V3WebuiObservability::since
   - V3ObsSinceResult
+  - cooldown_pool
   - emit_v3_request_console_observation
   - capture_v3_relay_provider_snapshots
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  - v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs

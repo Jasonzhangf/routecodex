@@ -1,7 +1,7 @@
 {
   "symptom": {
     "observed": "5555 logs show post-commit status=500 runtime_observability_contract: successful V3 Runtime observability is missing timing after Direct SSE status=201/completed.",
-    "expected": "Direct SSE client drop after observed response.completed must not emit failed/500; success console line may require Runtime timing only after clean EOF.",
+    "expected": "Direct SSE client-visible success must not be reclassified as failed/500 because timing observation is absent; the missing observation remains an explicit nonblocking diagnostic.",
     "entry": "/v1/responses SSE Direct on 5555",
     "raw_evidence": ["~/.rcc/logs/server-5555.log", "v3/crates/routecodex-v3-server/src/lib.rs:V3DirectSseConsoleFinalizer::client_disconnected"]
   },
@@ -16,11 +16,11 @@
   "hypotheses": [
     {
       "id": "H1",
-      "cause": "Direct SSE Drop after response.completed merges terminal status without timing, then success console formatter treats missing timing as runtime contract failure and emits post-commit 500.",
-      "modules": ["v3/crates/routecodex-v3-server/src/lib.rs"],
-      "supporting_evidence": "format_v3_console_runtime_timing errors on None; client_disconnected emits success on terminal status; direct runtime timing records only at clean EOF.",
-      "verification_action": "make direct_sse_console_closeout_does_not_fabricate_success_or_error_before_runtime_eof set observability.timing=None and expect no runtime_observability_contract/500",
-      "confidence": 95
+      "cause": "Direct SSE handoff creates a replacement stream observation, but the original Direct finalizer retained the original observation; missing timing then reached the console projection as a post-commit 500.",
+      "modules": ["v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs", "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs", "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs"],
+      "supporting_evidence": "The handoff runtime returned a new stream_observation without merging it into the original finalizer carrier; the console formatter rejects None timing.",
+      "verification_action": "assert handoff observation/timing is merged, and clean success with missing timing emits completed_observation_warning without event=failed or status=500",
+      "confidence": 98
     }
   ],
   "active_hypothesis": "H1",

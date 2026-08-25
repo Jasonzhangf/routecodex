@@ -1378,6 +1378,24 @@ resources:
     may_enter_client_body: false
     binding_status: design
 
+  - resource_id: v3.front.client_closeout_frame
+    resource_kind: transport_control_resource
+    lifecycle: v3.runtime.restart_handoff_skeleton
+    owner_crate: routecodex-v3-server
+    owner_node: V3StableFrontSocket
+    identity: [connection_identity, request_cycle, response_started, closeout_state]
+    semantic_contract:
+      keepalive_scope: each accepted HTTP request starts a fresh request cycle on the persistent connection
+      cycle_reset: a new request clears the previous response phase and protocol-specific closeout frame atomically
+      preheader_restart: the current accepted request receives one HTTP 503 server_restart_in_progress terminal
+      postheader_restart: only the current request protocol's registered SSE closeout frame may be emitted
+    allowed_writers: [V3StableFrontSocket::set_exec_closeout_frame, V3FrontSseAcceptSkeleton::accept]
+    allowed_readers: [V3StableFrontSocket::close_for_exec_replacement]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, MetadataCenter.payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: source_controlled_runtime_pending_live_replay
+
   - resource_id: v3.request.selected_provider_model_bound
     resource_kind: provider_semantic_projection
     lifecycle: v3.selected_provider_model_binding
