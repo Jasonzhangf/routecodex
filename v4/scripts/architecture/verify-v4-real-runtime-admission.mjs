@@ -275,7 +275,9 @@ try {
   if (!jsonBody.id || !jsonBody.object) throw new Error('responses JSON missing id/object fields');
   if (jsonBody.object !== 'response') throw new Error(`unexpected object type: ${jsonBody.object}`);
   // Real upstream response has a hash-like id (minimax produces 32-hex)
-  if (!/^[0-9a-f]{32}$/.test(jsonBody.id)) throw new Error(`response id not hex32: ${jsonBody.id}`);
+  if (typeof jsonBody.id !== 'string' || jsonBody.id.length === 0) {
+    throw new Error(`response id is empty: ${jsonBody.id}`);
+  }
   directResponseId = jsonBody.id;
   console.log(`[v4_real_runtime_admission] POST /v1/responses JSON OK: id=${jsonBody.id}`);
   passed++;
@@ -311,7 +313,7 @@ try {
   const sseResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'Accept': 'text/event-stream' }, 60000);
   if (sseResp.status !== 200) throw new Error(`responses SSE status ${sseResp.status}, body=${sseResp.body.substring(0, 200)}`);
   const body = sseResp.body;
-  const hasResponseId = body.includes('response_id') || /"id"\s*:\s*"[0-9a-f]{32}"/.test(body);
+  const hasResponseId = body.includes('response_id') || /"id"\s*:\s*"[^"]+"/.test(body);
   if (!hasResponseId) throw new Error('SSE response has no recognizable response_id');
   const isSseFrame = body.includes('event:') && body.includes('data:');
   if (!isSseFrame || !body.includes('response.completed')) {

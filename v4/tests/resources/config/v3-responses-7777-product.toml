@@ -395,6 +395,11 @@ weight = 1
 pool_id = "default"
 selection = "priority"
 [[route_groups.pools.targets]]
+provider_id = "cc-sol"
+model_id = "gpt-5.6-sol"
+priority = 1
+weight = 1
+[[route_groups.pools.targets]]
 provider_id = "opencode-go-zen"
 model_id = "x-preview-f-free"
 priority = 2

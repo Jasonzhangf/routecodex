@@ -801,8 +801,9 @@ fn handle_responses(
                 502,
             ));
         }
+        let client_status = if (200..300).contains(&status) { 200 } else { status };
         return Ok(HttpResponse::streaming(
-            status,
+            client_status,
             "text/event-stream",
             Box::new(ResponsesSseStream::new(
                 stream,
@@ -1046,7 +1047,8 @@ fn handle_responses(
                     502,
                 )
             })?;
-            Ok(json_response(raw.status, projected))
+            let client_status = if (200..300).contains(&raw.status) { 200 } else { raw.status };
+            Ok(json_response(client_status, projected))
         }
         ResponsesProviderPayload::Sse(_) => Err(project_fault(
             request,
