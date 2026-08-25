@@ -10,14 +10,14 @@ id = "primary"
 address = "127.0.0.1:5520"
 
 [[providers]]
-provider_id = "canary"
-config_path = "provider/canary/config.v2.toml"
+provider_id = "cc-sol"
+config_path = "provider/cc-sol/config.v2.toml"
 protocol = "responses"
-wire_model = "deepseek-v4-flash"
+wire_model = "gpt-5.6-sol"
 priority = 1
-entry_models = ["deepseek-v4-flash"]
+entry_models = ["gpt-5.6-sol"]
 
 [[routes]]
 id = "canary"
-models = ["deepseek-v4-flash"]
-targets = ["canary"]
+models = ["gpt-5.6-sol"]
+targets = ["cc-sol"]
