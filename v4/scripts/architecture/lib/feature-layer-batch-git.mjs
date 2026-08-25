@@ -106,30 +106,46 @@ function filesystemBlobIdentity(v4Root, relativePath) {
 
 export function createGitTruth({ repoRoot, v4Root }) {
   const git = (args, options = {}) => run('git', args, repoRoot, options);
+  // Red fixtures replay immutable Git facts many times. Cache read-only facts
+  // within this truth view so the gate remains deterministic without spawning
+  // the same Git subprocess for every mutation case.
+  const factCache = new Map();
+  const cachedFact = (key, producer) => {
+    if (factCache.has(key)) return factCache.get(key);
+    const value = producer();
+    factCache.set(key, value);
+    return value;
+  };
 
   function resolveCommit(ref) {
-    if (typeof ref !== 'string' || !/^[0-9a-f]{7,40}$/.test(ref)) return null;
-    const result = git(['rev-parse', '--verify', `${ref}^{commit}`], {
-      allowFailure: true,
-      encoding: 'utf8',
+    return cachedFact(`resolveCommit:${ref}`, () => {
+      if (typeof ref !== 'string' || !/^[0-9a-f]{7,40}$/.test(ref)) return null;
+      const result = git(['rev-parse', '--verify', `${ref}^{commit}`], {
+        allowFailure: true,
+        encoding: 'utf8',
+      });
+      if (result.status !== 0) return null;
+      const resolved = result.stdout.trim();
+      return FULL_COMMIT_PATTERN.test(resolved) ? resolved : null;
     });
-    if (result.status !== 0) return null;
-    const resolved = result.stdout.trim();
-    return FULL_COMMIT_PATTERN.test(resolved) ? resolved : null;
   }
 
   function isAncestor(baseCommit, headCommit) {
-    if (!FULL_COMMIT_PATTERN.test(baseCommit) || !FULL_COMMIT_PATTERN.test(headCommit)) return false;
-    return git(['merge-base', '--is-ancestor', baseCommit, headCommit], { allowFailure: true }).status === 0;
+    return cachedFact(`isAncestor:${baseCommit}:${headCommit}`, () => {
+      if (!FULL_COMMIT_PATTERN.test(baseCommit) || !FULL_COMMIT_PATTERN.test(headCommit)) return false;
+      return git(['merge-base', '--is-ancestor', baseCommit, headCommit], { allowFailure: true }).status === 0;
+    });
   }
 
   function treeHash(commit) {
-    if (!FULL_COMMIT_PATTERN.test(commit)) return null;
-    const result = git(['rev-parse', '--verify', `${commit}^{tree}`], {
-      allowFailure: true,
-      encoding: 'utf8',
+    return cachedFact(`treeHash:${commit}`, () => {
+      if (!FULL_COMMIT_PATTERN.test(commit)) return null;
+      const result = git(['rev-parse', '--verify', `${commit}^{tree}`], {
+        allowFailure: true,
+        encoding: 'utf8',
+      });
+      return result.status === 0 ? result.stdout.trim() : null;
     });
-    return result.status === 0 ? result.stdout.trim() : null;
   }
 
   function changedPaths(baseCommit, headCommit) {
@@ -175,8 +191,10 @@ export function createGitTruth({ repoRoot, v4Root }) {
 
   function blob(commit, relativePath) {
     if (!FULL_COMMIT_PATTERN.test(commit)) return null;
-    const result = git(['show', `${commit}:${repoPath(relativePath)}`], { allowFailure: true });
-    return result.status === 0 ? result.stdout : null;
+    return cachedFact(`blob:${commit}:${relativePath}`, () => {
+      const result = git(['show', `${commit}:${repoPath(relativePath)}`], { allowFailure: true });
+      return result.status === 0 ? result.stdout : null;
+    });
   }
 
   function blobHash(commit, relativePath) {
@@ -186,60 +204,69 @@ export function createGitTruth({ repoRoot, v4Root }) {
 
   function trackedAt(commit, relativePath) {
     if (!FULL_COMMIT_PATTERN.test(commit)) return false;
-    return git(['cat-file', '-e', `${commit}:${repoPath(relativePath)}`], { allowFailure: true }).status === 0;
+    return cachedFact(`trackedAt:${commit}:${relativePath}`, () =>
+      git(['cat-file', '-e', `${commit}:${repoPath(relativePath)}`], { allowFailure: true }).status === 0);
   }
 
   function blobIdentity(commit, relativePath) {
     if (!FULL_COMMIT_PATTERN.test(commit)) return null;
-    const expectedPath = repoPath(relativePath);
-    const result = git([
-      'ls-tree', '-z', '--full-tree', commit, '--', expectedPath,
-    ], { allowFailure: true });
-    if (result.status !== 0) return null;
-    const entries = nulStrings(result.stdout);
-    if (entries.length !== 1) return null;
-    const [header, actualPath, ...extra] = entries[0].split(String.fromCharCode(9));
-    const match = header.match(/^([0-9]{6}) (blob) ([0-9a-f]{40})$/);
-    if (extra.length > 0 || !match || actualPath !== expectedPath
-        || !['100644', '100755'].includes(match[1])) return null;
-    const bytes = blob(commit, relativePath);
-    if (bytes === null) return null;
-    return {
-      path: normalizeRelative(relativePath),
-      mode: match[1],
-      git_oid: match[3],
-      sha256: sha256(bytes),
-    };
+    return cachedFact(`blobIdentity:${commit}:${relativePath}`, () => {
+      const expectedPath = repoPath(relativePath);
+      const result = git([
+        'ls-tree', '-z', '--full-tree', commit, '--', expectedPath,
+      ], { allowFailure: true });
+      if (result.status !== 0) return null;
+      const entries = nulStrings(result.stdout);
+      if (entries.length !== 1) return null;
+      const [header, actualPath, ...extra] = entries[0].split(String.fromCharCode(9));
+      const match = header.match(/^([0-9]{6}) (blob) ([0-9a-f]{40})$/);
+      if (extra.length > 0 || !match || actualPath !== expectedPath
+          || !['100644', '100755'].includes(match[1])) return null;
+      const bytes = blob(commit, relativePath);
+      if (bytes === null) return null;
+      return {
+        path: normalizeRelative(relativePath),
+        mode: match[1],
+        git_oid: match[3],
+        sha256: sha256(bytes),
+      };
+    });
   }
 
   function ignored(relativePath) {
-    const result = git(['check-ignore', '--no-index', '--quiet', '--', repoPath(relativePath)], {
-      allowFailure: true,
+    return cachedFact(`ignored:${relativePath}`, () => {
+      const result = git(['check-ignore', '--no-index', '--quiet', '--', repoPath(relativePath)], {
+        allowFailure: true,
+      });
+      if (![0, 1].includes(result.status)) {
+        throw new Error(`git check-ignore failed for ${relativePath}`);
+      }
+      return result.status === 0;
     });
-    if (![0, 1].includes(result.status)) {
-      throw new Error(`git check-ignore failed for ${relativePath}`);
-    }
-    return result.status === 0;
   }
 
   function scopeFilesAt(commit, patterns) {
-    const roots = patterns.map((pattern) => repoPath(scopeRoot(pattern)));
-    const result = git(['ls-tree', '-r', '-z', '--name-only', commit, '--', ...roots]);
-    return nulStrings(result.stdout)
-      .filter((candidate) => candidate.startsWith('v4/'))
-      .map((candidate) => candidate.slice(3))
-      .filter((candidate) => patterns.some((pattern) => matchesScope(candidate, pattern)))
-      .sort();
+    return cachedFact(`scopeFilesAt:${commit}:${patterns.join('|')}`, () => {
+      const roots = patterns.map((pattern) => repoPath(scopeRoot(pattern)));
+      const result = git(['ls-tree', '-r', '-z', '--name-only', commit, '--', ...roots]);
+      return nulStrings(result.stdout)
+        .filter((candidate) => candidate.startsWith('v4/'))
+        .map((candidate) => candidate.slice(3))
+        .filter((candidate) => patterns.some((pattern) => matchesScope(candidate, pattern)))
+        .sort();
+    });
   }
 
   function currentScopeFiles(patterns) {
-    const files = [];
-    for (const pattern of patterns) {
-      walkFiles(v4Root, scopeRoot(pattern), files);
-    }
-    return [...new Set(files)]
-      .filter((candidate) => patterns.some((pattern) => matchesScope(candidate, pattern)))
-      .sort();
+    return cachedFact(`currentScopeFiles:${patterns.join('|')}`, () => {
+      const files = [];
+      for (const pattern of patterns) {
+        walkFiles(v4Root, scopeRoot(pattern), files);
+      }
+      return [...new Set(files)]
+        .filter((candidate) => patterns.some((pattern) => matchesScope(candidate, pattern)))
+        .sort();
+    });
   }
 
   function scopeHashAt(commit, patterns) {
@@ -300,10 +327,12 @@ export function createGitTruth({ repoRoot, v4Root }) {
   }
 
   function currentHead() {
-    const result = git(['rev-parse', '--verify', 'HEAD^{commit}'], { encoding: 'utf8' });
-    const commit = result.stdout.trim();
-    if (!FULL_COMMIT_PATTERN.test(commit)) throw new Error('current HEAD is not a full commit');
-    return commit;
+    return cachedFact('currentHead', () => {
+      const result = git(['rev-parse', '--verify', 'HEAD^{commit}'], { encoding: 'utf8' });
+      const commit = result.stdout.trim();
+      if (!FULL_COMMIT_PATTERN.test(commit)) throw new Error('current HEAD is not a full commit');
+      return commit;
+    });
   }
 
   function controlledScopeClean(patterns = ['v4/**']) {
@@ -315,22 +344,24 @@ export function createGitTruth({ repoRoot, v4Root }) {
   }
 
   function cargoGraph(commit = null) {
-    const patterns = ['crates/**', 'cordis/**'];
-    const files = commit === null ? currentScopeFiles(patterns) : scopeFilesAt(commit, patterns);
-    const manifests = files.filter((relativePath) => relativePath.endsWith('/Cargo.toml'));
-    const rootBytes = commit === null
-      ? fs.readFileSync(path.join(v4Root, 'Cargo.toml'))
-      : blob(commit, 'Cargo.toml');
-    if (rootBytes === null) throw new Error('Cargo.toml cannot be read');
-    const manifestSources = new Map();
-    for (const manifest of manifests) {
-      const bytes = commit === null
-        ? fs.readFileSync(path.join(v4Root, manifest))
-        : blob(commit, manifest);
-      if (bytes === null) throw new Error(`${manifest}: tracked manifest cannot be read`);
-      manifestSources.set(manifest, bytes.toString('utf8'));
-    }
-    return parseCargoWorkspace(rootBytes.toString('utf8'), manifestSources);
+    return cachedFact(`cargoGraph:${commit ?? 'worktree'}`, () => {
+      const patterns = ['crates/**', 'cordis/**'];
+      const files = commit === null ? currentScopeFiles(patterns) : scopeFilesAt(commit, patterns);
+      const manifests = files.filter((relativePath) => relativePath.endsWith('/Cargo.toml'));
+      const rootBytes = commit === null
+        ? fs.readFileSync(path.join(v4Root, 'Cargo.toml'))
+        : blob(commit, 'Cargo.toml');
+      if (rootBytes === null) throw new Error('Cargo.toml cannot be read');
+      const manifestSources = new Map();
+      for (const manifest of manifests) {
+        const bytes = commit === null
+          ? fs.readFileSync(path.join(v4Root, manifest))
+          : blob(commit, manifest);
+        if (bytes === null) throw new Error(`${manifest}: tracked manifest cannot be read`);
+        manifestSources.set(manifest, bytes.toString('utf8'));
+      }
+      return parseCargoWorkspace(rootBytes.toString('utf8'), manifestSources);
+    });
   }
 
   function runGate(argv) {

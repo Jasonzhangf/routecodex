@@ -20,7 +20,8 @@ use routecodex_v4_lifecycle::{
 use routecodex_v4_node_container::{NodeContainer, PlanBindings};
 use routecodex_v4_standard_plugins::{compile_standard_plan, StandardHandleRegistry};
 use routecodex_v4_provider::{
-    build_protocol_wire, send_responses, send_responses_streaming, write_provider_profile,
+    build_protocol_wire, build_responses_local_continuation_wire, load_profile, send_responses,
+    send_responses_streaming, write_provider_profile,
     normalize_provider_response, normalize_provider_sse_frame, send_anthropic_messages,
     send_anthropic_messages_streaming, send_openai_chat, send_openai_chat_streaming,
     validate_auth_alias, ProviderInitAuth, ProviderInitOptions, ProviderResponseStream,
@@ -33,8 +34,8 @@ use routecodex_v4_router::{
 use routecodex_v4_runtime::{
     parse_responses_provider_payload,
     project_chat_request_to_responses, project_runtime_fault, project_runtime_fault_with_policy,
-    ResponsesProviderPayload,
-    RuntimeFault, SkeletonRuntime,
+    ContinuationKey, ResponsesProviderPayload, RuntimeFault,
+    LocalContinuationStore, SkeletonRuntime,
 };
 use routecodex_v4_server::{HttpHandler, HttpRequest, HttpResponse, ResponseStream, V4HttpServer};
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
@@ -397,6 +398,7 @@ struct PipelineHandler {
     response_node: Arc<Mutex<NodeContainer>>,
     plugin_registry: Arc<StandardHandleRegistry>,
     availability: Arc<Mutex<V4Availability01SessionScoped>>,
+    local_continuations: Arc<Mutex<LocalContinuationStore>>,
 }
 
 fn publish_node_container(
@@ -453,6 +455,7 @@ impl PipelineHandler {
             )?)),
             plugin_registry: Arc::new(StandardHandleRegistry::new()),
             availability: Arc::new(Mutex::new(V4Availability01SessionScoped::new())),
+            local_continuations: Arc::new(Mutex::new(LocalContinuationStore::new())),
         })
     }
 
@@ -501,6 +504,7 @@ impl HttpHandler for PipelineHandler {
                 &self.response_node,
                 &self.plugin_registry,
                 &self.availability,
+                &self.local_continuations,
                 &request,
                 "responses",
                 "direct",
@@ -513,6 +517,7 @@ impl HttpHandler for PipelineHandler {
                     &self.response_node,
                     &self.plugin_registry,
                     &self.availability,
+                    &self.local_continuations,
                     &request,
                     "chat",
                     "relay",
@@ -563,6 +568,7 @@ fn handle_responses(
     response_node: &Arc<Mutex<NodeContainer>>,
     plugin_registry: &Arc<StandardHandleRegistry>,
     availability: &Arc<Mutex<V4Availability01SessionScoped>>,
+    local_continuations: &Arc<Mutex<LocalContinuationStore>>,
     request: &HttpRequest,
     entry_protocol: &str,
     continuation_owner: &str,
@@ -574,32 +580,22 @@ fn handle_responses(
             400,
         )
     })?;
+    if entry_protocol != "responses" && body.get("previous_response_id").is_some() {
+        return Err(project_fault(
+            request,
+            RuntimeFault::new(
+                "continuation_entry_protocol_mismatch",
+                "previous_response_id is only valid on the Responses entry protocol",
+            ),
+            400,
+        ));
+    }
     let session_scope = request
         .header("x-rccv4-session-id")
         .unwrap_or(&request.request_id);
     let conversation_scope = request
         .header("x-rccv4-conversation-id")
         .unwrap_or(session_scope);
-    runtime
-        .lock()
-        .map_err(|_| {
-            project_fault(
-                request,
-                RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"),
-                500,
-            )
-        })?
-        .execute_request_scoped(
-            &format!(
-                "{entry_protocol}:{}",
-                String::from_utf8_lossy(&request.body)
-            ),
-            &format!("{}:request", request.request_id),
-            request.port,
-            session_scope,
-            conversation_scope,
-        )
-        .map_err(|fault| project_fault(request, fault, 409))?;
     let model = body
         .get("model")
         .and_then(serde_json::Value::as_str)
@@ -684,12 +680,46 @@ fn handle_responses(
             404,
         )
     })?;
+    let continuation_owner = if entry_protocol == "responses" {
+        load_profile(&target.config_path)
+            .map_err(|error| project_fault(request, RuntimeFault::new(&error.code, error.message), 500))?
+            .responses_continuation
+    } else {
+        continuation_owner.to_string()
+    };
+    runtime
+        .lock()
+        .map_err(|_| {
+            project_fault(
+                request,
+                RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"),
+                500,
+            )
+        })?
+        .execute_request_scoped_with_owner(
+            &format!(
+                "{entry_protocol}:{}",
+                String::from_utf8_lossy(&request.body)
+            ),
+            &format!("{}:request", request.request_id),
+            request.port,
+            session_scope,
+            conversation_scope,
+            Some(&continuation_owner),
+        )
+        .map_err(|fault| project_fault(request, fault, 409))?;
     let provider_body = client_to_responses_request(&body, entry_protocol)
         .map_err(|fault| project_fault(request, fault, 400))?;
-    let wire_body = build_protocol_wire(
-        &target.protocol,
+    let wire_body = build_continuation_or_protocol_wire(
+        &body,
         &provider_body,
-        &target.wire_model,
+        &target,
+        entry_protocol,
+        &continuation_owner,
+        request.port,
+        session_scope,
+        conversation_scope,
+        local_continuations,
         stream_mode,
     )
     .map_err(|error| {
@@ -802,20 +832,34 @@ fn handle_responses(
             ));
         }
         let client_status = if (200..300).contains(&status) { 200 } else { status };
+        let mut response_stream = ResponsesSseStream::new(
+            stream,
+            Arc::clone(runtime),
+            request.request_id.clone(),
+            request.port,
+            entry_protocol.to_string(),
+            continuation_owner.to_string(),
+            target.protocol.clone(),
+            session_scope.to_string(),
+            conversation_scope.to_string(),
+        );
+        if entry_protocol == "responses" && continuation_owner == "relay" {
+            let context_seed = wire_body
+                .get("input")
+                .cloned()
+                .ok_or_else(|| {
+                    project_fault(
+                        request,
+                        RuntimeFault::new("continuation_commit", "stream input is missing"),
+                        400,
+                    )
+                })?;
+            response_stream.set_local_continuation(Arc::clone(local_continuations), context_seed);
+        }
         return Ok(HttpResponse::streaming(
             client_status,
             "text/event-stream",
-            Box::new(ResponsesSseStream::new(
-                stream,
-                Arc::clone(runtime),
-                request.request_id.clone(),
-                request.port,
-                entry_protocol.to_string(),
-                continuation_owner.to_string(),
-                target.protocol.clone(),
-                session_scope.to_string(),
-                conversation_scope.to_string(),
-            )),
+            Box::new(response_stream),
         ));
     }
     let mut raw = send_target_nonstream(&target, &wire_body).map_err(|error| {
@@ -1020,14 +1064,15 @@ fn handle_responses(
                         500,
                     )
                 })?
-                .execute_provider_response_scoped(
+                .execute_provider_response_scoped_with_seed(
                     &provider_raw,
                     &format!("{}:response", request.request_id),
                     request.port,
                     session_scope,
                     conversation_scope,
                     entry_protocol,
-                    continuation_owner,
+                    &continuation_owner,
+                    Some(serde_json::to_string(wire_body.get("input").unwrap_or(&serde_json::Value::Null)).map_err(|error| project_fault(request, RuntimeFault::new("continuation_commit", error.to_string()), 500))?),
                 )
                 .map_err(|fault| project_fault(request, fault, 502))?;
             let frame = report.client_frame.ok_or_else(|| {
@@ -1077,6 +1122,70 @@ fn client_to_responses_request(
     ))
 }
 
+fn build_continuation_or_protocol_wire(
+    client_body: &serde_json::Value,
+    provider_body: &serde_json::Value,
+    target: &routecodex_v4_router::SelectedTarget,
+    entry_protocol: &str,
+    continuation_owner: &str,
+    port: u16,
+    session_scope: &str,
+    conversation_scope: &str,
+    local_continuations: &Arc<Mutex<LocalContinuationStore>>,
+    stream: bool,
+) -> Result<serde_json::Value, routecodex_v4_provider::ProviderTransportError> {
+    if entry_protocol == "responses"
+        && target.protocol == "responses"
+        && continuation_owner == "relay"
+        && client_body.get("previous_response_id").is_some()
+    {
+        let response_id = client_body
+            .get("previous_response_id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| routecodex_v4_provider::ProviderTransportError {
+                code: "continuation_locator_invalid".to_string(),
+                message: "previous_response_id must be a non-empty string".to_string(),
+                status: None,
+            })?;
+        let key = ContinuationKey::new(
+            "responses",
+            "relay",
+            port,
+            session_scope,
+            conversation_scope,
+        );
+        let ordered_context = local_continuations
+            .lock()
+            .map_err(|_| routecodex_v4_provider::ProviderTransportError {
+                code: "continuation_store_lock".to_string(),
+                message: "local continuation store lock poisoned".to_string(),
+                status: None,
+            })?
+            .load(&key, response_id)
+            .map_err(|fault| routecodex_v4_provider::ProviderTransportError {
+                code: "continuation_restore".to_string(),
+                message: fault.to_string(),
+                status: None,
+            })?
+            .ordered_context
+            .clone();
+        let prior_context: serde_json::Value = serde_json::from_str(&ordered_context)
+            .map_err(|error| routecodex_v4_provider::ProviderTransportError {
+                code: "continuation_context_decode".to_string(),
+                message: error.to_string(),
+                status: None,
+            })?;
+        return build_responses_local_continuation_wire(
+            &prior_context,
+            provider_body,
+            &target.wire_model,
+            stream,
+        );
+    }
+    build_protocol_wire(&target.protocol, provider_body, &target.wire_model, stream)
+}
+
 trait ProviderSseSource: Send {
     fn read_chunk(&mut self, chunk: &mut [u8]) -> Result<usize, String>;
     fn wait(&mut self) -> Result<(), String>;
@@ -1108,6 +1217,8 @@ struct ResponsesSseStream<S = ProviderResponseStream> {
     frame_buffer: Vec<u8>,
     terminal_seen: bool,
     close_after_pending: bool,
+    local_context_seed: Option<serde_json::Value>,
+    local_continuations: Option<Arc<Mutex<LocalContinuationStore>>>,
 }
 
 impl<S: ProviderSseSource> ResponsesSseStream<S> {
@@ -1137,7 +1248,65 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
             frame_buffer: Vec::new(),
             terminal_seen: false,
             close_after_pending: false,
+            local_context_seed: None,
+            local_continuations: None,
         }
+    }
+
+    fn set_local_context_seed(&mut self, seed: serde_json::Value) {
+        self.local_context_seed = Some(seed);
+    }
+
+    fn set_local_continuation(
+        &mut self,
+        store: Arc<Mutex<LocalContinuationStore>>,
+        seed: serde_json::Value,
+    ) {
+        self.local_continuations = Some(store);
+        self.set_local_context_seed(seed);
+    }
+
+    fn commit_local_terminal_frame(&self, frame: &[u8]) -> Result<(), RuntimeFault> {
+        if self.entry_protocol != "responses" || self.continuation_owner != "relay" {
+            return Ok(());
+        }
+        let Some(store) = &self.local_continuations else { return Ok(()); };
+        let data = frame
+            .split(|byte| *byte == b'\n' || *byte == b'\r')
+            .find_map(|line| line.strip_prefix(b"data: "))
+            .ok_or_else(|| RuntimeFault::new("continuation_commit", "terminal SSE data missing"))?;
+        let payload: serde_json::Value = serde_json::from_slice(data)
+            .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))?;
+        let response = payload.get("response").unwrap_or(&payload);
+        let response_id = response
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| RuntimeFault::new("continuation_commit", "terminal response id missing"))?;
+        let mut ordered = match self.local_context_seed.clone() {
+            Some(serde_json::Value::Array(items)) => items,
+            Some(value) => vec![value],
+            None => Vec::new(),
+        };
+        if let Some(output) = response.get("output") {
+            if let Some(items) = output.as_array() {
+                ordered.extend(items.iter().cloned());
+            } else {
+                ordered.push(output.clone());
+            }
+        }
+        let key = ContinuationKey::new(
+            "responses",
+            "relay",
+            self.port,
+            &self.session_scope,
+            &self.conversation_scope,
+        );
+        store
+            .lock()
+            .map_err(|_| RuntimeFault::new("continuation_store_lock", "local continuation store lock poisoned"))?
+            .rotate(key, response_id, &serde_json::Value::Array(ordered).to_string())
+            .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))
     }
 
     fn queue_error(&mut self, message: impl Into<String>) {
@@ -1168,13 +1337,19 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
         } else {
             "none"
         };
+        let continuation_seed = self
+            .local_context_seed
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))?;
         let report = self
             .runtime
             .lock()
             .map_err(|_| {
                 RuntimeFault::new("response_runtime_lock", "response runtime lock poisoned")
             })?
-            .execute_provider_response_scoped(
+            .execute_provider_response_scoped_with_seed(
                 std::str::from_utf8(&normalized_frame)
                     .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?,
                 &format!("{}:sse:{}", self.request_id, self.frame_sequence),
@@ -1183,6 +1358,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
                 &self.conversation_scope,
                 &self.entry_protocol,
                 owner,
+                continuation_seed,
             )?;
         let client_frame = report.client_frame.ok_or_else(|| {
             RuntimeFault::new(
@@ -1190,6 +1366,9 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
                 "response chain produced no client frame",
             )
         })?;
+        if terminal {
+            self.commit_local_terminal_frame(frame)?;
+        }
         self.pending.extend_from_slice(client_frame.as_bytes());
         Ok(())
     }
@@ -1593,6 +1772,76 @@ targets = ["mock"]
         );
         chunk.clear();
         assert!(!stream.next_chunk(&mut chunk).expect("stream must close"));
+    }
+
+    #[test]
+    fn local_responses_terminal_frame_commits_ordered_context() {
+        let store = Arc::new(Mutex::new(LocalContinuationStore::new()));
+        let frame = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-local\",\"output\":[{\"type\":\"message\"}]}}\n\n";
+        let mut stream = stream_for(vec![Ok(frame.to_vec())], "responses", "relay");
+        stream.set_local_continuation(
+            Arc::clone(&store),
+            serde_json::json!([{"role":"user","content":"hello"}]),
+        );
+        let mut chunk = Vec::new();
+        assert!(stream.next_chunk(&mut chunk).expect("terminal frame projects"));
+        let key = ContinuationKey::new(
+            "responses",
+            "relay",
+            u16::from_ne_bytes([0, 1]),
+            "session-1",
+            "conversation-1",
+        );
+        let ordered_context = {
+            let store_guard = store.lock().expect("runtime lock");
+            store_guard
+                .load(&key, "resp-local")
+                .expect("terminal response is committed")
+                .ordered_context
+                .clone()
+        };
+        let context: serde_json::Value = serde_json::from_str(&ordered_context).expect("context JSON");
+        assert_eq!(context.as_array().expect("ordered context").len(), 2);
+    }
+
+    #[test]
+    fn local_continuation_wire_uses_exact_locator_and_preserves_request_fields() {
+        let store = Arc::new(Mutex::new(LocalContinuationStore::new()));
+        let key = ContinuationKey::new("responses", "relay", 5520, "session-1", "conversation-1");
+        store
+            .lock()
+            .expect("runtime lock")
+            .commit(key, "resp-1", r#"[{"role":"user","content":"first"}]"#)
+            .expect("seed local continuation");
+        let target = routecodex_v4_router::SelectedTarget {
+            provider_id: "cc-sol".to_string(),
+            config_path: "/tmp/provider.toml".to_string(),
+            protocol: "responses".to_string(),
+            wire_model: "gpt-wire".to_string(),
+            auth_alias: Some("key1".to_string()),
+        };
+        let client = serde_json::json!({
+            "model":"gpt-wire",
+            "previous_response_id":"resp-1",
+            "input":[{"role":"user","content":"second"}],
+            "tools":[{"type":"function"}]
+        });
+        let wire = build_continuation_or_protocol_wire(
+            &client,
+            &client,
+            &target,
+            "responses",
+            "relay",
+            5520,
+            "session-1",
+            "conversation-1",
+            &store,
+            false,
+        )
+        .expect("local continuation wire");
+        assert!(wire.get("previous_response_id").is_none());
+        assert_eq!(wire["tools"][0]["type"], "function");
+        assert_eq!(wire["input"].as_array().expect("input array").len(), 2);
     }
 
     #[test]

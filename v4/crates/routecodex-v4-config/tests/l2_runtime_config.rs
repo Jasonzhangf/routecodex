@@ -266,7 +266,7 @@ fn v3_7777_fixture_preserves_all_route_pools_and_targets() {
         .iter()
         .map(|pool| pool.targets.len())
         .sum();
-    assert_eq!(target_count, 42);
+    assert_eq!(target_count, 43);
     assert_eq!(product.route_groups[0].pools[0].pool_id, "anthropic_entry");
     assert_eq!(product.route_groups[0].pools[0].precedence, Some(100));
     let longcontext = product.route_groups[0]

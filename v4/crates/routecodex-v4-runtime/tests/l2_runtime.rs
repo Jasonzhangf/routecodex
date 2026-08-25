@@ -11,6 +11,7 @@ use routecodex_v4_runtime::{
     release_scope_via_bridge, select_relay_operator, ContinuationFacts, ContinuationKey,
     ExecutionBinding, ExecutionContext, NodePluginPlan, PayloadCycleError, PayloadCycleRegistry,
     PayloadCycleState, RelayOperator, ScopeError, ScopeRegistry, SkeletonRuntime,
+    LocalContinuationError, LocalContinuationStore,
 };
 use routecodex_v4_skeleton::{
     BindingContract, ChainDefinition, Edge, NodeSlot, PluginBinding, SkeletonPlan,
@@ -264,16 +265,16 @@ fn relay_operator_select_uses_typed_facts_only() {
         "direct",
         "direct",
     ))
-    .expect("responses + direct owner selects direct operator");
+        .expect("responses + direct owner selects direct operator");
     assert_eq!(direct, RelayOperator::Direct);
-    let error = select_relay_operator(&ContinuationFacts::new(
+    let responses_relay = select_relay_operator(&ContinuationFacts::new(
         "responses",
         "responses",
         "relay",
         "relay",
     ))
-    .expect_err("responses entry with relay owner must fail (no typed-facts match)");
-    assert_eq!(error.code, "relay_operator_select");
+    .expect("responses + explicit local relay owner selects relay operator");
+    assert_eq!(responses_relay, RelayOperator::Relay);
     let chat_direct =
         select_relay_operator(&ContinuationFacts::new("chat", "hub", "direct", "direct"))
             .expect_err("chat entry with direct owner must fail (no typed-facts match)");
@@ -308,6 +309,52 @@ fn continuation_three_key_save_and_restore_roundtrip() {
         .expect("request chain restores continuation");
     assert!(restored.continuation_restored);
     assert_eq!(restored.continuation_owner.as_deref(), Some("direct"));
+}
+
+#[test]
+fn local_continuation_store_requires_exact_response_locator_and_context() {
+    let key = ContinuationKey::new("responses", "relay", 5520, "session-1", "conversation-1");
+    let mut store = LocalContinuationStore::new();
+    store
+        .commit(key.clone(), "resp-1", "[{\"role\":\"user\",\"content\":\"hi\"}]")
+        .expect("local continuation commit");
+    let record = store.load(&key, "resp-1").expect("exact locator load");
+    assert_eq!(record.response_id, "resp-1");
+    assert!(matches!(
+        store.load(&key, "resp-other"),
+        Err(LocalContinuationError::ResponseIdMismatch)
+    ));
+    assert!(matches!(
+        store.commit(key.clone(), "resp-2", "[]"),
+        Err(LocalContinuationError::AlreadyBound)
+    ));
+    store.release(&key).expect("release");
+    assert!(matches!(
+        store.load(&key, "resp-1"),
+        Err(LocalContinuationError::Released)
+    ));
+    store
+        .rotate(key.clone(), "resp-2", "[{\"role\":\"user\",\"content\":\"next\"}]")
+        .expect("rotation after terminal release");
+    assert_eq!(store.load(&key, "resp-2").expect("rotated locator").response_id, "resp-2");
+}
+
+#[test]
+fn responses_local_owner_override_is_typed_before_request_classification() {
+    let runtime = SkeletonRuntime::load(&contract_json()).expect("skeleton plan");
+    let report = runtime
+        .execute_request_scoped_with_owner(
+            "responses:{\"model\":\"gpt-wire\",\"input\":[]}",
+            "r-local-owner",
+            5520,
+            "session-local",
+            "conversation-local",
+            Some("relay"),
+        )
+        .expect("typed local owner request");
+    assert_eq!(report.continuation_owner.as_deref(), Some("relay"));
+    assert_eq!(report.execution_mode.as_deref(), Some("relay"));
+    assert!(report.relay_operator_selected);
 }
 
 #[test]

@@ -91,8 +91,9 @@ error chain / MetadataCenter / Config v2 / Responses Direct compat 已闭环）�
   `docs/architecture/maps/resource-map.json`）。
 - feature 映射：`v4/docs/architecture/v4-v3-feature-mapping.yml`
   （relay/continuation feature 已逐条 mapped：remote_continuation_contract_store、
-  responses_direct_remote_continuation_integration、anthropic_relay_local_
-  continuation_integration、relay_runtime_core/shared 等）。
+  responses_direct_remote_continuation_integration、responses_relay_local_
+  continuation_integration、anthropic_relay_local_continuation_integration、
+  relay_runtime_core/shared 等）。
 - V3 语义参考（只读，不修改）：`docs/architecture/v3-mainline-call-map.yml`、
   `docs/goals/v3-responses-direct-mvp-test-design.md`。
 - Direct compat 模板：`v4/docs/architecture/v4-responses-direct-compatibility-slice.yml`。
