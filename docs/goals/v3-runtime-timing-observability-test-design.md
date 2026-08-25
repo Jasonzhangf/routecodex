@@ -45,7 +45,8 @@ projection preparation remain internal Runtime time.
    response block, and only formats numeric milliseconds.
 9. A terminal-success body Drop before clean EOF emits no terminal console
    projection while timing is still absent. A clean-EOF completion with missing
-   timing is a Runtime observability contract failure and remains explicit.
+   timing emits `completed_observation_warning`; real stream/runtime errors remain
+   explicit.
 10. Direct-to-Relay and Relay-to-Direct protocol handoffs transfer the same
     Runtime-owned timing/attempt accumulator through a typed diagnostic
     side-channel. The receiving Runtime continues that accumulator; Server may
@@ -88,8 +89,8 @@ projection preparation remain internal Runtime time.
   observation.
 - A terminal-success Drop before clean EOF cannot fabricate completion, 499, or
   `runtime_observability_contract`.
-- A clean-EOF terminal success with missing timing cannot be silently
-  suppressed; it must expose `runtime_observability_contract`.
+- A clean-EOF terminal success with missing timing exposes an observation warning
+  without `event=failed`, status 500, or client payload mutation.
 - A second timing owner cannot appear in Server, SSE transport, Virtual Router,
   Target, or provider codec crates.
 - Request/response payload semantics are byte-equivalent apart from existing

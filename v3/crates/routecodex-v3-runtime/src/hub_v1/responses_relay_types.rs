@@ -298,6 +298,23 @@ impl V3RuntimeStreamObservation {
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())
     }
 
+    pub fn merge_snapshot(
+        &self,
+        incoming: &V3RuntimeStreamObservationSnapshot,
+    ) -> Result<(), String> {
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        if incoming.response_status.is_some() { snapshot.response_status = incoming.response_status.clone(); }
+        if incoming.finish_reason.is_some() { snapshot.finish_reason = incoming.finish_reason.clone(); }
+        if incoming.usage.is_some() { snapshot.usage = incoming.usage.clone(); }
+        if incoming.timing.is_some() { snapshot.timing = incoming.timing.clone(); }
+        if !incoming.typed_object_types.is_empty() { snapshot.typed_object_types = incoming.typed_object_types.clone(); }
+        if !incoming.provider_raw_sse.is_empty() { snapshot.provider_raw_sse = incoming.provider_raw_sse.clone(); }
+        Ok(())
+    }
+
     pub fn record_provider_event_json(&self, event: &Value) -> Result<(), String> {
         let event_type = event.get("type").and_then(Value::as_str).map(str::trim);
         let semantic = event.get("response").unwrap_or(event);

@@ -2329,7 +2329,7 @@ async fn direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_a
 }
 
 #[tokio::test]
-async fn direct_sse_console_clean_eof_exposes_missing_runtime_timing_contract() {
+async fn direct_sse_console_clean_eof_does_not_project_missing_runtime_timing_as_failure() {
     let log_file = test_v3_console_log_file("direct-console-sse-clean-eof-missing-timing");
     let _ = std::fs::remove_file(&log_file);
     let state = test_v3_listener_state(&log_file, 4444);
@@ -2375,17 +2375,13 @@ async fn direct_sse_console_clean_eof_exposes_missing_runtime_timing_contract() 
         .contains("response.completed"));
 
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
-    assert!(log.contains("event=failed"), "{log}");
-    assert!(log.contains("status=500"), "{log}");
-    assert!(
-        log.contains("subcode=runtime_observability_contract"),
-        "{log}"
-    );
+    assert!(log.contains("event=completed_observation_warning"), "{log}");
+    assert!(!log.contains("event=failed"), "{log}");
+    assert!(!log.contains("status=500"), "{log}");
     assert!(
         log.contains("successful V3 Runtime observability is missing timing"),
         "{log}"
     );
-    assert!(!log.contains("event=completed"), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
 
