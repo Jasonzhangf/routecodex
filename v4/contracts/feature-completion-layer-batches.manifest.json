@@ -343,6 +343,8 @@
       "added:consumer:source_path:routecodex-v4-runtime-bin->routecodex-v4-plugin-plan",
       "added:consumer:source_path:routecodex-v4-runtime-bin->routecodex-v4-standard-plugins",
       "added:mainline:undefined:routecodex-v4-runtime-bin->routecodex-v4-router:routecodex-v4-runtime-bin::project_provider_fault",
+      "added:regression:source-deps:routecodex-v4-runtime->routecodex-v4-node-container",
+      "added:regression:source-deps:routecodex-v4-runtime->routecodex-v4-plugin-plan",
       "added:workspace:member:crates/routecodex-v4-config",
       "added:workspace:member:crates/routecodex-v4-edge",
       "added:workspace:member:crates/routecodex-v4-runtime-bin",
