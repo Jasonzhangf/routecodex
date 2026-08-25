@@ -10,7 +10,8 @@
 
 验收标准：
 
-1. `v4-resource-operation-map.yml` 49 条全部 anchored，且 `v4/.appsdk/maps/resource-map.json`
+1. `v4-resource-operation-map.yml` 49 条全部 anchored，且产品 resource map JSON（2026-08-23 后
+   为 `docs/architecture/maps/resource-map.json`）
    双源一致；`verify-v4-resource-binding.mjs` 对每一条校验 owner crate 存在、owner node
    在 node-graph contract 注册、owner symbols 在源码可解析、allowed/forbidden 与
    data-control-boundary contract 一致。
@@ -157,7 +158,7 @@
   re-freeze（begin-version -> evidence -> promote -> freeze -> publish），超出
   本 slice 且需 Jason 明确批准；owner 迁移后不再触发。
 - 同步动作：`v4-resource-operation-map.yml` owner_crate/owner_node/owner_symbols、
-  `.appsdk/maps/resource-map.json` owner、node-graph `registered_nodes` 目录
+  产品 resource map owner（当前路径 `docs/architecture/maps/resource-map.json`）、node-graph `registered_nodes` 目录
   三源一致；frozen control/error/edge/base-node Active artifact 零修改。
 
 ### 9.2 关系 validator 落点

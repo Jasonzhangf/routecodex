@@ -3,10 +3,11 @@
 .appsdk/sdk.bin
 /active/lib/
 /generated/
+# END APPSDK MANAGED
+
 /node_modules/
 /dist/
 /artifacts/
-# END APPSDK MANAGED
 
 Cargo.lock
 

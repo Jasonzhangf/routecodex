@@ -39,7 +39,7 @@ const readYaml = (file) => {
 };
 
 const parity = readYaml('docs/architecture/v3-v4-semantic-parity-map.yml');
-const verification = readJson('.appsdk/maps/verification-map.json');
+const verification = readJson('docs/architecture/maps/verification-map.json');
 const resourceMap = readYaml('docs/architecture/v4-resource-operation-map.yml');
 
 if (!parity || !verification || !resourceMap) process.exit(1);

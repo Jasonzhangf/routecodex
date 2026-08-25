@@ -38,7 +38,7 @@ const readYaml = (file) => {
 };
 
 const slice = readYaml('docs/architecture/v4-responses-direct-compatibility-slice.yml');
-const verification = readJson('.appsdk/maps/verification-map.json');
+const verification = readJson('docs/architecture/maps/verification-map.json');
 const resourceMap = readYaml('docs/architecture/v4-resource-operation-map.yml');
 
 if (!slice || !verification || !resourceMap) process.exit(1);

@@ -469,7 +469,7 @@ function loadCurrent() {
     nodeGraph: readJson('contracts/node-graph.contract.json'),
     resourceMap: readYaml('docs/architecture/v4-resource-operation-map.yml'),
     skeleton: readJson('contracts/skeleton-plan.contract.json'),
-    mainline: readJson('.appsdk/maps/mainline-call-map.json'),
+    mainline: readJson('docs/architecture/maps/mainline-call-map.json'),
     sources: {
       runtime: readText('crates/routecodex-v4-runtime/src/lib.rs'),
       skeleton: readText('crates/routecodex-v4-skeleton/src/lib.rs'),

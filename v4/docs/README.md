@@ -11,6 +11,23 @@ V3 remains the existing runtime baseline. V4 must not modify, rename, or consume
 - [`architecture/v4-data-control-plane-boundary.md`](architecture/v4-data-control-plane-boundary.md) — data/control physical-separation contract.
 - [`architecture/v4-pipeline-abstraction-model.md`](architecture/v4-pipeline-abstraction-model.md) — six-axis pipeline abstraction and V3 coverage model.
 
+## Architecture maps
+
+AppSDK 0.1.5 owns the canonical governance skeleton in `.appsdk/maps/`, and its
+contents must remain exactly aligned with the SDK lock. V4 product truth lives in
+`docs/architecture/maps/`: `function-map.json`, `resource-map.json`,
+`mainline-call-map.json`, and `verification-map.json`. Architecture gates read
+these product maps from that path; `.appsdk/maps/module-registry.json` remains
+the AppSDK-owned module registry.
+
+AppSDK lifecycle `ReviewRecord` fields continue to bind the SDK-owned map
+skeleton required by AppSDK verification. V4 reviews created on or after the
+2026-08-23 product-map cutover must additionally bind
+`v4_product_map_root = docs/architecture/maps`, the four current product-map
+hashes, and a DSH reviewer. The V4 isolation gate rejects missing, stale, or
+wrong-surface bindings and rejects architecture scripts that read product truth
+from `.appsdk/maps/`.
+
 ## Product completion
 
 - [`goals/v4-feature-completion-plan.md`](goals/v4-feature-completion-plan.md) — product-completion source of truth: V3 feature parity states, production NodeContainer migration, protocol/provider/router/continuation/tool/admin/release closeout, evidence gates, and canary/cutover readiness.

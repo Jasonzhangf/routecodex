@@ -1,0 +1,368 @@
+{
+  "schema_version": 2,
+  "manifest_id": "V4-LAYER-GATE-001",
+  "status": "active",
+  "owner_feature_id": "v4.governance.feature_layer_batch_admission",
+  "owner_module_id": "routecodex-v4-governance",
+  "canonical_contract": {
+    "path": "v4/docs/goals/v4-feature-completion-plan.md",
+    "sha256": "sha256:21dd9b6551048d900be523a325355e825c67ebb9f93e5b0bad34c3079abf32f0",
+    "required_anchors": [
+      "# 28. `RUNTIME-007` 后的分层批量开发与接线计划",
+      "同层独立任务全部达到 `source_green` 后才允许 production wiring",
+      "A–G 全部 `source_green`，且 conditional H 为 `source_green` 或 `not_needed_by_evidence`",
+      "review 状态不参与 `source_green` 判定"
+    ]
+  },
+  "definition": {
+    "required_batch_ids": ["A", "B", "C", "D", "E", "F", "G"],
+    "conditional_batch_ids": ["H"],
+    "source_ready_status": "source_green",
+    "conditional_ready_statuses": ["source_green", "not_needed_by_evidence"],
+    "required_prerequisite_ids": ["V4-RUNTIME-002"],
+    "required_evidence_roles": ["positive", "red_gate", "boundary_audit", "plane_isolation"],
+    "integration_owner": "v4.feature_completion.integration",
+    "review_can_satisfy_source": false,
+    "normal_payload_carrier": "forbidden",
+    "source_dependency_policy": "shared_contract_modules_only_before_wiring",
+    "candidate_record_schema": "contracts/records/fix-candidate-record.schema.json",
+    "evidence_record_schema": "contracts/records/evidence-record.schema.json"
+  },
+  "baseline": {
+    "feature_id": "V4-CURRENT-TREE",
+    "required_commit": "dde0f292751df9d83cc9df817ba0f48057674703",
+    "resolved_commit": "dde0f292751df9d83cc9df817ba0f48057674703",
+    "runtime_module_id": "routecodex-v4-runtime",
+    "provenance": "current_v4_tree",
+    "object_status": "reachable",
+    "replay_status": "pass",
+    "source_paths": [
+      "crates/routecodex-v4-runtime/src/lib.rs",
+      "crates/routecodex-v4-node-container/src/lib.rs",
+      "crates/routecodex-v4-runtime-bin/src/main.rs"
+    ],
+    "evidence_refs": [
+      {"role":"baseline_replay","gate_id":"v4_current_tree_baseline_replay","path":"docs/evidence/feature-completion/M1/V4-CURRENT-TREE/baseline-replay.json"}
+    ]
+  },
+  "prerequisites": [
+    {
+      "feature_id": "V4-RUNTIME-002",
+      "status": "pass",
+      "gap_detected": true,
+      "epoch_closure_lane_status": "source_green",
+      "audit_commit": "98a81f86aeb22b240d804b168ad18c076f584daf",
+      "source_paths": [
+        "crates/routecodex-v4-node-container/src/lib.rs",
+        "crates/routecodex-v4-node-container/tests/l2_epoch.rs"
+      ],
+      "evidence_refs": [
+        {"role":"closure_audit","gate_id":"v4_node_container_epoch_closure_audit","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/closure-audit.json"}
+      ]
+    }
+  ],
+  "batches": [
+    {
+      "batch_id": "A",
+      "conditional": false,
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.parity.product_ledger",
+      "module_ids": ["routecodex-v4-parity"],
+      "owned_paths": [
+        "scripts/architecture/verify-v4-product-differential.mjs",
+        "scripts/architecture/verify-v4-product-parity-ledger.mjs",
+        "scripts/architecture/verify-v4-product-parity-status.mjs",
+        "scripts/architecture/verify-v4-v3-baseline-delta.mjs"
+      ],
+      "source_dependencies": [],
+      "status": "source_green",
+      "tasks": [
+        {
+          "task_id":"V4-PARITY-001","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate.json",
+          "function_ids":["v4.parity.product_ledger"],"resource_ids":["v4.parity.product_ledger"],
+          "source_paths":["scripts/architecture/verify-v4-product-parity-ledger.mjs"],"support_paths":[],
+          "required_gate_ids":["v4_parity_ledger_positive","v4_parity_ledger_red","v4_parity_ledger_boundary","v4_parity_ledger_plane"],"mainline_binding":"forbidden_before_integration",
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_parity_ledger_positive","path":"docs/evidence/feature-completion/M1/V4-PARITY-001/positive.json"},
+            {"role":"red_gate","gate_id":"v4_parity_ledger_red","path":"docs/evidence/feature-completion/M1/V4-PARITY-001/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_parity_ledger_boundary","path":"docs/evidence/feature-completion/M1/V4-PARITY-001/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_parity_ledger_plane","path":"docs/evidence/feature-completion/M1/V4-PARITY-001/plane-isolation.json"}
+          ]
+        },
+        {
+          "task_id":"V4-PARITY-002","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate.json",
+          "function_ids":["v4.parity.baseline_delta"],"resource_ids":["v4.parity.baseline_delta"],
+          "source_paths":["scripts/architecture/verify-v4-v3-baseline-delta.mjs"],"support_paths":[],
+          "required_gate_ids":["v4_parity_ledger_positive","v4_parity_ledger_red","v4_parity_ledger_boundary","v4_parity_ledger_plane"],"mainline_binding":"forbidden_before_integration",
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_parity_ledger_positive","path":"docs/evidence/feature-completion/M1/V4-PARITY-002/positive.json"},
+            {"role":"red_gate","gate_id":"v4_parity_ledger_red","path":"docs/evidence/feature-completion/M1/V4-PARITY-002/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_parity_ledger_boundary","path":"docs/evidence/feature-completion/M1/V4-PARITY-002/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_parity_ledger_plane","path":"docs/evidence/feature-completion/M1/V4-PARITY-002/plane-isolation.json"}
+          ]
+        },
+        {
+          "task_id":"V4-PARITY-003","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate.json",
+          "function_ids":["v4.parity.status_gate"],"resource_ids":["v4.parity.status_gate"],
+          "source_paths":["scripts/architecture/verify-v4-product-parity-status.mjs"],"support_paths":[],
+          "required_gate_ids":["v4_parity_ledger_positive","v4_parity_ledger_red","v4_parity_ledger_boundary","v4_parity_ledger_plane"],"mainline_binding":"forbidden_before_integration",
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_parity_ledger_positive","path":"docs/evidence/feature-completion/M1/V4-PARITY-003/positive.json"},
+            {"role":"red_gate","gate_id":"v4_parity_ledger_red","path":"docs/evidence/feature-completion/M1/V4-PARITY-003/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_parity_ledger_boundary","path":"docs/evidence/feature-completion/M1/V4-PARITY-003/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_parity_ledger_plane","path":"docs/evidence/feature-completion/M1/V4-PARITY-003/plane-isolation.json"}
+          ]
+        },
+        {
+          "task_id":"V4-PARITY-HARNESS-001","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate.json",
+          "function_ids":["v4.parity.differential_harness"],"resource_ids":["v4.parity.differential_harness"],
+          "source_paths":["scripts/architecture/verify-v4-product-differential.mjs"],"support_paths":[],
+          "required_gate_ids":["v4_parity_ledger_positive","v4_parity_ledger_red","v4_parity_ledger_boundary","v4_parity_ledger_plane"],"mainline_binding":"forbidden_before_integration",
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_parity_ledger_positive","path":"docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/positive.json"},
+            {"role":"red_gate","gate_id":"v4_parity_ledger_red","path":"docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_parity_ledger_boundary","path":"docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_parity_ledger_plane","path":"docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/plane-isolation.json"}
+          ]
+        }
+      ]
+    },
+    {
+      "batch_id": "B",
+      "conditional": false,
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.runtime.node_plan_bundle",
+      "module_ids": ["routecodex-v4-plugin-plan"],
+      "owned_paths": ["crates/routecodex-v4-plugin-plan/**"],
+      "source_dependencies": [],
+      "status": "source_green",
+      "tasks": [
+        {
+          "task_id":"V4-RUNTIME-003",
+          "status":"source_green",
+          "candidate_record":"docs/evidence/feature-completion/M1/V4-RUNTIME-003/fix-candidate.json",
+          "function_ids":["v4.runtime.node_plan_bundle"],
+          "resource_ids":["v4.runtime.node_plan_bundle"],
+          "source_paths":["crates/routecodex-v4-plugin-plan/src/lib.rs"],
+          "support_paths":[
+            "docs/architecture/maps/function-map.json",
+            "docs/architecture/maps/resource-map.json",
+            "docs/architecture/maps/verification-map.json"
+          ],
+          "required_gate_ids":["v4_runtime_003_plan_bundle_positive","v4_runtime_003_plan_bundle_red","v4_runtime_003_plan_bundle_boundary","v4_runtime_003_plan_bundle_plane"],
+          "mainline_binding":"forbidden_before_integration",
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_runtime_003_plan_bundle_positive","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-003/positive.json"},
+            {"role":"red_gate","gate_id":"v4_runtime_003_plan_bundle_red","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-003/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_runtime_003_plan_bundle_boundary","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-003/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_runtime_003_plan_bundle_plane","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-003/plane-isolation.json"}
+          ]
+        }
+      ]
+    },
+    {
+      "batch_id": "C",
+      "conditional": false,
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.runtime.cordis_mount_candidate",
+      "module_ids": ["routecodex-v4-cordis-bridge"],
+      "owned_paths": ["crates/routecodex-v4-cordis-bridge/**"],
+      "source_dependencies": [],
+      "status": "source_green",
+      "tasks": [
+        {
+          "task_id":"V4-RUNTIME-004",
+          "status":"source_green",
+          "candidate_record":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/fix-candidate.json",
+          "function_ids":["v4.runtime.cordis_mount_candidate"],
+          "resource_ids":["v4.cordis.mount_candidate"],
+          "source_paths":["crates/routecodex-v4-cordis-bridge/src/lib.rs"],
+          "support_paths":[],
+          "required_gate_ids":["v4_runtime_004_mount_positive","v4_runtime_004_mount_red","v4_runtime_004_mount_boundary","v4_runtime_004_mount_plane"],
+          "mainline_binding":"forbidden_before_integration",
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_runtime_004_mount_positive","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/positive.json"},
+            {"role":"red_gate","gate_id":"v4_runtime_004_mount_red","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_runtime_004_mount_boundary","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_runtime_004_mount_plane","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/plane-isolation.json"}
+          ]
+        }
+      ]
+    },
+    {
+      "batch_id": "D",
+      "conditional": false,
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.plugin.request.responses_normalize",
+      "module_ids": ["routecodex-v4-standard-plugins"],
+      "owned_paths": ["crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs","crates/routecodex-v4-standard-plugins/src/provider_semantic.rs","crates/routecodex-v4-standard-plugins/src/request_governance.rs","crates/routecodex-v4-standard-plugins/src/request_normalize.rs","crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs"],
+      "source_dependencies": [],
+      "status": "source_green",
+      "tasks": [
+        {"task_id":"V4-PLUGIN-001","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate.json","function_ids":["v4.plugin.request.responses_normalize"],"resource_ids":["v4.plugin.request.responses_normalize"],"source_paths":["crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/src/request_normalize.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_request_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-001/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_request_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-001/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_request_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-001/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_request_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-001/plane-isolation.json"}]},
+        {"task_id":"V4-PLUGIN-002","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate.json","function_ids":["v4.plugin.request.chat_to_responses"],"resource_ids":["v4.plugin.request.chat_to_responses"],"source_paths":["crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_request_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-002/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_request_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-002/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_request_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-002/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_request_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-002/plane-isolation.json"}]},
+        {"task_id":"V4-PLUGIN-003","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate.json","function_ids":["v4.plugin.request.governance"],"resource_ids":["v4.plugin.request.governance"],"source_paths":["crates/routecodex-v4-standard-plugins/src/request_governance.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_request_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-003/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_request_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-003/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_request_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-003/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_request_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-003/plane-isolation.json"}]},
+        {"task_id":"V4-PLUGIN-004","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate.json","function_ids":["v4.plugin.request.provider_semantic"],"resource_ids":["v4.plugin.request.provider_semantic"],"source_paths":["crates/routecodex-v4-standard-plugins/src/provider_semantic.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_request_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-004/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_request_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-004/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_request_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-004/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_request_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-004/plane-isolation.json"}]},
+        {"task_id":"V4-PLUGIN-005","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate.json","function_ids":["v4.plugin.request.responses_wire_build"],"resource_ids":["v4.plugin.request.responses_wire_build"],"source_paths":["crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_request_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-005/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_request_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-005/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_request_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-005/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_request_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-005/plane-isolation.json"}]}
+      ]
+    },
+    {
+      "batch_id": "E",
+      "conditional": false,
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.plugin.response.decode",
+      "module_ids": ["routecodex-v4-standard-plugins"],
+      "owned_paths": ["crates/routecodex-v4-standard-plugins/src/response_decode.rs","crates/routecodex-v4-standard-plugins/src/response_governance.rs","crates/routecodex-v4-standard-plugins/src/response_fault.rs"],
+      "source_dependencies": [],
+      "status": "source_green",
+      "tasks": [
+        {"task_id":"V4-PLUGIN-006","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-E/fix-candidate.json","function_ids":["v4.plugin.response.decode"],"resource_ids":["v4.plugin.response.decode"],"source_paths":["crates/routecodex-v4-standard-plugins/src/response_decode.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_response_positive","v4_plugin_response_red","v4_plugin_response_boundary","v4_plugin_response_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_response_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-006/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_response_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-006/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_response_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-006/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_response_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-006/plane-isolation.json"}]},
+        {"task_id":"V4-PLUGIN-007","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-E/fix-candidate.json","function_ids":["v4.plugin.response.governance"],"resource_ids":["v4.plugin.response.governance"],"source_paths":["crates/routecodex-v4-standard-plugins/src/response_governance.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_response_positive","v4_plugin_response_red","v4_plugin_response_boundary","v4_plugin_response_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_response_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-007/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_response_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-007/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_response_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-007/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_response_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-007/plane-isolation.json"}]},
+        {"task_id":"V4-PLUGIN-008","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-E/fix-candidate.json","function_ids":["v4.plugin.response.fault_intake"],"resource_ids":["v4.plugin.response.fault_intake"],"source_paths":["crates/routecodex-v4-standard-plugins/src/response_fault.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_response_positive","v4_plugin_response_red","v4_plugin_response_boundary","v4_plugin_response_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_response_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-008/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_response_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-008/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_response_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-008/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_response_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-008/plane-isolation.json"}]}
+      ]
+    },
+    {
+      "batch_id": "F",
+      "conditional": false,
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.runtime.request_port",
+      "module_ids": ["routecodex-v4-runtime"],
+      "owned_paths": ["crates/routecodex-v4-runtime/**"],
+      "source_dependencies": ["routecodex-v4-node-container", "routecodex-v4-plugin-plan"],
+      "status": "source_green",
+      "tasks": [
+        {"task_id":"V4-RUNTIME-005","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-RUNTIME-005/fix-candidate.json","function_ids":["v4.runtime.request_port"],"resource_ids":["v4.runtime.request_port"],"source_paths":["crates/routecodex-v4-runtime/src/request_port.rs","crates/routecodex-v4-runtime/tests/l2_ports.rs"],"support_paths":[],"required_gate_ids":["v4_runtime_005_request_port_positive","v4_runtime_005_request_port_red","v4_runtime_005_request_port_boundary","v4_runtime_005_request_port_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_runtime_005_request_port_positive","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-005/positive.json"},{"role":"red_gate","gate_id":"v4_runtime_005_request_port_red","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-005/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_runtime_005_request_port_boundary","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-005/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_runtime_005_request_port_plane","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-005/plane-isolation.json"}]},
+        {"task_id":"V4-RUNTIME-006","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-RUNTIME-005/fix-candidate.json","function_ids":["v4.runtime.response_error_port"],"resource_ids":["v4.runtime.response_error_port"],"source_paths":["crates/routecodex-v4-runtime/src/response_error_port.rs"],"support_paths":[],"required_gate_ids":["v4_runtime_006_response_error_positive","v4_runtime_006_response_error_red","v4_runtime_006_response_error_boundary","v4_runtime_006_response_error_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_runtime_006_response_error_positive","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-006/positive.json"},{"role":"red_gate","gate_id":"v4_runtime_006_response_error_red","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-006/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_runtime_006_response_error_boundary","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-006/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_runtime_006_response_error_plane","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-006/plane-isolation.json"}]}
+      ]
+    },
+    {
+      "batch_id": "G",
+      "conditional": false,
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.governance.feature_layer_batch_admission",
+      "module_ids": ["routecodex-v4-governance"],
+      "owned_paths": [
+        "docs/architecture/maps/function-map.json",
+        ".appsdk/maps/module-registry.json",
+        "docs/architecture/maps/resource-map.json",
+        "docs/architecture/maps/verification-map.json",
+        "contracts/data-control-boundary.contract.json",
+        "contracts/feature-completion-layer-batches.manifest.json",
+        "contracts/feature-layer-gate-inputs.contract.json",
+        "docs/goals/v4-feature-completion-goal-prompt.md",
+        "docs/goals/v4-feature-completion-plan.md",
+        "package.json",
+        "scripts/_gate-matrix.mjs",
+        "scripts/architecture/lib/**",
+        "scripts/architecture/verify-v4-feature-layer-batches.mjs",
+        "scripts/architecture/verify-v4-plane-isolation.mjs",
+        "scripts/build.mjs",
+        "scripts/compile-real-runtime-manifest.mjs",
+        "scripts/install-rccv4.mjs",
+        "scripts/tests/v4-feature-layer-batches-red-fixtures.mjs",
+        "scripts/verify.mjs",
+        "scripts/verify-ci.mjs"
+      ],
+      "source_dependencies": [],
+      "status": "source_green",
+      "tasks": [
+        {"task_id":"V4-GATE-001","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-GATE-001/fix-candidate.json","function_ids":["v4.governance.feature_layer_gate_contract"],"resource_ids":["v4.governance.feature_layer_gate_contract"],"source_paths":["scripts/architecture/verify-v4-feature-layer-batches.mjs"],"support_paths":[],"required_gate_ids":["v4_feature_layer_batches","v4_feature_layer_batches_self_test","v4_feature_layer_batches_boundary","v4_feature_layer_batches_red"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_feature_layer_batches_self_test","path":"docs/evidence/feature-completion/M1/V4-GATE-001/positive.json"},{"role":"red_gate","gate_id":"v4_feature_layer_batches_red","path":"docs/evidence/feature-completion/M1/V4-GATE-001/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_feature_layer_batches_boundary","path":"docs/evidence/feature-completion/M1/V4-GATE-001/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_parity_gate_plane_isolation","path":"docs/evidence/feature-completion/M1/V4-GATE-001/plane-isolation.json"}]},
+        {"task_id":"V4-LAYER-GATE-001","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-GATE-001/fix-candidate.json","function_ids":["v4.governance.feature_layer_product_lockstep"],"resource_ids":["v4.governance.feature_layer_product_lockstep"],"source_paths":["scripts/architecture/lib/feature-layer-batch-source.mjs"],"support_paths":[],"required_gate_ids":["v4_feature_layer_batches","v4_feature_layer_batches_self_test","v4_feature_layer_batches_boundary","v4_feature_layer_batches_red"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_feature_layer_batches_self_test","path":"docs/evidence/feature-completion/M1/V4-LAYER-GATE-001/positive.json"},{"role":"red_gate","gate_id":"v4_feature_layer_batches_red","path":"docs/evidence/feature-completion/M1/V4-LAYER-GATE-001/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_feature_layer_batches_boundary","path":"docs/evidence/feature-completion/M1/V4-LAYER-GATE-001/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_parity_gate_plane_isolation","path":"docs/evidence/feature-completion/M1/V4-LAYER-GATE-001/plane-isolation.json"}]}
+      ]
+    },
+    {
+      "batch_id": "H",
+      "conditional": true,
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.node_container.execution_epoch",
+      "module_ids": ["routecodex-v4-node-container"],
+      "owned_paths": ["crates/routecodex-v4-node-container/**"],
+      "source_dependencies": [],
+      "status": "source_green",
+      "tasks": [
+        {
+          "task_id":"V4-RUNTIME-002",
+          "status":"source_green",
+          "candidate_record":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/fix-candidate.json",
+          "function_ids":["v4.node_container.execution_epoch"],
+          "resource_ids":["v4.node_container.execution_epoch"],
+          "source_paths":["crates/routecodex-v4-node-container/src/lib.rs","crates/routecodex-v4-node-container/tests/l2_epoch.rs"],
+          "support_paths":[],
+          "required_gate_ids":["v4_node_container_epoch_positive","v4_node_container_epoch_red","v4_node_container_epoch_boundary","v4_node_container_epoch_plane"],
+          "mainline_binding":"forbidden_before_integration",
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_node_container_epoch_positive","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/positive.json"},
+            {"role":"red_gate","gate_id":"v4_node_container_epoch_red","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_node_container_epoch_boundary","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_node_container_epoch_plane","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/plane-isolation.json"}
+          ]
+        }
+      ]
+    }
+  ],
+  "integration": {
+    "owner": "v4.feature_completion.integration",
+    "admission_command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
+    "enforcement_binding_status": "bound",
+    "guard_commit": "5e108f06174deee70204744ea667bdd2c53742f5",
+    "guarded_surfaces": [
+      {"path":"Cargo.toml","scope_hash":"sha256:04ae8d949591da18a542702922a3e4612994707b6baedef64c79a70cce11e37e"},
+      {"path":"scripts/build.mjs","scope_hash":"sha256:c8b0a604764630daa3e4604ef6af0d6996ba465a399bc4bbf95fd16998dabcba"},
+      {"path":"scripts/verify.mjs","scope_hash":"sha256:0608141962c8a203d157fe6c5d7b7ad8931bce832974acb8a0f5e6aa04c336d7"},
+      {"path":"scripts/verify-ci.mjs","scope_hash":"sha256:eb651c0850179ca96482f0f3a6b4b7084be7102e2be64d6e8d93726a40cf2b4c"},
+      {"path":"scripts/install-rccv4.mjs","scope_hash":"sha256:f449b083e44fe025134eb48f84fefd964b7445e793ec8cad318c386ca003254e"},
+      {"path":"scripts/compile-real-runtime-manifest.mjs","scope_hash":"sha256:a4756498aafa9d3c6726f1be982bbea76bec5daa5ddc4631c49666ba0e9902de"},
+      {"path":"contracts/real-runtime-admission.manifest.json","scope_hash":"sha256:1dd63ba0bd84acbae162663b534bfe1c7d5f5315e66d5310822090a5121e863c"},
+      {"path":"contracts/active-link/frozen-consumer-registry.json","scope_hash":"sha256:2808e91efca384cc1c1ebf229d66803e0ffe834800908c8eaac847d6507f56c1"},
+      {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:da16e5e4019ffd41b87e6332a96dfd616fb24f53647b9a888ac6fb52135c8fb8"},
+      {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:f9a194e35af2f30a8517a0f7998d0e44c2bf40c520ae30d8c16ad03d63b58d50"}
+    ],
+    "wiring_started": true,
+    "wiring_edges": [
+      "added:build:source-deps:routecodex-v4-runtime->routecodex-v4-node-container",
+      "added:build:source-deps:routecodex-v4-runtime-bin->routecodex-v4-cordis-bridge",
+      "added:build:source-deps:routecodex-v4-runtime-bin->routecodex-v4-node-container",
+      "added:build:source-deps:routecodex-v4-runtime-bin->routecodex-v4-plugin-plan",
+      "added:build:source-deps:routecodex-v4-runtime-bin->routecodex-v4-standard-plugins",
+      "added:cargo:path:routecodex-v4-config->routecodex-v4-base-node",
+      "added:cargo:path:routecodex-v4-config->routecodex-v4-edge",
+      "added:cargo:path:routecodex-v4-edge->routecodex-v4-base-node",
+      "added:cargo:path:routecodex-v4-runtime-bin->routecodex-v4-base-node",
+      "added:cargo:path:routecodex-v4-runtime-bin->routecodex-v4-cordis-bridge",
+      "added:cargo:path:routecodex-v4-runtime-bin->routecodex-v4-error",
+      "added:cargo:path:routecodex-v4-runtime-bin->routecodex-v4-node-container",
+      "added:cargo:path:routecodex-v4-runtime-bin->routecodex-v4-plugin-plan",
+      "added:cargo:path:routecodex-v4-runtime-bin->routecodex-v4-standard-plugins",
+      "added:consumer:source_path:routecodex-v4-config->routecodex-v4-base-node",
+      "added:consumer:source_path:routecodex-v4-config->routecodex-v4-edge",
+      "added:consumer:source_path:routecodex-v4-edge->routecodex-v4-base-node",
+      "added:consumer:source_path:routecodex-v4-runtime-bin->routecodex-v4-base-node",
+      "added:consumer:source_path:routecodex-v4-runtime-bin->routecodex-v4-cordis-bridge",
+      "added:consumer:source_path:routecodex-v4-runtime-bin->routecodex-v4-error",
+      "added:consumer:source_path:routecodex-v4-runtime-bin->routecodex-v4-node-container",
+      "added:consumer:source_path:routecodex-v4-runtime-bin->routecodex-v4-plugin-plan",
+      "added:consumer:source_path:routecodex-v4-runtime-bin->routecodex-v4-standard-plugins",
+      "added:mainline:undefined:routecodex-v4-runtime-bin->routecodex-v4-router:routecodex-v4-runtime-bin::project_provider_fault",
+      "added:regression:source-deps:routecodex-v4-runtime->routecodex-v4-node-container",
+      "added:regression:source-deps:routecodex-v4-runtime->routecodex-v4-plugin-plan",
+      "added:workspace:member:crates/routecodex-v4-config",
+      "added:workspace:member:crates/routecodex-v4-edge",
+      "added:workspace:member:crates/routecodex-v4-runtime-bin",
+      "surface:Cargo.toml:sha256:5ce83c9e3837823b19aa44dfdc28948a0123973fcb5e853e385f42aff3add62e",
+      "surface:contracts/active-link/frozen-consumer-registry.json:sha256:70df9fa89217c6bd7241788294cf3ded9a6922ea6bdd908e20468cda4d96f375",
+    "surface:crates/routecodex-v4-runtime-bin/**:sha256:6ec98c14026a50873321da589adbb0748e49ccd427134fcd9a1f82fc8070c931",
+      "surface:docs/architecture/maps/mainline-call-map.json:sha256:19a38f374876225682de890790957a2416b42343c72d4803774868871b6732d8",
+      "surface:scripts/build.mjs:sha256:ec1a7a511a514e5334a418bca25f47a554051134429aa1eeff5421f229d63f75",
+      "surface:scripts/verify.mjs:sha256:a30d109629e8ff411db4beef8a6e312826c412d24696923f3b296f03e912e804"
+    ],
+    "resource_refs": {
+      "merge_queue_state": ".appsdk/records/merge-queue-state.json",
+      "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"
+    },
+    "evidence_refs": []
+  },
+  "review": {
+    "status": "not_started",
+    "evidence_refs": []
+  }
+}

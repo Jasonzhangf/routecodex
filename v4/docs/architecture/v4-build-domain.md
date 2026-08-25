@@ -32,7 +32,7 @@ The CI `v4-build`/`v4-appsdk-admission` jobs run on `macos-14` because the
 hermetic Active fixtures and the pinned AppSDK release artifact are
 `aarch64-apple-darwin`.
 
-`v4/.appsdk/maps/verification-map.json` command entries execute with
+`v4/docs/architecture/maps/verification-map.json` command entries execute with
 `cwd = v4` (declared in `command_context`); they are not runnable from the
 repository root.
 
@@ -81,7 +81,7 @@ red; coordinated removal from baseline + mapping + contract remains red.
 ## Resource/edge model
 
 The build domain registers distinct resources in
-`v4/.appsdk/maps/resource-map.json`:
+`v4/docs/architecture/maps/resource-map.json`:
 
 - `v4.build.domain`, `v4.build.node_lock`, `v4.build.rust_lock`,
   `v4.build.toolchain` — build-domain truth and locks;

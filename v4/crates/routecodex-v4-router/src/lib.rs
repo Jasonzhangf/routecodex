@@ -8,7 +8,10 @@
 //!   never rewritten;
 //! - control fields never enter provider/client normal payload.
 
-use routecodex_v4_config::{RuntimeProviderCandidate, RuntimeRoute};
+use routecodex_v4_config::{
+    RuntimeProductConfig, RuntimeProductProvider, RuntimeProductTarget, RuntimeProviderCandidate,
+    RuntimeProductPolicyAction, RuntimeRoute,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedTarget {
@@ -16,6 +19,7 @@ pub struct SelectedTarget {
     pub config_path: String,
     pub protocol: String,
     pub wire_model: String,
+    pub auth_alias: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +27,9 @@ pub enum TargetSelectionError {
     EmptyCandidates,
     EmptyRoutes,
     RouteTargetMissing(String),
+    ProductRouteGroupMissing(String),
+    ProductPoolUnavailable(String),
+    ProductTargetMissing(String),
     ModelUnavailable(String),
 }
 
@@ -37,8 +44,195 @@ impl std::fmt::Display for TargetSelectionError {
             Self::RouteTargetMissing(provider) => {
                 write!(f, "compiled route references missing provider {provider}")
             }
+            Self::ProductRouteGroupMissing(group) => {
+                write!(f, "compiled product route group is missing: {group}")
+            }
+            Self::ProductPoolUnavailable(group) => {
+                write!(f, "no product route pool serves request in group {group}")
+            }
+            Self::ProductTargetMissing(target) => {
+                write!(f, "compiled product target references missing provider/model {target}")
+            }
         }
     }
+}
+
+/// Selects a target from the typed product manifest.  Pool eligibility is
+/// derived only from the request's typed selection facts; no payload is
+/// modified and no legacy flat route is consulted.
+pub fn select_product_target(
+    product: &RuntimeProductConfig,
+    route_group_id: &str,
+    requested_model: &str,
+    entry_protocol: &str,
+    required_capabilities: &[&str],
+    input_tokens: u64,
+) -> Result<SelectedTarget, TargetSelectionError> {
+    select_product_target_with_unavailable(
+        product,
+        route_group_id,
+        requested_model,
+        entry_protocol,
+        required_capabilities,
+        input_tokens,
+        &[],
+    )
+}
+
+pub fn select_product_target_with_unavailable(
+    product: &RuntimeProductConfig,
+    route_group_id: &str,
+    requested_model: &str,
+    entry_protocol: &str,
+    required_capabilities: &[&str],
+    input_tokens: u64,
+    unavailable_provider_ids: &[&str],
+) -> Result<SelectedTarget, TargetSelectionError> {
+    let group = product
+        .route_groups
+        .iter()
+        .find(|group| group.route_group_id == route_group_id)
+        .ok_or_else(|| TargetSelectionError::ProductRouteGroupMissing(route_group_id.to_string()))?;
+    let mut pools = group
+        .pools
+        .iter()
+        .filter(|pool| {
+            pool.entry_protocol
+                .as_deref()
+                .map_or(true, |protocol| protocol == entry_protocol)
+        })
+        .filter(|pool| pool.models.is_empty() || pool.models.iter().any(|model| model == requested_model))
+        .filter(|pool| pool.min_input_tokens.map_or(true, |minimum| input_tokens >= minimum))
+        .filter(|pool| {
+            pool.required_capabilities
+                .iter()
+                .all(|required| required_capabilities.iter().any(|fact| fact == required))
+        })
+        .collect::<Vec<_>>();
+    pools.sort_by(|left, right| {
+        right
+            .required_capabilities
+            .len()
+            .cmp(&left.required_capabilities.len())
+            .then_with(|| left.precedence.unwrap_or(i32::MAX).cmp(&right.precedence.unwrap_or(i32::MAX)))
+    });
+    let pool = pools
+        .into_iter()
+        .next()
+        .ok_or_else(|| TargetSelectionError::ProductPoolUnavailable(route_group_id.to_string()))?;
+    let target = pool
+        .targets
+        .iter()
+        .filter(|target| target.model_id == requested_model)
+        .filter(|target| !unavailable_provider_ids.iter().any(|provider| *provider == target.provider_id))
+        .min_by_key(|target| target.priority)
+        .ok_or_else(|| TargetSelectionError::ProductPoolUnavailable(pool.pool_id.clone()))?;
+    let provider = product
+        .providers
+        .iter()
+        .find(|provider| provider.provider_id == target.provider_id);
+    let model = provider.and_then(|provider| {
+        provider
+            .models
+            .iter()
+            .find(|model| model.model_id == target.model_id)
+    });
+    product_target_to_selected(provider, model, target)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProductErrorDecision {
+    pub policy_id: String,
+    pub retry: bool,
+    pub cooldown: bool,
+    pub failure_threshold: u64,
+    pub project_status: Option<u16>,
+    pub reason_code: Option<String>,
+}
+
+/// Apply the compiled product error policy. This produces typed control facts
+/// only; execution, cooldown storage and client projection remain downstream
+/// owners in the error/runtime chain.
+pub fn apply_product_error_policy(
+    product: &RuntimeProductConfig,
+    provider_id: &str,
+    status: u16,
+    response_body: &str,
+) -> Option<ProductErrorDecision> {
+    if status < 400 {
+        return None;
+    }
+    let policy = product.error_policies.iter().find(|policy| {
+        policy
+            .scope_provider_id
+            .as_deref()
+            .map_or(true, |scope| scope == provider_id)
+            && policy.match_status.map_or(true, |expected| expected == status)
+            && (policy.match_content_contains_any.is_empty()
+                || policy
+                    .match_content_contains_any
+                    .iter()
+                    .any(|needle| response_body.contains(needle)))
+    });
+    let (policy_id, actions, reason_code) = match policy {
+        Some(policy) => (
+            policy.policy_id.clone(),
+            policy.actions.as_slice(),
+            policy.reason_code.clone(),
+        ),
+        None if !product.default_error_path.is_empty() => (
+            "default".to_string(),
+            product.default_error_path.as_slice(),
+            None,
+        ),
+        None => return None,
+    };
+    Some(ProductErrorDecision {
+        policy_id,
+        retry: has_step(actions, "wait_retry"),
+        cooldown: has_step(actions, "cooldown"),
+        failure_threshold: actions
+            .iter()
+            .find_map(|action| (action.step == "wait_retry").then_some(action.max_attempts))
+            .flatten()
+            .unwrap_or(1)
+            .max(1) as u64,
+        project_status: actions.iter().find_map(|action| {
+            (action.step == "project").then_some(action.status).flatten()
+        }),
+        reason_code: reason_code.or_else(|| {
+            actions
+                .iter()
+                .find_map(|action| (action.step == "project").then(|| action.reason_code.clone()).flatten())
+        }),
+    })
+}
+
+fn has_step(actions: &[RuntimeProductPolicyAction], step: &str) -> bool {
+    actions.iter().any(|action| action.step == step)
+}
+
+fn product_target_to_selected(
+    provider: Option<&RuntimeProductProvider>,
+    model: Option<&routecodex_v4_config::RuntimeProductModel>,
+    target: &RuntimeProductTarget,
+) -> Result<SelectedTarget, TargetSelectionError> {
+    let provider = provider.ok_or_else(|| {
+        TargetSelectionError::ProductTargetMissing(target.provider_id.clone())
+    })?;
+    let model = model.ok_or_else(|| {
+        TargetSelectionError::ProductTargetMissing(format!(
+            "{}/{}",
+            target.provider_id, target.model_id
+        ))
+    })?;
+    Ok(SelectedTarget {
+        provider_id: provider.provider_id.clone(),
+        config_path: provider.config_path.clone(),
+        protocol: provider.protocol.clone(),
+        wire_model: model.wire_name.clone(),
+        auth_alias: provider.auth_handles.first().map(|handle| handle.alias.clone()),
+    })
 }
 
 impl std::error::Error for TargetSelectionError {}
@@ -82,6 +276,7 @@ pub fn select_target(
             config_path: candidate.config_path.clone(),
             protocol: candidate.protocol.clone(),
             wire_model: candidate.wire_model.clone(),
+            auth_alias: None,
         })
         .ok_or_else(|| TargetSelectionError::ModelUnavailable(requested_model.to_string()))
 }

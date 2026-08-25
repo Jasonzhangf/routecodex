@@ -799,10 +799,15 @@ group 作为超级节点，除继承节点测试外还必须通过：
 ## Phase 1 现状审计（2026-08-16，目标 V4-INDEPENDENT NODE GRAPH 激活）
 
 设计 ID：`V4-NODE-GRAPH-ACTIVE-20260816`；owner feature：`v4.node_graph`。
+路径口径更新：2026-08-23 起，V4 产品 map 真源在
+`docs/architecture/maps/{resource,function,mainline-call,verification}-map.json`；
+`.appsdk/maps/module-registry.json` 仍由 AppSDK 持有。本节保留 2026-08-16 审计时
+的路径与数量快照，不作为当前 map 路径真源。
 本审计只读现状、不改合同；审计数据来自以下真源（全部在 `v4/` 内）：
 `contracts/node-graph.contract.json`（design）、`contracts/skeleton-plan.contract.json`
 （active）、`docs/architecture/v4-resource-operation-map.yml`（active，49/49 anchored）、
-`.appsdk/maps/{resource,function,mainline-call,module-registry,verification}-map.json`、
+设计日期的 `.appsdk/maps/{resource,function,mainline-call,module-registry,verification}-map.json`
+（2026-08-23 后产品四 map 已迁至 `docs/architecture/maps/`，module registry 仍为 SDK-owned）、
 `.appsdk/project.json`、`crates/routecodex-v4-{skeleton,runtime,config,error}/src` 与
 `scripts/architecture/verify-v4-*.mjs` 现有门禁。
 
@@ -820,10 +825,10 @@ group 作为超级节点，除继承节点测试外还必须通过：
 | skeleton-plan.contract.json `config` | active | plan nodes | 5 | V4Config01AuthoringFileSource … V4Config05ManifestPublished |
 | skeleton-plan.contract.json 全部链 | active | checkpoints | 23 | 混合旧/目标风格（见 §3） |
 | v4-resource-operation-map.yml | active | owner_node / allowed_* / forbidden_* | 49 资源、46 个不同 owner_node | 旧风格链 ID + side/control/debug/config/error |
-| .appsdk/maps/resource-map.json | active | owner（crate::symbol） | 82 资源，39 个携带 `V4*` 节点符号 | `routecodex-v4-runtime::V4ReqInbound02Normalized` 等 |
-| .appsdk/maps/mainline-call-map.json | active | node-level edges | 48 边（8 条节点边） | config 4 条正确；runtime 4 条旧三节点边 |
-| .appsdk/maps/function-map.json | active | functions | 25 | **无 `v4.node_graph` 条目** |
-| .appsdk/maps/verification-map.json | active | gates | 46 | 仅 `v4_parity_gate_skeleton_topology` 涉及节点图，且只查通用拓扑 |
+| design-date product resource-map.json | active | owner（crate::symbol） | 82 资源，39 个携带 `V4*` 节点符号 | `routecodex-v4-runtime::V4ReqInbound02Normalized` 等 |
+| design-date product mainline-call-map.json | active | node-level edges | 48 边（8 条节点边） | config 4 条正确；runtime 4 条旧三节点边 |
+| design-date product function-map.json | active | functions | 25 | **无 `v4.node_graph` 条目** |
+| design-date product verification-map.json | active | gates | 46 | 仅 `v4_parity_gate_skeleton_topology` 涉及节点图，且只查通用拓扑 |
 | crates/routecodex-v4-runtime | source_implemented | PLUGIN_REGISTRY + 链执行 | 16 个本地插件 + 9 个外部链插件 | 3 节点链执行、测试断言 trace.len()==3 |
 | crates/routecodex-v4-config | source_implemented | 链节点常量 | 5 | V4Config01..05（与目标一致） |
 | crates/routecodex-v4-error | frozen | ErrorStage | 6 | V4Error01..06（与目标一致，冻结不可改） |

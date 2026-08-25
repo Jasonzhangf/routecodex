@@ -1,0 +1,17 @@
+{
+  "evidence_id": "positive",
+  "issue_id": "V4-RUNTIME-004",
+  "experiment_id": "v4-runtime-004-cordis-mount-candidate",
+  "phase": "positive_intervention",
+  "kind": "positive_test",
+  "source_commit": "6c220209afd42162b16f070dafb60e3a432cb35c",
+  "scope": {"feature_id": "V4-RUNTIME-004", "module_id": "routecodex-v4-cordis-bridge"},
+  "producer": {"adapter": "cargo", "identity": "v4_runtime_004_mount_positive"},
+  "command_argv": ["cargo", "test", "-p", "routecodex-v4-cordis-bridge", "--manifest-path", "Cargo.toml", "--locked"],
+  "exit_status": 0,
+  "result": "pass",
+  "created_at": "2026-08-24T05:30:00Z",
+  "expires_at": "2026-08-31T05:30:00Z",
+  "input_hashes": ["sha256:9ddf3c3de035a2be1c75b6bddaa0e8f0e868fdb1aea7dc6ec6204848effb46a7"],
+  "scope_hash": "sha256:4c7f572adf64acfc3d609ae7aa7ef5bc300c24494ed97c5c47f4c97595ab0bdc"
+}

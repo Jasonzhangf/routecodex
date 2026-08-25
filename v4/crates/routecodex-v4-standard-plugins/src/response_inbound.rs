@@ -83,7 +83,7 @@ pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
     )]
 }
 
-fn protocol_decode(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+pub(crate) fn protocol_decode_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let data = ctx.read_data();
     let raw = data
         .as_object()
@@ -124,11 +124,15 @@ fn protocol_decode(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+pub(crate) fn protocol_decode(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    protocol_decode_entry(ctx)
+}
+
 pub(crate) fn protocol_decode_handle() -> (&'static str, fn(&mut ExecCtx<'_>) -> Result<(), String>)
 {
     (
         PLUGIN_ID,
-        protocol_decode as fn(&mut ExecCtx<'_>) -> Result<(), String>,
+        protocol_decode_entry as fn(&mut ExecCtx<'_>) -> Result<(), String>,
     )
 }
 

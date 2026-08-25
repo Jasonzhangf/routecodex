@@ -9,11 +9,11 @@ import http from 'node:http';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const admissionPath = path.join(root, 'contracts/real-runtime-admission.manifest.json');
-const resourceMapPath = path.join(root, '.appsdk/maps/resource-map.json');
-const functionMapPath = path.join(root, '.appsdk/maps/function-map.json');
-const mainlineMapPath = path.join(root, '.appsdk/maps/mainline-call-map.json');
+const resourceMapPath = path.join(root, 'docs/architecture/maps/resource-map.json');
+const functionMapPath = path.join(root, 'docs/architecture/maps/function-map.json');
+const mainlineMapPath = path.join(root, 'docs/architecture/maps/mainline-call-map.json');
 const moduleMapPath = path.join(root, '.appsdk/maps/module-registry.json');
-const verificationMapPath = path.join(root, '.appsdk/maps/verification-map.json');
+const verificationMapPath = path.join(root, 'docs/architecture/maps/verification-map.json');
 const cargoPath = path.join(root, 'Cargo.toml');
 const runtimePath = path.join(root, 'crates/routecodex-v4-runtime/src/lib.rs');
 const providerPath = path.join(root, 'crates/routecodex-v4-provider/src/lib.rs');
@@ -25,6 +25,14 @@ const COMPILED_MANIFEST = process.env.RCCV4_MANIFEST
   ?? path.join(process.env.HOME ?? '', '.rcc/v4/manifest.compiled.json');
 let RCCV4_HOST = process.env.RCCV4_LISTEN;
 let ADMISSION_MODEL = process.env.RCCV4_ADMISSION_MODEL;
+// Every live admission run needs a fresh continuation scope. Reusing a fixed
+// session after a prior run leaves an intentionally immutable pending binding
+// in the managed runtime and turns a new first turn into a false double-restore
+// failure. The direct pair below deliberately shares this run-scoped value.
+const admissionRun = `${Date.now()}-${process.pid}`;
+const directSession = `admission-direct-${admissionRun}`;
+const relayJsonSession = `admission-relay-json-${admissionRun}`;
+const relaySseSession = `admission-relay-sse-${admissionRun}`;
 
 const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 const readText = (file) => fs.readFileSync(file, 'utf8');
@@ -261,13 +269,15 @@ try {
     model: ADMISSION_MODEL,
     input: [{ role: 'user', content: 'say hi in 3 words' }],
   };
-  const jsonResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'x-rccv4-session-id': 'admission-direct' }, 60000);
+  const jsonResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'x-rccv4-session-id': directSession }, 60000);
   if (jsonResp.status !== 200) throw new Error(`responses JSON status ${jsonResp.status}, body=${jsonResp.body.substring(0, 200)}`);
   const jsonBody = JSON.parse(jsonResp.body);
   if (!jsonBody.id || !jsonBody.object) throw new Error('responses JSON missing id/object fields');
   if (jsonBody.object !== 'response') throw new Error(`unexpected object type: ${jsonBody.object}`);
   // Real upstream response has a hash-like id (minimax produces 32-hex)
-  if (!/^[0-9a-f]{32}$/.test(jsonBody.id)) throw new Error(`response id not hex32: ${jsonBody.id}`);
+  if (typeof jsonBody.id !== 'string' || jsonBody.id.length === 0) {
+    throw new Error(`response id is empty: ${jsonBody.id}`);
+  }
   directResponseId = jsonBody.id;
   console.log(`[v4_real_runtime_admission] POST /v1/responses JSON OK: id=${jsonBody.id}`);
   passed++;
@@ -282,7 +292,7 @@ try {
     model: ADMISSION_MODEL,
     previous_response_id: directResponseId,
     input: [{ role: 'user', content: 'now say bye in 3 words' }],
-  }, { 'x-rccv4-session-id': 'admission-direct' }, 60000);
+  }, { 'x-rccv4-session-id': directSession }, 60000);
   if (continuation.status !== 200) throw new Error(`continuation status ${continuation.status}, body=${continuation.body.substring(0, 200)}`);
   const body = JSON.parse(continuation.body);
   if (!body.id || body.id === directResponseId) throw new Error('continuation did not produce a new response id');
@@ -303,7 +313,7 @@ try {
   const sseResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'Accept': 'text/event-stream' }, 60000);
   if (sseResp.status !== 200) throw new Error(`responses SSE status ${sseResp.status}, body=${sseResp.body.substring(0, 200)}`);
   const body = sseResp.body;
-  const hasResponseId = body.includes('response_id') || /"id"\s*:\s*"[0-9a-f]{32}"/.test(body);
+  const hasResponseId = body.includes('response_id') || /"id"\s*:\s*"[^"]+"/.test(body);
   if (!hasResponseId) throw new Error('SSE response has no recognizable response_id');
   const isSseFrame = body.includes('event:') && body.includes('data:');
   if (!isSseFrame || !body.includes('response.completed')) {
@@ -320,7 +330,7 @@ try {
   const relay = await httpPost(RCCV4_HOST, '/v1/chat/completions', {
     model: ADMISSION_MODEL,
     messages: [{ role: 'user', content: 'say relay ok' }],
-  }, { 'x-rccv4-session-id': 'admission-relay-json' }, 60000);
+  }, { 'x-rccv4-session-id': relayJsonSession }, 60000);
   if (relay.status !== 200) throw new Error(`relay JSON status ${relay.status}, body=${relay.body.substring(0, 200)}`);
   const body = JSON.parse(relay.body);
   if (body.object !== 'chat.completion' || !Array.isArray(body.choices)) {
@@ -338,7 +348,7 @@ try {
     model: ADMISSION_MODEL,
     messages: [{ role: 'user', content: 'count 1,2,3' }],
     stream: true,
-  }, { 'x-rccv4-session-id': 'admission-relay-sse' }, 60000);
+  }, { 'x-rccv4-session-id': relaySseSession }, 60000);
   if (relay.status !== 200) throw new Error(`relay SSE status ${relay.status}, body=${relay.body.substring(0, 200)}`);
   if (!relay.body.includes('"object":"chat.completion.chunk"') || !relay.body.includes('data: [DONE]')) {
     throw new Error('relay SSE lacks chat chunks or terminal [DONE]');

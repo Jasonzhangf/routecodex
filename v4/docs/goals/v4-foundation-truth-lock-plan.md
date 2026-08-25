@@ -3,7 +3,7 @@
 ## 目标
 
 把 V4 foundation 从"功能绿但注册表半 design"推进到机器可审计的 truth 状态：
-资源 binding_status 全部准确（anchored 或显式 design）、YAML 与 `.appsdk` JSON 双源一致、
+资源 binding_status 全部准确（anchored 或显式 design）、YAML 与产品 resource map JSON 双源一致、
 binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation slice。
 
 ## 验收标准
@@ -14,7 +14,7 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
 2. 新增机器 gate `verify-v4-resource-binding.mjs`（或扩展既有 verify-v4 gate）校验：
    - anchored 资源的 owner_crate/owner_node/verification_gate/evidence 存在且 gate 在
      verification-map.json 注册；
-   - YAML `binding_status` 与 `.appsdk/maps/resource-map.json` `status` 一致；
+   - YAML `binding_status` 与 `docs/architecture/maps/resource-map.json` `status` 一致；
    - 禁止 anchored↔design 双源漂移。
 3. 修复 `v4.control.metadata_center` 双源漂移（YAML=anchored / JSON=design 二选一，按证据定）。
 4. 新 gate 接入 `verify:v4-foundation` + `.github/workflows/test.yml`。
@@ -26,7 +26,7 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
 ### In scope
 
 - 资源注册表真源审计与状态修正（49 条逐个核对）。
-- `.appsdk/maps/resource-map.json` 双源同步。
+- 产品 resource map JSON（2026-08-23 后为 `docs/architecture/maps/resource-map.json`）双源同步。
 - binding_status 机器 gate + CI 接线。
 - DSH review 门禁与 claim 关闭。
 
@@ -40,11 +40,11 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
 
 - `v4-resource-operation-map.yml`：49 资源，17 `anchored`（实现落地 + gate 绿），
   32 仍为显式 `design`（计划 owner 或未落地切片，禁止引用为真源）。
-- `.appsdk/maps/resource-map.json`：67 条，32 active / 32 design / 3 contract_bound；
+- 设计日期的 `.appsdk/maps/resource-map.json`：67 条，32 active / 32 design / 3 contract_bound；
   与 YAML 双源一致由 `v4_parity_gate_resource_binding` 机器锁校验。
 - `v4_parity_gate_resource_binding` 已锁：binding_status 合法性、anchored 准入
   （owner_crate 存在 + gate 注册 + owner_symbols 在 crate 源码顶层声明 +
-  .appsdk status=active）、design 无漂移、.appsdk 未登记 v4 资源（7/7 红测）。
+  product resource-map status=active）、design 无漂移、产品 map 未登记 v4 资源（7/7 红测）。
 - DSH review r1（commit `4bcf7c48b`）FAIL：P1 anchored 无代码符号绑定、
   P2 自测 case 5 覆盖错分支、计划文档计数过期；修复后需重审。
 - DSH review r2（commit `9cc33f97e`）FAIL：P1 符号绑定是文本正则启发式
@@ -137,7 +137,7 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
 
 1. 逐资源审计 49 条：有实现证据的标记 anchored（request/response/error/config/control
    已实现切片内资源），未实现的保留 design 并给 gate 豁免/阶段标注。
-2. 同步 `.appsdk/maps/resource-map.json` status。
+2. 同步产品 resource map JSON status；2026-08-23 后路径为 `docs/architecture/maps/resource-map.json`。
 3. 新增 `v4/scripts/architecture/verify-v4-resource-binding.mjs`，锁 anchored 准入 + 双源一致。
 4. 接入 package.json `verify:v4-foundation` 与 CI。
 5. 全量验证（cargo workspace + test-consumer + verify:v4-foundation + appsdk admission）。

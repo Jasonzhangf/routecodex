@@ -11,7 +11,7 @@ notes: '本注册表是 V4 真源资源图，binding_status 已按机器 gate
 
   （v4_parity_gate_resource_binding）收敛：anchored 表示对应实现已落地、
 
-  机器 gate 绿且 .appsdk resource-map.json 双源 status=active；design 表示
+  机器 gate 绿且 docs/architecture/maps/resource-map.json 双源 status=active；design 表示
 
   计划 owner 尚未生效，不得作为真源引用。anchored 准入条件：对应 V4 实现、
 
@@ -19,7 +19,7 @@ notes: '本注册表是 V4 真源资源图，binding_status 已按机器 gate
 
   Phase 2 追加：每个 resource 必须声明 axis（data/control/information/
 
-  diagnostic 之一）与 verification_gate（v4/.appsdk/maps/verification-map.json
+  diagnostic 之一）与 verification_gate（docs/architecture/maps/verification-map.json
 
   中的 gate_id 或 v4_parity_gate_* 系列）；存在 resource 但无 owner 或无 gate
 
@@ -641,6 +641,67 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
+- resource_id: v4.runtime.request_port
+  axis: control
+  verification_gate:
+  - v4_runtime_005_request_port_positive
+  - v4_runtime_005_request_port_red
+  - v4_runtime_005_request_port_boundary
+  - v4_runtime_005_request_port_plane
+  resource_kind: typed_side_channel
+  lifecycle: v4.pipeline.request_cycle
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4HubReqChatProcess04Governed
+  owner_symbols:
+  - RequestPortLease
+  identity:
+  - requestId
+  - planEpoch
+  - manifestHash
+  allowed_writers:
+  - RequestPortLease::admit
+  allowed_readers:
+  - ResponsePortReceipt::consume_response
+  - ResponsePortReceipt::consume_error
+  forbidden_writers:
+  - V4HubReqInbound03Normalized
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.runtime.response_error_port
+  axis: control
+  verification_gate:
+  - v4_runtime_006_response_error_positive
+  - v4_runtime_006_response_error_red
+  - v4_runtime_006_response_error_boundary
+  - v4_runtime_006_response_error_plane
+  resource_kind: typed_side_channel
+  lifecycle: v4.pipeline.response_cycle
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4HubRespInbound02Parsed
+  owner_symbols:
+  - ResponsePortReceipt
+  - consume_response
+  - consume_error
+  identity:
+  - requestId
+  - planEpoch
+  - manifestHash
+  allowed_writers:
+  - consume_response
+  - consume_error
+  allowed_readers:
+  - V4HubRespInbound02Parsed
+  - V4Error05ExecutionDecision
+  forbidden_writers:
+  - V4HubReqInbound03Normalized
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
 - resource_id: v4.pipeline.mainline
   axis: control
   verification_gate:
@@ -772,6 +833,45 @@ resources:
   - V4HubRespOutbound04ClientSemantic
   - V4ServerFrame
   - V4DebugSnapshotLedger
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.continuation.local_context
+  axis: control
+  verification_gate:
+  - v4_runtime_l2_regression
+  - v4_parity_gate_plane_isolation
+  resource_kind: continuation_context_store
+  lifecycle: v4.continuation.relay_local_materialization
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4HubRespChatProcess03Governed
+  owner_symbols:
+  - LocalContinuationStore
+  - LocalContinuationRecord
+  identity:
+  - entryProtocol
+  - continuationOwner
+  - port
+  - sessionScope
+  - conversationScope
+  - responseId
+  semantic_contract:
+    ordered_context_immutable_between_commit_and_restore: true
+    exact_response_locator_required: true
+    control_plane_only: true
+  allowed_writers:
+  - V4HubRespChatProcess03Governed
+  - LocalContinuationStore::commit
+  - LocalContinuationStore::rotate
+  - LocalContinuationStore::release
+  allowed_readers:
+  - V4HubReqChatProcess04Governed
+  - LocalContinuationStore::load
+  forbidden_writers:
+  - V4HubReqInbound03Normalized
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4ServerRespOutbound06ClientFrame
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
@@ -2003,6 +2103,37 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
+- resource_id: v4.node_container.execution_epoch
+  axis: control
+  verification_gate:
+  - v4_node_container_l2_regression
+  - v4_node_container_epoch_closure_audit
+  resource_kind: execution_epoch_lifecycle
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-node-container
+  owner_node: V4NodeContainer
+  owner_symbols:
+  - ExecutionEpochIdentity
+  - ExecutionEpochSnapshot
+  - ActiveExecutionEpoch
+  - EpochLease
+  - ActiveEpochStore
+  identity:
+  - planEpoch
+  - manifestHash
+  - executionIdentity
+  allowed_writers:
+  - V4NodeContainer
+  allowed_readers:
+  - V4RuntimeInspector
+  - V4Admin
+  forbidden_writers:
+  - V4AdminCommand
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
 - resource_id: v4.node_container.plan_bindings
   axis: control
   verification_gate:
@@ -2251,15 +2382,18 @@ resources:
   - ProviderRawResponse
   - send_responses
   - send_responses_streaming
+  - build_responses_local_continuation_wire
   identity:
   - requestId
   - providerId
   - endpoint
   - statusCode
+  - continuationOwner
   semantic_contract:
     auth_materialization_transport_only: true
     request_response_bytes_preserved: true
     internal_control_fields_forbidden: true
+    continuation_owner_compiled_from_provider_profile: true
   allowed_writers:
   - V4ProviderSseOut07WireBoundary
   - V4ProviderSseIn01FrameBoundary
@@ -2518,6 +2652,222 @@ resources:
   - routecodex-v4-runtime
   - routecodex-v4-provider
   - routecodex-v4-server
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.cordis.mount_candidate
+  axis: control
+  verification_gate:
+  - v4_runtime_004_mount_positive
+  - v4_runtime_004_mount_boundary
+  resource_kind: cordis_mount_candidate
+  lifecycle: v4.cordis_bridge
+  owner_crate: routecodex-v4-cordis-bridge
+  owner_node: V4CordisMountCandidate
+  owner_symbols:
+  - CordisMountCandidate
+  allowed_writers:
+  - routecodex-v4-cordis-bridge
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-runtime
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.runtime.node_plan_bundle
+  axis: control
+  verification_gate:
+  - v4_runtime_003_plan_bundle_positive
+  - v4_runtime_003_plan_bundle_boundary
+  resource_kind: node_plugin_plan_bundle
+  lifecycle: v4.plugin_plan
+  owner_crate: routecodex-v4-plugin-plan
+  owner_node: V4NodePluginPlanBundle
+  owner_symbols:
+  - NodePluginPlanBundle
+  allowed_writers:
+  - routecodex-v4-plugin-plan
+  allowed_readers:
+  - routecodex-v4-node-container
+  forbidden_writers:
+  - routecodex-v4-runtime
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.plugin.request.responses_normalize
+  axis: data
+  verification_gate:
+  - v4_plugin_request_positive
+  - v4_plugin_request_boundary
+  resource_kind: normal_payload
+  lifecycle: v4.plugin.standard_library
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubReqInbound03Normalized
+  owner_symbols:
+  - StandardPlugin
+  - StandardHandleRegistry
+  allowed_writers:
+  - V4HubReqInbound03Normalized
+  allowed_readers:
+  - V4HubReqInbound03Normalized
+  - V4HubReqChatProcess04Governed
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.plugin.request.chat_to_responses
+  axis: data
+  verification_gate:
+  - v4_plugin_request_positive
+  - v4_plugin_request_boundary
+  resource_kind: normal_payload
+  lifecycle: v4.plugin.standard_library
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubReqInbound03Normalized
+  owner_symbols:
+  - StandardPlugin
+  - StandardHandleRegistry
+  allowed_writers:
+  - V4HubReqInbound03Normalized
+  allowed_readers:
+  - V4HubReqInbound03Normalized
+  - V4HubReqChatProcess04Governed
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.plugin.request.governance
+  axis: data
+  verification_gate:
+  - v4_plugin_request_positive
+  - v4_plugin_request_boundary
+  resource_kind: normal_payload
+  lifecycle: v4.plugin.standard_library
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubReqChatProcess04Governed
+  owner_symbols:
+  - StandardPlugin
+  - StandardHandleRegistry
+  allowed_writers:
+  - V4HubReqChatProcess04Governed
+  allowed_readers:
+  - V4HubReqChatProcess04Governed
+  - V4HubReqOutbound05ProviderSemantic
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.plugin.request.provider_semantic
+  axis: data
+  verification_gate:
+  - v4_plugin_request_positive
+  - v4_plugin_request_boundary
+  resource_kind: provider_semantic
+  lifecycle: v4.plugin.standard_library
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubReqOutbound05ProviderSemantic
+  owner_symbols:
+  - StandardPlugin
+  - StandardHandleRegistry
+  allowed_writers:
+  - V4HubReqOutbound05ProviderSemantic
+  allowed_readers:
+  - V4ProviderReqCompat06Compat
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.plugin.request.responses_wire_build
+  axis: data
+  verification_gate:
+  - v4_plugin_request_positive
+  - v4_plugin_request_boundary
+  resource_kind: provider_wire
+  lifecycle: v4.plugin.standard_library
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4ProviderReqCompat06Compat
+  owner_symbols:
+  - StandardPlugin
+  - StandardHandleRegistry
+  semantic_contract:
+    control_fields_forbidden: true
+  allowed_writers:
+  - V4ProviderReqCompat06Compat
+  allowed_readers:
+  - V4ProviderSseOut07WireBoundary
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.config.product_parity
+  axis: information
+  verification_gate:
+  - v4_config_l2_regression
+  resource_kind: product_manifest
+  lifecycle: v4.config.compile
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config03SchemaValidated
+  owner_symbols:
+  - RuntimeProductConfig
+  allowed_writers:
+  - V4Config03SchemaValidated
+  allowed_readers:
+  - V4Config05ManifestPublished
+  forbidden_writers: []
+  binding_status: anchored
+- resource_id: v4.plugin.response.decode
+  axis: data
+  verification_gate:
+  - v4_plugin_response_positive
+  resource_kind: response_plugin
+  lifecycle: v4.response.inbound
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubRespInbound02Parsed
+  owner_symbols:
+  - StandardPlugin
+  allowed_writers:
+  - V4HubRespInbound02Parsed
+  allowed_readers:
+  - V4HubRespChatProcess03Governed
+  forbidden_writers: []
+  binding_status: anchored
+- resource_id: v4.plugin.response.governance
+  axis: data
+  verification_gate:
+  - v4_plugin_response_positive
+  resource_kind: response_plugin
+  lifecycle: v4.response.chat_process
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubRespChatProcess03Governed
+  owner_symbols:
+  - StandardPlugin
+  allowed_writers:
+  - V4HubRespChatProcess03Governed
+  allowed_readers:
+  - V4HubRespOutbound04ClientSemantic
+  forbidden_writers: []
+  binding_status: anchored
+- resource_id: v4.plugin.response.fault_intake
+  axis: control
+  verification_gate:
+  - v4_plugin_response_positive
+  resource_kind: response_error_control
+  lifecycle: v4.error.mainline
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubRespInbound02Parsed
+  owner_symbols:
+  - StandardPlugin
+  allowed_writers:
+  - V4HubRespInbound02Parsed
+  allowed_readers:
+  - V4Error01SourceRaised
+  forbidden_writers: []
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored

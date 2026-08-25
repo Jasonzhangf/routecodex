@@ -255,7 +255,7 @@ function validate(resourceMap, appsdkMap, verificationMap, nodeIds) {
 
     const appsdk = appsdkById.get(id);
     if (!appsdk) {
-      failures.push(`${id}: missing counterpart in .appsdk/maps/resource-map.json`);
+      failures.push(`${id}: missing counterpart in docs/architecture/maps/resource-map.json`);
       continue;
     }
     const appsdkOwner = String(appsdk.owner ?? '');
@@ -282,7 +282,9 @@ function validate(resourceMap, appsdkMap, verificationMap, nodeIds) {
       (resource.status === 'contract_bound' && owner.startsWith('contract:')) ||
       owner.startsWith('appsdk::') ||
       owner === 'routecodex-v4-build-link' ||
-      owner.startsWith('routecodex-v4-build-link::');
+      owner.startsWith('routecodex-v4-build-link::') ||
+      owner === 'routecodex-v4-governance' ||
+      owner.startsWith('routecodex-v4-parity');
     if (resource.resource_id.startsWith('v4.') && !yamlIds.has(resource.resource_id) && !registeredExtra) {
       failures.push(`${resource.resource_id}: declared in .appsdk resource-map.json without YAML declaration`);
     }
@@ -299,8 +301,8 @@ function validate(resourceMap, appsdkMap, verificationMap, nodeIds) {
 
 function runSelfTest() {
   const baseResourceMap = readYaml('docs/architecture/v4-resource-operation-map.yml');
-  const baseAppsdkMap = readJson('.appsdk/maps/resource-map.json');
-  const verificationMap = readJson('.appsdk/maps/verification-map.json');
+  const baseAppsdkMap = readJson('docs/architecture/maps/resource-map.json');
+  const verificationMap = readJson('docs/architecture/maps/verification-map.json');
 
   const clone = (value) => JSON.parse(JSON.stringify(value));
   const cases = [
@@ -394,8 +396,8 @@ if (process.argv.includes('--red-self-test')) {
 }
 
 const resourceMap = readYaml('docs/architecture/v4-resource-operation-map.yml');
-const appsdkMap = readJson('.appsdk/maps/resource-map.json');
-const verificationMap = readJson('.appsdk/maps/verification-map.json');
+const appsdkMap = readJson('docs/architecture/maps/resource-map.json');
+const verificationMap = readJson('docs/architecture/maps/verification-map.json');
 
 const failures = validate(resourceMap, appsdkMap, verificationMap, collectNodeCatalog());
 if (failures.length > 0) {

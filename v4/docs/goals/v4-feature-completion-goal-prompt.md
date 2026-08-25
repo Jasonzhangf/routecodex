@@ -2,7 +2,7 @@
 
 ```text
 /goal
-目标：以云端 `main@ef3899f` 为基线，一次性完成 V4 当前生产执行层全部独立组件，全部 source-green 后再由单一 integration owner 接线，关闭 M1 + M2 P0 的生产 NodeContainer 断点。
+目标：以执行开始时当前 V4 worktree 的 HEAD/tree hash（及其后继）为唯一基线，一次性完成 V4 当前生产执行层全部独立组件，全部 source-green 后再由单一 integration owner 接线，关闭 M1 + M2 P0 的生产 NodeContainer 断点。
 
 说明：本任务不需要再写新的提示词，直接按实现文档第 28 章执行。
 
@@ -10,7 +10,7 @@
 v4/docs/goals/v4-feature-completion-plan.md#28-runtime-007-后的分层批量开发与接线计划
 
 执行规范：
-- 基线必须是 `ef3899f` 或其后继；缺对象只同步，禁止重做 `V4-RUNTIME-007`。同步后先重放 R007 证据，并完成 `V4-RUNTIME-002` closure audit：证明同一 epoch owner 已覆盖其合同；有缺口则登记 epoch-owner lane 并纳入 source-green barrier，只补确证缺口。
+- 基线必须从当前 V4 worktree 的 HEAD 解析，并以当前基准 tree 的可达 commit/tree hash 固定；后继 tree 只允许在 baseline drift audit 后登记。缺对象只同步，禁止重做 `V4-RUNTIME-007`。同步后先重放 R007 证据，并完成 `V4-RUNTIME-002` closure audit：证明同一 epoch owner 已覆盖其合同；有缺口则登记 epoch-owner lane 并纳入 source-green barrier，只补确证缺口。
 - 先锁 P0 plugin ABI/immutable IDs 与 typed interfaces/owner，完成 `RUNTIME-003A/004A`、`PLUGIN-001..008`、`RUNTIME-005A/006A`、parity/harness/gates 全部独立红绿验证；同层未全绿禁止 production wiring。
 - 接线只由一个 integration owner 完成 `003B/004B/005B/006B`，并显式分开 request、success response、Error Skeleton、client-drop terminal；禁止 fallback、重复 owner、V3 修改及控制面进入 payload。
 - 不做逐 lane 交付 review；clean worktree 全绿后把 exact candidate 合入主 tree，完成 build/install/live/differential，再进入一个 batch-scoped DSH review loop。Review 不阻止无依赖独立开发或主树验证；FAIL 只回唯一 owner 修复并复验复审，未 PASS 禁止 final commit/push/promotion/freeze/完成声明。
@@ -32,7 +32,7 @@ ARCHIVED_GOAL_DO_NOT_EXECUTE
 
 目标：按照 `v4/docs/goals/v4-feature-completion-plan.md` 完成 RouteCodex V4 的全部产品功能闭环，使 V4 在保留新架构的前提下对齐当前选定的 V3 冻结行为基线，并达到可灰度接管、可发布、可回滚的生产准入状态。
 
-当前审计基线：`main@2fda3f049190620511f2d2c6069a7bec0dd2871f`。开始执行时必须先读取当前 HEAD；若 HEAD 已变化，不得假设本提示词中的完成度仍然准确，先完成 baseline drift 审计并把差异写入产品 parity ledger 和 plan-deviation evidence，再继续执行。
+历史审计基线：`main@2fda3f049190620511f2d2c6069a7bec0dd2871f`（仅作封存记录，不是当前执行基线）。执行基线必须从当前 V4 worktree 的 HEAD 与 tree hash 解析；若 HEAD/tree 已变化，先完成 V4 baseline drift 审计并登记差异，再继续执行。
 
 本 goal 是长线分阶段目标，不是单个 slice，也不是要求一次提交完成。每个 milestone、每个任务必须独立计划、独立红测、独立实现、独立验证、独立 review、独立提交。前一 milestone 的硬退出条件未通过，不进入依赖它的后续 milestone。M3 fixture 提取可与 M1/M2 部分并行，但只有 production NodeContainer 路径接通后的 V4 差分结果才能作为产品完成证据。
 

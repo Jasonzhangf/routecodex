@@ -1,0 +1,17 @@
+{
+  "evidence_id": "red-gate",
+  "issue_id": "V4-RUNTIME-003",
+  "experiment_id": "v4-runtime-003-plan-bundle",
+  "phase": "negative_intervention",
+  "kind": "red_test",
+  "source_commit": "c1b81ddee7500a877264b17224e7b21a7f115497",
+  "scope": {"feature_id": "V4-RUNTIME-003", "module_id": "routecodex-v4-plugin-plan"},
+  "producer": {"adapter": "cargo", "identity": "v4_runtime_003_plan_bundle_red"},
+  "command_argv": ["cargo", "test", "-p", "routecodex-v4-plugin-plan", "--manifest-path", "Cargo.toml", "--locked"],
+  "exit_status": 0,
+  "result": "pass",
+  "created_at": "2026-08-24T05:10:00Z",
+  "expires_at": "2026-08-31T05:10:00Z",
+  "input_hashes": ["sha256:4f6ae8516588abe7900772827fb32786a5b5d2ea81dea4c5a64a9071404cc07f","sha256:6aa6d08a1eadf951e7c28940d54757948b314bbaa0f76c8ec2fe80aa618691c0","sha256:7dee7e58703f74d1aea3b40a5822ce584c943a61fc66a76f8dba3cb823b43af2","sha256:c943c4b66c53094bbbcf53e474d79e2177dbbf050d8183b1e9a46675773d5fad"],
+  "scope_hash": "sha256:cb1323417bec2848c2ef95205c67f6411db3e45af13214e59820eecfb712a821"
+}

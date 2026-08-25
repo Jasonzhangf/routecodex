@@ -1,0 +1,32 @@
+{
+  "regression_report_id": "v4-governance-regression-report",
+  "module_id": "routecodex-v4-governance",
+  "suite_id": "v4-governance-regression",
+  "command": {
+    "program": "appsdk",
+    "args": [
+      "verify",
+      "."
+    ],
+    "working_directory": "."
+  },
+  "input_hash": "sha256:caf0a52b61016db31bb19e7c813de82c44e2f62014883957c2c27d072bb9ca8b",
+  "artifact_hash": "sha256:caf0a52b61016db31bb19e7c813de82c44e2f62014883957c2c27d072bb9ca8b",
+  "public_api_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "scope_hash": "sha256:b9fbe0d93c2c5d6bb105b07b4471bf64acad32b31c371a4ab5329ec3adb13031",
+  "source_commit": "cbb1006d741f693df3f490bf9c092d989284e0dd",
+  "passed": 1,
+  "failed": 0,
+  "skipped": 0,
+  "test_count": 1,
+  "test_characteristics": {
+    "whitebox": true,
+    "blackbox": true
+  },
+  "producer": {
+    "adapter": "appsdk-cli",
+    "identity": "appsdk-0.1.5"
+  },
+  "result": "pass",
+  "created_at": "2026-08-23T11:08:00Z"
+}

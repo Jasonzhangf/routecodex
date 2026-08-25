@@ -128,7 +128,7 @@ Cordis 插件框架运行完整垂直切片，与 V3 同入口真实样本行为
   -> verify:v4-foundation-red -> appsdk verify v4 / appsdk verify --admission v4
   -> gen/verify-index -> DSH review（opencode-go/deepseek-v4-flash）语义 PASS。
 - 涉及 runtime 行为/配置的 Phase，增加全局安装、聚合 restart（仅
-  `routecodex restart` exec 原位置重启）、在线旧样本复测。
+  `rccv4 restart` exec 原位置重启）、在线旧样本复测。
 
 完成标准（长线总闸）：
 - Phase 0-6 全部语义 PASS，gate 全绿，无遗留 P0/P1；

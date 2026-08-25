@@ -31,13 +31,17 @@ fn responses_fixture() -> KeylessChatFixture {
         "POST",
         "/v1/responses",
         Vec::new(),
-        "responses:hello".to_string(),
+        "responses:{\"model\":\"responses-model\",\"input\":[{\"role\":\"user\",\"content\":\"hello\"}]}".to_string(),
         "responses-model".to_string(),
     )
 }
 
 fn mock_provider_frame_ok() -> &'static str {
     r#"{"ok": true, "choices": [{"message": {"role": "assistant"}}]}"#
+}
+
+fn mock_responses_provider_frame_ok() -> &'static str {
+    r#"{"id":"resp_mock_1","object":"response","output":[]}"#
 }
 
 #[test]
@@ -147,7 +151,7 @@ fn positive_responses_direct_operator_accepted() {
 }
 
 #[test]
-fn red_responses_relay_operator_rejected() {
+fn positive_responses_relay_operator_accepted() {
     let runtime = load_runtime();
     let mut counter = MockTransportIdentityCounter::new();
     let fixture = responses_fixture();
@@ -155,7 +159,7 @@ fn red_responses_relay_operator_rejected() {
         &runtime,
         &mut counter,
         &fixture,
-        mock_provider_frame_ok(),
+        mock_responses_provider_frame_ok(),
         "srv-m8",
         "2026-08-17",
         TEST_PORT,
@@ -164,10 +168,12 @@ fn red_responses_relay_operator_rejected() {
         "responses",
         "relay",
     );
-    assert!(outcome.is_err(), "responses + relay owner must fail fast");
-    let fault = outcome.err().expect("missing fault");
-    assert_eq!(fault.code, "keyless_fixture_invalid");
-    assert!(fault.message.contains("responses"), "error must mention invalid pair");
+    let report = outcome.expect("responses + relay owner must use local materialization");
+    assert!(report.error.is_none(), "no fault expected: {:?}", report.error);
+    assert!(report.relay_operator_accepted, "responses+relay selects relay operator");
+    assert_eq!(report.fixture_path, "/v1/responses");
+    assert!(report.continuation_committed, "responses/relay commits local continuation");
+    assert_eq!(report.continuation_owner, "relay");
 }
 
 #[test]

@@ -1,0 +1,18 @@
+{
+  "fix_candidate_id":"v4-runtime-005-006-runtime-port-candidate",
+  "issue_id":"V4-RUNTIME-005",
+  "module_id":"routecodex-v4-runtime",
+  "worktree_id":"v4-feature-completion-20260824T190611Z-Macstudio-v4branch",
+  "base_commit":"42611b93193c7c56e5e0850f94f34476f33483b2",
+  "head_commit":"eafc7f694e6ceb9fc361593d0ae20fe2b7b168cb",
+  "tree_hash":"0fe97a73171bc2f33040275e1e9173cdd9b7f35a",
+  "diff_hash":"sha256:ac6d5ef0ad13957e248f60f0eccf52b1499382c58b9293c28850c1c63fa2d35b",
+  "design_id":"v4-feature-completion-runtime-ports",
+  "owner":"routecodex-v4-runtime",
+  "scope_hash":"sha256:c0972b199e2dcf7f22fca8d167e1409d87c74ae03c2d586d84b197947386b2b0",
+  "changed_paths":["v4/crates/routecodex-v4-runtime/src/request_port.rs","v4/crates/routecodex-v4-runtime/src/response_error_port.rs","v4/crates/routecodex-v4-runtime/tests/l2_ports.rs"],
+  "verification_evidence_ids":["boundary-audit","plane-isolation","positive","red-gate"],
+  "created_at":"2026-08-24T05:30:00Z",
+  "batch_id":"F",
+  "task_ids":["V4-RUNTIME-005","V4-RUNTIME-006"]
+}

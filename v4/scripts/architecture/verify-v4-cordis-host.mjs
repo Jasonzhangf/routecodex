@@ -7,9 +7,9 @@ const sourcePath = path.join(root, 'cordis/routecodex-v4-cordis-host/src/index.m
 const testsPath = path.join(root, 'cordis/routecodex-v4-cordis-host/tests/host.test.mjs');
 const bindingTestsPath = path.join(root, 'cordis/routecodex-v4-cordis-host/tests/host-binding.test.mjs');
 const bindingContractPath = path.join(root, 'contracts/node-container-host-binding.contract.json');
-const functionMapPath = path.join(root, '.appsdk/maps/function-map.json');
-const mainlinePath = path.join(root, '.appsdk/maps/mainline-call-map.json');
-const resourceMapPath = path.join(root, '.appsdk/maps/resource-map.json');
+const functionMapPath = path.join(root, 'docs/architecture/maps/function-map.json');
+const mainlinePath = path.join(root, 'docs/architecture/maps/mainline-call-map.json');
+const resourceMapPath = path.join(root, 'docs/architecture/maps/resource-map.json');
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const required = [
   'from \'cordis\'',

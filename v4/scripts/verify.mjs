@@ -13,6 +13,9 @@ import path from 'node:path';
 import { v4Root, run } from './_common.mjs';
 import { ARCHITECTURE_GATES, CONSUMER_REGRESSIONS } from './_gate-matrix.mjs';
 
+run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
+// V4-LAYER-PREFLIGHT-END
+
 function restoreHermeticActive() {
   const fixture = path.join(v4Root, 'tests/resources/active-link-fixture/active/lib');
   const target = path.join(v4Root, 'active/lib');
@@ -28,7 +31,7 @@ run('cargo run --quiet --manifest-path Cargo.toml -p routecodex-v4-skeleton --bi
 run('cargo build --release --manifest-path Cargo.toml --locked');
 restoreHermeticActive();
 run('node scripts/build.mjs');
-run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-binary --root . --consumer routecodex-v4-runtime-bin --deps routecodex-v4-base-node,routecodex-v4-edge,routecodex-v4-control,routecodex-v4-error --source-deps routecodex-v4-cli,routecodex-v4-lifecycle,routecodex-v4-servertool --rlib-deps routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib,routecodex_v4_provider=build-control/routecodex-v4-provider/libroutecodex_v4_provider.rlib,routecodex_v4_router=build-control/routecodex-v4-router/libroutecodex_v4_router.rlib,routecodex_v4_runtime=build-control/routecodex-v4-runtime/libroutecodex_v4_runtime.rlib,routecodex_v4_server=build-control/routecodex-v4-server/libroutecodex_v4_server.rlib --out build-control/routecodex-v4-runtime-bin/tests');
+run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-binary --root . --consumer routecodex-v4-runtime-bin --deps routecodex-v4-base-node,routecodex-v4-edge,routecodex-v4-control,routecodex-v4-error --source-deps routecodex-v4-cli,routecodex-v4-cordis-bridge,routecodex-v4-lifecycle,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-servertool,routecodex-v4-standard-plugins --rlib-deps routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib,routecodex_v4_provider=build-control/routecodex-v4-provider/libroutecodex_v4_provider.rlib,routecodex_v4_router=build-control/routecodex-v4-router/libroutecodex_v4_router.rlib,routecodex_v4_runtime=build-control/routecodex-v4-runtime/libroutecodex_v4_runtime.rlib,routecodex_v4_server=build-control/routecodex-v4-server/libroutecodex_v4_server.rlib --out build-control/routecodex-v4-runtime-bin/tests');
 
 for (const gate of ARCHITECTURE_GATES) {
   run(`node scripts/architecture/${gate}`);

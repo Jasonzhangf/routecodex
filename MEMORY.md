@@ -5810,3 +5810,9 @@ Tags: #v3 #historical-samples #error-samples #provider-debug
 - `routecodex-v3-server` Front transport 是唯一 owner：connection identity 保持稳定，每次 `mark_request_started` 必须原子清旧 frame、置当前轮 request started 并重置 response phase。restart 在当前轮 headers 前生成完整 HTTP 503 `server_restart_in_progress`；headers 后只可使用当前轮已登记协议 terminal。
 - 回归必须包含同一 state 的第二请求白盒红测和真实同连接在线 replay。普通新连接 curl 不能替代；上传未完成时的 `Broken pipe` 也不能证明 closeout。安装版 `0.90.4600` 在线证明第一轮 Chat 200、第二轮完整上传等待时 restart 得到完整 503/connection-close，重启后 7777/4444 health 与 Chat SSE `[DONE]` 通过。
 Tags: #v3 #restart #keepalive #InvalidHTTPResponse #front-closeout #request-cycle
+
+## 2026-08-24 V4 completion-claim correction
+- V4 active-link, layer-batch, release build, install, managed restart, health, and one live Responses replay were completed, but that is only independent runtime admission/integration evidence. It is not V4 product completion or V3 parity.
+- V4 currently requires `version = 4`, `runtime.id = "rccv4"`, and a compiled manifest; V3 7777 uses `version = 3` with route groups, multiple pools, multiple protocols, and provider-specific policies. V4 does not yet consume or compile the V3 config and cannot claim equivalent routing/provider/config behavior.
+- Completion claims must follow the product definition in `v4/docs/goals/v4-feature-completion-plan.md`: all selected V3 features must reach differential/live parity, not merely mapped/source/production-canary states. Keep the V4 independent runtime admission milestone explicitly separate from the V4 product-parity milestone.
+- 2026-08-24 Jason correction: RCCV4 install/restart/live verification must use only global `rccv4`; never use `routecodex` as the V4 lifecycle command. Any V4 evidence must bind installed binary identity, `rccv4 restart`, 5520 health, and live samples to the same V4 artifact.

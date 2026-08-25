@@ -1,7 +1,7 @@
 {
   "ai_confidence": 0.93,
   "confidence_rationale": "Post-merge architecture re-audit confirms the migration candidate remains governance-only, current maps bind real symbols, and Edge still consumes only the frozen base-node Active artifact. Runtime control resources remain typed side-channel state and cannot enter provider or client payload paths.",
-  "created_at": "2026-08-22T05:46:00Z",
+  "created_at": "2026-08-22T05:41:00Z",
   "evidence_ids": [
     "edge-sdk013-candidate",
     "edge-sdk013-positive",

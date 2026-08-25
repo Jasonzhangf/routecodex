@@ -1,0 +1,23 @@
+version = 4
+
+product_config_path = "v3-responses-7777-product.toml"
+
+[runtime]
+id = "rccv4"
+
+[[listeners]]
+id = "primary"
+address = "127.0.0.1:5520"
+
+[[providers]]
+provider_id = "cc-sol"
+config_path = "provider/cc-sol/config.v2.toml"
+protocol = "responses"
+wire_model = "gpt-5.6-sol"
+priority = 1
+entry_models = ["gpt-5.6-sol"]
+
+[[routes]]
+id = "canary"
+models = ["gpt-5.6-sol"]
+targets = ["cc-sol"]

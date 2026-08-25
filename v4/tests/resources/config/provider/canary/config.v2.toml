@@ -1,0 +1,25 @@
+version = "2.0.0"
+providerId = "canary"
+
+[provider]
+id = "canary"
+enabled = true
+type = "responses"
+baseURL = "https://api.anyint.ai/openai/v1"
+defaultModel = "deepseek-v4-flash"
+compatibilityProfile = "responses:thinking-tags"
+
+[provider.responses]
+process = "direct"
+streaming = "always"
+
+[provider.auth]
+type = "apikey"
+selection = { strategy = "priority" }
+entries = [{ alias = "key1", secretFile = "/Volumes/extension/.rcc/secrets/v3/opencode-go.conf", secretKey = "cc-sol.key1" }]
+
+[provider.models."deepseek-v4-flash"]
+wireName = "gpt-5.6-sol"
+supportsStreaming = true
+supportsThinking = true
+capabilities = ["text", "reasoning", "thinking", "tools", "web_search", "multimodal"]

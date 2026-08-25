@@ -63,6 +63,114 @@ pub struct NodePluginPlan {
     pub hash: String,
 }
 
+/// Immutable set of plans emitted for one compiled manifest.  The bundle is
+/// the source-side artifact handed to the mount/publication lane; it does not
+/// load plugins, mutate an active pointer, or execute a request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodePluginPlanBundle {
+    pub plans: Vec<NodePluginPlan>,
+    pub artifact_set_hash: String,
+    artifact_hashes: Vec<String>,
+}
+
+impl NodePluginPlanBundle {
+    pub fn verify(&self) -> bool {
+        if self.plans.iter().any(|plan| !plan.verify()) {
+            return false;
+        }
+        let mut body = self
+            .plans
+            .iter()
+            .map(|plan| (plan.node_id.clone(), plan.hash.clone()))
+            .zip(self.artifact_hashes.iter().cloned())
+            .map(|((node_id, plan_hash), artifact_hash)| {
+                (node_id, plan_hash, artifact_hash)
+            })
+            .collect::<Vec<_>>();
+        body.sort();
+        let encoded = serde_json::to_vec(&body).expect("bundle identity is serializable");
+        let mut hasher = Sha256::new();
+        hasher.update(encoded);
+        format!("sha256:{}", hex(&hasher.finalize())) == self.artifact_set_hash
+    }
+
+    pub fn artifact_set_hash(&self) -> &str {
+        &self.artifact_set_hash
+    }
+}
+
+/// One active node input for the source-side bundle compiler.
+#[derive(Debug, Clone)]
+pub struct ActiveNodePlanInput {
+    pub node_id: String,
+    pub role_id: String,
+    pub chain: String,
+    pub position: u32,
+    pub authoring: Vec<AuthoringPlugin>,
+    pub allowed_reads: Vec<String>,
+    pub allowed_writes: Vec<String>,
+    pub container_services: Vec<String>,
+}
+
+/// Compile every active node deterministically and bind the exact plugin
+/// artifact set.  This is intentionally a pure candidate compiler: callers
+/// must perform mount, publication, and epoch selection in their owning lanes.
+pub fn compile_active_node_plan_bundle(
+    mut inputs: Vec<ActiveNodePlanInput>,
+    resources: &ResourceRegistry,
+) -> Result<NodePluginPlanBundle, PlanError> {
+    inputs.sort_by(|left, right| {
+        left.chain
+            .cmp(&right.chain)
+            .then(left.position.cmp(&right.position))
+            .then(left.node_id.cmp(&right.node_id))
+    });
+    let mut plans = Vec::with_capacity(inputs.len());
+    let mut artifact_hashes = Vec::new();
+    for input in inputs {
+        let mut node_artifact_hashes = input
+            .authoring
+            .iter()
+            .filter(|plugin| plugin.enabled)
+            .map(|plugin| plugin.descriptor.artifact_hash.clone())
+            .collect::<Vec<_>>();
+        node_artifact_hashes.sort();
+        let plan = compile_node_plan(
+            &input.node_id,
+            &input.role_id,
+            &input.chain,
+            input.position,
+            &input.authoring,
+            &input.allowed_reads,
+            &input.allowed_writes,
+            resources,
+            &input.container_services,
+        )?;
+        let encoded = serde_json::to_vec(&node_artifact_hashes)
+            .expect("node artifact identity is serializable");
+        let mut node_hasher = Sha256::new();
+        node_hasher.update(encoded);
+        artifact_hashes.push(format!("sha256:{}", hex(&node_hasher.finalize())));
+        plans.push(plan);
+    }
+    let mut identity = plans
+        .iter()
+        .map(|plan| (plan.node_id.clone(), plan.hash.clone()))
+        .zip(artifact_hashes.iter().cloned())
+        .map(|((node_id, plan_hash), artifact_hash)| (node_id, plan_hash, artifact_hash))
+        .collect::<Vec<_>>();
+    identity.sort();
+    let encoded = serde_json::to_vec(&identity).expect("bundle identity is serializable");
+    let mut hasher = Sha256::new();
+    hasher.update(encoded);
+    let artifact_set_hash = format!("sha256:{}", hex(&hasher.finalize()));
+    Ok(NodePluginPlanBundle {
+        plans,
+        artifact_set_hash,
+        artifact_hashes,
+    })
+}
+
 impl NodePluginPlan {
     /// Deterministic canonical plan hash. Stable for the same semantic plan
     /// regardless of authoring order or map iteration order.
@@ -1299,5 +1407,98 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, PlanError::PhaseOrderConflict { .. }));
+    }
+
+    #[test]
+    fn active_node_bundle_binds_plan_and_artifact_set_identity() {
+        let input = ActiveNodePlanInput {
+            node_id: "V4HubReqChatProcess04Governed".to_string(),
+            role_id: "request_chat_process".to_string(),
+            chain: "request".to_string(),
+            position: 4,
+            authoring: vec![authoring_plugin(
+                "v4.request.govern",
+                PluginPhase::Semantic,
+                300,
+                true,
+            )],
+            allowed_reads: allowed_reads(),
+            allowed_writes: allowed_writes(),
+            container_services: vec![],
+        };
+        let bundle = compile_active_node_plan_bundle(vec![input], &registry())
+            .expect("active node bundle compiles");
+        assert_eq!(bundle.plans.len(), 1);
+        assert!(bundle.plans[0].verify());
+        assert!(bundle.artifact_set_hash().starts_with("sha256:"));
+        assert!(bundle.verify());
+    }
+
+    #[test]
+    fn active_node_bundle_is_deterministic_across_node_authoring_order() {
+        let make_input = |node_id: &str, role_id: &str, chain: &str, position: u32| {
+            let mut plugin = authoring_plugin(
+                &format!("v4.request.{position}"),
+                PluginPhase::Semantic,
+                300,
+                true,
+            );
+            plugin.descriptor.node_selector.node_id = node_id.to_string();
+            plugin.descriptor.node_selector.role_id = role_id.to_string();
+            plugin.descriptor.node_selector.position = position;
+            ActiveNodePlanInput {
+            node_id: node_id.to_string(),
+            role_id: role_id.to_string(),
+            chain: chain.to_string(),
+            position,
+            authoring: vec![plugin],
+            allowed_reads: allowed_reads(),
+            allowed_writes: allowed_writes(),
+            container_services: vec![],
+            }
+        };
+        let first = compile_active_node_plan_bundle(
+            vec![
+                make_input("V4HubReqChatProcess04Governed", "request_chat_process", "request", 4),
+                make_input("V4HubRespChatProcess03Governed", "response_chat_process", "response", 3),
+            ],
+            &registry(),
+        )
+        .expect("first bundle compiles");
+        let second = compile_active_node_plan_bundle(
+            vec![
+                make_input("V4HubRespChatProcess03Governed", "response_chat_process", "response", 3),
+                make_input("V4HubReqChatProcess04Governed", "request_chat_process", "request", 4),
+            ],
+            &registry(),
+        )
+        .expect("second bundle compiles");
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn active_node_bundle_rejects_plan_or_artifact_identity_drift() {
+        let input = ActiveNodePlanInput {
+            node_id: "V4HubReqChatProcess04Governed".to_string(),
+            role_id: "request_chat_process".to_string(),
+            chain: "request".to_string(),
+            position: 4,
+            authoring: vec![authoring_plugin(
+                "v4.request.govern",
+                PluginPhase::Semantic,
+                300,
+                true,
+            )],
+            allowed_reads: allowed_reads(),
+            allowed_writes: allowed_writes(),
+            container_services: vec![],
+        };
+        let bundle = compile_active_node_plan_bundle(vec![input], &registry()).unwrap();
+        let mut artifact_drift = bundle.clone();
+        artifact_drift.artifact_hashes[0] = "sha256:drift".to_string();
+        assert!(!artifact_drift.verify());
+        let mut plan_drift = bundle;
+        plan_drift.plans[0].hash = "sha256:drift".to_string();
+        assert!(!plan_drift.verify());
     }
 }

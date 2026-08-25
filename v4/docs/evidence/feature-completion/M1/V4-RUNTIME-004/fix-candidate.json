@@ -1,0 +1,20 @@
+{
+  "fix_candidate_id": "v4-runtime-004-cordis-mount-candidate",
+  "issue_id": "V4-RUNTIME-004",
+  "module_id": "routecodex-v4-cordis-bridge",
+  "worktree_id": "v4-feature-completion-20260824T190611Z-Macstudio-v4branch",
+  "base_commit": "a6d24de8fa99e3ddc8b525b8b1ae83fec154aa34",
+  "head_commit": "6c220209afd42162b16f070dafb60e3a432cb35c",
+  "tree_hash": "071b1d66e4ecb0532dcaed4a4f00c88305cac9e4",
+  "diff_hash": "sha256:c5d0e6b62d52bf4f97744cfbab4a4623ebedec85bac5fd5b662e7c0b10744e0f",
+  "design_id": "v4-feature-completion-runtime-004-cordis-mount-candidate",
+  "owner": "routecodex-v4-cordis-bridge",
+  "scope_hash": "sha256:4c7f572adf64acfc3d609ae7aa7ef5bc300c24494ed97c5c47f4c97595ab0bdc",
+  "changed_paths": [
+    "v4/crates/routecodex-v4-cordis-bridge/src/lib.rs"
+  ],
+  "verification_evidence_ids": ["boundary-audit", "plane-isolation", "positive", "red-gate"],
+  "created_at": "2026-08-24T05:30:00Z",
+  "batch_id": "C",
+  "task_ids": ["V4-RUNTIME-004"]
+}

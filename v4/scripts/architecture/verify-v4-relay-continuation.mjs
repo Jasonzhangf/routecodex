@@ -226,7 +226,7 @@ function loadInputs() {
   const baselineInfo = loadV3Baseline('v3-resource-operation-map.yml');
   return {
     slice: readYaml('docs/architecture/v4-relay-continuation-compatibility-slice.yml'),
-    verification: readJson('.appsdk/maps/verification-map.json'),
+    verification: readJson('docs/architecture/maps/verification-map.json'),
     resourceMap: readYaml('docs/architecture/v4-resource-operation-map.yml'),
     v3ResourceMap: readYaml(baselineInfo.artifactPath),
     nodeGraph: readJson('contracts/node-graph.contract.json'),

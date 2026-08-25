@@ -7,6 +7,14 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const admission = spawnSync(process.execPath, [
+  'scripts/architecture/verify-v4-feature-layer-batches.mjs',
+  '--admission',
+], { cwd: root, encoding: 'utf8' });
+if (admission.status !== 0) {
+  throw new Error(`V4 feature-layer admission failed: ${admission.stderr || admission.stdout}`);
+}
+// V4-LAYER-PREFLIGHT-END
 const source = path.join(root, 'target/release/rccv4');
 const directory = path.join(os.homedir(), '.local/bin');
 const destination = path.join(directory, 'rccv4');

@@ -7,14 +7,23 @@
       "owner": "routecodex-v4-governance",
       "owned_paths": [
         ".appsdk/**",
+        ".appsdk/goal.json",
+        ".appsdk/project.json",
+        ".appsdk/sdk.lock",
+        ".appsdk/maps/**",
+        ".appsdk/rules/**",
+        ".appsdk/skills/**",
+        ".appsdk/contracts/**",
+        ".appsdk/docs/**",
+        ".appsdk/sdk-resources.json",
         "contracts/**",
         "docs/**",
+        "scripts/**",
+        "package.json",
         "playground/**",
         "tests/**",
-        "scripts/**",
         "Cargo.toml",
         "Cargo.lock",
-        "package.json",
         "package-lock.json",
         "rust-toolchain.toml",
         ".gitignore"
@@ -36,7 +45,15 @@
         "v4_isolation_positive",
         "v4_parity_gate_real_runtime_admission",
         "v4_parity_gate_real_runtime_admission_red",
-        "v4_real_runtime_admission_red"
+        "v4_real_runtime_admission_red",
+        "v4_feature_layer_batches",
+        "v4_feature_layer_batch_build_guard",
+        "v4_feature_layer_batches_self_test",
+        "v4_feature_layer_batch_admission",
+        "v4_feature_layer_batches_boundary",
+        "v4_feature_layer_batches_red",
+        "v4_parity_gate_plane_isolation",
+        "v4_parity_gate_plane_isolation_red"
       ]
     },
     {
@@ -57,6 +74,30 @@
         "v4_active_link_resolver",
         "v4_active_index_verify",
         "v4_cargo_workspace_build"
+      ]
+    },
+    {
+      "module_id": "appsdk-record-graph",
+      "status": "active",
+      "owner": "appsdk::record_graph",
+      "owned_paths": [
+        ".appsdk/records/**"
+      ],
+      "forbidden_paths": [
+        "contracts/**",
+        "docs/**",
+        "scripts/**",
+        "crates/**",
+        "cordis/**",
+        "active/lib/**",
+        "protected/**",
+        "generated/**"
+      ],
+      "verification_gates": [
+        "record_graph",
+        "fix_lifecycle_graph",
+        "mainline_merge_identity",
+        "regression_report"
       ]
     },
     {
@@ -254,7 +295,11 @@
         "v4_response_inbound_outbound_l2",
         "v4_standard_plugins_test_consumer",
         "v4_parity_gate_standard_plugins",
-        "v4_parity_gate_standard_plugins_red"
+        "v4_parity_gate_standard_plugins_red",
+        "v4_plugin_response_positive",
+        "v4_plugin_response_red",
+        "v4_plugin_response_boundary",
+        "v4_plugin_response_plane"
       ]
     },
     {
@@ -319,6 +364,14 @@
         "contract_valid",
         "record_graph",
         "v4_runtime_l2_regression",
+        "v4_runtime_005_request_port_positive",
+        "v4_runtime_005_request_port_red",
+        "v4_runtime_005_request_port_boundary",
+        "v4_runtime_005_request_port_plane",
+        "v4_runtime_006_response_error_positive",
+        "v4_runtime_006_response_error_red",
+        "v4_runtime_006_response_error_boundary",
+        "v4_runtime_006_response_error_plane",
         "v4_parity_gate_execution_binding",
         "v4_parity_gate_execution_binding_red",
         "v4_parity_gate_resource_binding",
@@ -601,6 +654,19 @@
         "v4_servertool_l2_regression",
         "v4_infrastructure_contract"
       ]
+    },
+    {
+      "module_id": "routecodex-v4-parity",
+      "status": "active",
+      "owner": "routecodex-v4-parity",
+      "owned_paths": [
+        "scripts/architecture/verify-v4-product-parity-ledger.mjs",
+        "scripts/architecture/verify-v4-v3-baseline-delta.mjs",
+        "scripts/architecture/verify-v4-product-parity-status.mjs",
+        "scripts/architecture/verify-v4-product-differential.mjs"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**"],
+      "verification_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
     }
   ]
 }

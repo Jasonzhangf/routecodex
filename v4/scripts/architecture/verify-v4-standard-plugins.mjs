@@ -96,7 +96,7 @@ const REQUIRED_SOURCE = [
   'pub mod protocol',
   'pub mod chat_process',
   'pub mod routing',
-  'pub mod provider',
+  'pub mod provider;',
 ];
 
 const NODE_PERMISSIONS = new Map([
@@ -483,8 +483,8 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 24) {
-      failures.push(`${MODULE}: expected 24 active standard descriptors, got ${activeDescriptors.length}`);
+    if (activeDescriptors.length !== 29) {
+      failures.push(`${MODULE}: expected 29 active standard descriptors, got ${activeDescriptors.length}`);
     }
     if (!activeDescriptors.some(
       (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',
@@ -586,13 +586,13 @@ function validate(
 function runSelfTest() {
   const contracts = { [CONTRACT_ID]: readJson('contracts/plugin-library.contract.json') };
   const moduleRegistry = readJson('.appsdk/maps/module-registry.json');
-  const verificationMap = readJson('.appsdk/maps/verification-map.json');
-  const functionMap = readJson('.appsdk/maps/function-map.json');
-  const resourceMap = readJson('.appsdk/maps/resource-map.json');
+  const verificationMap = readJson('docs/architecture/maps/verification-map.json');
+  const functionMap = readJson('docs/architecture/maps/function-map.json');
+  const resourceMap = readJson('docs/architecture/maps/resource-map.json');
   const registry = readJson('contracts/active-link/frozen-consumer-registry.json');
   const nodeGraph = readJson('contracts/node-graph.contract.json');
   const resourceOperations = readYaml('docs/architecture/v4-resource-operation-map.yml');
-  const mainline = readJson('.appsdk/maps/mainline-call-map.json');
+  const mainline = readJson('docs/architecture/maps/mainline-call-map.json');
   const source = readSource();
 
   const cases = [
@@ -639,7 +639,7 @@ function runSelfTest() {
       state.source = `${source}\nuse routecodex_v4_base_node::BaseNode;`;
     }],
     ['category module removed', (state) => {
-      state.source = source.replace('pub mod provider', 'mod provider');
+      state.source = source.replace('pub mod provider;', 'mod provider;');
     }],
     ['response tool harvest descriptor removed', (state) => {
       state.source = source.replace(
@@ -765,13 +765,13 @@ if (isRedSelfTest) {
   const failures = validate(
     { [CONTRACT_ID]: readJson('contracts/plugin-library.contract.json') },
     readJson('.appsdk/maps/module-registry.json'),
-    readJson('.appsdk/maps/verification-map.json'),
-    readJson('.appsdk/maps/function-map.json'),
-    readJson('.appsdk/maps/resource-map.json'),
+    readJson('docs/architecture/maps/verification-map.json'),
+    readJson('docs/architecture/maps/function-map.json'),
+    readJson('docs/architecture/maps/resource-map.json'),
     readJson('contracts/active-link/frozen-consumer-registry.json'),
     readJson('contracts/node-graph.contract.json'),
     readYaml('docs/architecture/v4-resource-operation-map.yml'),
-    readJson('.appsdk/maps/mainline-call-map.json'),
+    readJson('docs/architecture/maps/mainline-call-map.json'),
     readSource(),
   );
   if (failures.length > 0) {

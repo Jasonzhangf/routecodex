@@ -1,0 +1,1323 @@
+{
+  "schema_version": 1,
+  "resources": [
+    {
+      "resource_id": "project_contract",
+      "owner": "appsdk::project_contract",
+      "truth_store": ".appsdk/project.json",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "sdk_lock",
+      "owner": "appsdk::pin_lock",
+      "truth_store": ".appsdk/sdk.lock",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "sdk_bundle_manifest",
+      "owner": "appsdk::bundle_verifier",
+      "truth_store": ".appsdk/contracts/sdk-bundle.manifest.json",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "sdk_bundle_resources",
+      "owner": "appsdk::bundle_verifier",
+      "truth_store": ".appsdk/sdk-resources.json",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "lifecycle_records",
+      "owner": "appsdk::record_graph",
+      "truth_store": ".appsdk/records/**",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "compiled_artifact",
+      "owner": "appsdk::compiler",
+      "truth_store": "generated/project.compiled.json",
+      "allowed_operations": [
+        "read",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "base_node_control_record",
+      "owner": "routecodex-v4-base-node::BaseNode",
+      "truth_store": "crates/routecodex-v4-base-node/src/lib.rs",
+      "allowed_operations": [
+        "record"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "base_node_debug_subscription",
+      "owner": "routecodex-v4-base-node::BaseNode",
+      "truth_store": "crates/routecodex-v4-base-node/src/lib.rs",
+      "allowed_operations": [
+        "subscribe",
+        "read"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "base_node_error_intake",
+      "owner": "routecodex-v4-base-node::BaseNode",
+      "truth_store": "crates/routecodex-v4-base-node/src/lib.rs",
+      "allowed_operations": [
+        "record"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "edge_contract",
+      "owner": "routecodex-v4-edge::validate_edge",
+      "truth_store": "crates/routecodex-v4-edge/src/lib.rs",
+      "allowed_operations": [
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "base_node_library",
+      "owner": "appsdk::compiler",
+      "truth_store": "active/lib/routecodex-v4-base-node/**",
+      "allowed_operations": [
+        "read"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "edge_library",
+      "owner": "appsdk::compiler",
+      "truth_store": "active/lib/routecodex-v4-edge/**",
+      "allowed_operations": [
+        "read"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.request.normal_payload",
+      "owner": "routecodex-v4-runtime::V4HubReqInbound03Normalized",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.request.provider_semantic",
+      "owner": "routecodex-v4-runtime::V4HubReqOutbound05ProviderSemantic",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.request.provider_wire_payload",
+      "owner": "routecodex-v4-runtime::V4ProviderReqCompat06Compat",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.response.normal_payload",
+      "owner": "routecodex-v4-runtime::V4HubRespInbound02Parsed",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.response.provider_raw",
+      "owner": "routecodex-v4-runtime::V4ProviderSseIn01FrameBoundary",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.response.client_wire_payload",
+      "owner": "routecodex-v4-runtime::V4HubRespOutbound04ClientSemantic",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.response.client_frame",
+      "owner": "routecodex-v4-runtime::FrameBuild",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.response.client_object",
+      "owner": "routecodex-v4-standard-plugins::frame_build",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.side_channel",
+      "owner": "routecodex-v4-control::V4Control01ScopeBoundCarrier",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.metadata_center",
+      "owner": "routecodex-v4-control::V4MetadataCenter01ScopeRegistry",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.route_facts",
+      "owner": "routecodex-v4-runtime::V4Router05RequestClassified",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.target_selection",
+      "owner": "routecodex-v4-runtime::V4Router06SelectionPlan",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.availability",
+      "owner": "routecodex-v4-provider::V4Availability01SessionScoped",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.error_chain",
+      "owner": "routecodex-v4-error::ErrorChain",
+      "truth_store": "crates/routecodex-v4-error/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.error_center",
+      "owner": "routecodex-v4-error::ErrorCenter",
+      "truth_store": "crates/routecodex-v4-error/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.retry_policy",
+      "owner": "routecodex-v4-error::RetryPolicy",
+      "truth_store": "crates/routecodex-v4-error/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.route_exit",
+      "owner": "routecodex-v4-runtime::V4Router07RouteDecisionExit",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.route_policy_live",
+      "owner": "routecodex-v4-router::V4Router08LivePolicyOverride",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.lifecycle.payload_cycle",
+      "owner": "routecodex-v4-runtime::V4PayloadCycleRegistry",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.pipeline.mainline",
+      "owner": "routecodex-v4-runtime::V4Runtime01MainlineKernel",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.runtime.request_port",
+      "owner": "routecodex-v4-runtime::RequestPortLease",
+      "truth_store": "v4/crates/routecodex-v4-runtime/src/request_port.rs",
+      "allowed_operations": ["read", "validate", "write"],
+      "status": "active",
+      "feature_id": "V4-RUNTIME-005"
+    },
+    {
+      "resource_id": "v4.runtime.response_error_port",
+      "owner": "routecodex-v4-runtime::ResponsePortReceipt",
+      "truth_store": "v4/crates/routecodex-v4-runtime/src/response_error_port.rs",
+      "allowed_operations": ["read", "validate", "write"],
+      "status": "active",
+      "feature_id": "V4-RUNTIME-006"
+    },
+    {
+      "resource_id": "v4.scope.session",
+      "owner": "routecodex-v4-runtime::V4ScopeRegistry",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.continuation.local_context",
+      "owner": "routecodex-v4-runtime::LocalContinuationStore",
+      "truth_store": "v4/crates/routecodex-v4-runtime/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.stopless_state",
+      "owner": "routecodex-v4-runtime::V4StoplessControlState",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.config.authoring",
+      "owner": "routecodex-v4-config::V4Config01AuthoringFileSource",
+      "truth_store": "crates/routecodex-v4-config/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.config.parsed",
+      "owner": "routecodex-v4-config::parse_v4_config_02_from_v4_config_01",
+      "truth_store": "crates/routecodex-v4-config/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.config.schema_validated",
+      "owner": "routecodex-v4-config::validate_v4_config_03_from_v4_config_02",
+      "truth_store": "crates/routecodex-v4-config/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.config.resource_registry",
+      "owner": "routecodex-v4-config::build_v4_config_04_from_v4_config_03",
+      "truth_store": "crates/routecodex-v4-config/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.config.manifest",
+      "owner": "routecodex-v4-config::publish_v4_config_05_from_v4_config_04",
+      "truth_store": "crates/routecodex-v4-config/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.config.product_parity",
+      "owner": "routecodex-v4-config::RuntimeProductConfig",
+      "truth_store": "crates/routecodex-v4-config/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.artifact.compiled_index",
+      "owner": "routecodex-v4-config::ConfigManifest",
+      "truth_store": "generated/compiled-index.json",
+      "allowed_operations": [
+        "read",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.secret.provider_auth_handle",
+      "owner": "routecodex-v4-config::AuthHandle",
+      "truth_store": "crates/routecodex-v4-config/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.snapshot_ledger",
+      "owner": "routecodex-v4-debug::V4Debug01SnapshotLedger",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.record_ledger",
+      "owner": "routecodex-v4-runtime::V4Control02RecordLedger",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.bus_subscription",
+      "owner": "routecodex-v4-debug::V4Debug02BusSubscription",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.snapshot_subscription",
+      "owner": "routecodex-v4-debug::V4Debug03SnapshotSubscription",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.node.statistics",
+      "owner": "routecodex-v4-runtime::V4Control03NodeStatistics",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.trace_context",
+      "owner": "routecodex-v4-debug::V4Debug04TraceContextStarted",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.event_ledger",
+      "owner": "routecodex-v4-debug::V4Debug05EventLedgerRecorded",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.raw_capture",
+      "owner": "routecodex-v4-debug::V4Debug06RawCaptureStored",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.snapshot_session",
+      "owner": "routecodex-v4-debug::V4Debug07SnapshotSessionRegistered",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.dry_run_fixture",
+      "owner": "routecodex-v4-debug::V4Debug08DryRunFixture",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.dry_run_execution",
+      "owner": "routecodex-v4-runtime::V4Debug09DryRunNoNetworkTerminalEffect",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.codex_sample_authorization",
+      "owner": "routecodex-v4-config::V4Config05ManifestPublished",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.payload_budget",
+      "owner": "routecodex-v4-debug::V4Debug10PayloadBudget",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.codex_sample_filesystem",
+      "owner": "routecodex-v4-debug::V4Debug11CodexSampleStore",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.module_switch",
+      "owner": "routecodex-v4-debug::V4Debug12ModuleSwitch",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.dry_run_chain",
+      "owner": "routecodex-v4-debug::V4Debug13DryRunChain",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.observability",
+      "owner": "routecodex-v4-runtime::V4RuntimeObservability",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.debug.timing_observability",
+      "owner": "routecodex-v4-runtime::V4RuntimeTimingSummary",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.console.terminal_output",
+      "owner": "routecodex-v4-server::V4ConsoleTerminalOutput",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.server.request_identity",
+      "owner": "routecodex-v4-server::V4RequestIdCounter",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.error.raw_wire_evidence",
+      "owner": "routecodex-v4-server::V4ErrorEvidenceFlushOnTerminalFailure",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.error.client_projection",
+      "owner": "routecodex-v4-error::ClientProjection",
+      "truth_store": "crates/routecodex-v4-error/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.plugin.node_plugin_contract",
+      "owner": "contract:v4-node-plugin",
+      "truth_store": "contracts/node-plugin.contract.json",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "contract_bound"
+    },
+    {
+      "resource_id": "v4.plugin.catalog",
+      "owner": "contract:v4-plugin-catalog",
+      "truth_store": "contracts/plugin-catalog.contract.json",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "contract_bound"
+    },
+    {
+      "resource_id": "v4.plugin.node_plugin_plan",
+      "owner": "contract:v4-node-container",
+      "truth_store": "contracts/node-container.contract.json",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "contract_bound"
+    },
+    {
+      "resource_id": "v4.plugin.standard_library",
+      "owner": "contract:v4-plugin-library",
+      "truth_store": "contracts/plugin-library.contract.json",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "register"
+      ],
+      "status": "contract_bound"
+    },
+    {
+      "resource_id": "v4.cli.standard_library_projection",
+      "owner": "routecodex-v4-cli-plugin::run",
+      "truth_store": "v4/contracts/cli-plugin.contract.json",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.link_surface",
+      "owner": "routecodex-v4-build-link",
+      "truth_store": "active/lib/**",
+      "allowed_operations": [
+        "read",
+        "resolve",
+        "link"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.active_artifact_index",
+      "owner": "routecodex-v4-build-link",
+      "truth_store": "build-control/active-index.json",
+      "allowed_operations": [
+        "generate",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.workspace_artifact_link",
+      "owner": "routecodex-v4-build-link",
+      "truth_store": "crates/routecodex-v4-build-link/src/resolver.rs",
+      "allowed_operations": [
+        "read",
+        "resolve",
+        "link"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.domain",
+      "owner": "appsdk::build_domain",
+      "truth_store": "package.json",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.node_lock",
+      "owner": "appsdk::build_domain",
+      "truth_store": "package-lock.json",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.rust_lock",
+      "owner": "appsdk::build_domain",
+      "truth_store": "Cargo.lock",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.toolchain",
+      "owner": "appsdk::build_domain",
+      "truth_store": "rust-toolchain.toml",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.verification_entrypoint",
+      "owner": "appsdk::build_domain",
+      "truth_store": "scripts/verify-ci.mjs",
+      "allowed_operations": [
+        "read",
+        "execute"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.architecture_gates",
+      "owner": "appsdk::build_domain",
+      "truth_store": "scripts/architecture/**",
+      "allowed_operations": [
+        "read",
+        "execute"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.scratch_output",
+      "owner": "appsdk::build_domain",
+      "truth_store": "build-control/**",
+      "allowed_operations": [
+        "read",
+        "write",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.generated_output",
+      "owner": "appsdk::build_domain",
+      "truth_store": "generated/**",
+      "allowed_operations": [
+        "read",
+        "write",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.dist_output",
+      "owner": "appsdk::build_domain",
+      "truth_store": "dist/**",
+      "allowed_operations": [
+        "read",
+        "write",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.artifact_output",
+      "owner": "appsdk::build_domain",
+      "truth_store": "artifacts/**",
+      "allowed_operations": [
+        "read",
+        "write",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.cargo_target",
+      "owner": "appsdk::build_domain",
+      "truth_store": "target/**",
+      "allowed_operations": [
+        "read",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.v3_baseline",
+      "owner": "appsdk::build_domain",
+      "truth_store": "contracts/v3-baseline/**",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.build.root_dispatcher",
+      "owner": "appsdk::build_domain",
+      "truth_store": "<repo-root>/package.json + .github/workflows/test.yml",
+      "allowed_operations": [
+        "read",
+        "execute"
+      ],
+      "status": "active",
+      "notes": "dispatch-only consumer of v4.build.verification_entrypoint; must never enumerate V4 modules/gates"
+    },
+    {
+      "resource_id": "v4.build.forbidden_v3_live_map",
+      "owner": "appsdk::build_domain",
+      "truth_store": "<repo-root>/docs/architecture/v3-* (forbidden read)",
+      "allowed_operations": [],
+      "status": "active",
+      "notes": "V4 build/test/verify must never read live V3 maps; only immutable contracts/v3-baseline snapshots"
+    },
+    {
+      "resource_id": "v4.build.forbidden_root_dependency",
+      "owner": "appsdk::build_domain",
+      "truth_store": "<repo-root>/node_modules + src/ + sharedmodule/ (forbidden dependency)",
+      "allowed_operations": [],
+      "status": "active",
+      "notes": "V4 Node resolution must stay in v4/node_modules; Cargo path deps must not escape v4"
+    },
+    {
+      "resource_id": "v4.plugin_management.active_pointer",
+      "owner": "routecodex-v4-plugin-manager::PluginManager",
+      "truth_store": "crates/routecodex-v4-plugin-manager/src/manager.rs",
+      "allowed_operations": [
+        "read",
+        "publish"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.plugin_management.audit_ledger",
+      "owner": "routecodex-v4-plugin-manager::AuditSink",
+      "truth_store": "crates/routecodex-v4-plugin-manager/src/audit.rs",
+      "allowed_operations": [
+        "append",
+        "read"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.plugin_management.candidate_store",
+      "owner": "routecodex-v4-plugin-manager::PluginCandidate",
+      "truth_store": "crates/routecodex-v4-plugin-manager/src/manager.rs",
+      "allowed_operations": [
+        "create",
+        "transition",
+        "discard"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.admin.projection",
+      "owner": "routecodex-v4-runtime-inspector::RuntimeSnapshot",
+      "truth_store": "crates/routecodex-v4-runtime-inspector/src/lib.rs",
+      "allowed_operations": [
+        "read"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.cordis.node_context",
+      "owner": "routecodex-v4-cordis-host::CordisNodeHost",
+      "truth_store": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "allowed_operations": [
+        "create",
+        "mount",
+        "drain",
+        "dispose"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.cordis.mount_candidate",
+      "owner": "routecodex-v4-cordis-bridge::CordisMountCandidate",
+      "truth_store": "crates/routecodex-v4-cordis-bridge/src/lib.rs",
+      "allowed_operations": ["create", "read", "validate"],
+      "status": "active",
+      "feature_id": "V4-RUNTIME-004"
+    },
+    {
+      "resource_id": "v4.cordis.plugin_fibers",
+      "owner": "routecodex-v4-cordis-host::CordisNodeHost",
+      "truth_store": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "allowed_operations": [
+        "mount",
+        "read",
+        "dispose"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.node_container.lifecycle",
+      "owner": "routecodex-v4-node-container::NodeContainer",
+      "truth_store": "crates/routecodex-v4-node-container/src/lib.rs",
+      "allowed_operations": [
+        "declare",
+        "publish",
+        "fail",
+        "enter_execution",
+        "exit_execution",
+        "read_status",
+        "execute",
+        "drain",
+        "dispose"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.node_container.lifecycle_failure",
+      "owner": "routecodex-v4-node-container::LifecycleFailureFact",
+      "truth_store": "crates/routecodex-v4-node-container/src/bin/host_binding.rs",
+      "allowed_operations": [
+        "record",
+        "project",
+        "read"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.node_container.execution_failure",
+      "owner": "routecodex-v4-node-container::ExecutionFailureFact",
+      "truth_store": "crates/routecodex-v4-node-container/src/bin/host_binding.rs",
+      "allowed_operations": [
+        "record",
+        "project",
+        "read"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.node_container.execution_epoch",
+      "owner": "routecodex-v4-node-container::ActiveEpochStore",
+      "feature_id": "V4-RUNTIME-002",
+      "truth_store": "crates/routecodex-v4-node-container/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "admit",
+        "publish",
+        "record_execution_failure",
+        "read_snapshot",
+        "retire",
+        "dispose"
+      ],
+      "forbidden_relations": [
+        "automatic_failure_switch",
+        "payload_projection",
+        "fallback_epoch_selection"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.node_container.plan_bindings",
+      "owner": "routecodex-v4-node-container::PlanBindings",
+      "truth_store": "crates/routecodex-v4-node-container/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.pipeline.mock_transport_report",
+      "owner": "routecodex-v4-runtime::MockTransportReport",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.pipeline.mock_transport_error",
+      "owner": "routecodex-v4-runtime::MockTransportError",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.pipeline.mock_transport_identity",
+      "owner": "routecodex-v4-runtime::MockTransportIdentityCounter",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "create",
+        "read",
+        "write",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.runtime.admission_manifest",
+      "owner": "routecodex-v4-config::RuntimeConfigManifest",
+      "truth_store": "contracts/real-runtime-admission.manifest.json",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.runtime.compiled_manifest",
+      "owner": "routecodex-v4-config::RuntimeConfigManifest",
+      "truth_store": "crates/routecodex-v4-config/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.runtime.node_plan_bundle",
+      "feature_id": "V4-RUNTIME-003",
+      "owner": "routecodex-v4-plugin-plan::NodePluginPlanBundle",
+      "truth_store": "crates/routecodex-v4-plugin-plan/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.runtime.binary_identity",
+      "owner": "routecodex-v4-runtime-bin::RCCV4_BINARY_IDENTITY",
+      "truth_store": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.provider.real_transport",
+      "owner": "routecodex-v4-provider::ProviderResponseStream",
+      "truth_store": "crates/routecodex-v4-provider/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.server.http_listener",
+      "owner": "routecodex-v4-server::V4HttpServer",
+      "truth_store": "crates/routecodex-v4-server/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.cli.command_intent",
+      "owner": "routecodex-v4-cli::V4CommandIntent",
+      "truth_store": "crates/routecodex-v4-cli/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.lifecycle.instance_state",
+      "owner": "routecodex-v4-lifecycle::ManagedInstanceRecord",
+      "truth_store": "crates/routecodex-v4-lifecycle/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate",
+        "remove"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.lifecycle.control_socket",
+      "owner": "routecodex-v4-lifecycle::ManagedControlPlane",
+      "truth_store": "crates/routecodex-v4-lifecycle/src/lib.rs",
+      "allowed_operations": [
+        "bind",
+        "request",
+        "acknowledge",
+        "remove"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.servertool.cli_projection",
+      "owner": "routecodex-v4-servertool::ServertoolRunOutput",
+      "truth_store": "crates/routecodex-v4-servertool/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.servertool.cli_control",
+      "owner": "routecodex-v4-servertool::ServertoolRunControl",
+      "truth_store": "crates/routecodex-v4-servertool/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "merge_queue_state",
+      "owner": "appsdk::merge_queue",
+      "truth_store": ".appsdk/records/merge-queue-state.json",
+      "allowed_operations": ["read", "validate", "write"],
+      "forbidden_relations": ["multiple_merge_owners", "duplicate_queue_entry"]
+    },
+    {
+      "resource_id": "integration_candidate",
+      "owner": "appsdk::merge_queue",
+      "truth_store": ".appsdk/records/integration-record-<integration_id>.json",
+      "allowed_operations": ["read", "validate", "write"],
+      "relations": {"must_reference": ["merge_queue"]}
+    },
+    {
+      "resource_id": "feature_layer_batch_manifest",
+      "status": "active",
+      "feature_id": "V4-LAYER-GATE-001",
+      "owner": "routecodex-v4-governance",
+      "truth_store": "contracts/feature-completion-layer-batches.manifest.json",
+      "allowed_operations": ["read", "validate", "write"],
+      "relations": {"must_reference": ["merge_queue_state", "integration_candidate"]},
+      "forbidden_relations": [
+        "normal_payload",
+        "review_as_source_completion",
+        "cross_lane_source_dependency",
+        "early_production_wiring"
+      ]
+    },
+    {
+      "resource_id": "v4.parity.product_ledger",
+      "owner": "routecodex-v4-parity",
+      "truth_store": "docs/architecture/v3-v4-product-parity-ledger.yml",
+      "allowed_operations": ["read", "validate", "write"],
+      "status": "active",
+      "feature_id": "V4-PARITY-001"
+    },
+    {
+      "resource_id": "v4.parity.baseline_delta",
+      "owner": "routecodex-v4-parity",
+      "truth_store": "docs/architecture/v3-v4-semantic-parity-map.yml",
+      "allowed_operations": ["read", "validate", "write"],
+      "status": "active",
+      "feature_id": "V4-PARITY-002"
+    },
+    {
+      "resource_id": "v4.parity.status_gate",
+      "owner": "routecodex-v4-parity",
+      "truth_store": "docs/architecture/v3-v4-product-parity-ledger.yml",
+      "allowed_operations": ["read", "validate"],
+      "status": "active",
+      "feature_id": "V4-PARITY-003"
+    },
+    {
+      "resource_id": "v4.parity.differential_harness",
+      "owner": "routecodex-v4-parity",
+      "truth_store": "docs/architecture/v3-v4-semantic-parity-map.yml",
+      "allowed_operations": ["read", "validate"],
+      "status": "active",
+      "feature_id": "V4-PARITY-HARNESS-001"
+    }
+    ,{"resource_id":"v4.plugin.request.responses_normalize","owner":"routecodex-v4-standard-plugins::StandardPlugin","truth_store":"crates/routecodex-v4-standard-plugins/src/request_plugins.rs","allowed_operations":["read","validate"],"status":"active","feature_id":"V4-PLUGIN-001"}
+    ,{"resource_id":"v4.plugin.request.chat_to_responses","owner":"routecodex-v4-standard-plugins::StandardPlugin","truth_store":"crates/routecodex-v4-standard-plugins/src/request_plugins.rs","allowed_operations":["read","write","validate"],"status":"active","feature_id":"V4-PLUGIN-002"}
+    ,{"resource_id":"v4.plugin.request.governance","owner":"routecodex-v4-standard-plugins::StandardPlugin","truth_store":"crates/routecodex-v4-standard-plugins/src/request_plugins.rs","allowed_operations":["read","write","validate"],"status":"active","feature_id":"V4-PLUGIN-003"}
+    ,{"resource_id":"v4.plugin.request.provider_semantic","owner":"routecodex-v4-standard-plugins::StandardPlugin","truth_store":"crates/routecodex-v4-standard-plugins/src/request_plugins.rs","allowed_operations":["read","write","validate"],"status":"active","feature_id":"V4-PLUGIN-004"}
+    ,{"resource_id":"v4.plugin.request.responses_wire_build","owner":"routecodex-v4-standard-plugins::StandardPlugin","truth_store":"crates/routecodex-v4-standard-plugins/src/request_plugins.rs","allowed_operations":["read","write","validate"],"status":"active","feature_id":"V4-PLUGIN-005"}
+    ,{"resource_id":"v4.plugin.response.decode","owner":"routecodex-v4-standard-plugins::StandardPlugin","truth_store":"crates/routecodex-v4-standard-plugins/src/response_decode.rs","allowed_operations":["read","validate"],"status":"active","feature_id":"V4-PLUGIN-006"}
+    ,{"resource_id":"v4.plugin.response.governance","owner":"routecodex-v4-standard-plugins::StandardPlugin","truth_store":"crates/routecodex-v4-standard-plugins/src/response_governance.rs","allowed_operations":["read","write","validate"],"status":"active","feature_id":"V4-PLUGIN-007"}
+    ,{"resource_id":"v4.plugin.response.fault_intake","owner":"routecodex-v4-standard-plugins::StandardPlugin","truth_store":"crates/routecodex-v4-standard-plugins/src/response_fault.rs","allowed_operations":["read","write","validate"],"status":"active","feature_id":"V4-PLUGIN-008"}
+    ,{"resource_id":"v4.governance.feature_layer_gate_contract","owner":"routecodex-v4-governance","truth_store":"v4/scripts/architecture/verify-v4-feature-layer-batches.mjs","allowed_operations":["read","validate"],"status":"active","feature_id":"V4-GATE-001"}
+    ,{"resource_id":"v4.governance.feature_layer_product_lockstep","owner":"routecodex-v4-governance","truth_store":"v4/scripts/architecture/lib/feature-layer-batch-source.mjs","allowed_operations":["read","validate"],"status":"active","feature_id":"V4-LAYER-GATE-001"}
+  ]
+}
