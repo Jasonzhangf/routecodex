@@ -1,0 +1,19 @@
+version = "2.0.0"
+providerId = "opencode-go-zen"
+
+[provider]
+id = "opencode-go-zen"
+enabled = true
+type = "openai"
+baseURL = "https://opencode.ai/zen/v1"
+defaultModel = "x-preview-f-free"
+compatibilityProfile = "chat:openai"
+
+[provider.auth]
+type = "apikey"
+entries = [{ alias = "key1", secretFile = "/Volumes/extension/.rcc/secrets/v3/opencode-go.conf", secretKey = "opencode-go.key1" }]
+
+[provider.models."x-preview-f-free"]
+supportsStreaming = true
+supportsThinking = true
+capabilities = ["text", "reasoning", "thinking", "tools", "longcontext", "multimodal"]

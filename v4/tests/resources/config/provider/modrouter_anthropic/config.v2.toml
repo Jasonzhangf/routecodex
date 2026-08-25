@@ -1,0 +1,18 @@
+version = "2.0.0"
+providerId = "modrouter_anthropic"
+
+[provider]
+id = "modrouter_anthropic"
+enabled = true
+type = "anthropic"
+baseURL = "https://api.anthropic.com"
+defaultModel = "claude-fable-5"
+compatibilityProfile = "chat:anthropic"
+
+[provider.auth]
+type = "apikey"
+entries = [{ alias = "default", secretFile = "/Volumes/extension/.rcc/secrets/v3/opencode-go.conf", secretKey = "modrouter.key1" }]
+
+[provider.models."claude-fable-5"]
+supportsStreaming = true
+capabilities = ["text", "tools", "web_search", "longcontext"]

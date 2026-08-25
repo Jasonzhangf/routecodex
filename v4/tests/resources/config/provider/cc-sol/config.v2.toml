@@ -1,0 +1,24 @@
+version = "2.0.0"
+providerId = "cc-sol"
+
+[provider]
+id = "cc-sol"
+enabled = true
+type = "responses"
+baseURL = "https://api.openai.com/v1"
+defaultModel = "gpt-5.6-sol"
+compatibilityProfile = "responses:openai"
+
+[provider.responses]
+process = "direct"
+streaming = "always"
+
+[provider.auth]
+type = "apikey"
+selection = { strategy = "priority" }
+entries = [{ alias = "key1", secretFile = "/Volumes/extension/.rcc/secrets/v3/opencode-go.conf", secretKey = "cc-sol.key1" }]
+
+[provider.models."gpt-5.6-sol"]
+supportsStreaming = true
+supportsThinking = true
+capabilities = ["text", "reasoning", "thinking", "tools", "web_search", "multimodal"]
