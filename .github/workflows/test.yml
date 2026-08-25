@@ -83,7 +83,6 @@ jobs:
       - name: Install built V3 CLI shim
         run: npm run fix:cli-shim
       - name: Run host tests
-        env:
         run: npm run test:v3-workspace
 
   v4-build:
