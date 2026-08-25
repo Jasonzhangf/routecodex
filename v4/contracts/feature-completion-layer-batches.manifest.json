@@ -304,7 +304,7 @@
     "owner": "v4.feature_completion.integration",
     "admission_command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
     "enforcement_binding_status": "bound",
-    "guard_commit": "de43f4f544e685a87bfdc931f7113362dab66eae",
+    "guard_commit": "76216d0615bf0db8a3c4de2a00304cd703ddbc59",
     "guarded_surfaces": [
       {"path":"Cargo.toml","scope_hash":"sha256:5ce83c9e3837823b19aa44dfdc28948a0123973fcb5e853e385f42aff3add62e"},
       {"path":"scripts/build.mjs","scope_hash":"sha256:ec1a7a511a514e5334a418bca25f47a554051134429aa1eeff5421f229d63f75"},
@@ -315,7 +315,7 @@
       {"path":"contracts/real-runtime-admission.manifest.json","scope_hash":"sha256:1dd63ba0bd84acbae162663b534bfe1c7d5f5315e66d5310822090a5121e863c"},
       {"path":"contracts/active-link/frozen-consumer-registry.json","scope_hash":"sha256:70df9fa89217c6bd7241788294cf3ded9a6922ea6bdd908e20468cda4d96f375"},
       {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:19a38f374876225682de890790957a2416b42343c72d4803774868871b6732d8"},
-      {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:5f6b7e685c0e7960a8067dac3a34843b33009de107d07054748da889fb0a12e5"}
+      {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:5237b680d4312859ae0c16ce81ead1459f23f4e42558b9b36bdfe864a0f72c3b"}
     ],
     "wiring_started": true,
     "wiring_edges": [
