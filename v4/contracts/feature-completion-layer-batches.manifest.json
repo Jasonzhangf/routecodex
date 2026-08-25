@@ -315,7 +315,7 @@
       {"path":"contracts/real-runtime-admission.manifest.json","scope_hash":"sha256:1dd63ba0bd84acbae162663b534bfe1c7d5f5315e66d5310822090a5121e863c"},
       {"path":"contracts/active-link/frozen-consumer-registry.json","scope_hash":"sha256:2808e91efca384cc1c1ebf229d66803e0ffe834800908c8eaac847d6507f56c1"},
       {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:da16e5e4019ffd41b87e6332a96dfd616fb24f53647b9a888ac6fb52135c8fb8"},
-      {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:6f71e8eaa90adfa6bcf8a23b92806a0c6a405d2833d9eacaa7ab985a35fba048"}
+      {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:f9a194e35af2f30a8517a0f7998d0e44c2bf40c520ae30d8c16ad03d63b58d50"}
     ],
     "wiring_started": true,
     "wiring_edges": [
