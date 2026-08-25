@@ -1,8 +1,8 @@
 {
   "evidence_id": "v4-5520-full-product-health-20260825",
   "execution_surface": "rccv4_global_live_5520",
-  "source_commit": "76f9a270af09c49ef38e8f67a35944ce3925d6c6",
-  "binary_sha256": "9dcd22829629bb6504b90438a9211ca2c7d5691b973fa761cc29f35e8ec5c619",
+  "source_commit": "01c22456870120cafbfd21a0c635e6ba9d02550d",
+  "binary_sha256": "3b5fce8ba851a9e2b478f75c52cd3b535be5f26eb09ae349ab00b11274e85bb7a",
   "manifest_digest": "sha256:0afe104f2ca1a62ad3aa4281ec60570f25d94b9c8b4cca8489fe7e488c7aa7c8",
   "listener": "127.0.0.1:5520",
   "health": {"status": 200, "runtime_identity": "rccv4", "version": "0.1.0-v4"},
