@@ -48,7 +48,10 @@ before Error06 can close the client response. RouteCodex request-stage internal
 failures project as 598; response-stage internal failures project as 599;
 external provider HTTP identity remains external. No provider retry, switch,
 decode failure, malformed terminal, or illegal EOF may directly close the
-client stream or become a silent EOF.
+client stream or become a silent EOF. If aggregate exec replacement interrupts
+an accepted request before response headers, the Front owner must emit one
+explicit HTTP 503 terminal with `server_restart_in_progress`; an unstarted
+request and an already-started response must not receive that pre-header frame.
 
 ## Required gates
 

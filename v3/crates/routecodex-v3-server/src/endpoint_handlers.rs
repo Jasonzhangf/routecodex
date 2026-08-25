@@ -103,6 +103,7 @@ impl V3FrontSseAcceptSkeleton {
         payload: Value,
     ) -> Response<Body> {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(32);
+        let front_transport_broker = state.front_transport_broker.clone();
         let keepalive_interval =
             std::time::Duration::from_millis(state.server.http_sse_keepalive_ms);
         tokio::spawn(async move {
@@ -223,6 +224,16 @@ impl V3FrontSseAcceptSkeleton {
             rx.recv().await.map(|item| (item, rx))
         });
         let body = v3_io_sse_body(Box::pin(client_stream), Some(keepalive_interval));
+        if let Some(connection_identity) = front_connection_identity {
+            if let Some(front_socket) = front_transport_broker.front_socket(connection_identity)
+            {
+                front_socket.set_exec_closeout_frame(v3_responses_sse_error_event_chunk(
+                    503,
+                    "server_restart_in_progress",
+                    "RouteCodex restarted before this response completed",
+                ));
+            }
+        }
         Response::builder()
             .status(axum::http::StatusCode::OK)
             .header("content-type", "text/event-stream")

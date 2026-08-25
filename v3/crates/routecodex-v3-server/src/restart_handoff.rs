@@ -706,9 +706,29 @@ impl V3FrontTransportBroker {
                 .cloned(),
         );
         for socket in sockets {
-            socket.close();
+            socket.close_for_exec_replacement();
         }
     }
+}
+
+fn build_v3_restart_closeout_http_error(
+    request_started: bool,
+    response_started: bool,
+) -> Option<Vec<u8>> {
+    if !request_started || response_started {
+        return None;
+    }
+    let body = br#"{"error":{"type":"server_error","code":"server_restart_in_progress","message":"RouteCodex restarted before this request completed","status":503}}"#;
+    Some(
+        format!(
+            "HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes()
+        .into_iter()
+        .chain(body.iter().copied())
+        .collect(),
+    )
 }
 
 fn v3_front_epoch_ms() -> u64 {
@@ -871,14 +891,21 @@ impl V3StableFrontConnection {
 pub struct V3StableFrontSocket {
     write_tx: mpsc::Sender<Vec<u8>>,
     close_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    exec_close_frame: Arc<Mutex<Option<Vec<u8>>>>,
     closed: Arc<AtomicBool>,
+    request_started: Arc<AtomicBool>,
+    response_started: Arc<AtomicBool>,
 }
 
 impl V3StableFrontSocket {
     fn spawn(mut write_half: OwnedWriteHalf) -> Self {
         let (write_tx, mut write_rx) = mpsc::channel::<Vec<u8>>(32);
         let (close_tx, mut close_rx) = oneshot::channel();
+        let exec_close_frame: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
         let closed = Arc::new(AtomicBool::new(false));
+        let request_started = Arc::new(AtomicBool::new(false));
+        let response_started = Arc::new(AtomicBool::new(false));
+        let worker_exec_close_frame = Arc::clone(&exec_close_frame);
         tokio::spawn(async move {
             let mut close_requested = false;
             loop {
@@ -886,6 +913,14 @@ impl V3StableFrontSocket {
                     biased;
                     close = &mut close_rx, if !close_requested => {
                         if close.is_ok() {
+                            let frame = worker_exec_close_frame
+                                .lock()
+                                .expect("front exec close frame lock")
+                                .take();
+                            if let Some(frame) = frame {
+                                let _ = write_half.write_all(&frame).await;
+                                let _ = write_half.flush().await;
+                            }
                             break;
                         }
                         // Dropping the last socket handle cancels the
@@ -910,7 +945,40 @@ impl V3StableFrontSocket {
         Self {
             write_tx,
             close_tx: Arc::new(Mutex::new(Some(close_tx))),
+            exec_close_frame,
             closed,
+            request_started,
+            response_started,
+        }
+    }
+
+    fn mark_request_started(&self) {
+        self.request_started.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn set_exec_closeout_frame(&self, frame: Vec<u8>) {
+        *self
+            .exec_close_frame
+            .lock()
+            .expect("front exec close frame lock") = Some(frame);
+    }
+
+    fn close_for_exec_replacement(&self) {
+        self.closed.store(true, Ordering::Release);
+        let frame = build_v3_restart_closeout_http_error(
+            self.request_started.load(Ordering::Acquire),
+            self.response_started.load(Ordering::Acquire),
+        );
+        if let Some(frame) = frame {
+            self.set_exec_closeout_frame(frame);
+        }
+        if let Some(close_tx) = self
+            .close_tx
+            .lock()
+            .expect("front socket close lock")
+            .take()
+        {
+            let _ = close_tx.send(());
         }
     }
 
@@ -970,6 +1038,9 @@ impl AsyncWrite for V3FrontHttpIo {
                 "front socket closed for exec replacement",
             )));
         }
+        self.front_socket
+            .response_started
+            .store(true, Ordering::Release);
         let sender = &self.front_socket.write_tx;
         match sender.try_reserve() {
             Ok(permit) => {
@@ -1029,6 +1100,7 @@ where
         let mut service = service.clone();
         let front_socket = request_front_socket.clone();
         async move {
+            front_socket.mark_request_started();
             let (parts, body) = request.into_parts();
             let mut request = Request::from_parts(parts, Body::new(body));
             request.extensions_mut().insert(ConnectInfo(remote_addr));
@@ -1066,7 +1138,10 @@ mod tests {
         V3StableFrontSocket {
             write_tx,
             close_tx: Arc::new(Mutex::new(Some(close_tx))),
+            exec_close_frame: Arc::new(Mutex::new(None)),
             closed: Arc::new(AtomicBool::new(false)),
+            request_started: Arc::new(AtomicBool::new(false)),
+            response_started: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -1247,6 +1322,17 @@ mod tests {
         assert!(socket.is_closed());
     }
 
+    #[test]
+    fn restart_closeout_has_explicit_terminal_for_request_before_response_headers() {
+        let frame = build_v3_restart_closeout_http_error(true, false)
+            .expect("accepted request must not become a silent EOF during restart");
+        let text = String::from_utf8(frame).expect("restart closeout response is HTTP bytes");
+        assert!(text.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+        assert!(text.contains("server_restart_in_progress"));
+        assert!(build_v3_restart_closeout_http_error(false, false).is_none());
+        assert!(build_v3_restart_closeout_http_error(true, true).is_none());
+    }
+
     #[tokio::test]
     async fn broker_close_finishes_active_tcp_client_before_exec_replacement() {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
@@ -1307,6 +1393,66 @@ mod tests {
             .await
             .expect("client write half shutdown");
         let _ = accept.await;
+    }
+
+    #[tokio::test]
+    async fn front_socket_writes_restart_terminal_after_request_acceptance() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (_, write_half) = stream.into_split();
+            let socket = V3StableFrontSocket::spawn(write_half);
+            socket.mark_request_started();
+            socket.close_for_exec_replacement();
+        });
+
+        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+        let mut response = Vec::new();
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            tokio::io::AsyncReadExt::read_to_end(&mut client, &mut response),
+        )
+        .await
+        .expect("restart closeout must terminate the client transport")
+        .expect("client read must succeed");
+        let response = String::from_utf8(response).expect("restart response must be HTTP bytes");
+        assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+        assert!(response.contains("server_restart_in_progress"));
+        accept.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn front_socket_writes_configured_sse_terminal_after_headers() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let expected = b"event: response.failed\ndata: {}\n\n".to_vec();
+        let accept_expected = expected.clone();
+        let accept = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (_, write_half) = stream.into_split();
+            let socket = V3StableFrontSocket::spawn(write_half);
+            socket.mark_request_started();
+            socket.response_started.store(true, Ordering::Release);
+            socket.set_exec_closeout_frame(accept_expected);
+            socket.close_for_exec_replacement();
+        });
+
+        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+        let mut response = Vec::new();
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            tokio::io::AsyncReadExt::read_to_end(&mut client, &mut response),
+        )
+        .await
+        .expect("SSE restart closeout must terminate the client transport")
+        .expect("client read must succeed");
+        assert_eq!(response, expected);
+        accept.await.unwrap();
     }
 
     #[test]

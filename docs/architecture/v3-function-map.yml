@@ -5086,6 +5086,7 @@ features:
   owner_crate: routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
@@ -5094,17 +5095,20 @@ features:
   - v3.front.request_lease
   - v3.front.runtime_handoff_checkpoint
   - v3.front.client_frame_sequence
+  - v3.front.client_closeout_frame
   - v3.front.deadline_budget
   - v3.front.request_activity_gate
   entry_symbols:
   - V3FrontRequestLease
   - V3RuntimeHandoffCheckpoint
   - V3FrontFrameSequence
+  - V3StableFrontSocket::set_exec_closeout_frame
   - V3FrontDeadlineBudget
   - V3ServerRequestActivityGate
   - V3ServerAggregateHandle::prepare_for_exec
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
