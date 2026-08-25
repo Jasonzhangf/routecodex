@@ -15,7 +15,7 @@ v4/docs/goals/rccv4-v3-parity-completion-plan.md
 
 验证：
 - 定向正反测试、architecture/red、active-link、workspace cargo test/build。
-- 全局安装 `rccv4`，仅使用 `routecodex restart`，验证 5520 及配置内全部 listener `/health`。
+- 用 `npm --prefix v4 run install:global` 安装 V4 产物，随后仅使用全局 `rccv4 restart`，验证 5520 及配置内全部 listener `/health`；禁止用 `routecodex` 作为 V4 生命周期证据。
 - 同 requestId V3 7777 ↔ V4 5520 真实 replay：raw request → provider-bound request → raw response → client projection；unexplained_diff 必须为 0。
 - 运行 AGY review；只接受零 P0/P1 的 PASS。
 

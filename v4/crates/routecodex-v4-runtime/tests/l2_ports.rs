@@ -59,3 +59,14 @@ fn error_port_rejects_binding_drift() {
     let error = response_error_port::consume_error(&request, &binding).unwrap_err();
     assert_eq!(error.code, "response_error_epoch_binding");
 }
+
+#[test]
+fn request_admission_rejects_plan_epoch_drift_before_response_port() {
+    let mut p = plan();
+    p.plan_epoch += 1;
+    let error = match RequestPortLease::admit(&store(), "req-3", &p) {
+        Ok(_) => panic!("plan epoch drift must be rejected"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, "request_epoch_binding");
+}

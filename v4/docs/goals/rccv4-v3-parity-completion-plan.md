@@ -112,7 +112,7 @@ ledger 全部关闭；live 版本与提交一致；所有 required gate、在线
 2. product fixture 必须由 live V4 authoring/config 入口加载，不能停在测试资源消费。
 3. Chat/Responses/Anthropic 的同 requestId 四段 differential replay 尚未完成；需保留
    raw request、provider-bound request、raw response、client projection。
-4. 全局安装、`routecodex restart` 聚合重启、5520 与配置内全部 listener `/health`、
+4. 全局安装 V4 产物、仅用 `rccv4 restart` 聚合重启、5520 与配置内全部 listener `/health`、
    在线旧样本尚未完成。
 5. active-link、architecture/red、differential、AGY review 尚未完成；在此之前禁止
    final commit/push/完成声明。
