@@ -653,8 +653,7 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4HubReqChatProcess04Governed
   owner_symbols:
-  - RequestPortLease::admit
-  - RequestPortLease::binding
+  - RequestPortLease
   identity:
   - requestId
   - planEpoch
@@ -683,6 +682,7 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4HubRespInbound02Parsed
   owner_symbols:
+  - ResponsePortReceipt
   - consume_response
   - consume_error
   identity:
@@ -2762,6 +2762,70 @@ resources:
   - V4ControlMetadataCenter
   may_enter_provider_body: true
   may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.config.product_parity
+  axis: information
+  verification_gate:
+  - v4_config_l2_regression
+  resource_kind: product_manifest
+  lifecycle: v4.config.compile
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config03SchemaValidated
+  owner_symbols:
+  - RuntimeProductConfig
+  allowed_writers:
+  - V4Config03SchemaValidated
+  allowed_readers:
+  - V4Config05ManifestPublished
+  forbidden_writers: []
+  binding_status: anchored
+- resource_id: v4.plugin.response.decode
+  axis: data
+  verification_gate:
+  - v4_plugin_response_positive
+  resource_kind: response_plugin
+  lifecycle: v4.response.inbound
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubRespInbound02Parsed
+  owner_symbols:
+  - StandardPlugin
+  allowed_writers:
+  - V4HubRespInbound02Parsed
+  allowed_readers:
+  - V4HubRespChatProcess03Governed
+  forbidden_writers: []
+  binding_status: anchored
+- resource_id: v4.plugin.response.governance
+  axis: data
+  verification_gate:
+  - v4_plugin_response_positive
+  resource_kind: response_plugin
+  lifecycle: v4.response.chat_process
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubRespChatProcess03Governed
+  owner_symbols:
+  - StandardPlugin
+  allowed_writers:
+  - V4HubRespChatProcess03Governed
+  allowed_readers:
+  - V4HubRespOutbound04ClientSemantic
+  forbidden_writers: []
+  binding_status: anchored
+- resource_id: v4.plugin.response.fault_intake
+  axis: control
+  verification_gate:
+  - v4_plugin_response_positive
+  resource_kind: response_error_control
+  lifecycle: v4.error.mainline
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubRespInbound02Parsed
+  owner_symbols:
+  - StandardPlugin
+  allowed_writers:
+  - V4HubRespInbound02Parsed
+  allowed_readers:
+  - V4Error01SourceRaised
+  forbidden_writers: []
   binding_status: anchored
 forbidden_direct_edges:
 - from: v4.config.manifest
