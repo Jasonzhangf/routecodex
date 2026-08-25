@@ -1,18 +1,22 @@
 use std::collections::VecDeque;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct V3RouteTurnObservation {
     pub new_user_input: bool,
     pub is_compaction: bool,
     pub search_pool_hit: bool,
     pub tool_execution_error: bool,
+    pub tool_name: Option<String>,
+    pub route_pool: String,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct V3RouteHistoryFacts {
     pub observed_turns: usize,
     pub search_pool_turns: usize,
     pub tool_execution_error_turns: usize,
+    pub consecutive_tool_name: Option<String>,
+    pub consecutive_tool_calls: usize,
 }
 
 impl V3RouteHistoryFacts {
@@ -53,15 +57,33 @@ impl V3RouteHistoryWindow {
 
     pub fn facts(&self, window_turns: usize) -> V3RouteHistoryFacts {
         let start = self.turns.len().saturating_sub(window_turns);
-        self.turns
-            .iter()
-            .skip(start)
-            .fold(V3RouteHistoryFacts::default(), |mut facts, turn| {
+        let mut facts = self.turns.iter().skip(start).fold(
+            V3RouteHistoryFacts::default(),
+            |mut facts, turn| {
                 facts.observed_turns += 1;
                 facts.search_pool_turns += usize::from(turn.search_pool_hit);
                 facts.tool_execution_error_turns += usize::from(turn.tool_execution_error);
                 facts
-            })
+            },
+        );
+        let mut last_tool_name = None;
+        let mut consecutive = 0;
+        for turn in self.turns.iter().skip(start).rev() {
+            let Some(tool_name) = turn.tool_name.as_deref() else {
+                break;
+            };
+            if let Some(last) = last_tool_name.as_deref() {
+                if last != tool_name {
+                    break;
+                }
+            } else {
+                last_tool_name = Some(tool_name.to_string());
+            }
+            consecutive += 1;
+        }
+        facts.consecutive_tool_name = last_tool_name;
+        facts.consecutive_tool_calls = consecutive;
+        facts
     }
 }
 
@@ -80,7 +102,11 @@ pub enum V3RouteCondition {
 }
 
 impl V3RouteCondition {
-    fn matches(&self, observation: V3RouteTurnObservation, history: &V3RouteHistoryWindow) -> bool {
+    fn matches(
+        &self,
+        observation: &V3RouteTurnObservation,
+        history: &V3RouteHistoryWindow,
+    ) -> bool {
         match self {
             Self::CurrentCompaction => observation.is_compaction,
             Self::SearchPoolTurnRatioAtLeast {
@@ -123,9 +149,18 @@ pub fn evaluate_v3_route_policies(
     observation: V3RouteTurnObservation,
     history: &V3RouteHistoryWindow,
 ) -> Result<Option<V3RoutePolicyAction>, V3RoutePolicyEvaluationError> {
+    if observation.route_pool == "thinking"
+        && observation.tool_name.is_some()
+        && history.facts(history.turns.len()).consecutive_tool_calls >= 5
+    {
+        return Ok(Some(V3RoutePolicyAction {
+            policy_id: "same-tool-consecutive-switch".to_string(),
+            route_pool: "coding".to_string(),
+        }));
+    }
     let mut matched = policies
         .iter()
-        .filter(|policy| policy.condition.matches(observation, history))
+        .filter(|policy| policy.condition.matches(&observation, history))
         .collect::<Vec<_>>();
     matched.sort_by_key(|policy| policy.precedence);
     let Some(first) = matched.first() else {
@@ -276,5 +311,50 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(action.route_pool, "compact");
+    }
+
+    #[test]
+    fn fifth_consecutive_same_tool_switches_thinking_to_coding() {
+        let mut history = V3RouteHistoryWindow::new(8);
+        for _ in 0..4 {
+            history.record_turn(V3RouteTurnObservation {
+                tool_name: Some("read_file".into()),
+                route_pool: "thinking".into(),
+                ..Default::default()
+            });
+        }
+        let current = V3RouteTurnObservation {
+            tool_name: Some("read_file".into()),
+            route_pool: "thinking".into(),
+            ..Default::default()
+        };
+        let mut with_current = history.clone();
+        with_current.record_turn(current.clone());
+        let action = evaluate_v3_route_policies(&[], current, &with_current)
+            .expect("same-tool policy")
+            .expect("fifth call switches route");
+        assert_eq!(action.route_pool, "coding");
+    }
+
+    #[test]
+    fn different_tool_breaks_consecutive_switch() {
+        let mut history = V3RouteHistoryWindow::new(8);
+        for _ in 0..4 {
+            history.record_turn(V3RouteTurnObservation {
+                tool_name: Some("read_file".into()),
+                route_pool: "thinking".into(),
+                ..Default::default()
+            });
+        }
+        let current = V3RouteTurnObservation {
+            tool_name: Some("view_file".into()),
+            route_pool: "thinking".into(),
+            ..Default::default()
+        };
+        let mut with_current = history.clone();
+        with_current.record_turn(current.clone());
+        assert!(evaluate_v3_route_policies(&[], current, &with_current)
+            .expect("same-tool policy")
+            .is_none());
     }
 }
