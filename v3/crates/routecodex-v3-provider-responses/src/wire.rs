@@ -474,10 +474,8 @@ fn insert_v3_deepseek_interleaved_tool_segment_reasoning(body: &mut Value) {
                 last_reasoning_text = if text.is_empty() { None } else { Some(text) };
             }
         }
-        // 只在交错工具段（output -> call 交界）补 reasoning：thinking mode
-        // 的 provider 要求后继 tool-call 段回传 reasoning。user 消息后的首个
-        // tool call 属于新轮，不能凭空插入占位 reasoning（会把本轮的
-        // `[thinking redacted]` 错配给 provider）；无前文 reasoning 时仍用
+        // 交错工具段（output -> call 交界）必须补 reasoning：thinking mode
+        // 的 provider 要求后继 tool-call 段回传 reasoning；无前文明文时使用
         // 确定性占位符保持 wire 字节稳定。
         let is_output = matches!(
             input[index].get("type").and_then(Value::as_str),
@@ -495,6 +493,19 @@ fn insert_v3_deepseek_interleaved_tool_segment_reasoning(body: &mut Value) {
             input.insert(
                 index + 1,
                 json!({"type": "reasoning", "content": [{"type": "reasoning_text", "text": text}]}),
+            );
+        }
+        // 新 user 轮次可能直接以 tool call 开始，客户端上一轮没有返回任何
+        // reasoning item。Console Go 仍会把该 call 转成 thinking assistant turn，
+        // 缺失 reasoning_text 会被 DeepSeek 400；单空格是该协议接受的最小非缺失
+        // 表示，不伪造上一轮 reasoning，也不跨 user 边界继承旧文本。
+        let is_user_message = input[index].get("type").and_then(Value::as_str)
+            == Some("message")
+            && input[index].get("role").and_then(Value::as_str) == Some("user");
+        if is_user_message && next_is_call {
+            input.insert(
+                index + 1,
+                json!({"type": "reasoning", "content": [{"type": "reasoning_text", "text": " "}]}),
             );
         }
         // assistant 文本后直接跟 call 时，reasoning 必须位于整个 assistant

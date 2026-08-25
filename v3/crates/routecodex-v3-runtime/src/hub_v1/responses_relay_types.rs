@@ -298,6 +298,26 @@ impl V3RuntimeStreamObservation {
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())
     }
 
+    pub(crate) fn has_semantic_terminal(&self) -> Result<bool, String> {
+        Ok(self
+            .snapshot()?
+            .response_status
+            .as_deref()
+            .is_some_and(|status| {
+                matches!(
+                    status.trim(),
+                    "completed"
+                        | "requires_action"
+                        | "done"
+                        | "failed"
+                        | "incomplete"
+                        | "cancelled"
+                        | "canceled"
+                        | "error"
+                )
+            }))
+    }
+
     pub fn merge_snapshot(
         &self,
         incoming: &V3RuntimeStreamObservationSnapshot,
@@ -306,12 +326,24 @@ impl V3RuntimeStreamObservation {
             .inner
             .lock()
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
-        if incoming.response_status.is_some() { snapshot.response_status = incoming.response_status.clone(); }
-        if incoming.finish_reason.is_some() { snapshot.finish_reason = incoming.finish_reason.clone(); }
-        if incoming.usage.is_some() { snapshot.usage = incoming.usage.clone(); }
-        if incoming.timing.is_some() { snapshot.timing = incoming.timing.clone(); }
-        if !incoming.typed_object_types.is_empty() { snapshot.typed_object_types = incoming.typed_object_types.clone(); }
-        if !incoming.provider_raw_sse.is_empty() { snapshot.provider_raw_sse = incoming.provider_raw_sse.clone(); }
+        if incoming.response_status.is_some() {
+            snapshot.response_status = incoming.response_status.clone();
+        }
+        if incoming.finish_reason.is_some() {
+            snapshot.finish_reason = incoming.finish_reason.clone();
+        }
+        if incoming.usage.is_some() {
+            snapshot.usage = incoming.usage.clone();
+        }
+        if incoming.timing.is_some() {
+            snapshot.timing = incoming.timing.clone();
+        }
+        if !incoming.typed_object_types.is_empty() {
+            snapshot.typed_object_types = incoming.typed_object_types.clone();
+        }
+        if !incoming.provider_raw_sse.is_empty() {
+            snapshot.provider_raw_sse = incoming.provider_raw_sse.clone();
+        }
         Ok(())
     }
 

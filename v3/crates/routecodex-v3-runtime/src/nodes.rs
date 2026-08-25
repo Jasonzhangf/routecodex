@@ -255,6 +255,8 @@ pub enum V3CommittedSseTerminal {
 /// terminal-incomplete stream and call it committed.
 pub struct V3CommittedClientSseStream {
     inner: Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>,
+    next_frame_index: usize,
+    terminal_frame_index: usize,
 }
 
 impl fmt::Debug for V3CommittedClientSseStream {
@@ -267,7 +269,13 @@ impl Stream for V3CommittedClientSseStream {
     type Item = Vec<u8>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.inner.as_mut().poll_next(cx)
+        match self.inner.as_mut().poll_next(cx) {
+            Poll::Ready(Some(frame)) => {
+                self.next_frame_index = self.next_frame_index.saturating_add(1);
+                Poll::Ready(Some(frame))
+            }
+            terminal => terminal,
+        }
     }
 }
 
@@ -277,12 +285,16 @@ impl V3CommittedClientSseStream {
         on_frame: impl Fn(&[u8]) + Send + Sync + 'static,
         on_terminal: impl FnOnce(V3CommittedSseTerminal) + Send + 'static,
     ) -> Self {
+        let next_frame_index = self.next_frame_index;
+        let terminal_frame_index = self.terminal_frame_index;
         Self {
             inner: Box::pin(V3ObservedCommittedSseStream {
                 source: self,
                 on_frame: Box::new(on_frame),
                 on_terminal: Some(Box::new(on_terminal)),
             }),
+            next_frame_index,
+            terminal_frame_index,
         }
     }
 }
@@ -308,6 +320,9 @@ impl Stream for V3ObservedCommittedSseStream {
         match Pin::new(&mut self.source).poll_next(cx) {
             Poll::Ready(Some(frame)) => {
                 (self.on_frame)(&frame);
+                if self.source.next_frame_index > self.source.terminal_frame_index {
+                    self.finish(V3CommittedSseTerminal::Completed);
+                }
                 Poll::Ready(Some(frame))
             }
             Poll::Ready(None) => {
@@ -331,6 +346,7 @@ impl Drop for V3ObservedCommittedSseStream {
 pub(crate) struct V3CommittedClientSseBuilder {
     frames: Vec<Vec<u8>>,
     byte_len: usize,
+    terminal_frame_index: Option<usize>,
 }
 
 impl V3CommittedClientSseBuilder {
@@ -338,6 +354,7 @@ impl V3CommittedClientSseBuilder {
         Self {
             frames: Vec::new(),
             byte_len: 0,
+            terminal_frame_index: None,
         }
     }
 
@@ -364,15 +381,85 @@ impl V3CommittedClientSseBuilder {
         Ok(())
     }
 
+    pub(crate) fn mark_last_frame_as_terminal(&mut self) -> Result<(), String> {
+        let terminal_frame_index = self
+            .frames
+            .len()
+            .checked_sub(1)
+            .ok_or_else(|| "committed SSE terminal cannot precede every frame".to_string())?;
+        if self.terminal_frame_index.is_none() {
+            self.terminal_frame_index = Some(terminal_frame_index);
+        }
+        Ok(())
+    }
+
     pub(crate) fn seal_after_validated_terminal(
         self,
     ) -> Result<V3CommittedClientSseStream, String> {
         if self.frames.is_empty() {
             return Err("provider response event codec produced an empty stream".to_string());
         }
+        let terminal_frame_index = self.terminal_frame_index.ok_or_else(|| {
+            "provider response event codec did not identify the committed terminal frame"
+                .to_string()
+        })?;
         Ok(V3CommittedClientSseStream {
             inner: Box::pin(futures_util::stream::iter(self.frames)),
+            next_frame_index: 0,
+            terminal_frame_index,
         })
+    }
+}
+
+#[cfg(test)]
+mod committed_sse_handoff_tests {
+    use super::*;
+    use futures_util::StreamExt;
+    use std::sync::{Arc, Mutex};
+
+    async fn observed_terminal_after_drop(frames_to_consume: usize) -> V3CommittedSseTerminal {
+        let mut builder = V3CommittedClientSseBuilder::new();
+        builder
+            .push(b"event: response.created\n\n".to_vec())
+            .unwrap();
+        builder
+            .push(b"event: response.completed\n\n".to_vec())
+            .unwrap();
+        builder.mark_last_frame_as_terminal().unwrap();
+        builder.push(b"event: ping\n\n".to_vec()).unwrap();
+        let terminal = Arc::new(Mutex::new(None));
+        let observed_terminal = Arc::clone(&terminal);
+        let mut stream = builder.seal_after_validated_terminal().unwrap().observe(
+            |_| {},
+            move |value| {
+                *observed_terminal.lock().unwrap() = Some(value);
+            },
+        );
+        for _ in 0..frames_to_consume {
+            stream.next().await.expect("sealed replay frame");
+        }
+        drop(stream);
+        let terminal = terminal
+            .lock()
+            .unwrap()
+            .expect("drop must finalize the committed handoff");
+        terminal
+    }
+
+    #[tokio::test]
+    async fn committed_sse_drop_before_last_handoff_frame_remains_dropped() {
+        assert_eq!(
+            observed_terminal_after_drop(1).await,
+            V3CommittedSseTerminal::Dropped
+        );
+    }
+
+    #[tokio::test]
+    async fn committed_sse_drop_after_last_handoff_frame_is_completed() {
+        assert_eq!(
+            observed_terminal_after_drop(2).await,
+            V3CommittedSseTerminal::Completed
+        );
     }
 }
 

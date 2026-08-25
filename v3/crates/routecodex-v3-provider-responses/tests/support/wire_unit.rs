@@ -840,6 +840,39 @@ mod tests {
     }
 
     #[test]
+    fn wire_inserts_space_reasoning_before_user_turn_first_deepseek_tool_call() {
+        let mut target = target();
+        target.provider_id = "opencode-go".into();
+        target.provider_type = "responses".into();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        target.wire_model = "deepseek-v4-flash".into();
+        target.compatibility_profile = Some("responses:deepseek-console-go".into());
+        let body = json!({
+            "model": "deepseek-v4-flash", "reasoning": {"effort": "high"}, "input": [
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "inspect it"}]},
+                {"type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "done"}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-user-turn-first-tool-call",
+            target,
+            body,
+        )
+        .unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        assert_eq!(
+            input.iter().map(|item| item["type"].as_str().unwrap()).collect::<Vec<_>>(),
+            vec!["message", "reasoning", "function_call", "function_call_output"]
+        );
+        assert_eq!(
+            input[1]["content"],
+            json!([{"type": "reasoning_text", "text": " "}]),
+            "Console Go requires a reasoning representation on the assistant tool turn even when the prior response supplied no reasoning text"
+        );
+    }
+
+    #[test]
     fn wire_keeps_deepseek_model_interleaved_tools_untouched_for_unproven_provider() {
         // junction 兼容只属于已证实的 opencode-go/Console Go 网关；其他持
         // deepseek-v4-flash 模型的 Responses provider 没有证明需要合成 reasoning，
@@ -1284,7 +1317,8 @@ mod tests {
         assert_eq!(input[junction_idx + 1]["type"], "function_call");
         assert_eq!(
             input[junction_idx]["content"],
-            json!([{"type": "reasoning_text", "text": "[thinking redacted]"}])
+            json!([{"type": "reasoning_text", "text": " "}]),
+            "the second turn must inherit its own minimal reasoning representation, never the prior turn's reasoning text"
         );
     }
 

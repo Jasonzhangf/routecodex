@@ -1037,6 +1037,17 @@ where
                             if let Err(reason) = committed_attempt.push(frame) {
                                 break Some(reason);
                             }
+                            match stream_observation.has_semantic_terminal() {
+                                Ok(true) => {
+                                    if let Err(reason) =
+                                        committed_attempt.mark_last_frame_as_terminal()
+                                    {
+                                        break Some(reason);
+                                    }
+                                }
+                                Ok(false) => {}
+                                Err(reason) => break Some(reason),
+                            }
                         }
                         Some(Err(reason)) => break Some(reason),
                         None => break None,

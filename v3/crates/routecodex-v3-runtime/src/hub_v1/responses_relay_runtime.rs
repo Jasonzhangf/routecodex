@@ -1004,6 +1004,7 @@ pub fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
             }
         }
     }
+    let terminal_frame_index;
     if failed {
         frames.push(build_v3_runtime_sse_json_frame(
             "response.failed",
@@ -1012,6 +1013,7 @@ pub fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
                 "response": response,
             }),
         ));
+        terminal_frame_index = frames.len() - 1;
     } else {
         let terminal_response = project_v3_responses_client_completed_response(&response);
         let terminal_event = if incomplete {
@@ -1026,6 +1028,7 @@ pub fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
                 "response": terminal_response,
             }),
         ));
+        terminal_frame_index = frames.len() - 1;
         frames.push(build_v3_runtime_sse_json_frame(
             "response.done",
             &json!({
@@ -1036,8 +1039,11 @@ pub fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
     }
     frames.push(b"data: [DONE]\n\n".to_vec());
     let mut committed = crate::nodes::V3CommittedClientSseBuilder::new();
-    for frame in frames {
+    for (index, frame) in frames.into_iter().enumerate() {
         committed.push(frame)?;
+        if index == terminal_frame_index {
+            committed.mark_last_frame_as_terminal()?;
+        }
     }
     committed.seal_after_validated_terminal()
 }

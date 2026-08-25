@@ -115,6 +115,9 @@ pub fn project_v3_anthropic_client_sse_stream(
     let mut committed = crate::nodes::V3CommittedClientSseBuilder::new();
     for event in &events {
         committed.push(build_v3_anthropic_client_sse_event_chunk(event)?)?;
+        if event.get("event").and_then(Value::as_str) == Some("message_stop") {
+            committed.mark_last_frame_as_terminal()?;
+        }
     }
     committed.seal_after_validated_terminal()
 }

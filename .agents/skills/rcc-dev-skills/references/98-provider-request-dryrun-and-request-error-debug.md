@@ -86,3 +86,41 @@ console 摘要、最终 HTTP 200、另一个 key、另一个 provider、普通 s
 
 禁止通过 routing、provider switch、fallback、thinking=false、payload 裁剪、silent strip、错误码改写、handler/SSE/outbound 补偿掩盖请求错误。
 
+## 3. DeepSeek thinking 工具轮 reasoning 合同
+
+触发条件：目标是 `responses:deepseek-console-go`、模型是 DeepSeek thinking 模型，且新 user 轮次后第一个 assistant 行为是 tool call。Console Go 要求每个 thinking assistant tool turn 都携带非空 `reasoning_text`；这个合同不因客户端没有回传 reasoning 而消失。
+
+provider wire 的最小合法投影是把下面的 item 放在新 user message 与首个 tool call 之间：
+
+```json
+{
+  "type": "reasoning",
+  "content": [{"type": "reasoning_text", "text": " "}]
+}
+```
+
+已验证边界：缺少 reasoning item 失败；`reasoning_text` 为空字符串失败；单空格成功。新 user 轮次不得继承上一轮 assistant reasoning，单空格是当前轮“客户端没有 reasoning 表示”的最小非空协议值，不是对历史 payload 的清洗或补写。
+
+必须锁两类回归：
+
+1. 正向：`user -> function_call -> function_call_output` 经最终 provider wire 变为 `user -> reasoning_text(" ") -> function_call -> function_call_output`，相同 wire 原样 curl 成功。
+2. 反向：已有当前轮 reasoning 时不得重复插入；跨 user 边界不得搬运旧 reasoning；非 DeepSeek Console Go、非 thinking、非 Responses provider wire 不得触发该投影。
+
+修复 owner 只能是对应 provider wire compat builder。禁止在 Hub、Virtual Router、handler、SSE、响应投影或历史 restore 中补这个 provider-specific wire 语法。
+
+## 4. Fully buffered SSE 交接与 499 定位
+
+正确生命周期：Front 先接住客户端请求并只发送 transport heartbeat；Runtime 完整读取、校验并缓存 provider attempt；只有完整 attempt 出现已登记 semantic terminal 后，Runtime 才 seal client projection 并把 typed committed stream 交给 Front；Front 随后向客户端 replay。provider 业务帧在 seal 前不得越过 client edge。
+
+完成判定必须由 Runtime validator 写进 typed committed carrier，至少携带首次 semantic terminal frame 的位置。不能把 `poll_next(None)`、HTTP EOF、Hyper Body Drop 或“客户端读完物理最后一帧”当唯一完成证据，因为合法 provider 可能在 `response.completed` 后继续发送 `ping` 等 transport tail，客户端也会在 semantic terminal 后正常停止读取。
+
+判定矩阵：
+
+- terminal frame 前 Drop：真实 `client_disconnect`，保持 health-neutral 499。
+- terminal frame 已交给 Front 后 Drop，即使 trailing `ping`/`[DONE]`/EOF 未消费：已完成，不得投影 499。
+- provider 未产生 semantic terminal：attempt 不得 seal，不得作为成功交接。
+- provider terminal failure：保持 typed failure，不得改写成 client disconnect 或成功。
+
+唯一 owner 是 Runtime 的 provider-response validator + committed handoff carrier。Server/Front 只消费 typed terminal，不重新解析 SSE event 文本；不得在 handler、HTTP body、console finalizer、outbound 或 provider health 增加补偿分支。
+
+在线验证使用成对客户端：正向客户端读到 `response.completed` 立即关闭且不消费 trailing `ping`/EOF，同 requestId 必须 completed、无 499；反向客户端在 heartbeat/terminal 前关闭，必须仍走 health-neutral client disconnect。两组都要确认 provider failure events 为空，避免把客户端行为污染 provider health。

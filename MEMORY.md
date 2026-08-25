@@ -5785,3 +5785,15 @@ Tags: #v3 #historical-samples #error-samples #provider-debug
 - Accepted client requests could silently EOF during `prepare_for_exec` because `close_active_client_transports` closed Front sockets without an Error06/client terminal; the regression was introduced by `8798f9800` and was locked by an old empty-response assertion.
 - Canonical owner is `routecodex-v3-server` Front transport plus Responses SSE accept owner: pre-header restart emits HTTP 503 `server_restart_in_progress`; started Responses SSE emits typed `response.failed`; unstarted requests and client disconnects do not receive fabricated restart errors.
 - Verified on main `5adced262`: 19 restart-handoff tests, architecture/resource/module gates, CLI debug/release build, global install, parameterless `routecodex restart`, 7777/4444 health, and live 7777 Responses SSE. Full build admission still has unrelated pre-existing `console/impl_bulk.rs` shrink-only ratchet failure.
+
+## 2026-08-25 - DeepSeek thinking 首个工具调用 reasoning 合同
+
+- `responses:deepseek-console-go` 的 DeepSeek thinking 请求中，新 user 轮次后的首个 tool call 必须有当前轮非空 `reasoning_text`。客户端没有 reasoning 回传时，provider wire 在 user message 与 tool call 之间投影 `reasoning_text: " "`；空字符串和缺字段均会被 Console Go 以 HTTP 400 拒绝。
+- 单变量 provider curl 已锁定：相同 provider/model/key/body 缺 reasoning 为 400，只插入单空格 reasoning 为 200。新 user 轮次不得继承旧 assistant reasoning；该语法只属于 DeepSeek Console Go provider wire compat owner，禁止放进 Hub、历史 restore、SSE 或 handler。
+- 回归必须同时锁最终 wire 顺序、空格非空表示、已有 reasoning 不重复、跨 user 不继承、非目标 provider/profile 不触发。最终验证必须包含 `provider.model` exact pin dry-run、dry-run wire 原样 provider curl，以及安装重启后的 exact-pin live 200；最终 provider switch 成功不能替代目标 provider 证据。
+
+## 2026-08-25 - Fully buffered SSE semantic-terminal 交接锁
+
+- Responses Front 先接住客户端连接并维持 transport heartbeat；Runtime 完整缓存、校验 provider SSE，只有 semantic terminal 已验证后才 seal 并把 committed client stream 交给 Front。provider 业务帧在 seal 前不得越过 client edge。
+- 回归 `e7aa62392` 把 `poll_next(None)` 误当唯一完成证据，导致客户端读到 `response.completed` 后因未消费 trailing `ping`/EOF 而被误报 499。正确 owner 是 Runtime validator + typed committed carrier：记录首次 semantic terminal frame index；该帧交付后 Drop 是完成，标记前 Drop 仍是 health-neutral client disconnect。
+- Server/Front、handler、console finalizer 和 outbound 不得重新解析 SSE event 文本重建 terminal，也不得补偿成功。验证必须成对覆盖 terminal 前 Drop=499、terminal 后 trailing tail 未消费=completed，并在线确认 provider failure events 不受客户端断连污染。
