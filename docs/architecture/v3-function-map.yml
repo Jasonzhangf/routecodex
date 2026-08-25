@@ -5104,6 +5104,7 @@ features:
   - V3FrontRequestLease
   - V3RuntimeHandoffCheckpoint
   - V3FrontFrameSequence
+  - V3FrontTransportCloseoutState
   - V3StableFrontSocket::set_exec_closeout_frame
   - V3FrontDeadlineBudget
   - V3ServerRequestActivityGate

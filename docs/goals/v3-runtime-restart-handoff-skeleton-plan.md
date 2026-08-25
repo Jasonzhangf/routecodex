@@ -34,6 +34,13 @@ Transport Broker owns provider transport identity, provider frame sequence, and
 provider-attempt handoff. Both Direct and Relay use this skeleton; only their
 protocol codecs and semantic projectors differ.
 
+One persistent HTTP/1.1 connection may carry multiple sequential requests.
+Connection identity is stable, but closeout phase and the registered protocol
+terminal are request-scoped: accepting the next request must atomically clear
+the previous response-started phase and closeout frame. A restart before the
+new response headers therefore emits the generic HTTP 503 terminal; it must
+never inherit a completed Chat/Responses SSE phase from the preceding request.
+
 Every lease is keyed by `request_id`, `pipeline_id`, `server_id`, `port`,
 `session_scope`, and `generation`. A restart exports a typed checkpoint through
 the lifecycle control plane. The checkpoint contains remaining deadlines,

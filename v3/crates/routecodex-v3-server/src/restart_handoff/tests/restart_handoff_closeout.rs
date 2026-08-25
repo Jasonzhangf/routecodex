@@ -19,6 +19,25 @@ fn restart_closeout_has_explicit_terminal_for_request_before_response_headers() 
     assert!(started.take_frame().is_none());
 }
 
+#[test]
+fn persistent_connection_second_request_gets_preheader_restart_terminal() {
+    let state = V3FrontTransportCloseoutState::new();
+
+    state.mark_request_started();
+    state.mark_response_started();
+    state.set_frame(b"event: response.failed\ndata: stale\n\n".to_vec());
+
+    state.mark_request_started();
+    state.close_for_exec_replacement();
+
+    let frame = state
+        .take_frame()
+        .expect("a new keep-alive request must not inherit the previous response phase");
+    let text = String::from_utf8(frame).expect("restart response is HTTP bytes");
+    assert!(text.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(text.contains("server_restart_in_progress"));
+}
+
 #[tokio::test]
 async fn front_socket_writes_restart_terminal_after_request_acceptance() {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))

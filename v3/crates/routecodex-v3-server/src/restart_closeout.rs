@@ -3,44 +3,65 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 pub(crate) struct V3FrontTransportCloseoutState {
-    frame: Mutex<Option<Vec<u8>>>,
+    request_cycle: Mutex<V3FrontTransportRequestCycle>,
     closed: AtomicBool,
-    request_started: AtomicBool,
-    response_started: AtomicBool,
+}
+
+#[derive(Debug, Default)]
+struct V3FrontTransportRequestCycle {
+    frame: Option<Vec<u8>>,
+    request_started: bool,
+    response_started: bool,
 }
 
 impl V3FrontTransportCloseoutState {
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
-            frame: Mutex::new(None),
+            request_cycle: Mutex::new(V3FrontTransportRequestCycle::default()),
             closed: AtomicBool::new(false),
-            request_started: AtomicBool::new(false),
-            response_started: AtomicBool::new(false),
         })
     }
 
     pub(crate) fn take_frame(&self) -> Option<Vec<u8>> {
-        self.frame.lock().expect("front closeout frame lock").take()
+        self.request_cycle
+            .lock()
+            .expect("front closeout request cycle lock")
+            .frame
+            .take()
     }
 
     pub(crate) fn mark_request_started(&self) {
-        self.request_started.store(true, Ordering::Release);
+        let mut request_cycle = self
+            .request_cycle
+            .lock()
+            .expect("front closeout request cycle lock");
+        request_cycle.frame = None;
+        request_cycle.request_started = true;
+        request_cycle.response_started = false;
     }
 
     pub(crate) fn mark_response_started(&self) {
-        self.response_started.store(true, Ordering::Release);
+        self.request_cycle
+            .lock()
+            .expect("front closeout request cycle lock")
+            .response_started = true;
     }
 
     pub(crate) fn set_frame(&self, frame: Vec<u8>) {
-        *self.frame.lock().expect("front closeout frame lock") = Some(frame);
+        self.request_cycle
+            .lock()
+            .expect("front closeout request cycle lock")
+            .frame = Some(frame);
     }
 
     pub(crate) fn close_for_exec_replacement(&self) {
         self.closed.store(true, Ordering::Release);
-        if self.request_started.load(Ordering::Acquire)
-            && !self.response_started.load(Ordering::Acquire)
-        {
-            self.set_frame(build_v3_restart_closeout_http_error());
+        let mut request_cycle = self
+            .request_cycle
+            .lock()
+            .expect("front closeout request cycle lock");
+        if request_cycle.request_started && !request_cycle.response_started {
+            request_cycle.frame = Some(build_v3_restart_closeout_http_error());
         }
     }
 
