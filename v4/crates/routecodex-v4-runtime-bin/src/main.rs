@@ -1441,7 +1441,7 @@ id = "rccv4"
 
 [[listeners]]
 id = "primary"
-address = "127.0.0.1:17777"
+address = "127.0.0.1:0"
 
 [[providers]]
 provider_id = "mock"
@@ -1507,7 +1507,7 @@ targets = ["mock"]
             body: br#"{"model":"mock-model","input":"hello"}"#.to_vec(),
             request_id: "request-node-container-test".to_string(),
             server_id: "test".to_string(),
-            port: 17777,
+            port: 0,
         });
         assert_eq!(response.status, 404, "request node must run before route projection");
     }
@@ -1558,7 +1558,7 @@ targets = ["mock"]
             },
             runtime(),
             "request-1".to_string(),
-            17777,
+            0,
             entry_protocol.to_string(),
             continuation_owner.to_string(),
             "responses".to_string(),
