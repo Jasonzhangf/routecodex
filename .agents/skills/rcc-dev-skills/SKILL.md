@@ -376,13 +376,16 @@ Provider SSE 的兼容修复只能修复传输语法和格式，不得根据响�
 
 ## 相关规则
 - RouteCodex V3 Rust Responses direct MVP：`references/94-v3-rust-responses-direct-mvp.md`
+- Provider-request dry-run 与请求错误定位：`references/98-provider-request-dryrun-and-request-error-debug.md`
 - note.md append-only：顶部 consolidation index，正文不删 raw
 - MEMORY.md append-only：只追加 dated correction
 - 同主题冲突：最新已验证时间戳胜出
 
 ## V3 Provider-Request Dry-Run Guard
 - Trigger: `x-routecodex-dry-run: provider-request`, `/v1/responses`, `/v1/messages`, provider request evidence, or Jason reports dry-run/live mismatch.
+- For an exact target probe, set the client `model` to `provider.model` (for example `opencode-go.deepseek-v4-flash`). Generic model routing or a later provider's success is not evidence for the requested provider.
 - Interpret dry-run as a real route/outbound/provider-request chain only up to the no-network transport cutpoint. The authoritative evidence is `providerRequest` / `dry_run.provider_request`; `dry_run.response_payload` is a fake protocol-shaped terminal response and must not be used as provider behavior truth.
+- If the source request has `stream=true`, expect the dry-run evidence inside an SSE `data: {...}` event rather than assuming the HTTP body is bare JSON.
 - If `providerRequestCaptured=false`, debug the pre-transport owner: route manifest, target selection, provider wire protocol compatibility, or outbound codec. Do not blame provider network or SSE.
 - Anthropic entry dry-run must select an Anthropic provider wire target. If it selects OpenAI Chat, fix the loaded route manifest or target protocol filtering before touching Anthropic codec, SSE, or error projection.
 

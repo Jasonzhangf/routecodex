@@ -497,21 +497,32 @@ fn insert_v3_deepseek_interleaved_tool_segment_reasoning(body: &mut Value) {
                 json!({"type": "reasoning", "content": [{"type": "reasoning_text", "text": text}]}),
             );
         }
-        // 首个工具段（assistant 文本后直接跟 call、同轮无前文 reasoning）：
-        // Console Go 转 Chat 时该 tool_calls 消息同样必须附着 reasoning，
-        // 否则上游 400 `reasoning_text must be passed back`；无前文时用
-        // 确定性占位符保持 wire 字节稳定。有前文 reasoning 时该条目已存在
-        // 于工具段之前，不再重复插入。
+        // assistant 文本后直接跟 call 时，reasoning 必须位于整个 assistant
+        // message + tool-call 段之前。放在 message 与 call 之间仍会触发
+        // `reasoning_text must be passed back`，放在 call 与 output 之间则会破坏
+        // Console Go 的最近 output 配对。前一条不是 reasoning 时，在 message
+        // 之前插入继承的明文；无前文时使用确定性占位符。
         let is_assistant_message = matches!(
             input[index].get("type").and_then(Value::as_str),
             Some("message")
         ) && input[index].get("role").and_then(Value::as_str)
             == Some("assistant");
-        if is_assistant_message && next_is_call && last_reasoning_text.is_none() {
+        let previous_is_reasoning = index
+            .checked_sub(1)
+            .and_then(|previous| input.get(previous))
+            .and_then(|item| item.get("type"))
+            .and_then(Value::as_str)
+            == Some("reasoning");
+        if is_assistant_message && next_is_call && !previous_is_reasoning {
+            let text = last_reasoning_text
+                .clone()
+                .unwrap_or_else(|| "[thinking redacted]".to_string());
             input.insert(
-                index + 1,
-                json!({"type": "reasoning", "content": [{"type": "reasoning_text", "text": "[thinking redacted]"}]}),
+                index,
+                json!({"type": "reasoning", "content": [{"type": "reasoning_text", "text": text}]}),
             );
+            index += 2;
+            continue;
         }
         index += 1;
     }

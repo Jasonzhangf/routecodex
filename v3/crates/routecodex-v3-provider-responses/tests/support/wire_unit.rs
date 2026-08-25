@@ -830,7 +830,12 @@ mod tests {
             build_v3_provider_12_responses_wire_payload("req-first-tool-segment", target, body)
                 .unwrap();
         let input = wire.body()["input"].as_array().unwrap();
-        assert_eq!(input[1]["type"], "reasoning");
+        assert_eq!(input[0]["type"], "reasoning");
+        assert_eq!(
+            input[0]["content"],
+            json!([{"type": "reasoning_text", "text": "[thinking redacted]"}])
+        );
+        assert_eq!(input[1]["type"], "message");
         assert_eq!(input[2]["type"], "function_call");
     }
 
@@ -897,8 +902,10 @@ mod tests {
         // 与其 output 之间的 assistant 文本消息会打断配对，导致上游 400
         // `No tool output found for tool call ...`（DeepSeek 原生 API 接受该
         // 交错，只有 Console Go Chat 降级不接受）。wire 必须把每个工具 run
-        // 内的 assistant 消息移到该 run 最后一个 output 之后，calls/outputs
-        // 原序保留；并行 calls 的 run 同样后移，且重复构建字节不变。
+        // 内的 assistant 消息移到该 run 最后一个 output 之后；若后面紧接下一
+        // 个工具 run，则继承 reasoning 并放在 assistant message 之前。这样既
+        // 保持 call/output 相邻，也满足 thinking turn 的 reasoning passback。
+        // calls/outputs 原序保留；并行 calls 的 run 同样后移，且重复构建字节不变。
         let mut target = target();
         target.provider_id = "opencode-go".into();
         target.provider_type = "responses".into();
@@ -935,10 +942,11 @@ mod tests {
             .map(|item| item["type"].as_str().unwrap_or(""))
             .collect();
         assert_eq!(
-            &types[1..10],
+            &types[1..11],
             &[
                 "function_call",
                 "function_call_output",
+                "reasoning",
                 "message",
                 "function_call",
                 "function_call",
@@ -947,7 +955,12 @@ mod tests {
                 "message",
                 "message",
             ],
-            "single-call run must become call/output/message; parallel run must become call/call/output/output/message"
+            "single-call run must become call/output/reasoning/message before the next tool run; parallel calls and outputs must stay paired and ordered"
+        );
+        assert_eq!(
+            input[3]["content"],
+            json!([{"type": "reasoning_text", "text": "plan"}]),
+            "the next assistant message + tool-call turn must inherit reasoning before the message"
         );
         // 结构化断言：任意 call 与其同名 output 之间不得夹 assistant message。
         let mut pending: Vec<(&str, usize)> = Vec::new();
@@ -1067,6 +1080,55 @@ mod tests {
             input[2]["content"],
             json!([{"type": "reasoning_text", "text": "tool note"}]),
             "reasoning must follow its paired tool output on the Console Go wire"
+        );
+    }
+
+    #[test]
+    fn wire_places_console_go_reasoning_before_assistant_message_tool_turn() {
+        let mut target = target();
+        target.provider_id = "opencode-go".into();
+        target.provider_type = "responses".into();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        target.wire_model = "deepseek-v4-flash".into();
+        target.compatibility_profile = Some("responses:deepseek-console-go".into());
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-deepseek-assistant-message-tool-turn",
+            target,
+            json!({
+                "model": "deepseek-v4-flash",
+                "reasoning": {"effort": "high"},
+                "input": [
+                    {"type": "reasoning", "content": [{"type": "reasoning_text", "text": "shared plan"}]},
+                    {"type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{}"},
+                    {"type": "function_call_output", "call_id": "call_1", "output": "one"},
+                    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "continuing"}]},
+                    {"type": "function_call", "call_id": "call_2", "name": "exec_command", "arguments": "{}"},
+                    {"type": "function_call_output", "call_id": "call_2", "output": "two"}
+                ]
+            }),
+        )
+        .unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        let types: Vec<&str> = input
+            .iter()
+            .map(|item| item["type"].as_str().unwrap_or(""))
+            .collect();
+        assert_eq!(
+            types,
+            vec![
+                "reasoning",
+                "function_call",
+                "function_call_output",
+                "reasoning",
+                "message",
+                "function_call",
+                "function_call_output"
+            ]
+        );
+        assert_eq!(
+            input[3]["content"],
+            json!([{"type": "reasoning_text", "text": "shared plan"}]),
+            "Console Go thinking turns require reasoning before every assistant message + tool-call segment"
         );
     }
 

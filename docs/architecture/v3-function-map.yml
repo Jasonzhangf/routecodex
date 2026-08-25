@@ -5425,6 +5425,7 @@ features:
   owner_crate: routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  - v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -5435,10 +5436,12 @@ features:
   - V3WebuiObservability::snapshot
   - V3WebuiObservability::since
   - V3ObsSinceResult
+  - cooldown_pool
   - emit_v3_request_console_observation
   - capture_v3_relay_provider_snapshots
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  - v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
