@@ -211,6 +211,7 @@
     "verify:runtime-responses-provider-compat": "node scripts/architecture/verify-runtime-responses-provider-compat.mjs",
     "verify:sse-architecture-boundary": "node scripts/architecture/verify-sse-architecture-boundary.mjs",
     "verify:v3-direct-sse-accept-skeleton": "npm --prefix v3 run verify:v3-direct-sse-accept-skeleton",
+    "verify:v3-direct-sse-full-attempt-commit": "npm --prefix v3 run verify:v3-direct-sse-full-attempt-commit",
     "verify:v3-contract-map-owner": "npm --prefix v3 run verify:v3-contract-map-owner",
     "verify:v3-mainline-manifest-sync": "npm --prefix v3 run verify:v3-mainline-manifest-sync",
     "test:v3-sse-transport-adapter": "npm --prefix v3 run test:v3-sse-transport-adapter",

@@ -2272,3 +2272,20 @@ resources:
     may_enter_client_body: true
     may_enter_metadata_center: false
     binding_status: design
+
+  - resource_id: v3.sse.direct.full_attempt_buffer
+    resource_kind: direct_sse_attempt_buffer
+    lifecycle: v3.responses.direct.sse.attempt_until_terminal
+    owner_feature_id: v3.responses_direct_full_attempt_commit
+    owner_crate: routecodex-v3-runtime
+    owner_module: direct_runtime_helpers_stream
+    owner_node: V3DirectSseAttemptBuffer
+    identity: [requestId, attemptId, providerKey, protocol]
+    allowed_writers: [V3DirectSseAttemptBuffer::push, V3DirectSseAttemptBuffer::finish_terminal, V3DirectSseAttemptBuffer::discard]
+    allowed_readers: [commit_direct_sse_attempt_after_terminal, V3DirectSseAttemptBuffer::release]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload, session.cache]
+    must_pass_through: [V3ProviderResp14Raw, V3DirectResp14ProviderProjectionPrepared, Error01, Error03, Error04, Error05]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design

@@ -107,6 +107,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     hook_registry: V3HookRegistry,
     transport: &T,
 ) -> V3ResponsesDirectRuntimeOutput {
+    let raw_for_sse_handoff = raw.clone();
+    let manifest_for_sse_handoff = manifest.clone();
+    let state_for_sse_handoff = state.clone();
+    let hook_registry_for_sse_handoff = hook_registry;
+    let transport_for_sse_handoff = transport.handoff_handle();
     let accumulator = state
         .observability_accumulator
         .clone()
@@ -1541,7 +1546,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                             Some(policy.target.candidate.model_id.clone()),
                             true,
                         );
-                    let client_stream = commit_direct_sse_stream(projected);
+                    let client_stream =
+                        direct_runtime_helpers_stream::commit_direct_sse_attempt_after_terminal(
+                            projected,
+                        );
                     let client_stream = if let (
                         false,
                         V3RemoteContinuationObservation::Streaming { state },
@@ -1563,6 +1571,97 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                         )
                     } else {
                         client_stream
+                    };
+                    let failure_scope_for_sse_handoff = direct_failure_session_scope.clone();
+                    let provider_id_for_sse_handoff = policy.target.candidate.provider_id.clone();
+                    let auth_alias_for_sse_handoff = policy.target.candidate.auth_alias.clone();
+                    let model_id_for_sse_handoff = policy.target.candidate.model_id.clone();
+                    let client_stream = match transport_for_sse_handoff.clone() {
+                        Some(transport) => {
+                            let raw = raw_for_sse_handoff.clone();
+                            let manifest = manifest_for_sse_handoff.clone();
+                            let state = state_for_sse_handoff.clone();
+                            let hooks = hook_registry_for_sse_handoff;
+                            let failure_scope = failure_scope_for_sse_handoff.clone();
+                            let provider_id = provider_id_for_sse_handoff.clone();
+                            let auth_alias = auth_alias_for_sse_handoff.clone();
+                            let model_id = model_id_for_sse_handoff.clone();
+                            direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream(
+                                client_stream,
+                                response_projection.compat_plan.provider_protocol,
+                                move |error| {
+                                    let transport = transport.clone();
+                                    let raw = raw.clone();
+                                    let manifest = manifest.clone();
+                                    let mut state = state.clone();
+                                    let failure_scope = failure_scope.clone();
+                                    let provider_id = provider_id.clone();
+                                    let auth_alias = auth_alias.clone();
+                                    let model_id = model_id.clone();
+                                    async move {
+                                        if let Some(health) = state.provider_health.as_ref() {
+                                            health
+                                                .record_post_commit_provider_stream_failure_from_source(
+                                                    &failure_scope,
+                                                    &provider_id,
+                                                    Some(&auth_alias),
+                                                    Some(&model_id),
+                                                    &error,
+                                                )
+                                                .map_err(|message| {
+                                                    build_v3_error_01_source_raised(
+                                                        V3ErrorSourceKind::RuntimeFailure,
+                                                        "V3DirectSseHandoffRuntime",
+                                                        "provider_stream_failure_bookkeeping_failed",
+                                                        message,
+                                                    )
+                                                })?;
+                                        }
+                                        let next = tokio::task::spawn_blocking(move || {
+                                            let runtime = tokio::runtime::Builder::new_current_thread()
+                                                .enable_all()
+                                                .build()
+                                                .map_err(|error| error.to_string())?;
+                                            Ok::<_, String>(runtime.block_on(
+                                                execute_v3_responses_direct_runtime_kernel_core(
+                                                    state,
+                                                    &manifest,
+                                                    raw,
+                                                    hooks,
+                                                    transport.as_ref(),
+                                                ),
+                                            ))
+                                        })
+                                        .await
+                                        .map_err(|error| build_v3_error_01_source_raised(
+                                            V3ErrorSourceKind::RuntimeFailure,
+                                            "V3DirectSseHandoffRuntime",
+                                            "provider_stream_handoff_runtime_join_failed",
+                                            error.to_string(),
+                                        ))?
+                                        .map_err(|message| build_v3_error_01_source_raised(
+                                            V3ErrorSourceKind::RuntimeFailure,
+                                            "V3DirectSseHandoffRuntime",
+                                            "provider_stream_handoff_runtime_failed",
+                                            message,
+                                        ))?;
+                                        match next.client_payload.body {
+                                            V3ClientBody::Sse(stream) => Ok(Some(stream)),
+                                            V3ClientBody::Json(_)
+                                            | V3ClientBody::Bytes(_)
+                                            | V3ClientBody::CommittedSse(_) => Ok(None),
+                                        }
+                                    }
+                                },
+                                Some(8),
+                            )
+                        }
+                        None => direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream(
+                            client_stream,
+                            response_projection.compat_plan.provider_protocol,
+                            |error| async move { Err(error) },
+                            Some(0),
+                        ),
                     };
                     drop(provider_action_permit.take());
                     client_sse = Some(client_stream);

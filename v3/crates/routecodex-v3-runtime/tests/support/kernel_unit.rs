@@ -1163,7 +1163,105 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
 }
 
 #[tokio::test]
+async fn direct_sse_full_attempt_commit_reselects_after_partial_network_failure() {
+    use futures_util::StreamExt;
+
+    let source: V3ClientSseStream = Box::pin(stream::iter([
+        Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec()),
+        Err(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_stream",
+            "network failure after partial provider output",
+        )),
+    ]));
+    let client = wrap_direct_sse_provider_handoff_stream(
+        source,
+        V3HubProviderWireProtocol::Responses,
+        move |_| {
+            async move {
+                Ok(Some(Box::pin(stream::iter([Ok(
+                    b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"recovered\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"recovered\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
+                )])) as V3ClientSseStream))
+            }
+        },
+        Some(1),
+    );
+    let frames = client.collect::<Vec<_>>().await;
+    let text = String::from_utf8(
+        frames
+            .into_iter()
+            .map(|frame| frame.expect("replacement attempt must succeed"))
+            .flatten()
+            .collect(),
+    )
+    .unwrap();
+    assert!(text.contains("recovered"));
+    assert!(!text.contains("failed-partial"));
+}
+
+#[tokio::test]
+async fn direct_sse_full_attempt_commit_rejects_eof_without_terminal() {
+    use futures_util::StreamExt;
+
+    let source: V3ClientSseStream = Box::pin(stream::iter([Ok(
+        b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
+    )]));
+    let client = wrap_direct_sse_provider_handoff_stream(
+        source,
+        V3HubProviderWireProtocol::Responses,
+        |_| async { Ok(None) },
+        Some(0),
+    );
+    let frames = client.collect::<Vec<_>>().await;
+    assert_eq!(frames.len(), 1);
+    let error = frames.into_iter().next().unwrap().expect_err("EOF without terminal must be an error");
+    assert_eq!(error.code, "provider_response_sse_stream");
+}
+
+#[tokio::test]
+async fn direct_sse_full_attempt_commit_does_not_mix_failed_attempt_bytes() {
+    use futures_util::StreamExt;
+
+    let source: V3ClientSseStream = Box::pin(stream::iter([
+        Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec()),
+        Err(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_stream",
+            "provider A disconnected",
+        )),
+    ]));
+    let client = wrap_direct_sse_provider_handoff_stream(
+        source,
+        V3HubProviderWireProtocol::Responses,
+        move |_| {
+            async move {
+                Ok(Some(Box::pin(stream::iter([Ok(
+                    b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider-b\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-b-only\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider-b\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
+                )])) as V3ClientSseStream))
+            }
+        },
+        Some(1),
+    );
+    let text = String::from_utf8(
+        client
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .map(|frame| frame.expect("provider B must complete"))
+            .flatten()
+            .collect(),
+    )
+    .unwrap();
+    assert!(text.contains("provider-b-only"));
+    assert!(!text.contains("provider-a-only"));
+}
+
+#[tokio::test]
 async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
+    use futures_util::StreamExt;
+
     struct FailedSseTransport;
 
     #[async_trait]
@@ -1209,13 +1307,13 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
     )
     .await;
 
-    assert_eq!(output.client_payload.status, 502, "{output:?}");
-    assert!(output.error_chain.is_some(), "{output:?}");
-    let V3ClientBody::Json(error) = output.client_payload.body else {
-        panic!("pool exhaustion must project one terminal Error06 JSON body: {output:?}");
+    assert_eq!(output.client_payload.status, 200, "SSE headers are already accepted: {output:?}");
+    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
+        panic!("provider SSE must remain a lazy client stream: {output:?}");
     };
-    assert_eq!(error["error"]["code"], "provider_response_sse_stream");
-    assert_eq!(error["error"]["message"], "provider_response_sse_stream");
+    let frames = stream.collect::<Vec<_>>().await;
+    assert!(frames.iter().all(Result::is_err), "partial provider bytes must not be exposed: {frames:?}");
+    assert!(frames.iter().any(|frame| frame.as_ref().unwrap_err().code == "provider_response_sse_stream"));
 }
 
 #[tokio::test]
@@ -1229,6 +1327,12 @@ async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_fro
 
     #[async_trait]
     impl ResponsesTransport for PostCommitResponsesTransport {
+        fn handoff_handle(&self) -> Option<Arc<dyn ResponsesTransport>> {
+            Some(Arc::new(Self {
+                calls: self.calls.clone(),
+            }))
+        }
+
         async fn send(
             &self,
             request: V3Transport13ResponsesHttpRequest,
@@ -1268,7 +1372,7 @@ async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_fro
                     value: b"text/event-stream".to_vec(),
                 }],
                 Box::pin(stream::iter([Ok::<Vec<u8>, V3ProviderError>(
-                    b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_recovered\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_recovered\",\"status\":\"completed\",\"output\":[]}}\n\n".to_vec(),
+                    b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_recovered\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_recovered\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
                 )])),
             ))
         }
@@ -1298,12 +1402,12 @@ async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_fro
     )
     .await;
 
-    let V3ClientBody::CommittedSse(mut stream) = output.client_payload.body else {
+    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
         panic!("expected committed direct SSE client body: {output:?}");
     };
     let mut bytes = Vec::new();
     while let Some(frame) = stream.next().await {
-        bytes.extend_from_slice(&frame);
+        bytes.extend_from_slice(&frame.expect("replacement attempt must complete"));
     }
     let text = String::from_utf8(bytes).expect("committed client frames must be UTF-8");
     assert!(text.contains("recovered"), "{text}");

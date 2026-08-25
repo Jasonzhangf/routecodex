@@ -868,7 +868,7 @@ where
                     Some(C::policy_target(&policy).candidate.model_id.clone()),
                     true,
                 );
-                let stream = crate::kernel::direct_runtime_helpers_stream::commit_direct_sse_stream(stream);
+                let stream = crate::kernel::direct_runtime_helpers_stream::commit_direct_sse_attempt_after_terminal(stream);
                 let stream = if let Some(transport) = transport_for_handoff.clone() {
                     let provider_target = C::policy_target(&policy).candidate.clone();
                     let failure_scope = direct_failure_session_scope.clone();
@@ -963,7 +963,12 @@ where
                         Some(8),
                     )
                 } else {
-                    stream
+                    crate::kernel::direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream(
+                        stream,
+                        response_projection.compat_plan.provider_protocol,
+                        |error| async move { Err(error) },
+                        Some(0),
+                    )
                 };
                 drop(provider_action_permit.take());
                 V3ClientBody::Sse(stream)

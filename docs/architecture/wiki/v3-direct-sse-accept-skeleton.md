@@ -13,12 +13,13 @@ sequenceDiagram
   participant P as Provider
 
   C->>A: Responses SSE request
-  A-->>C: 200 text/event-stream + : keepalive
+  A-->>C: transport channel + : keepalive only
   A->>W: start the execution-plan-selected Direct or Relay pipeline
   W->>P: provider attempt
   P-->>W: raw provider response
   W->>W: transport decode -> provider codec -> hooks -> client projection
-  W-->>A: projected client frame only
+  W->>W: buffer complete attempt until protocol terminal
+  W-->>A: complete projected client attempt only
   A-->>C: client SSE frame / keepalive / EOF
 ```
 
@@ -43,11 +44,16 @@ The skeleton owner is `routecodex-v3-server/src/endpoint_handlers.rs`:
 The following are skeleton invariants and may not be changed by later hooks or
 compatibility features:
 
-- provider failure before the first semantic client event stays in the Error
-  chain and can trigger the existing reselect policy while the client channel
-  remains open;
-- after semantic client commitment, the current stream may close and update
-  side-channel health, but it cannot reroute or rebuild the current response;
+- establishing the HTTP/SSE transport channel is not semantic client commit;
+- the runtime owns a complete-attempt buffer. No provider business frame may
+  cross the client-frame edge before a protocol-valid terminal event;
+- provider failure, malformed event, missing terminal, or transport EOF before
+  terminal stays in the Error chain and triggers the existing reselect policy;
+- a failed attempt buffer is discarded. A replacement provider must produce a
+  complete terminal attempt before any business frame is released;
+- the client may receive transport-only keepalive comments while the attempt is
+  pending, but never a partial provider response;
+- after semantic client commitment, provider reroute/rebuild is forbidden;
 - heartbeat is an SSE comment, never a Responses event, JSON payload, tool
   result, metadata field, or terminal marker;
 - feature work may extend typed hooks inside the runtime projection boundary,
@@ -62,8 +68,26 @@ provider codec owners. They must preserve the three skeleton nodes and both
 adjacent edges, add a positive and reverse test, and update the maps before
 implementation.
 
+## Full-attempt lifecycle lock
+
+```text
+Client request
+  -> transport accept / keepalive (no semantic response yet)
+  -> Direct provider attempt N buffer
+       -> provider codec + typed projection
+       -> terminal success? -- no --> discard + Error01..05 + reselect
+                              \-- yes -> release complete attempt
+  -> client semantic commit
+```
+
+The buffer is request-local and runtime-owned. It is not metadata, payload
+control state, session state, or a server-side reconstruction cache. The failed
+attempt's frames must not be concatenated with the replacement attempt.
+
 ## Gate
 
-Run `npm run verify:v3-direct-sse-accept-skeleton`. The gate checks source
-markers, owner symbols, map/manifest lockstep, and forbidden ownership. It is a
-sub-gate of `verify:v3-architecture-ci` and therefore runs before V3 builds.
+Run `npm run verify:v3-direct-sse-accept-skeleton` and
+`npm run verify:v3-direct-sse-full-attempt-commit`. The gates check source
+markers, owner symbols, map/manifest lockstep, precommit terminal admission,
+and forbidden ownership. They are sub-gates of `verify:v3-architecture-ci` and
+therefore run before V3 builds.
