@@ -694,7 +694,7 @@ resources:
   - consume_error
   allowed_readers:
   - V4HubRespInbound02Parsed
-  - V4ErrorErr05ExecutionDecision
+  - V4Error05ExecutionDecision
   forbidden_writers:
   - V4HubReqInbound03Normalized
   - V4ProviderReqCompat06Compat
@@ -2621,7 +2621,7 @@ resources:
   resource_kind: cordis_mount_candidate
   lifecycle: v4.cordis_bridge
   owner_crate: routecodex-v4-cordis-bridge
-  owner_node: CordisMountCandidate
+  owner_node: V4CordisMountCandidate
   owner_symbols:
   - CordisMountCandidate
   allowed_writers:
@@ -2641,7 +2641,7 @@ resources:
   resource_kind: node_plugin_plan_bundle
   lifecycle: v4.plugin_plan
   owner_crate: routecodex-v4-plugin-plan
-  owner_node: NodePluginPlanBundle
+  owner_node: V4NodePluginPlanBundle
   owner_symbols:
   - NodePluginPlanBundle
   allowed_writers:

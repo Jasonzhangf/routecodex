@@ -3,7 +3,7 @@
   "contract_id": "v4-node-graph",
   "status": "active",
   "owner_feature_id": "v4.node_graph",
-  "graph_hash": "sha256:298f1bde0d5c212a4b5f427186e0fb3f74bc2201760556369ff2e1e0b27c8aad",
+  "graph_hash": "sha256:45f393fcccb5d429e1b55d8d6dd05e364858c743e02d04c256d11bc26a905930",
   "canonical_docs": [
     "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
@@ -1706,6 +1706,20 @@
       "role_id": "response_outbound",
       "scope": "local servertool CLI result projection",
       "owner": "routecodex-v4-servertool"
+    },
+    {
+      "node_id": "V4CordisMountCandidate",
+      "family": "ControlCenterNode",
+      "role_id": "control_center",
+      "scope": "validated Cordis mount candidate control resource",
+      "owner": "routecodex-v4-cordis-bridge"
+    },
+    {
+      "node_id": "V4NodePluginPlanBundle",
+      "family": "ControlCenterNode",
+      "role_id": "control_center",
+      "scope": "compiled node plugin plan bundle",
+      "owner": "routecodex-v4-plugin-plan"
     }
   ],
   "registered_nodes_rule": "registered_nodes is the single machine node catalog: fixed chain nodes, group-private nodes, and control/diagnostic/lifecycle side nodes all resolve here; every entry needs unique family/role/scope/owner; skeleton checkpoints and resource relations may only reference catalog nodes",
