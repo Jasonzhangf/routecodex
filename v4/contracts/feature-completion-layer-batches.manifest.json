@@ -304,7 +304,7 @@
     "owner": "v4.feature_completion.integration",
     "admission_command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
     "enforcement_binding_status": "bound",
-    "guard_commit": "76216d0615bf0db8a3c4de2a00304cd703ddbc59",
+    "guard_commit": "d91919a317a35d53fcefad691b4a881737532b25",
     "guarded_surfaces": [
       {"path":"Cargo.toml","scope_hash":"sha256:5ce83c9e3837823b19aa44dfdc28948a0123973fcb5e853e385f42aff3add62e"},
       {"path":"scripts/build.mjs","scope_hash":"sha256:ec1a7a511a514e5334a418bca25f47a554051134429aa1eeff5421f229d63f75"},
