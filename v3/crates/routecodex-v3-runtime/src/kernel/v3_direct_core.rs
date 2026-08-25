@@ -845,12 +845,13 @@ where
         let committed_client_sse = matches!(&attempt_body, V3ProviderAttemptBody::Sse(_));
         let client_body = match attempt_body {
             V3ProviderAttemptBody::Sse(mut stream) => {
+                let target_observation = response_projection
+                    .stream_observation
+                    .clone()
+                    .unwrap_or_default();
                 stream = crate::kernel::wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook(
                     stream,
-                    response_projection
-                        .stream_observation
-                        .clone()
-                        .unwrap_or_default(),
+                    target_observation.clone(),
                     runtime_timing.clone(),
                     false,
                     true,
@@ -878,6 +879,7 @@ where
                     let control = control_for_handoff.clone();
                     let provider_failure_event_sink = provider_failure_event_sink_for_handoff.clone();
                     let route_selection_event_sink = route_selection_event_sink_for_handoff.clone();
+                    let target_observation_for_handoff = target_observation.clone();
                     let handoff = move |source: V3Error01SourceRaised| {
                         let transport = transport.clone();
                         let provider_health = provider_health_for_handoff.clone();
@@ -888,6 +890,7 @@ where
                         let route_selection_event_sink = route_selection_event_sink.clone();
                         let provider_target = provider_target.clone();
                         let failure_scope = failure_scope.clone();
+                        let target_observation = target_observation_for_handoff.clone();
                         async move {
                             provider_health
                                 .record_post_commit_provider_stream_failure_from_source(
@@ -950,9 +953,16 @@ where
                                     message,
                                 )
                             })?;
-                            match next.client_payload.body {
-                                V3ClientBody::Sse(stream) => Ok(Some(stream)),
-                                V3ClientBody::Json(_) | V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => Ok(None),
+                            match (next.client_payload.body, next.stream_observation) {
+                                (V3ClientBody::Sse(stream), Some(source_observation)) => Ok(Some(
+                                    crate::kernel::direct_runtime_helpers_stream::bridge_direct_sse_handoff_observation(
+                                        stream, source_observation, target_observation.clone(),
+                                    ),
+                                )),
+                                (V3ClientBody::Json(_), _)
+                                | (V3ClientBody::Bytes(_), _)
+                                | (V3ClientBody::CommittedSse(_), _) => Ok(None),
+                                (_, None) => Ok(None),
                             }
                         }
                     };
@@ -1055,16 +1065,6 @@ where
                 },
                 None => None,
             };
-            if observability.timing.is_none() {
-                return error_output(
-                    runtime_source(
-                        "V3RuntimeTimingTerminal",
-                        "successful Direct SSE completed without typed timing",
-                    ),
-                    trace,
-                    &crate::hooks::register_responses_direct_hooks(),
-                );
-            }
         } else {
             let _ = runtime_timing.finish_external();
             if let Ok(summary) = runtime_timing.finish_runtime() {

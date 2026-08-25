@@ -244,6 +244,32 @@ pub(crate) fn commit_direct_sse_attempt_after_terminal(
     Box::pin(stream)
 }
 
+pub(crate) fn bridge_direct_sse_handoff_observation(
+    stream: V3ClientSseStream,
+    source_observation: V3RuntimeStreamObservation,
+    target_observation: V3RuntimeStreamObservation,
+) -> V3ClientSseStream {
+    Box::pin(stream::unfold(
+        (stream, source_observation, target_observation),
+        |(mut stream, source_observation, target_observation)| async move {
+            match stream.next().await {
+                Some(item) => {
+                    if let Ok(snapshot) = source_observation.snapshot() {
+                        let _ = target_observation.merge_snapshot(&snapshot);
+                    }
+                    Some((item, (stream, source_observation, target_observation)))
+                }
+                None => {
+                    if let Ok(snapshot) = source_observation.snapshot() {
+                        let _ = target_observation.merge_snapshot(&snapshot);
+                    }
+                    None
+                }
+            }
+        },
+    ))
+}
+
 pub(crate) fn wrap_direct_sse_provider_handoff_stream<F, Fut>(
     source: V3ClientSseStream,
     provider_protocol: V3HubProviderWireProtocol,

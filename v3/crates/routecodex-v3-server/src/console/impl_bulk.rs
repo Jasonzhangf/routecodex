@@ -823,6 +823,39 @@ pub(crate) fn emit_v3_runtime_observability_contract_failure(
     emit_v3_post_commit_sse_source_console_line_for_context(context, observability, 500, &source);
 }
 
+fn emit_v3_runtime_observability_contract_or_warning(
+    context: &V3ConsoleEmissionContext,
+    observability: &V3RuntimeObservability,
+    error: impl Into<String>,
+) {
+    let error = error.into();
+    if error == "successful V3 Runtime observability is missing timing" {
+        let route = resolve_v3_console_route_projection(observability);
+        let content = format_v3_console_timed_content(
+            "⚠️ [v3-observability]",
+            &format!(
+                "req={} event=completed_observation_warning status={} error={}",
+                context.request_identity.request_id,
+                observability.provider_status.unwrap_or(200),
+                error
+            ),
+        );
+        let prefix = format_v3_console_human_prefix_for_observability(
+            &context.state.server.port.to_string(),
+            &context.entry_protocol,
+            context.identity.project_path.as_deref(),
+            observability,
+            &route.label,
+        );
+        emit_v3_colorized_request_console_line(
+            &context.state, &content, &content, context.identity.color_key.as_deref(),
+            &prefix, &context.identity.session_id,
+        );
+    } else {
+        emit_v3_runtime_observability_contract_failure(context, observability, error);
+    }
+}
+
 pub(crate) fn emit_v3_stopless_console_line(
     context: &V3ConsoleEmissionContext,
     observability: &V3RuntimeObservability,
@@ -947,7 +980,7 @@ pub(crate) fn emit_v3_observability_console_lines(
                 observability,
                 elapsed,
             ) {
-                emit_v3_runtime_observability_contract_failure(context, observability, error);
+                emit_v3_runtime_observability_contract_or_warning(context, observability, error);
             }
         }
     }
@@ -1080,7 +1113,7 @@ impl V3SseConsoleFinalizer {
             &mut self.observability,
             Some(&self.stream_observation),
         ) {
-            emit_v3_runtime_observability_contract_failure(
+            emit_v3_runtime_observability_contract_or_warning(
                 &self.context,
                 &self.observability,
                 error,
@@ -1184,7 +1217,7 @@ impl V3DirectSseConsoleFinalizer {
                 &self.observability,
                 elapsed,
             ) {
-                emit_v3_runtime_observability_contract_failure(
+                emit_v3_runtime_observability_contract_or_warning(
                     &self.context,
                     &self.observability,
                     error,
