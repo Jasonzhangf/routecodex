@@ -5,7 +5,8 @@ use routecodex_v4_skeleton::SkeletonPlan;
 /// Request-local admission carrier. Lease and immutable binding are acquired
 /// together; consumers cannot reacquire the active epoch through this type.
 /// The port owns the request-to-epoch pin; response/error ports may only
-/// consume the binding carried by this lease.
+/// consume the binding carried by this lease, and admission never consults a
+/// second runtime configuration source.
 pub struct RequestPortLease {
     request_id: String,
     binding: ExecutionBinding,

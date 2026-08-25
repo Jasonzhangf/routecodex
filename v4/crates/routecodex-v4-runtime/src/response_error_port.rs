@@ -9,7 +9,8 @@ pub struct ResponsePortReceipt {
 }
 
 /// Response and error consumption is terminal only after the request lease
-/// proves the same immutable execution binding; no active epoch is reselected.
+/// proves the same immutable execution binding; no active epoch is reselected
+/// and no response payload is used to reconstruct control state.
 pub fn consume_response(
     request: &RequestPortLease,
     binding: &ExecutionBinding,
