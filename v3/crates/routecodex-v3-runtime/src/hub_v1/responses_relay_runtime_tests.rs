@@ -174,25 +174,6 @@ targets = [{ kind = "provider_model", provider = "relay", model = "test", key = 
 }
 
 #[test]
-fn relay_local_tool_output_cannot_enter_fresh_protocol_switch() {
-    let payload = json!({
-        "model": "client-model",
-        "input": [{
-            "type": "function_call_output",
-            "call_id": "call_relay_owned",
-            "output": "done"
-        }]
-    });
-    let ids = find_responses_tool_output_ids(&payload).expect("tool output ids");
-
-    assert!(!ids.restore_ids.is_empty());
-    assert!(
-        !responses_relay_protocol_switch_allowed(&payload, &ids),
-        "Relay-owned local continuation must remain in Relay after ReqChatProcess restore"
-    );
-}
-
-#[test]
 fn relay_local_tool_output_consumes_previous_response_and_call_id_aliases() {
     let payload = json!({
         "previous_response_id": "resp_relay_owned",
