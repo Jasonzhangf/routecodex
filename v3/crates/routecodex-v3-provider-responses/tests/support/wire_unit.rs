@@ -1032,7 +1032,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_moves_console_go_reasoning_out_of_call_output_pairing_window() {
+    fn wire_preserves_console_go_reasoning_in_call_output_pairing_window() {
         let mut target = target();
         target.provider_id = "opencode-go".into();
         target.provider_type = "responses".into();
@@ -1061,12 +1061,12 @@ mod tests {
             .collect();
         assert_eq!(
             types,
-            vec!["function_call", "function_call_output", "reasoning", "message"]
+            vec!["function_call", "reasoning", "function_call_output", "message"]
         );
         assert_eq!(
-            input[2]["content"],
+            input[1]["content"],
             json!([{"type": "reasoning_text", "text": "tool note"}]),
-            "interleaved reasoning must be preserved after the paired tool output"
+            "interleaved reasoning must remain in the client-provided tool sequence"
         );
     }
 
