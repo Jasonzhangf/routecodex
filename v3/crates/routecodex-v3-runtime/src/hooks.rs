@@ -290,10 +290,7 @@ pub(crate) fn apply_relay_toolreason_sse_hook(
 ) {
     crate::hub_v1::strip_v3_tool_thinking_request_artifacts_at_resp03(value);
     if projection_authorized.is_some()
-        && crate::hub_v1::v3_toolreason_projection_authorized_at_resp03(
-            value,
-            expected_model_id,
-        )
+        && crate::hub_v1::v3_toolreason_projection_authorized_at_resp03(value, expected_model_id)
     {
         if let Some(authorized) = projection_authorized.as_deref_mut() {
             *authorized = true;
@@ -555,7 +552,9 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
                         request_id: Some(request_id.as_str()),
                     },
                 );
-                if let Some(names) = context.tool_thinking_turn_context.original_custom_tool_names()
+                if let Some(names) = context
+                    .tool_thinking_turn_context
+                    .original_custom_tool_names()
                 {
                     crate::hub_v1::restore_v3_tool_thinking_custom_calls_in_payload_at_resp03(
                         payload, names,
@@ -602,7 +601,9 @@ pub(crate) fn chat_direct_response_projection_hook(
                         request_id: Some(request_id.as_str()),
                     },
                 );
-                if let Some(names) = context.tool_thinking_turn_context.original_custom_tool_names()
+                if let Some(names) = context
+                    .tool_thinking_turn_context
+                    .original_custom_tool_names()
                 {
                     crate::hub_v1::restore_v3_tool_thinking_custom_calls_in_payload_at_resp03(
                         payload, names,
@@ -1464,7 +1465,8 @@ mod tests {
                     tool_thinking_enabled: false,
                     toolreason_client_projection: true,
                     toolreason_observation_session_id: Some("session-test".to_string()),
-                    tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext::disabled(),
+                    tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext::disabled(
+                    ),
                     runtime_timing: crate::runtime_timing::V3RuntimeTimingState::start(),
                 },
             )
@@ -1576,10 +1578,10 @@ mod tests {
         assert_eq!(internal.node_id, "V3Provider12ResponsesWirePayload");
     }
 }
-    #[test]
-    fn relay_sse_runtime_does_not_own_toolreason_parser() {
-        let source = include_str!("hub_v1/openai_chat_relay_runtime.rs");
-        assert!(!source.contains("map_v3_toolreason_stream_event_at_resp03"));
-        let sse_source = include_str!("hub_v1/openai_chat_relay_runtime_sse.rs");
-        assert!(!sse_source.contains("map_v3_toolreason_stream_event_at_resp03"));
-    }
+#[test]
+fn relay_sse_runtime_does_not_own_toolreason_parser() {
+    let source = include_str!("hub_v1/openai_chat_relay_runtime.rs");
+    assert!(!source.contains("map_v3_toolreason_stream_event_at_resp03"));
+    let sse_source = include_str!("hub_v1/openai_chat_relay_runtime_sse.rs");
+    assert!(!sse_source.contains("map_v3_toolreason_stream_event_at_resp03"));
+}

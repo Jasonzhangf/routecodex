@@ -155,8 +155,7 @@ pub struct V3Req04StandardizedResponses {
     pub endpoint: String,
     pub method: String,
     pub request_purpose: V3RequestPurpose,
-    pub tool_thinking_turn_context:
-        crate::hub_v1::V3ToolThinkingTurnContext,
+    pub tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext,
 }
 
 /// Chat 入口标准化（与 V3Req04StandardizedResponses 同构，协议不同）：
@@ -174,8 +173,7 @@ pub struct V3Req04StandardizedChat {
     pub endpoint: String,
     pub method: String,
     pub request_purpose: V3RequestPurpose,
-    pub tool_thinking_turn_context:
-        crate::hub_v1::V3ToolThinkingTurnContext,
+    pub tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext,
 }
 
 /// Chat direct 执行策略节点（与 V3ResponsesDirect11Policy 同构）。
@@ -486,14 +484,9 @@ pub fn build_v3_router_request_facts_from_v3_req_04_chat(
     build_v3_router_request_facts_for_entry_with_control(
         &standardized.body,
         "openai_chat",
-        configured_v3_longcontext_threshold_tokens(
-            manifest,
-            &standardized.server_id,
-        ),
+        configured_v3_longcontext_threshold_tokens(manifest, &standardized.server_id),
         false,
-        standardized
-            .request_purpose
-            .is_compaction()
+        standardized.request_purpose.is_compaction()
             || is_v3_compaction_endpoint(&standardized.endpoint),
         Some(manifest),
     )
@@ -506,20 +499,13 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
     let mut facts = build_v3_router_request_facts_for_entry_with_control(
         &standardized.body,
         "responses",
-        configured_v3_longcontext_threshold_tokens(
-            manifest,
-            &standardized.server_id,
-        ),
+        configured_v3_longcontext_threshold_tokens(manifest, &standardized.server_id),
         false,
-        standardized
-            .request_purpose
-            .is_compaction()
+        standardized.request_purpose.is_compaction()
             || is_v3_compaction_endpoint(&standardized.endpoint),
         Some(manifest),
     );
-    if standardized
-        .request_purpose
-        .is_compaction()
+    if standardized.request_purpose.is_compaction()
         || is_v3_compaction_endpoint(&standardized.endpoint)
     {
         facts.client_model = None;

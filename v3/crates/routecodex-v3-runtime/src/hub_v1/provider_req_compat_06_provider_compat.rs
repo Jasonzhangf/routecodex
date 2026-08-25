@@ -134,7 +134,9 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
         &mut result,
         &selected.wire_model,
     )
-    .map_err(|reason| classify_v3_provider_compat_error("request_tool_thinking", profile, reason))?;
+    .map_err(|reason| {
+        classify_v3_provider_compat_error("request_tool_thinking", profile, reason)
+    })?;
     project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
     normalize_deepseek_thinking_stopless_tool_choice(&mut result, selected, provider_protocol);
     Ok(result)
@@ -271,9 +273,9 @@ fn project_reasoning_effort_for_selected_target(
                 );
             }
         }
-        V3HubProviderWireProtocol::Anthropic => unreachable!(
-            "standard Anthropic effort returned before provider compat projection"
-        ),
+        V3HubProviderWireProtocol::Anthropic => {
+            unreachable!("standard Anthropic effort returned before provider compat projection")
+        }
         V3HubProviderWireProtocol::Gemini => unreachable!(),
     }
     Ok(())
@@ -508,7 +510,10 @@ mod tests {
             req_compat.provider_semantic_payload()["output_config"]["effort"],
             "max"
         );
-        assert!(req_compat.provider_semantic_payload().get("thinking").is_none());
+        assert!(req_compat
+            .provider_semantic_payload()
+            .get("thinking")
+            .is_none());
     }
 
     #[test]
@@ -527,7 +532,10 @@ mod tests {
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("MiniMax Anthropic compat must produce adaptive thinking");
-        assert!(req_compat.provider_semantic_payload().get("output_config").is_none());
+        assert!(req_compat
+            .provider_semantic_payload()
+            .get("output_config")
+            .is_none());
         assert_eq!(
             req_compat.provider_semantic_payload()["thinking"]["type"],
             "adaptive"
@@ -1012,8 +1020,10 @@ mod tests {
         responses_req07.previous.selected_target.provider_id = "opencode-go-zen".to_string();
         responses_req07.previous.selected_target.model_id = "x-preview-f-free".to_string();
         responses_req07.previous.selected_target.wire_model = "x-preview-f-free".to_string();
-        responses_req07.previous.selected_target.compatibility_profile =
-            Some("compat:passthrough".to_string());
+        responses_req07
+            .previous
+            .selected_target
+            .compatibility_profile = Some("compat:passthrough".to_string());
 
         let responses_compat =
             build_provider_req_compat_06_from_v3_hub_req_outbound_07(responses_req07)

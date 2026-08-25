@@ -462,7 +462,7 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml",
-      "source_commit": "8cac78876a6127eaeb0eabd6d022c13d2d7c8b4e",
+      "source_commit": "19a122ba866dc4ffa6edb893d22ac5622dec6d6e",
       "sha256": "db071d8f2c807f2d85fa4e20700d9bac8da9e4293af8c5822f06d9dbc436749b"
     },
     {
@@ -798,7 +798,7 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "b2f5c5231df7aca3f5d6f5c781e19c6bad5ea5ce",
+      "source_commit": "19a122ba866dc4ffa6edb893d22ac5622dec6d6e",
       "sha256": "8c9d8c42c71295a537b995586b093ea019f2feb60aac7abdd634d51a726c041d"
     },
     {
@@ -810,13 +810,13 @@
     {
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
-      "source_commit": "b2f5c5231df7aca3f5d6f5c781e19c6bad5ea5ce",
+      "source_commit": "19a122ba866dc4ffa6edb893d22ac5622dec6d6e",
       "sha256": "7409d56a43861497320b0736ae4d78d7812f7a5117effb6ac997496e6d12fe0c"
     },
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "b2f5c5231df7aca3f5d6f5c781e19c6bad5ea5ce",
+      "source_commit": "19a122ba866dc4ffa6edb893d22ac5622dec6d6e",
       "sha256": "678467e0b13130b10471ce64f3314a3ff5f415784b04b6c93961b990d46b64fa"
     },
     {
@@ -828,7 +828,7 @@
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "8cac78876a6127eaeb0eabd6d022c13d2d7c8b4e",
+      "source_commit": "19a122ba866dc4ffa6edb893d22ac5622dec6d6e",
       "sha256": "4ff5a69a633cdf840f4e0d77fe7dd509cec128911581a2de70ffe58bb21b1172"
     },
     {
@@ -1212,7 +1212,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-direct-sse-accept-skeleton.md",
       "source_path": "docs/architecture/wiki/v3-direct-sse-accept-skeleton.md",
-      "source_commit": "8cac78876a6127eaeb0eabd6d022c13d2d7c8b4e",
+      "source_commit": "19a122ba866dc4ffa6edb893d22ac5622dec6d6e",
       "sha256": "8f6718cd99ab2a4cf5105981da7ff0c70af800e8405e6bfe303e240cea970775"
     },
     {
@@ -1576,6 +1576,12 @@
       "sha256": "90cca3ebb5405a8b4c45f92966dee4a8c10983472f416c18e69bbb092ae130e3"
     },
     {
+      "output_path": "repo/docs/design/virtual-router-risk-audit.md",
+      "source_path": "docs/design/virtual-router-risk-audit.md",
+      "source_commit": "2ffde51fc796d29355f06f2be6508e78af4b9a9d",
+      "sha256": "425d1162a794992f3a13a90a27a99889faed252d0fcf3619420901448ed98faf"
+    },
+    {
       "output_path": "repo/docs/design/virtual-router-simplification-design.md",
       "source_path": "docs/design/virtual-router-simplification-design.md",
       "source_commit": "58335325600d29a10ca4fbe3ffbd6eadaa0441c8",
@@ -1894,6 +1900,12 @@
       "sha256": "43c2fe997bf9b6d50c71e887f22e889dc84d5c8e740957bd2793ba0202eafb7f"
     },
     {
+      "output_path": "repo/docs/goals/sse-client-provider-restart-lifecycle-plan.md",
+      "source_path": "docs/goals/sse-client-provider-restart-lifecycle-plan.md",
+      "source_commit": "2ffde51fc796d29355f06f2be6508e78af4b9a9d",
+      "sha256": "4ea647ee5d3d98814280184ec10260e006dfb7095c0f2bd3d0a7cf9dc6e8074c"
+    },
+    {
       "output_path": "repo/docs/goals/sse-rustification-closeout-plan.md",
       "source_path": "docs/goals/sse-rustification-closeout-plan.md",
       "source_commit": "58335325600d29a10ca4fbe3ffbd6eadaa0441c8",
@@ -1916,6 +1928,12 @@
       "source_path": "docs/goals/stopless-v2-blackbox-hook-chain-parity-plan.md",
       "source_commit": "344aeda1058392276d95a0f151e0555a4de2672c",
       "sha256": "90499a8003d0ec2cf0a4cb9024f8ac3ee1c688f72e71d79d9ab7035bc23d5760"
+    },
+    {
+      "output_path": "repo/docs/goals/transparent-proxy-daily-audit-prompt.md",
+      "source_path": "docs/goals/transparent-proxy-daily-audit-prompt.md",
+      "source_commit": "2ffde51fc796d29355f06f2be6508e78af4b9a9d",
+      "sha256": "6f3514c047468cc495f1a982c155a3fa5c6fb5953150e7e297f02540b559af0e"
     },
     {
       "output_path": "repo/docs/goals/ts-cli-orchestration-retirement-plan.md",
@@ -2496,7 +2514,7 @@
     {
       "output_path": "repo/docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md",
       "source_path": "docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md",
-      "source_commit": "e03ec8e7fdc4fddc5f28405b87ef873929d7f66b",
+      "source_commit": "19a122ba866dc4ffa6edb893d22ac5622dec6d6e",
       "sha256": "a8a986674c4e1c91fca97bbab10be022035106a26e86178a3692503ebef66da4"
     },
     {
@@ -2923,8 +2941,8 @@
       "output_path": "repo/v3/config/v3-file-size-policy.json",
       "source_path": "v3/config/v3-file-size-policy.json",
       "source_commit": "f0561f843d977b91d0fc896859649c41c91c770c",
-      "sha256": "920ce7423a921243b74c7dccae899906f4a28a4e880b6a39385acdfd87e5b51c"
+      "sha256": "5cc420540dffe755ef55174e73198b28d7b0142769fd3fbae89c5c8016250e79"
     }
   ],
-  "manifest_digest": "65030cba882ad192afa1997069a210de8c8251e4fecd4d8d0319177dd526a22d"
+  "manifest_digest": "ef0469490f45c91057b5765af8880c0867e944033bc28e5ee5e2662bf5685185"
 }

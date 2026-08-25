@@ -210,16 +210,10 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         .send()
         .await
         .unwrap();
-    assert_eq!(
-        exhausted_response.status(),
-        ReqwestStatusCode::BAD_GATEWAY
-    );
+    assert_eq!(exhausted_response.status(), ReqwestStatusCode::BAD_GATEWAY);
     let exhausted_body: Value = exhausted_response.json().await.unwrap();
     assert_eq!(exhausted_body["error"]["code"], "provider_http_503");
-    assert_eq!(
-        exhausted_body["error"]["message"],
-        "provider_http_503"
-    );
+    assert_eq!(exhausted_body["error"]["message"], "provider_http_503");
     assert!(exhausted_body["error"].get("internal_code").is_none());
     assert!(
         exhausted_body["error"].get("target_exhausted").is_none()

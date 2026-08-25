@@ -10,11 +10,10 @@ use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw as build_v3_server_03_http_request_raw_with_scope,
     execute_v3_responses_direct_runtime_kernel_with_continuation,
     execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control,
-    register_responses_direct_hooks, V3ClientBody,
-    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
-    V3ResponsesDirectStoplessControlScope, V3ResponsesDirectStoplessControlState,
-    V3RuntimeUsageSummary, V3ServerToolCenterWriteOrigin, V3StoplessCenterState,
-    V3StoplessCenterSteering,
+    register_responses_direct_hooks, V3ClientBody, V3ResponsesDirectContinuationScope,
+    V3ResponsesDirectContinuationState, V3ResponsesDirectStoplessControlScope,
+    V3ResponsesDirectStoplessControlState, V3RuntimeUsageSummary, V3ServerToolCenterWriteOrigin,
+    V3StoplessCenterState, V3StoplessCenterSteering,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -231,10 +230,7 @@ async fn direct_sse_completed_without_summary_passes_through_without_synthetic_s
     )
     .await;
     assert_eq!(first.client_payload.status, 200, "{:#?}", first);
-    assert!(matches!(
-        &first.client_payload.body,
-        V3ClientBody::Sse(_)
-    ));
+    assert!(matches!(&first.client_payload.body, V3ClientBody::Sse(_)));
     assert_eq!(
         state.len().unwrap(),
         0,
@@ -647,10 +643,7 @@ async fn direct_sse_stopless_metadata_center_projects_terminal_frames_without_ss
     )
     .await;
     assert_eq!(first.client_payload.status, 200, "{first:#?}");
-    assert!(matches!(
-        &first.client_payload.body,
-        V3ClientBody::Sse(_)
-    ));
+    assert!(matches!(&first.client_payload.body, V3ClientBody::Sse(_)));
     let first_body = collect_sse_body_text(first.client_payload.body)
         .await
         .expect("Direct SSE must remain valid while streaming");
@@ -2271,7 +2264,10 @@ async fn malformed_sse_attempt_never_commits_partial_bytes_and_fresh_request_rem
         .await
         .expect_err("malformed provider event must fail while the live stream is consumed");
     let body_text = stream_error;
-    assert!(body_text.contains("provider_response_sse_event_invalid"), "{body_text}");
+    assert!(
+        body_text.contains("provider_response_sse_event_invalid"),
+        "{body_text}"
+    );
     assert!(
         !body_text.contains("partial"),
         "failed-attempt diagnostics must not expose partial control state: {body_text}"

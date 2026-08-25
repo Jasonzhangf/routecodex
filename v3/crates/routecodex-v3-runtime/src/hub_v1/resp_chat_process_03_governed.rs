@@ -20,11 +20,7 @@ fn log_v3_toolreason_observation_at_resp03_with_context(
     context: V3ToolreasonObservationContext<'_>,
 ) {
     log_v3_toolreason_observation_at_resp03_with_context_and_expected_model(
-        tool_name,
-        reason,
-        stage,
-        context,
-        None,
+        tool_name, reason, stage, context, None,
     );
 }
 
@@ -35,10 +31,8 @@ fn log_v3_toolreason_observation_at_resp03_with_context_and_expected_model(
     context: V3ToolreasonObservationContext<'_>,
     expected_model_id: Option<&str>,
 ) {
-    let (status, fields) = classify_v3_toolreason_observation_at_resp03_with_expected_model(
-        reason,
-        expected_model_id,
-    );
+    let (status, fields) =
+        classify_v3_toolreason_observation_at_resp03_with_expected_model(reason, expected_model_id);
     let (label, color) = match status {
         V3ToolreasonObservationStatus::Ok => ("OK", "42"),
         V3ToolreasonObservationStatus::Missing => ("MISSING", "43"),
@@ -148,8 +142,8 @@ pub(crate) fn audit_v3_toolreason_dry_run_payloads(
     // Confidence and model_id are optional diagnostics; their absence must
     // never turn a valid reason-only request into a false injection failure.
     let request_guidance_present = provider_text.contains("reason");
-    let optional_diagnostics_present = provider_text.contains("goal_alignment_confidence")
-        && provider_text.contains("model_id");
+    let optional_diagnostics_present =
+        provider_text.contains("goal_alignment_confidence") && provider_text.contains("model_id");
     let mut tool_call_count = 0usize;
     let mut toolreason_count = 0usize;
     collect_v3_toolreason_dry_run_counts(
@@ -322,7 +316,9 @@ fn v3_tool_thinking_fields_from_parameter_value_at_resp03(
     expected_model_id: Option<&str>,
 ) -> Option<V3ToolreasonFields> {
     match value {
-        Value::Object(object) => v3_tool_thinking_object_reason_at_resp03(object, expected_model_id),
+        Value::Object(object) => {
+            v3_tool_thinking_object_reason_at_resp03(object, expected_model_id)
+        }
         Value::String(text) => {
             if json_object_has_duplicate_keys_at_resp03(text.trim()) {
                 return None;
@@ -389,7 +385,10 @@ fn v3_tool_thinking_raw_parameter_from_tool_call_at_resp03(
 ) -> Option<String> {
     if object.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
         if v3_custom_tool_thinking_wrapper_at_resp03(object).is_some() {
-            return object.get("input").and_then(Value::as_str).map(str::to_string);
+            return object
+                .get("input")
+                .and_then(Value::as_str)
+                .map(str::to_string);
         }
         return serde_json::to_string(object).ok();
     }
@@ -415,8 +414,7 @@ fn strip_v3_tool_thinking_fields_from_object_at_resp03(
     }
     if v3_is_tool_call_object_at_resp03(object) {
         if object.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
-            if let Some((_fields, native_input)) =
-                v3_custom_tool_thinking_wrapper_at_resp03(object)
+            if let Some((_fields, native_input)) = v3_custom_tool_thinking_wrapper_at_resp03(object)
             {
                 if object
                     .get("input")
@@ -446,10 +444,7 @@ fn strip_v3_tool_thinking_fields_from_object_at_resp03(
                 );
             }
         } else if let Some(value) = object.get_mut("arguments") {
-            strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
-                value,
-                expected_model_id,
-            );
+            strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(value, expected_model_id);
         }
     }
 }
@@ -531,12 +526,7 @@ fn emit_v3_toolreason_observation_at_resp03_with_context(
     context: V3ToolreasonObservationContext<'_>,
 ) {
     emit_v3_toolreason_observation_at_resp03_with_expected_model(
-        tool_name,
-        reason,
-        stage,
-        emitted,
-        context,
-        None,
+        tool_name, reason, stage, emitted, context, None,
     );
 }
 
@@ -1144,10 +1134,7 @@ fn restore_v3_tool_thinking_custom_calls_at_resp03(
     original_custom_tool_names: &BTreeSet<String>,
 ) {
     let payload = Arc::make_mut(input.provider_payload_mut());
-    restore_v3_tool_thinking_custom_calls_in_payload_at_resp03(
-        payload,
-        original_custom_tool_names,
-    );
+    restore_v3_tool_thinking_custom_calls_in_payload_at_resp03(payload, original_custom_tool_names);
 }
 
 pub(crate) fn restore_v3_tool_thinking_custom_calls_in_payload_at_resp03(
@@ -1159,23 +1146,29 @@ pub(crate) fn restore_v3_tool_thinking_custom_calls_in_payload_at_resp03(
     }
     if let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) {
         for item in output {
-            let Some(row) = item.as_object_mut() else { continue };
+            let Some(row) = item.as_object_mut() else {
+                continue;
+            };
             if row.get("type").and_then(Value::as_str) != Some("function_call") {
                 continue;
             }
-            let Some(name) = row.get("name").and_then(Value::as_str) else { continue };
+            let Some(name) = row.get("name").and_then(Value::as_str) else {
+                continue;
+            };
             if !original_custom_tool_names.contains(name) {
                 continue;
             }
             let Some(arguments) = row.get("arguments").and_then(Value::as_str) else {
                 continue;
             };
-            let Some((native_input, fields)) =
-                parse_v3_custom_tool_wrapper_for_resp03(arguments)
+            let Some((native_input, fields)) = parse_v3_custom_tool_wrapper_for_resp03(arguments)
             else {
                 continue;
             };
-            row.insert("type".to_string(), Value::String("custom_tool_call".to_string()));
+            row.insert(
+                "type".to_string(),
+                Value::String("custom_tool_call".to_string()),
+            );
             row.insert("input".to_string(), Value::String(native_input));
             row.remove("arguments");
             for (key, value) in fields {
@@ -1192,9 +1185,10 @@ pub(crate) fn restore_v3_tool_thinking_custom_calls_in_payload_at_resp03(
                 continue;
             };
             for call in tool_calls {
-                let Some(row) = call.as_object_mut() else { continue };
-                let Some(function) = row.get_mut("function").and_then(Value::as_object_mut)
-                else {
+                let Some(row) = call.as_object_mut() else {
+                    continue;
+                };
+                let Some(function) = row.get_mut("function").and_then(Value::as_object_mut) else {
                     continue;
                 };
                 let Some(name) = function.get("name").and_then(Value::as_str) else {
@@ -1230,7 +1224,10 @@ fn parse_v3_custom_tool_wrapper_for_resp03(
         return None;
     };
     if wrapper.keys().any(|key| {
-        !matches!(key.as_str(), "input" | "reason" | "goal_alignment_confidence" | "model_id")
+        !matches!(
+            key.as_str(),
+            "input" | "reason" | "goal_alignment_confidence" | "model_id"
+        )
     }) {
         return None;
     }
@@ -1238,7 +1235,12 @@ fn parse_v3_custom_tool_wrapper_for_resp03(
     wrapper.get("reason")?.as_str()?;
     let fields = ["reason", "goal_alignment_confidence", "model_id"]
         .into_iter()
-        .filter_map(|key| wrapper.get(key).cloned().map(|value| (key.to_string(), value)))
+        .filter_map(|key| {
+            wrapper
+                .get(key)
+                .cloned()
+                .map(|value| (key.to_string(), value))
+        })
         .collect();
     Some((native_input, fields))
 }
@@ -2291,8 +2293,7 @@ fn map_v3_openai_chat_toolreason_delta_at_resp03_with_expected_model(
             let Some(fields) = v3_tool_thinking_fields_from_parameter_value_at_resp03(
                 &parameter,
                 expected_model_id,
-            )
-            else {
+            ) else {
                 continue;
             };
             strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
@@ -2842,8 +2843,8 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
                 .filter(|arguments| !arguments.is_empty())
                 .map(String::as_str)
         });
-        let Some(arguments) = buffered_arguments
-            .or_else(|| payload.get("arguments").and_then(Value::as_str))
+        let Some(arguments) =
+            buffered_arguments.or_else(|| payload.get("arguments").and_then(Value::as_str))
         else {
             return;
         };
@@ -2860,10 +2861,9 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
             }
             return;
         };
-        let Some(_fields) = v3_tool_thinking_fields_from_parameter_value_at_resp03(
-            &parameter,
-            expected_model_id,
-        ) else {
+        let Some(_fields) =
+            v3_tool_thinking_fields_from_parameter_value_at_resp03(&parameter, expected_model_id)
+        else {
             if arguments_were_buffered {
                 payload["arguments"] = Value::String(arguments.to_string());
             }
@@ -2936,9 +2936,7 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
                 );
             }
         }
-        if !*reason_emitted
-            && (response_raw_reason.is_some() || !response_tools.is_empty())
-        {
+        if !*reason_emitted && (response_raw_reason.is_some() || !response_tools.is_empty()) {
             let tool_label = format_toolreason_tool_label(&response_tools);
             let tool_label = if tool_label.is_empty() {
                 "<missing>".to_string()
@@ -3196,8 +3194,10 @@ fn map_v3_openai_chat_toolreason_chunk_at_resp03_with_expected_model(
                     expected_model_id,
                 )
                 .0;
-                let fields =
-                    v3_tool_thinking_fields_from_parameter_value_at_resp03(&parameter, expected_model_id);
+                let fields = v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                    &parameter,
+                    expected_model_id,
+                );
                 strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
                     &mut parameter,
                     expected_model_id,
@@ -3243,12 +3243,10 @@ fn map_v3_openai_chat_toolreason_chunk_at_resp03_with_expected_model(
                 .filter_map(|reason| reason.as_deref())
                 .find_map(|raw| serde_json::from_str::<Value>(raw).ok())
             {
-                if let Some(fields) =
-                    v3_tool_thinking_fields_from_parameter_value_at_resp03(
-                        &raw_pending,
-                        expected_model_id,
-                    )
-                {
+                if let Some(fields) = v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                    &raw_pending,
+                    expected_model_id,
+                ) {
                     projected_reasoning =
                         format_toolreason_reasoning_from_reason(tool_names, &fields.reason);
                 }
@@ -3816,9 +3814,9 @@ pub(crate) fn build_v3_toolreason_reasoning_done_projection_at_resp03(
         .pointer("/item/summary")
         .and_then(Value::as_array)
         .and_then(|summary| {
-            summary.iter().find_map(|part| {
-                part.get("text").and_then(Value::as_str)
-            })
+            summary
+                .iter()
+                .find_map(|part| part.get("text").and_then(Value::as_str))
         })?;
     Some(build_v3_toolreason_visible_text_sse_events_at_resp03(
         payload, reasoning,
@@ -4368,8 +4366,7 @@ mod tests {
         assert_eq!(audit["request_guidance_present"], true);
         assert_eq!(audit["optional_diagnostics_present"], true);
 
-        let reason_only_provider_request =
-            json!({"tools": [{"description": "reason"}]});
+        let reason_only_provider_request = json!({"tools": [{"description": "reason"}]});
         let reason_only_audit = audit_v3_toolreason_dry_run_payloads(
             &request,
             &reason_only_provider_request,
@@ -4401,11 +4398,7 @@ mod tests {
         });
         let mut tool_names = Vec::new();
         let mut reasons = Vec::new();
-        collect_v3_toolreason_json_observations_at_resp03(
-            &payload,
-            &mut tool_names,
-            &mut reasons,
-        );
+        collect_v3_toolreason_json_observations_at_resp03(&payload, &mut tool_names, &mut reasons);
         assert_eq!(tool_names, vec!["pwd"]);
         assert_eq!(
             reasons,

@@ -142,7 +142,9 @@ fn resp03_strips_echoed_auxiliary_schema_fields_without_descriptions() {
 
     let parameters = &payload["response"]["tools"][0]["function"]["parameters"];
     assert!(parameters["properties"].get("input").is_some());
-    assert!(parameters["properties"].get("goal_alignment_confidence").is_none());
+    assert!(parameters["properties"]
+        .get("goal_alignment_confidence")
+        .is_none());
     assert!(parameters["properties"].get("model_id").is_none());
     assert_eq!(parameters["required"], json!(["input"]));
 }
@@ -345,7 +347,8 @@ fn resp03_responses_missing_toolreason_restores_buffered_native_arguments() {
     let mut pending_reasons = Vec::new();
     let mut argument_buffers = Vec::new();
     let mut reason_emitted = false;
-    let native_arguments = r#"{"patch":"*** Begin Patch\n*** Update File: README.md\n*** End Patch"}"#;
+    let native_arguments =
+        r#"{"patch":"*** Begin Patch\n*** Update File: README.md\n*** End Patch"}"#;
 
     let mut delta = json!({
         "type": "response.function_call_arguments.delta",
@@ -517,7 +520,13 @@ fn resp03_plain_responses_text_is_not_projected() {
     });
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
     assert_eq!(payload["output"][0]["type"], "output_text");
-    assert_eq!(payload["output"][0]["text"].as_str().unwrap().contains("<legacy-control>"), true);
+    assert_eq!(
+        payload["output"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("<legacy-control>"),
+        true
+    );
     assert_eq!(payload["output"][1]["type"], "function_call");
 }
 
@@ -532,7 +541,10 @@ fn resp03_plain_generic_text_is_not_stripped() {
 
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
 
-    assert!(payload["output"][0]["text"].as_str().unwrap().contains("<legacy-control>"));
+    assert!(payload["output"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("<legacy-control>"));
     assert_eq!(payload["output"][1]["type"], "function_call");
 }
 
@@ -557,12 +569,11 @@ fn resp03_native_reasoning_is_not_toolreason() {
 fn resp03_duplicate_native_auxiliary_keys_are_invalid_and_not_projected() {
     let duplicate = r#"{"cmd":"pwd","reason":"确认当前目录","goal_alignment_confidence":100,"model_id":"x-preview-f-free","reason":"获取当前日期","goal_alignment_confidence":100,"model_id":"x-preview-f-free"}"#;
     assert!(json_object_has_duplicate_keys_at_resp03(duplicate));
-    assert!(
-        v3_tool_thinking_fields_from_parameter_value_at_resp03(&Value::String(
-            duplicate.to_string()
-        ), None)
-        .is_none()
-    );
+    assert!(v3_tool_thinking_fields_from_parameter_value_at_resp03(
+        &Value::String(duplicate.to_string()),
+        None
+    )
+    .is_none());
 
     let mut payload = json!({
         "choices": [{
@@ -584,8 +595,7 @@ fn resp03_duplicate_native_auxiliary_keys_are_invalid_and_not_projected() {
 
 #[test]
 fn resp03_wrong_wire_model_does_not_block_phase1_reason_projection() {
-    let arguments =
-        r#"{"cmd":"pwd","reason":"确认当前目录","goal_alignment_confidence":100,"model_id":"other-model"}"#;
+    let arguments = r#"{"cmd":"pwd","reason":"确认当前目录","goal_alignment_confidence":100,"model_id":"other-model"}"#;
     let mut payload = json!({
         "choices":[{"message":{
             "role":"assistant",
@@ -663,7 +673,10 @@ fn resp03_phase1_reason_only_projects_without_optional_diagnostics() {
         },
     );
 
-    assert_eq!(payload["output"][1]["input"], "*** Begin Patch\n*** End Patch");
+    assert_eq!(
+        payload["output"][1]["input"],
+        "*** Begin Patch\n*** End Patch"
+    );
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],
         "调用工具 apply_patch：应用用户要求的最小补丁"

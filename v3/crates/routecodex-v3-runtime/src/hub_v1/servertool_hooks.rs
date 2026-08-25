@@ -73,7 +73,8 @@ pub(crate) fn inject_v3_tool_thinking_guidance_at_req04(
     current_payload_start: usize,
     enabled: bool,
 ) -> Result<(), V3HubRelayRequestError> {
-    let _ = compile_v3_tool_thinking_turn_context_at_req04(payload, current_payload_start, enabled)?;
+    let _ =
+        compile_v3_tool_thinking_turn_context_at_req04(payload, current_payload_start, enabled)?;
     Ok(())
 }
 
@@ -112,7 +113,9 @@ pub(crate) fn compile_v3_tool_thinking_turn_context_at_req04(
             });
         }
     }
-    Ok(V3ToolThinkingTurnContext::enabled(original_custom_tool_names))
+    Ok(V3ToolThinkingTurnContext::enabled(
+        original_custom_tool_names,
+    ))
 }
 
 fn wrap_v3_custom_tools_at_req04(
@@ -123,7 +126,9 @@ fn wrap_v3_custom_tools_at_req04(
     };
     let mut names = BTreeSet::new();
     for (index, tool) in tools.iter_mut().enumerate() {
-        let Some(row) = tool.as_object() else { continue };
+        let Some(row) = tool.as_object() else {
+            continue;
+        };
         if row.get("type").and_then(Value::as_str) != Some("custom") {
             continue;
         }
@@ -301,26 +306,38 @@ pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> 
             .get_mut("properties")
             .and_then(Value::as_object_mut)
             .expect("validated tool-thinking properties object");
-        properties.insert("reason".to_string(), json!({
-            "type": "string",
-            "description": "当前工具调用的唯一直接动机，只说动机，简短"
-        }));
-        properties.insert("goal_alignment_confidence".to_string(), json!({
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 100,
-            "description": "当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"
-        }));
-        properties.insert("model_id".to_string(), json!({
-            "type": "string",
-            "description": "本次响应实际使用的模型 ID"
-        }));
+        properties.insert(
+            "reason".to_string(),
+            json!({
+                "type": "string",
+                "description": "当前工具调用的唯一直接动机，只说动机，简短"
+            }),
+        );
+        properties.insert(
+            "goal_alignment_confidence".to_string(),
+            json!({
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"
+            }),
+        );
+        properties.insert(
+            "model_id".to_string(),
+            json!({
+                "type": "string",
+                "description": "本次响应实际使用的模型 ID"
+            }),
+        );
     }
     let required = schema
         .get_mut("required")
         .and_then(Value::as_array_mut)
         .expect("validated tool-thinking required array");
-    if !required.iter().any(|value| value.as_str() == Some("reason")) {
+    if !required
+        .iter()
+        .any(|value| value.as_str() == Some("reason"))
+    {
         required.push(Value::String("reason".to_string()));
     }
     Ok(())
@@ -378,7 +395,10 @@ fn is_v3_tool_thinking_guidance_anchor(tool: &Value) -> bool {
     object.get("function").is_some()
         || object.get("input_schema").is_some()
         || object.get("parameters").is_some()
-        || matches!(object.get("type").and_then(Value::as_str), Some("function" | "custom"))
+        || matches!(
+            object.get("type").and_then(Value::as_str),
+            Some("function" | "custom")
+        )
 }
 
 fn append_v3_tool_thinking_guidance_to_text(value: &mut Value) {

@@ -1007,6 +1007,14 @@ fn top_level_lifecycle_without_config_uses_home_config_v3_toml() {
     );
     assert_eq!(last_json(&status)["state"], "running");
 
+    let restart = run_top_level_without_config(binary, &state_root, &home, "restart");
+    assert!(
+        restart.status.success(),
+        "top-level restart without config must resolve ~/.rcc/config.v3.toml: {}",
+        String::from_utf8_lossy(&restart.stderr)
+    );
+    assert_eq!(last_json(&restart)["state"], "running");
+
     let stop = run_top_level_without_config(binary, &state_root, &home, "stop");
     assert!(
         stop.status.success(),

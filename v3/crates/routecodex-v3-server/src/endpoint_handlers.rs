@@ -21,13 +21,14 @@ fn v3_front_json_body_to_sse_frame(bytes: &[u8]) -> Vec<u8> {
 }
 
 pub(crate) fn v3_front_sse_worker_panic_frame(message: &str) -> Vec<u8> {
-    let frame = build_v3_server_16_http_frame_from_v3_error_06(
-        project_v3_post_commit_sse_source(raise_v3_sse_runtime_failure(
+    let frame = build_v3_server_16_http_frame_from_v3_error_06(project_v3_post_commit_sse_source(
+        raise_v3_sse_runtime_failure(
             "V3ServerRespOutbound05ClientFrame",
             "front_sse_worker_panicked",
             message,
-        ), 599),
-    );
+        ),
+        599,
+    ));
     let V3Server16Body::Json(value) = frame.body else {
         panic!("Front worker panic must project JSON Error06 body");
     };

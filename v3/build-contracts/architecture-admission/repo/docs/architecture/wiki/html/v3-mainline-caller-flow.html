@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>75 functional paths</span>
-        <span>439 caller edges</span>
+        <span>74 functional paths</span>
+        <span>437 caller edges</span>
       </div>
     </header>
 
@@ -471,7 +471,7 @@ flowchart TD
 <tr><td>Forbidden source registered direct response edges</td><td><strong>none</strong></td></tr>
 <tr><td>Invalid aggregate wrapper edges</td><td><strong>none</strong></td></tr>
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
-<tr><td>Binding-pending edges</td><td><strong>10</strong></td></tr>
+<tr><td>Binding-pending edges</td><td><strong>8</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>17</strong></td></tr>
 <tr><td>live-bound source edges</td><td><strong>322</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
@@ -499,8 +499,6 @@ flowchart TD
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-06</code></td><td><code>HubRespChatProcess03Governed</code></td><td><code>V3WebSearch03SearchResultCaptured</code></td></tr>
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-07</code></td><td><code>V3WebSearch03SearchResultCaptured</code></td><td><code>HubRespOutbound04ClientSemantic</code></td></tr>
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-08</code></td><td><code>HubReqChatProcess03Governed</code></td><td><code>V3WebSearch04ToolResultInjected</code></td></tr>
-<tr><td><code>v3.responses_direct_full_attempt_commit</code></td><td><code>v3-direct-sse-full-attempt-buffer</code></td><td><code>V3ProviderResp14Raw</code></td><td><code>V3DirectResp14ProviderProjectionPrepared</code></td></tr>
-<tr><td><code>v3.responses_direct_full_attempt_commit</code></td><td><code>v3-direct-sse-full-attempt-terminal-commit</code></td><td><code>V3DirectResp14ProviderProjectionPrepared</code></td><td><code>V3DirectSseAccept03ProjectedClientFrame</code></td></tr>
 </tbody>
 </table>
 
@@ -535,8 +533,6 @@ flowchart TD
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-06</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-07</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-08</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
-<tr><td><code>v3.responses_direct_full_attempt_commit</code></td><td><code>v3-direct-sse-full-attempt-buffer</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
-<tr><td><code>v3.responses_direct_full_attempt_commit</code></td><td><code>v3-direct-sse-full-attempt-terminal-commit</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
 </tbody>
 </table>
     </section>
@@ -623,7 +619,6 @@ flowchart TD
 <tr><td><a href="#chain-v3_sse_error_and_direct_consumer_pre_wiring"><code>v3.sse_error_and_direct_consumer_pre_wiring</code></a><br/>v 3.sse_error_and_direct_consumer_pre_wiring</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>8</td><td><code>v3.responses_chat_sse_typed_tree_refactor</code></td><td><code>sha256:7bf7b0abf720…</code></td></tr>
 <tr><td><a href="#chain-v3_runtime_restart_handoff_skeleton"><code>v3.runtime_restart_handoff_skeleton</code></a><br/>v 3.runtime_restart_handoff_skeleton</td><td><span class="status pending_review">pending review</span></td><td>2</td><td>5</td><td><code>v3.runtime_restart_handoff_skeleton</code></td><td><code>sha256:00ccd7d41d35…</code></td></tr>
 <tr><td><a href="#chain-v3_direct_sse_accept_skeleton"><code>v3.direct_sse_accept_skeleton</code></a><br/>v 3.direct_sse_accept_skeleton</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>7</td><td><code>v3.direct_sse_accept_skeleton</code></td><td><code>sha256:c761e369bd59…</code></td></tr>
-<tr><td><a href="#chain-v3_responses_direct_full_attempt_commit"><code>v3.responses_direct_full_attempt_commit</code></a><br/>v 3.responses_direct_full_attempt_commit</td><td><span class="status pending_review">pending review</span></td><td>2</td><td>4</td><td><code>v3.responses_direct_full_attempt_commit</code></td><td><code>sha256:09f8423a43a1…</code></td></tr>
 </tbody>
 </table>
     </section>
@@ -1143,13 +1138,6 @@ flowchart TD
             <span><code>v3.responses.inbound_websocket_proxy</code></span>
             <span>4 edges · 7 resources · v3-runtime, v3-server</span>
             <span class="status audited_locked">locked by Jason</span>
-          </a>
-<a class="branch-card" href="#chain-v3_responses_direct_full_attempt_commit">
-            <span class="chain-id">v 3.responses_direct_full_attempt_commit</span>
-            <span>V3ProviderResp14Raw → V3DirectSseAccept03ProjectedClientFrame</span>
-            <span><code>v3.responses_direct_full_attempt_commit</code></span>
-            <span>2 edges · 4 resources · v3-runtime</span>
-            <span class="status pending_review">pending review</span>
           </a>
       </div>
     </section>
@@ -4912,46 +4900,6 @@ flowchart TD
 <tr><td><code>v3-direct-sse-accept-skeleton-01</code></td><td><code>V3DirectSseAccept01ClientChannel</code><br/>→ <code>V3DirectSseAccept02RuntimeWorker</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.sse.direct.accept_skeleton</code> <code>v3.config.http_sse_keepalive_interval</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.config.http_sse_keepalive_interval</code></div></td><td><code>pending_endpoint_after_responses_admission</code><br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small></td><td><code>pending_endpoint_after_responses_admission_inner</code><br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small></td></tr>
 <tr><td><code>v3-direct-sse-accept-skeleton-02</code></td><td><code>V3DirectSseAccept02RuntimeWorker</code><br/>→ <code>V3DirectSseAccept03ProjectedClientFrame</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.client_payload</code> <code>v3.error.chain</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code></div></td><td><code>pending_endpoint_after_responses_admission_inner</code><br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small></td><td><code>v3_io_sse_body</code><br/><small>routecodex-v3-server/src/frame_builders.rs</small></td></tr>
 <tr><td><code>v3-direct-typed-hook-catalog-02</code></td><td><code>V3DirectResp14ProviderProjectionPrepared</code><br/>→ <code>V3DirectResp14ProviderProjectionPrepared</code></td><td><span class="status active">active</span></td><td><span class="status active" title="map status from edge record">active</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.sse.direct.typed_hook_catalog</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.sse.responses.hook_effect</code> <code>v3.sse.chat.hook_effect</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.sse.direct.typed_hook_catalog</code></div></td><td><code>execute_v3_responses_direct_runtime_kernel</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td><td><code>V3HookRegistry::direct_sse_typed_hooks</code><br/><small>routecodex-v3-runtime/src/hooks.rs</small></td></tr>
-</tbody>
-</table>
-      </div>
-    </details>
-
-
-    <details class="branch-detail" id="chain-v3_responses_direct_full_attempt_commit" >
-      <summary>
-        <span class="summary-main">v 3.responses_direct_full_attempt_commit</span>
-        <span class="summary-sub">V3ProviderResp14Raw → V3DirectSseAccept03ProjectedClientFrame</span>
-        <span class="summary-sub">2 edges · <code>v3.responses_direct_full_attempt_commit</code> · V3ProviderResp14Raw → V3DirectSseAccept03ProjectedClientFrame</span>
-      </summary>
-      <div class="branch-body">
-        <p class="chain-summary">Direct provider SSE attempts remain runtime-buffered until a protocol terminal; failure enters Error01-05 and reselects before any business frame reaches the client.</p>
-        <div class="branch-meta">
-          <span>owner: <code>v3.responses_direct_full_attempt_commit</code></span>
-          <span>audit: <span class="status pending_review">pending review</span></span>
-          <span>modules: <code>v3-runtime</code></span>
-          <span>resources: <code>4</code></span>
-          <span>manifest: <code>docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml</code></span>
-          <span class="pending-pill">2 binding pending</span>
-        </div>
-        <div class="diagram-shell">
-          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
-flowchart TD
-  n_v3_responses_direct_full_attempt_commit_0[&quot;&lt;b&gt;Provider 原始响应&lt;/b&gt;&lt;br/&gt;上游原始 JSON/SSE 响应&lt;br/&gt;&lt;small&gt;V3ProviderResp14Raw&lt;/small&gt;&quot;]
-  n_v3_responses_direct_full_attempt_commit_1[&quot;&lt;b&gt;Direct 响应准备&lt;/b&gt;&lt;br/&gt;Direct 专属投影准备节点；阻断 raw→client 直跳&lt;br/&gt;&lt;small&gt;V3DirectResp14ProviderProjectionPrepared&lt;/small&gt;&quot;]
-  n_v3_responses_direct_full_attempt_commit_2[&quot;&lt;b&gt;Direct Sse Accept 03 Projected Client Frame&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3DirectSseAccept03ProjectedClientFrame&lt;/small&gt;&quot;]
-  n_v3_responses_direct_full_attempt_commit_0 --&gt;|v3-direct-sse-full-attempt-buffer&lt;br/&gt;v3-runtime → v3-runtime| n_v3_responses_direct_full_attempt_commit_1
-  n_v3_responses_direct_full_attempt_commit_1 --&gt;|v3-direct-sse-full-attempt-terminal-commit&lt;br/&gt;v3-runtime → v3-runtime| n_v3_responses_direct_full_attempt_commit_2
-  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
-  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
-  class n_v3_responses_direct_full_attempt_commit_0,n_v3_responses_direct_full_attempt_commit_1,n_v3_responses_direct_full_attempt_commit_2 node;
-  class n_v3_responses_direct_full_attempt_commit_0,n_v3_responses_direct_full_attempt_commit_1,n_v3_responses_direct_full_attempt_commit_2 pending;</pre>
-        </div>
-        <table>
-<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
-<tbody>
-<tr><td><code>v3-direct-sse-full-attempt-buffer</code></td><td><code>V3ProviderResp14Raw</code><br/>→ <code>V3DirectResp14ProviderProjectionPrepared</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.provider.response.raw</code> <code>v3.sse.direct.full_attempt_buffer</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.sse.direct.full_attempt_buffer</code></div></td><td><code>wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook</code><br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small></td><td><code>V3DirectSseAttemptBuffer::push</code><br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small></td></tr>
-<tr><td><code>v3-direct-sse-full-attempt-terminal-commit</code></td><td><code>V3DirectResp14ProviderProjectionPrepared</code><br/>→ <code>V3DirectSseAccept03ProjectedClientFrame</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.sse.direct.full_attempt_buffer</code> <code>v3.error.chain</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code></div></td><td><code>execute_v3_direct_runtime_kernel_core</code><br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small></td><td><code>commit_direct_sse_attempt_after_terminal</code><br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small></td></tr>
 </tbody>
 </table>
       </div>

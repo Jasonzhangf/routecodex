@@ -49,10 +49,7 @@ fn responses_wire_wraps_apply_patch_custom_tool_with_toolreason_schema() {
     let tool = &request["tools"][0];
     assert_eq!(tool["type"], "function");
     assert_eq!(tool["function"]["name"], "apply_patch");
-    assert_eq!(
-        tool["function"]["parameters"]["required"],
-        json!(["input"])
-    );
+    assert_eq!(tool["function"]["parameters"]["required"], json!(["input"]));
     assert!(tool["function"]["parameters"]["properties"]
         .get("reason")
         .is_none());
@@ -561,9 +558,12 @@ fn openai_chat_wire_preserves_preflattened_apply_patch_function_schema() {
 
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
         .expect("pre-flattened apply_patch must remain a legal function tool");
-    assert_eq!(request["tools"][0]["function"]["parameters"], json!({
-        "type":"object"
-    }));
+    assert_eq!(
+        request["tools"][0]["function"]["parameters"],
+        json!({
+            "type":"object"
+        })
+    );
 }
 
 #[test]

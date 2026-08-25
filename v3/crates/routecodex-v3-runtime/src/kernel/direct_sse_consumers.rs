@@ -352,8 +352,7 @@ impl V3DirectSseContentConsumer {
                 let output = payload.pointer("/response/output")?.as_array()?;
                 output.iter().enumerate().find_map(|(output_index, item)| {
                     let is_projected_reasoning =
-                        item.get("type").and_then(serde_json::Value::as_str)
-                            == Some("reasoning")
+                        item.get("type").and_then(serde_json::Value::as_str) == Some("reasoning")
                             && item
                                 .get("id")
                                 .and_then(serde_json::Value::as_str)
@@ -651,7 +650,8 @@ fn project_direct_client_data(
     provider_protocol: V3HubProviderWireProtocol,
     typed_hooks: &V3DirectSseTypedHookCatalog,
 ) -> Result<serde_json::Value, SseObjectError> {
-    let projected = project_direct_typed_protocol_data(provider.value(), provider_protocol, typed_hooks)?;
+    let projected =
+        project_direct_typed_protocol_data(provider.value(), provider_protocol, typed_hooks)?;
     Ok(V3ClientSseProjectedObject(projected).into_value())
 }
 

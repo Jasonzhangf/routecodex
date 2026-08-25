@@ -509,19 +509,20 @@ impl V3HubRelayRequestHooks {
         if let Some(key) = find_v3_hub_side_channel_key(&classified.previous.previous.payload.0) {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });
         }
-        let (stopless_state, web_search_state, tool_thinking_turn_context) = govern_v3_servertool_request_at_req04(
-            Arc::make_mut(&mut classified.previous.previous.payload.0),
-            current_payload_start,
-            &mut events,
-            profile.stopless_reasoning_stop_enabled(),
-            profile.web_search_execution_mode().is_some_and(
-                routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search,
-            ),
-            profile.tool_thinking_enabled(),
-            profile.stopless_center_state(),
-            profile.stopless_transition_request_id(),
-            profile.stopless_transition_updated_at(),
-        )?;
+        let (stopless_state, web_search_state, tool_thinking_turn_context) =
+            govern_v3_servertool_request_at_req04(
+                Arc::make_mut(&mut classified.previous.previous.payload.0),
+                current_payload_start,
+                &mut events,
+                profile.stopless_reasoning_stop_enabled(),
+                profile.web_search_execution_mode().is_some_and(
+                    routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search,
+                ),
+                profile.tool_thinking_enabled(),
+                profile.stopless_center_state(),
+                profile.stopless_transition_request_id(),
+                profile.stopless_transition_updated_at(),
+            )?;
         if govern_protocol_tool_identity_at_req04(
             classified.previous.previous.entry_protocol,
             &classified.previous.previous.payload.0,

@@ -456,9 +456,12 @@ async fn direct_live_sse_reaches_front_before_provider_stream_eof() {
     let frame = V3Server16HttpFrame {
         status: 200,
         content_type: "text/event-stream".to_string(),
-        body: V3Server16Body::Sse(Box::pin(futures_util::stream::iter(vec![
-            Ok::<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>(provider_bytes.clone()),
-        ]))),
+        body: V3Server16Body::Sse(Box::pin(futures_util::stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(
+            provider_bytes.clone(),
+        )]))),
         debug_node: "V3Debug01NodeEventRegistered",
         error_node: "none",
         error_chain: Vec::new(),
@@ -470,13 +473,19 @@ async fn direct_live_sse_reaches_front_before_provider_stream_eof() {
 
     let response = responses_direct_output_response(frame, Some(Duration::from_millis(3_000)));
     let mut client = response.into_body().into_data_stream();
-    assert_eq!(client.next().await.unwrap().unwrap().as_ref(), b": keepalive\n\n");
-    assert_eq!(client.next().await.unwrap().unwrap().as_ref(), provider_bytes.as_slice());
+    assert_eq!(
+        client.next().await.unwrap().unwrap().as_ref(),
+        b": keepalive\n\n"
+    );
+    assert_eq!(
+        client.next().await.unwrap().unwrap().as_ref(),
+        provider_bytes.as_slice()
+    );
     assert!(client.next().await.is_none());
 }
 
 #[tokio::test]
-async fn direct_live_sse_provider_error_projects_generic_599_without_provider_detail() {
+async fn direct_live_sse_provider_error_projects_responses_failed_without_provider_detail() {
     let frame = V3Server16HttpFrame {
         status: 200,
         content_type: "text/event-stream".to_string(),
@@ -503,10 +512,10 @@ async fn direct_live_sse_provider_error_projects_generic_599_without_provider_de
     let response = responses_direct_output_response(frame, None);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
-    assert!(text.contains("599"), "{text}");
+    assert!(text.contains("event: response.failed"), "{text}");
     assert!(text.contains("internal_response_stream_error"), "{text}");
     assert!(!text.contains("provider secret detail"), "{text}");
-    assert!(text.contains("[DONE]"), "{text}");
+    assert!(!text.contains("[DONE]"), "{text}");
 }
 
 #[tokio::test]
@@ -2568,10 +2577,10 @@ async fn direct_stream_request_error06_projects_sse_error_not_json() {
     match projected.body {
         V3Server16Body::Bytes(bytes) => {
             let text = std::str::from_utf8(&bytes).unwrap();
-            assert!(text.contains("event: error"), "{text}");
+            assert!(text.contains("event: response.failed"), "{text}");
             assert!(text.contains("HTTP_429"), "{text}");
             assert!(text.contains("Rate limited by upstream provider"), "{text}");
-            assert!(bytes.ends_with(b"data: [DONE]\n\n"), "{text}");
+            assert!(!text.contains("[DONE]"), "{text}");
         }
         other => panic!("stream request Error06 must project SSE body, got {other:?}"),
     }
@@ -2630,7 +2639,7 @@ async fn direct_continuation_scope_error_for_stream_request_projects_sse_not_jso
     match frame.body {
         V3Server16Body::Bytes(bytes) => {
             let text = std::str::from_utf8(&bytes).unwrap();
-            assert!(text.contains("event: error"), "{text}");
+            assert!(text.contains("event: response.failed"), "{text}");
             assert!(
                 text.contains("responses_direct_continuation_scope_incomplete"),
                 "{text}"
@@ -2669,7 +2678,7 @@ async fn accept_sse_error06_without_payload_projects_sse_error_not_json() {
     match projected.body {
         V3Server16Body::Bytes(bytes) => {
             let text = std::str::from_utf8(&bytes).unwrap();
-            assert!(text.contains("event: error"), "{text}");
+            assert!(text.contains("event: response.failed"), "{text}");
             assert!(text.contains("malformed_json"), "{text}");
             assert!(text.contains("malformed JSON request body"), "{text}");
         }
@@ -2923,6 +2932,37 @@ async fn io_sse_body_internal_error_is_explicit_599_not_silent_eof() {
     assert!(
         client.next().await.is_none(),
         "error event must close the body"
+    );
+}
+
+#[tokio::test]
+async fn responses_live_sse_error_emits_responses_failed_terminal() {
+    let provider = futures_util::stream::iter(vec![Err(
+        routecodex_v3_error::raise_v3_sse_runtime_failure(
+            "V3ProviderRespInbound01Raw",
+            "provider_response_stream_failed",
+            "provider stream failed",
+        ),
+    )]);
+    let body = v3_live_client_sse_body_for_protocol(
+        Box::pin(provider),
+        None,
+        V3SseClientProtocol::Responses,
+    );
+    let mut client = body.into_data_stream();
+
+    let error = client
+        .next()
+        .await
+        .expect("Responses stream failure must emit a terminal event")
+        .expect("terminal event must be transportable");
+    let error = std::str::from_utf8(&error).unwrap();
+    assert!(error.starts_with("event: response.failed\n"), "{error}");
+    assert!(error.contains("internal_response_stream_error"), "{error}");
+    assert!(!error.contains("[DONE]"), "{error}");
+    assert!(
+        client.next().await.is_none(),
+        "terminal event must close the body"
     );
 }
 

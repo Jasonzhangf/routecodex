@@ -265,11 +265,15 @@ fn req04_tool_thinking_injects_anthropic_tool_list_and_parameter_schema() {
     let required = payload["tools"][0]["input_schema"]["required"]
         .as_array()
         .unwrap();
-    assert!(required.iter().any(|value| value.as_str() == Some("reason")));
+    assert!(required
+        .iter()
+        .any(|value| value.as_str() == Some("reason")));
     assert!(!required
         .iter()
         .any(|value| value.as_str() == Some("goal_alignment_confidence")));
-    assert!(!required.iter().any(|value| value.as_str() == Some("model_id")));
+    assert!(!required
+        .iter()
+        .any(|value| value.as_str() == Some("model_id")));
 }
 
 #[test]
@@ -292,15 +296,21 @@ fn req04_tool_thinking_injects_every_present_native_schema_shape() {
         for field in ["reason", "goal_alignment_confidence", "model_id"] {
             assert!(schema["properties"][field].is_object(), "schema={schema}");
         }
-        assert!(schema["required"].as_array().is_some_and(|required| required
-            .iter()
-            .any(|value| value.as_str() == Some("reason"))));
-        assert!(!schema["required"].as_array().is_some_and(|required| required
-            .iter()
-            .any(|value| value.as_str() == Some("goal_alignment_confidence"))));
-        assert!(!schema["required"].as_array().is_some_and(|required| required
-            .iter()
-            .any(|value| value.as_str() == Some("model_id"))));
+        assert!(schema["required"]
+            .as_array()
+            .is_some_and(|required| required
+                .iter()
+                .any(|value| value.as_str() == Some("reason"))));
+        assert!(!schema["required"]
+            .as_array()
+            .is_some_and(|required| required
+                .iter()
+                .any(|value| value.as_str() == Some("goal_alignment_confidence"))));
+        assert!(!schema["required"]
+            .as_array()
+            .is_some_and(|required| required
+                .iter()
+                .any(|value| value.as_str() == Some("model_id"))));
     }
 }
 

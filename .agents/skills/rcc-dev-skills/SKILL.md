@@ -1,7 +1,7 @@
 ---
 name: rcc-dev-skills
 description: >-
-  DEBUG FIRST / A-B-C 门禁：有请求/响应、provider、SSE、响应形状或切换问题时，先用同一 requestId 的 raw request → provider-bound request → raw response → client projection 做 Provider A/B/C 直连与 live replay；未完成前禁止归因、改代码或用普通 smoke 替代。确认唯一 owner/数据形状后才改唯一真源。P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script 做跨文件或同一文件多位置语义批量替换；逐文件读取核实上下文后用 apply_patch hunk，formatter/canonical generator 只生成声明的机械产物，不得语义改写。P0 Architecture Guard：typed carrier / MetadataCenter 控制资源绝不能进入 payload，payload must not reconstruct control，必须 fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound 补偿。模块定义、owner、allowed/forbidden paths、相邻调用边、资源关系和方案越界审查先行，写完审 diff 越界，功能验证后最后 code review。
+  DEBUG FIRST / A-B-C 门禁：请求或响应、provider、SSE、响应形状或切换问题必须先找根因，禁止通过 thinking=false、裁剪字段、换 provider、改路由、fallback、静默吞错或 handler/SSE/outbound 补偿绕过；首先检查 git 历史是否已有同类问题及修复，确认回归后先锁定回归 commit、历史修复 commit、首次偏离节点、唯一 owner 和最小红测，再恢复历史正确语义或迁移到当前唯一 owner。随后才用同一 requestId 的 raw request → provider-bound request → raw response → client projection 做 Provider A/B/C 直连与 live replay；未完成前禁止归因、改代码或用普通 smoke 替代。P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script 做跨文件或同一文件多位置语义批量替换；逐文件读取核实上下文后用 apply_patch hunk，formatter/canonical generator 只生成声明的机械产物，不得语义改写。P0 Architecture Guard：typed carrier / MetadataCenter 控制资源绝不能进入 payload，payload must not reconstruct control，必须 fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound 补偿。模块定义、owner、allowed/forbidden paths、相邻调用边、资源关系和方案越界审查先行，写完审 diff 越界，功能验证后最后 code review。
 ---
 
 NO FALLBACK! FUCK FALLBACK!!!
@@ -25,6 +25,12 @@ NO FALLBACK! FUCK FALLBACK!!!
 定位时先看状态码，再按错误链确认：598 查 Req04/VR/ProviderReq/Transport 请求链；599 查 ProviderResp/RespInbound/RespChatProcess/RespOutbound 响应链。没有外部 provider error link 时，禁止把 598/599 计入 provider key health 或改写成 502。
 
 ## P0 请求/响应问题标准流程
+
+### 根因优先与历史回归锁（最高优先级）
+
+遇到请求或响应问题时，目标是找到并修复根因，使同类问题不再发生；禁止把“客户端暂时成功”当作修复。不得通过关闭能力、裁剪请求/响应、换 provider、改路由优先级、fallback、静默吞错或 handler/SSE/outbound 补偿绕过问题。
+
+在任何实现前，先检查该现象是否已经在 git 历史中解决过：搜索相关 issue/commit、对照已解决版本与当前版本、确认第一个回归节点和唯一 owner。确认是历史回归后，先锁定回归（记录回归 commit、历史修复 commit、当前偏离和红测），再恢复/重建历史正确语义；禁止凭当前表象重新发明一套近似方案。若历史实现与当前架构不兼容，必须保留其语义合同并把实现迁移到当前唯一 owner，不能删除合同后绕过。
 
 1. **Provider baseline**：先用 provider curl 最小 ping，确认 provider/key/model/endpoint 存活。
 2. **原始 payload 复现**：再用失败请求的完整 provider-bound payload 原样直连重试；最小 ping 成功而原始 payload 失败，优先判定请求构建/请求内容问题。
@@ -200,19 +206,19 @@ Provider SSE 的兼容修复只能修复传输语法和格式，不得根据响�
 - 交付顺序固定：定向测试 -> 编译构建 -> 全局安装 -> 聚合重启 -> 全部成员 health -> 真实旧样本/同入口在线 replay -> Codex review -> 精准 commit/push。禁止在全局安装和在线验证前运行交付 review；review 后若代码、测试、构建或运行配置发生变化，旧 PASS 作废，必须从受影响验证重新跑到在线 replay，再重新 review。
 - Codex review 不能替代自验证，也不能与 source/live gate 并行抢跑；只有当前工作树对应产物已完成上述 install/restart/同入口 replay 并留下证据后，才允许启动 review。review 请求、旧 PASS、源码静态判断都不能豁免前置验证。
 - 所有交付级 RouteCodex 测试必须使用全局安装版本。单元测试、编译、repo-local build 只能作为前置 gate，不能作为“已修复/已启动/已可用”的最终证据。
-- Hub Pipeline / runtime rustification 的每个实现轮次必须按顺序完成：定向测试 -> native/build -> release/global install -> `routecodex restart --port <locator-port>` 聚合重启一次 -> 配置全部成员端口 `/health.version` 一致 -> 检查目标 server log/样本目录错误 -> 修复发现的问题。缺任一项只能声明 source gate 通过，不能声明本轮完成。
-- 实验测试和 live closeout 使用 `routecodex` 安装面执行：先安装目标产物，再用全局 `routecodex --version` 确认版本，用任一成员端口作为 locator 执行一次 `routecodex restart --port <locator-port>`，然后验证该 aggregate instance 的全部配置成员端口。禁止逐端口循环 restart。
+- Hub Pipeline / runtime rustification 的每个实现轮次必须按顺序完成：定向测试 -> native/build -> release/global install -> 无参数 `routecodex restart` 聚合重启一次 -> 配置全部成员端口 `/health.version` 一致 -> 检查目标 server log/样本目录错误 -> 修复发现的问题。缺任一项只能声明 source gate 通过，不能声明本轮完成；只有需要覆盖非默认配置时才传 `-c <config>`。
+- 实验测试和 live closeout 使用 `routecodex` 安装面执行：先安装目标产物，再用全局 `routecodex --version` 确认版本，直接执行一次 `routecodex restart`，然后验证该 aggregate instance 的全部配置成员端口。禁止传端口查询参数、逐端口循环 restart；非默认配置仅使用 `routecodex restart -c <config>`。
 - Jason 未明确要求时，不得覆盖或改写 `rcc` 的 release 安装、Homebrew/global shim、或正在工作的 release runtime。需要动 `rcc` release install 时，先确认这是本轮目标。
 - 禁止用 `rcc start`、repo-local `node dist/...`、手工 snapshot、或临时 shim 代替标准 release/global 安装验证；这些只能作为定位证据，不能作为交付闭环。
 - V3 5555 live lifecycle 纠偏：Jason 要求用 restart 就只能用 restart。`start` / `server start` / 手工 `run-managed-child` 会留下错误 identity、stale socket/lock、foreground child 和不可用证据；如果 `restart` 失败，先查 lifecycle owner、instance declaration、exact PID/socket/lock，不准用 start 兜底恢复。
-- V3 native/rccv3 lifecycle 纠偏：当目标是 `config.v3.toml` 管理的 4444/5555 V3 实例时，交付级动作必须用 `RUSTUP_TOOLCHAIN=stable npm run install:v3` 编译安装，再用 `rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml` 和 `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml` 重启该 V3 instance；不要用 V2/legacy `routecodex restart --port <port>` 当作 rccv3 live 证据。重启后验证 4444/5555 `/health`、installed rccv3 hash、provider-request dry-run 和真实样本 replay。
+- V3 native/rccv3 lifecycle 纠偏：当目标是 `config.v3.toml` 管理的 4444/5555 V3 实例时，交付级动作必须用 `RUSTUP_TOOLCHAIN=stable npm run install:v3` 编译安装，再执行无参数 `rccv3 config check` 和 `rccv3 restart`；CLI 自动解析 `~/.rcc/config.v3.toml`，只有非默认配置才使用 `-c <config>`。重启后验证全部配置成员端口 `/health`、installed rccv3 hash、provider-request dry-run 和真实样本 replay。
 - V3 server 入口锁：生产、dev、launcher、npm start 与安装产物只能执行 `dist/bin/rccv3 server start [--foreground]`；`src/index.ts`、`dist/index.js`、`RouteCodexHttpServer`、`resolveServerEntryPath()` 和 `serverBin -> nodeBin` fallback 均不得作为 server 入口。入口迁移完成后必须物理删除 `src/index.ts`，并运行 `npm run verify:v3-rust-only-server-entry`。
 - 版本真相必须三点一致：命令入口版本、`~/.rcc/install/current/package.json`、目标端口 `/health.version`。不一致时先修安装/入口，不继续判断业务功能。
 - 区分测试与生命周期动作：`npm run test:webui` 这类 Jest/UI 单测不得启动、停止、重启 live server；若测试前后 server 变化，必须用 `~/.rcc/logs/server-<port>.log` 的 `signal_received` / `self_termination` / `restart_signal_received` 追真正 stop owner，禁止把 install/restart/HTTP shutdown 误归因给 UI 单测。
 - 如果 Jason 说某次执行导致 live server 停止，并且已经手动恢复，立刻接受现场事实；停止争辩和重复复现。后续命令先按 side-effect 分级：禁止再跑 install/restart/start/stop/HTTP shutdown/foreground server/可能退出会话的 browser probe，除非 Jason 明确要求。
 - 调试 `rcc start`/`routecodex start` 当前行为时，必须同时检查 source、repo `dist`、以及 `~/.rcc/install/current/dist`。start takeover lock 分支禁止用 health OK 直接成功；running 只能说明端口被占，默认/--restart 必须进入 port-scoped stop + safe PID fallback，只有 `--no-restart` 或 live lock still active 可拒绝。
 - **更新运行中 Mach-O 二进制禁止 `cp` 覆盖**（2026-08-09 事故）：`cp` 覆盖 `~/.local/bin/rccv3` 会使 macOS 代码签名失效，进程启动即 `SIGKILL (Code Signature Invalid)`（`config check` / `start` 全部 Killed:9），`codesign --verify` 可能仍报 valid，以崩溃报告 `~/Library/Logs/DiagnosticReports/rccv3-*.ips` 的 `namespace=CODESIGNING` 为准。正确流程：`cargo build --release` 产出 `target/release/rccv3` -> 确认目标进程已停止 -> 安装到目标路径 -> `codesign -s - -f ~/.local/bin/rccv3` 重签 -> `rccv3 config check` + `rccv3 --help` 验证可运行 -> 再启动 daemon。
-- **重启/杀掉协议永远不变**（Jason 2026-08-09）：RouteCodex 的 stop/restart/kill 只走固定协议，禁止每次探索新方式。CLI managed instance（`routecodex restart`）与用户手动在 ttys023 启动的 daemon 是两套 managed lifecycle：CLI 的 stop/restart 对后者会被 SIGKILL 且不生效，必须先停目标进程（或用户在其终端停），再走 `routecodex restart --port <locator>` 聚合重启并验证全部成员端口 `/health`。禁止用 CLI stop 杀用户手动 daemon、禁止 start 兜底恢复。
+- **重启/杀掉协议永远不变**（Jason 2026-08-09）：RouteCodex 的 stop/restart/kill 只走固定协议，禁止每次探索新方式。CLI managed instance（`routecodex restart`）与用户手动在 ttys023 启动的 daemon 是两套 managed lifecycle：CLI 的 stop/restart 对后者会被 SIGKILL 且不生效，必须先停目标进程（或用户在其终端停），再走无参数 `routecodex restart` 聚合重启并验证全部成员端口 `/health`。禁止用端口查询参数、CLI stop 杀用户手动 daemon、或 start 兜底恢复；非默认配置只允许显式 `-c <config>`。
 
 ## 路由表
 
@@ -336,7 +342,7 @@ Provider SSE 的兼容修复只能修复传输语法和格式，不得根据响�
 - Hub Pipeline Rust 残留引用 gate：先跑 `verify:hub-pipeline-native-reference-gate` 和 red fixture，区分 private loader、owner-specific host、white-box mock、direct-native evidence、doc stale owner；runtime 禁 import direct-native helper，docs/wiki 禁把 broad `native-exports.ts` 写成语义 owner。
 - Thin-wrapper closeout 不能以空扫描为证据：`verify:architecture-thin-wrapper-only` 必须覆盖根仓 bridge/handler/converter/executor host 面并在 `rootHostCheckedFiles=0` 时失败；red fixture 要分别锁 second writer、TS ErrorErr 分类、flat metadata fallback、semantic payload fallback、malformed Rust plan downgrade 和 broad/dead facade 复活。
 - V3 Relay hook/resource 声明面：Config 只发布 Manifest 声明，Runtime 只消费 `V3Config05ManifestPublished` 并借用资源/Hook 声明；禁止 runtime 读 config 文件/目录、动态发现/加载 hook、把 side-channel resource 写进 provider/client body，或为了 hook 规划 retain/full clone/JSON round-trip/SSE materialize/snapshot-copy 当前节点业务 payload。
-- V3 compact Hub config live closeout: after `v3.config.compact_hub_v1_defaults` is locked, real `~/.rcc/config.v3.toml` and `/Volumes/extension/.rcc/config.v3.toml` must contain only `[pipelines.hub_v1] skeleton = "hub_v1"` for Hub internals; remove expanded entry/hook/resource/server execution blocks, run `rccv3 config check`, scan for expanded fields, then use only `routecodex restart --port 5555` and provider-request dry-run for live evidence.
+- V3 compact Hub config live closeout: after `v3.config.compact_hub_v1_defaults` is locked, real `~/.rcc/config.v3.toml` and `/Volumes/extension/.rcc/config.v3.toml` must contain only `[pipelines.hub_v1] skeleton = "hub_v1"` for Hub internals; remove expanded entry/hook/resource/server execution blocks, run `rccv3 config check`, scan for expanded fields, then use only no-argument `routecodex restart` and provider-request dry-run for live evidence; use `-c <config>` only for an explicitly non-default config.
 
 ## 快查命令
 - 查 owner：
@@ -420,7 +426,7 @@ Provider SSE 的兼容修复只能修复传输语法和格式，不得根据响�
 - Canonical installed executable is `~/.local/bin/rccv3`; `routecodex` and `rcc` are same-directory aliases. `~/.rcc` contains config, provider, secret, state, log, session, and bounded debug resources only.
 - `~/.rcc/install/current`, `~/.rcc/install/releases`, release snapshots, adjacent runtime `package.json`, npm-global fallback, and repo-build fallback are forbidden V3 runtime paths. Installation must atomically replace the one binary and verify its hash.
 - The RouteCodex build version must be embedded during Cargo build through `ROUTECODEX_BUILD_VERSION`; runtime health and `--version` may not depend on a release directory.
-- Canonical restart is `routecodex restart -c ~/.rcc/config.v3.toml`. The removed `restart --port` syntax must not appear in V3 install or verification instructions.
+- Canonical restart is `routecodex restart`, which resolves `~/.rcc/config.v3.toml`; `routecodex restart -c <config>` is the explicit non-default override. Port query parameters are not part of the CLI contract and must not appear in V3 install or verification instructions.
 - Required proof: distribution test, owned Cargo target cleanup test, resource/module gates, direct installed path/hash/version, aggregate restart, every configured listener health, and physical absence of `~/.rcc/install`.
 
 ## V3 provider key health closeout card

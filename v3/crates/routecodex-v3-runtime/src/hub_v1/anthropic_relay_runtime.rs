@@ -597,8 +597,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         } else {
             V3HubContinuationLookup::new(None, base_hub_scope)
         };
-        let tool_thinking_enabled =
-            v3_tool_thinking_enabled_for_server(manifest, &input.server_id);
+        let tool_thinking_enabled = v3_tool_thinking_enabled_for_server(manifest, &input.server_id);
         let request_hook_profile = if request_web_search_execution_mode
             .is_metadata_center_local_search()
             || tool_thinking_enabled

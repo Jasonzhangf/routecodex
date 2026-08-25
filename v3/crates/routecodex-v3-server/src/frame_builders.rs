@@ -208,7 +208,11 @@ fn project_v3_responses_stream_error_frame_if_requested(
         frame.error_body = Some(body);
     }
     frame.content_type = "text/event-stream".to_string();
-    frame.body = V3Server16Body::Bytes(v3_sse_error_event_chunk(frame.status, &code, &message));
+    frame.body = V3Server16Body::Bytes(v3_responses_sse_error_event_chunk(
+        frame.status,
+        &code,
+        &message,
+    ));
     frame
 }
 
@@ -241,24 +245,64 @@ pub(crate) fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -
     format!("event: error\ndata: {event}\n\ndata: [DONE]\n\n").into_bytes()
 }
 
-fn v3_sse_runtime_error_source_chunk(
+pub(crate) fn v3_responses_sse_error_event_chunk(
+    _status: u16,
+    code: &str,
+    message: &str,
+) -> Vec<u8> {
+    let event = json!({
+        "type": "response.failed",
+        "response": {
+            "status": "failed",
+            "error": {
+                "code": code,
+                "message": message
+            }
+        }
+    });
+    format!("event: response.failed\ndata: {event}\n\n").into_bytes()
+}
+
+fn v3_sse_runtime_error_source_chunk_for_protocol(
     source_stage: &'static str,
     code: &'static str,
     message: impl Into<String>,
     status: u16,
+    protocol: V3SseClientProtocol,
 ) -> Vec<u8> {
     let projected = project_v3_post_commit_sse_source(
         raise_v3_sse_runtime_failure(source_stage, code, message),
         status,
     );
     let (code, message) = v3_error_body_code_message(&projected.body);
-    v3_sse_error_event_chunk(projected.status, &code, &message)
+    match protocol {
+        V3SseClientProtocol::Responses => {
+            v3_responses_sse_error_event_chunk(projected.status, &code, &message)
+        }
+        V3SseClientProtocol::OpenAiChat => {
+            v3_sse_error_event_chunk(projected.status, &code, &message)
+        }
+    }
 }
 
 pub(crate) fn responses_direct_output_response_with_console(
     frame: V3Server16HttpFrame,
     stream_console_finalizer: Option<V3DirectSseConsoleFinalizer>,
     keepalive_interval: Option<Duration>,
+) -> Response<Body> {
+    responses_direct_output_response_with_console_for_protocol(
+        frame,
+        stream_console_finalizer,
+        keepalive_interval,
+        V3SseClientProtocol::Responses,
+    )
+}
+
+pub(crate) fn responses_direct_output_response_with_console_for_protocol(
+    frame: V3Server16HttpFrame,
+    stream_console_finalizer: Option<V3DirectSseConsoleFinalizer>,
+    keepalive_interval: Option<Duration>,
+    protocol: V3SseClientProtocol,
 ) -> Response<Body> {
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
@@ -276,7 +320,9 @@ pub(crate) fn responses_direct_output_response_with_console(
                 .then_some(keepalive_interval)
                 .flatten();
             return builder
-                .body(v3_live_client_sse_body(stream, keepalive))
+                .body(v3_live_client_sse_body_for_protocol(
+                    stream, keepalive, protocol,
+                ))
                 .expect("typed response");
         }
         V3Server16Body::CommittedSse(stream) => {
@@ -366,6 +412,12 @@ impl Drop for V3DirectLiveSseConsoleStream {
 pub(crate) type V3IoSseStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, io::Error>> + Send>>;
 
+#[derive(Clone, Copy)]
+pub(crate) enum V3SseClientProtocol {
+    Responses,
+    OpenAiChat,
+}
+
 pub(crate) fn v3_client_sse_body(
     stream: V3CommittedClientSseStream,
     keepalive_interval: Option<Duration>,
@@ -389,13 +441,25 @@ pub(crate) fn v3_live_client_sse_body(
     stream: V3ClientSseStream,
     keepalive_interval: Option<Duration>,
 ) -> Body {
+    v3_live_client_sse_body_for_protocol(
+        stream,
+        keepalive_interval,
+        V3SseClientProtocol::OpenAiChat,
+    )
+}
+
+pub(crate) fn v3_live_client_sse_body_for_protocol(
+    stream: V3ClientSseStream,
+    keepalive_interval: Option<Duration>,
+    protocol: V3SseClientProtocol,
+) -> Body {
     // The typed stream error has already gone to the runtime Error chain and
     // console owner. Keep provider/internal diagnostics off the client frame;
-    // the Front owner emits the generic 599 closeout.
+    // the protocol-specific client terminal is emitted at this boundary.
     let stream: V3IoSseStream = Box::pin(stream.map(|item| {
         item.map_err(|_| io::Error::other("response stream terminated before completion"))
     }));
-    v3_io_sse_body(Box::pin(stream), keepalive_interval)
+    v3_io_sse_body_for_protocol(Box::pin(stream), keepalive_interval, protocol)
 }
 
 pub(crate) fn wrap_v3_sse_io_dump_stream(
@@ -595,24 +659,33 @@ pub(crate) fn wrap_v3_live_sse_dump_stream(
 }
 
 pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<Duration>) -> Body {
+    v3_io_sse_body_for_protocol(stream, keepalive_interval, V3SseClientProtocol::OpenAiChat)
+}
+
+fn v3_io_sse_body_for_protocol(
+    stream: V3IoSseStream,
+    keepalive_interval: Option<Duration>,
+    protocol: V3SseClientProtocol,
+) -> Body {
     // A body-stream error must never become a bare EOF. Runtime/provider
     // failures are already handled before client commit; anything that still
     // reaches this transport owner is an internal response-stage failure and
     // is made explicit as 599 before the SSE body closes.
     let stream: V3IoSseStream = Box::pin(stream::unfold(
         (stream, false),
-        |(mut stream, done)| async move {
+        move |(mut stream, done)| async move {
             if done {
                 return None;
             }
             match stream.next().await {
                 Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
                 Some(Err(error)) => Some((
-                    Ok(v3_sse_runtime_error_source_chunk(
+                    Ok(v3_sse_runtime_error_source_chunk_for_protocol(
                         "V3ServerRespOutbound05ClientFrame",
                         "internal_response_stream_error",
                         format!("internal response stream failed: {error}"),
                         599,
+                        protocol,
                     )),
                     (stream, true),
                 )),
@@ -623,7 +696,7 @@ pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<D
     let Some(keepalive_interval) = keepalive_interval else {
         return Body::from_stream(stream::unfold(
             (stream, false),
-            |(mut stream, done)| async move {
+            move |(mut stream, done)| async move {
                 if done {
                     return None;
                 }
@@ -633,11 +706,12 @@ pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<D
                 {
                     Ok(Some(Ok(bytes))) => Some((Ok::<Vec<u8>, io::Error>(bytes), (stream, false))),
                     Ok(Some(Err(error))) => {
-                        let frame = v3_sse_runtime_error_source_chunk(
+                        let frame = v3_sse_runtime_error_source_chunk_for_protocol(
                             "V3ServerRespOutbound05ClientFrame",
                             "front_sse_io_stream_failed",
                             error.to_string(),
                             599,
+                            protocol,
                         );
                         Some((Ok(frame), (Box::pin(stream::empty()), true)))
                     }
@@ -648,11 +722,12 @@ pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<D
                             .copied()
                             .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
                             .unwrap_or("Front SSE IO stream panicked");
-                        let frame = v3_sse_runtime_error_source_chunk(
+                        let frame = v3_sse_runtime_error_source_chunk_for_protocol(
                             "V3ServerRespOutbound05ClientFrame",
                             "front_sse_io_stream_panicked",
                             message,
                             599,
+                            protocol,
                         );
                         Some((Ok(frame), (Box::pin(stream::empty()), true)))
                     }
@@ -669,7 +744,7 @@ pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<D
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     Body::from_stream(stream::unfold(
         (stream, interval, true, keepalive_chunk),
-        |(mut stream, mut interval, initial, keepalive_chunk)| async move {
+        move |(mut stream, mut interval, initial, keepalive_chunk)| async move {
             if initial {
                 return Some((
                     Ok::<Vec<u8>, io::Error>(keepalive_chunk.clone()),
@@ -689,11 +764,12 @@ pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<D
             match next {
                 Some((Ok(bytes), state)) => Some((Ok(bytes), state)),
                 Some((Err(error), (stream, interval, _, keepalive_chunk))) => {
-                    let frame = v3_sse_runtime_error_source_chunk(
+                    let frame = v3_sse_runtime_error_source_chunk_for_protocol(
                         "V3ServerRespOutbound05ClientFrame",
                         "front_sse_io_stream_failed",
                         error.to_string(),
                         599,
+                        protocol,
                     );
                     Some((
                         Ok(frame),

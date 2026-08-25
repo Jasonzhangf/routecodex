@@ -690,10 +690,11 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             &request_id,
         ));
     }
-    responses_direct_output_response_with_console(
+    responses_direct_output_response_with_console_for_protocol(
         frame,
         stream_console_finalizer,
         Some(Duration::from_millis(state.server.http_sse_keepalive_ms)),
+        V3SseClientProtocol::OpenAiChat,
     )
 }
 
