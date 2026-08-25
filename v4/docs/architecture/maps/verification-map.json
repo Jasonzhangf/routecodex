@@ -1108,6 +1108,18 @@
       "required_for": ["routecodex-v4-governance:architecture_stable"]
     },
     {
+      "gate_id": "v4_parity_differential_positive",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-PARITY-HARNESS-001"],
+      "command": "node scripts/architecture/verify-v4-product-differential.mjs",
+      "argv": ["node", "scripts/architecture/verify-v4-product-differential.mjs"],
+      "producer": {"adapter": "node", "identity": "v4_parity_differential_positive"},
+      "evidence_role": "positive",
+      "input_paths": ["scripts/architecture/verify-v4-product-differential.mjs", "docs/architecture/v3-v4-semantic-parity-map.yml"],
+      "required_for": ["source_green"]
+    },
+    {
       "gate_id": "v4_parity_ledger_positive",
       "status": "active",
       "owner_module_id": "routecodex-v4-governance",

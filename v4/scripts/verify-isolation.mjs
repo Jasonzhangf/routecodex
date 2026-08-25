@@ -295,6 +295,7 @@ function checkMainlineEdges(mainlinePath = path.join(v4Root, 'docs/architecture/
   allowedOwners.add('routecodex-v4-runtime-bin::spawn_servers');
   allowedOwners.add('routecodex-v4-runtime-bin::PipelineHandler');
   allowedOwners.add('routecodex-v4-runtime-bin::handle_responses');
+  allowedOwners.add('routecodex-v4-runtime-bin::project_provider_fault');
   allowedOwners.add('routecodex-v4-runtime-bin::run_managed_child');
   allowedOwners.add('routecodex-v4-runtime-bin::run_servertool');
   allowedOwners.add('routecodex-v4-cli::V4CommandIntent');
