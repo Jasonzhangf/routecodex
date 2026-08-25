@@ -10,7 +10,7 @@
 
 pub async fn execute_v3_direct_runtime_kernel_core<
     C: V3DirectProtocolCodec,
-    T: ResponsesTransport + ?Sized,
+    T: ResponsesTransport + ?Sized + 'static,
 >(
     mut control: C::Control,
     manifest: &V3Config05ManifestPublished,
@@ -23,9 +23,10 @@ pub async fn execute_v3_direct_runtime_kernel_core<
     route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
 ) -> V3ResponsesDirectRuntimeOutput
 where
+    C: Send + Sync + 'static,
     C::Control: Clone + Send + Sync + 'static,
-    C::Standardized: Send,
-    C::Policy: Send,
+    C::Standardized: Send + Sync + 'static,
+    C::Policy: Send + Sync + 'static,
 {
     let request_key_catalog =
         crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog();
@@ -46,7 +47,7 @@ where
 
 pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
     C: V3DirectProtocolCodec,
-    T: ResponsesTransport + ?Sized,
+    T: ResponsesTransport + ?Sized + 'static,
 >(
     mut control: C::Control,
     manifest: &V3Config05ManifestPublished,
@@ -58,7 +59,19 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
     provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
     request_key_catalog: &crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog,
-) -> V3ResponsesDirectRuntimeOutput {
+) -> V3ResponsesDirectRuntimeOutput
+where
+    C: Send + Sync + 'static,
+    C::Control: Clone + Send + Sync + 'static,
+    C::Standardized: Send + Sync + 'static,
+    C::Policy: Send + Sync + 'static,
+{
+    let raw_for_handoff = raw.clone();
+    let manifest_for_handoff = manifest.clone();
+    let control_for_handoff = control.clone();
+    let transport_for_handoff = transport.handoff_handle();
+    let provider_failure_event_sink_for_handoff = provider_failure_event_sink.cloned();
+    let route_selection_event_sink_for_handoff = route_selection_event_sink.cloned();
     let accumulator = V3RuntimeObservabilityAccumulator::start();
     let runtime_timing = accumulator.timing();
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
@@ -856,6 +869,102 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
                     true,
                 );
                 let stream = crate::kernel::direct_runtime_helpers_stream::commit_direct_sse_stream(stream);
+                let stream = if let Some(transport) = transport_for_handoff.clone() {
+                    let provider_target = C::policy_target(&policy).candidate.clone();
+                    let failure_scope = direct_failure_session_scope.clone();
+                    let provider_health_for_handoff = provider_health.clone();
+                    let manifest = manifest_for_handoff.clone();
+                    let raw = raw_for_handoff.clone();
+                    let control = control_for_handoff.clone();
+                    let provider_failure_event_sink = provider_failure_event_sink_for_handoff.clone();
+                    let route_selection_event_sink = route_selection_event_sink_for_handoff.clone();
+                    let handoff = move |source: V3Error01SourceRaised| {
+                        let transport = transport.clone();
+                        let provider_health = provider_health_for_handoff.clone();
+                        let manifest = manifest.clone();
+                        let raw = raw.clone();
+                        let control = control.clone();
+                        let provider_failure_event_sink = provider_failure_event_sink.clone();
+                        let route_selection_event_sink = route_selection_event_sink.clone();
+                        let provider_target = provider_target.clone();
+                        let failure_scope = failure_scope.clone();
+                        async move {
+                            provider_health
+                                .record_post_commit_provider_stream_failure_from_source(
+                                    &failure_scope,
+                                    &provider_target.provider_id,
+                                    Some(&provider_target.auth_alias),
+                                    Some(&provider_target.model_id),
+                                    &source,
+                                )
+                                .map_err(|message| {
+                                    build_v3_error_01_source_raised(
+                                        V3ErrorSourceKind::RuntimeFailure,
+                                        "V3DirectSseHandoffRuntime",
+                                        "provider_stream_failure_bookkeeping_failed",
+                                        message,
+                                    )
+                                })?;
+                            let next = tokio::task::spawn_blocking(move || {
+                                std::thread::Builder::new()
+                                    .name("routecodex-v3-sse-handoff".to_owned())
+                                    .spawn(move || {
+                                        let runtime = tokio::runtime::Builder::new_current_thread()
+                                            .enable_all()
+                                            .build()
+                                            .map_err(|error| error.to_string())?;
+                                        let request_key_catalog = crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog();
+                                        Ok::<_, String>(runtime.block_on(
+                                            execute_v3_direct_runtime_kernel_core_with_key_catalog::<C, Arc<dyn ResponsesTransport>>(
+                                                control,
+                                                &manifest,
+                                                raw,
+                                                &transport,
+                                                provider_health,
+                                                now_epoch_ms,
+                                                allow_exhaustion_rescue_probe,
+                                                provider_failure_event_sink.as_ref(),
+                                                route_selection_event_sink.as_ref(),
+                                                &request_key_catalog,
+                                            ),
+                                        ))
+                                    })
+                                    .map_err(|error| error.to_string())?
+                                    .join()
+                                    .map_err(|_| "SSE handoff runtime thread panicked".to_owned())?
+                            })
+                            .await
+                            .map_err(|error| {
+                                build_v3_error_01_source_raised(
+                                    V3ErrorSourceKind::RuntimeFailure,
+                                    "V3DirectSseHandoffRuntime",
+                                    "provider_stream_handoff_runtime_join_failed",
+                                    error.to_string(),
+                                )
+                            })?
+                            .map_err(|message| {
+                                build_v3_error_01_source_raised(
+                                    V3ErrorSourceKind::RuntimeFailure,
+                                    "V3DirectSseHandoffRuntime",
+                                    "provider_stream_handoff_runtime_failed",
+                                    message,
+                                )
+                            })?;
+                            match next.client_payload.body {
+                                V3ClientBody::Sse(stream) => Ok(Some(stream)),
+                                V3ClientBody::Json(_) | V3ClientBody::Bytes(_) | V3ClientBody::CommittedSse(_) => Ok(None),
+                            }
+                        }
+                    };
+                    crate::kernel::direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream(
+                        stream,
+                        response_projection.compat_plan.provider_protocol,
+                        handoff,
+                        Some(8),
+                    )
+                } else {
+                    stream
+                };
                 drop(provider_action_permit.take());
                 V3ClientBody::Sse(stream)
             }
