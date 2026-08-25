@@ -345,12 +345,10 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                 continue;
             }
             if object.is_done() {
-                if !terminal_seen {
-                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                        "OpenAI Chat provider event stream emitted [DONE] before terminal finish_reason"
-                            .to_string(),
-                    ));
-                }
+                // `[DONE]` is transport closeout, not semantic terminality. If
+                // the gateway omitted finish_reason, the existing clean-EOF
+                // materialization below decides whether the accumulated output
+                // is a valid completion or must fail closed.
                 done_seen = true;
                 continue;
             }
@@ -610,6 +608,43 @@ mod tests {
         .expect("clean EOF without a tool call is a stop completion");
 
         assert_eq!(output["choices"][0]["finish_reason"], "stop");
+    }
+
+    #[tokio::test]
+    async fn done_without_finish_reason_is_transport_closeout_for_text_completion() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"data: {\"id\":\"chatcmpl_done\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n".to_vec(),
+        )]));
+
+        let output = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect("[DONE] must close a text completion without fabricating provider events");
+
+        assert_eq!(output["choices"][0]["message"]["content"], "ok");
+        assert_eq!(output["choices"][0]["finish_reason"], "stop");
+    }
+
+    #[tokio::test]
+    async fn done_without_content_still_fails_closed() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(b"data: [DONE]\n\n".to_vec())]));
+
+        let error = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect_err("[DONE] without a semantic response must not become success");
+
+        assert!(matches!(
+            error,
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message)
+                if message.contains("choices")
+        ));
     }
 
     #[tokio::test]
