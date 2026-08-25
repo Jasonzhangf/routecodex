@@ -2826,6 +2826,8 @@ resources:
   allowed_readers:
   - V4Error01SourceRaised
   forbidden_writers: []
+  may_enter_provider_body: false
+  may_enter_client_body: false
   binding_status: anchored
 forbidden_direct_edges:
 - from: v4.config.manifest
