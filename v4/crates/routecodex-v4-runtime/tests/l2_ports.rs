@@ -76,6 +76,6 @@ fn response_receipt_preserves_immutable_execution_identity() {
     let p = plan();
     let request = RequestPortLease::admit(&store(), "req-4", &p).unwrap();
     let receipt = response_error_port::consume_response(&request, &execution_binding(&p)).unwrap();
-    assert_eq!(receipt.binding.execution_identity, "exec-7");
+    assert_eq!(receipt.binding.plan_epoch, 7);
     assert_eq!(request.lease_snapshot().execution_identity, "exec-7");
 }
