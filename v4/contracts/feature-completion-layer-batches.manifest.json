@@ -315,7 +315,7 @@
       {"path":"contracts/real-runtime-admission.manifest.json","scope_hash":"sha256:1dd63ba0bd84acbae162663b534bfe1c7d5f5315e66d5310822090a5121e863c"},
       {"path":"contracts/active-link/frozen-consumer-registry.json","scope_hash":"sha256:2808e91efca384cc1c1ebf229d66803e0ffe834800908c8eaac847d6507f56c1"},
       {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:da16e5e4019ffd41b87e6332a96dfd616fb24f53647b9a888ac6fb52135c8fb8"},
-      {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:f9a194e35af2f30a8517a0f7998d0e44c2bf40c520ae30d8c16ad03d63b58d50"}
+      {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:4f83a7492cc871e1da5e8b8af2edfce9475fb6bf7c4ebae81bf102bd445c3ffa"}
     ],
     "wiring_started": true,
     "wiring_edges": [
@@ -348,7 +348,6 @@
       "added:workspace:member:crates/routecodex-v4-runtime-bin",
       "surface:Cargo.toml:sha256:5ce83c9e3837823b19aa44dfdc28948a0123973fcb5e853e385f42aff3add62e",
       "surface:contracts/active-link/frozen-consumer-registry.json:sha256:70df9fa89217c6bd7241788294cf3ded9a6922ea6bdd908e20468cda4d96f375",
-      "surface:crates/routecodex-v4-runtime-bin/**:sha256:5237b680d4312859ae0c16ce81ead1459f23f4e42558b9b36bdfe864a0f72c3b",
       "surface:docs/architecture/maps/mainline-call-map.json:sha256:19a38f374876225682de890790957a2416b42343c72d4803774868871b6732d8",
       "surface:scripts/build.mjs:sha256:ec1a7a511a514e5334a418bca25f47a554051134429aa1eeff5421f229d63f75",
       "surface:scripts/verify.mjs:sha256:a30d109629e8ff411db4beef8a6e312826c412d24696923f3b296f03e912e804"
