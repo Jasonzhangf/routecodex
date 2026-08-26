@@ -51,6 +51,7 @@ M00 -> M01 -> M02 --┐
 |---|---|---|---|---|
 | execution owner | M05-T01 | `blocked_scope_mismatch_and_external_input` | 否 | 除真实 Active-link/isolation 输入缺失外，父审计发现 dirty diff 含 `standard-plugins/**` 与多个 execution-binding/node-graph/mock/resource-binding gate 文件，超出现有 M05 allowed_paths；必须逐文件归属/授权后才能形成 candidate；不得清理、伪造 artifact、clean、AGY、commit、merge |
 | build-link owner | B01 | `blocked_external_input` | 否 | 独立 claim/worktree 内已完成并验证真实 consumer registry/mainline edge（23/23 resolver red、Active-link、execution-binding）；canonical `gen-index/verify-index` 对隔离 worktree 缺真实 frozen Active fail-fast，不得复制、伪造、软链或 allowlist；等待 Active/record-graph owner 提供 exact target input |
+| Active lifecycle owner | B02 | `dispatched` | 是（与 B01 只读等待并行） | 复用既有 Cordis host-daemon 会话，新建独立 claim/worktree；只由 `appsdk::lifecycle` / `appsdk::record_graph` 按真实 promotion→freeze→publish 流程提供 `routecodex-v4-base-node active-v2` 及 record graph；不得修改 B01/M05/D0/M08 或直接编辑 Active/Protected |
 | differential governance | D0-T01 | `stale_owner_handoff_required` | 否 | claim 仍 active 但原 feature-layer worktree 已不存在且无可调用会话；必须先完成 owner handoff，M05 不得抢改其 gate 文件 |
 | async data plane | M08-T01 | `ready_for_m05_execution_owner_handoff` | 否（等待交接） | provider/server 独立 slice 已完成并写入 handoff；整体 runtime-bin async stream/cancellation 尚未完成，必须等待 M05 交接，不覆盖 M05 |
 | provider live admission | M00-T05 | `blocked` | 否 | Responses WebSocket v2 / credential blocker；不得猜 endpoint、伪造 101 或绕过真实 continuation |
@@ -58,7 +59,7 @@ M00 -> M01 -> M02 --┐
 | governance audit | M00-T10 | `merged_and_cleaned` | 否 | merge `de7596514`；red/positive 主树复验通过；claim、worktree、branch 已释放/清理 |
 | protocol/tools/admin contract | M11-T01 | `merged_and_cleaned` | 否 | merge `d48956155`；合同/host/red gates 主树复验通过；resource binding 的既有 host owner/catalog drift 已记录；claim、worktree、branch 已释放/清理 |
 
-当前无可安全并发的 V4 实现 lane：B01 已完成 build-link registry/mainline 修复但被真实 frozen Active 输入阻塞；M05 是唯一 execution owner，必须保留 dirty candidate 等待 B01/Active 输入；M08 的 provider/server slice 已 ready，但整体 runtime-bin 接线必须等待 M05 明确交接；D0-T01 仍是 stale owner handoff，不能抢改。M06 及后续 milestone 继续等待 M05 合入重构主树并完成主树复验。M00-T10、M11-T01 已完成合入并清理，不得重复 claim；不得为填充并发槽位新开会话或新 worktree。
+当前可并发 lane：B02 正在独立处理 Active lifecycle 发布，B01 保持只读等待/验证；二者不共享 worktree，均不修改 M05。M05 是唯一 execution owner，必须保留 dirty candidate 等待真实 Active 输入和 scope 分类；M08 的 provider/server slice 已 ready，但整体 runtime-bin 接线必须等待 M05 明确交接；D0-T01 仍是 stale owner handoff，不能抢改。M06 及后续 milestone 继续等待 M05 合入重构主树并完成主树复验。M00-T10、M11-T01 已完成合入并清理，不得重复 claim；不得为填充并发槽位新开额外会话或 worktree。
 
 ## 当前派发记录（2026-08-26，证据优先）
 
@@ -66,6 +67,7 @@ M00 -> M01 -> M02 --┐
 |---|---|---|
 | M05-T01（原会话复用） | 已恢复自身 `runtime → plugin-contract` 边；继续保留 M05 execution candidate，等待 B01 handoff 后重跑 `v4/` Active/admission/build/install/live/AGY | 当前同时被外部 Active/build-link 输入和 scope mismatch 阻塞；已要求逐文件分类 standard-plugins 与 gate/map 改动；禁止自行清理、伪造 artifact、allowlist、clean、AGY、commit、merge、cleanup |
 | B01（复用 M02 会话） | 新 claim/worktree 处理 build-link consumer registry 与 canonical frozen Active resolver binding；只允许合入 `codex/v4-cordis-refactor-main` | exact consumer edges 已 red→green，23/23 resolver tests、Active-link、execution-binding、diff-check 通过；canonical Active index 仍因隔离 worktree 缺真实 frozen Active 输入而阻塞，已写 handoff；不 commit/AGY/queue/cleanup |
+| B02（复用 Cordis host-daemon 会话） | 新 claim/worktree 由 Active lifecycle/record-graph owner 按 AppSDK 正式流程发布 `routecodex-v4-base-node active-v2`；只允许为真实输入闭环服务，不得改 B01/M05/D0/M08 | 已派发；必须先核对实际 CLI/合同和现有记录，完成真实 promotion/freeze/publish 或记录精确 owner/权限阻塞；不得直接写 Active/Protected 或伪造 record graph |
 | M08-T01（原会话复用） | provider/server async transport、chunked response、cancellation/deadline、合同/边界/定向 red/green/evidence 已完成；等待 M05 execution owner 明确交接后再接 runtime-bin | 独立 slice ready；整体 M08 未完成，不得提前合并或宣称完成 |
 | D0-T01（既有 owner） | 继续其 differential/build-guard gate 收口；当前等待 stale owner handoff | claim 仍占用 gate projection；原 worker 会话不可见，禁止重复派发、抢改 gate 文件或自动接管 |
 | M00-T10 / M11-T01 | 已合入重构主树后完成主树复验、release claim、worktree/branch cleanup | 已完成并清理 |
