@@ -25,7 +25,7 @@
       "output_path": "repo/.github/workflows/test.yml",
       "source_path": ".github/workflows/test.yml",
       "source_commit": "61eb7acec0368e5b2d7e6d963a8ddb48cde0d99c",
-      "sha256": "688cc534e4fbe4471038b1126d3b9e02a3fb16e9f14b83306ed7b0d0b30cf7f2"
+      "sha256": "8a65603352b270808e94a275e6a162a16aa2cd489725197dc96f0ce9efe5ed2f"
     },
     {
       "output_path": "repo/docs/architecture/README.md",
@@ -2938,5 +2938,5 @@
       "sha256": "5cc420540dffe755ef55174e73198b28d7b0142769fd3fbae89c5c8016250e79"
     }
   ],
-  "manifest_digest": "b2125b471e120ea59251dbb21b8cb447c9fe4928ad9cd87b6af135ff76c463d0"
+  "manifest_digest": "af4105f8d3a5a8e35fe5d6e6af86b0187c33eb8358706a4b3280b5833c0be6d2"
 }
