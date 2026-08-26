@@ -43,7 +43,6 @@
     "v4/docs/goals/v4-relay-continuation-goal-prompt.md",
     "v4/docs/goals/v4-relay-continuation-slice-plan.md",
     "v4/docs/goals/v4-resource-anchor-complete-plan.md",
-    "v4/docs/README.md",
     "v4/scripts/_gate-matrix.mjs",
     "v4/scripts/architecture/lib/feature-layer-batch-contract.mjs",
     "v4/scripts/architecture/lib/feature-layer-batch-registry.mjs",
