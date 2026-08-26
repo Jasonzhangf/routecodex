@@ -2,20 +2,24 @@
   "fix_candidate_id": "v4-runtime-002-epoch-candidate",
   "issue_id": "V4-RUNTIME-002",
   "module_id": "routecodex-v4-node-container",
-  "worktree_id": "v4-runtime-002-candidate-final2-20260824T044500Z-Macstudio",
-  "base_commit": "8e56308138bb146833907397f18c8d6c00d48f70",
-  "head_commit": "98a81f86aeb22b240d804b168ad18c076f584daf",
-  "tree_hash": "19f0cfb9895380cada1ef3c4acc81f4944445e07",
-  "diff_hash": "sha256:71303d8b2d6efeea9f43fadaf0181de9ebf1df25f115fc45b84d744732eca799",
+  "worktree_id": "v4-cordis-m00-empty-epoch-admission-20260826T081500Z",
+  "base_commit": "8b070acfa87efd8049880f8857e40c537b179894",
+  "head_commit": "77368ae40ca38f652b7b8f7735fe58dcd890190a",
+  "tree_hash": "3c052b00e2ac85af2bca31c94d2a43b9a6a577e7",
+  "diff_hash": "sha256:38a5ac7f93247e739136109690c51b1392457772e5bd4b985b0c6d965b70074c",
   "design_id": "v4-feature-completion-r002-epoch-lifecycle",
   "owner": "routecodex-v4-node-container",
-  "scope_hash": "sha256:fad0b8c312471c8be230b3e3731517de53254b4c7195aa62c4d0c1efba779063",
+  "scope_hash": "sha256:97090223dfd4124992ad95e0c1e93fb71348f15db446831dc1258695c8e85e3c",
   "changed_paths": [
     "v4/crates/routecodex-v4-node-container/src/lib.rs",
-    "v4/crates/routecodex-v4-node-container/tests/l2_epoch.rs"
+    "v4/crates/routecodex-v4-node-container/tests/l2_epoch.rs",
+    "v4/docs/architecture/maps/function-map.json",
+    "v4/docs/goals/v4-cordis-mainline-audit-checklist.md",
+    "v4/docs/goals/v4-cordis-mainline-milestone-task-tables.md",
+    "v4/docs/goals/v4-cordis-mainline-progress.md"
   ],
   "verification_evidence_ids": ["boundary-audit", "plane-isolation", "positive", "red-gate"],
-  "created_at": "2026-08-24T04:45:00Z",
+  "created_at": "2026-08-26T08:15:00Z",
   "batch_id": "H",
   "task_ids": ["V4-RUNTIME-002"]
 }
