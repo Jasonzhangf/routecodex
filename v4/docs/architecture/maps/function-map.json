@@ -579,6 +579,26 @@
       ]
     },
     {
+      "function_id": "v4.provider.bound_raw_evidence_binding",
+      "owner": "routecodex-v4-provider",
+      "status": "active",
+      "entry_symbols": [
+        "PROVIDER_BOUND_RAW_EVIDENCE_OWNER",
+        "ProviderBoundRawEvidence",
+        "ProviderBoundRawEvidenceOwnerContract::bind",
+        "ProviderBoundRawEvidenceBindingError"
+      ],
+      "resource_ids": [
+        "v4.provider.bound_raw_evidence"
+      ],
+      "required_gates": [
+        "v4_provider_bound_raw_evidence_positive",
+        "v4_provider_bound_raw_evidence_red",
+        "v4_parity_gate_resource_binding",
+        "v4_parity_gate_plane_isolation"
+      ]
+    },
+    {
       "function_id": "v4.server.console_identity_evidence",
       "owner": "routecodex-v4-server",
       "entry_symbols": [

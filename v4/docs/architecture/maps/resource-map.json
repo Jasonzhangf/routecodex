@@ -717,6 +717,17 @@
       "status": "active"
     },
     {
+      "resource_id": "v4.provider.bound_raw_evidence",
+      "owner": "routecodex-v4-provider::ProviderBoundRawEvidenceOwnerContract",
+      "truth_store": "crates/routecodex-v4-provider/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
       "resource_id": "v4.plugin.node_plugin_contract",
       "owner": "contract:v4-node-plugin",
       "truth_store": "contracts/node-plugin.contract.json",

@@ -438,6 +438,8 @@
         "contract_valid",
         "record_graph",
         "v4_provider_l2_regression",
+        "v4_provider_bound_raw_evidence_positive",
+        "v4_provider_bound_raw_evidence_red",
         "v4_parity_gate_resource_binding",
         "v4_parity_gate_plane_isolation"
       ]

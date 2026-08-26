@@ -104,6 +104,64 @@ pub struct ProviderRawResponse {
     pub body: Vec<u8>,
 }
 
+pub const PROVIDER_BOUND_RAW_EVIDENCE_OWNER: &str =
+    "routecodex-v4-provider::ProviderBoundRawEvidence";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderBoundRawEvidence {
+    pub request_id: String,
+    pub provider_request: Vec<u8>,
+    pub provider_response: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderBoundRawEvidenceBindingError {
+    MissingOwner,
+    InvalidOwner { owner: String },
+    MissingRequestId,
+    MissingProviderRequest,
+    MissingProviderResponse,
+}
+
+/// Contract-only binding point for future live provider capture.
+///
+/// M00 may validate ownership and identity only. M08 supplies transport bytes
+/// and decides when a capture is made; no transport, retry, or payload logic
+/// belongs here.
+pub struct ProviderBoundRawEvidenceOwnerContract;
+
+impl ProviderBoundRawEvidenceOwnerContract {
+    pub fn bind(
+        owner: &str,
+        request_id: &str,
+        provider_request: &[u8],
+        provider_response: &[u8],
+    ) -> Result<ProviderBoundRawEvidence, ProviderBoundRawEvidenceBindingError> {
+        if owner.trim().is_empty() {
+            return Err(ProviderBoundRawEvidenceBindingError::MissingOwner);
+        }
+        if owner != PROVIDER_BOUND_RAW_EVIDENCE_OWNER {
+            return Err(ProviderBoundRawEvidenceBindingError::InvalidOwner {
+                owner: owner.to_string(),
+            });
+        }
+        if request_id.trim().is_empty() {
+            return Err(ProviderBoundRawEvidenceBindingError::MissingRequestId);
+        }
+        if provider_request.is_empty() {
+            return Err(ProviderBoundRawEvidenceBindingError::MissingProviderRequest);
+        }
+        if provider_response.is_empty() {
+            return Err(ProviderBoundRawEvidenceBindingError::MissingProviderResponse);
+        }
+        Ok(ProviderBoundRawEvidence {
+            request_id: request_id.to_string(),
+            provider_request: provider_request.to_vec(),
+            provider_response: provider_response.to_vec(),
+        })
+    }
+}
+
 /// Provider-owned real transport stream. The runtime owns semantic frame
 /// validation and the server owns client chunk emission.
 pub struct ProviderResponseStream {
