@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use routecodex_v4_cordis_bridge::{
     compile_node, execute_plan, BridgeError, ExecCtx, HandleRegistry, NodeExecutionInput,
-    PluginHandle, ScopeContinuationOwner, ScopeSessionCommand, ScopeSessionOperation,
+    PluginHandle, ScopeSessionCommand, ScopeSessionOperation,
 };
 use routecodex_v4_plugin_contract::{
     NodePluginDescriptor, NodeSelector, PluginEffect, PluginKind, PluginPhase, ResourceAxis,
@@ -238,7 +238,6 @@ impl PluginHandle for ScopeRoundtripHandle {
     fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
         let value = json!({
             "entry_protocol": "responses",
-            "continuation_owner": "direct",
             "pipeline_id": "pipeline-1",
             "port": 5555,
             "session_scope": "session-1",
@@ -484,7 +483,6 @@ fn scope_command_typed_roundtrip_uses_dedicated_control_slot() {
     let scope = ScopeSessionCommand::parse(&output.control["scope_command"])
         .expect("scope command slot remains typed");
     assert_eq!(scope.operation, ScopeSessionOperation::Bind);
-    assert_eq!(scope.continuation_owner, ScopeContinuationOwner::Direct);
     assert_eq!(output.data, json!({"unchanged": true}));
 }
 
@@ -492,7 +490,6 @@ fn scope_command_typed_roundtrip_uses_dedicated_control_slot() {
 fn scope_command_rejects_unknown_field_and_invalid_operation() {
     let base = json!({
         "entry_protocol": "responses",
-        "continuation_owner": "direct",
         "pipeline_id": "pipeline-1",
         "port": 5555,
         "session_scope": "session-1",

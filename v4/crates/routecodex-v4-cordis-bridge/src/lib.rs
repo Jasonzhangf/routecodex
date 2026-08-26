@@ -39,27 +39,10 @@ impl ScopeEntryProtocol {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ScopeContinuationOwner {
-    Direct,
-    Relay,
-}
-
-impl ScopeContinuationOwner {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Direct => "direct",
-            Self::Relay => "relay",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct ScopeSessionCommand {
     pub entry_protocol: ScopeEntryProtocol,
-    pub continuation_owner: ScopeContinuationOwner,
     pub pipeline_id: String,
     pub port: u16,
     pub session_scope: String,
@@ -662,7 +645,6 @@ mod tests {
     fn scope_session_command_requires_complete_typed_shape() {
         let value = ScopeSessionCommand::parse(&json!({
             "entry_protocol": "responses",
-            "continuation_owner": "direct",
             "pipeline_id": "pipeline-1",
             "port": 5555,
             "session_scope": "session-1",
@@ -673,13 +655,11 @@ mod tests {
             "sequence": 1
         }))
         .expect("complete scope command parses");
-        assert_eq!(value.continuation_owner, ScopeContinuationOwner::Direct);
         assert_eq!(value.operation, ScopeSessionOperation::Bind);
 
         assert!(matches!(
             ScopeSessionCommand::parse(&json!({
-                "entry_protocol": "responses",
-                "continuation_owner": "direct"
+                "entry_protocol": "responses"
             })),
             Err(BridgeError::Protocol(_))
         ));
@@ -687,7 +667,6 @@ mod tests {
         assert!(matches!(
             ScopeSessionCommand::parse(&json!({
                 "entry_protocol": "responses",
-                "continuation_owner": "direct",
                 "pipeline_id": "pipeline-1",
                 "port": 5555,
                 "session_scope": "session-1",
@@ -703,7 +682,6 @@ mod tests {
         assert!(matches!(
             ScopeSessionCommand::parse(&json!({
                 "entry_protocol": "anthropic",
-                "continuation_owner": "direct",
                 "pipeline_id": "pipeline-1",
                 "port": 5555,
                 "session_scope": "session-1",
@@ -718,7 +696,6 @@ mod tests {
 
         let relay = ScopeSessionCommand::parse(&json!({
             "entry_protocol": "chat",
-            "continuation_owner": "relay",
             "pipeline_id": "pipeline-1",
             "port": 5555,
             "session_scope": "session-1",
@@ -730,7 +707,6 @@ mod tests {
         }))
         .expect("chat relay scope command parses");
         assert_eq!(relay.entry_protocol, ScopeEntryProtocol::Chat);
-        assert_eq!(relay.continuation_owner, ScopeContinuationOwner::Relay);
     }
 
     #[test]
