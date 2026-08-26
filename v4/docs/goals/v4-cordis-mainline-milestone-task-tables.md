@@ -35,7 +35,7 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M02-T01 | `feature_id:v4.cordis_generic_factory` | M01 | blocked_by_M01 | `codex/v4-cordis-refactor-main` |
+| M02-T01 | `feature_id:v4.cordis_generic_factory` | M01 | available (M01 merged and main-tree verified) | `codex/v4-cordis-refactor-main` |
 
 ## M03 — Cordis Host Daemon
 

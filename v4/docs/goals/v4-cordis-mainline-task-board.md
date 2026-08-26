@@ -46,7 +46,7 @@ M00 结构出口：T00/T01/T02/T03/T04/T06/T07/T09 都完成并合并主树；T0
 | task_id | claim_id | 内容 | 依赖 | 状态 | merge target |
 |---|---|---|---|---|---|
 | M01-T01 | `feature_id:v4.native_plugin_abi` | NativePlugin、Resolver、Config、Outcome/Failure、catalog exporter | M00 structural contracts | `merged` (`7c7e141f5`, main-tree merge `100b9fd12`) | refactor main |
-| M02-T01 | `feature_id:v4.cordis_generic_factory` | canonical catalog → generic Cordis factory → Fiber mount/dispose | M01 | `blocked` | refactor main |
+| M02-T01 | `feature_id:v4.cordis_generic_factory` | canonical catalog → generic Cordis factory → Fiber mount/dispose | M01 | `available` (M01 merged and main-tree verified) | refactor main |
 | M03-T01 | `feature_id:v4.cordis_host_daemon` | child daemon、handshake、socket、heartbeat、generation、reconcile | M00 structural contracts | `available` (T05 独立 blocker 不传播) | refactor main |
 | M04-T01 | `feature_id:v4.execution_epoch_transaction` | prepare/commit/abort/drain/rollback、stale/hash/idempotency | M02 + M03 | `blocked` | refactor main |
 | M05-T01 | `feature_id:v4.execution_engine` | 唯一 ExecutionEngine、真实 NodeOutcome 链、删除第二 graph/registry | M04 | `blocked` | refactor main |
