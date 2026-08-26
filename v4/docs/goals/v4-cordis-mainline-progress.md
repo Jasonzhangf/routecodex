@@ -36,7 +36,7 @@ M00 -> M01 -> M02 --┐
 | M08 async data plane | `in_progress_with_execution_boundary` | M00 structural contracts + M00-T07 | 原 worktree/claim 已恢复；native transport、chunked stream、async listener 已推进。runtime handler async stream/cancellation、M00-T07 live evidence、full gates/live/AGY 未闭环；不得覆盖 M05 execution owner |
 | M09 SSE | `blocked` | M07 + M08 | 必须串行 |
 | M10 state semantics | `blocked` | M09 | 必须串行 |
-| M11 protocols/tools/admin | `blocked` | M10 | 协议 lane 与 tools/admin lane 可并行 |
+| M11 protocols/tools/admin | `contract_preflight_merged` | M10 | M11-T01 前置合同已合入；实现仍依赖 M10，既有 host owner/catalog drift 仍需后续治理 |
 | M12 parity/release | `blocked` | M11 + D0 | 最终串行收敛 |
 
 ## 周期
@@ -54,7 +54,7 @@ M00 -> M01 -> M02 --┐
 | async data plane | M08-T01 | `in_progress_with_execution_boundary` | 是（受边界约束） | 已复用原会话继续；只推进 native async transport/handler/cancellation/evidence，遇 M05 execution-owner 同语义冲突即停并报告，不覆盖 M05 |
 | provider live admission | M00-T05 | `blocked` | 否 | Responses WebSocket v2 / credential blocker；不得猜 endpoint、伪造 101 或绕过真实 continuation |
 | next dependency | M06-T01 | `blocked` | 否 | 必须等待 M05 合入重构主 tree 并完成主树复验 |
-| governance audit | M00-T10 | `dispatched` | 是 | 已复用 M02 会话；仅治理文档/机器任务清单/红测，独立于 M05/D0/M08；等待新 claim/worktree/evidence |
-| protocol/tools/admin contract | M11-T01 | `dispatched` | 是 | 已复用 M03 会话；仅 M11 前置合同与验证映射，独立于 M05/D0/M08；等待新 claim/worktree/evidence |
+| governance audit | M00-T10 | `merged_and_cleaned` | 否 | merge `de7596514`；red/positive 主树复验通过；claim、worktree、branch 已释放/清理 |
+| protocol/tools/admin contract | M11-T01 | `merged_and_cleaned` | 否 | merge `d48956155`；合同/host/red gates 主树复验通过；resource binding 的既有 host owner/catalog drift 已记录；claim、worktree、branch 已释放/清理 |
 
-当前可并发 lane：M00-T10、M11-T01、M08-T01。M00-T10 与 M11-T01 必须建立新 claim/worktree；M08 使用已存在的原 claim/worktree。三者都必须完成 red-first、边界审计、定向验证、evidence、AGY（仅在前置验证完成后）、merge queue；M08 不得覆盖 M05 execution owner。M05、D0 继续保持原 owner；M06 仍等待 M05 合入并完成主树复验。
+当前可并发 lane：M08-T01，以及后续经 owner 审核开放的独立治理 lane。M00-T10、M11-T01 已完成合入并清理；不得重复 claim。M08 使用既有 worktree，继续受 M05 execution-owner 边界约束。M05、D0 继续保持原 owner；M06 仍等待 M05 合入并完成主树复验。
