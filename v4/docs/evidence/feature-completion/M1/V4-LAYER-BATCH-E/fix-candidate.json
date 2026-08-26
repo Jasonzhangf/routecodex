@@ -6,10 +6,10 @@
   "base_commit": "45be5f5623e617d89260cce663a2b20ea6b09d72",
   "head_commit": "0da3812901471480f27520ff4f4c838c8ebc6661",
   "tree_hash": "cc7622edce583d72b8631a3c1f50da50cc878398",
-  "diff_hash": "sha256:9cf74b482ede311f1135f127200530781b0c7bae85a59c9fb3fb79bff3bffc41",
+  "diff_hash": "sha256:d4a1515a906fc7295f58d09ee8515a5b2b8b83bb766b88d0bd696ad14d2c18ed",
   "design_id": "v4-feature-completion-response-plugins",
   "owner": "routecodex-v4-standard-plugins",
-  "scope_hash": "sha256:0f6e6e56354bd1fe9610062838b0ea68e1bf94ac02f445a280c167f26293afd4",
+  "scope_hash": "sha256:0abd123a9e5705729ce11cac24c3271c351846db677b43494d1f8484d1fddb03",
   "changed_paths": [
     "v4/crates/routecodex-v4-standard-plugins/src/lib.rs",
     "v4/crates/routecodex-v4-standard-plugins/src/response_decode.rs",
