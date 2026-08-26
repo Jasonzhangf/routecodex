@@ -47,13 +47,13 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M04-T01 | `feature_id:v4.execution_epoch_transaction` | M02 + M03 | available (M02/M03 main-tree gates passed) | `codex/v4-cordis-refactor-main` |
+| M04-T01 | `feature_id:v4.execution_epoch_transaction` | M02 + M03 | merged (`9914a69fe` → `ba4af6c02`; target gates passed; active-link manifest environment-blocked) | `codex/v4-cordis-refactor-main` |
 
 ## M05 — 唯一 ExecutionEngine
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M05-T01 | `feature_id:v4.execution_engine` | M04 | blocked | `codex/v4-cordis-refactor-main` |
+| M05-T01 | `feature_id:v4.execution_engine` | M04 | available | `codex/v4-cordis-refactor-main` |
 
 ## M06 — Responses Request 主线
 

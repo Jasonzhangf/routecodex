@@ -29,8 +29,8 @@ M00 -> M01 -> M02 --┐
 | M02 generic factory | `merged` | M01 | task `ff9065c8c` 已合入重构主树 `aa5518b50`；主树 host 30/30、red 10/10、release build、plugin tests 通过 |
 | M03 Cordis daemon | `merged` | M00 structural contracts | task `8be1e7ced` 已合入重构主树 `3a425633c`；daemon 3/3、host 联测 30/30、red 10/10、release build 通过 |
 | D0 differential harness | `in_progress` | M00 structural contracts | 已有独立 worker；与 M03/M08 并行，T05 不传播阻塞 |
-| M04 epoch transaction | `available` | M02 + M03 | 两个前置 task 已合并并完成主树复验；可独立 claim |
-| M05 ExecutionEngine | `blocked` | M04 | 必须串行 |
+| M04 epoch transaction | `merged` | M02 + M03 | task `9914a69fe` 已以 merge `ba4af6c02` 合入重构主树；目标树定向 gates 全部通过，active-link 仍缺 frozen-consumer-registry 环境文件 |
+| M05 ExecutionEngine | `available` | M04 | M04 已完成目标树合入与复验；claim 后独立 worktree 开发 |
 | M06 request JSON | `blocked` | M05 | 必须串行 |
 | M07 response JSON | `blocked` | M06 | 必须串行 |
 | M08 async data plane | `blocked_by_incomplete_sync_transport_migration` | M00 structural contracts + M00-T07 | worker 已完成局部 async listener/native transport 测试，但旧 curl、同步 runtime-bin、真实 evidence integration 未完成；另有无关 formatter dirty，未合入；T05 不是该 blocker |
