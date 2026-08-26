@@ -48,7 +48,7 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 
 ### M00 — 架构冻结与 ratchet
 
-落地 ADR、ExecutionEpochBundle、NativePluginCatalog、Control protocol、NodeOutcome 合同；登记当前 bypass（内部 NodeContainer、静态 registry、runtime-bin 直调、丢弃 node output、测试 binding）；建立“违规只能减少”的 gate。退出：合同可解析、maps/manifest/wiki 同步、违规清单可测量且不得新增。
+落地 ADR、ExecutionEpochBundle、NativePluginCatalog、Control protocol、NodeOutcome 合同；登记当前 bypass（内部 NodeContainer、静态 registry、runtime-bin 直调、丢弃 node output、测试 binding）；建立“违规只能减少”的 gate。M00-T07 只冻结未来 live transport 的真实 provider-bound/raw evidence owner 合同，实际 async/native transport 与 live capture integration 归 M08；不得用 M00 的 server/diagnostic contract 重建或伪造 provider wire。退出：合同可解析、maps/manifest/wiki 同步、违规清单可测量且不得新增，T05 live provider admission blocker 解除，M00-T07 evidence-owner contract 完成。
 
 ### M01 — NativePlugin ABI 与 resolver
 
