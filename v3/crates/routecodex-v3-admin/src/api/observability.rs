@@ -171,7 +171,9 @@ struct QueryRow {
     usage: Option<serde_json::Value>,
     timing_internal_ms: Option<u64>,
     timing_external_ms: Option<u64>,
+    #[serde(default)]
     servertool: bool,
+    #[serde(default)]
     stopless: bool,
     raw_artifact_ref: Option<String>,
 }

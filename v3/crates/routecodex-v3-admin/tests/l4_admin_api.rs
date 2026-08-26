@@ -424,7 +424,7 @@ async fn revisions_and_static_assets_are_served() {
     assert!(requests.status().is_success());
     let requests_body = requests.text().await.expect("requests page body");
     assert!(
-        requests_body.contains("Realtime request lifecycle"),
+        requests_body.contains("Persistent request records"),
         "requests page rendered"
     );
     let css = http_client()

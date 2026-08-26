@@ -19,7 +19,9 @@ function el(tag, className, text) {
   const node = document.createElement(tag);
   if (tag === "button") node.type = "button";
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined && text !== null) {
+    node.textContent = typeof text === "string" || typeof text === "number" ? text : String(text);
+  }
   return node;
 }
 

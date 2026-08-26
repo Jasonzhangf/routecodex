@@ -78,6 +78,7 @@
       total: 0,
       stats: {},
       facets: { ports: {}, providers: {}, models: {}, routes: {}, sessions: {}, response_types: {}, error_categories: {} },
+      liveStats: {},
       selected: null,
       loading: false,
       eventLog: new Map(),
@@ -123,6 +124,7 @@
       }
       while (state.eventLog.size > 2048) state.eventLog.delete(state.eventLog.keys().next().value);
       state.recentEvents = data.recent_events || [];
+      state.liveStats = data.stats || {};
       renderStats(data.stats || {});
     }
 
@@ -250,7 +252,9 @@
       if (!ports.length) {
         const cell = document.createElement("td");
         cell.colSpan = 6;
-        portBody.replaceChildren(el("tr", null, cell));
+        const emptyRow = document.createElement("tr");
+        emptyRow.appendChild(cell);
+        portBody.replaceChildren(emptyRow);
       }
       const errorBody = document.querySelector("#errors-table tbody");
       const categories = Object.entries(state.facets.error_categories || {}).sort(([, a], [, b]) => b - a);
@@ -262,7 +266,9 @@
       if (!categories.length) {
         const cell = document.createElement("td");
         cell.colSpan = 3;
-        errorBody.replaceChildren(el("tr", null, cell));
+        const emptyRow = document.createElement("tr");
+        emptyRow.appendChild(cell);
+        errorBody.replaceChildren(emptyRow);
       }
       const portSelect = document.getElementById("port-filter");
       const selected = portSelect.value;
@@ -432,7 +438,7 @@
 
     function renderAll() {
       renderStatsCards();
-      renderStats({});
+      renderStats(state.liveStats);
       renderRequests();
       renderPagination();
       renderRequestDetail();
