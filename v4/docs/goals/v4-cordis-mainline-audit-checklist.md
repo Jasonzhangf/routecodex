@@ -41,6 +41,6 @@
 
 - [x] V4 已有 Cordis/NodeContainer/plugin plan/基础 maps 与 gates。
 - [x] M00-T01 合同已合并 V4 重构主树：`aaf8b1f39`。
-- [ ] M00-T02 ratchet 尚未完成 protected projection promotion。
+- [ ] M00-T02 ratchet 已合并主树，但 canonical live admission 仍被 5 个 upstream HTTP 502 样本阻塞。
 - [x] M00-T03 审计面已合并 V4 重构主树：`c4d13d7b8`。
 - [x] M00-T04 每个 milestone 独立 claim 表已建立并合并 V4 重构主树：`5e0090f9d`。

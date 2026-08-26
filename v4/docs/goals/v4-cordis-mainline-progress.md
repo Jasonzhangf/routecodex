@@ -17,7 +17,7 @@ M00 -> M01 -> M02 --┐
 |---|---|---|---|
 | M00-T00 迁移计划 | `merged` | 无 | 已合并 `3b62ffd9a` |
 | M00-T01 合同 | `merged` | 无 | 已进主树 |
-| M00-T02 ratchet/protected promotion | `blocked` | T01 | 与 T03 可并行，需修 protected gate 接线 |
+| M00-T02 ratchet/protected promotion | `merged` | T01 | 已合并；canonical live admission 的 upstream HTTP 502 阻塞 M00 退出 |
 | M00-T03 审计面 | `merged` | T01 | 已合并 `c4d13d7b8` |
 | M00-T04 每 milestone 独立 claim 表 | `merged` | T03 | 已合并 `5e0090f9d` |
 | M01 NativePlugin ABI | `blocked_by_M00` | M00 | M00 完成后可 claim |
