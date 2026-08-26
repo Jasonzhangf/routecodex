@@ -317,7 +317,7 @@
         "CordisMountCandidate::verify"
       ],
       "entry_paths": ["crates/routecodex-v4-cordis-bridge/src/lib.rs"],
-      "source_paths": ["crates/routecodex-v4-cordis-bridge/src/lib.rs", "crates/routecodex-v4-cordis-bridge/tests/l2_bridge.rs"],
+      "source_paths": ["crates/routecodex-v4-cordis-bridge/src/lib.rs"],
       "resource_ids": ["v4.cordis.mount_candidate"],
       "required_gates": [
         "v4_runtime_004_mount_positive",
@@ -1137,7 +1137,7 @@
       "function_id":"v4.plugin.request.responses_wire_build","status":"active","feature_id":"V4-PLUGIN-005","owner":"routecodex-v4-standard-plugins","entry_symbols":["responses_wire_build_entry"],"resource_ids":["v4.plugin.request.responses_wire_build"],"source_paths":["crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs"],"required_gates":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"]
     },
     {
-      "function_id":"v4.plugin.response.decode","status":"active","feature_id":"V4-PLUGIN-006","owner":"routecodex-v4-standard-plugins","entry_symbols":["response_decode_entry"],"resource_ids":["v4.plugin.response.decode"],"source_paths":["crates/routecodex-v4-standard-plugins/src/response_decode.rs","crates/routecodex-v4-standard-plugins/tests/l2_response_chat_process_plugins.rs"],"required_gates":["v4_plugin_response_positive","v4_plugin_response_red","v4_plugin_response_boundary","v4_plugin_response_plane"]
+      "function_id":"v4.plugin.response.decode","status":"active","feature_id":"V4-PLUGIN-006","owner":"routecodex-v4-standard-plugins","entry_symbols":["response_decode_entry"],"resource_ids":["v4.plugin.response.decode"],"source_paths":["crates/routecodex-v4-standard-plugins/src/response_decode.rs"],"required_gates":["v4_plugin_response_positive","v4_plugin_response_red","v4_plugin_response_boundary","v4_plugin_response_plane"]
     },
     {
       "function_id":"v4.plugin.response.governance","status":"active","feature_id":"V4-PLUGIN-007","owner":"routecodex-v4-standard-plugins","entry_symbols":["response_governance_entry","response_tool_harvest_entry","response_client_projection_entry"],"resource_ids":["v4.plugin.response.governance"],"source_paths":["crates/routecodex-v4-standard-plugins/src/response_governance.rs"],"required_gates":["v4_plugin_response_positive","v4_plugin_response_red","v4_plugin_response_boundary","v4_plugin_response_plane"]
