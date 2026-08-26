@@ -85,6 +85,11 @@
       "textContains": "Degraded,"
     },
     {
+      "ruleId": "degrade-keyword",
+      "pathContains": "v4/crates/routecodex-v4-provider/src/lib.rs",
+      "textContains": "AvailabilityState::Degraded"
+    },
+    {
       "ruleId": "fallback-keyword",
       "pathContains": "v3/crates/routecodex-v3-provider-responses/src/transport.rs",
       "textContains": "fallback-credit-2026-06-01"
