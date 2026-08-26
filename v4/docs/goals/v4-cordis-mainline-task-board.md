@@ -28,12 +28,13 @@
 
 | task_id | claim_id | 内容 | 允许路径 | 依赖 | 状态 | merge target |
 |---|---|---|---|---|---|---|
+| M00-T00 | `feature_id:v4.cordis_m00.migration_plan` | 将 M00→M12 唯一迁移计划纳入 V4 主树并闭合 canonical doc 引用 | `v4/docs/goals/**` | 无 | `in_progress` | `codex/v4-cordis-refactor-main` |
 | M00-T01 | `feature_id:v4.cordis_m00.contracts` | ADR、ExecutionEpochBundle、NativePluginCatalog、Control、NodeOutcome 合同 | `v4/contracts/**`, `v4/docs/architecture/v4-cordis-mainline-adr.md` | 无 | `merged` (`9f4577081`, main-tree merge `aaf8b1f39`) | `codex/v4-cordis-refactor-main` |
 | M00-T02 | `feature_id:v4.cordis_m00.ratchet_gate` | bypass ratchet 正反测试与 canonical gate 接线；先处理 protected projection promotion | `v4/scripts/architecture/**`, `v4/scripts/_gate-matrix.mjs`, `v4/package.json`, V4 maps | M00-T01 | `blocked` | `codex/v4-cordis-refactor-main` |
 | M00-T03 | `feature_id:v4.cordis_m00.audit_surfaces` | 全局审计 checklist、依赖进度表、task board 与 wiki/manifest 回链 | `v4/docs/goals/**`, `v4/docs/architecture/**` | M00-T01 | `merged` (`de31399d6`, main-tree merge `c4d13d7b8`) | `codex/v4-cordis-refactor-main` |
 | M00-T04 | `feature_id:v4.cordis_m00.stage_task_tables` | 每个 milestone 独立 claim task table，并同步 checklist/progress 状态 | `v4/docs/goals/**` | M00-T03 | `merged` (`55faef2ee`, main-tree merge `5e0090f9d`) | `codex/v4-cordis-refactor-main` |
 
-M00 退出：T01/T02/T03/T04 都完成并合并主树；合同/map/wiki/manifest/gate 与独立 task tables 同步；canonical V4 verify 与 red suite 通过；未完成前不得 claim M01。
+M00 退出：T00/T01/T02/T03/T04 都完成并合并主树；合同/map/wiki/manifest/gate 与独立 task tables 同步；canonical V4 verify 与 red suite 通过；未完成前不得 claim M01。
 
 ## M01-M05：Cordis 控制面与唯一执行器
 

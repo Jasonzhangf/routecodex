@@ -15,6 +15,7 @@ M00 -> M01 -> M02 --┐
 
 | task | 当前状态 | 依赖 | 并行关系 |
 |---|---|---|---|
+| M00-T00 迁移计划 | `in_progress` | 无 | M00 文档前置项 |
 | M00-T01 合同 | `merged` | 无 | 已进主树 |
 | M00-T02 ratchet/protected promotion | `blocked` | T01 | 与 T03 可并行，需修 protected gate 接线 |
 | M00-T03 审计面 | `merged` | T01 | 已合并 `c4d13d7b8` |
