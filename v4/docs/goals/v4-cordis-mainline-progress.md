@@ -25,7 +25,7 @@ M00 -> M01 -> M02 --┐
 | M00-T07 live B capture binding contract | `merged` | T06 | 已合并独立 task `70ccc287b`，V4 主树 merge `3bec92d81`；绑定 provider-owned raw pair contract；无合法 owner/binding fail-closed；不实现 M08 runtime、不伪造 B 证据；M08 完成后再做 live integration |
 | M00-T08 dependency reconciliation | `merged` | T01 + T03 + T04 | 已合并独立 task `764351194`，V4 主树 merge `0f353bee8`；拆分 T07 contract 与 M08 async/native runtime，消除循环依赖 |
 | M00-T09 no-active-epoch admission | `merged` | T01 + T02 | 已合并独立 task `23220dceb`，V4 主树 merge `4298257666`；ActiveEpochStore 无 active epoch 时 fail-closed，6 项 L2、架构 gates、Active-linked build 与 AGY review 通过 |
-| M01 NativePlugin ABI | `blocked_by_M00` | M00 | M00 完成后可 claim |
+| M01 NativePlugin ABI | `in_progress` | M00 | 独立 worker 已 claim 并在 worktree 实现 ABI；M00-T05 live closeout 独立保留，不阻塞本 task 的合同/实现准备 |
 | M02 generic factory | `blocked_by_M01` | M01 | 不可抢跑 |
 | M03 Cordis daemon | `blocked_by_M00` | M00 | M00 后与 M01 并行 |
 | D0 differential harness | `blocked_by_M00` | M00 | M00 完成后与 M01/M03/M08 并行 |

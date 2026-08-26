@@ -45,7 +45,7 @@ M00 退出：T00/T01/T02/T03/T04/T06/T07/T09 都完成并合并主树；T05 的 
 
 | task_id | claim_id | 内容 | 依赖 | 状态 | merge target |
 |---|---|---|---|---|---|
-| M01-T01 | `feature_id:v4.native_plugin_abi` | NativePlugin、Resolver、Config、Outcome/Failure、catalog exporter | M00 | `blocked` | refactor main |
+| M01-T01 | `feature_id:v4.native_plugin_abi` | NativePlugin、Resolver、Config、Outcome/Failure、catalog exporter | M00 | `in_progress` | refactor main |
 | M02-T01 | `feature_id:v4.cordis_generic_factory` | canonical catalog → generic Cordis factory → Fiber mount/dispose | M01 | `blocked` | refactor main |
 | M03-T01 | `feature_id:v4.cordis_host_daemon` | child daemon、handshake、socket、heartbeat、generation、reconcile | M00 | `blocked` | refactor main |
 | M04-T01 | `feature_id:v4.execution_epoch_transaction` | prepare/commit/abort/drain/rollback、stale/hash/idempotency | M02 + M03 | `blocked` | refactor main |

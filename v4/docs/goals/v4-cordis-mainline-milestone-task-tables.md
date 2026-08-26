@@ -29,7 +29,7 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M01-T01 | `feature_id:v4.native_plugin_abi` | M00 | blocked_by_M00 | `codex/v4-cordis-refactor-main` |
+| M01-T01 | `feature_id:v4.native_plugin_abi` | M00 | in_progress (independent worktree; M00 live closeout remains separate) | `codex/v4-cordis-refactor-main` |
 
 ## M02 — Generic Cordis Factory
 
