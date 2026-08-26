@@ -25,15 +25,15 @@ M00 -> M01 -> M02 --┐
 | M00-T07 live B capture binding contract | `merged` | T06 | 已合并独立 task `70ccc287b`，V4 主树 merge `3bec92d81`；绑定 provider-owned raw pair contract；无合法 owner/binding fail-closed；不实现 M08 runtime、不伪造 B 证据；M08 完成后再做 live integration |
 | M00-T08 dependency reconciliation | `merged` | T01 + T03 + T04 | 已合并独立 task `764351194`，V4 主树 merge `0f353bee8`；拆分 T07 contract 与 M08 async/native runtime，消除循环依赖 |
 | M00-T09 no-active-epoch admission | `merged` | T01 + T02 | 已合并独立 task `23220dceb`，V4 主树 merge `4298257666`；ActiveEpochStore 无 active epoch 时 fail-closed，6 项 L2、架构 gates、Active-linked build 与 AGY review 通过 |
-| M01 NativePlugin ABI | `in_progress` | M00 | 独立 worker 已 claim 并在 worktree 实现 ABI；M00-T05 live closeout 独立保留，不阻塞本 task 的合同/实现准备 |
+| M01 NativePlugin ABI | `merged` | M00 structural contracts | task `7c7e141f5` 已合入重构主树 `100b9fd12`；主树 contract/catalog tests、plugin plan、resource binding `91/91`、diff check 通过；T05 独立保留 |
 | M02 generic factory | `blocked_by_M01` | M01 | 不可抢跑 |
-| M03 Cordis daemon | `blocked_by_M00` | M00 | M00 后与 M01 并行 |
-| D0 differential harness | `blocked_by_M00` | M00 | M00 完成后与 M01/M03/M08 并行 |
+| M03 Cordis daemon | `available` | M00 structural contracts | 与 M01 后续阶段并行；T05 不传播阻塞 |
+| D0 differential harness | `in_progress` | M00 structural contracts | 已有独立 worker；与 M03/M08 并行，T05 不传播阻塞 |
 | M04 epoch transaction | `blocked` | M02 + M03 | 必须串行收敛 |
 | M05 ExecutionEngine | `blocked` | M04 | 必须串行 |
 | M06 request JSON | `blocked` | M05 | 必须串行 |
 | M07 response JSON | `blocked` | M06 | 必须串行 |
-| M08 async data plane | `blocked_by_M00` | M00 | M00-T07 contract merged 后，M00 完成再 claim；负责真实 live transport/capture integration |
+| M08 async data plane | `available` | M00 structural contracts + M00-T07 | 可独立 claim；负责真实 live transport/capture integration；T05 仅影响其真实 provider closeout，不阻塞合同/实现推进 |
 | M09 SSE | `blocked` | M07 + M08 | 必须串行 |
 | M10 state semantics | `blocked` | M09 | 必须串行 |
 | M11 protocols/tools/admin | `blocked` | M10 | 协议 lane 与 tools/admin lane 可并行 |
