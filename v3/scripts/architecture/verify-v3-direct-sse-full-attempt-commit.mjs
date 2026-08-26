@@ -18,7 +18,11 @@ function read(relativePath, alternatives = []) {
   return fs.readFileSync(file, 'utf8');
 }
 
-const manifest = read('docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml', ['../docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml']);
+const manifest = read('docs/architecture/mainline-manifests/v3.direct_sse_accept_skeleton.mainline.yml', [
+  'docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml',
+  '../docs/architecture/mainline-manifests/v3.direct_sse_accept_skeleton.mainline.yml',
+  '../docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml',
+]);
 const design = read('docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md', ['../docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md']);
 const runtime = read('crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs');
 const directCore = read('crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs');
