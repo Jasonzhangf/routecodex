@@ -7,7 +7,6 @@ enabled = true
 type = "responses"
 baseURL = "http://127.0.0.1:17771/v1"
 defaultModel = "parity-model"
-responsesContinuation = "relay"
 
 [provider.auth]
 type = "apikey"

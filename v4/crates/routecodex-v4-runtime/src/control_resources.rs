@@ -30,7 +30,6 @@ pub enum StoplessError {
     NotStored,
     CrossScopeReuse,
     HistoryMutationForbidden,
-    ContinuationIntervalViolation,
 }
 
 impl std::fmt::Display for StoplessError {

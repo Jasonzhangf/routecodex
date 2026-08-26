@@ -2,9 +2,9 @@
 
 use routecodex_v4_provider::{
     build_anthropic_messages_wire, build_openai_chat_wire, build_protocol_wire,
-    build_responses_local_continuation_wire, load_profile, normalize_provider_response,
-    normalize_provider_sse_frame, send_openai_chat, validate_auth_alias, verify_profile_auth,
-    AvailabilityRecord, AvailabilityState, V4Availability01SessionScoped,
+    load_profile, normalize_provider_response, normalize_provider_sse_frame, send_openai_chat,
+    validate_auth_alias, verify_profile_auth, AvailabilityRecord, AvailabilityState,
+    V4Availability01SessionScoped,
 };
 use serde_json::json;
 use std::fs;
@@ -90,30 +90,6 @@ fn secret_file_without_secret_key_fails_fast() {
 }
 
 #[test]
-fn responses_continuation_owner_is_compiled_and_invalid_values_fail_fast() {
-    let root = std::env::temp_dir().join(format!("rccv4-provider-continuation-{}", std::process::id()));
-    fs::create_dir_all(&root).expect("temp root");
-    let relay_path = root.join("relay.toml");
-    fs::write(
-        &relay_path,
-        "providerId = \"relay\"\n[provider]\nbaseURL = \"https://example.invalid/v1\"\ndefaultModel = \"wire\"\ntype = \"responses\"\nresponsesContinuation = \"relay\"\n[provider.models.wire]\nwireName = \"wire\"\n[provider.auth]\nenv = \"RCCV4_TEST_KEY\"\n",
-    )
-    .expect("relay profile");
-    let profile = load_profile(relay_path.to_str().expect("utf8 path")).expect("load relay profile");
-    assert_eq!(profile.responses_continuation, "relay");
-
-    let invalid_path = root.join("invalid.toml");
-    fs::write(
-        &invalid_path,
-        "providerId = \"invalid\"\n[provider]\nbaseURL = \"https://example.invalid/v1\"\ndefaultModel = \"wire\"\ntype = \"responses\"\nresponsesContinuation = \"unknown\"\n[provider.models.wire]\nwireName = \"wire\"\n[provider.auth]\nenv = \"RCCV4_TEST_KEY\"\n",
-    )
-    .expect("invalid profile");
-    let error = load_profile(invalid_path.to_str().expect("utf8 path"))
-        .expect_err("unknown continuation owner must fail");
-    assert_eq!(error.code, "provider_continuation_owner_invalid");
-}
-
-#[test]
 fn v3_provider_profile_reads_secret_file_handle_without_runtime_import() {
     let root = std::env::temp_dir().join(format!("rccv4-provider-v3-{}", std::process::id()));
     fs::create_dir_all(&root).expect("temp root");
@@ -181,36 +157,6 @@ fn protocol_dispatch_projects_normalized_input_to_selected_wire_shape() {
         .expect("anthropic wire");
     assert_eq!(anthropic["max_tokens"], 64);
     assert!(build_protocol_wire("unknown", &input, "wire", false).is_err());
-}
-
-#[test]
-fn responses_local_continuation_materializes_ordered_context_without_locator() {
-    let wire = build_responses_local_continuation_wire(
-        &json!([
-            {"role":"user","content":"first"},
-            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}
-        ]),
-        &json!({"input":[{"role":"user","content":"second"}],"tools":[{"type":"function"}],"previous_response_id":"resp-1"}),
-        "gpt-wire",
-        false,
-    )
-    .expect("relay wire");
-    assert_eq!(wire["model"], "gpt-wire");
-    assert_eq!(wire["input"].as_array().expect("input array").len(), 3);
-    assert_eq!(wire["tools"][0]["type"], "function");
-    assert!(wire.get("previous_response_id").is_none());
-}
-
-#[test]
-fn responses_local_continuation_rejects_non_array_prior_context() {
-    let error = build_responses_local_continuation_wire(
-        &json!({"id":"response-1"}),
-        &json!("next"),
-        "gpt-wire",
-        false,
-    )
-    .expect_err("prior context must be an ordered array");
-    assert_eq!(error.code, "continuation_context_invalid");
 }
 
 #[test]

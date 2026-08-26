@@ -209,7 +209,7 @@ fn edge_control_flow_record_required() {
         "V4HubReqChatProcess04Governed",
         "v4.control.side_channel",
         "register",
-        "continuation.restore",
+        "route.facts",
         vec!["requestId".to_string()],
         true,
     );
@@ -222,7 +222,7 @@ fn edge_control_flow_record_required() {
         "V4HubReqChatProcess04Governed",
         "v4.control.side_channel",
         "register",
-        "continuation.restore",
+        "route.facts",
         vec!["requestId".to_string()],
         false,
     );
@@ -240,7 +240,7 @@ fn edge_control_flow_scope_isolation() {
         "V4HubReqChatProcess04Governed",
         "v4.control.side_channel",
         "register",
-        "continuation.restore",
+        "route.facts",
         vec!["req-A".to_string()],
         true,
     );
@@ -253,7 +253,7 @@ fn edge_control_flow_scope_isolation() {
         "V4HubReqChatProcess04Governed",
         "v4.control.side_channel",
         "consume",
-        "continuation.restore",
+        "route.facts",
         vec!["req-A".to_string()],
         true,
     );
@@ -266,7 +266,7 @@ fn edge_control_flow_scope_isolation() {
         "V4HubReqChatProcess04Governed",
         "v4.control.side_channel",
         "consume",
-        "continuation.restore",
+        "route.facts",
         vec!["req-B".to_string()],
         true,
     );
@@ -284,7 +284,7 @@ fn red_control_duplicate_register_fails_fast() {
         "V4HubReqChatProcess04Governed",
         "v4.control.side_channel",
         "register",
-        "continuation.restore",
+        "route.facts",
         vec!["req-A".to_string()],
         true,
     );
@@ -297,7 +297,7 @@ fn red_control_duplicate_register_fails_fast() {
         "V4HubReqChatProcess04Governed",
         "v4.control.side_channel",
         "register",
-        "continuation.restore",
+        "route.facts",
         vec!["req-B".to_string()],
         true,
     );
@@ -317,7 +317,7 @@ fn red_control_release_requires_registered_same_scope() {
         "V4HubReqChatProcess04Governed",
         "v4.control.side_channel",
         "release",
-        "continuation.restore",
+        "route.facts",
         vec!["req-A".to_string()],
         true,
     );
@@ -333,7 +333,7 @@ fn red_control_release_requires_registered_same_scope() {
         "V4HubReqChatProcess04Governed",
         "v4.control.side_channel",
         "register",
-        "continuation.restore",
+        "route.facts",
         vec!["req-A".to_string()],
         true,
     );
@@ -345,7 +345,7 @@ fn red_control_release_requires_registered_same_scope() {
         "V4HubReqChatProcess04Governed",
         "v4.control.side_channel",
         "release",
-        "continuation.restore",
+        "route.facts",
         vec!["req-B".to_string()],
         true,
     );
@@ -365,7 +365,7 @@ fn red_control_key_must_be_present_and_non_empty() {
         "V4HubReqChatProcess04Governed",
         "v4.control.side_channel",
         "register",
-        "continuation.restore",
+        "route.facts",
         vec!["req-A".to_string()],
         true,
     );
@@ -386,7 +386,7 @@ fn red_control_flow_rejects_data_axis_resource() {
         "V4HubReqChatProcess04Governed",
         "v4.request.normal_payload",
         "register",
-        "continuation.restore",
+        "route.facts",
         vec!["req-A".to_string()],
         true,
     );

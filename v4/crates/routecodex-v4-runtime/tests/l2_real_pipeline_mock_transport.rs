@@ -3,7 +3,6 @@
 //! Coverage:
 //! - positive: keyless fixture identity sequence, trace chain, responses+direct
 //! - red: invalid fixture fields, malformed provider frame, error-chain scope
-//! - red: (entry_protocol, continuation_owner) illegal pairs
 //! - red: fixture.path vs entry_protocol mismatch
 //! - red: error-chain projection consumes real ExecutionReport.scope
 use routecodex_v4_runtime::{
@@ -61,7 +60,6 @@ fn positive_keyless_fixture_carries_fixture_identity_through_request_chain() {
         "session-a",
         "conv-a",
         "chat",
-        "relay",
     )
     .expect("mock transport slice must succeed");
     assert_eq!(first.request_id, "mock.srv-m8-2026-08-17-00000001");
@@ -71,13 +69,10 @@ fn positive_keyless_fixture_carries_fixture_identity_through_request_chain() {
     assert_eq!(frame["object"], "chat.completion");
     assert_eq!(frame["choices"][0]["message"]["role"], "assistant");
     assert!(first.provider_wire.starts_with("wire:semantic:mock-model:"));
-    assert!(first.continuation_committed, "chat/relay commits");
-    assert_eq!(first.continuation_owner, "relay");
     assert_eq!(first.fixture_method, "POST");
     assert_eq!(first.fixture_path, "/v1/chat/completions");
     assert_eq!(first.fixture_model, "mock-model");
     assert_eq!(first.fixture_headers, Vec::<(String, String)>::new());
-    assert!(first.relay_operator_accepted, "chat+relay is a valid typed-facts pair");
     assert_eq!(first.error_projection_scope, None, "no error occurred");
     assert!(first.error.is_none(), "no fault expected");
     let second = execute_mock_transport_slice(
@@ -91,7 +86,6 @@ fn positive_keyless_fixture_carries_fixture_identity_through_request_chain() {
         "session-b",
         "conv-b",
         "chat",
-        "relay",
     )
     .expect("second mock transport slice must succeed");
     assert_eq!(second.request_id, "mock.srv-m8-2026-08-17-00000002");
@@ -117,7 +111,6 @@ fn positive_trace_entries_follows_request_then_response_chains() {
         "session-trace",
         "conv-trace",
         "chat",
-        "relay",
     )
     .expect("mock transport slice must succeed");
     assert_eq!(report.trace.len(), 7 + 6);
@@ -139,19 +132,15 @@ fn positive_responses_direct_operator_accepted() {
         "session-direct",
         "conv-direct",
         "responses",
-        "direct",
     )
     .expect("responses + direct must succeed");
     assert!(report.error.is_none(), "no fault expected: {:?}", report.error);
-    assert!(report.relay_operator_accepted, "responses+direct selects Direct operator");
     assert_eq!(report.fixture_path, "/v1/responses");
     assert_eq!(report.fixture_model, "responses-model");
-    assert!(report.continuation_committed, "responses/direct commits");
-    assert_eq!(report.continuation_owner, "direct");
 }
 
 #[test]
-fn positive_responses_relay_operator_accepted() {
+fn positive_responses_relay_fixture_projects_client_frame() {
     let runtime = load_runtime();
     let mut counter = MockTransportIdentityCounter::new();
     let fixture = responses_fixture();
@@ -166,37 +155,10 @@ fn positive_responses_relay_operator_accepted() {
         "session-r",
         "conv-r",
         "responses",
-        "relay",
     );
-    let report = outcome.expect("responses + relay owner must use local materialization");
+    let report = outcome.expect("responses + relay fixture must use relay projection");
     assert!(report.error.is_none(), "no fault expected: {:?}", report.error);
-    assert!(report.relay_operator_accepted, "responses+relay selects relay operator");
     assert_eq!(report.fixture_path, "/v1/responses");
-    assert!(report.continuation_committed, "responses/relay commits local continuation");
-    assert_eq!(report.continuation_owner, "relay");
-}
-
-#[test]
-fn red_chat_direct_operator_rejected() {
-    let runtime = load_runtime();
-    let mut counter = MockTransportIdentityCounter::new();
-    let fixture = chat_fixture();
-    let outcome = execute_mock_transport_slice(
-        &runtime,
-        &mut counter,
-        &fixture,
-        mock_provider_frame_ok(),
-        "srv-m8",
-        "2026-08-17",
-        TEST_PORT,
-        "session-cd",
-        "conv-cd",
-        "chat",
-        "direct",
-    );
-    assert!(outcome.is_err(), "chat + direct owner must fail fast");
-    let fault = outcome.err().expect("missing fault");
-    assert_eq!(fault.code, "keyless_fixture_invalid");
 }
 
 #[test]
@@ -215,7 +177,6 @@ fn red_chat_fixture_with_responses_entry_rejected() {
         "session-m",
         "conv-m",
         "responses", // expects /v1/responses but fixture path is /v1/chat/completions
-        "direct",
     );
     assert!(outcome.is_err(), "chat fixture path cannot serve responses entry");
     let fault = outcome.err().expect("missing fault");
@@ -246,7 +207,6 @@ fn red_responses_path_with_chat_body_rejected() {
         "session-body",
         "conv-body",
         "responses",
-        "direct",
     );
     let fault = outcome.expect_err("body must match entry protocol");
     assert_eq!(fault.code, "keyless_fixture_invalid");
@@ -269,7 +229,6 @@ fn red_empty_server_id_fails_fast() {
         "session-z",
         "conv-z",
         "chat",
-        "relay",
     );
     assert!(outcome.is_err(), "empty server_id must fail fast");
     let fault = outcome.err().expect("missing fault");
@@ -293,14 +252,13 @@ fn red_empty_fixture_model_fails_fast() {
         "session-model",
         "conversation-model",
         "chat",
-        "relay",
     );
     let fault = outcome.expect_err("empty model must fail fast");
     assert_eq!(fault.code, "keyless_fixture_invalid");
 }
 
 #[test]
-fn red_empty_continuation_scope_fails_fast() {
+fn red_empty_conversation_scope_fails_fast() {
     let runtime = load_runtime();
     let mut counter = MockTransportIdentityCounter::new();
     let fixture = chat_fixture();
@@ -315,7 +273,6 @@ fn red_empty_continuation_scope_fails_fast() {
         "session-scope",
         "",
         "chat",
-        "relay",
     );
     let fault = outcome.expect_err("empty conversation scope must fail fast");
     assert_eq!(fault.code, "keyless_fixture_invalid");
@@ -337,7 +294,6 @@ fn red_malformed_provider_frame_flows_error_chain_with_real_scope() {
         "session-err",
         "conv-err",
         "chat",
-        "relay",
     )
     .expect("raw_parse fault must be projected as a typed error");
     let error = report
@@ -356,7 +312,6 @@ fn red_malformed_provider_frame_flows_error_chain_with_real_scope() {
         "client projection must carry the json_parse reason: {:?}",
         error.client_projection_message
     );
-    assert_eq!(report.continuation_committed, false);
     // The error projection scope is NOT the old fake "mock-transport-slice/port=0";
     // it is the real request-bound scope from the same request id.
     assert!(
@@ -393,7 +348,6 @@ fn red_blank_provider_frame_fails_fast() {
         "session-blank",
         "conv-blank",
         "chat",
-        "relay",
     );
     assert!(outcome.is_err(), "blank provider frame must fail fast");
     let fault = outcome.err().expect("missing fault");

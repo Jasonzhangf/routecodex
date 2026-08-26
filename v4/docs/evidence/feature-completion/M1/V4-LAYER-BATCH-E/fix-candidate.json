@@ -1,1 +1,22 @@
-{"fix_candidate_id":"v4-layer-batch-e-response-candidate-current-tree","issue_id":"V4-LAYER-BATCH-E","module_id":"routecodex-v4-standard-plugins","worktree_id":"v4-feature-completion-20260824T190611Z-Macstudio-v4branch","base_commit":"45be5f5623e617d89260cce663a2b20ea6b09d72","head_commit":"eb41f2753c3abd78081a3aeb48c15367c7d824e7","tree_hash":"3b22d8114e1ac31e6ae75bfd001853b69718f568","diff_hash":"sha256:c852c40a1754a78b57db40c8b1b8a6a8bdf60611278f93077eaca70748599e49","design_id":"v4-feature-completion-response-plugins","owner":"routecodex-v4-standard-plugins","scope_hash":"sha256:6763ed4a4d273273698d238de5aa89a4f56a2b10b8751efefa73c37300b4ec30","changed_paths":["v4/contracts/feature-completion-layer-batches.manifest.json","v4/crates/routecodex-v4-standard-plugins/src/lib.rs","v4/crates/routecodex-v4-standard-plugins/src/response_decode.rs","v4/crates/routecodex-v4-standard-plugins/src/response_fault.rs","v4/crates/routecodex-v4-standard-plugins/src/response_governance.rs","v4/crates/routecodex-v4-standard-plugins/src/response_inbound.rs","v4/crates/routecodex-v4-standard-plugins/src/response_outbound.rs","v4/docs/architecture/maps/verification-map.json","v4/docs/evidence/feature-completion/M1/V4-LAYER-BATCH-E/fix-candidate.json","v4/docs/evidence/feature-completion/M1/V4-PLUGIN-006/boundary-audit.json","v4/docs/evidence/feature-completion/M1/V4-PLUGIN-006/plane-isolation.json","v4/docs/evidence/feature-completion/M1/V4-PLUGIN-006/positive.json","v4/docs/evidence/feature-completion/M1/V4-PLUGIN-006/red-gate.json","v4/docs/evidence/feature-completion/M1/V4-PLUGIN-007/boundary-audit.json","v4/docs/evidence/feature-completion/M1/V4-PLUGIN-007/plane-isolation.json","v4/docs/evidence/feature-completion/M1/V4-PLUGIN-007/positive.json","v4/docs/evidence/feature-completion/M1/V4-PLUGIN-007/red-gate.json","v4/docs/evidence/feature-completion/M1/V4-PLUGIN-008/boundary-audit.json","v4/docs/evidence/feature-completion/M1/V4-PLUGIN-008/plane-isolation.json","v4/docs/evidence/feature-completion/M1/V4-PLUGIN-008/positive.json","v4/docs/evidence/feature-completion/M1/V4-PLUGIN-008/red-gate.json","v4/scripts/architecture/lib/feature-layer-batch-definition.mjs","v4/scripts/architecture/lib/feature-layer-batch-source.mjs"],"verification_evidence_ids":["boundary-audit","plane-isolation","positive","red-gate"],"created_at":"2026-08-24T09:30:00Z","batch_id":"E","task_ids":["V4-PLUGIN-006","V4-PLUGIN-007","V4-PLUGIN-008"]}
+{
+  "fix_candidate_id": "v4-layer-batch-e-response-candidate-current-tree",
+  "issue_id": "V4-LAYER-BATCH-E",
+  "module_id": "routecodex-v4-standard-plugins",
+  "worktree_id": "v4-no-continuation-rebase-20260826T052700Z",
+  "base_commit": "a0e49b429120af947484c008dd3149cfcefebea0",
+  "head_commit": "5cf54f09648de77d9768993db50fe9a802fc6262",
+  "tree_hash": "4787d244512431c7ed6db28e0b34af74a56303a0",
+  "diff_hash": "sha256:e9015b1a17aaa9da5be49fab6873075738c635a55299a35f2e228d81ceec282a",
+  "design_id": "v4-feature-completion-response-plugins",
+  "owner": "routecodex-v4-standard-plugins",
+  "scope_hash": "sha256:44570c7eaaefaca6a755f7fdebd2a15fd727e4e9258eb5b9eb7dffa0b8a99e9a",
+  "changed_paths": [
+    "v4/crates/routecodex-v4-standard-plugins/src/response_inbound.rs",
+    "v4/crates/routecodex-v4-standard-plugins/src/response_outbound.rs",
+    "v4/crates/routecodex-v4-standard-plugins/tests/l2_response_chat_process_plugins.rs"
+  ],
+  "verification_evidence_ids": ["boundary-audit", "plane-isolation", "positive", "red-gate"],
+  "created_at": "2026-08-26T05:27:32Z",
+  "batch_id": "E",
+  "task_ids": ["V4-PLUGIN-006", "V4-PLUGIN-007", "V4-PLUGIN-008"]
+}

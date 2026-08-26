@@ -5,7 +5,7 @@
 //! Hard boundaries:
 //! - validates descriptors against the node-graph role catalog and the
 //!   resource registry only; never executes plugins;
-//! - never decides routing, continuation, retry or any control semantics;
+//! - never decides routing, retry or any control semantics;
 //! - never touches business payload.
 
 use serde::{Deserialize, Serialize};

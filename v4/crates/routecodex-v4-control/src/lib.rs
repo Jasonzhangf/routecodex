@@ -7,7 +7,6 @@ use routecodex_v4_base_node::Scope;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlSignalKind {
     Route,
-    Continuation,
     Stopless,
     Error,
     Scope,

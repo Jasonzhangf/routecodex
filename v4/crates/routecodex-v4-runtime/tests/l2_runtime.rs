@@ -6,17 +6,13 @@ use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::{ControlError, ControlSignal, ControlSignalKind, MetadataOperation};
 use routecodex_v4_error::{DecisionAction, ErrorChain, ErrorStage, ExecutionDecision, RetryPolicy};
 use routecodex_v4_runtime::{
-    assert_no_control_leak, bind_scope_via_bridge, execution_binding, project_runtime_fault,
-    project_runtime_fault_with_policy,
-    release_scope_via_bridge, select_relay_operator, ContinuationFacts, ContinuationKey,
-    ExecutionBinding, ExecutionContext, NodePluginPlan, PayloadCycleError, PayloadCycleRegistry,
-    PayloadCycleState, RelayOperator, ScopeError, ScopeRegistry, SkeletonRuntime,
-    LocalContinuationError, LocalContinuationStore,
+    assert_no_control_leak, execution_binding, project_runtime_fault,
+    project_runtime_fault_with_policy, ExecutionBinding, ExecutionContext, NodePluginPlan,
+    PayloadCycleError, PayloadCycleRegistry, PayloadCycleState, SkeletonRuntime,
 };
 use routecodex_v4_skeleton::{
     BindingContract, ChainDefinition, Edge, NodeSlot, PluginBinding, SkeletonPlan,
 };
-use serde_json::json;
 use std::fs;
 
 fn contract_json() -> String {
@@ -45,122 +41,6 @@ fn first_sse_data_json(frame: &str) -> serde_json::Value {
         .find_map(|line| line.strip_prefix("data: "))
         .expect("SSE data line must exist");
     serde_json::from_str(payload).expect("SSE data must be JSON")
-}
-
-fn bridge_scope(operation: &str) -> serde_json::Value {
-    json!({
-        "scope_command": {
-            "entry_protocol": "responses",
-            "continuation_owner": "direct",
-            "pipeline_id": "v4-pipeline",
-            "port": 5555,
-            "session_scope": "session-1",
-            "conversation_scope": "conversation-1",
-            "request_id": "request-1",
-            "full_input_hash": "sha256:full-input",
-            "operation": operation,
-            "sequence": 1
-        }
-    })
-}
-
-#[test]
-fn bridge_scope_bind_and_release_reach_registry_truth() {
-    let mut registry = ScopeRegistry::new();
-    let key = ContinuationKey::new("responses", "direct", 5555, "session-1", "conversation-1");
-    let bind = bind_scope_via_bridge(&bridge_scope("bind"), &mut registry)
-        .expect("typed bridge bind reaches ScopeRegistry");
-    assert_eq!(bind.operation, "bind");
-    assert!(registry.is_bound(&key));
-
-    let release = release_scope_via_bridge(&bridge_scope("release"), &mut registry)
-        .expect("typed bridge release reaches ScopeRegistry");
-    assert_eq!(release.operation, "release");
-    assert!(matches!(
-        registry.restore(&key, "request-2", Some("sha256:full-input")),
-        Err(ScopeError::RestoreAfterRelease)
-    ));
-}
-
-#[test]
-fn bridge_scope_missing_or_duplicate_bind_fails_fast() {
-    let mut registry = ScopeRegistry::new();
-    assert!(matches!(
-        bind_scope_via_bridge(&json!({}), &mut registry),
-        Err(ScopeError::NotBound)
-    ));
-    bind_scope_via_bridge(&bridge_scope("bind"), &mut registry).expect("first bind succeeds");
-    assert!(matches!(
-        bind_scope_via_bridge(&bridge_scope("bind"), &mut registry),
-        Err(ScopeError::AlreadyBound)
-    ));
-}
-
-#[test]
-fn bridge_scope_rejects_malformed_operation_and_payload_lookalike() {
-    let mut registry = ScopeRegistry::new();
-    assert!(matches!(
-        bind_scope_via_bridge(&bridge_scope("replace"), &mut registry),
-        Err(ScopeError::InvalidBridgeControl)
-    ));
-    let mut unknown = bridge_scope("bind");
-    unknown["scope_command"]["payload_hint"] = json!(true);
-    assert!(matches!(
-        bind_scope_via_bridge(&unknown, &mut registry),
-        Err(ScopeError::InvalidBridgeControl)
-    ));
-    assert!(matches!(
-        bind_scope_via_bridge(
-            &json!({"normal_payload": bridge_scope("bind")["scope_command"].clone()}),
-            &mut registry,
-        ),
-        Err(ScopeError::NotBound)
-    ));
-}
-
-#[test]
-fn bridge_scope_release_without_bind_fails_fast() {
-    let mut registry = ScopeRegistry::new();
-    assert!(matches!(
-        release_scope_via_bridge(&bridge_scope("release"), &mut registry),
-        Err(ScopeError::NotBound)
-    ));
-}
-
-#[test]
-fn bridge_bound_scope_rejects_all_isolation_mismatches() {
-    let mut registry = ScopeRegistry::new();
-    bind_scope_via_bridge(&bridge_scope("bind"), &mut registry)
-        .expect("typed bind reaches ScopeRegistry");
-
-    let mismatches = [
-        (
-            ContinuationKey::new("responses", "relay", 5555, "session-1", "conversation-1"),
-            ScopeError::OwnerMismatch,
-        ),
-        (
-            ContinuationKey::new("chat", "direct", 5555, "session-1", "conversation-1"),
-            ScopeError::EntryProtocolMismatch,
-        ),
-        (
-            ContinuationKey::new("responses", "direct", 5556, "session-1", "conversation-1"),
-            ScopeError::PortMismatch,
-        ),
-        (
-            ContinuationKey::new("responses", "direct", 5555, "session-2", "conversation-1"),
-            ScopeError::SessionMismatch,
-        ),
-        (
-            ContinuationKey::new("responses", "direct", 5555, "session-1", "conversation-2"),
-            ScopeError::ConversationMismatch,
-        ),
-    ];
-    for (key, expected) in mismatches {
-        let error = registry
-            .restore(&key, "request-2", Some("sha256:full-input"))
-            .expect_err("isolation mismatch must fail");
-        assert_eq!(error, expected);
-    }
 }
 
 fn slot(
@@ -229,255 +109,6 @@ fn positive_request_chain_produces_wire_and_stable_binding() {
         "execution binding must match the loaded plan"
     );
     assert_eq!(report.trace.len(), 7, "seven request nodes must be traced");
-    let scope_value = report
-        .continuation_scope
-        .as_deref()
-        .expect("continuation classified");
-    assert!(scope_value.starts_with("scope:chat:relay:port-0:session-:conversation-"));
-    assert_eq!(report.continuation_owner.as_deref(), Some("relay"));
-    assert_eq!(report.execution_mode.as_deref(), Some("relay"));
-    assert!(report.relay_operator_selected);
-    assert_eq!(report.route_exit.as_deref(), Some("relay_policy_bound"));
-}
-
-#[test]
-fn responses_entry_classifies_direct_owner() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
-    let report = runtime
-        .execute_request("responses:hello", "r-direct-1")
-        .expect("responses request chain runs");
-    assert_eq!(report.continuation_owner.as_deref(), Some("direct"));
-    assert_eq!(report.execution_mode.as_deref(), Some("direct"));
-    assert!(!report.relay_operator_selected);
-    assert_eq!(report.route_exit.as_deref(), Some("direct_policy_bound"));
-    let scope_value = report.continuation_scope.as_deref().unwrap();
-    assert!(scope_value.starts_with("scope:responses:direct:port-0:session-:conversation-"));
-}
-
-#[test]
-fn relay_operator_select_uses_typed_facts_only() {
-    let relay = select_relay_operator(&ContinuationFacts::new("chat", "hub", "relay", "relay"))
-        .expect("chat + relay owner selects relay operator");
-    assert_eq!(relay, RelayOperator::Relay);
-    let direct = select_relay_operator(&ContinuationFacts::new(
-        "responses",
-        "responses",
-        "direct",
-        "direct",
-    ))
-        .expect("responses + direct owner selects direct operator");
-    assert_eq!(direct, RelayOperator::Direct);
-    let responses_relay = select_relay_operator(&ContinuationFacts::new(
-        "responses",
-        "responses",
-        "relay",
-        "relay",
-    ))
-    .expect("responses + explicit local relay owner selects relay operator");
-    assert_eq!(responses_relay, RelayOperator::Relay);
-    let chat_direct =
-        select_relay_operator(&ContinuationFacts::new("chat", "hub", "direct", "direct"))
-            .expect_err("chat entry with direct owner must fail (no typed-facts match)");
-    assert_eq!(chat_direct.code, "relay_operator_select");
-}
-
-#[test]
-fn continuation_three_key_save_and_restore_roundtrip() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
-    // Response chat process commit saves the three-key binding.
-    let response = runtime
-        .execute_provider_response_scoped(
-            "{\"text\":\"ok\"}",
-            "r-save-1",
-            5555,
-            "session-1",
-            "conversation-1",
-            "responses",
-            "direct",
-        )
-        .expect("response chain commits continuation");
-    assert!(response.continuation_committed);
-    // Next request chat process restores with the exact same three keys.
-    let restored = runtime
-        .execute_request_scoped(
-            "responses:continue",
-            "r-restore-1",
-            5555,
-            "session-1",
-            "conversation-1",
-        )
-        .expect("request chain restores continuation");
-    assert!(restored.continuation_restored);
-    assert_eq!(restored.continuation_owner.as_deref(), Some("direct"));
-}
-
-#[test]
-fn local_continuation_store_requires_exact_response_locator_and_context() {
-    let key = ContinuationKey::new("responses", "relay", 5520, "session-1", "conversation-1");
-    let mut store = LocalContinuationStore::new();
-    store
-        .commit(key.clone(), "resp-1", "[{\"role\":\"user\",\"content\":\"hi\"}]")
-        .expect("local continuation commit");
-    let record = store.load(&key, "resp-1").expect("exact locator load");
-    assert_eq!(record.response_id, "resp-1");
-    assert!(matches!(
-        store.load(&key, "resp-other"),
-        Err(LocalContinuationError::ResponseIdMismatch)
-    ));
-    assert!(matches!(
-        store.commit(key.clone(), "resp-2", "[]"),
-        Err(LocalContinuationError::AlreadyBound)
-    ));
-    store.release(&key).expect("release");
-    assert!(matches!(
-        store.load(&key, "resp-1"),
-        Err(LocalContinuationError::Released)
-    ));
-    store
-        .rotate(key.clone(), "resp-2", "[{\"role\":\"user\",\"content\":\"next\"}]")
-        .expect("rotation after terminal release");
-    assert_eq!(store.load(&key, "resp-2").expect("rotated locator").response_id, "resp-2");
-}
-
-#[test]
-fn responses_relay_terminal_frame_commits_ordered_context_in_runtime_store() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("skeleton plan");
-    let frame = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-local\",\"output\":[{\"type\":\"message\"}]}}\n\n";
-    let report = runtime
-        .execute_provider_response_scoped_with_seed(
-            frame,
-            "r-local-terminal",
-            5520,
-            "session-local-terminal",
-            "conversation-local-terminal",
-            "responses",
-            "relay",
-            Some(r#"[{"role":"user","content":"hello"}]"#.to_string()),
-        )
-        .expect("responses + relay terminal frame must commit at response chat process");
-    assert!(report.continuation_committed);
-    let key = ContinuationKey::new(
-        "responses",
-        "relay",
-        5520,
-        "session-local-terminal",
-        "conversation-local-terminal",
-    );
-    let record = runtime
-        .load_local_continuation(&key, "resp-local")
-        .expect("terminal frame must be visible through the runtime-owned store");
-    let context: serde_json::Value =
-        serde_json::from_str(&record.ordered_context).expect("ordered context JSON");
-    assert_eq!(context.as_array().expect("ordered context").len(), 2);
-}
-
-#[test]
-fn responses_local_owner_override_is_typed_before_request_classification() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("skeleton plan");
-    let report = runtime
-        .execute_request_scoped_with_owner(
-            "responses:{\"model\":\"gpt-wire\",\"input\":[]}",
-            "r-local-owner",
-            5520,
-            "session-local",
-            "conversation-local",
-            Some("relay"),
-        )
-        .expect("typed local owner request");
-    assert_eq!(report.continuation_owner.as_deref(), Some("relay"));
-    assert_eq!(report.execution_mode.as_deref(), Some("relay"));
-    assert!(report.relay_operator_selected);
-}
-
-#[test]
-fn red_continuation_checkpoint_cannot_rebind_before_restore() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
-    runtime
-        .execute_provider_response_scoped(
-            "{\"text\":\"first\"}",
-            "r-unrestored-save-1",
-            5555,
-            "session-unrestored",
-            "conversation-unrestored",
-            "responses",
-            "direct",
-        )
-        .expect("first response commits continuation");
-    let error = runtime
-        .execute_provider_response_scoped(
-            "{\"text\":\"second\"}",
-            "r-unrestored-save-2",
-            5555,
-            "session-unrestored",
-            "conversation-unrestored",
-            "responses",
-            "direct",
-        )
-        .expect_err("unrestored checkpoint must stay immutable");
-    assert_eq!(error.code, "continuation_commit");
-    assert!(error.message.contains("already bound"));
-}
-
-#[test]
-fn red_direct_relay_cross_continuation_fails() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
-    runtime
-        .execute_provider_response_scoped(
-            "{\"text\":\"ok\"}",
-            "r-cross-save",
-            5555,
-            "session-1",
-            "conversation-1",
-            "responses",
-            "direct",
-        )
-        .expect("direct continuation committed");
-    // Relay request with the same session must never hit the responses-direct
-    // continuation: three-key isolation fails fast.
-    let error = runtime
-        .execute_request_scoped(
-            "chat:continue",
-            "r-cross-restore",
-            5555,
-            "session-1",
-            "conversation-1",
-        )
-        .expect_err("chat entry must not hit responses-direct continuation");
-    assert_eq!(error.code, "continuation_restore");
-    assert!(error.message.contains("owner mismatch"));
-}
-
-#[test]
-fn red_session_only_restore_fails_fast() {
-    let mut registry = ScopeRegistry::new();
-    let full_key = ContinuationKey::new("responses", "direct", 5555, "session-1", "conversation-1");
-    registry
-        .bind(full_key.clone(), "r-sess-save", Some("sha256:full"))
-        .expect("bind succeeds");
-    // Session-only restore is impossible by construction: a key carrying only
-    // session/conversation (empty entry protocol and owner) cannot match the
-    // three-key binding and must fail fast.
-    let session_only = ContinuationKey::new("", "", 5555, "session-1", "conversation-1");
-    let error = registry
-        .restore(&session_only, "r-sess-restore", Some("sha256:full"))
-        .expect_err("session-only restore must fail");
-    assert_eq!(error, ScopeError::OwnerMismatch);
-}
-
-#[test]
-fn red_immutable_interval_double_restore_fails() {
-    let mut registry = ScopeRegistry::new();
-    let key = ContinuationKey::new("responses", "direct", 5555, "session-1", "conversation-1");
-    registry
-        .bind(key.clone(), "r-imm-save", Some("sha256:full"))
-        .expect("bind succeeds");
-    registry
-        .restore(&key, "r-imm-restore-1", Some("sha256:full"))
-        .expect("first restore succeeds");
-    let error = registry
-        .restore(&key, "r-imm-restore-2", Some("sha256:full"))
-        .expect_err("second restore must fail (immutable interval)");
-    assert_eq!(error, ScopeError::ImmutableIntervalViolation);
 }
 
 #[test]
@@ -531,10 +162,6 @@ fn positive_provider_response_chain_projects_client_frame() {
         .as_deref()
         .expect("client frame produced");
     assert_eq!(frame, "{\"text\":\"ok\"}");
-    assert!(
-        report.continuation_committed,
-        "continuation truth committed at chat process exit"
-    );
     assert_eq!(report.trace.len(), 6, "six response nodes must be traced");
 }
 
@@ -549,7 +176,6 @@ fn direct_sse_frame_runs_frame_parse_through_client_frame() {
             "session-direct-sse",
             "conversation-direct-sse",
             "responses",
-            "none",
         )
         .expect("direct SSE frame must traverse response nodes");
     assert_eq!(
@@ -572,7 +198,6 @@ fn relay_json_projects_responses_to_chat_semantic() {
             "session-relay-json",
             "conversation-relay-json",
             "chat",
-            "relay",
         )
         .expect("relay JSON must traverse response nodes");
     let frame: serde_json::Value = serde_json::from_str(
@@ -584,8 +209,6 @@ fn relay_json_projects_responses_to_chat_semantic() {
     .expect("chat frame must be JSON");
     assert_eq!(frame["object"], "chat.completion");
     assert_eq!(frame["choices"][0]["message"]["content"], "hello");
-    assert!(report.continuation_committed);
-    assert_eq!(report.continuation_owner.as_deref(), Some("relay"));
 }
 
 #[test]
@@ -599,7 +222,6 @@ fn relay_json_projects_tool_calls_and_usage_to_chat_contract() {
             "session-relay-json-tool",
             "conversation-relay-json-tool",
             "chat",
-            "relay",
         )
         .expect("relay JSON tool response must traverse response nodes");
     let frame: serde_json::Value = serde_json::from_str(
@@ -632,7 +254,6 @@ fn relay_sse_delta_projects_responses_event_to_chat_chunk() {
             "session-relay-sse",
             "conversation-relay-sse",
             "chat",
-            "none",
         )
         .expect("relay SSE delta must traverse response nodes");
     let frame = first_sse_data_json(
@@ -656,7 +277,6 @@ fn relay_sse_function_arguments_delta_is_preserved() {
             "session-relay-sse-tool-args",
             "conversation-relay-sse-tool-args",
             "chat",
-            "none",
         )
         .expect("relay SSE tool arguments must traverse response nodes");
     let frame = first_sse_data_json(
@@ -683,7 +303,6 @@ fn relay_sse_tool_terminal_projects_tool_calls_finish_reason() {
             "session-relay-sse-tool-terminal",
             "conversation-relay-sse-tool-terminal",
             "chat",
-            "relay",
         )
         .expect("relay SSE tool terminal must traverse response nodes");
     let frame = first_sse_data_json(
@@ -693,42 +312,6 @@ fn relay_sse_tool_terminal_projects_tool_calls_finish_reason() {
             .expect("chat chunk must exist"),
     );
     assert_eq!(frame["choices"][0]["finish_reason"], "tool_calls");
-}
-
-#[test]
-fn continuation_rotates_after_restore_for_next_response() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
-    runtime
-        .execute_provider_response_scoped(
-            "{\"text\":\"first\"}",
-            "r-rotate-save-1",
-            5555,
-            "session-rotate",
-            "conversation-rotate",
-            "responses",
-            "direct",
-        )
-        .expect("first response commits");
-    runtime
-        .execute_request_scoped(
-            "responses:continue",
-            "r-rotate-restore",
-            5555,
-            "session-rotate",
-            "conversation-rotate",
-        )
-        .expect("next request restores");
-    runtime
-        .execute_provider_response_scoped(
-            "{\"text\":\"second\"}",
-            "r-rotate-save-2",
-            5555,
-            "session-rotate",
-            "conversation-rotate",
-            "responses",
-            "direct",
-        )
-        .expect("restored scope rotates to the next response truth");
 }
 
 #[test]
@@ -750,7 +333,7 @@ fn red_invalid_input_flows_typed_error_path_to_terminal_projection() {
     assert!(chain.is_terminal());
     assert_eq!(chain.records().count(), 6, "01..06 stages must be recorded");
     assert!(
-        !projection.message.contains("continuation_scope"),
+        !projection.message.contains("route_facts"),
         "client projection must not carry control fields"
     );
 }
@@ -840,15 +423,10 @@ fn red_control_leak_into_wire_fails() {
         plan_hash: "sha256:test".to_string(),
     };
     let mut ctx = ExecutionContext::new("r-leak-1", binding);
-    ctx.control.continuation_scope = Some("scope:typed-only".to_string());
     ctx.control.route_facts = Some("facts:typed-only".to_string());
-    ctx.data.provider_wire = Some("{\"continuation_scope\":\"business-data\"}".to_string());
+    ctx.data.provider_wire = Some("{\"stopless_scope\":\"business-data\"}".to_string());
     ctx.data.client_frame = Some("{\"route_facts\":\"business-data\"}".to_string());
     assert_no_control_leak(&ctx).expect("typed planes remain physically separate");
-    assert_eq!(
-        ctx.control.continuation_scope.as_deref(),
-        Some("scope:typed-only")
-    );
     assert_eq!(ctx.control.route_facts.as_deref(), Some("facts:typed-only"));
 }
 

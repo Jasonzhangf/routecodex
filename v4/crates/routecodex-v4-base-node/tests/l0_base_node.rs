@@ -28,20 +28,20 @@ fn base_node_control_in_out_record() {
     let mut node = BaseNode::new(identity());
     let sc = scope("req-1");
     let in_record = node
-        .control_in("continuation.restore", sc.clone(), Some("hash-a"))
+        .control_in("route.facts", sc.clone(), Some("hash-a"))
         .unwrap();
     assert_eq!(in_record.direction, ControlDirection::In);
     assert_eq!(in_record.sequence, 1);
 
     let out_record = node
-        .control_out("continuation.restore", sc.clone(), Some("hash-a"))
+        .control_out("route.facts", sc.clone(), Some("hash-a"))
         .unwrap();
     assert_eq!(out_record.direction, ControlDirection::Out);
     assert_eq!(out_record.sequence, 2);
 
     let records: Vec<&ControlRecord> = node.records().collect();
     assert_eq!(records.len(), 2);
-    assert_eq!(records[0].control_key, "continuation.restore");
+    assert_eq!(records[0].control_key, "route.facts");
     assert_eq!(records[1].scope, sc);
 }
 
@@ -50,7 +50,7 @@ fn base_node_control_out_without_in_record_is_red() {
     let mut node = BaseNode::new(identity());
     let sc = scope("req-red-1");
     let err = node
-        .control_out("continuation.restore", sc, Some("hash-a"))
+        .control_out("route.facts", sc, Some("hash-a"))
         .unwrap_err();
     assert!(matches!(err, NodeError::NoMatchingInRecord));
 }

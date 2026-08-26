@@ -183,12 +183,11 @@ fn audit_records_immutable_ordered_and_scoped() {
 fn control_signal_kind_is_typed_enum() {
     let kinds = vec![
         ControlSignalKind::Route,
-        ControlSignalKind::Continuation,
         ControlSignalKind::Stopless,
         ControlSignalKind::Error,
         ControlSignalKind::Scope,
     ];
-    assert_eq!(kinds.len(), 5);
+    assert_eq!(kinds.len(), 4);
     assert_eq!(ControlSignalKind::Route as u8, 0);
 }
 

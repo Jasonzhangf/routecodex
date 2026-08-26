@@ -21,7 +21,7 @@ use routecodex_v4_node_container::{NodeContainer, PlanBindings};
 use routecodex_v4_standard_plugins::{compile_standard_plan, StandardHandleRegistry};
 use routecodex_v4_standard_plugins::diagnostic;
 use routecodex_v4_provider::{
-    build_protocol_wire, build_responses_local_continuation_wire, load_profile, send_responses,
+    build_protocol_wire, send_responses,
     send_responses_streaming, write_provider_profile,
     normalize_provider_response, normalize_provider_sse_frame, send_anthropic_messages,
     send_anthropic_messages_streaming, send_openai_chat, send_openai_chat_streaming,
@@ -35,7 +35,7 @@ use routecodex_v4_router::{
 use routecodex_v4_runtime::{
     parse_responses_provider_payload,
     project_chat_request_to_responses, project_runtime_fault, project_runtime_fault_with_policy,
-    ContinuationKey, ResponsesProviderPayload, RuntimeFault, SkeletonRuntime,
+    ResponsesProviderPayload, RuntimeFault, SkeletonRuntime,
 };
 use routecodex_v4_server::{HttpHandler, HttpRequest, HttpResponse, ResponseStream, V4HttpServer};
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
@@ -522,7 +522,6 @@ impl HttpHandler for PipelineHandler {
                 &self.availability,
                 &request,
                 "responses",
-                "direct",
             )
             .unwrap_or_else(|response| response),
             ("POST", "/v1/chat/completions") => {
@@ -534,7 +533,6 @@ impl HttpHandler for PipelineHandler {
                     &self.availability,
                     &request,
                     "chat",
-                    "relay",
                 )
                 .unwrap_or_else(|response| response)
             }
@@ -584,7 +582,6 @@ fn handle_responses(
     availability: &Arc<Mutex<V4Availability01SessionScoped>>,
     request: &HttpRequest,
     entry_protocol: &str,
-    continuation_owner: &str,
 ) -> Result<HttpResponse, HttpResponse> {
     let body: serde_json::Value = serde_json::from_slice(&request.body).map_err(|error| {
         project_fault(
@@ -593,16 +590,6 @@ fn handle_responses(
             400,
         )
     })?;
-    if entry_protocol != "responses" && body.get("previous_response_id").is_some() {
-        return Err(project_fault(
-            request,
-            RuntimeFault::new(
-                "continuation_entry_protocol_mismatch",
-                "previous_response_id is only valid on the Responses entry protocol",
-            ),
-            400,
-        ));
-    }
     let session_scope = request
         .header("x-rccv4-session-id")
         .unwrap_or(&request.request_id);
@@ -703,13 +690,6 @@ fn handle_responses(
         )
     );
     let _ = std::io::stdout().flush();
-    let continuation_owner = if entry_protocol == "responses" {
-        load_profile(&target.config_path)
-            .map_err(|error| project_fault(request, RuntimeFault::new(&error.code, error.message), 500))?
-            .responses_continuation
-    } else {
-        continuation_owner.to_string()
-    };
     runtime
         .lock()
         .map_err(|_| {
@@ -719,7 +699,7 @@ fn handle_responses(
                 500,
             )
         })?
-        .execute_request_scoped_with_owner(
+        .execute_request_scoped(
             &format!(
                 "{entry_protocol}:{}",
                 String::from_utf8_lossy(&request.body)
@@ -728,21 +708,14 @@ fn handle_responses(
             request.port,
             session_scope,
             conversation_scope,
-            Some(&continuation_owner),
         )
         .map_err(|fault| project_fault(request, fault, 409))?;
     let provider_body = client_to_responses_request(&body, entry_protocol)
         .map_err(|fault| project_fault(request, fault, 400))?;
-    let wire_body = build_continuation_or_protocol_wire(
-        &body,
+    let wire_body = build_protocol_wire(
+        &target.protocol,
         &provider_body,
-        &target,
-        entry_protocol,
-        &continuation_owner,
-        request.port,
-        session_scope,
-        conversation_scope,
-        runtime,
+        &target.wire_model,
         stream_mode,
     )
     .map_err(|error| {
@@ -865,30 +838,16 @@ fn handle_responses(
             )
         );
         let _ = std::io::stdout().flush();
-        let mut response_stream = ResponsesSseStream::new(
+        let response_stream = ResponsesSseStream::new(
             stream,
             Arc::clone(runtime),
             request.request_id.clone(),
             request.port,
             entry_protocol.to_string(),
-            continuation_owner.to_string(),
             target.protocol.clone(),
             session_scope.to_string(),
             conversation_scope.to_string(),
         );
-        if entry_protocol == "responses" && continuation_owner == "relay" {
-            let context_seed = wire_body
-                .get("input")
-                .cloned()
-                .ok_or_else(|| {
-                    project_fault(
-                        request,
-                        RuntimeFault::new("continuation_commit", "stream input is missing"),
-                        400,
-                    )
-                })?;
-            response_stream.set_local_context_seed(context_seed);
-        }
         return Ok(HttpResponse::streaming(
             client_status,
             "text/event-stream",
@@ -1097,15 +1056,13 @@ fn handle_responses(
                         500,
                     )
                 })?
-                .execute_provider_response_scoped_with_seed(
+                .execute_provider_response_scoped(
                     &provider_raw,
                     &format!("{}:response", request.request_id),
                     request.port,
                     session_scope,
                     conversation_scope,
                     entry_protocol,
-                    &continuation_owner,
-                    Some(serde_json::to_string(wire_body.get("input").unwrap_or(&serde_json::Value::Null)).map_err(|error| project_fault(request, RuntimeFault::new("continuation_commit", error.to_string()), 500))?),
                 )
                 .map_err(|fault| project_fault(request, fault, 502))?;
             let frame = report.client_frame.ok_or_else(|| {
@@ -1165,68 +1122,6 @@ fn client_to_responses_request(
     ))
 }
 
-fn build_continuation_or_protocol_wire(
-    client_body: &serde_json::Value,
-    provider_body: &serde_json::Value,
-    target: &routecodex_v4_router::SelectedTarget,
-    entry_protocol: &str,
-    continuation_owner: &str,
-    port: u16,
-    session_scope: &str,
-    conversation_scope: &str,
-    runtime: &Arc<Mutex<SkeletonRuntime>>,
-    stream: bool,
-) -> Result<serde_json::Value, routecodex_v4_provider::ProviderTransportError> {
-    if entry_protocol == "responses"
-        && target.protocol == "responses"
-        && continuation_owner == "relay"
-        && client_body.get("previous_response_id").is_some()
-    {
-        let response_id = client_body
-            .get("previous_response_id")
-            .and_then(serde_json::Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| routecodex_v4_provider::ProviderTransportError {
-                code: "continuation_locator_invalid".to_string(),
-                message: "previous_response_id must be a non-empty string".to_string(),
-                status: None,
-            })?;
-        let key = ContinuationKey::new(
-            "responses",
-            "relay",
-            port,
-            session_scope,
-            conversation_scope,
-        );
-        let record = runtime
-            .lock()
-            .map_err(|_| routecodex_v4_provider::ProviderTransportError {
-                code: "continuation_runtime_lock".to_string(),
-                message: "runtime lock poisoned".to_string(),
-                status: None,
-            })?
-            .load_local_continuation(&key, response_id)
-            .map_err(|fault| routecodex_v4_provider::ProviderTransportError {
-                code: "continuation_restore".to_string(),
-                message: fault.to_string(),
-                status: None,
-            })?;
-        let prior_context: serde_json::Value = serde_json::from_str(&record.ordered_context)
-            .map_err(|error| routecodex_v4_provider::ProviderTransportError {
-                code: "continuation_context_decode".to_string(),
-                message: error.to_string(),
-                status: None,
-            })?;
-        return build_responses_local_continuation_wire(
-            &prior_context,
-            provider_body,
-            &target.wire_model,
-            stream,
-        );
-    }
-    build_protocol_wire(&target.protocol, provider_body, &target.wire_model, stream)
-}
-
 trait ProviderSseSource: Send {
     fn read_chunk(&mut self, chunk: &mut [u8]) -> Result<usize, String>;
     fn wait(&mut self) -> Result<(), String>;
@@ -1249,7 +1144,6 @@ struct ResponsesSseStream<S = ProviderResponseStream> {
     request_id: String,
     port: u16,
     entry_protocol: String,
-    continuation_owner: String,
     provider_protocol: String,
     session_scope: String,
     conversation_scope: String,
@@ -1258,7 +1152,6 @@ struct ResponsesSseStream<S = ProviderResponseStream> {
     frame_buffer: Vec<u8>,
     terminal_seen: bool,
     close_after_pending: bool,
-    local_context_seed: Option<serde_json::Value>,
 }
 
 impl<S: ProviderSseSource> ResponsesSseStream<S> {
@@ -1268,7 +1161,6 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
         request_id: String,
         port: u16,
         entry_protocol: String,
-        continuation_owner: String,
         provider_protocol: String,
         session_scope: String,
         conversation_scope: String,
@@ -1279,7 +1171,6 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
             request_id,
             port,
             entry_protocol,
-            continuation_owner,
             provider_protocol,
             session_scope,
             conversation_scope,
@@ -1288,12 +1179,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
             frame_buffer: Vec::new(),
             terminal_seen: false,
             close_after_pending: false,
-            local_context_seed: None,
         }
-    }
-
-    fn set_local_context_seed(&mut self, seed: serde_json::Value) {
-        self.local_context_seed = Some(seed);
     }
 
     fn queue_error(&mut self, message: impl Into<String>) {
@@ -1310,7 +1196,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
         self.close_after_pending = true;
     }
 
-    fn project_frame(&mut self, frame: &[u8], terminal: bool) -> Result<(), RuntimeFault> {
+    fn project_frame(&mut self, frame: &[u8], _terminal: bool) -> Result<(), RuntimeFault> {
         self.frame_sequence += 1;
         let normalized_frame = if self.provider_protocol == "responses" {
             frame.to_vec()
@@ -1319,24 +1205,13 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
                 RuntimeFault::new(&error.code, error.message)
             })?
         };
-        let owner = if terminal {
-            self.continuation_owner.as_str()
-        } else {
-            "none"
-        };
-        let continuation_seed = self
-            .local_context_seed
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))?;
         let report = self
             .runtime
             .lock()
             .map_err(|_| {
                 RuntimeFault::new("response_runtime_lock", "response runtime lock poisoned")
             })?
-            .execute_provider_response_scoped_with_seed(
+            .execute_provider_response_scoped(
                 std::str::from_utf8(&normalized_frame)
                     .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?,
                 &format!("{}:sse:{}", self.request_id, self.frame_sequence),
@@ -1344,8 +1219,6 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
                 &self.session_scope,
                 &self.conversation_scope,
                 &self.entry_protocol,
-                owner,
-                continuation_seed,
             )?;
         let client_frame = report.client_frame.ok_or_else(|| {
             RuntimeFault::new(
@@ -1708,27 +1581,20 @@ targets = ["mock"]
     }
 
     fn stream(chunks: Vec<Result<Vec<u8>, String>>) -> ResponsesSseStream<MockSseSource> {
-        stream_for(chunks, "responses", "direct")
+        stream_for(chunks, "responses")
     }
 
     fn stream_for(
         chunks: Vec<Result<Vec<u8>, String>>,
         entry_protocol: &str,
-        continuation_owner: &str,
     ) -> ResponsesSseStream<MockSseSource> {
-        stream_for_with_runtime(
-            runtime(),
-            chunks,
-            entry_protocol,
-            continuation_owner,
-        )
+        stream_for_with_runtime(runtime(), chunks, entry_protocol)
     }
 
     fn stream_for_with_runtime(
         runtime: Arc<Mutex<SkeletonRuntime>>,
         chunks: Vec<Result<Vec<u8>, String>>,
         entry_protocol: &str,
-        continuation_owner: &str,
     ) -> ResponsesSseStream<MockSseSource> {
         ResponsesSseStream::new(
             MockSseSource {
@@ -1739,7 +1605,6 @@ targets = ["mock"]
             "request-1".to_string(),
             u16::from_ne_bytes([0, 1]),
             entry_protocol.to_string(),
-            continuation_owner.to_string(),
             "responses".to_string(),
             "session-1".to_string(),
             "conversation-1".to_string(),
@@ -1770,79 +1635,6 @@ targets = ["mock"]
         );
         chunk.clear();
         assert!(!stream.next_chunk(&mut chunk).expect("stream must close"));
-    }
-
-    #[test]
-    fn local_responses_terminal_frame_commits_ordered_context() {
-        let runtime = runtime();
-        let frame = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-local\",\"output\":[{\"type\":\"message\"}]}}\n\n";
-        let mut stream = stream_for_with_runtime(
-            Arc::clone(&runtime),
-            vec![Ok(frame.to_vec())],
-            "responses",
-            "relay",
-        );
-        stream.set_local_context_seed(
-            serde_json::json!([{"role":"user","content":"hello"}]),
-        );
-        let mut chunk = Vec::new();
-        assert!(stream.next_chunk(&mut chunk).expect("terminal frame projects"));
-        let key = ContinuationKey::new(
-            "responses",
-            "relay",
-            u16::from_ne_bytes([0, 1]),
-            "session-1",
-            "conversation-1",
-        );
-        let ordered_context = {
-            let runtime_guard = runtime.lock().expect("runtime lock");
-            runtime_guard
-                .load_local_continuation(&key, "resp-local")
-                .expect("terminal response is committed")
-                .ordered_context
-        };
-        let context: serde_json::Value = serde_json::from_str(&ordered_context).expect("context JSON");
-        assert_eq!(context.as_array().expect("ordered context").len(), 2);
-    }
-
-    #[test]
-    fn local_continuation_wire_uses_exact_locator_and_preserves_request_fields() {
-        let runtime = runtime();
-        let key = ContinuationKey::new("responses", "relay", 5520, "session-1", "conversation-1");
-        runtime
-            .lock()
-            .expect("runtime lock")
-            .commit_local_continuation(key, "resp-1", r#"[{"role":"user","content":"first"}]"#)
-            .expect("seed local continuation");
-        let target = routecodex_v4_router::SelectedTarget {
-            provider_id: "cc-sol".to_string(),
-            config_path: "/tmp/provider.toml".to_string(),
-            protocol: "responses".to_string(),
-            wire_model: "gpt-wire".to_string(),
-            auth_alias: Some("key1".to_string()),
-        };
-        let client = serde_json::json!({
-            "model":"gpt-wire",
-            "previous_response_id":"resp-1",
-            "input":[{"role":"user","content":"second"}],
-            "tools":[{"type":"function"}]
-        });
-        let wire = build_continuation_or_protocol_wire(
-            &client,
-            &client,
-            &target,
-            "responses",
-            "relay",
-            5520,
-            "session-1",
-            "conversation-1",
-            &runtime,
-            false,
-        )
-        .expect("local continuation wire");
-        assert!(wire.get("previous_response_id").is_none());
-        assert_eq!(wire["tools"][0]["type"], "function");
-        assert_eq!(wire["input"].as_array().expect("input array").len(), 2);
     }
 
     #[test]
@@ -1938,7 +1730,7 @@ targets = ["mock"]
     #[test]
     fn relay_terminal_frame_projects_chat_chunk_and_done() {
         let frame = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\"}}\n\n";
-        let mut stream = stream_for(vec![Ok(frame.to_vec())], "chat", "relay");
+        let mut stream = stream_for(vec![Ok(frame.to_vec())], "chat");
         let mut chunk = Vec::new();
         assert!(stream
             .next_chunk(&mut chunk)
