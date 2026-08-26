@@ -63,8 +63,8 @@ function validate(input) {
   ) {
     failures.push('runtime control digest embeds business payload');
   }
-  if (!input.runtime.includes('Sha256::digest(value.as_bytes())')) {
-    failures.push('runtime control digest lacks SHA-256 owner');
+  if (input.runtime.includes('sha256_control_digest')) {
+    failures.push('runtime retains retired continuation digest helper');
   }
   if (input.runtimeBin.includes('DEFAULT_MANIFEST')) failures.push('runtime-bin retains cwd-relative default manifest');
   if (input.runtimeBin.includes('AdmissionHandler')) failures.push('runtime-bin retains admission handler bypass');
@@ -236,12 +236,15 @@ if (process.argv.includes('--red-self-test')) {
     process.exit(1);
   }
   const payloadDigestLeak = structuredClone(input);
-  payloadDigestLeak.runtime = payloadDigestLeak.runtime.replace(
-    '.map(sha256_control_digest)',
-    '.map(|payload| format!("sha256:{payload}"))',
-  );
+  payloadDigestLeak.runtime += '\nlet _ = format!("sha256:{payload}");\n';
   if (!validate(payloadDigestLeak).includes('runtime control digest embeds business payload')) {
     console.error('[v4_infrastructure] red self-test failed to detect business payload in control digest');
+    process.exit(1);
+  }
+  const retiredContinuationDigest = structuredClone(input);
+  retiredContinuationDigest.runtime += '\nfn sha256_control_digest(value: &str) -> String { value.to_string() }\n';
+  if (!validate(retiredContinuationDigest).includes('runtime retains retired continuation digest helper')) {
+    console.error('[v4_infrastructure] red self-test failed to detect retired continuation digest helper');
     process.exit(1);
   }
   console.log('[v4_infrastructure] red self-test OK');
