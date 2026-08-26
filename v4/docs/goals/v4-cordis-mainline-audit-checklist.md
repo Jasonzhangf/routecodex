@@ -37,7 +37,7 @@
 
 ## 当前审计结论
 
-- [ ] M00-T00 迁移计划已纳入 V4 重构主树并闭合 ratchet canonical doc 引用。
+- [x] M00-T00 迁移计划已纳入 V4 重构主树并闭合 ratchet canonical doc 引用：`3b62ffd9a`。
 
 - [x] V4 已有 Cordis/NodeContainer/plugin plan/基础 maps 与 gates。
 - [x] M00-T01 合同已合并 V4 重构主树：`aaf8b1f39`。

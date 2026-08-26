@@ -28,7 +28,7 @@
 
 | task_id | claim_id | 内容 | 允许路径 | 依赖 | 状态 | merge target |
 |---|---|---|---|---|---|---|
-| M00-T00 | `feature_id:v4.cordis_m00.migration_plan` | 将 M00→M12 唯一迁移计划纳入 V4 主树并闭合 canonical doc 引用 | `v4/docs/goals/**` | 无 | `in_progress` | `codex/v4-cordis-refactor-main` |
+| M00-T00 | `feature_id:v4.cordis_m00.migration_plan` | 将 M00→M12 唯一迁移计划纳入 V4 主树并闭合 canonical doc 引用 | `v4/docs/goals/**` | 无 | `merged` (`cf1bfab26`, main-tree merge `3b62ffd9a`) | `codex/v4-cordis-refactor-main` |
 | M00-T01 | `feature_id:v4.cordis_m00.contracts` | ADR、ExecutionEpochBundle、NativePluginCatalog、Control、NodeOutcome 合同 | `v4/contracts/**`, `v4/docs/architecture/v4-cordis-mainline-adr.md` | 无 | `merged` (`9f4577081`, main-tree merge `aaf8b1f39`) | `codex/v4-cordis-refactor-main` |
 | M00-T02 | `feature_id:v4.cordis_m00.ratchet_gate` | bypass ratchet 正反测试与 canonical gate 接线；先处理 protected projection promotion | `v4/scripts/architecture/**`, `v4/scripts/_gate-matrix.mjs`, `v4/package.json`, V4 maps | M00-T01 | `blocked` | `codex/v4-cordis-refactor-main` |
 | M00-T03 | `feature_id:v4.cordis_m00.audit_surfaces` | 全局审计 checklist、依赖进度表、task board 与 wiki/manifest 回链 | `v4/docs/goals/**`, `v4/docs/architecture/**` | M00-T01 | `merged` (`de31399d6`, main-tree merge `c4d13d7b8`) | `codex/v4-cordis-refactor-main` |
@@ -79,7 +79,6 @@ M11-T01/T02 可并行；M12 等二者和 D0。
 | M00-T03 | `de31399d6` | `c4d13d7b8` | markdown scope/diff check passed; main-tree files present | merged |
 | M00-T04 | `55faef2ee` | `5e0090f9d` | per-milestone table count=14; markdown diff check passed; main-tree files present | merged |
 | M00-T02 | pending | pending | pending | pending |
-| M00-T03 | pending | pending | pending | pending |
 
 ## 禁止事项
 
