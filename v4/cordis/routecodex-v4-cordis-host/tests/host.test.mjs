@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Context, FiberState } from 'cordis';
-import { CordisNodeHost, CordisHostError, createNodePlugin } from '../src/index.mjs';
+import {
+  CordisNodeHost,
+  CordisHostError,
+  createCordisPluginFactory,
+  createNodePlugin,
+} from '../src/index.mjs';
 
 test('mounts real Cordis fibers and disposes in reverse order', async () => {
   const events = [];
@@ -70,4 +75,77 @@ test('node context is real Cordis Context and service names are isolated', () =>
   });
   assert.equal(Context.is(host.context), true);
   assert.equal(host.context.root !== host.context, true);
+});
+
+test('canonical catalog factory mounts generic Cordis fibers and disposes them in reverse order', async () => {
+  const events = [];
+  const catalog = Object.freeze({
+    entries: Object.freeze([
+      Object.freeze({
+        plugin_id: 'v4.request.first',
+        version: '1.0.0',
+        owner: 'test',
+        artifact_hash: 'sha256:first',
+        contract_hash: 'sha256:contract-first',
+        supported_node_roles: ['request_chat_process'],
+        services_provided: [],
+        services_injected: [],
+        resources_read: [],
+        resources_written: [],
+        required_tests: ['factory'],
+      }),
+      Object.freeze({
+        plugin_id: 'v4.request.second',
+        version: '1.0.0',
+        owner: 'test',
+        artifact_hash: 'sha256:second',
+        contract_hash: 'sha256:contract-second',
+        supported_node_roles: ['request_chat_process'],
+        services_provided: [],
+        services_injected: [],
+        resources_read: [],
+        resources_written: [],
+        required_tests: ['factory'],
+      }),
+    ]),
+  });
+  const factory = createCordisPluginFactory({
+    catalog,
+    implementations: new Map([
+      ['v4.request.first@1.0.0+sha256:first', (ctx) => {
+        ctx.effect(() => () => events.push('first:dispose'));
+        events.push('first:active');
+      }],
+      ['v4.request.second@1.0.0+sha256:second', (ctx) => {
+        ctx.effect(() => () => events.push('second:dispose'));
+        events.push('second:active');
+      }],
+    ]),
+  });
+  const host = new CordisNodeHost({
+    nodeId: 'node-factory',
+    descriptor: { roleId: 'request_chat_process' },
+  });
+
+  await host.mount(factory.createPlugins(catalog.entries));
+  assert.equal(host.fibers.length, 2);
+  await host.dispose();
+  assert.deepEqual(events, [
+    'first:active',
+    'second:active',
+    'second:dispose',
+    'first:dispose',
+  ]);
+});
+
+test('canonical catalog factory rejects an implementation missing from the catalog', () => {
+  assert.throws(
+    () => createCordisPluginFactory({
+      catalog: { entries: [] },
+      implementations: new Map([
+        ['v4.request.unknown@1.0.0+sha256:unknown', () => {}],
+      ]),
+    }),
+    (error) => error instanceof CordisHostError && error.code === 'catalog_implementation_mismatch',
+  );
 });

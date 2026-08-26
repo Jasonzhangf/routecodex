@@ -677,6 +677,36 @@
       "status": "active"
     },
     {
+      "from": "routecodex-v4-plugin-catalog",
+      "to": "routecodex-v4-cordis-host",
+      "owner": "routecodex-v4-cordis-host::createCordisPluginFactory",
+      "edge_type": "catalog_factory_mount",
+      "caller_feature_id": "v4.plugin.catalog",
+      "callee_feature_id": "v4.cordis_generic_factory",
+      "caller_path": "crates/routecodex-v4-plugin-catalog/src/lib.rs",
+      "callee_path": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "caller_symbols": [
+        "CatalogSnapshot",
+        "CatalogEntry"
+      ],
+      "callee_symbols": [
+        "cordisCatalogIdentityKey",
+        "createCordisPluginFactory",
+        "CordisNodeHost::mount",
+        "CordisNodeHost::dispose"
+      ],
+      "symbols": [
+        "CatalogSnapshot",
+        "CatalogEntry",
+        "createCordisPluginFactory",
+        "CordisNodeHost::mount",
+        "CordisNodeHost::dispose"
+      ],
+      "resource_id": "v4.cordis.plugin_fibers",
+      "path": "crates/routecodex-v4-plugin-catalog/src/lib.rs,cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "status": "active"
+    },
+    {
       "from": "routecodex-v4-cordis-host",
       "to": "routecodex-v4-node-container",
       "owner": "routecodex-v4-cordis-host::CordisBoundNodeHost",

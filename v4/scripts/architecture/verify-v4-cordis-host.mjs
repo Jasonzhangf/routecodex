@@ -48,6 +48,12 @@ const required = [
   "failure.resource_id === 'v4.node_container.execution_failure'",
   'await this.#port.drain()',
   'await this.#port.status()',
+  'export function cordisCatalogIdentityKey',
+  'export function createCordisPluginFactory',
+  'canonical catalog entries are required',
+  'catalog_implementation_mismatch',
+  'catalog_implementation_missing',
+  'createPlugins(pluginEntries, configs = new Map())',
 ];
 const forbidden = [
   'metadata',
@@ -67,6 +73,8 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     !tests.includes('Context.is(host.context)')
     || !tests.includes('reverse order')
     || !tests.includes('failing in-flight fiber is disposed before mount rejects')
+    || !tests.includes('canonical catalog factory mounts generic Cordis fibers and disposes them in reverse order')
+    || !tests.includes('canonical catalog factory rejects an implementation missing from the catalog')
   ) {
     failures.push('black-box lifecycle tests missing');
   }
@@ -128,6 +136,7 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     failures.push('Cordis host -> NodeContainer mainline edge is not active');
   }
   const caller = functionMap.functions.find((entry) => entry.function_id === 'v4.cordis.host_binding');
+  const factory = functionMap.functions.find((entry) => entry.function_id === 'v4.cordis.generic_factory');
   const callee = functionMap.functions.find((entry) => entry.function_id === 'v4.node_container.lifecycle_dispatch');
   if (
     caller?.owner !== 'routecodex-v4-cordis-host'
@@ -139,6 +148,24 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     || !callee.required_gates?.includes('v4_cordis_host_l3_regression')
   ) {
     failures.push('host binding caller/callee feature ownership is not split at the module edge');
+  }
+  if (
+    factory?.owner !== 'routecodex-v4-cordis-host'
+    || factory.feature_id !== 'v4.cordis_generic_factory'
+    || !factory.entry_symbols?.includes('createCordisPluginFactory')
+    || !factory.required_gates?.includes('v4_parity_gate_cordis_host')
+  ) {
+    failures.push('generic Cordis factory owner or gate binding is missing');
+  }
+  const factoryEdge = mainline.edges.find((entry) => entry.edge_type === 'catalog_factory_mount');
+  if (
+    factoryEdge?.from !== 'routecodex-v4-plugin-catalog'
+    || factoryEdge?.to !== 'routecodex-v4-cordis-host'
+    || factoryEdge.owner !== 'routecodex-v4-cordis-host::createCordisPluginFactory'
+    || factoryEdge.callee_feature_id !== 'v4.cordis_generic_factory'
+    || factoryEdge.resource_id !== 'v4.cordis.plugin_fibers'
+  ) {
+    failures.push('canonical catalog -> generic factory -> Cordis fiber edge is not active');
   }
   const failureEdge = mainline.edges.find((entry) => (
     entry.edge_type === 'lifecycle_failure_projection'

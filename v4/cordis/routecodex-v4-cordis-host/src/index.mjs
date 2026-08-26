@@ -261,6 +261,97 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
+export function cordisCatalogIdentityKey(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    throw new CordisHostError('invalid_catalog_entry', 'catalog entry must be an object');
+  }
+  for (const field of ['plugin_id', 'version', 'artifact_hash']) {
+    if (typeof entry[field] !== 'string' || entry[field].length === 0) {
+      throw new CordisHostError('invalid_catalog_entry', `catalog entry requires ${field}`);
+    }
+  }
+  return `${entry.plugin_id}@${entry.version}+${entry.artifact_hash}`;
+}
+
+function catalogEntries(catalog) {
+  if (!catalog || typeof catalog !== 'object' || !Array.isArray(catalog.entries)) {
+    throw new CordisHostError('invalid_catalog', 'canonical catalog entries are required');
+  }
+  const identities = new Set();
+  return Object.freeze(catalog.entries.map((entry) => {
+    const identity = cordisCatalogIdentityKey(entry);
+    if (identities.has(identity)) {
+      throw new CordisHostError('catalog_identity_conflict', `duplicate catalog identity ${identity}`);
+    }
+    identities.add(identity);
+    return Object.freeze({ ...entry });
+  }));
+}
+
+/**
+ * Bind canonical catalog identities to real Cordis plugin factories.
+ * The catalog is the only identity source; implementations provide behavior
+ * and never carry request or response state.
+ */
+export function createCordisPluginFactory({ catalog, implementations }) {
+  const entries = catalogEntries(catalog);
+  if (!(implementations instanceof Map)) {
+    throw new CordisHostError('invalid_catalog_implementations', 'implementations must be a Map');
+  }
+  const byIdentity = new Map(entries.map((entry) => [cordisCatalogIdentityKey(entry), entry]));
+  for (const [identity, implementation] of implementations) {
+    if (typeof identity !== 'string' || typeof implementation !== 'function') {
+      throw new CordisHostError(
+        'invalid_catalog_implementation',
+        'implementation entries require an identity string and function',
+      );
+    }
+    if (!byIdentity.has(identity)) {
+      throw new CordisHostError(
+        'catalog_implementation_mismatch',
+        `implementation ${identity} is absent from canonical catalog`,
+      );
+    }
+  }
+  return Object.freeze({
+    createPlugin(entry, config = undefined) {
+      const identity = cordisCatalogIdentityKey(entry);
+      const canonical = byIdentity.get(identity);
+      if (!canonical) {
+        throw new CordisHostError(
+          'catalog_identity_mismatch',
+          `plugin ${identity} is absent from canonical catalog`,
+        );
+      }
+      const implementation = implementations.get(identity);
+      if (!implementation) {
+        throw new CordisHostError(
+          'catalog_implementation_missing',
+          `catalog plugin ${identity} has no Cordis implementation`,
+        );
+      }
+      return createNodePlugin(
+        canonical.plugin_id,
+        (context, pluginConfig) => implementation(context, pluginConfig),
+        config,
+        entry,
+      );
+    },
+    createPlugins(pluginEntries, configs = new Map()) {
+      if (!Array.isArray(pluginEntries)) {
+        throw new CordisHostError('invalid_plugin_entries', 'plugin entries must be an array');
+      }
+      if (!(configs instanceof Map)) {
+        throw new CordisHostError('invalid_plugin_configs', 'plugin configs must be a Map');
+      }
+      return Object.freeze(pluginEntries.map((entry) => {
+        const identity = cordisCatalogIdentityKey(entry);
+        return this.createPlugin(entry, configs.get(identity));
+      }));
+    },
+  });
+}
+
 export function computeNodePluginPlanHash(plan) {
   const { hash: _hash, ...body } = plan;
   return createHash('sha256').update(canonicalJson(body)).digest('hex');
