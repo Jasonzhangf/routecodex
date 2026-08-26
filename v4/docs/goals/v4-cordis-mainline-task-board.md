@@ -57,14 +57,14 @@ M01 与 M03 可并行；M02 等 M01；M04 等 M02+M03；M05 等 M04。
 
 | task_id | claim_id | 内容 | 依赖 | 状态 | merge target |
 |---|---|---|---|---|---|
-| D0-T01 | `feature_id:v4.differential_harness` | old/new wire 与 raw response differential，不重复 provider 请求 | M00 | `available` | refactor main |
+| D0-T01 | `feature_id:v4.differential_harness` | old/new wire 与 raw response differential，不重复 provider 请求 | M00 | `blocked_by_M00` | refactor main |
 | M06-T01 | `feature_id:v4.responses_request_mainline` | Responses JSON request chain takeover | M05 | `blocked` | refactor main |
 | M07-T01 | `feature_id:v4.responses_response_mainline` | Responses JSON response chain takeover | M06 | `blocked` | refactor main |
 | M08-T01 | `feature_id:v4.async_data_plane` | async server、native provider transport、cancel/deadline/buffer，并接入 M00-T07 已冻结的 live evidence owner | M00 | `blocked_by_M00` | refactor main |
 | M09-T01 | `feature_id:v4.sse_mainline` | SSE parser → response pipeline → frame writer，zero per-frame IPC | M07 + M08 | `blocked` | refactor main |
 | M10-T01 | `feature_id:v4.state_semantics` | Router/Error/Health/Continuation typed owner 接管 | M09 | `blocked` | refactor main |
 
-D0、M08 可与 M01-M07 并行；M09 必须等 M07+M08；M10 等 M09。
+D0、M08 在 M00 完成后可与 M01-M07 并行；M09 必须等 M07+M08；M10 等 M09。
 
 ## M11-M12：产品接入与 release
 
