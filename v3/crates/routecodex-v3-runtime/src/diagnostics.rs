@@ -320,14 +320,57 @@ fn route_target_provider_statuses(
     now_ms: u64,
 ) -> Vec<Value> {
     match target.kind {
-        V3RouteTargetKind::ProviderModel => vec![provider_target_status_snapshot(
-            route_pool_target_label(target),
-            target.provider.as_deref(),
-            target.key.as_deref(),
-            target.model.as_deref(),
-            availability,
-            now_ms,
-        )],
+        V3RouteTargetKind::ProviderModel => {
+            let Some(provider_id) = target.provider.as_deref() else {
+                return vec![provider_target_status_snapshot(
+                    route_pool_target_label(target),
+                    None,
+                    target.key.as_deref(),
+                    target.model.as_deref(),
+                    availability,
+                    now_ms,
+                )];
+            };
+            let Some(key) = target.key.as_deref() else {
+                let Some(provider) = manifest.providers.get(provider_id) else {
+                    return vec![provider_target_status_snapshot(
+                        route_pool_target_label(target),
+                        Some(provider_id),
+                        None,
+                        target.model.as_deref(),
+                        availability,
+                        now_ms,
+                    )];
+                };
+                return provider
+                    .auth
+                    .entries
+                    .iter()
+                    .map(|entry| {
+                        provider_target_status_snapshot(
+                            format_provider_key(
+                                Some(provider_id),
+                                Some(entry.alias.as_str()),
+                                target.model.as_deref(),
+                            ),
+                            Some(provider_id),
+                            Some(entry.alias.as_str()),
+                            target.model.as_deref(),
+                            availability,
+                            now_ms,
+                        )
+                    })
+                    .collect();
+            };
+            vec![provider_target_status_snapshot(
+                route_pool_target_label(target),
+                Some(provider_id),
+                Some(key),
+                target.model.as_deref(),
+                availability,
+                now_ms,
+            )]
+        }
         V3RouteTargetKind::Forwarder => target
             .id
             .as_ref()
@@ -572,6 +615,55 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
         );
     }
 
+    #[test]
+    fn virtual_router_status_expands_keyless_provider_targets_before_health_projection() {
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.a]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "gateway"
+endpoints = ["responses"]
+[providers.test]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [
+  { alias = "key1", env = "TEST_KEY_1" },
+  { alias = "key2", env = "TEST_KEY_2" }
+] }
+[providers.test.models.test]
+[route_groups.gateway.pools.default]
+selection = { strategy = "weighted" }
+targets = [{ kind = "provider_model", provider = "test", model = "test", priority = 1, weight = 1 }]
+"#,
+        )
+        .expect("config");
+        let manifest = compile_v3_config_05_manifest(authoring).expect("manifest");
+        let status = project_v3_virtual_router_status(
+            &manifest,
+            "a",
+            &KeyedAvailability,
+            1_000,
+        )
+        .expect("status");
+        let pool = &status["routes"]["gateway"]["pools"][0];
+        assert_eq!(
+            pool["resolvedTargets"],
+            json!(["test.key1.test", "test.key2.test"])
+        );
+        assert_eq!(pool["availableTargets"], json!(["test.key2.test"]));
+        assert_eq!(
+            pool["unavailableProviders"][0]["providerKey"],
+            "test.key1.test"
+        );
+        assert_eq!(
+            pool["unavailableProviders"][0]["reasons"][0],
+            "provider_key:test:key1:test:controlled status failure"
+        );
+    }
+
     struct CooledAvailability {
         until_ms: u64,
     }
@@ -585,6 +677,37 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
             now_ms: u64,
         ) -> V3ProviderAvailabilityProjection {
             let blocked = now_ms < self.until_ms;
+            V3ProviderAvailabilityProjection {
+                provider_id: provider_id.to_string(),
+                auth_alias: auth_alias.map(str::to_string),
+                model_id: model_id.map(str::to_string),
+                available: !blocked,
+                blocked_scopes: blocked
+                    .then(|| {
+                        format!(
+                            "provider_key:{}:{}:{}:controlled status failure",
+                            provider_id,
+                            auth_alias.unwrap_or("-"),
+                            model_id.unwrap_or("-")
+                        )
+                    })
+                    .into_iter()
+                    .collect(),
+            }
+        }
+    }
+
+    struct KeyedAvailability;
+
+    impl V3ProviderAvailabilityReader for KeyedAvailability {
+        fn availability(
+            &self,
+            provider_id: &str,
+            auth_alias: Option<&str>,
+            model_id: Option<&str>,
+            _now_ms: u64,
+        ) -> V3ProviderAvailabilityProjection {
+            let blocked = auth_alias == Some("key1");
             V3ProviderAvailabilityProjection {
                 provider_id: provider_id.to_string(),
                 auth_alias: auth_alias.map(str::to_string),
