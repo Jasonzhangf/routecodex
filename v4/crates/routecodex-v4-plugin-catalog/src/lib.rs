@@ -8,6 +8,10 @@ use routecodex_v4_plugin_contract::DependencySpec;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod native_resolver;
+
+pub use native_resolver::{NativePluginResolver, ResolverError};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogEntry {
     pub plugin_id: String,
