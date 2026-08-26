@@ -46,5 +46,5 @@
 - [x] M00-T04 每个 milestone 独立 claim 表已建立并合并 V4 重构主树：`5e0090f9d`。
 - [ ] M00-T05 live admission closeout：当前被 provider Responses WebSocket v2 endpoint 阻塞；不得以 HTTP continuation 或 fallback 替代。
 - [x] M00-T06 canonical B wire evidence contract：已在 V4 重构主树合并 `0bcd0e3ff`（merge `9f9ebc25d`）；server L2、resource binding、plane isolation、infrastructure 均通过。
-- [ ] M00-T07 live B capture binding：真实 provider-bound/raw capture 尚未接入 live transport，继续 blocked。
+- [ ] M00-T07 live B capture binding contract：待 T06 后在 M00 内绑定未来 live transport 的真实 evidence owner；不提前实现 M08 runtime，不由 server contract 重建或伪造 B 证据。
 - [x] M00-T09 no-active-epoch admission：已合并独立 task `23220dceb`，V4 主树 merge `4298257666`；empty store fail-closed admission、6 项 L2、架构 gates、Active-linked build 与 AGY review 通过。

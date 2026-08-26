@@ -33,8 +33,12 @@
 | M00-T02 | `feature_id:v4.cordis_m00.ratchet_gate` | bypass ratchet 正反测试与 canonical gate 接线；先处理 protected projection promotion | `v4/scripts/architecture/**`, `v4/scripts/_gate-matrix.mjs`, `v4/package.json`, V4 maps | M00-T01 | `merged` (`faab92ff8`, main-tree merge `70bf0bda2`; live gate remains blocked by upstream HTTP 502 baseline) | `codex/v4-cordis-refactor-main` |
 | M00-T03 | `feature_id:v4.cordis_m00.audit_surfaces` | 全局审计 checklist、依赖进度表、task board 与 wiki/manifest 回链 | `v4/docs/goals/**`, `v4/docs/architecture/**` | M00-T01 | `merged` (`de31399d6`, main-tree merge `c4d13d7b8`) | `codex/v4-cordis-refactor-main` |
 | M00-T04 | `feature_id:v4.cordis_m00.stage_task_tables` | 每个 milestone 独立 claim task table，并同步 checklist/progress 状态 | `v4/docs/goals/**` | M00-T03 | `merged` (`55faef2ee`, main-tree merge `5e0090f9d`) | `codex/v4-cordis-refactor-main` |
+| M00-T05 | `feature_id:v4.cordis_m00.live_admission_closeout` | provider/live admission A/B/C closeout；必须保留真实 provider continuation 语义 | V4 live/provider evidence paths | M00-T02 + M00-T04 | `blocked_by_provider_websocket_v2_endpoint` | `codex/v4-cordis-refactor-main` |
+| M00-T06 | `resource_id:v4.error.raw_wire_evidence` | canonical provider request/response diagnostic evidence contract | `v4/crates/routecodex-v4-server/**`, V4 maps/contracts | M00-T01 + M00-T03 | `merged` (`0bcd0e3ff`, main-tree merge `9f9ebc25d`) | `codex/v4-cordis-refactor-main` |
+| M00-T07 | `feature_id:v4.cordis_m00.live_capture_binding` | 只绑定未来 live transport 的真实 provider-bound/raw evidence owner；不实现 M08 runtime、不伪造 B 证据 | V4 task contract/progress/evidence surfaces | M00-T06 | `available_after_T06` | `codex/v4-cordis-refactor-main` |
+| M00-T09 | `feature_id:v4.cordis_m00.empty_epoch_admission` | 无 active epoch 时 fail-closed admission 与正反测试 | `v4/crates/routecodex-v4-node-container/**`, V4 maps/evidence | M00-T01 + M00-T02 | `merged` (`23220dceb`, main-tree merge `4298257666`) | `codex/v4-cordis-refactor-main` |
 
-M00 退出：T00/T01/T02/T03/T04 都完成并合并主树；合同/map/wiki/manifest/gate 与独立 task tables 同步；canonical V4 verify 与 red suite 通过；live provider admission 也必须通过；未完成前不得 claim M01。
+M00 退出：T00/T01/T02/T03/T04/T06/T07/T09 都完成并合并主树；T05 的 live provider admission blocker 必须解除；合同/map/wiki/manifest/gate 与独立 task tables 同步；canonical V4 verify 与 red suite 通过；未完成前不得 claim M01/M03/D0/M08。
 
 ## M01-M05：Cordis 控制面与唯一执行器
 
@@ -55,7 +59,7 @@ M01 与 M03 可并行；M02 等 M01；M04 等 M02+M03；M05 等 M04。
 | D0-T01 | `feature_id:v4.differential_harness` | old/new wire 与 raw response differential，不重复 provider 请求 | M00 | `available` | refactor main |
 | M06-T01 | `feature_id:v4.responses_request_mainline` | Responses JSON request chain takeover | M05 | `blocked` | refactor main |
 | M07-T01 | `feature_id:v4.responses_response_mainline` | Responses JSON response chain takeover | M06 | `blocked` | refactor main |
-| M08-T01 | `feature_id:v4.async_data_plane` | async server、native provider transport、cancel/deadline/buffer | M00 | `available` | refactor main |
+| M08-T01 | `feature_id:v4.async_data_plane` | async server、native provider transport、cancel/deadline/buffer，并接入 M00-T07 已冻结的 live evidence owner | M00 | `blocked_by_M00` | refactor main |
 | M09-T01 | `feature_id:v4.sse_mainline` | SSE parser → response pipeline → frame writer，zero per-frame IPC | M07 + M08 | `blocked` | refactor main |
 | M10-T01 | `feature_id:v4.state_semantics` | Router/Error/Health/Continuation typed owner 接管 | M09 | `blocked` | refactor main |
 
