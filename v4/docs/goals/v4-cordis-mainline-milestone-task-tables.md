@@ -14,12 +14,13 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
+| M00-T00 | `feature_id:v4.cordis_m00.migration_plan` | 无 | merged (`3b62ffd9a`) | `codex/v4-cordis-refactor-main` |
 | M00-T01 | `feature_id:v4.cordis_m00.contracts` | 无 | merged | `codex/v4-cordis-refactor-main` |
-| M00-T02 | `feature_id:v4.cordis_m00.ratchet_gate` | T01 | blocked | `codex/v4-cordis-refactor-main` |
+| M00-T02 | `feature_id:v4.cordis_m00.ratchet_gate` | T01 | merged (`70bf0bda2`) | `codex/v4-cordis-refactor-main` |
 | M00-T03 | `feature_id:v4.cordis_m00.audit_surfaces` | T01 | merged | `codex/v4-cordis-refactor-main` |
 | M00-T04 | `feature_id:v4.cordis_m00.stage_task_tables` | T03 | merged (`55faef2ee`, main-tree merge `5e0090f9d`) | `codex/v4-cordis-refactor-main` |
 | M00-T05 | `feature_id:v4.cordis_m00.live_admission_closeout` | T02 + T04 | blocked_by_provider_websocket_v2_endpoint | `codex/v4-cordis-refactor-main` |
-| M00-T06 | `resource_id:v4.error.raw_wire_evidence` | T01 + T03 | in_progress | `codex/v4-cordis-refactor-main` |
+| M00-T06 | `resource_id:v4.error.raw_wire_evidence` | T01 + T03 | merged (`0bcd0e3ff`, main-tree merge `9f9ebc25d`) | `codex/v4-cordis-refactor-main` |
 | M00-T07 | `feature_id:v4.cordis_m00.live_capture_binding` | T05 + M08 transport owner | blocked_by_live_transport_owner | `codex/v4-cordis-refactor-main` |
 
 ## M01 — NativePlugin ABI
