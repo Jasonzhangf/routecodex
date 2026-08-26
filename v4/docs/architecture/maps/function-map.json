@@ -1256,5 +1256,15 @@
     {
       "function_id":"v4.governance.feature_layer_product_lockstep","status":"active","feature_id":"V4-LAYER-GATE-001","owner":"routecodex-v4-governance","entry_symbols":["validateSourceGreenClaims"],"resource_ids":["v4.governance.feature_layer_product_lockstep"],"source_paths":["scripts/architecture/lib/feature-layer-batch-source.mjs"],"required_gates":["v4_feature_layer_batches","v4_feature_layer_batches_self_test","v4_feature_layer_batches_boundary","v4_feature_layer_batches_red"]
     }
+    ,{
+      "function_id": "v4.governance.cordis_concurrency_reconciliation",
+      "status": "active",
+      "feature_id": "gate_id:v4.cordis-concurrency-reconciliation",
+      "owner": "routecodex-v4-governance",
+      "entry_symbols": ["root"],
+      "resource_ids": ["v4.governance.cordis_concurrency_reconciliation"],
+      "source_paths": ["scripts/verify-v4-cordis-concurrency-reconciliation.mjs", "contracts/v4-cordis-concurrency-reconciliation.manifest.json"],
+      "required_gates": ["v4_cordis_concurrency_reconciliation", "v4_cordis_concurrency_reconciliation_red"]
+    }
   ]
 }
