@@ -26,14 +26,14 @@ M00 -> M01 -> M02 --┐
 | M00-T08 dependency reconciliation | `merged` | T01 + T03 + T04 | 已合并独立 task `764351194`，V4 主树 merge `0f353bee8`；拆分 T07 contract 与 M08 async/native runtime，消除循环依赖 |
 | M00-T09 no-active-epoch admission | `merged` | T01 + T02 | 已合并独立 task `23220dceb`，V4 主树 merge `4298257666`；ActiveEpochStore 无 active epoch 时 fail-closed，6 项 L2、架构 gates、Active-linked build 与 AGY review 通过 |
 | M01 NativePlugin ABI | `merged` | M00 structural contracts | task `7c7e141f5` 已合入重构主树 `100b9fd12`；主树 contract/catalog tests、plugin plan、resource binding `91/91`、diff check 通过；T05 独立保留 |
-| M02 generic factory | `available` | M01 | M01 已合并并通过主树复验；可与 M03/M08/D0 并行 claim |
-| M03 Cordis daemon | `available` | M00 structural contracts | 与 M01 后续阶段并行；T05 不传播阻塞 |
+| M02 generic factory | `merged` | M01 | task `ff9065c8c` 已合入重构主树 `aa5518b50`；主树 host 30/30、red 10/10、release build、plugin tests 通过 |
+| M03 Cordis daemon | `merged` | M00 structural contracts | task `8be1e7ced` 已合入重构主树 `3a425633c`；daemon 3/3、host 联测 30/30、red 10/10、release build 通过 |
 | D0 differential harness | `in_progress` | M00 structural contracts | 已有独立 worker；与 M03/M08 并行，T05 不传播阻塞 |
-| M04 epoch transaction | `blocked` | M02 + M03 | 必须串行收敛 |
+| M04 epoch transaction | `available` | M02 + M03 | 两个前置 task 已合并并完成主树复验；可独立 claim |
 | M05 ExecutionEngine | `blocked` | M04 | 必须串行 |
 | M06 request JSON | `blocked` | M05 | 必须串行 |
 | M07 response JSON | `blocked` | M06 | 必须串行 |
-| M08 async data plane | `available` | M00 structural contracts + M00-T07 | 可独立 claim；负责真实 live transport/capture integration；T05 仅影响其真实 provider closeout，不阻塞合同/实现推进 |
+| M08 async data plane | `blocked_by_incomplete_sync_transport_migration` | M00 structural contracts + M00-T07 | worker 已完成局部 async listener/native transport 测试，但旧 curl、同步 runtime-bin、真实 evidence integration 未完成；另有无关 formatter dirty，未合入；T05 不是该 blocker |
 | M09 SSE | `blocked` | M07 + M08 | 必须串行 |
 | M10 state semantics | `blocked` | M09 | 必须串行 |
 | M11 protocols/tools/admin | `blocked` | M10 | 协议 lane 与 tools/admin lane 可并行 |
