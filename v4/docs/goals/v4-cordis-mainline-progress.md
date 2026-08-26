@@ -51,7 +51,7 @@ M00 -> M01 -> M02 --┐
 |---|---|---|---|---|
 | execution owner | M05-T01 | `blocked_external_input_with_scope_ruling` | 否 | 父审计已完成 35 个物理文件分类：A=26 个在 claim 内，B=3 个 M05 gate 已获父任务批准扩展 claim，C=6 个 standard-plugins/real-pipeline gate 必须返还其他 owner；真实 Active-link/isolation 输入仍缺失；不得清理 C、伪造 artifact、clean、AGY、commit、merge |
 | build-link owner | B01 | `blocked_external_input` | 否 | 独立 claim/worktree 内已完成并验证真实 consumer registry/mainline edge（23/23 resolver red、Active-link、execution-binding）；canonical `gen-index/verify-index` 对隔离 worktree 缺真实 frozen Active fail-fast，不得复制、伪造、软链或 allowlist；等待 Active/record-graph owner 提供 exact target input |
-| Active lifecycle owner | B02 | `blocked_owner_handoff` | 否 | B02 隔离 worktree 的正式 `begin-version active-v1→active-v2` 已 fail-closed：缺 `v4/active/lib/routecodex-v4-base-node/current.json`（`ACTIVE_INDEX_MISSING`）；重构主 tree 虽出现 ignored `current.json`/`active-v2/artifact.json`，但不属于 B02 admission 证据且主 tree 仍缺 `build-control/active-index.json`。必须由 `appsdk::lifecycle` / `appsdk::record_graph` 在目标 worktree 正式恢复，禁止复制、软链、手写 Active/index 或修改 B01/M05/D0/M08 |
+| Active lifecycle owner | B02 | `blocked_owner_handoff` | 否 | B02 隔离 worktree 的正式 `begin-version active-v1→active-v2`、`gen-index`、`verify-index` 仍 fail-closed：缺 `current.json`/`active-v2`（`ACTIVE_INDEX_MISSING`/`ActiveLinkErr03ArtifactMissing`）；重构主 tree 已由 canonical generator 生成并验证 `build-control/active-index.json`（`V4_ACTIVE_INDEX_OK`），但这些 ignored 输出不属于 B02 admission 证据，不能复制到隔离 worktree。必须由 `appsdk::lifecycle` / `appsdk::record_graph` 在目标 worktree 正式恢复，禁止软链、手写 Active/index 或修改 B01/M05/D0/M08 |
 | differential governance | D0-T01 | `stale_owner_handoff_required` | 否 | claim 仍 active 但原 feature-layer worktree 已不存在且无可调用会话；必须先完成 owner handoff，M05 不得抢改其 gate 文件 |
 | async data plane | M08-T01 | `blocked_waiting_m05_handoff` | 否 | provider/server 独立 slice 已完成并写入 handoff；整体无合法并发实现面，runtime-bin async stream/cancellation 尚未完成，必须等待 M05 交接，不覆盖 M05 |
 | provider live admission | M00-T05 | `blocked` | 否 | Responses WebSocket v2 / credential blocker；不得猜 endpoint、伪造 101 或绕过真实 continuation |
@@ -59,7 +59,7 @@ M00 -> M01 -> M02 --┐
 | governance audit | M00-T10 | `merged_and_cleaned` | 否 | merge `de7596514`；red/positive 主树复验通过；claim、worktree、branch 已释放/清理 |
 | protocol/tools/admin contract | M11-T01 | `merged_and_cleaned` | 否 | merge `d48956155`；合同/host/red gates 主树复验通过；resource binding 的既有 host owner/catalog drift 已记录；claim、worktree、branch 已释放/清理 |
 
-当前无可执行的 V4 并发实现 lane：B02 已在独立 worktree 完成 red-first，但其目标 worktree 仍缺 canonical Active 输入；重构主 tree 出现的 ignored 生成物不能作为隔离 admission 证据；B01 只读等待同一输入；M05 是唯一 execution owner，保留 dirty candidate 等待 B01/B02；M08 的 provider/server slice 已 ready，但整体 runtime-bin 接线等待 M05 明确交接；D0-T01 是 stale owner handoff，不能抢改。M06 及后续 milestone 继续等待 M05 合入重构主树并完成主树复验。M00-T10、M11-T01、M03-T01 已完成合入并清理，不得重复 claim；不为填充并发槽位新开会话或 worktree。下一次可派发条件是 B02 在自身 worktree 通过正式 lifecycle 并提供真实 Active/index，随后并发唤醒 B01 与 M05；在此之前只保留既有 claims/worktrees，不做无效派发。
+当前无可执行的 V4 并发实现 lane：重构主 tree 的 canonical Active/index 已可生成并通过自身 `verify-index`/`verify:isolation`，但 B02 目标 worktree 仍缺同一真实输入，不能把 ignored 输出当隔离 admission 证据；B02 继续负责唯一 owner handoff，B01 只读等待，M05 保留 dirty candidate 等待 B01/B02；M08 的 provider/server slice 已 ready，但整体 runtime-bin 接线等待 M05 明确交接；D0-T01 是 stale owner handoff，不能抢改。M06 及后续 milestone 继续等待 M05 合入重构主树并完成主树复验。M00-T10、M11-T01、M03-T01 已完成合入并清理，不得重复 claim；不为填充并发槽位新开会话或 worktree。下一次可派发条件是 B02 在自身 worktree 通过正式 lifecycle 并提供真实 Active/index，随后并发唤醒 B01 与 M05；在此之前只保留既有 claims/worktrees，不做无效派发。
 
 ## 当前派发记录（2026-08-26，证据优先）
 
