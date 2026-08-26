@@ -143,6 +143,7 @@ fn observability_source_row() -> serde_json::Value {
         "meta": {
             "request_id": "req-source",
             "endpoint": "/v1/chat/completions",
+            "provider_status": 429,
             "error_category": "provider_http_429",
             "error_detail": "upstream rate limited"
         },
@@ -232,25 +233,30 @@ async fn spawn_bootstrap_source_on_configured_port() -> (u16, tokio::sync::onesh
         .await
         .expect("bind configured observability source port");
     let port = listener.local_addr().expect("source address").port();
-    let app = axum::Router::new()
-        .route(
-            "/_routecodex/observability/snapshot",
-            axum::routing::get(|| async { axum::Json(source_snapshot()) }),
-        )
-        .route(
-            "/_routecodex/observability/events",
-            axum::routing::get(
-                |axum::extract::Query(query): axum::extract::Query<BTreeMap<String, String>>| async move {
-                    let cursor = query.get("cursor").and_then(|cursor| cursor.parse::<u64>().ok());
-                    axum::Json(serde_json::json!({
-                        "kind": "events",
-                        "cursor": 7,
-                        "resync_required": cursor == Some(0),
-                        "events": []
-                    }))
-                },
-            ),
-        );
+    let app =
+        axum::Router::new()
+            .route(
+                "/_routecodex/observability/snapshot",
+                axum::routing::get(|| async { axum::Json(source_snapshot()) }),
+            )
+            .route(
+                "/_routecodex/observability/events",
+                axum::routing::get(
+                    |axum::extract::Query(query): axum::extract::Query<
+                        BTreeMap<String, String>,
+                    >| async move {
+                        let cursor = query
+                            .get("cursor")
+                            .and_then(|cursor| cursor.parse::<u64>().ok());
+                        axum::Json(serde_json::json!({
+                            "kind": "events",
+                            "cursor": 7,
+                            "resync_required": cursor == Some(0),
+                            "events": []
+                        }))
+                    },
+                ),
+            );
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
         let _ = axum::serve(listener, app)
@@ -528,25 +534,40 @@ async fn observability_poll_aggregates_source_and_advances_cursor() {
 }
 
 #[tokio::test]
-async fn observability_records_terminal_error_not_in_provider_failure_facets() {
+async fn observability_records_group_terminal_errors_by_raw_status_code() {
     let _guard = OBSERVABILITY_TEST_LOCK.lock().await;
     let (base, _state, _home) = bind_test_server().await;
     let (_source_port, shutdown) = spawn_source_on_configured_port().await;
 
     let response = http_client()
-        .get(format!("{base}/api/observability/records?page=1&page_size=10"))
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10"
+        ))
         .send()
         .await
         .expect("records response");
     assert!(response.status().is_success());
     let body: serde_json::Value = response.json().await.expect("records json");
 
-    // Source row has failed_attempts=1, so provider_failure_categories must include it.
+    assert_eq!(body["facets"]["error_status_codes"]["429"], 1);
     assert!(
-        body["facets"]["provider_failure_categories"]["provider_http_429"]
-            .as_u64()
-            .is_some(),
-        "provider failure with failed_attempts>0 must appear in facets: {body}"
+        body["facets"]["error_status_codes"]["provider_http_429"].is_null(),
+        "semantic error category must never be exposed as a status-code facet: {body}"
+    );
+
+    let filtered = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&status=error&error_status_code=429"
+        ))
+        .send()
+        .await
+        .expect("filtered records response");
+    assert!(filtered.status().is_success());
+    let filtered_body: serde_json::Value = filtered.json().await.expect("filtered json");
+    assert_eq!(filtered_body["total"], 1);
+    assert_eq!(
+        filtered_body["records"][0]["request_key"],
+        "19999:req-source"
     );
     shutdown.send(()).unwrap();
 }
@@ -590,8 +611,7 @@ async fn observability_poll_recovers_from_resync_using_snapshot_cursor() {
     );
     let body: serde_json::Value = response.json().await.expect("poll json");
     assert_eq!(
-        body["sources"][0]["cursor"],
-        7,
+        body["sources"][0]["cursor"], 7,
         "stale cursor must be replaced by the snapshot cursor after resync"
     );
     shutdown.send(()).unwrap();

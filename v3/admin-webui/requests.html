@@ -37,7 +37,7 @@
       </div>
       <div class="layout">
         <div class="panel"><table id="ports-table"><thead><tr><th>Port</th><th class="num">Total</th><th class="num">Active</th><th class="num">Success</th><th class="num">Error</th><th class="num">Failed attempts</th><th class="num">Cancelled</th></tr></thead><tbody><tr><td colspan="7" class="loading">loading…</td></tr></tbody></table></div>
-        <div class="panel"><table id="errors-table"><thead><tr><th>Error category</th><th class="num">Total</th><th class="num">Recovered</th></tr></thead><tbody><tr><td colspan="3" class="loading">no errors</td></tr></tbody></table></div>
+        <div class="panel"><table id="errors-table"><thead><tr><th>Status code</th><th class="num">Errors</th></tr></thead><tbody><tr><td colspan="2" class="loading">no errors</td></tr></tbody></table></div>
       </div>
     </div>
 
@@ -125,7 +125,8 @@
       total: 0,
       stats: {},
       timeseries: [],
-      facets: { ports: {}, providers: {}, models: {}, routes: {}, sessions: {}, response_types: {}, error_categories: {} },
+      facets: { ports: {}, providers: {}, models: {}, routes: {}, sessions: {}, response_types: {}, error_status_codes: {} },
+      errorStatusCode: null,
       liveStats: {},
       selected: null,
       loading: false,
@@ -208,6 +209,7 @@
         if (mode !== "all") params.set("execution_mode", mode);
         const search = document.getElementById("search-filter").value.trim();
         if (search) params.set("search", search);
+        if (state.errorStatusCode) params.set("error_status_code", state.errorStatusCode);
         const response = await api(`/api/observability/records?${params}`);
         state.records = response.records || [];
         state.total = response.total || 0;
@@ -272,38 +274,29 @@
         portBody.replaceChildren(emptyRow);
       }
       const errorBody = document.querySelector("#errors-table tbody");
-      // Merge terminal error_categories with provider-failure categories so the user can
-      // see both terminal failures and recovered-switch provider failures in one place.
+      // Group errors by raw numeric status; semantic error details stay in the drawer.
       const errorMap = new Map();
-      for (const [cat, count] of Object.entries(state.facets.error_categories || {})) {
-        errorMap.set(cat, { terminal: count, recovered: 0 });
+      for (const [code, count] of Object.entries(state.facets.error_status_codes || {})) {
+        errorMap.set(code, { terminal: count });
       }
-      for (const [cat, count] of Object.entries(state.facets.provider_failure_categories || {})) {
-        const entry = errorMap.get(cat) || { terminal: 0, recovered: 0 };
-        entry.recovered = count;
-        errorMap.set(cat, entry);
-      }
-      const categories = [...errorMap.entries()]
-        .map(([cat, v]) => [cat, v.terminal + v.recovered])
-        .sort(([, a], [, b]) => b - a);
-      errorBody.replaceChildren(...categories.map(([category, _]) => {
-        const entry = errorMap.get(category);
+      const statusCodes = [...errorMap.entries()]
+        .sort(([left], [right]) => left === "unknown" ? 1 : right === "unknown" ? -1 : Number(left) - Number(right));
+      errorBody.replaceChildren(...statusCodes.map(([statusCode, entry]) => {
         const row = el("tr", "status-error");
         row.style.cursor = "pointer";
-        row.title = `Filter requests by error category "${category}"`;
+        row.title = `Filter requests by status code "${statusCode}"`;
         row.addEventListener("click", () => {
-          const filter = document.getElementById("search-filter");
-          filter.value = category;
           state.page = 1;
           document.getElementById("status-filter").value = "error";
+          state.errorStatusCode = statusCode;
           loadRecords();
         });
-        row.append(el("td", null, category), numberCell((entry?.terminal || 0) + (entry?.recovered || 0)), numberCell(entry?.recovered || 0));
+        row.append(el("td", null, statusCode), numberCell(entry.terminal));
         return row;
       }));
-      if (!categories.length) {
+      if (!statusCodes.length) {
         const cell = document.createElement("td");
-        cell.colSpan = 3;
+        cell.colSpan = 2;
         const emptyRow = document.createElement("tr");
         emptyRow.appendChild(cell);
         errorBody.replaceChildren(emptyRow);
@@ -573,9 +566,14 @@
       let timer = null;
       input.addEventListener("input", () => {
         clearTimeout(timer);
+        if (id === "status-filter") state.errorStatusCode = null;
         timer = setTimeout(() => { state.page = 1; loadRecords(); }, 400);
       });
-      if (input.tagName === "SELECT") input.addEventListener("change", () => { state.page = 1; loadRecords(); });
+      if (input.tagName === "SELECT") input.addEventListener("change", () => {
+        if (id === "status-filter") state.errorStatusCode = null;
+        state.page = 1;
+        loadRecords();
+      });
     });
     ["sort-field","sort-order"].forEach((id) => {
       document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });

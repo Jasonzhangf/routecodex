@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Json, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 const SOURCE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -167,6 +167,7 @@ pub(crate) struct RecordQuery {
     status: Option<String>,
     response_type: Option<String>,
     error_category: Option<String>,
+    error_status_code: Option<String>,
     session: Option<String>,
     search: Option<String>,
     range: String,
@@ -309,6 +310,12 @@ impl RecordQuery {
                 "status" => query.status = Some(value.to_string()),
                 "response_type" => query.response_type = Some(value.to_string()),
                 "error_category" => query.error_category = Some(value.to_string()),
+                "error_status_code" => {
+                    if value != "unknown" && value.parse::<u16>().is_err() {
+                        return Err(format!("invalid error_status_code: {value}"));
+                    }
+                    query.error_status_code = Some(value.to_string());
+                }
                 "session" => query.session = Some(value.to_string()),
                 "search" => query.search = Some(value.to_string()),
                 "timezone_offset_minutes" => {
@@ -402,6 +409,11 @@ impl RecordQuery {
             .is_some_and(|value| meta_value("error_category") != Some(value))
         {
             return false;
+        }
+        if let Some(status_code) = self.error_status_code.as_deref() {
+            if row_status_code(row) != status_code {
+                return false;
+            }
         }
         if self
             .session
@@ -511,6 +523,40 @@ fn facet_add(
             .entry(value.to_string())
             .or_default() += 1;
     }
+}
+
+fn status_code_label(value: Option<&Value>) -> String {
+    value
+        .and_then(|value| {
+            value
+                .as_u64()
+                .and_then(|number| u16::try_from(number).ok())
+                .map(|number| number.to_string())
+                .or_else(|| {
+                    value
+                        .as_str()?
+                        .parse::<u16>()
+                        .ok()
+                        .map(|number| number.to_string())
+                })
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn row_status_code(row: &QueryRow) -> String {
+    status_code_label(row.meta.get("provider_status"))
+}
+
+fn facet_add_status_code(
+    facets: &mut BTreeMap<String, BTreeMap<String, u64>>,
+    name: &str,
+    value: Option<&Value>,
+) {
+    *facets
+        .entry(name.to_string())
+        .or_default()
+        .entry(status_code_label(value))
+        .or_default() += 1;
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -798,17 +844,25 @@ async fn records(
             .unwrap_or(0);
         cached_against_input += row_cached.min(row_input);
         match row.result.as_deref() {
-            Some("success") => { stats["success_count"] = json!(stats["success_count"].as_u64().unwrap_or(0) + 1); }
-            Some("error") => { stats["error_count"] = json!(stats["error_count"].as_u64().unwrap_or(0) + 1); }
-            Some("cancelled") => { stats["cancelled_count"] = json!(stats["cancelled_count"].as_u64().unwrap_or(0) + 1); }
-            _ => { stats["active_count"] = json!(stats["active_count"].as_u64().unwrap_or(0) + 1); }
+            Some("success") => {
+                stats["success_count"] = json!(stats["success_count"].as_u64().unwrap_or(0) + 1);
+            }
+            Some("error") => {
+                stats["error_count"] = json!(stats["error_count"].as_u64().unwrap_or(0) + 1);
+            }
+            Some("cancelled") => {
+                stats["cancelled_count"] =
+                    json!(stats["cancelled_count"].as_u64().unwrap_or(0) + 1);
+            }
+            _ => {
+                stats["active_count"] = json!(stats["active_count"].as_u64().unwrap_or(0) + 1);
+            }
         }
         stats["switch_count"] = json!(stats["switch_count"].as_u64().unwrap_or(0) + row.switches);
         let failed_attempts = row.failed_attempts;
         if failed_attempts > 0 {
-            stats["provider_failure_count"] = json!(
-                stats["provider_failure_count"].as_u64().unwrap_or(0) + failed_attempts
-            );
+            stats["provider_failure_count"] =
+                json!(stats["provider_failure_count"].as_u64().unwrap_or(0) + failed_attempts);
         }
         if let Some(duration) = row.duration_ms {
             durations += duration;
@@ -836,16 +890,11 @@ async fn records(
             "response_types",
             row.meta.get("response_status").and_then(Value::as_str),
         );
-        facet_add(
-            &mut facets,
-            "error_categories",
-            row.meta.get("error_category").and_then(Value::as_str),
-        );
-        if row.failed_attempts > 0 {
-            facet_add(
+        if row.result.as_deref() == Some("error") {
+            facet_add_status_code(
                 &mut facets,
-                "provider_failure_categories",
-                row.meta.get("error_category").and_then(Value::as_str),
+                "error_status_codes",
+                row.meta.get("provider_status"),
             );
         }
     }
@@ -949,21 +998,12 @@ pub(crate) async fn poll(
             port,
             cursor: snapshot.cursor,
         });
+        // A resync envelope is non-fatal here: the fresh snapshot above already
+        // replaces the stale caller cursor with the source's current sequence.
         match events_result {
             Ok(envelope) if envelope.kind == "events" => {
                 if envelope.resync_required {
-                    return (
-                        StatusCode::CONFLICT,
-                        Json(serde_json::json!({
-                            "error": "resync_required",
-                            "detail": format!(
-                                "observability source {port} evicted events below cursor {event_cursor}; caller must re-poll from cursor 0"
-                            ),
-                            "port": port,
-                            "resync_required": true
-                        })),
-                    )
-                        .into_response();
+                    continue;
                 }
                 if let Some(cursor) = envelope.cursor {
                     if let Some(source) = aggregate.sources.last_mut() {
