@@ -10,6 +10,7 @@ use routecodex_v4_cordis_bridge::{
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -296,6 +297,26 @@ pub enum EpochError {
     LeaseUnavailable,
     NotRetired,
     InFlightLeases(usize),
+    EmptyTransactionId,
+    StaleBase {
+        expected_epoch: u64,
+        actual_epoch: u64,
+    },
+    HashMismatch {
+        expected: String,
+        actual: String,
+    },
+    IdempotencyConflict {
+        transaction_id: String,
+    },
+    UnknownTransaction {
+        transaction_id: String,
+    },
+    InvalidTransactionState {
+        transaction_id: String,
+        state: EpochTransactionState,
+        operation: &'static str,
+    },
     Container(NodeContainerError),
 }
 
@@ -308,6 +329,12 @@ impl std::fmt::Display for EpochError {
             Self::LeaseUnavailable => write!(f, "active execution epoch is unavailable"),
             Self::NotRetired => write!(f, "execution epoch must be retired before disposal"),
             Self::InFlightLeases(count) => write!(f, "cannot dispose execution epoch with {count} lease(s)"),
+            Self::EmptyTransactionId => write!(f, "execution epoch transaction id is required"),
+            Self::StaleBase { expected_epoch, actual_epoch } => write!(f, "execution epoch transaction base is stale: expected {expected_epoch}, active {actual_epoch}"),
+            Self::HashMismatch { expected, actual } => write!(f, "execution epoch candidate hash mismatch: expected {expected}, actual {actual}"),
+            Self::IdempotencyConflict { transaction_id } => write!(f, "execution epoch transaction id {transaction_id} was reused with different input"),
+            Self::UnknownTransaction { transaction_id } => write!(f, "unknown execution epoch transaction {transaction_id}"),
+            Self::InvalidTransactionState { transaction_id, state, operation } => write!(f, "cannot {operation} execution epoch transaction {transaction_id} while {state:?}"),
             Self::Container(error) => write!(f, "execution epoch container failed: {error}"),
         }
     }
@@ -327,6 +354,7 @@ struct EpochInner {
     state: Mutex<ExecutionEpochState>,
     leases: AtomicUsize,
     failures: AtomicU64,
+    rollback_hold: std::sync::atomic::AtomicBool,
 }
 
 /// One immutable execution epoch. Admission pins this object with a lease;
@@ -360,6 +388,7 @@ impl ActiveExecutionEpoch {
                 state: Mutex::new(ExecutionEpochState::Active),
                 leases: AtomicUsize::new(0),
                 failures: AtomicU64::new(0),
+                rollback_hold: std::sync::atomic::AtomicBool::new(false),
             }),
         })
     }
@@ -419,17 +448,44 @@ impl ActiveExecutionEpoch {
         Ok(self.snapshot())
     }
 
+    fn hold_for_rollback(&self) {
+        self.inner.rollback_hold.store(true, Ordering::Release);
+    }
+
+    fn restore_active(&self) -> Result<(), EpochError> {
+        let mut state = self.inner.state.lock().expect("epoch state lock poisoned");
+        if *state != ExecutionEpochState::Retired {
+            return Err(EpochError::NotRetired);
+        }
+        self.inner.rollback_hold.store(false, Ordering::Release);
+        *state = ExecutionEpochState::Active;
+        Ok(())
+    }
+
+    fn release_rollback_hold(&self) -> Result<ExecutionEpochSnapshot, EpochError> {
+        self.inner.rollback_hold.store(false, Ordering::Release);
+        self.try_dispose()?;
+        Ok(self.snapshot())
+    }
+
     fn try_dispose(&self) -> Result<(), EpochError> {
         if *self.inner.state.lock().expect("epoch state lock poisoned")
             != ExecutionEpochState::Retired
         {
             return Ok(());
         }
+        if self.inner.rollback_hold.load(Ordering::Acquire) {
+            return Ok(());
+        }
         let leases = self.inner.leases.load(Ordering::Acquire);
         if leases != 0 {
             return Ok(());
         }
-        let mut container = self.inner.container.lock().expect("epoch container lock poisoned");
+        let mut container = self
+            .inner
+            .container
+            .lock()
+            .expect("epoch container lock poisoned");
         if let Some(container) = container.as_mut() {
             container.drain()?;
             container.dispose()?;
@@ -482,6 +538,45 @@ impl Drop for EpochLease {
 /// only lease release can make the old physical container disposable.
 pub struct ActiveEpochStore {
     active: RwLock<Option<ActiveExecutionEpoch>>,
+    transactions: Mutex<HashMap<String, EpochTransactionRecord>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EpochTransactionState {
+    Prepared,
+    Committed,
+    Aborted,
+    Draining,
+    RolledBack,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EpochTransactionSnapshot {
+    pub transaction_id: String,
+    pub state: EpochTransactionState,
+    pub plan_epoch: u64,
+    pub manifest_hash: String,
+}
+
+struct EpochTransactionRecord {
+    base_epoch: u64,
+    base_manifest_hash: String,
+    candidate_hash: String,
+    candidate: ActiveExecutionEpoch,
+    previous: Option<ActiveExecutionEpoch>,
+    state: EpochTransactionState,
+}
+
+impl EpochTransactionRecord {
+    fn snapshot(&self, transaction_id: &str) -> EpochTransactionSnapshot {
+        let candidate = self.candidate.snapshot();
+        EpochTransactionSnapshot {
+            transaction_id: transaction_id.to_string(),
+            state: self.state,
+            plan_epoch: candidate.plan_epoch,
+            manifest_hash: candidate.manifest_hash,
+        }
+    }
 }
 
 impl std::fmt::Debug for ActiveEpochStore {
@@ -498,12 +593,14 @@ impl ActiveEpochStore {
     pub fn empty() -> Self {
         Self {
             active: RwLock::new(None),
+            transactions: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn new(active: ActiveExecutionEpoch) -> Self {
         Self {
             active: RwLock::new(Some(active)),
+            transactions: Mutex::new(HashMap::new()),
         }
     }
 
@@ -535,7 +632,10 @@ impl ActiveEpochStore {
         Ok(active.record_execution_failure())
     }
 
-    pub fn publish(&self, candidate: ActiveExecutionEpoch) -> Result<ExecutionEpochSnapshot, EpochError> {
+    pub fn publish(
+        &self,
+        candidate: ActiveExecutionEpoch,
+    ) -> Result<ExecutionEpochSnapshot, EpochError> {
         let mut active = self.active.write().expect("active epoch lock poisoned");
         if candidate.snapshot().state != ExecutionEpochState::Active {
             return Err(EpochError::CandidateNotAccepting);
@@ -546,6 +646,199 @@ impl ActiveEpochStore {
             previous.retire()?;
         }
         self.active_snapshot().ok_or(EpochError::LeaseUnavailable)
+    }
+
+    pub fn prepare(
+        &self,
+        transaction_id: impl Into<String>,
+        base_epoch: u64,
+        base_manifest_hash: &str,
+        candidate: ActiveExecutionEpoch,
+        candidate_hash: &str,
+    ) -> Result<EpochTransactionSnapshot, EpochError> {
+        let transaction_id = transaction_id.into();
+        if transaction_id.is_empty() {
+            return Err(EpochError::EmptyTransactionId);
+        }
+        let candidate_snapshot = candidate.snapshot();
+        if candidate_snapshot.manifest_hash != candidate_hash {
+            return Err(EpochError::HashMismatch {
+                expected: candidate_hash.to_string(),
+                actual: candidate_snapshot.manifest_hash,
+            });
+        }
+        let active = self
+            .active
+            .read()
+            .expect("active epoch lock poisoned")
+            .clone()
+            .ok_or(EpochError::LeaseUnavailable)?;
+        let active_snapshot = active.snapshot();
+        if active_snapshot.plan_epoch != base_epoch
+            || active_snapshot.manifest_hash != base_manifest_hash
+        {
+            return Err(EpochError::StaleBase {
+                expected_epoch: base_epoch,
+                actual_epoch: active_snapshot.plan_epoch,
+            });
+        }
+        let mut transactions = self
+            .transactions
+            .lock()
+            .expect("epoch transaction lock poisoned");
+        if let Some(existing) = transactions.get(&transaction_id) {
+            if existing.base_epoch != base_epoch
+                || existing.base_manifest_hash != base_manifest_hash
+                || existing.candidate_hash != candidate_hash
+                || existing.candidate.snapshot() != candidate_snapshot
+            {
+                return Err(EpochError::IdempotencyConflict { transaction_id });
+            }
+            return Ok(existing.snapshot(&transaction_id));
+        }
+        let record = EpochTransactionRecord {
+            base_epoch,
+            base_manifest_hash: base_manifest_hash.to_string(),
+            candidate_hash: candidate_hash.to_string(),
+            candidate,
+            previous: None,
+            state: EpochTransactionState::Prepared,
+        };
+        let snapshot = record.snapshot(&transaction_id);
+        transactions.insert(transaction_id, record);
+        Ok(snapshot)
+    }
+
+    pub fn commit(&self, transaction_id: &str) -> Result<EpochTransactionSnapshot, EpochError> {
+        let mut transactions = self
+            .transactions
+            .lock()
+            .expect("epoch transaction lock poisoned");
+        let record =
+            transactions
+                .get_mut(transaction_id)
+                .ok_or_else(|| EpochError::UnknownTransaction {
+                    transaction_id: transaction_id.to_string(),
+                })?;
+        if record.state == EpochTransactionState::Committed {
+            return Ok(record.snapshot(transaction_id));
+        }
+        if record.state != EpochTransactionState::Prepared {
+            return Err(EpochError::InvalidTransactionState {
+                transaction_id: transaction_id.to_string(),
+                state: record.state,
+                operation: "commit",
+            });
+        }
+        let mut active = self.active.write().expect("active epoch lock poisoned");
+        let current = active.as_ref().ok_or(EpochError::LeaseUnavailable)?;
+        let current_snapshot = current.snapshot();
+        if current_snapshot.plan_epoch != record.base_epoch
+            || current_snapshot.manifest_hash != record.base_manifest_hash
+        {
+            return Err(EpochError::StaleBase {
+                expected_epoch: record.base_epoch,
+                actual_epoch: current_snapshot.plan_epoch,
+            });
+        }
+        let previous = active.replace(record.candidate.clone());
+        if let Some(previous) = previous.as_ref() {
+            previous.hold_for_rollback();
+            previous.retire()?;
+        }
+        record.previous = previous;
+        record.state = EpochTransactionState::Committed;
+        Ok(record.snapshot(transaction_id))
+    }
+
+    pub fn abort(&self, transaction_id: &str) -> Result<EpochTransactionSnapshot, EpochError> {
+        let mut transactions = self
+            .transactions
+            .lock()
+            .expect("epoch transaction lock poisoned");
+        let record =
+            transactions
+                .get_mut(transaction_id)
+                .ok_or_else(|| EpochError::UnknownTransaction {
+                    transaction_id: transaction_id.to_string(),
+                })?;
+        if record.state == EpochTransactionState::Aborted {
+            return Ok(record.snapshot(transaction_id));
+        }
+        if record.state != EpochTransactionState::Prepared {
+            return Err(EpochError::InvalidTransactionState {
+                transaction_id: transaction_id.to_string(),
+                state: record.state,
+                operation: "abort",
+            });
+        }
+        record.state = EpochTransactionState::Aborted;
+        Ok(record.snapshot(transaction_id))
+    }
+
+    pub fn drain(&self, transaction_id: &str) -> Result<EpochTransactionSnapshot, EpochError> {
+        let mut transactions = self
+            .transactions
+            .lock()
+            .expect("epoch transaction lock poisoned");
+        let record =
+            transactions
+                .get_mut(transaction_id)
+                .ok_or_else(|| EpochError::UnknownTransaction {
+                    transaction_id: transaction_id.to_string(),
+                })?;
+        if record.state == EpochTransactionState::Draining {
+            return Ok(record.snapshot(transaction_id));
+        }
+        if record.state != EpochTransactionState::Committed {
+            return Err(EpochError::InvalidTransactionState {
+                transaction_id: transaction_id.to_string(),
+                state: record.state,
+                operation: "drain",
+            });
+        }
+        if let Some(previous) = record.previous.as_ref() {
+            previous.release_rollback_hold()?;
+        }
+        record.state = EpochTransactionState::Draining;
+        Ok(record.snapshot(transaction_id))
+    }
+
+    pub fn rollback(&self, transaction_id: &str) -> Result<EpochTransactionSnapshot, EpochError> {
+        let mut transactions = self
+            .transactions
+            .lock()
+            .expect("epoch transaction lock poisoned");
+        let record =
+            transactions
+                .get_mut(transaction_id)
+                .ok_or_else(|| EpochError::UnknownTransaction {
+                    transaction_id: transaction_id.to_string(),
+                })?;
+        if record.state != EpochTransactionState::Committed {
+            return Err(EpochError::InvalidTransactionState {
+                transaction_id: transaction_id.to_string(),
+                state: record.state,
+                operation: "rollback",
+            });
+        }
+        let previous = record.previous.clone().ok_or(EpochError::NotRetired)?;
+        let mut active = self.active.write().expect("active epoch lock poisoned");
+        if active.as_ref().map(|value| value.snapshot()) != Some(record.candidate.snapshot()) {
+            return Err(EpochError::StaleBase {
+                expected_epoch: record.candidate.snapshot().plan_epoch,
+                actual_epoch: active
+                    .as_ref()
+                    .map(|value| value.snapshot().plan_epoch)
+                    .unwrap_or(0),
+            });
+        }
+        record.candidate.retire()?;
+        record.candidate.try_dispose()?;
+        previous.restore_active()?;
+        *active = Some(previous);
+        record.state = EpochTransactionState::RolledBack;
+        Ok(record.snapshot(transaction_id))
     }
 }
 
@@ -702,7 +995,10 @@ mod tests {
         let failure = store.record_execution_failure().unwrap();
         assert_eq!(failure.failure_count, 1);
         assert_eq!(failure.plan_epoch, active.plan_epoch);
-        assert_eq!(store.active_snapshot().unwrap().state, ExecutionEpochState::Active);
+        assert_eq!(
+            store.active_snapshot().unwrap().state,
+            ExecutionEpochState::Active
+        );
         lease.release().unwrap();
     }
 
@@ -728,10 +1024,17 @@ mod tests {
             manifest_hash: "manifest-stable".into(),
             execution_identity: "execution-stable".into(),
         };
-        let first = ActiveExecutionEpoch::new(accepting_container("first"), identity.clone()).unwrap();
+        let first =
+            ActiveExecutionEpoch::new(accepting_container("first"), identity.clone()).unwrap();
         let rebuilt = ActiveExecutionEpoch::new(accepting_container("rebuilt"), identity).unwrap();
         assert_eq!(first.snapshot().plan_epoch, rebuilt.snapshot().plan_epoch);
-        assert_eq!(first.snapshot().manifest_hash, rebuilt.snapshot().manifest_hash);
-        assert_eq!(first.snapshot().execution_identity, rebuilt.snapshot().execution_identity);
+        assert_eq!(
+            first.snapshot().manifest_hash,
+            rebuilt.snapshot().manifest_hash
+        );
+        assert_eq!(
+            first.snapshot().execution_identity,
+            rebuilt.snapshot().execution_identity
+        );
     }
 }

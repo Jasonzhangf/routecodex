@@ -1094,11 +1094,16 @@
       "truth_store": "crates/routecodex-v4-node-container/src/lib.rs",
       "allowed_operations": [
         "create",
+        "prepare",
+        "commit",
+        "abort",
         "admit",
         "publish",
         "record_execution_failure",
         "read_snapshot",
         "retire",
+        "drain",
+        "rollback",
         "dispose"
       ],
       "forbidden_relations": [
