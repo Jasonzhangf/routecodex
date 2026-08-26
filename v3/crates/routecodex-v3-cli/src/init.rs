@@ -408,6 +408,7 @@ fn build_minimal_authoring(
         features: BTreeMap::new(),
         debug: Default::default(),
         error: Default::default(),
+        admin_webui: Default::default(),
     })
 }
 

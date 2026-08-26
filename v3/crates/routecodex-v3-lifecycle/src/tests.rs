@@ -40,6 +40,36 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
     (config, executable, state)
 }
 
+#[test]
+fn declaration_includes_enabled_admin_webui_listener() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    std::env::remove_var("ROUTECODEX_V3_ADMIN_BIND");
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture_with_port(&root, 45499);
+    let mut raw = fs::read_to_string(&config).unwrap();
+    raw.push_str(
+        r#"
+[admin_webui]
+enabled = true
+bind = "127.0.0.1"
+port = 45498
+"#,
+    );
+    fs::write(&config, raw).unwrap();
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+    assert!(
+        declaration.listeners.iter().any(|listener| {
+            listener.server_id == "admin_webui"
+                && listener.bind == "127.0.0.1"
+                && listener.port == 45498
+        }),
+        "declaration must include enabled admin_webui listener: {:?}",
+        declaration.listeners
+    );
+}
+
 fn managed_test_declaration(
     instance_id: &str,
     config_path: &Path,

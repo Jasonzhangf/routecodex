@@ -775,6 +775,36 @@ fn rejects_duplicate_listener_empty_default_and_no_enabled_server() {
 }
 
 #[test]
+fn admin_webui_is_compiled_into_registry_not_manifest_and_duplicates_fail() {
+    let with_admin = format!(
+        r#"
+{FULL_CONFIG}
+[admin_webui]
+enabled = true
+bind = "127.0.0.1"
+port = 4446
+"#
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&with_admin).unwrap())
+            .unwrap();
+    assert_eq!(manifest.servers.len(), 2);
+
+    let duplicate = format!(
+        r#"
+{FULL_CONFIG}
+[admin_webui]
+enabled = true
+bind = "127.0.0.1"
+port = 4444
+"#
+    );
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&duplicate).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("admin_webui shares listen address"));
+}
+
+#[test]
 fn rejects_invalid_auth_handle_shapes_and_unknown_forwarder() {
     let empty_env = FULL_CONFIG.replace("env = \"CC_API_KEY\"", "env = \"\"");
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&empty_env).unwrap())

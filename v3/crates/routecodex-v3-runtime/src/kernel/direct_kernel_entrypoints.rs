@@ -84,6 +84,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
     )
     .await
 }
+
 include!("direct_protocol_plan.rs");
 pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,

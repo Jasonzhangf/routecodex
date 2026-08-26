@@ -42,7 +42,8 @@ pub(crate) fn build_resource_registry(
         hub_v1.is_some(),
         http_sse_keepalive_ms,
     )?;
-    ensure_unique_listen_addresses(&servers)?;
+    let admin_webui = compile_admin_webui(authoring.admin_webui)?;
+    ensure_unique_listen_addresses(&servers, admin_webui.as_ref())?;
     if !servers.values().any(|server| server.enabled) {
         return Err(validation("at least one enabled server is required"));
     }
@@ -63,6 +64,7 @@ pub(crate) fn build_resource_registry(
         features,
         debug: compile_debug(authoring.debug)?,
         error: compile_error(authoring.error, provider_error_action_policies)?,
+        admin_webui,
     })
 }
 pub(crate) fn publish_manifest(
@@ -1618,8 +1620,49 @@ pub(crate) fn compile_debug(
 
 include!("validate/provider_error_policy.rs");
 
+fn compile_admin_webui(
+    authoring: V3AdminWebuiAuthoringConfig,
+) -> Result<Option<V3AdminWebuiManifest>, V3ConfigError> {
+    // ROUTECODEX_V3_ADMIN_BIND overrides authoring for dev/test scenarios
+    // (e.g., CLI tests that pre-bind port 8777 to verify lifecycle release).
+    let env_bind = std::env::var("ROUTECODEX_V3_ADMIN_BIND").ok();
+    let (enabled, bind, port) = if let Some(env_val) = env_bind {
+        let val = env_val.trim();
+        if !val.is_empty() {
+            let parts: Vec<&str> = val.rsplitn(2, ':').collect();
+            if parts.len() == 2 {
+                let port_str = parts[0];
+                let ip = parts[1];
+                let port: u16 = port_str.parse().unwrap_or(8777);
+                (true, ip.to_string(), port)
+            } else {
+                (authoring.enabled, authoring.bind.clone(), authoring.port)
+            }
+        } else {
+            (authoring.enabled, authoring.bind.clone(), authoring.port)
+        }
+    } else {
+        (authoring.enabled, authoring.bind.clone(), authoring.port)
+    };
+    if bind.trim().is_empty() {
+        return Err(validation("admin_webui bind is empty"));
+    }
+    if port == 0 {
+        return Err(validation("admin_webui port must be non-zero"));
+    }
+    if !enabled {
+        return Ok(None);
+    }
+    Ok(Some(V3AdminWebuiManifest {
+        enabled: true,
+        bind,
+        port,
+    }))
+}
+
 fn ensure_unique_listen_addresses(
     servers: &BTreeMap<String, V3ServerManifest>,
+    admin_webui: Option<&V3AdminWebuiManifest>,
 ) -> Result<(), V3ConfigError> {
     let mut addresses = BTreeSet::new();
     for server in servers.values().filter(|server| server.enabled) {
@@ -1627,6 +1670,14 @@ fn ensure_unique_listen_addresses(
         if !addresses.insert(address.clone()) {
             return Err(validation(format!(
                 "enabled servers share listen address {address}"
+            )));
+        }
+    }
+    if let Some(admin) = admin_webui.filter(|admin| admin.enabled) {
+        let address = format!("{}:{}", admin.bind, admin.port);
+        if !addresses.insert(address.clone()) {
+            return Err(validation(format!(
+                "enabled admin_webui shares listen address {address}"
             )));
         }
     }

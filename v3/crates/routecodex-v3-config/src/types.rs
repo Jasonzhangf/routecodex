@@ -26,6 +26,8 @@ pub struct V3Config02AuthoringParsed {
     pub debug: V3DebugAuthoringConfig,
     #[serde(default)]
     pub error: V3ErrorAuthoringConfig,
+    #[serde(default)]
+    pub admin_webui: V3AdminWebuiAuthoringConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -267,6 +269,35 @@ pub struct V3ErrorAuthoringConfig {
     pub client_error_projection_policy: Vec<V3ClientErrorProjectionPolicyAuthoringConfig>,
     #[serde(default)]
     pub provider_error_default_path: Option<Vec<V3ProviderDispositionStepAuthoringConfig>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3AdminWebuiAuthoringConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_admin_bind")]
+    pub bind: String,
+    #[serde(default = "default_admin_port")]
+    pub port: u16,
+}
+
+fn default_admin_bind() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_admin_port() -> u16 {
+    8777
+}
+
+impl Default for V3AdminWebuiAuthoringConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bind: default_admin_bind(),
+            port: default_admin_port(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -908,6 +939,7 @@ pub struct V3Config04ResourceRegistryBuilt {
     pub features: BTreeMap<String, bool>,
     pub debug: V3DebugManifest,
     pub error: V3ErrorManifest,
+    pub admin_webui: Option<V3AdminWebuiManifest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1228,6 +1260,13 @@ pub struct V3ErrorManifest {
     pub provider_error_action_policy: Vec<V3ProviderErrorActionPolicyManifest>,
     pub provider_error_default_path: Vec<V3ProviderDispositionStepManifest>,
     pub client_error_projection_policy: Vec<V3ClientErrorProjectionPolicyManifest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3AdminWebuiManifest {
+    pub enabled: bool,
+    pub bind: String,
+    pub port: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

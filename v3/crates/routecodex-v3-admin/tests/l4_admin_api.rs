@@ -35,6 +35,7 @@ fn write_init_config(home: &PathBuf) -> PathBuf {
         features: BTreeMap::new(),
         debug: Default::default(),
         error: Default::default(),
+        admin_webui: Default::default(),
     };
     authoring.servers.insert(
         "test-server".to_string(),

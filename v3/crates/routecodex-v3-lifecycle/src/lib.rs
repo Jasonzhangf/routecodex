@@ -1,7 +1,9 @@
 #![cfg_attr(test, allow(unused_variables, clippy::zombie_processes))]
 
-use routecodex_v3_config::{V3Config05ManifestPublished, V3ConfigStore};
-use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
+use routecodex_v3_config::{
+    V3AdminWebuiManifest, V3Config05ManifestPublished, V3ConfigStore,
+};
+use routecodex_v3_server::{spawn_v3_server_aggregate_with_admin, V3ServerAggregateHandle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -294,6 +296,7 @@ impl V3ManagedLifecycle {
         let snapshot =
             V3ConfigStore::new(&self.config_path).load_snapshot_with_source_identity()?;
         let config_path = snapshot.canonical_path;
+        let admin_webui = snapshot.admin_webui;
         let executable_path = fs::canonicalize(executable_path)?;
         let config_digest = snapshot.source_sha256;
         let mut identity = Sha256::new();
@@ -316,6 +319,14 @@ impl V3ManagedLifecycle {
                 port: server.port,
             })
             .collect::<Vec<_>>();
+        let mut listeners = listeners;
+        if let Some(admin) = admin_webui.as_ref().filter(|admin| admin.enabled) {
+            listeners.push(V3ManagedListenerDeclaration {
+                server_id: "admin_webui".to_string(),
+                bind: admin.bind.clone(),
+                port: admin.port,
+            });
+        }
         if listeners.is_empty() {
             return Err(V3LifecycleError::Validation(
                 "managed instance has no enabled listeners".to_string(),
@@ -853,7 +864,25 @@ impl V3ManagedLifecycle {
                 start_nonce: start_nonce.clone(),
             },
         )?;
-        let handle = match spawn_v3_server_aggregate(manifest).await {
+        let admin_webui = declaration
+            .listeners
+            .iter()
+            .find(|listener| listener.server_id == "admin_webui")
+            .map(|listener| V3AdminWebuiManifest {
+                enabled: true,
+                bind: listener.bind.clone(),
+                port: listener.port,
+            });
+        let admin_config_path = admin_webui
+            .as_ref()
+            .map(|_| PathBuf::from(&declaration.config_path));
+        let handle = match spawn_v3_server_aggregate_with_admin(
+            manifest,
+            admin_webui,
+            admin_config_path,
+        )
+        .await
+        {
             Ok(handle) => handle,
             Err(error) => {
                 write_status(

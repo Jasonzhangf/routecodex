@@ -397,9 +397,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                 )
             }
         };
-        let request_is_compaction = standardized
-            .request_purpose
-            .is_compaction()
+        let request_is_compaction = standardized.request_purpose.is_compaction()
             || standardized
                 .endpoint
                 .trim_end_matches('/')
@@ -483,8 +481,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     let mut send_attempts = 0usize;
     let mut pending_provider_action_recovery = None;
     let mut continuation_provider_action_lookup = previous_response_id.is_some();
-    let allowed_modes =
-        direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
+    let allowed_modes = direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
     loop {
         let selected = match pinned_selected.take() {
             Some(selected) => selected,
@@ -1618,10 +1615,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                                                 })?;
                                         }
                                         let next = tokio::task::spawn_blocking(move || {
-                                            let runtime = tokio::runtime::Builder::new_current_thread()
-                                                .enable_all()
-                                                .build()
-                                                .map_err(|error| error.to_string())?;
+                                            let runtime =
+                                                tokio::runtime::Builder::new_current_thread()
+                                                    .enable_all()
+                                                    .build()
+                                                    .map_err(|error| error.to_string())?;
                                             Ok::<_, String>(runtime.block_on(
                                                 execute_v3_responses_direct_runtime_kernel_core(
                                                     state,
@@ -1633,18 +1631,22 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                                             ))
                                         })
                                         .await
-                                        .map_err(|error| build_v3_error_01_source_raised(
-                                            V3ErrorSourceKind::RuntimeFailure,
-                                            "V3DirectSseHandoffRuntime",
-                                            "provider_stream_handoff_runtime_join_failed",
-                                            error.to_string(),
-                                        ))?
-                                        .map_err(|message| build_v3_error_01_source_raised(
-                                            V3ErrorSourceKind::RuntimeFailure,
-                                            "V3DirectSseHandoffRuntime",
-                                            "provider_stream_handoff_runtime_failed",
-                                            message,
-                                        ))?;
+                                        .map_err(|error| {
+                                            build_v3_error_01_source_raised(
+                                                V3ErrorSourceKind::RuntimeFailure,
+                                                "V3DirectSseHandoffRuntime",
+                                                "provider_stream_handoff_runtime_join_failed",
+                                                error.to_string(),
+                                            )
+                                        })?
+                                        .map_err(|message| {
+                                            build_v3_error_01_source_raised(
+                                                V3ErrorSourceKind::RuntimeFailure,
+                                                "V3DirectSseHandoffRuntime",
+                                                "provider_stream_handoff_runtime_failed",
+                                                message,
+                                            )
+                                        })?;
                                         match next.client_payload.body {
                                             V3ClientBody::Sse(stream) => Ok(Some(stream)),
                                             V3ClientBody::Json(_)
@@ -1656,12 +1658,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                                 Some(8),
                             )
                         }
-                        None => direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream(
-                            client_stream,
-                            response_projection.compat_plan.provider_protocol,
-                            |error| async move { Err(error) },
-                            Some(0),
-                        ),
+                        None => {
+                            direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream(
+                                client_stream,
+                                response_projection.compat_plan.provider_protocol,
+                                |error| async move { Err(error) },
+                                Some(0),
+                            )
+                        }
                     };
                     drop(provider_action_permit.take());
                     client_sse = Some(client_stream);

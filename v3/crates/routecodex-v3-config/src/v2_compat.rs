@@ -131,6 +131,7 @@ fn compile_v2_root(
             ]),
             debug: Default::default(),
             error: Default::default(),
+            admin_webui: Default::default(),
         },
         provider_sources,
     })

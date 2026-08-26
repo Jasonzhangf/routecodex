@@ -1280,6 +1280,7 @@ dependencies = [
  "hyper-util",
  "libc",
  "reqwest",
+ "routecodex-v3-admin",
  "routecodex-v3-config",
  "routecodex-v3-debug",
  "routecodex-v3-error",

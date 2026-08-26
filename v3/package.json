@@ -1,6 +1,6 @@
 {
   "name": "routecodex-v3",
-  "version": "0.90.4574",
+  "version": "0.90.4601",
   "private": true,
   "description": "RouteCodex V3 independent build domain",
   "type": "module",
@@ -13,6 +13,7 @@
     "node": ">=20 <26"
   },
   "scripts": {
+    "bump-version": "node scripts/bump-version.mjs",
     "build": "node scripts/build.mjs",
     "test": "node scripts/test.mjs",
     "verify": "node scripts/verify.mjs",

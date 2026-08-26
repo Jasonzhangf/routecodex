@@ -12,6 +12,7 @@ hyper.workspace = true
 hyper-util.workspace = true
 libc.workspace = true
 routecodex-v3-config = { path = "../routecodex-v3-config" }
+routecodex-v3-admin = { path = "../routecodex-v3-admin" }
 routecodex-v3-debug = { path = "../routecodex-v3-debug" }
 routecodex-v3-error = { path = "../routecodex-v3-error" }
 routecodex-v3-runtime = { path = "../routecodex-v3-runtime" }

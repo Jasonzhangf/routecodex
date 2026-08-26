@@ -58,7 +58,8 @@ use responses_direct_server_outcome::{
 };
 use routecodex_v3_config::{
     collect_v3_route_group_catalog_model_refs, resolve_routecodex_package_version_from_executable,
-    V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode, V3ServerManifest,
+    V3AdminWebuiManifest, V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode,
+    V3ServerManifest,
 };
 use routecodex_v3_debug::{
     V3DebugBoundedTextCapture, V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig,
@@ -137,7 +138,7 @@ use session_admission::{
     V3ResponsesSessionAdmissionGate, V3ResponsesSessionAdmissionPermit,
     V3ResponsesSessionAdmissionScope, V3ServerRequestActivityGate,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
 use std::fs;
@@ -302,6 +303,9 @@ impl V3ServerAggregateHandle {
     pub async fn shutdown_listener_ports(&mut self, ports: &BTreeSet<u16>) -> Vec<u16> {
         let mut released = Vec::new();
         for listener in &mut self.listeners {
+            if listener.server_id == "admin_webui" {
+                continue;
+            }
             if !ports.contains(&listener.addr.port()) {
                 continue;
             }
@@ -322,6 +326,14 @@ impl V3ServerAggregateHandle {
 
 pub async fn spawn_v3_server_aggregate(
     manifest: V3Config05ManifestPublished,
+) -> Result<V3ServerAggregateHandle, std::io::Error> {
+    spawn_v3_server_aggregate_with_admin(manifest, None, None).await
+}
+
+pub async fn spawn_v3_server_aggregate_with_admin(
+    manifest: V3Config05ManifestPublished,
+    admin_webui: Option<V3AdminWebuiManifest>,
+    admin_config_path: Option<std::path::PathBuf>,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
     let sse_dump_enabled = v3_sse_dump_env_flag();
     let console_enabled = manifest.debug.log_console;
@@ -361,6 +373,29 @@ pub async fn spawn_v3_server_aggregate(
         let bound_addr = listener.local_addr()?;
         bound.push((server, listener, bound_addr));
     }
+    if let Some(admin) = admin_webui.filter(|admin| admin.enabled) {
+        let addr: SocketAddr = format!("{}:{}", admin.bind, admin.port)
+            .parse()
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+        let listener = TcpListener::bind(addr).await?;
+        let bound_addr = listener.local_addr()?;
+        bound.push((
+            V3ServerManifest {
+                id: "admin_webui".to_string(),
+                enabled: true,
+                bind: admin.bind,
+                port: admin.port,
+                routing_group: String::new(),
+                endpoints: Vec::new(),
+                features: BTreeMap::new(),
+                execution: None,
+                http_sse_keepalive_ms: 0,
+                expose_models: Vec::new(),
+            },
+            listener,
+            bound_addr,
+        ));
+    }
 
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
     let request_activity_gate = Arc::new(V3ServerRequestActivityGate::default());
@@ -368,38 +403,52 @@ pub async fn spawn_v3_server_aggregate(
     // listener may accept requests as soon as it binds, so the normal startup
     // broker must already carry a valid positive runtime generation.
     let front_transport_broker = V3FrontTransportBroker::new(1);
+    let admin_config_path_for_router = admin_config_path.clone();
     let mut listeners = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
-        let observability_store_path = observability_store_path_for_listener(
-            manifest.debug.log_file.as_deref().map(std::path::Path::new),
-            server.port,
-        );
-        let webui_observability =
-            V3WebuiObservability::load_persisted(&observability_store_path)
-                .map_err(std::io::Error::other)?;
-        let app = build_v3_listener_router(V3ListenerState {
-            server,
-            manifest_version: preflight.manifest_version,
-            manifest: manifest.clone(),
-            debug: debug.clone(),
-            console_enabled,
-            sse_dump_enabled,
-            request_counter: Arc::clone(&request_counter),
-            codex_sample_store: codex_sample_store.clone(),
-            responses_direct_continuation: responses_direct_continuation.clone(),
-            responses_direct_stopless_control: responses_direct_stopless_control.clone(),
-            responses_relay_local_continuation: responses_relay_local_continuation.clone(),
-            responses_relay_stopless_control: responses_relay_stopless_control.clone(),
-            provider_health: provider_health.clone(),
-            realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
-            responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
-            request_activity_gate: Arc::clone(&request_activity_gate),
-            front_transport_broker: front_transport_broker.clone(),
-            webui_observability,
-        });
+        let app = if server_id == "admin_webui" {
+            let config_path = admin_config_path_for_router.clone().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "admin_webui requires a canonical config path",
+                )
+            })?;
+            routecodex_v3_admin::router(routecodex_v3_admin::AppState::new(
+                config_path,
+            ))
+        } else {
+            let observability_store_path = observability_store_path_for_listener(
+                manifest.debug.log_file.as_deref().map(std::path::Path::new),
+                server.port,
+            );
+            let webui_observability =
+                V3WebuiObservability::load_persisted(&observability_store_path)
+                    .map_err(std::io::Error::other)?;
+            build_v3_listener_router(V3ListenerState {
+                server,
+                manifest_version: preflight.manifest_version,
+                manifest: manifest.clone(),
+                debug: debug.clone(),
+                console_enabled,
+                sse_dump_enabled,
+                request_counter: Arc::clone(&request_counter),
+                codex_sample_store: codex_sample_store.clone(),
+                responses_direct_continuation: responses_direct_continuation.clone(),
+                responses_direct_stopless_control: responses_direct_stopless_control.clone(),
+                responses_relay_local_continuation: responses_relay_local_continuation.clone(),
+                responses_relay_stopless_control: responses_relay_stopless_control.clone(),
+                provider_health: provider_health.clone(),
+                realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
+                responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
+                request_activity_gate: Arc::clone(&request_activity_gate),
+                front_transport_broker: front_transport_broker.clone(),
+                webui_observability,
+            })
+        };
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let connection_broker = front_transport_broker.clone();
+        let app_for_serve = app.clone();
         tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
             loop {
@@ -408,7 +457,7 @@ pub async fn spawn_v3_server_aggregate(
                     accepted = listener.accept() => {
                         let Ok((stream, remote_addr)) = accepted else { break };
                         let connection_identity = connection_broker.allocate_connection_identity();
-                        let service = app.clone().into_service();
+                        let service = app_for_serve.clone().into_service();
                         let request_connection_broker = connection_broker.clone();
                         tokio::spawn(async move {
                             if let Err(error) = serve_v3_front_http_connection(

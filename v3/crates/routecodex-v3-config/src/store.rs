@@ -3,7 +3,7 @@ use crate::{
     provider_directory::V3Config02AuthoringResolved,
     publish_v3_config_05_manifest_from_v3_config_04, read_v3_config_01_file_source,
     validate_v3_config_03_schema_from_v3_config_02, V3Config02AuthoringParsed,
-    V3Config05ManifestPublished, V3ConfigError,
+    V3AdminWebuiManifest, V3Config05ManifestPublished, V3ConfigError,
 };
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -25,6 +25,7 @@ pub struct V3ConfigLoadedSnapshot {
     pub canonical_path: PathBuf,
     pub source_sha256: String,
     pub manifest: V3Config05ManifestPublished,
+    pub admin_webui: Option<V3AdminWebuiManifest>,
 }
 
 impl V3ConfigStore {
@@ -55,11 +56,13 @@ impl V3ConfigStore {
             source_closure_sha256(&canonical_path, &source.raw_toml, &parsed.provider_sources);
         let validated = validate_v3_config_03_schema_from_v3_config_02(parsed.authoring)?;
         let registry = build_v3_config_04_resource_registry_from_v3_config_03(validated)?;
+        let admin_webui = registry.admin_webui.clone();
         let manifest = publish_v3_config_05_manifest_from_v3_config_04(registry)?;
         Ok(V3ConfigLoadedSnapshot {
             canonical_path,
             source_sha256,
             manifest,
+            admin_webui,
         })
     }
 

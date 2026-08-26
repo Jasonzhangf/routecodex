@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { run, v3Root } from './_common.mjs';
+import './bump-version.mjs';
 
 const pkg = JSON.parse(readFileSync(resolve(v3Root, 'package.json'), 'utf8'));
 const env = {
