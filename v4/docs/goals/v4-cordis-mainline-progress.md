@@ -30,7 +30,7 @@ M00 -> M01 -> M02 --┐
 | M03 Cordis daemon | `merged` | M00 structural contracts | task `8be1e7ced` 已合入重构主树 `3a425633c`；daemon 3/3、host 联测 30/30、red 10/10、release build 通过 |
 | D0 differential harness | `stale_owner_handoff_required` | M00 structural contracts | `gate_id:V4-LAYER-GATE-001` 仍占用 feature-layer projection/build paths；原 run/worktree 已不可见，需 owner handoff 后才能修复 M05 admission，不得抢改 |
 | M04 epoch transaction | `merged` | M02 + M03 | task `9914a69fe` 已以 merge `ba4af6c02` 合入重构主树；目标树定向 gates 全部通过，active-link 仍缺 frozen-consumer-registry 环境文件 |
-| M05 ExecutionEngine | `in_progress` | M04 | 唯一 owner 已证明外部 frozen Active-link/isolation 通过；其独立 candidate 仍缺 runtime→plugin-contract 与新增 execution-engine/runtime-bin 边注册、candidate/protected projection 和隔离 worktree Active binding，未 build/install/live/AGY/commit/merge |
+| M05 ExecutionEngine | `in_progress` | M04 | 唯一 owner 已恢复其 runtime→plugin-contract 边并完成 red/partial-green；其独立 candidate 仍缺 build-link 注册、新 Active binding、candidate/protected projection，未 build/install/live/AGY/commit/merge |
 | M06 request JSON | `blocked` | M05 | 必须串行 |
 | M07 response JSON | `blocked` | M06 | 必须串行 |
 | M08 async data plane | `ready_for_m05_execution_owner_handoff` | M00 structural contracts + M00-T07 | provider/server 独立 slice 已交接（5/5 provider、2/2 server、locked check、diff-check、handoff PASS）；整体待 M05 明确交接，runtime-bin async stream/cancellation、M00-T07 live evidence、full gates/live/AGY 未闭环；不得覆盖 M05 execution owner |
@@ -50,6 +50,7 @@ M00 -> M01 -> M02 --┐
 | lane | task | 状态 | 是否可再派发 | 原因 / 收口条件 |
 |---|---|---|---|---|
 | execution owner | M05-T01 | `blocked_candidate_contract` | 否 | 外部 Active-link/isolation 已通过；原 worktree candidate 缺新 execution 边注册、runtime plugin-contract 边、projection/queue identity 与隔离 Active binding；不得伪造 artifact、clean、AGY、commit、merge |
+| build-link owner | B01 | `in_progress` | 否 | 复用 M02 会话但新建独立 claim/worktree；只处理真实 consumer registry 与 canonical Active resolver binding，不修改 D0 feature-layer projection/gates |
 | differential governance | D0-T01 | `stale_owner_handoff_required` | 否 | claim 仍 active 但原 feature-layer worktree 已不存在且无可调用会话；必须先完成 owner handoff，M05 不得抢改其 gate 文件 |
 | async data plane | M08-T01 | `ready_for_m05_execution_owner_handoff` | 否（等待交接） | provider/server 独立 slice 已完成并写入 handoff；整体 runtime-bin async stream/cancellation 尚未完成，必须等待 M05 交接，不覆盖 M05 |
 | provider live admission | M00-T05 | `blocked` | 否 | Responses WebSocket v2 / credential blocker；不得猜 endpoint、伪造 101 或绕过真实 continuation |
@@ -63,7 +64,8 @@ M00 -> M01 -> M02 --┐
 
 | worker | 已派发动作 | 当前结论 |
 |---|---|---|
-| M05-T01（原会话复用） | 修复其 candidate 合同：补齐 owner 注册的相邻边、candidate/protected projection、queue identity 和隔离 worktree 的真实 Active binding；随后重跑 `v4/` Active/admission/build/install/live/AGY | 当前被 candidate contract 阻塞；禁止伪造 artifact、allowlist、clean、AGY、commit、merge、cleanup |
+| M05-T01（原会话复用） | 已恢复自身 `runtime → plugin-contract` 边；继续保留 M05 execution candidate，等待 B01 handoff 后重跑 `v4/` Active/admission/build/install/live/AGY | 当前被外部 build-link/projection/Active binding 阻塞；禁止伪造 artifact、allowlist、clean、AGY、commit、merge、cleanup |
+| B01（复用 M02 会话） | 新 claim/worktree 处理 build-link consumer registry 与 canonical frozen Active resolver binding；只允许合入 `codex/v4-cordis-refactor-main` | 已派发；必须先 red→green、locked focused gates 和 evidence，未完成不得交付 |
 | M08-T01（原会话复用） | provider/server async transport、chunked response、cancellation/deadline、合同/边界/定向 red/green/evidence 已完成；等待 M05 execution owner 明确交接后再接 runtime-bin | 独立 slice ready；整体 M08 未完成，不得提前合并或宣称完成 |
 | D0-T01（既有 owner） | 继续其 differential/build-guard gate 收口；当前等待 stale owner handoff | claim 仍占用 gate projection；原 worker 会话不可见，禁止重复派发、抢改 gate 文件或自动接管 |
 | M00-T10 / M11-T01 | 已合入重构主树后完成主树复验、release claim、worktree/branch cleanup | 已完成并清理 |
