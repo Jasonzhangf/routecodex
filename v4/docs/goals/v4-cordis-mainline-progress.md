@@ -18,7 +18,7 @@ M00 -> M01 -> M02 --┐
 | M00-T01 合同 | `merged` | 无 | 已进主树 |
 | M00-T02 ratchet/protected promotion | `blocked` | T01 | 与 T03 可并行，需修 protected gate 接线 |
 | M00-T03 审计面 | `merged` | T01 | 已合并 `c4d13d7b8` |
-| M00-T04 每 milestone 独立 claim 表 | `in_progress` | T03 | 与 T02 不同语义，可并行 |
+| M00-T04 每 milestone 独立 claim 表 | `merged` | T03 | 已合并 `5e0090f9d` |
 | M01 NativePlugin ABI | `blocked_by_M00` | M00 | M00 完成后可 claim |
 | M02 generic factory | `blocked_by_M01` | M01 | 不可抢跑 |
 | M03 Cordis daemon | `blocked_by_M00` | M00 | M00 后与 M01 并行 |
