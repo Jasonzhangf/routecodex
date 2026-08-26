@@ -21,7 +21,7 @@
 | M00-T04 | `feature_id:v4.cordis_m00.stage_task_tables` | T03 | merged (`55faef2ee`, main-tree merge `5e0090f9d`) | `codex/v4-cordis-refactor-main` |
 | M00-T05 | `feature_id:v4.cordis_m00.live_admission_closeout` | T02 + T04 | blocked_by_provider_websocket_v2_endpoint | `codex/v4-cordis-refactor-main` |
 | M00-T06 | `resource_id:v4.error.raw_wire_evidence` | T01 + T03 | merged (`0bcd0e3ff`, main-tree merge `9f9ebc25d`) | `codex/v4-cordis-refactor-main` |
-| M00-T07 | `feature_id:v4.cordis_m00.live_capture_binding` | T06 | available_after_T06 | `codex/v4-cordis-refactor-main` |
+| M00-T07 | `feature_id:v4.cordis_m00.live_capture_binding` | T06 | available | `codex/v4-cordis-refactor-main` |
 | M00-T08 | `feature_id:v4.cordis_m00.dependency_reconciliation` | T01 + T03 + T04 | merged (`764351194`, main-tree merge `0f353bee8`) | `codex/v4-cordis-refactor-main` |
 | M00-T09 | `feature_id:v4.cordis_m00.empty_epoch_admission` | T01 + T02 | merged (`23220dceb`, main-tree merge `4298257666`) | `codex/v4-cordis-refactor-main` |
 
