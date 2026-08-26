@@ -39,15 +39,15 @@
 | M00-T08 | `feature_id:v4.cordis_m00.dependency_reconciliation` | 拆分 T07 evidence-owner contract 与 M08 async/native transport runtime，消除 M00/M08 循环依赖 | `v4/docs/goals/**` | M00-T01 + M00-T03 + M00-T04 | `merged` (`764351194`, main-tree merge `0f353bee8`) | `codex/v4-cordis-refactor-main` |
 | M00-T09 | `feature_id:v4.cordis_m00.empty_epoch_admission` | 无 active epoch 时 fail-closed admission 与正反测试 | `v4/crates/routecodex-v4-node-container/**`, V4 maps/evidence | M00-T01 + M00-T02 | `merged` (`23220dceb`, main-tree merge `4298257666`) | `codex/v4-cordis-refactor-main` |
 
-M00 退出：T00/T01/T02/T03/T04/T06/T07/T09 都完成并合并主树；T05 的 live provider admission blocker 必须解除；合同/map/wiki/manifest/gate 与独立 task tables 同步；canonical V4 verify 与 red suite 通过；未完成前不得 claim M01/M03/D0/M08。
+M00 结构出口：T00/T01/T02/T03/T04/T06/T07/T09 都完成并合并主树；T05 live provider admission 保留为独立 blocker，不得用 fallback 或伪造证据解除，也不得阻塞不依赖其运行时语义的 M01/M03/D0/M08。M00 全局 release/cutover 仍需 T05 解除；合同/map/wiki/manifest/gate 与独立 task tables 同步。
 
 ## M01-M05：Cordis 控制面与唯一执行器
 
 | task_id | claim_id | 内容 | 依赖 | 状态 | merge target |
 |---|---|---|---|---|---|
-| M01-T01 | `feature_id:v4.native_plugin_abi` | NativePlugin、Resolver、Config、Outcome/Failure、catalog exporter | M00 | `in_progress` | refactor main |
+| M01-T01 | `feature_id:v4.native_plugin_abi` | NativePlugin、Resolver、Config、Outcome/Failure、catalog exporter | M00 structural contracts | `merged` (`7c7e141f5`, main-tree merge `100b9fd12`) | refactor main |
 | M02-T01 | `feature_id:v4.cordis_generic_factory` | canonical catalog → generic Cordis factory → Fiber mount/dispose | M01 | `blocked` | refactor main |
-| M03-T01 | `feature_id:v4.cordis_host_daemon` | child daemon、handshake、socket、heartbeat、generation、reconcile | M00 | `blocked` | refactor main |
+| M03-T01 | `feature_id:v4.cordis_host_daemon` | child daemon、handshake、socket、heartbeat、generation、reconcile | M00 structural contracts | `available` (T05 独立 blocker 不传播) | refactor main |
 | M04-T01 | `feature_id:v4.execution_epoch_transaction` | prepare/commit/abort/drain/rollback、stale/hash/idempotency | M02 + M03 | `blocked` | refactor main |
 | M05-T01 | `feature_id:v4.execution_engine` | 唯一 ExecutionEngine、真实 NodeOutcome 链、删除第二 graph/registry | M04 | `blocked` | refactor main |
 
@@ -57,10 +57,10 @@ M01 与 M03 可并行；M02 等 M01；M04 等 M02+M03；M05 等 M04。
 
 | task_id | claim_id | 内容 | 依赖 | 状态 | merge target |
 |---|---|---|---|---|---|
-| D0-T01 | `feature_id:v4.differential_harness` | old/new wire 与 raw response differential，不重复 provider 请求 | M00 | `blocked_by_M00` | refactor main |
+| D0-T01 | `feature_id:v4.differential_harness` | old/new wire 与 raw response differential，不重复 provider 请求 | M00 structural contracts | `in_progress` (T05 独立 blocker 不传播) | refactor main |
 | M06-T01 | `feature_id:v4.responses_request_mainline` | Responses JSON request chain takeover | M05 | `blocked` | refactor main |
 | M07-T01 | `feature_id:v4.responses_response_mainline` | Responses JSON response chain takeover | M06 | `blocked` | refactor main |
-| M08-T01 | `feature_id:v4.async_data_plane` | async server、native provider transport、cancel/deadline/buffer，并接入 M00-T07 已冻结的 live evidence owner | M00 | `blocked_by_M00` | refactor main |
+| M08-T01 | `feature_id:v4.async_data_plane` | async server、native provider transport、cancel/deadline/buffer，并接入 M00-T07 已冻结的 live evidence owner | M00 structural contracts + M00-T07 | `available` (T05 live admission 独立阻塞) | refactor main |
 | M09-T01 | `feature_id:v4.sse_mainline` | SSE parser → response pipeline → frame writer，zero per-frame IPC | M07 + M08 | `blocked` | refactor main |
 | M10-T01 | `feature_id:v4.state_semantics` | Router/Error/Health/Continuation typed owner 接管 | M09 | `blocked` | refactor main |
 

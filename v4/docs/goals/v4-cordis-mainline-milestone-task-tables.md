@@ -29,7 +29,7 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M01-T01 | `feature_id:v4.native_plugin_abi` | M00 | in_progress (independent worktree; M00 live closeout remains separate) | `codex/v4-cordis-refactor-main` |
+| M01-T01 | `feature_id:v4.native_plugin_abi` | M00 structural contracts | merged (`7c7e141f5`, main-tree merge `100b9fd12`; post-merge gates passed) | `codex/v4-cordis-refactor-main` |
 
 ## M02 — Generic Cordis Factory
 
@@ -41,7 +41,7 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M03-T01 | `feature_id:v4.cordis_host_daemon` | M00 | blocked_by_M00 | `codex/v4-cordis-refactor-main` |
+| M03-T01 | `feature_id:v4.cordis_host_daemon` | M00 structural contracts | available (T05 live admission is independent) | `codex/v4-cordis-refactor-main` |
 
 ## M04 — Execution Epoch Transaction
 
@@ -102,4 +102,4 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| D0-T01 | `feature_id:v4.differential_harness` | M00 | blocked_by_M00 | `codex/v4-cordis-refactor-main` |
+| D0-T01 | `feature_id:v4.differential_harness` | M00 structural contracts | in_progress (independent of T05) | `codex/v4-cordis-refactor-main` |
