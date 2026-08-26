@@ -150,7 +150,7 @@
 **不改 frozen control**，按实现证据将三条资源 owner 迁移到
 `routecodex-v4-runtime`：
 
-- runtime 已拥有同一 control 邻域真源：`v4.scope.session`（V4ScopeRegistry）、
+- runtime 已拥有同一 control 邻域真源：`v4.runtime.execution_scope`（ExecutionContext）、
   `v4.lifecycle.payload_cycle`（V4PayloadCycleRegistry）、
   relay operator 与 route_exit 派生；stopless/record/statistics 与这些
   control center 是同一层，不是 frozen control crate 的 MetadataCenter 面。

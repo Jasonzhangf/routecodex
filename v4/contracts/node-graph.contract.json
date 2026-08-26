@@ -3,7 +3,7 @@
   "contract_id": "v4-node-graph",
   "status": "active",
   "owner_feature_id": "v4.node_graph",
-  "graph_hash": "sha256:bb6438fdeb0f9231534b29935fbc496a0b07e398c77f16684932376b02050266",
+  "graph_hash": "sha256:cdc9f4ee940bfb735a7f0f2f9a75c0b278f222213d871a9be9413313a2b7ad64",
   "canonical_docs": [
     "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
@@ -1274,13 +1274,6 @@
       "family": "RequestChainNode",
       "role_id": "request_execution",
       "scope": "route decision exit produced at request execution stage",
-      "owner": "routecodex-v4-runtime"
-    },
-    {
-      "node_id": "V4ScopeRegistry",
-      "family": "ControlCenterNode",
-      "role_id": "control_center",
-      "scope": "request/session scope bind/release control center",
       "owner": "routecodex-v4-runtime"
     },
     {

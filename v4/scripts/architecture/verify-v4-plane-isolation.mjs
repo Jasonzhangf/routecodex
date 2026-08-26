@@ -17,7 +17,7 @@ const SOURCE_PATHS = {
   responseOutbound: 'crates/routecodex-v4-standard-plugins/src/response_outbound.rs',
 };
 const CONTRACT_HASHES = {
-  forbiddenEdges: 'sha256:af6dea8727859fbe4953293efd1e272f3139a041f63cb0d8183b53652a97d7bc',
+  forbiddenEdges: 'sha256:d664a42dca9a31101df1655278ae40a484ec8c8d782ee6a8eae488f0bb08061c',
   invariants: 'sha256:376ca42227cbaded5d2c229b8db34cecac186c1841c962e2a4b9d46f17c6410d',
   redGates: 'sha256:6f3f6e71647e6110ec4bef014e085e804f385b9bac43cb697919a69069d5dbea',
   activationConditions: 'sha256:820b26c09fad7c191a54df5e61b807bf507eda469cf3a15f532ce0ca174c7006',
@@ -242,7 +242,7 @@ export function runPlaneIsolationRedSelfTest(resourceMap, boundaryContract, sour
       name: 'control writer enters provider wire',
       mutate(map) {
         const wire = map.resources.find((resource) => resource.resource_id === 'v4.request.provider_wire_payload');
-        wire.allowed_writers = sortedUnique([...(wire.allowed_writers ?? []), 'V4ScopeRegistry']);
+        wire.allowed_writers = sortedUnique([...(wire.allowed_writers ?? []), 'V4Control01ScopeBoundCarrier']);
       },
       expected: ['DATA_CONTROL_WRITER', 'DATA_WRITER_FORBIDDEN_OVERLAP', 'FORBIDDEN_EDGE_REVERSE', 'WIRE_CONTROL_WRITER'],
     },

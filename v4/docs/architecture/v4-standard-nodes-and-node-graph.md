@@ -812,7 +812,7 @@ group 作为超级节点，除继承节点测试外还必须通过：
 | node-graph.contract.json `v4_hub_request_chain` | design | chain nodes | 7 | V4ServerReqInbound01ClientRaw … V4ProviderSseOut07WireBoundary |
 | node-graph.contract.json `v4_hub_response_chain` | design | chain nodes | 6 | V4ProviderSseIn01FrameBoundary … V4ServerRespOutbound06ClientFrame |
 | node-graph.contract.json `v4_config_chain` | design | chain nodes | 5 | V4Config01AuthoringFileSource … V4Config05ManifestPublished |
-| node-graph.contract.json `registered_nodes` | design | side/control/diagnostic 目录 | 41 | V4ScopeRegistry、V4PayloadCycleRegistry、V4Debug01..13、V4ErrorCenter02ClassifyAudit 等 |
+| node-graph.contract.json `registered_nodes` | design | side/control/diagnostic 目录 | 40 | V4PayloadCycleRegistry、V4Debug01..13、V4ErrorCenter02ClassifyAudit 等 |
 | skeleton-plan.contract.json `request` | active | plan nodes | 3（旧压缩） | V4ReqInbound01Raw、V4ReqProcess02、V4ReqOutbound03 |
 | skeleton-plan.contract.json `response` | active | plan nodes | 3（旧压缩） | V4RespInbound01Raw、V4RespProcess02、V4ClientProjection03 |
 | skeleton-plan.contract.json `error` | active | plan nodes | 6 | V4Error01SourceRaised … V4Error06ClientProjected |

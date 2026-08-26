@@ -355,8 +355,8 @@
       "feature_id": "V4-RUNTIME-006"
     },
     {
-      "resource_id": "v4.scope.session",
-      "owner": "routecodex-v4-runtime::V4ScopeRegistry",
+      "resource_id": "v4.runtime.execution_scope",
+      "owner": "routecodex-v4-runtime::ExecutionContext",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
       "allowed_operations": [
         "read",

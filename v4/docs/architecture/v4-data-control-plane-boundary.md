@@ -32,7 +32,7 @@ V4 从第一行实现开始就锁定数据面与控制面的物理隔离，并�
 
 - `v4.request.normal_payload` / `v4.response.normal_payload`：数据面；可进入 provider/client wire 语义投影，但绝不含控制字段。
 - `v4.request.provider_wire_payload` / `v4.response.client_wire_payload`：wire 面；只由唯一 codec owner 写入。
-- `v4.control.side_channel` / `v4.control.metadata_center` / `v4.control.error_chain` / `v4.scope.session` / `v4.control.stopless_state`：控制面；`may_enter_provider_body=false`、`may_enter_client_body=false`。
+- `v4.control.side_channel` / `v4.control.metadata_center` / `v4.control.error_chain` / `v4.runtime.execution_scope` / `v4.control.stopless_state`：控制面；`may_enter_provider_body=false`、`may_enter_client_body=false`。
 - `v4.node_container.lifecycle_failure`：NodeContainer 管理生命周期失败 fact；只经 lifecycle port 投影，不伪造 product request/session/target scope 接入 Error01-06，也不进入 provider/client payload。
 - `v4.control.error_center`：错误接收/分类/审计中心；只接受 `V4Error02HostCaptured` typed fact，且 `payload_hash` / `typed_context` 必须非空；输出不可构造、绑定 exact fact lineage、只能消费一次的 audit witness，`V4Error03RuntimeClassified` 必须消费该 witness。禁止读取业务 payload 决策，禁止路由操作；路由决策唯一 owner 是 VR，经 `v4.control.route_exit` 出口发出。
 - `v4.lifecycle.payload_cycle`：原始请求 payload 生命周期；switch/cooldown/reroute 合并同一周期，原始请求不变；只有响应入客户端或错误终态才终了。
@@ -76,7 +76,7 @@ V4 从第一行实现开始就锁定数据面与控制面的物理隔离，并�
 
 ### RED-06：跨 session/闭环复用 scope 必红
 
-断言：session A 的 scope key 在请求 B 中被消费时，`V4ScopeRegistry` 必须拒绝并 fail-fast。
+断言：session A 的 scope key 在请求 B 中被消费时，runtime 的 typed execution scope 必须拒绝并 fail-fast。
 
 正：同一闭环内 register -> consume -> release 成功；release 后再次 consume 失败。
 

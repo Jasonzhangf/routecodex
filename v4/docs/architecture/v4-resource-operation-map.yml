@@ -110,10 +110,11 @@ resources:
   - V4ProviderSseOut07WireBoundary
   forbidden_writers:
   - V4ControlMetadataCenter
+  - V4Control01ScopeBoundCarrier
   - V4HubReqChatProcess04Governed
   - V4Router
   - V4DebugSnapshotLedger
-  - V4ScopeRegistry
+  - V4Runtime01MainlineKernel
   may_enter_provider_body: true
   may_enter_client_body: false
   binding_status: anchored
@@ -292,7 +293,7 @@ resources:
   - V4HubReqChatProcess04Governed
   - V4Router
   - V4ErrorChain
-  - V4ScopeRegistry
+  - V4Runtime01MainlineKernel
   forbidden_writers:
   - V4ProviderReqCompat06Compat
   - V4HubRespOutbound04ClientSemantic
@@ -337,7 +338,7 @@ resources:
   - V4Router
   - V4ErrorChain
   - V4StoplessControlState
-  - V4ScopeRegistry
+  - V4Runtime01MainlineKernel
   forbidden_writers:
   - V4ProviderReqCompat06Compat
   - V4HubRespOutbound04ClientSemantic
@@ -799,7 +800,7 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
-- resource_id: v4.scope.session
+- resource_id: v4.runtime.execution_scope
   axis: control
   verification_gate:
   - v4_parity_gate_execution_binding
@@ -807,9 +808,9 @@ resources:
   resource_kind: control_scope
   lifecycle: v4.control.scope
   owner_crate: routecodex-v4-runtime
-  owner_node: V4ScopeRegistry
+  owner_node: V4Runtime01MainlineKernel
   owner_symbols:
-  - ScopeRegistry
+  - ExecutionContext
   identity:
   - requestId
   - pipelineId
@@ -821,12 +822,12 @@ resources:
     cross_session_reuse: forbidden
     entry_protocol_locked: true
   allowed_writers:
-  - V4ScopeRegistry::bind
-  - V4ScopeRegistry::release
+  - V4Runtime01MainlineKernel
   allowed_readers:
   - V4Control01ScopeBoundCarrier
   - V4ControlMetadataCenter
   - V4StoplessControlState
+  - V4Runtime01MainlineKernel
   forbidden_writers:
   - V4ProviderReqCompat06Compat
   - V4HubRespOutbound04ClientSemantic
@@ -2153,7 +2154,6 @@ resources:
   - V4ErrorCenter02ClassifyAudit
   - V4PayloadCycleRegistry
   - V4Error04RouterPolicyApplied
-  - V4ScopeRegistry
   - V4StoplessControlState
   - V4Control02RecordLedger
   - V4PluginManager
@@ -2200,7 +2200,6 @@ resources:
   - V4ErrorCenter02ClassifyAudit
   - V4PayloadCycleRegistry
   - V4Error04RouterPolicyApplied
-  - V4ScopeRegistry
   - V4StoplessControlState
   - V4Control02RecordLedger
   - V4PluginManager
@@ -2372,7 +2371,6 @@ resources:
   - V4Runtime01MainlineKernel
   - V4Error06ClientProjected
   - V4Error04RouterPolicyApplied
-  - V4ScopeRegistry
   - V4StoplessControlState
   - V4Control02RecordLedger
   - V4PluginManager
@@ -2422,7 +2420,6 @@ resources:
   - V4Runtime01MainlineKernel
   - V4Error06ClientProjected
   - V4Error04RouterPolicyApplied
-  - V4ScopeRegistry
   - V4StoplessControlState
   - V4Control02RecordLedger
   - V4PluginManager
@@ -2567,7 +2564,6 @@ resources:
   - V4Runtime01MainlineKernel
   - V4Error06ClientProjected
   - V4Error04RouterPolicyApplied
-  - V4ScopeRegistry
   - V4StoplessControlState
   - V4Control02RecordLedger
   - V4PluginManager
@@ -2853,10 +2849,10 @@ forbidden_direct_edges:
   to: v4.request.provider_wire_payload
   reason: only registered Req04 current-turn projection may carry stopless guidance
     to provider
-- from: v4.scope.session
+- from: v4.runtime.execution_scope
   to: v4.request.provider_wire_payload
   reason: scope keys must not become provider body fields
-- from: v4.scope.session
+- from: v4.runtime.execution_scope
   to: v4.response.client_wire_payload
   reason: scope keys must not become client body fields
 - from: v4.control.route_facts
