@@ -1053,8 +1053,16 @@ where
         hyper_service,
     );
     tokio::select! {
-        result = connection => result.map_err(std::io::Error::other),
-        _ = front_socket.closeout_state.wait_peer_disconnected() => Ok(()),
+        _ = front_socket.closeout_state.wait_peer_disconnected() => {
+            front_socket.close();
+            Ok(())
+        },
+        result = connection => {
+            if front_socket.closeout_state.is_peer_disconnected() {
+                front_socket.close();
+            }
+            result.map_err(std::io::Error::other)
+        },
     }
 }
 
