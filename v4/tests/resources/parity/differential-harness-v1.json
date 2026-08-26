@@ -1,0 +1,35 @@
+{
+  "fixture_id": "v4-differential-harness-v1",
+  "fixture_kind": "deterministic_contract_fixture",
+  "provider_network_send": false,
+  "provider_requests_replayed": 0,
+  "old": {
+    "wire": {
+      "model": "parity-model",
+      "input": [{"role": "user", "content": [{"type": "input_text", "text": "reply parity"}]}],
+      "stream": false
+    },
+    "raw_response": {
+      "id": "resp_parity_0001",
+      "object": "response",
+      "status": "completed",
+      "model": "parity-model",
+      "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "parity"}]}]
+    }
+  },
+  "new": {
+    "wire": {
+      "model": "parity-model",
+      "input": [{"role": "user", "content": [{"type": "input_text", "text": "reply parity"}]}],
+      "stream": false
+    },
+    "raw_response": {
+      "id": "resp_parity_0001",
+      "object": "response",
+      "status": "completed",
+      "model": "parity-model",
+      "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "parity"}]}]
+    }
+  },
+  "intentional_differences": []
+}
