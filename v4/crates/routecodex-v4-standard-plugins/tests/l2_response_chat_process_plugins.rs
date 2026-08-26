@@ -2,6 +2,7 @@
 //!
 //! Positive: the group plan compiles and executes with response governance,
 //! tool harvest; tool facts are observed without rewriting response data.
+//! Continuation control remains owned by the runtime typed scope path.
 //! Negative: malformed and duplicate tool identity fail fast.
 
 use routecodex_v4_cordis_bridge::{BridgeError, NodeExecutionInput};
