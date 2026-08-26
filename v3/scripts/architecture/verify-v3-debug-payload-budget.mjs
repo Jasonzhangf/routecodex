@@ -99,7 +99,7 @@ requireMatch(
 );
 requireMatch(
   sampleStore,
-  /pub fn enforce_listener_retention\(&self, port: u16\)/,
+  /pub fn enforce_listener_retention\(&self, (?:_)?port: u16\)/,
   "V3CodexSampleStore must own startup listener retention",
 );
 requireMatch(
@@ -185,8 +185,8 @@ requireMatch(
 );
 requireMatch(
   serverLiveSnapshot,
-  /struct V3LiveSnapRecordedStream<S, E, F, O>[\s\S]*Poll::Ready\(None\) if !this\.terminal_persisted[\s\S]*persist_current\(None\)/,
-  "Recorded stream sample persistence must finalize once at stream EOF",
+  /stream\.observe\([\s\S]*move \|terminal\|[\s\S]*persist_current\(disconnect\)/,
+  "Recorded stream sample persistence must finalize at the shared stream terminal callback",
 );
 requireMatch(
   serverLiveSnapshot,
@@ -208,15 +208,16 @@ const directProjectionStart = serverFrameBuilders.indexOf(
   "fn responses_direct_output_response_with_console(",
 );
 let directProjectionEnd = serverFrameBuilders.indexOf(
-  "\nfn wrap_v3_direct_sse_console_stream(",
+  "\npub(crate) fn wrap_v3_direct_committed_sse_console_stream(",
   directProjectionStart,
 );
 if (directProjectionEnd === -1) {
   directProjectionEnd = serverFrameBuilders.indexOf(
-    "fn wrap_v3_direct_sse_console_stream(",
+    "pub(crate) fn wrap_v3_direct_committed_sse_console_stream(",
     directProjectionStart,
   );
-}const directProjection =
+}
+const directProjection =
   directProjectionStart >= 0 && directProjectionEnd > directProjectionStart
     ? serverFrameBuilders.slice(directProjectionStart, directProjectionEnd)
     : "";
@@ -249,7 +250,7 @@ requireMatch(
 );
 requireMatch(
   sampleStore,
-  /retention_caps_samples_at_configured_limit[\s\S]*200/,
+  /retention_caps_samples_at_configured_limit[\s\S]*V3_CODEX_SAMPLE_REQUEST_RETENTION/,
   "Sample store must have a retention-cap test at 200",
 );
 for (const [source, label] of [
