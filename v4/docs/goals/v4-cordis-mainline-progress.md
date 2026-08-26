@@ -33,7 +33,7 @@ M00 -> M01 -> M02 --┐
 | M05 ExecutionEngine | `in_progress` | M04 | 已 claim 独立 worktree；源码与 M05 专项验证完成，交付门禁被 Active artifact、feature-layer admission、isolation wiring、install/live 基线阻断；未 AGY/commit/merge |
 | M06 request JSON | `blocked` | M05 | 必须串行 |
 | M07 response JSON | `blocked` | M06 | 必须串行 |
-| M08 async data plane | `paused_due_to_m05_runtime_bin_overlap` | M00 structural contracts + M00-T07 | 原 worktree 保留；旧 curl、同步 runtime-bin、真实 evidence integration 未完成。当前 M05 正在修改同一 runtime-bin execution owner，暂停并发避免语义冲突；M05 收口后再恢复 |
+| M08 async data plane | `in_progress_with_execution_boundary` | M00 structural contracts + M00-T07 | 原 worktree/claim 已恢复；native transport、chunked stream、async listener 已推进。runtime handler async stream/cancellation、M00-T07 live evidence、full gates/live/AGY 未闭环；不得覆盖 M05 execution owner |
 | M09 SSE | `blocked` | M07 + M08 | 必须串行 |
 | M10 state semantics | `blocked` | M09 | 必须串行 |
 | M11 protocols/tools/admin | `blocked` | M10 | 协议 lane 与 tools/admin lane 可并行 |
@@ -51,10 +51,10 @@ M00 -> M01 -> M02 --┐
 |---|---|---|---|---|
 | execution owner | M05-T01 | `in_progress` | 否 | 唯一 ExecutionEngine 正在退役旧 runtime execution surface；完成 Active/feature-layer/install/live 前不得 AGY、commit、merge |
 | differential governance | D0-T01 | `in_progress` | 否 | 已有独立 worker/claim 处理 layer-batch gate；不得重复 claim 或抢改其 gate 文件 |
-| async data plane | M08-T01 | `paused` | 否 | 与 M05 共享 runtime-bin 语义和文件；待 M05 merge 或明确交接后恢复，原 worktree/dirty 保留 |
+| async data plane | M08-T01 | `in_progress_with_execution_boundary` | 是（受边界约束） | 已复用原会话继续；只推进 native async transport/handler/cancellation/evidence，遇 M05 execution-owner 同语义冲突即停并报告，不覆盖 M05 |
 | provider live admission | M00-T05 | `blocked` | 否 | Responses WebSocket v2 / credential blocker；不得猜 endpoint、伪造 101 或绕过真实 continuation |
 | next dependency | M06-T01 | `blocked` | 否 | 必须等待 M05 合入重构主 tree 并完成主树复验 |
 | governance audit | M00-T10 | `dispatched` | 是 | 已复用 M02 会话；仅治理文档/机器任务清单/红测，独立于 M05/D0/M08；等待新 claim/worktree/evidence |
 | protocol/tools/admin contract | M11-T01 | `dispatched` | 是 | 已复用 M03 会话；仅 M11 前置合同与验证映射，独立于 M05/D0/M08；等待新 claim/worktree/evidence |
 
-当前可并发 lane：M00-T10 与 M11-T01。两者均必须从 `codex/v4-cordis-refactor-main` 当前 HEAD 建立独立 worktree，并分别完成 claim、red-first、边界审计、定向验证、evidence、merge queue；不得修改父任务进度文件、M05 runtime-bin、D0 gate 或 M08 async data-plane。M05、D0、M08 继续保持原 owner；M06 仍等待 M05 合入并完成主树复验。
+当前可并发 lane：M00-T10、M11-T01、M08-T01。M00-T10 与 M11-T01 必须建立新 claim/worktree；M08 使用已存在的原 claim/worktree。三者都必须完成 red-first、边界审计、定向验证、evidence、AGY（仅在前置验证完成后）、merge queue；M08 不得覆盖 M05 execution owner。M05、D0 继续保持原 owner；M06 仍等待 M05 合入并完成主树复验。
