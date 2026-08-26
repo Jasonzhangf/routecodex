@@ -35,19 +35,19 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M02-T01 | `feature_id:v4.cordis_generic_factory` | M01 | available (M01 merged and main-tree verified) | `codex/v4-cordis-refactor-main` |
+| M02-T01 | `feature_id:v4.cordis_generic_factory` | M01 | merged (`ff9065c8c`, main-tree merge `aa5518b50`) | `codex/v4-cordis-refactor-main` |
 
 ## M03 — Cordis Host Daemon
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M03-T01 | `feature_id:v4.cordis_host_daemon` | M00 structural contracts | available (T05 live admission is independent) | `codex/v4-cordis-refactor-main` |
+| M03-T01 | `feature_id:v4.cordis_host_daemon` | M00 structural contracts | merged (`8be1e7ced`, main-tree merge `3a425633c`) | `codex/v4-cordis-refactor-main` |
 
 ## M04 — Execution Epoch Transaction
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M04-T01 | `feature_id:v4.execution_epoch_transaction` | M02 + M03 | blocked | `codex/v4-cordis-refactor-main` |
+| M04-T01 | `feature_id:v4.execution_epoch_transaction` | M02 + M03 | available (M02/M03 main-tree gates passed) | `codex/v4-cordis-refactor-main` |
 
 ## M05 — 唯一 ExecutionEngine
 
@@ -71,7 +71,7 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M08-T01 | `feature_id:v4.async_data_plane` | M00 | blocked_by_M00 | `codex/v4-cordis-refactor-main` |
+| M08-T01 | `feature_id:v4.async_data_plane` | M00 structural contracts + M00-T07 | blocked_by_incomplete_sync_transport_migration | `codex/v4-cordis-refactor-main` |
 
 ## M09 — SSE 主线
 
