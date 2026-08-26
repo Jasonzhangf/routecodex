@@ -493,6 +493,14 @@ impl std::fmt::Debug for ActiveEpochStore {
 }
 
 impl ActiveEpochStore {
+    /// Construct a store before Cordis has committed an epoch. Admission
+    /// must fail closed until a validated candidate is published.
+    pub fn empty() -> Self {
+        Self {
+            active: RwLock::new(None),
+        }
+    }
+
     pub fn new(active: ActiveExecutionEpoch) -> Self {
         Self {
             active: RwLock::new(Some(active)),

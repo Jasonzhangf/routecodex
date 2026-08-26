@@ -108,3 +108,10 @@ fn rebuild_keeps_execution_identity_stable() {
     assert_eq!(first.snapshot().manifest_hash, rebuilt.snapshot().manifest_hash);
     assert_eq!(first.snapshot().execution_identity, rebuilt.snapshot().execution_identity);
 }
+
+#[test]
+fn empty_store_rejects_admission_until_epoch_is_published() {
+    let store = ActiveEpochStore::empty();
+    assert!(matches!(store.admit(), Err(EpochError::LeaseUnavailable)));
+    assert!(store.active_snapshot().is_none());
+}

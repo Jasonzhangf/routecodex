@@ -840,6 +840,7 @@
         "EpochLease",
         "EpochLease::release",
         "ActiveEpochStore",
+        "ActiveEpochStore::empty",
         "ActiveEpochStore::admit",
         "ActiveEpochStore::publish",
         "ActiveEpochStore::record_execution_failure",
