@@ -22,3 +22,4 @@ features:
       - docs/architecture/v3-v4-semantic-parity-map.yml
       - docs/evidence/parity/v3-v4-normalized-differential-20260825.json
       - docs/evidence/parity/v4-5520-full-product-health-20260825.json
+      - docs/evidence/parity/v3-v4-provider-dryrun-20260825.json

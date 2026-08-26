@@ -19,6 +19,7 @@ use routecodex_v4_lifecycle::{
 };
 use routecodex_v4_node_container::{NodeContainer, PlanBindings};
 use routecodex_v4_standard_plugins::{compile_standard_plan, StandardHandleRegistry};
+use routecodex_v4_standard_plugins::diagnostic;
 use routecodex_v4_provider::{
     build_protocol_wire, build_responses_local_continuation_wire, load_profile, send_responses,
     send_responses_streaming, write_provider_profile,
@@ -38,6 +39,7 @@ use routecodex_v4_runtime::{
 };
 use routecodex_v4_server::{HttpHandler, HttpRequest, HttpResponse, ResponseStream, V4HttpServer};
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -296,6 +298,23 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
             .collect(),
     };
     let control = ManagedControlPlane::bind(paths, record).map_err(|error| error.to_string())?;
+    let listeners = manifest
+        .listeners
+        .iter()
+        .map(|listener| listener.address.clone())
+        .collect::<Vec<_>>();
+    let binary = std::env::current_exe()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    let (headline, debug) = diagnostic::format_startup(
+        &manifest.runtime_identity,
+        VERSION,
+        &binary,
+        &listeners,
+    );
+    println!("{headline}");
+    println!("{debug}");
+    let _ = std::io::stdout().flush();
     let stop = Arc::new(AtomicBool::new(false));
     let handles = spawn_servers(servers, manifest.clone(), Arc::clone(&stop));
     let action = loop {
@@ -674,6 +693,16 @@ fn handle_responses(
             404,
         )
     })?;
+    println!(
+        "{}",
+        diagnostic::format_request(
+            request.path.as_str(),
+            &request.request_id,
+            model,
+            &target.provider_id,
+        )
+    );
+    let _ = std::io::stdout().flush();
     let continuation_owner = if entry_protocol == "responses" {
         load_profile(&target.config_path)
             .map_err(|error| project_fault(request, RuntimeFault::new(&error.code, error.message), 500))?
@@ -826,6 +855,16 @@ fn handle_responses(
             ));
         }
         let client_status = if (200..300).contains(&status) { 200 } else { status };
+        println!(
+            "{}",
+            diagnostic::format_response(
+                request.path.as_str(),
+                &request.request_id,
+                client_status,
+                model,
+            )
+        );
+        let _ = std::io::stdout().flush();
         let mut response_stream = ResponsesSseStream::new(
             stream,
             Arc::clone(runtime),
@@ -1087,6 +1126,16 @@ fn handle_responses(
                 )
             })?;
             let client_status = if (200..300).contains(&raw.status) { 200 } else { raw.status };
+            println!(
+                "{}",
+                diagnostic::format_response(
+                    request.path.as_str(),
+                    &request.request_id,
+                    client_status,
+                    model,
+                )
+            );
+            let _ = std::io::stdout().flush();
             Ok(json_response(client_status, projected))
         }
         ResponsesProviderPayload::Sse(_) => Err(project_fault(

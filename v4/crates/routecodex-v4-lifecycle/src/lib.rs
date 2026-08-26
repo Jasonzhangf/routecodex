@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -270,10 +270,6 @@ pub fn start_managed(
     if paths.record_path.exists() || paths.control_socket.exists() {
         return Err(LifecycleError::AlreadyManaged);
     }
-    let log = open_log(paths)?;
-    let log_error = log
-        .try_clone()
-        .map_err(|error| io_error(&paths.log_path, error))?;
     let mut command = Command::new(executable);
     command
         .arg("server")
@@ -284,8 +280,20 @@ pub fn start_managed(
         .arg(config_path)
         .current_dir("/")
         .stdin(Stdio::null())
-        .stdout(Stdio::from(log))
-        .stderr(Stdio::from(log_error));
+        .stdout(if std::io::stdout().is_terminal() {
+            // V3's top-level managed start keeps the child attached to the
+            // invoking shell. V4 previously redirected both streams to a
+            // file, so no live startup/request console was visible.
+            Stdio::inherit()
+        } else {
+            Stdio::from(open_log(paths)?)
+        })
+        .stderr(if std::io::stderr().is_terminal() {
+            Stdio::inherit()
+        } else {
+            let log = open_log(paths)?;
+            Stdio::from(log)
+        });
     append_spawn_options(&mut command, options);
     unsafe {
         command.pre_exec(|| {

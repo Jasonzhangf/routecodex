@@ -1,6 +1,6 @@
 version = 4
 
-product_config_path = "v3-responses-7777-product.toml"
+product_config_path = "v4.toml"
 
 [runtime]
 id = "rccv4"

@@ -1,0 +1,41 @@
+{
+  "evidence_id": "v3-v4-provider-dryrun-20260825",
+  "status": "pass",
+  "source_commit": "8d52963ee70671fb03433b9bcfb7903bc6a60163",
+  "request_id": "parity-dryrun-0002",
+  "entry_protocol": "responses",
+  "input": {
+    "model": "deepseek-v4-flash",
+    "input": [{"role": "user", "content": [{"type": "input_text", "text": "reply parity"}]}],
+    "stream": false
+  },
+  "v3": {
+    "surface": "127.0.0.1:7777/v1/responses",
+    "mode": "provider-request-dry-run",
+    "provider_network_send": false,
+    "provider_pipeline_executed": true,
+    "provider_id": "opencode-go",
+    "provider_request": {
+      "input": [{"role": "user", "content": [{"type": "input_text", "text": "reply parity"}]}],
+      "model": "deepseek-v4-flash",
+      "stream": false
+    }
+  },
+  "v4": {
+    "surface": "127.0.0.1:5520",
+    "mode": "local-mock-provider-dry-run",
+    "external_network_send": false,
+    "provider_id": "v4-parity-mock",
+    "provider_request": {
+      "input": [{"role": "user", "content": [{"type": "input_text", "text": "reply parity"}]}],
+      "model": "deepseek-v4-flash",
+      "stream": false
+    }
+  },
+  "normalized_differential": {
+    "request_equal": true,
+    "provider_body_equal": true,
+    "control_fields_present": false,
+    "unexplained_differences": []
+  }
+}
