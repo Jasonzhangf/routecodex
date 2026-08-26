@@ -53,7 +53,7 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M05-T01 | `feature_id:v4.execution_engine` | M04 | available | `codex/v4-cordis-refactor-main` |
+| M05-T01 | `feature_id:v4.execution_engine` | M04 | in_progress (source/M05 gates green; external admission blockers; no AGY/commit/merge) | `codex/v4-cordis-refactor-main` |
 
 ## M06 — Responses Request 主线
 
@@ -71,7 +71,7 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M08-T01 | `feature_id:v4.async_data_plane` | M00 structural contracts + M00-T07 | blocked_by_incomplete_sync_transport_migration | `codex/v4-cordis-refactor-main` |
+| M08-T01 | `feature_id:v4.async_data_plane` | M00 structural contracts + M00-T07 | paused_due_to_m05_runtime_bin_overlap | `codex/v4-cordis-refactor-main` |
 
 ## M09 — SSE 主线
 

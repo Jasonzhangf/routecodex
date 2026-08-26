@@ -30,10 +30,10 @@ M00 -> M01 -> M02 --┐
 | M03 Cordis daemon | `merged` | M00 structural contracts | task `8be1e7ced` 已合入重构主树 `3a425633c`；daemon 3/3、host 联测 30/30、red 10/10、release build 通过 |
 | D0 differential harness | `in_progress` | M00 structural contracts | 已有独立 worker；与 M03/M08 并行，T05 不传播阻塞 |
 | M04 epoch transaction | `merged` | M02 + M03 | task `9914a69fe` 已以 merge `ba4af6c02` 合入重构主树；目标树定向 gates 全部通过，active-link 仍缺 frozen-consumer-registry 环境文件 |
-| M05 ExecutionEngine | `available` | M04 | M04 已完成目标树合入与复验；claim 后独立 worktree 开发 |
+| M05 ExecutionEngine | `in_progress` | M04 | 已 claim 独立 worktree；源码与 M05 专项验证完成，交付门禁被 Active artifact、feature-layer admission、isolation wiring、install/live 基线阻断；未 AGY/commit/merge |
 | M06 request JSON | `blocked` | M05 | 必须串行 |
 | M07 response JSON | `blocked` | M06 | 必须串行 |
-| M08 async data plane | `blocked_by_incomplete_sync_transport_migration` | M00 structural contracts + M00-T07 | worker 已完成局部 async listener/native transport 测试，但旧 curl、同步 runtime-bin、真实 evidence integration 未完成；另有无关 formatter dirty，未合入；T05 不是该 blocker |
+| M08 async data plane | `paused_due_to_m05_runtime_bin_overlap` | M00 structural contracts + M00-T07 | 原 worktree 保留；旧 curl、同步 runtime-bin、真实 evidence integration 未完成。当前 M05 正在修改同一 runtime-bin execution owner，暂停并发避免语义冲突；M05 收口后再恢复 |
 | M09 SSE | `blocked` | M07 + M08 | 必须串行 |
 | M10 state semantics | `blocked` | M09 | 必须串行 |
 | M11 protocols/tools/admin | `blocked` | M10 | 协议 lane 与 tools/admin lane 可并行 |
@@ -44,3 +44,15 @@ M00 -> M01 -> M02 --┐
 `audit → claim → isolated worktree → red → implement → boundary self-check → focused gates → build/live → evidence → checker → merge refactor main → refactor main reverify → milestone merge repo main → sync`。
 
 任何 task 未合并并通过主树复验，依赖 task 保持 blocked；worker 不得直接写主树。
+
+## 当前并发任务清单（2026-08-26）
+
+| lane | task | 状态 | 是否可再派发 | 原因 / 收口条件 |
+|---|---|---|---|---|
+| execution owner | M05-T01 | `in_progress` | 否 | 唯一 ExecutionEngine 正在退役旧 runtime execution surface；完成 Active/feature-layer/install/live 前不得 AGY、commit、merge |
+| differential governance | D0-T01 | `in_progress` | 否 | 已有独立 worker/claim 处理 layer-batch gate；不得重复 claim 或抢改其 gate 文件 |
+| async data plane | M08-T01 | `paused` | 否 | 与 M05 共享 runtime-bin 语义和文件；待 M05 merge 或明确交接后恢复，原 worktree/dirty 保留 |
+| provider live admission | M00-T05 | `blocked` | 否 | Responses WebSocket v2 / credential blocker；不得猜 endpoint、伪造 101 或绕过真实 continuation |
+| next dependency | M06-T01 | `blocked` | 否 | 必须等待 M05 合入重构主 tree 并完成主树复验 |
+
+结论：当前无新的可安全 claim 的并发任务。新增 worker 会与 M05、D0 或 M08 产生 owner/file 竞争；先完成现有 lane 的 merge/复验/清理，再开放后续 milestone。
