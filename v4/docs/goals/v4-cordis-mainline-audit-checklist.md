@@ -14,7 +14,7 @@
 
 ## 全局阶段审计
 
-- [ ] M00：ADR、epoch/catalog/control/outcome 合同；bypass ratchet；protected gate promotion。
+- [ ] M00：ADR、epoch/catalog/control/outcome 合同；bypass ratchet；protected gate promotion；每个 milestone 独立 claim 表。
 - [ ] M01：NativePlugin ABI、resolver、config、catalog exporter。
 - [ ] M02：generic Cordis factory；真实 request/response Fiber mount/dispose。
 - [ ] M03：Cordis daemon、typed socket、generation、heartbeat、reconcile。
@@ -40,4 +40,5 @@
 - [x] V4 已有 Cordis/NodeContainer/plugin plan/基础 maps 与 gates。
 - [x] M00-T01 合同已合并 V4 重构主树：`aaf8b1f39`。
 - [ ] M00-T02 ratchet 尚未完成 protected projection promotion。
-- [ ] M00-T03 审计面尚未合并 V4 重构主树。
+- [x] M00-T03 审计面已合并 V4 重构主树：`c4d13d7b8`。
+- [ ] M00-T04 每个 milestone 独立 claim 表已建立并合并 V4 重构主树。
