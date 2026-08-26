@@ -19,6 +19,7 @@ use routecodex_v4_lifecycle::{
 };
 use routecodex_v4_node_container::{NodeContainer, PlanBindings};
 use routecodex_v4_standard_plugins::{compile_standard_plan, StandardHandleRegistry};
+use routecodex_v4_standard_plugins::diagnostic;
 use routecodex_v4_provider::{
     build_protocol_wire, build_responses_local_continuation_wire, load_profile, send_responses,
     send_responses_streaming, write_provider_profile,
@@ -296,6 +297,24 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
             .collect(),
     };
     let control = ManagedControlPlane::bind(paths, record).map_err(|error| error.to_string())?;
+    let listeners = manifest
+        .listeners
+        .iter()
+        .map(|listener| listener.address.clone())
+        .collect::<Vec<_>>();
+    let binary = std::env::current_exe()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    let (headline, debug) = diagnostic::format_startup(
+        &manifest.runtime_identity,
+        VERSION,
+        &binary,
+        &listeners,
+    );
+    println!("{headline}");
+    println!("{debug}");
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
     let stop = Arc::new(AtomicBool::new(false));
     let handles = spawn_servers(servers, manifest.clone(), Arc::clone(&stop));
     let action = loop {
