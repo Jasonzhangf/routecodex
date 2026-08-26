@@ -68,10 +68,10 @@ V4.0 只有同时满足以下条件才算“功能完成”：
 
 1. 当前选定 V3 baseline 中的全部 feature 均进入 `differential_pass` 或更高状态；
 2. 所有生产入口都经过真实 `Skeleton -> NodeContainer -> NodePluginPlan`；
-3. `runtime-bin` 不直接拥有协议转换、路由选择、provider 传输、continuation、tool governance 或 client projection 业务；
+3. `runtime-bin` 不直接拥有协议转换、路由选择、provider 传输、tool governance 或 client projection 业务；
 4. OpenAI Responses、OpenAI Chat、Anthropic、Gemini 及基线确认保留的 WebSocket 能力完整；
 5. Router、Target、Provider Health、probe、retry/reroute/fail action 与 V3 等价；
-6. Direct/Relay continuation、session admission、SSE 生命周期和客户端断开完整；
+6. session admission、SSE 生命周期和客户端断开完整；V4 不实现 Responses continuation；
 7. Tool Governance、Servertool、Stopless、Web Search 多轮完整；
 8. Debug、Snapshot、Timing、Console、Admin、WebUI、配置迁移和正式发布可用；
 9. 性能预算、并发、长期流、restart/drain、rollback 达标；
@@ -134,7 +134,7 @@ mapped
 | HTTP server | 同步 TCP 简化实现 | 生产级 admission/streaming/cancellation |
 | Router | priority 排序后首选 | route group/pool/priority/SWRR/health/capability |
 | Error/Health | typed ErrorChain 基础存在 | 完整 provider action、probe、cooldown、quota |
-| Continuation | 最小 typed slice | Direct/Relay 多轮、immutable interval、exact pin |
+| Continuation | not implemented by design | V3 `previous_response_id` remains closed |
 | SSE | 基本 frame/terminal 校验 | 完整 first-frame/EOF/drop/backpressure/keepalive |
 | Tool/Servertool | 最小 governance/投影 | 多协议工具治理、真实执行、状态机、多轮 |
 | Diagnostics | 合同和部分 owner | 生产接入、预算、只读证据 |
@@ -196,7 +196,7 @@ send_responses_streaming(...)
 parse_responses_provider_payload(...)
 ```
 
-同类禁令也适用于后续新增的 Anthropic/Gemini/tool/continuation helper。二进制不得按 provider id、model prefix 或 payload shape 猜测业务路径。
+同类禁令也适用于后续新增的 Anthropic/Gemini/tool helper。二进制不得按 provider id、model prefix 或 payload shape 猜测业务路径。
 
 ## 6. 全局不可协商不变量
 
@@ -227,7 +227,7 @@ plugin_artifact_set_hash
 - Router：route/target decision；
 - Provider：transport/auth/provider-local evidence；
 - Health/Error：失败记录和 action；
-- Chat Process：tool/continuation/governance；
+- Chat Process：tool/governance；
 - Server：listener/admission/client framing；
 - Diagnostics：只读投影；
 - Admin/WebUI：管理请求和投影，不拥有业务语义。
@@ -259,7 +259,7 @@ selection group 中一个实现失败后不得尝试同组其他实现伪装成�
 
 ### INV-FC-06：数据与控制物理隔离
 
-route、target、health、retry、continuation、scope、stopless、secret、debug、manifest digest 不能进入正常 provider/client payload。payload 也不能重建这些控制事实。
+route、target、health、retry、scope、stopless、secret、debug、manifest digest 不能进入正常 provider/client payload。payload 也不能重建这些控制事实。
 
 ### INV-FC-07：V3 只读且构建隔离
 
@@ -298,7 +298,7 @@ begin-version
 | M3 | V3/V4 产品差分 harness | P0/P1，可与 M1/M2 部分并行 | M0 |
 | M4 | 生产 transport、协议和 Provider 完整迁移 | P1 | M1/M2/M3 |
 | M5 | Router、Target、Health、Error Action | P1 | M1/M3/M4 基础 |
-| M6 | Continuation、Session Admission、SSE 生命周期 | P1 | M4/M5 |
+| M6 | Session Admission、SSE 生命周期 | P1 | M4/M5 |
 | M7 | Tool Governance、Servertool、Stopless、Web Search | P1/P2 | M4/M6 |
 | M8 | Diagnostics、Admin、WebUI、配置迁移、Release | P2 | M1–M7 |
 | M9 | 性能、Canary、灰度、回滚与切换准备 | P2/P3 | M8 |
@@ -588,7 +588,6 @@ routecodex-v4-plugin-chat-process
 routecodex-v4-plugin-routing
 routecodex-v4-plugin-provider
 routecodex-v4-plugin-provider-health
-routecodex-v4-plugin-continuation
 routecodex-v4-plugin-tool-governance
 routecodex-v4-plugin-servertool-stopless
 routecodex-v4-plugin-sse-lifecycle
@@ -658,7 +657,7 @@ required_fixtures
 ## 10.4 退出条件
 
 - Runtime 只保留 orchestrator 和 typed context；
-- 协议、provider、route、tool、continuation 业务不再散落；
+- 协议、provider、route、tool 业务不再散落；
 - 每个生产插件有唯一 owner/artifact/fixture；
 - 未注册 handle、资源越权、effect 越权、依赖 cycle、tie、版本冲突均红；
 - Standard bundle 可以从 Manifest 确定性重建。
@@ -691,7 +690,6 @@ v4/scripts/architecture/verify-v4-product-differential.mjs
 - route plan；
 - selected provider/model/auth；
 - health/action；
-- continuation binding；
 - tool identity/schema；
 - Error01–06 分类/决策/投影；
 - session admission；
@@ -713,7 +711,7 @@ v4/scripts/architecture/verify-v4-product-differential.mjs
 - 忽略整个 object/array；
 - 忽略所有 unknown fields；
 - 把不同 event 顺序排序后比较；
-- 丢弃 tool/reasoning/continuation；
+- 丢弃 tool/reasoning；
 - 仅比较 HTTP status。
 
 每个差异只允许：
@@ -739,7 +737,7 @@ unexplained
 9. client disconnect；
 10. route unavailable；
 11. tool call/tool result；
-12. continuation second turn。
+12. session admission overlap。
 
 ## 11.6 退出条件
 
@@ -779,7 +777,7 @@ canary `curl` 路径在新 transport 通过后物理删除，不保留 fallback�
 ## 12.2 协议顺序
 
 ### `V4-PROTOCOL-OPENAI-RESPONSES`
-OpenAI Responses Direct：JSON/SSE、tools、reasoning、images、usage、errors、continuation。
+OpenAI Responses Direct：JSON/SSE、tools、reasoning、images、usage、errors。
 
 ### `V4-PROTOCOL-OPENAI-CHAT`
 OpenAI Chat Relay：messages、tools、tool choice、stream chunks、finish reason、usage。
@@ -838,7 +836,6 @@ endpoint
 client_model
 hard_capabilities
 soft_route_signals
-continuation_owner
 required_provider_protocol
 tool/image/reasoning flags
 session/conversation scope
@@ -860,7 +857,6 @@ input token estimate
 - deterministic candidate plan；
 - opaque target；
 - concrete provider/model/auth binding；
-- continuation exact pin；
 - availability 读取；
 - route exit decision。
 
@@ -910,7 +906,7 @@ Router 只能读取 availability，不能写 health；Provider/Error owner 记�
 ## 13.5 退出条件
 
 - 对齐 baseline supersession 后的最新 V3 probe/cooldown 行为；
-- priority/SWRR/health/capability/continuation 均有确定性差分；
+- priority/SWRR/health/capability 均有确定性差分；
 - retry/reroute 不修改原始 normal payload；
 - session/model/auth 不互相污染；
 -并发 probe/race 测试通过；
@@ -918,30 +914,11 @@ Router 只能读取 availability，不能写 health；Provider/Error owner 记�
 
 ---
 
-# 14. M6：Continuation、Session Admission 和 SSE 生命周期
+# 14. M6：Session Admission 和 SSE 生命周期
 
-## 14.1 Direct remote continuation
+V4 不实现 Responses continuation；`previous_response_id` 保持关闭。
 
-- `previous_response_id`；
-- provider/auth/model/route exact pin；
-- remote binding；
-- incompatible reroute 禁止；
--远端失败进入 typed action；
-- response terminal 后唯一 commit；
--下一轮唯一 restore。
-
-## 14.2 Relay/local continuation
-
-- 本地 history/materialization；
-- entry protocol aware；
-- continuation owner 锁定；
-- session/conversation/port/group 锁定；
-- tool result/reasoning state；
-- save→next restore immutable interval；
-- fullInput 缺失 fail-fast；
--跨协议、跨 owner、仅 session 命中均红。
-
-## 14.3 Session Admission
+## 14.1 Session Admission
 
 - 同 session overlap 策略；
 - admission lease；
@@ -952,7 +929,7 @@ Router 只能读取 availability，不能写 health；Provider/Error owner 记�
 -长流不持全局 mutex；
 -重复/迟到 release 幂等。
 
-## 14.4 SSE 生命周期
+## 14.2 SSE 生命周期
 
 - first-frame timeout；
 - heartbeat/keepalive；
@@ -969,13 +946,12 @@ Router 只能读取 availability，不能写 health；Provider/Error owner 记�
 - client drop health-neutral；
 - raw evidence 仅 terminal failure flush。
 
-## 14.5 退出条件
+## 14.3 退出条件
 
-- Direct/Relay 多轮同 fixture 差分；
 - session admission 全释放路径有测试；
 - SSE event 顺序、终态和错误投影等价；
 - client drop 不错误处罚 provider；
--无 handler/SSE/outbound continuation 补偿。
+-无 handler/SSE/outbound 控制补偿。
 
 ---
 
@@ -1020,7 +996,7 @@ Router 只能读取 availability，不能写 health；Provider/Error owner 记�
 ## 15.3 Stopless
 
 - current-turn typed state；
-- terminal/tool_pending/continuation_pending；
+- terminal/tool_pending；
 - MetadataCenter 生命周期；
 -唯一允许的当前轮例外；
 -禁止进入 provider/client normal payload；
@@ -1066,7 +1042,7 @@ Router 只能读取 availability，不能写 health；Provider/Error owner 记�
 - console human-readable layering；
 - retention/authorization/cleanup。
 
-诊断永远只读，不能成为 route/health/error/continuation 决策 owner。
+诊断永远只读，不能成为 route/health/error 决策 owner。
 
 ## 16.2 Admin API
 
@@ -1199,7 +1175,7 @@ V3/V4 同环境测量：
 - live-required feature 为 `live_pass`；
 -所有 endpoint 走 NodeContainer；
 -无第二 runtime/fallback；
--协议、health、continuation、tool、SSE 多轮通过；
+-协议、health、tool、SSE 通过；
 -正式发布和 rollback 可用；
 -性能预算达标；
 - Canary 稳定；
@@ -1246,7 +1222,7 @@ V3/V4 同环境测量：
 
 | V3 feature | 主责任里程碑 | 必须获得的产品证据 | 初始状态 |
 | --- | --- | --- | --- |
-| `v3.anthropic_relay_local_continuation_integration` | M4/M6 | Anthropic 协议插件、Relay 本地续接、跨轮 fixture 与 live replay | `mapped`，待产品闭环 |
+| `v3.anthropic_relay_local_continuation_integration` | closed-by-decision | V4 不实现 Responses continuation；仅保留 V3 基线覆盖审计 | `closed_by_decision` |
 | `v3.anthropic_relay_runtime_integration` | M4 | Anthropic Messages JSON/SSE 全链路与错误投影差分通过 | `mapped`，待产品闭环 |
 | `v3.build_test_artifact_budget` | M0/M9 | 构建、测试、artifact 与性能预算进入统一门禁 | `mapped`，待产品闭环 |
 | `v3.codex_sample_retention_snap_scope` | M8 | 样本留存授权、snap scope、payload budget 与清理策略 | `mapped`，待产品闭环 |
@@ -1288,12 +1264,12 @@ V3/V4 同环境测量：
 | `v3.provider_global_subscription_probe` | M5 | 全局订阅错误、single-flight probe、动态 backoff | `mapped`，待产品闭环 |
 | `v3.relay_runtime_core` | M1/M2 | Relay 与 Direct 共用 Skeleton，仅由 typed facts 选插件 | `mapped`，待产品闭环 |
 | `v3.relay_runtime_shared` | M1/M2 | 共享 execution context、error intake、diagnostic，不建第二 runtime | `mapped`，待产品闭环 |
-| `v3.relay_tool_servertool_multiturn_parity_closeout` | M7 | Tool/Servertool 多轮差分与 continuation 联动 | `mapped`，待产品闭环 |
-| `v3.remote_continuation_contract_store` | M6 | remote binding、immutable interval、exact target pin | `mapped`，待产品闭环 |
+| `v3.relay_tool_servertool_multiturn_parity_closeout` | M7 | Tool/Servertool 多轮差分 | `mapped`，待产品闭环 |
+| `v3.remote_continuation_contract_store` | closed-by-decision | V4 不实现 Responses continuation；仅保留 V3 基线覆盖审计 | `closed_by_decision` |
 | `v3.resource_relation_edge_lock` | M0/M1 | 资源 axis、owner、相邻边和禁止边持续机器锁 | `mapped`，待产品闭环 |
 | `v3.resp03_tool_governance_gap_closeout` | M7 | 响应侧 tool harvest/governance 唯一真源 | `mapped`，待产品闭环 |
 | `v3.responses_direct_mvp_architecture` | M1/M2/M4 | Responses Direct 生产插件路径与真实 transport | `mapped`，待产品闭环 |
-| `v3.responses_direct_remote_continuation_integration` | M6 | previous_response_id 多轮、精确绑定和错误 action | `mapped`，待产品闭环 |
+| `v3.responses_direct_remote_continuation_integration` | closed-by-decision | V4 不实现 Responses continuation；仅保留 V3 基线覆盖审计 | `closed_by_decision` |
 | `v3.responses_inbound_websocket_proxy` | M4/M6 | 若冻结基线确认必需，补齐 inbound WebSocket admission | `mapped`，待产品闭环 |
 | `v3.responses_provider_runtime` | M4/M5 | 生产 async transport、provider config/auth/capability/health | `mapped`，待产品闭环 |
 | `v3.responses_session_inflight_admission` | M6 | session lease、overlap、drop/timeout/terminal 释放 | `mapped`，待产品闭环 |
@@ -1322,9 +1298,9 @@ V3/V4 同环境测量：
 | Config/Information | authoring、validated、registry、manifest、secret handle | deterministic、unknown reject、secret-safe、runtime 不扫描 |
 | Request data | protocol context、normal payload、provider semantic/wire |相邻转换、字段保真、无 control 泄漏 |
 | Response data | provider raw、normal semantic、client wire/frame | JSON/SSE 完整、终态严格、无 provider event 泄漏 |
-| Route/Target control | route facts、selection plan、opaque/concrete target | priority/SWRR/capability/health/continuation 等价 |
+| Route/Target control | route facts、selection plan、opaque/concrete target | priority/SWRR/capability/health 等价 |
 | Error/Health control | Error01–06、action、availability、probe/cooldown |唯一 owner、typed action、并发安全 |
-| Continuation/session | remote/local truth、scope、admission lease | immutable interval、exact keys、完整释放 |
+| Session admission | scope、admission lease | exact keys、完整释放 |
 | Tool/Stopless | tool truth、servertool state、current-turn state |多协议、多轮、Rust owner、payload 隔离 |
 | Lifecycle | instance、control socket、operation lock、restart plan | start/status/restart/stop/drain/rollback |
 | Diagnostic | trace/raw/event/snapshot/timing/count/budget |只读、受预算、授权留存、secret redaction |
@@ -1577,7 +1553,7 @@ dsh_review.p1 == 0
 ### Out of scope
 
 - Anthropic/Gemini/WebSocket 的完整产品迁移；
-- Router/Health/Continuation/Tool/Admin/WebUI 的后续层接线；
+- Router/Health/Tool/Admin/WebUI 的后续层接线；
 - 修改、安装、重启、停止或替换 V3；
 - 修改真实用户配置、provider secret 或默认 `routecodex`/`rccv3` 入口；
 - HMR、第三方插件市场、正式生产切流；
@@ -1615,7 +1591,7 @@ all(layer.tasks[].implementation_status == source_green)
 
 ### LAYER-04：数据、控制和错误继续物理隔离
 
-epoch、manifest、route、health、retry、continuation、scope、debug、secret、failure count 和 execution identity 只走 typed carrier/resource/ErrorChain；不得写入或由业务 payload 重建。泄漏在 owner boundary fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound/transport 补偿。
+epoch、manifest、route、health、retry、scope、debug、secret、failure count 和 execution identity 只走 typed carrier/resource/ErrorChain；不得写入或由业务 payload 重建。泄漏在 owner boundary fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound/transport 补偿。
 
 ## 28.4 基线完成度与剩余任务
 
@@ -1787,7 +1763,7 @@ Rustfmt 旧债不能用来批量改写无关大文件，也不能被忽略为永
 | 后续层 | 独立开发集合 | 接线闸 |
 | --- | --- | --- |
 | Layer 4：Protocol/Provider | Rust async transport；沿用本批唯一 codec owners 增加 Anthropic/Gemini/必要 WS 变体；补齐 provider config/auth/capability，不重做 Responses/Chat 已完成语义 | 全部新增协议/transport 组件 source-green 后一次接 provider/server mainline；删除 `curl` canary |
-| Layer 5：Routing/Control | route facts、pool/priority/SWRR、target、health/probe、Error action、continuation、session admission、SSE lifecycle | 全部 typed state machines source-green 后接 executor；Router 只读 availability |
+| Layer 5：Routing/Control | route facts、pool/priority/SWRR、target、health/probe、Error action、session admission、SSE lifecycle | 全部 typed state machines source-green 后接 executor；Router 只读 availability |
 | Layer 6：Tool Runtime | 沿用 `PLUGIN-003/007` 唯一 tool-governance owners，增加 servertool、stopless、web search backend/registry/state machine，不复制本批 request/response governance | 全部新增 registry/state machine/backend contracts source-green 后接 Chat Process；多轮差分收口 |
 | Layer 7：Management/Release | diagnostics、admin、WebUI read/write phases、config migration、managed lifecycle、release | 只读面先完整，变更面全部独立验证后一次接 publish/rollback；UI 永不成为真源 |
 | Layer 8：Production Closeout | performance budget、canary、rollback、artifact freeze、runbook | 全 feature differential/live pass 后 freeze；切换 V3 仍需 Jason 独立授权 |

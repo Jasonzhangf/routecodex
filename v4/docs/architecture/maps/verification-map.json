@@ -300,20 +300,6 @@
       ]
     },
     {
-      "gate_id": "v4_compat_gate_relay_continuation",
-      "command": "node scripts/architecture/verify-v4-relay-continuation.mjs",
-      "required_for": [
-        "routecodex-v4-runtime:architecture_stable"
-      ]
-    },
-    {
-      "gate_id": "v4_compat_gate_relay_continuation_red",
-      "command": "node scripts/architecture/verify-v4-relay-continuation.mjs --red-self-test",
-      "required_for": [
-        "routecodex-v4-runtime:architecture_stable"
-      ]
-    },
-    {
       "gate_id": "v4_skeleton_l0_regression",
       "command": "cargo test -p routecodex-v4-skeleton --manifest-path Cargo.toml --locked",
       "required_for": [
@@ -765,7 +751,7 @@
     },
     {
       "gate_id": "v4_baseline_digest",
-      "command": "node scripts/architecture/verify-v4-feature-gap.mjs && node scripts/architecture/verify-v4-v3-resource-coverage.mjs && node scripts/architecture/verify-v4-relay-continuation.mjs",
+      "command": "node scripts/architecture/verify-v4-feature-gap.mjs && node scripts/architecture/verify-v4-v3-resource-coverage.mjs",
       "required_for": [
         "routecodex-v4-skeleton:architecture_stable",
         "routecodex-v4-runtime:architecture_stable"

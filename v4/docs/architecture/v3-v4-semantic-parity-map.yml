@@ -15,13 +15,15 @@ notes: |
   语义）、resource（v4-resource-operation-map.yml 的 resource_id）与 verification
   gate。coverage=100%、GAP=0 是进入下一阶段的硬门槛；checkpoint_evidence 为
   pending_skeleton_vslice 的条目由 Phase 4/5 提供实现证据，证据落地前
-  v4_parity_gate_semantic_parity 保持红。
+  v4_parity_gate_semantic_parity 保持红。V4 不实现 Responses continuation
+  （previous_response_id）；V3 continuation 资源/feature 仍作为 V3 基线保留在
+  coverage/feature mapping 中，不作为 V4 实现目标。
 coverage:
   v3_resources: {total: 103, mapped: 103, gap: 0}
   features: {total: 64, mapped: 64, gap: 0}
-  stages: {total: 26, mapped: 26, gap: 0}
-  request: {total: 9, mapped: 9}
-  response: {total: 6, mapped: 6}
+  stages: {total: 24, mapped: 24, gap: 0}
+  request: {total: 8, mapped: 8}
+  response: {total: 5, mapped: 5}
   error: {total: 6, mapped: 6}
   config: {total: 5, mapped: 5}
 chains:
@@ -34,16 +36,8 @@ chains:
       resource: v4.request.normal_payload
       verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation, v4_parity_gate_execution_binding]
       checkpoint_evidence: "implemented: routecodex-v4-runtime ProtocolParse/Normalize/InputValidate (request chain, runtime test-consumer 9)"
-    - v3_stage: request.continuation_classify
-      v3_semantic: classify entry protocol/continuation owner/scope; never restore history in inbound
-      container: {family: RequestChainNode, role: request_continuation}
-      plugins: [continuation_classify, continuation_restore]
-      checkpoint: {node_id: V4ReqContinuationClassified, semantic: continuation_scope_locked}
-      resource: v4.scope.session
-      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation, v4_parity_gate_execution_binding]
-      checkpoint_evidence: "implemented: routecodex-v4-runtime ContinuationClassify (request chain, runtime test-consumer 9)"
     - v3_stage: request.chat_process
-      v3_semantic: request-side tool governance and continuation restore; Rust-only
+      v3_semantic: request-side tool governance; Rust-only
       container: {family: RequestChainNode, role: request_chat_process}
       plugins: [request_governance, tool_governance]
       checkpoint: {node_id: V4HubReqChatProcess04Governed, semantic: governed_request}
@@ -108,7 +102,7 @@ chains:
       verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
       checkpoint_evidence: "implemented: routecodex-v4-runtime FrameParse/JsonParse (response chain, runtime test-consumer)"
     - v3_stage: response.normalize
-      v3_semantic: normalize provider response to hub semantic; no continuation save here
+      v3_semantic: normalize provider response to hub semantic
       container: {family: ResponseChainNode, role: response_inbound}
       plugins: [protocol_decode]
       checkpoint: {node_id: V4HubRespInbound02Parsed, semantic: parsed_response}
@@ -116,21 +110,13 @@ chains:
       verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
       checkpoint_evidence: "implemented: routecodex-v4-runtime ProtocolDecode (response chain, runtime test-consumer 9)"
     - v3_stage: response.response_process
-      v3_semantic: response-side tool governance and continuation save; Rust-only
+      v3_semantic: response-side tool governance; Rust-only
       container: {family: ResponseChainNode, role: response_chat_process}
       plugins: [response_governance, tool_harvest]
       checkpoint: {node_id: V4RespChatProcess03Governed, semantic: governed_response}
       resource: v4.response.normal_payload
       verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation, v4_parity_gate_capability_isolation]
       checkpoint_evidence: "implemented: routecodex-v4-runtime ResponseGovernance/ToolHarvest (response chain, runtime test-consumer 9)"
-    - v3_stage: response.continuation_commit
-      v3_semantic: continuation truth saved at chat process exit; immutable interval until next req restore
-      container: {family: ResponseChainNode, role: response_continuation}
-      plugins: [continuation_commit, continuation_release]
-      checkpoint: {node_id: V4RespContinuationCommitted, semantic: continuation_truth}
-      resource: v4.scope.session
-      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
-      checkpoint_evidence: "implemented: routecodex-v4-runtime ContinuationCommit (response chain, runtime test-consumer 9)"
     - v3_stage: response.client_projection
       v3_semantic: client protocol projection; no provider-specific branches
       container: {family: ResponseChainNode, role: response_outbound}

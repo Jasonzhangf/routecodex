@@ -5,6 +5,7 @@
 把 V4 foundation 从"功能绿但注册表半 design"推进到机器可审计的 truth 状态：
 资源 binding_status 全部准确（anchored 或显式 design）、YAML 与产品 resource map JSON 双源一致、
 binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation slice。
+2026-08-25 决策：V4 不实现 Responses continuation；Relay slice 不包含 continuation。
 
 ## 验收标准
 
@@ -32,9 +33,9 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
 
 ### Out of scope
 
-- Relay / Continuation / Provider expansion / PluginManager / WebUI（后续阶段）。
+- Relay / Provider expansion / PluginManager / WebUI（后续阶段）。
 - V3 任何改动、V3 工作树清理。
-- 新增业务能力（新 provider/协议/endpoint/错误语义/routing/continuation 规则）。
+- 新增业务能力（新 provider/协议/endpoint/错误语义/routing 规则）。
 
 ## 当前缺口（2026-08-15 证据）
 

@@ -37,14 +37,6 @@ surfaces:
         verification_gates: [v4_parity_gate_semantic_parity, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime ProtocolParse/Normalize/InputValidate (runtime test-consumer 12)"
         diff_status: equivalent
-      - v3_stage: request.continuation_classify
-        v3_resource: v3.hub.continuation_ownership
-        v4_container: {family: RequestChainNode, role: request_continuation}
-        v4_checkpoint: {node_id: V4ReqContinuationClassified, semantic: continuation_scope_locked}
-        v4_resource: v4.scope.session
-        verification_gates: [v4_parity_gate_semantic_parity, v4_runtime_l2_regression]
-        evidence: "implemented: routecodex-v4-runtime ContinuationClassify (runtime test-consumer 12)"
-        diff_status: equivalent
       - v3_stage: request.chat_process
         v3_resource: v3.hub.tool_governance_truth
         v4_container: {family: RequestChainNode, role: request_chat_process}
@@ -127,14 +119,6 @@ surfaces:
         v4_resource: v4.response.normal_payload
         verification_gates: [v4_parity_gate_semantic_parity, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime ResponseGovernance/ToolHarvest (response chain, runtime test-consumer 12)"
-        diff_status: equivalent
-      - v3_stage: response.continuation_commit
-        v3_resource: v3.continuation.remote_binding
-        v4_container: {family: ResponseChainNode, role: response_continuation}
-        v4_checkpoint: {node_id: V4RespContinuationCommitted, semantic: continuation_truth}
-        v4_resource: v4.scope.session
-        verification_gates: [v4_parity_gate_semantic_parity, v4_runtime_l2_regression]
-        evidence: "implemented: routecodex-v4-runtime ContinuationCommit (response chain, runtime test-consumer 12)"
         diff_status: equivalent
       - v3_stage: response.client_projection
         v3_resource: v3.response.client_payload

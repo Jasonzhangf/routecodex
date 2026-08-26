@@ -1,6 +1,6 @@
 /goal
 目标：V4 长线完整落地——从当前 foundation（资源 49/49 anchored、Relay/
-Continuation 垂直切片、base-node/edge/control/error 已冻结、13 模块注册）推进到
+垂直切片、base-node/edge/control/error 已冻结、13 模块注册）推进到
 V4 runtime 可运行、行为等价 V3、可逐步接管的完整目标态：三链 node-graph 机器
 锁、Cordis NodeContainer + 插件框架、标准插件库、Config Compiler 完整化与冻结、
 Admin API + WebUI 可视化，全部资源/函数/主链/验证门禁同步且 DSH review PASS。

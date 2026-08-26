@@ -33,4 +33,5 @@ manifest without making V4 runtime depend on V3.
 This plan is complete only when the config differential gate reports zero
 unexplained omissions for the selected 7777 fixture and the resulting manifest
 is consumed by V4's real startup path. It does not by itself close router,
-provider, protocol, health, continuation, tool governance or release parity.
+provider, protocol, health, tool governance or release parity. V4 does not
+implement Responses continuation.

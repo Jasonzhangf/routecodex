@@ -24,7 +24,7 @@ V3/V4 differential and live parity, followed by artifact freeze.
 | Protocols | Responses, OpenAI Chat, Anthropic and provider-specific wire protocols | Responses upstream plus Chat relay projection | gap: protocol coverage |
 | Route selection | route group → pool → match/capability → priority/SWRR → target | model → flat route → priority target | gap: route semantics |
 | Health/error policy | configured retry/cooldown/probe/action policies | typed error foundation; no V3-equivalent configured policy | gap: health/action |
-| Continuation | direct/relay ownership and scoped multi-turn stores | minimal V4 continuation slice | gap: parity/live |
+| Continuation | direct/relay ownership and scoped multi-turn stores | not implemented by design; V3 `previous_response_id` remains closed | closed-by-decision |
 | Tool/servertool/stopless | V3 production governance and multi-protocol projection | minimal V4 governance path | gap: semantic migration |
 | Live evidence | 7777 real provider attempts and historical samples | one V4 canary provider replay | gap: differential/live |
 | Product ledger | full V3 baseline | `source_only`, differential/live/artifact pending | gap: release eligibility |

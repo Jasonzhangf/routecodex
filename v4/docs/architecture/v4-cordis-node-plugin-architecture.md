@@ -103,7 +103,7 @@ Node02.execute
 Node03.execute
 ```
 
-Skeleton 不读取插件内部状态，不按插件名字决定控制流。Retry、reroute、continuation 等变化必须先形成专用 typed control/decision，再由登记的 Skeleton 边进入合法节点。
+Skeleton 不读取插件内部状态，不按插件名字决定控制流。Retry、reroute 等变化必须先形成专用 typed control/decision，再由登记的 Skeleton 边进入合法节点。
 
 ## NodeContainer：基于 Cordis 的节点容器
 
@@ -244,7 +244,7 @@ plugin-handle 注册必须在 M5 标准插件库阶段补齐后再启用真实 p
   "phase": "semantic",
   "order": 300,
   "before": ["v4.request.output_validate"],
-  "after": ["v4.request.continuation_restore"],
+  "after": ["v4.request.input_validate"],
   "inject": ["nodeControl", "nodeInformation"],
   "reads": ["v4.request.normal_payload", "v4.control.metadata_center"],
   "writes": ["v4.request.normal_payload", "v4.control.metadata_center"],
@@ -306,12 +306,11 @@ Debug、snapshot 和 observer 也是普通可管理插件，但其 capability to
 V4HubReqChatProcess04Governed
   010 input_contract_validate
   100 scope_consume
-  200 continuation_restore
-  300 request_governance
-  400 tool_governance
-  500 stopless_current_turn_projection
-  800 output_contract_validate
-  900 debug_observe + snapshot_record + timing (parallel read-only)
+  200 request_governance
+  300 tool_governance
+  400 stopless_current_turn_projection
+  700 output_contract_validate
+  800 debug_observe + snapshot_record + timing (parallel read-only)
 ```
 
 另一个节点可以使用完全不同的插件和顺序：
@@ -360,7 +359,6 @@ NodeExecutionInput
 Request Skeleton
   ClientRaw NodeContainer
   -> Normalized NodeContainer
-  -> Continuation NodeContainer
   -> ChatProcess NodeContainer
   -> Execution NodeContainer
   -> Target NodeContainer
@@ -376,7 +374,6 @@ Response Skeleton
   -> ProviderCompat NodeContainer
   -> Normalized NodeContainer
   -> ChatProcess NodeContainer
-  -> ContinuationCommit NodeContainer
   -> ClientSemantic NodeContainer
   -> ClientFrame NodeContainer
 ```
@@ -400,7 +397,7 @@ V4 必须提供标准插件库，而不是只提供框架。首批插件按包�
 ```text
 plugin-library/
   contracts/       input/output/scope/error validators
-  control/         scope, MetadataCenter, lifecycle, continuation capabilities
+  control/         scope, MetadataCenter, lifecycle capabilities
   protocol/        inbound/outbound/compat codecs
   chat-process/    request/response governance and tool operators
   routing/         route facts, selection-plan and decision consumers
@@ -480,7 +477,7 @@ GET  /v4/admin/audit
 1. Skeleton 只有一个 Runtime Kernel；NodePlugin 不拥有第二 orchestrator。
 2. NodePlugin 只能作为实际 Cordis NodeContext 的 Fiber 在所属 NodeContainer 内注册；跨节点通信走相邻 typed output 或登记控制资源。
 3. control/debug/snapshot/error state 不进入正常 request/response/provider/client payload。
-4. payload 不重建 routing、retry、continuation、scope、health、debug 或错误状态。
+4. payload 不重建 routing、retry、scope、health、debug 或错误状态。
 5. debug/snapshot/observer 插件只读，不进入 live 决策。
 6. 插件失败进入唯一 ErrorChain；禁止 silent strip、fallback 或 handler/outbound 补偿。
 7. runtime 不扫描 plugin authoring 目录，只消费确定性 compiled Manifest 和已验证 artifact。
@@ -514,5 +511,5 @@ GET  /v4/admin/audit
 - owner：feature_id:v4.runtime.real_pipeline_mock_transport
 - gate：v4_parity_gate_real_pipeline_mock_transport（含 --red-self-test）
 - 范围：config/lifecycle + diagnostics + request inbound + response inbound + error chain（keyless fixture + mock transport，禁真实 provider wire/凭据）
-- 下一切片：routing/target、provider compat/wire、transport、error/retry/continuation integration
+- 下一切片：routing/target、provider compat/wire、transport、error/retry integration
 实施和验证顺序见 [`v4-cordis-plugin-framework-and-webui-plan.md`](../goals/v4-cordis-plugin-framework-and-webui-plan.md)。

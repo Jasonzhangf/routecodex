@@ -53,8 +53,7 @@ ARCHIVED_GOAL_DO_NOT_EXECUTE
 11. `v4/contracts/pipeline-abstraction.contract.json`
 12. `v4/contracts/v3-baseline/manifest.json`
 13. `v4/docs/goals/v4-real-runtime-admission-plan.md`
-14. `v4/docs/goals/v4-relay-continuation-slice-plan.md`
-15. `v4/docs/goals/v4-long-horizon-goal-prompt.md`，只作为历史目标参考
+14. `v4/docs/goals/v4-long-horizon-goal-prompt.md`，只作为历史目标参考
 16. 当前 V4 Rust/Node/Cordis source、Cargo/package scripts、Active index、AppSDK maps 和 CI
 17. V3 冻结 baseline artifacts；只有 baseline supersession 专项可以读取明确选定的 live V3 commit
 
@@ -145,7 +144,7 @@ send_responses_streaming(...)
 parse_responses_provider_payload(...)
 ```
 
-以及任何后续新增的协议、provider、route、continuation、tool、SSE 业务 helper。
+以及任何后续新增的协议、provider、route、tool、SSE 业务 helper。V4 不实现 Responses continuation。
 
 ### C. 单请求不可变执行绑定
 
@@ -194,7 +193,6 @@ route
 target
 health
 retry/reroute
-continuation
 scope
 stopless
 secret
@@ -505,7 +503,7 @@ verify-v4-product-differential.mjs
 12. client disconnect；
 13. route unavailable；
 14. tool call/result；
-15. continuation second turn。
+15. session admission overlap。
 
 比较：
 
@@ -516,7 +514,6 @@ provider semantic/wire
 route facts/plan
 selected provider/model/auth
 health/action
-continuation binding
 tool identity/schema
 Error01-06
 session admission
@@ -524,7 +521,7 @@ diagnostic/lifecycle side effects
 copy/serialize/native-dispatch counters
 ```
 
-归一化必须由合同逐字段定义。禁止忽略整个 object、排序 event、丢 tool/reasoning/continuation 或只比较 HTTP status。
+归一化必须由合同逐字段定义。禁止忽略整个 object、排序 event、丢 tool/reasoning 或只比较 HTTP status。
 
 M3 退出：
 
@@ -576,7 +573,6 @@ images/multimodal
 usage
 finish reason
 errors
-continuation fields
 unknown-field policy
 ```
 
@@ -601,7 +597,6 @@ entry protocol/endpoint
 client model
 hard capabilities
 soft signals
-continuation owner
 required provider protocol
 tool/image/reasoning
 session/conversation
@@ -617,7 +612,6 @@ token estimate
 - deterministic candidate plan；
 - opaque target；
 - provider/model/auth exact binding；
-- continuation pin；
 - availability read；
 - route exit。
 
@@ -664,31 +658,15 @@ Router 不写 health；Provider/Error owner 记录；Executor 唯一消费 actio
 M5 退出：
 
 -最新 reviewed V3 health 语义差分；
-- priority/SWRR/capability/health/continuation 决策确定性；
+- priority/SWRR/capability/health 决策确定性；
 -并发 probe/race；
 -无 session/model/auth 污染；
 -所有错误进入 Error01–06；
 - retry/reroute 不修改 normal payload。
 
-# M6：Continuation、Session Admission、SSE
+# M6：Session Admission、SSE
 
-Direct remote continuation：
-
-- previous_response_id；
-- provider/auth/model/route exact pin；
-- remote binding；
-- incompatible reroute 红；
-- terminal unique commit；
-- next request unique restore。
-
-Relay/local continuation：
-
-- history/materialization；
-- entry protocol/owner/scope 锁；
-- tool/reasoning state；
-- immutable save→restore interval；
-- fullInput missing fail-fast；
--跨协议/owner/session-only hit 红。
+V4 不实现 Responses continuation；`previous_response_id` 保持关闭。
 
 Session admission：
 
@@ -716,10 +694,9 @@ SSE：
 
 M6 退出：
 
-- Direct/Relay 多轮差分；
 -所有 lease 释放路径；
 -事件顺序/终态等价；
--无 SSE/handler continuation 补偿。
+-无 SSE/handler 控制补偿。
 
 # M7：Tool、Servertool、Stopless、Web Search
 
@@ -755,7 +732,7 @@ Servertool：
 Stopless：
 
 - current-turn typed state；
-- terminal/tool/continuation pending；
+- terminal/tool pending；
 - MetadataCenter lifecycle；
 -无 payload 泄漏。
 
@@ -988,7 +965,7 @@ H. Close
 - 通过大范围 ignore 获得 diff=0；
 - provider 失败后走旧 runtime；
 - streaming 先缓存完整响应再伪装 SSE；
-- request handler 修补 continuation/tool/error；
+- request handler 修补 tool/error；
 - router 写 health；
 - UI 直接改 active；
 - secret 进入 manifest/log/snapshot；

@@ -27,7 +27,6 @@ BaseNode（根，横切能力）
 关键修正：`RequestChainNode` 不能直接实例化出 inbound 和 outbound 两种不同职责的节点。它必须先派生角色子类：
 
 - `RequestInboundNode`：允许 entry capture / protocol parse / normalize 类算子；
-- `RequestContinuationNode`：允许 continuation classify / restore 类算子；
 - `RequestChatProcessNode`：允许 request governance / tool governance 类算子；
 - `RequestExecutionNode`：允许 execution plan / target resolve 类算子；
 - `RequestOutboundNode`：允许 semantic projection / wire build / transport 类算子。
@@ -51,13 +50,11 @@ BaseNode（根，横切能力）
 | 角色子类 | 链族 | allowed_operator_kinds | data_in | data_out |
 | --- | --- | --- | --- | --- |
 | `RequestInboundNode` | request | `entry_capture` `protocol_parse` `normalize` | raw entry | normalized request |
-| `RequestContinuationNode` | request | `continuation_classify` `continuation_restore` | normalized request | continuation facts |
 | `RequestChatProcessNode` | request | `request_governance` `tool_governance` | normalized request | governed request |
 | `RequestExecutionNode` | request | `execution_plan` `target_resolve` | governed request | resolved target/execution |
 | `RequestOutboundNode` | request | `semantic_projection` `wire_build` `transport_build` | provider semantic | provider wire/transport |
 | `ResponseInboundNode` | response | `raw_parse` `protocol_decode` | provider raw | parsed response |
 | `ResponseChatProcessNode` | response | `response_governance` `tool_harvest` | parsed response | governed response |
-| `ResponseContinuationNode` | response | `continuation_commit` `continuation_release` | governed response | continuation truth |
 | `ResponseOutboundNode` | response | `client_semantic_projection` `frame_build` | client semantic | client frame |
 | `ErrorSourceNode` | error | `error_source_capture` | error source | classified error |
 | `ErrorClassifyNode` | error | `error_classify` | classified error | policy input |
@@ -128,7 +125,7 @@ BaseNode（根，横切能力）
 | `V4ReqChatProcess03Governed` | `RequestChatProcessNode` | `request_governance.relay.v1`、`request_governance.direct.v1` |
 | `V4ProviderReqOutbound06WirePayload` | `RequestOutboundNode` | `wire_build.responses.v1`、`wire_build.openai_chat.v1`、`wire_build.anthropic.v1`、`wire_build.gemini.v1` |
 
-wiring manifest 为每个节点编译一条 ordered active plugin chain。协议 operator 属于显式互斥 `selection_group`，组内按 typed facts（entry protocol、provider wire protocol、continuation owner）恰好选择一个，不能按 provider id、model 前缀或 payload 猜测；组外的 control、governance、validator、debug、snapshot 等插件继续按节点自己的顺序执行。协议 operator 全部输出该角色子类声明的 `data_out_kind`，所以同一个节点实例可以被不同协议算子复用。
+wiring manifest 为每个节点编译一条 ordered active plugin chain。协议 operator 属于显式互斥 `selection_group`，组内按 typed facts（entry protocol、provider wire protocol、execution mode）恰好选择一个，不能按 provider id、model 前缀或 payload 猜测；组外的 control、governance、validator、debug、snapshot 等插件继续按节点自己的顺序执行。协议 operator 全部输出该角色子类声明的 `data_out_kind`，所以同一个节点实例可以被不同协议算子复用。
 
 ## 节点编号语义
 
@@ -166,7 +163,7 @@ Server (HTTP/server adapter)
 | 01 | `V4ServerReqInbound01ClientRaw` | `RequestInboundNode` | raw entry | HTTP/server 入口捕获，只做 framing/context，不做语义 |
 | 02 | `V4ServerSseIn02FrameBoundary` | `RequestInboundNode` | SSE frame -> JSON semantic | 客户端 SSE 传输边界；只把 SSE 解码为 JSON 语义帧，不解析业务语义 |
 | 03 | `V4HubReqInbound03Normalized` | `RequestInboundNode` | JSON semantic | 协议解析、normalize，进入统一 JSON 数据面 |
-| 04 | `V4HubReqChatProcess04Governed` | `RequestChatProcessNode`（group 超模块） | JSON semantic | 请求治理、工具治理、continuation restore、servertool hook；对外是一个超级节点 |
+| 04 | `V4HubReqChatProcess04Governed` | `RequestChatProcessNode`（group 超模块） | JSON semantic | 请求治理、工具治理、servertool hook；对外是一个超级节点 |
 | 05 | `V4HubReqOutbound05ProviderSemantic` | `RequestOutboundNode` | JSON semantic | provider-neutral 出站语义定型 |
 | 06 | `V4ProviderReqCompat06Compat` | `RequestOutboundNode` | JSON semantic | provider compat / wire adaptation，保持同一 JSON 语义面 |
 | 07 | `V4ProviderSseOut07WireBoundary` | `RequestOutboundNode` | JSON semantic -> SSE frame | provider SSE 传输边界；只把 JSON 语义编码为 provider SSE，不做治理 |
@@ -177,16 +174,15 @@ Server (HTTP/server adapter)
 
 ```text
 V4HubReqChatProcess04Governed (group)
-  entry -> continuation restore -> request governance -> tool governance -> exit
+  entry -> request governance -> tool governance -> exit
 ```
 
 内部子节点：
 
 | 内部 position | node | 角色子类 | 职责 |
 | --- | --- | --- | --- |
-| 04.1 | `V4ChatProcess04ContinuationRestore` | `RequestContinuationNode` | 只读 continuation facts / restore |
-| 04.2 | `V4ChatProcess04RequestGovernance` | `RequestChatProcessNode` | 请求侧治理（工具声明、顺序、规则） |
-| 04.3 | `V4ChatProcess04ToolGovernance` | `RequestChatProcessNode` | 工具治理（servertool/MCP/apply_patch 规则） |
+| 04.1 | `V4ChatProcess04RequestGovernance` | `RequestChatProcessNode` | 请求侧治理（工具声明、顺序、规则） |
+| 04.2 | `V4ChatProcess04ToolGovernance` | `RequestChatProcessNode` | 工具治理（servertool/MCP/apply_patch 规则） |
 
 约束：
 
@@ -230,8 +226,8 @@ Provider SSE (provider transport boundary; SSE -> JSON semantic)
 | --- | --- | --- | --- | --- |
 | 01 | `V4ProviderSseIn01FrameBoundary` | `ResponseInboundNode` | provider SSE frame -> JSON semantic | provider SSE 传输边界；只把 SSE 解码为 JSON 语义帧，不解析业务语义 |
 | 02 | `V4HubRespInbound02Parsed` | `ResponseInboundNode` | JSON semantic | 协议解析、raw/decode，进入统一 JSON 数据面 |
-| 03 | `V4HubRespChatProcess03Governed` | `ResponseChatProcessNode`（group 超模块） | JSON semantic | 响应治理、工具收割、continuation save、servertool hook；对外是一个超级节点 |
-| 04 | `V4HubRespOutbound04ClientSemantic` | `ResponseOutboundNode` | JSON semantic | client 协议语义定型；不做 provider 特例、不做 continuation 语义 |
+| 03 | `V4HubRespChatProcess03Governed` | `ResponseChatProcessNode`（group 超模块） | JSON semantic | 响应治理、工具收割、servertool hook；对外是一个超级节点 |
+| 04 | `V4HubRespOutbound04ClientSemantic` | `ResponseOutboundNode` | JSON semantic | client 协议语义定型；不做 provider 特例 |
 | 05 | `V4ServerSseOut05FrameBoundary` | `ResponseOutboundNode` | JSON semantic -> SSE frame | 客户端 SSE 传输边界；只把 JSON 语义编码为 client SSE，不做治理 |
 | 06 | `V4ServerRespOutbound06ClientFrame` | `ResponseOutboundNode` | client frame | HTTP/server 终止帧；唯一成功终止点 |
 
@@ -241,16 +237,15 @@ Provider SSE (provider transport boundary; SSE -> JSON semantic)
 
 ```text
 V4HubRespChatProcess03Governed (group)
-  entry -> continuation commit -> response governance -> tool harvest -> exit
+  entry -> response governance -> tool harvest -> exit
 ```
 
 内部子节点：
 
 | 内部 position | node | 角色子类 | 职责 |
 | --- | --- | --- | --- |
-| 03.1 | `V4ChatProcess03ContinuationCommit` | `ResponseContinuationNode` | continuation save（唯一 save 入口；进入不可变区前完成） |
-| 03.2 | `V4ChatProcess03ResponseGovernance` | `ResponseChatProcessNode` | 响应侧治理（internal tool 剥离、provenance 处理） |
-| 03.3 | `V4ChatProcess03ToolHarvest` | `ResponseChatProcessNode` | 工具收割（文本工具、servertool followup 判定） |
+| 03.1 | `V4ChatProcess03ResponseGovernance` | `ResponseChatProcessNode` | 响应侧治理（internal tool 剥离、provenance 处理） |
+| 03.2 | `V4ChatProcess03ToolHarvest` | `ResponseChatProcessNode` | 工具收割（文本工具、servertool followup 判定） |
 
 约束（与请求侧 group 一致）：
 
@@ -258,7 +253,6 @@ V4HubRespChatProcess03Governed (group)
 - 父链只能连接 group entry/exit；
 - group 内部实现可替换，只要外部接口不变；
 - servertool 等控制处理挂在 group entry/exit hook 上，不是独立流水线节点；
-- continuation save 是响应链唯一允许的 save 点；`resp_chatprocess save -> req_chatprocess restore` 之间的不可变区禁止任何语义转换（沿用 V3 硬锁）。
 
 ### 响应链 SSE/JSON 边界
 
@@ -269,7 +263,7 @@ Provider SSE In -> JSON semantic (inbound/chatprocess/outbound) -> Client SSE Ou
 ```
 
 - provider SSE 入口与 client SSE 出口不直接耦合；禁止把 provider SSE frame 直接 pipe 到 client SSE；
-- 所有响应治理（工具收割、internal tool 剥离、continuation save、servertool followup）都在 JSON 语义面上发生；
+- 所有响应治理（工具收割、internal tool 剥离、servertool followup）都在 JSON 语义面上发生；
 - Direct/Relay 不改变这条链；只影响 operator 选择（direct provider 解析/透传算子 vs relay 本地治理算子）；
 - 两端 SSE 边界永远由传输 adapter 独占，不拥有治理语义；
 - 错误路径显式进入 Error chain，禁止在 SSE 层吞错误或把错误 frame 当成功终态。
@@ -308,7 +302,7 @@ Hook 合同：
 1. hook 与 operator 都是 NodePlugin；`kind/effect/phase` 决定权限和位置，不能形成节点外的第二执行机制；
 2. entry hooks 在 operator 前按 position 顺序执行；exit hooks 在 operator 后按 position 顺序执行；
 3. hook 默认 `effect: read_only`（observability、debug、record）；需要写控制状态或业务语义的 hook 必须显式声明 `effect: control_only` 或 `effect: semantic` 并登记；
-4. servertool 使用 `control_only` hook：在 chat process group 入口挂 Req04 注入、出口挂 Resp03 剥离（沿用 V3 已登记例外，禁止修改历史和 continuation 不可变区）；
+4. servertool 使用 `control_only` hook：在 chat process group 入口挂 Req04 注入、出口挂 Resp03 剥离（沿用 V3 已登记例外，禁止修改历史）；
 5. hook 不得产生第二个 lifecycle、不得跨节点短路、不得改变节点编号；
 6. 所有 hook 的 control in/out 都写 ControlRecord；debug/快照订阅只读；
 7. hook 配置与注册必须机器声明；未声明 hook 不能执行；
@@ -423,7 +417,7 @@ group 内部视角：
   "from": "V4ReqChatProcess03Governed",
   "to": "v4.control.metadata_center",
   "operation": "consume",
-  "control_key": "continuation.restore",
+  "control_key": "scope.restore",
   "scope_keys": ["requestId", "pipelineId", "port", "sessionScope"],
   "owner": "routecodex-v4-runtime",
   "record_required": true
@@ -879,13 +873,11 @@ pos3=config_authoring、pos4=config_registry、pos5=config_manifest），收口�
 
 **Group 私有节点与 side-chain（非父链节点）**
 
-- `V4HubReqChatProcess04Governed` 内部私有节点：continuation_classify / continuation_restore /
-  governance / execution_plan 子节点（现有 checkpoint 候选：V4ReqContinuationClassified、
-  V4ChatProcess04ContinuationRestore、V4ReqExecutionPlan04、V4Router05RequestClassified、
+- `V4HubReqChatProcess04Governed` 内部私有节点：governance / execution_plan 子节点（现有
+  checkpoint 候选：V4ReqExecutionPlan04、V4Router05RequestClassified、
   V4Router06SelectionPlan）。父链只能连 04 的 entry/exit；04.1/04.2/04.3 形式 ID 不得作为父链节点。
 - `V4HubRespChatProcess03Governed` 内部私有节点：response_governance / tool_harvest /
-  continuation_commit 子节点（现有 checkpoint 候选：V4ChatProcess03ContinuationCommit、
-  V4RespContinuationCommitted）。
+  子节点（现有 checkpoint 候选：V4RespGovernance、V4ToolHarvest）。
 - registered_nodes 必须覆盖：四条固定链全部节点、全部 group 私有节点、
   control/diagnostic/lifecycle side-chain 节点、以及 49/49 anchored resource 引用的
   全部 owner_node；每个 entry 需 family/role/scope/owner 唯一，未知或重复 fail-fast。

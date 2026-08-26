@@ -21,7 +21,7 @@ export const SELF_TEST_COMMAND = `${GATE_COMMAND} --self-test`;
 export const BOUNDARY_COMMAND = `${GATE_COMMAND} --boundary-self-test`;
 export const RED_COMMAND = `${GATE_COMMAND} --red-self-test`;
 export const PLAN_PATH = 'v4/docs/goals/v4-feature-completion-plan.md';
-export const PLAN_HASH = 'sha256:21dd9b6551048d900be523a325355e825c67ebb9f93e5b0bad34c3079abf32f0';
+export const PLAN_HASH = 'sha256:54cf791459da9996090c85cef95c26de4a507633948412d3d21a07ecd86b1bdc';
 export const PLAN_ANCHORS = [
   '# 28. `RUNTIME-007` 后的分层批量开发与接线计划',
   '同层独立任务全部达到 `source_green` 后才允许 production wiring',

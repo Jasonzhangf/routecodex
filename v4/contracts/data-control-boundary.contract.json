@@ -18,7 +18,6 @@
     "INV-03",
     "INV-04",
     "INV-05",
-    "INV-06",
     "INV-07",
     "INV-08",
     "INV-09"
@@ -82,7 +81,6 @@
     {"gate_id":"RED-04","name":"payload_reconstructs_control","required_for":["architecture_gate","promotion"]},
     {"gate_id":"RED-05","name":"leak_compensation_forbidden","required_for":["architecture_gate"]},
     {"gate_id":"RED-06","name":"scope_cross_session_reuse","required_for":["architecture_gate","promotion"]},
-    {"gate_id":"RED-07","name":"continuation_immutable_interval","required_for":["architecture_gate"]},
     {"gate_id":"RED-08","name":"debug_snapshot_live_path","required_for":["architecture_gate"]},
     {"gate_id":"RED-09","name":"protocol_metadata_as_control","required_for":["architecture_gate","promotion"]},
     {"gate_id":"RED-10","name":"runtime_authoring_scan","required_for":["architecture_gate","promotion"]},

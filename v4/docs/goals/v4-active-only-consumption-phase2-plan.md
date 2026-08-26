@@ -44,7 +44,7 @@ Design ID: `V4-ACTIVE-LINK-002`（本计划）；上游设计：`v4/docs/design/
 
 - appsdk 合约扩展（freeze record 显式记录 `target_triple`/`rustc_version`、真实 `public_api_hash`
   API-surface 提取）：记为 future-freeze 项，不做（Phase 2 不引入新 appsdk release）。
-- V3/V4 runtime、provider、pipeline、payload、servertool/stopless/continuation 语义。
+- V3/V4 runtime、provider、pipeline、payload、servertool/stopless 语义。
 - base-node 任何改动；其他 frozen 模块（edge active-v2）不重冻结。
 - 对已冻结记录的改写（沿用 edge 模式：历史 frozen 记录保留，resolver 为 active truth）。
 

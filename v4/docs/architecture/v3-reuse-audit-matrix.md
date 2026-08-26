@@ -33,7 +33,7 @@
 | `AUDIT-PROTOCOL-06` | OpenAI Chat / Gemini / Anthropic 等协议 codec characterization 与字段 parity | Function map `v3-function-map.yml:1467-1636`；verification map `v3-verification-map.yml:688-852`、`1923-2064` | `reuse-as-is`（仅证据） + `rewrite-in-v4`（实现） | V4 protocol adapters 只做解析、投影和语义保留；治理留在 Chat Process | 不复制 V3 codec 内部耦合，不在 normalize/compat 节点做工具治理或 payload cleanup | 协议样本/字段 parity 可作为只读基线；V4 codec owner 尚未建立，标记为下一阶段实现 |
 | `AUDIT-PROVIDER-07` | `v3.responses_provider_runtime` 与 provider wire/transport/auth/capability | Function map `v3-function-map.yml:508-582`；verification map `v3-verification-map.yml:1127-1207`；Hub chain 的 provider compat/wire/transport 节点 | `rewrite-in-v4` | Provider 仅声明配置、能力、认证句柄、transport codec 和注册 action operator | 不把 provider runtime 代码直接接入 V4 core；不把 route/tool/error/continuation 通用语义写进 provider 分支 | V3 provider shape 有明确 owner，但与 V4 operator model 不同；需要先建立 V4 provider contract |
 | `AUDIT-DEBUG-08` | debug trace/raw capture/event ledger/dry-run/snapshot 与 sample retention | Function map `v3-function-map.yml:268-412`、`4229-4266`；verification map `v3-verification-map.yml:1208-1295`、`3408-3438` | `legacy-only`（初期） | V4 后续建立独立 diagnostic side-channel 和受控 playground evidence | 不让 V3 debug store、snapshot 或样本路径成为 V4 runtime 输入；不裁剪真实 payload 语义 | V3 证据可用于对照，但生命周期和目录合同未迁移；后续单独设计 |
-| `AUDIT-CONTINUATION-09` | remote/local continuation store、Responses continuation、servertool/stopless followup | Function map `v3-function-map.yml:1707-2210`、`3158-3428`；verification map `v3-verification-map.yml:1454-1845`、`2538-2828` | `legacy-only`（初期） | 后续以 V4 scope、ownership、immutable interval 合同为前提专项迁移 | 不直接复用 V3 continuation store、桥层恢复、SSE/handler 补偿或 session-only 命中 | 这是高耦合高风险域；先冻结 V4 foundation，完成 data/control contract 后再审计 |
+| `AUDIT-CONTINUATION-09` | remote/local continuation store、Responses continuation、servertool/stopless followup | Function map `v3-function-map.yml:1707-2210`、`3158-3428`；verification map `v3-verification-map.yml:1454-1845`、`2538-2828` | `closed-by-decision`（V4 不迁移） | V4 不实现 Responses continuation；V3 基线只作覆盖审计，不进入 V4 实现 | 不直接复用 V3 continuation store、桥层恢复、SSE/handler 补偿或 session-only 命中 | 已按 2026-08-25 决策关闭：V4 不使用 `previous_response_id` |
 | `AUDIT-TRANSPORT-10` | SSE transport、HTTP keepalive、websocket proxy、client projection | Function map `v3-function-map.yml:2147-2210`、`2962-3046`、`3639-3689`；verification map `v3-verification-map.yml:1846-1883`、`2421-2486`、`2903-2943` | `legacy-only`（初期） | V4 只在主线合同稳定后建立 transport projection；transport 不拥有治理语义 | 不复制 SSE/handler 对 continuation、tool、error 或 metadata 的语义补偿 | V3 有独立边界和 gates；当前不进入 V4 foundation |
 | `AUDIT-LIFECYCLE-11` | V3 managed lifecycle、CLI、安装、restart/control plane | Function map `v3-function-map.yml:4-75`、`4327-4373`；verification map `v3-verification-map.yml:40-117`；mainline `v3.server.managed_lifecycle` | `legacy-only`（V4 bootstrap） | V4 由 AppSDK project lifecycle 和编译 artifact 管理；RouteCodex runtime lifecycle 后置 | 不让 V4 依赖 V3 CLI、全局安装路径、restart 状态或 V3 live config | V3 lifecycle 已验证但属于兼容运行面；V4 先使用 AppSDK contract，不迁移实现 |
 
@@ -45,7 +45,7 @@
 
 - 配置必须经过编译，runtime 只消费 deterministic manifest。
 - pipeline 节点必须有唯一 owner，只允许相邻转换。
-- route、error、health、continuation、debug、scope 和 MetadataCenter 都是控制面资源。
+- route、error、health、debug、scope 和 MetadataCenter 都是控制面资源。
 - provider 只实现配置声明、能力、transport/codec 和注册 action operators。
 - V3 已验证的协议 characterization、字段 parity、正反测试可作为只读对照证据。
 
@@ -57,7 +57,7 @@
 4. V4 pipeline type topology：实现 request/response/error 的最小 typed skeleton。
 5. V4 config compiler contract：生成 deterministic manifest/index。
 6. V4 MetadataCenter/data-center lifecycle：注册、消费、scope 校验、释放。
-7. 重新评估 `AUDIT-PROVIDER-07`、`AUDIT-CONTINUATION-09` 和 `AUDIT-TRANSPORT-10`，再决定进入模块迁移。
+7. 重新评估 `AUDIT-PROVIDER-07` 和 `AUDIT-TRANSPORT-10`；`AUDIT-CONTINUATION-09` 已关闭。
 
 ## Phase 0 退出门槛
 

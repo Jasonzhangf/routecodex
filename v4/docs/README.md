@@ -30,7 +30,7 @@ from `.appsdk/maps/`.
 
 ## Product completion
 
-- [`goals/v4-feature-completion-plan.md`](goals/v4-feature-completion-plan.md) — product-completion source of truth: V3 feature parity states, production NodeContainer migration, protocol/provider/router/continuation/tool/admin/release closeout, evidence gates, and canary/cutover readiness.
+- [`goals/v4-feature-completion-plan.md`](goals/v4-feature-completion-plan.md) — product-completion source of truth: V3 feature parity states, production NodeContainer migration, protocol/provider/router/tool/admin/release closeout, evidence gates, and canary/cutover readiness. V4 does not implement Responses continuation.
 - [`goals/v4-feature-completion-goal-prompt.md`](goals/v4-feature-completion-goal-prompt.md) — long-horizon `/goal` prompt for executing the completion plan phase by phase. It does not authorize automatic V3 cutover.
 
 ## Plans

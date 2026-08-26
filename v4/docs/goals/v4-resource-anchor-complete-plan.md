@@ -151,7 +151,7 @@
 `routecodex-v4-runtime`：
 
 - runtime 已拥有同一 control 邻域真源：`v4.scope.session`（V4ScopeRegistry）、
-  `v4.lifecycle.payload_cycle`（V4PayloadCycleRegistry）、continuation 三键、
+  `v4.lifecycle.payload_cycle`（V4PayloadCycleRegistry）、
   relay operator 与 route_exit 派生；stopless/record/statistics 与这些
   control center 是同一层，不是 frozen control crate 的 MetadataCenter 面。
 - `routecodex-v4-control` 已 frozen active-v2；给它加新能力必须完整

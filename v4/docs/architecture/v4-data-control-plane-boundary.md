@@ -9,7 +9,7 @@ V4 从第一行实现开始就锁定数据面与控制面的物理隔离，并�
 ## 术语
 
 - **数据面（data plane）**：业务请求/响应语义本身，包括客户端协议字段、hub 规范化 payload、provider wire payload。控制字段不得进入。
-- **控制面（control plane）**：routing、switching、continuation、retry、provider selection、health、debug、snapshot、error、scope、stopless/servertool 等控制语义。只允许通过 typed side-channel、MetadataCenter 控制资源或 Error 链承载。
+- **控制面（control plane）**：routing、switching、retry、provider selection、health、debug、snapshot、error、scope、stopless/servertool 等控制语义。只允许通过 typed side-channel、MetadataCenter 控制资源或 Error 链承载。
 - **typed side-channel**：带类型、带 scope 的 carrier，例如 `v4.control.side_channel`。它既不是 payload 字段，也不是无类型 JSON。
 - **MetadataCenter**：V4 内部控制信号注册/消费/释放的 scope 隔离资源；只承载 RouteCodex 自己生成的控制信号。
 
@@ -22,7 +22,6 @@ V4 从第一行实现开始就锁定数据面与控制面的物理隔离，并�
 | `INV-03` | MetadataCenter 只承载内部控制信号；客户端协议 `metadata`/`client_metadata`/`x-*` 是数据面，按入口协议透传 | `routecodex-v4-control` | `RED-09` |
 | `INV-04` | 泄漏必须在 owning boundary fail-fast；禁止 silent strip、请求侧 cleanup、handler/SSE/outbound/transport 补偿 | 各资源 owner | `RED-02`, `RED-03`, `RED-05` |
 | `INV-05` | scope 按 request/pipeline/port/session/conversation 隔离；闭环结束后释放，禁止跨闭环复用 | `routecodex-v4-control` | `RED-06` |
-| `INV-06` | continuation 保存到恢复之间的不可变区禁止任何语义转换、恢复、修补、重排 | `routecodex-v4-runtime` | `RED-07` |
 | `INV-07` | debug/snapshot 是诊断侧信道，禁止成为 live runtime 输入 | `routecodex-v4-debug` | `RED-08` |
 | `INV-08` | runtime 只消费编译后的 `v4.config.manifest`，禁止扫描 authoring 目录或把配置字段写入 payload | `routecodex-v4-config` | `RED-10` |
 | `INV-09` | 同一闭环内协议字段与控制字段不得共用同一个 DTO/struct；关键语义必须用唯一类型承载 | `routecodex-v4-runtime` | `RED-11` |
@@ -65,9 +64,9 @@ V4 从第一行实现开始就锁定数据面与控制面的物理隔离，并�
 
 ### RED-04：payload 重建控制状态必红
 
-断言：仅凭 payload 字段推导 routing/continuation/retry/scope 判定时，判定入口必须拒绝（缺 typed side-channel 输入即失败）。
+断言：仅凭 payload 字段推导 routing/retry/scope 判定时，判定入口必须拒绝（缺 typed side-channel 输入即失败）。
 
-正：routing 只消费 `v4.control.route_facts`；continuation 只消费已注册 scope + typed carrier。
+正：routing 只消费 `v4.control.route_facts`；scope 判定只消费已注册 typed carrier。
 
 ### RED-05：泄漏不补偿必红
 
@@ -80,12 +79,6 @@ V4 从第一行实现开始就锁定数据面与控制面的物理隔离，并�
 断言：session A 的 scope key 在请求 B 中被消费时，`V4ScopeRegistry` 必须拒绝并 fail-fast。
 
 正：同一闭环内 register -> consume -> release 成功；release 后再次 consume 失败。
-
-### RED-07：continuation 不可变区语义操作必红
-
-断言：在 `resp_chatprocess save -> req_chatprocess restore` 之间（resp_outbound、SSE、handler、store transport）出现任何语义转换、history/tool 修补、required_action 推断、stopless 注入时，gate 必须失败。
-
-正：不可变区只做语义等价投影、传输、scope 校验和释放。
 
 ### RED-08：debug snapshot 进 live path 必红
 

@@ -377,7 +377,7 @@ config/lifecycle
   -> routing/target
   -> provider compat/wire
   -> transport
-  -> error/retry/continuation integration
+  -> error/retry integration
 ```
 
 每个节点迁移必须提供：V3 baseline、输入/输出合同、插件拆分、顺序、正反测试、黑盒对照、性能和 payload copy 证据。禁止一次性迁移整条链。

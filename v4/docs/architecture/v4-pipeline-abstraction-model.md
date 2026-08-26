@@ -16,7 +16,7 @@
 | `response` (S) | 响应侧流程面：provider → hub → client 方向的节点与行为 | provider raw parse、response inbound、response chat process 治理、client semantic projection、client frame | 请求/控制状态不得混入响应语义 |
 | `operation` (O) | 行为算子面：所有可执行动作的统一注册单元 | parse / validate / classify / select / build / project / govern / record / restore / release / freeze / publish / transport / snapshot / error 等 | 未注册算子不得执行；算子不得越节点短路 |
 | `information` (I) | 事实知识面：编译/生成后不可变、只读消费 | config manifest、catalog、registry、binding matrix、capability truth、parity contract、verification manifest、build/index artifact、secret handle | runtime 不得改写；不得扫描 authoring 目录；不得混入 payload |
-| `control` (C) | 控制语义面：typed side-channel 承载的全部控制状态 | route facts、selection plan、opaque target、error chain、scope、availability、stopless state、continuation ownership、lifecycle lock、session admission、provider action gate | 不得进入正常 payload / provider wire / client wire；不得被 payload 重建 |
+| `control` (C) | 控制语义面：typed side-channel 承载的全部控制状态 | route facts、selection plan、opaque target、error chain、scope、availability、stopless state、lifecycle lock、session admission、provider action gate | 不得进入正常 payload / provider wire / client wire；不得被 payload 重建 |
 | `data` (D) | 数据语义面：业务语义本身 | normal request/response payload、provider wire、client wire、SSE chunk/frame、websocket frame、protocol context、transport raw | 不得携带控制字段；不得由 debug snapshot 重建 |
 
 ## 关系模型
@@ -125,7 +125,7 @@ baseline（V3 现状，只读对照）
 
 - `operation` 轴的 operator registry 资源；
 - request/response 链对 V3 资源的显式覆盖；
-- continuation、transport、lifecycle、diagnostic、build/install 等域的 design 条目。
+- transport、lifecycle、diagnostic、build/install 等域的 design 条目。
 
 它们本身作为 target 边界是合理的，但不能回答“全项目 operation 是否已被抽象覆盖”。本轮新增的六轴模型与 coverage matrix 补齐这一层。
 
@@ -156,7 +156,7 @@ V3 已经采用“固定 chain + 每个固定节点的静态 hook slot + Control
   - 新算子 promotion 只改 manifest，不改流程。
 ```
 
-V3 的 `V3HubReqChatProcess04Governed` / `V3HubRespChatProcess03Governed`、Stopless Req04 注入与 Resp03 剥离、continuation 不可变区等已发布合同，在本模型下仍不可改语义。
+V3 的 `V3HubReqChatProcess04Governed` / `V3HubRespChatProcess03Governed`、Stopless Req04 注入与 Resp03 剥离等已发布合同，在本模型下仍不可改语义；V4 不引入 Responses continuation。
 
 ### 2. 六轴抽象可覆盖 V3 全部操作
 
@@ -193,7 +193,7 @@ console/observability、timing、sample retention、servertool/stopless、lifecy
 
 ```text
 request chain:    entry -> inbound -> chatprocess -> route/target -> outbound semantic -> provider wire -> transport
-response chain:   provider raw -> resp inbound -> resp chatprocess -> continuation -> client semantic -> client frame
+response chain:   provider raw -> resp inbound -> resp chatprocess -> client semantic -> client frame
 error chain:      source -> host captured -> classified -> router policy -> execution decision -> client projection
 config chain:     authoring -> parse -> validate -> registry -> manifest
 lifecycle chain:  declare -> lock -> identity -> controlled runtime
@@ -317,11 +317,10 @@ BaseNode 不拥有业务逻辑。具体节点的业务行为由该节点 slot �
     "carrier_fields": ["requestId", "pipelineId", "port", "sessionScope"]
   },
   "state_machine": {
-    "in_events": ["continuation_restore_requested"],
-    "out_events": ["continuation_restored", "governance_completed"],
+    "in_events": ["governance_requested"],
+    "out_events": ["governance_completed"],
     "transitions": [
-      {"from": "idle", "event": "continuation_restore_requested", "to": "restoring"},
-      {"from": "restoring", "event": "continuation_restored", "to": "governing"},
+      {"from": "idle", "event": "governance_requested", "to": "governing"},
       {"from": "governing", "event": "governance_completed", "to": "done"}
     ]
   },
@@ -381,7 +380,7 @@ Control Center
     -> 闭环结束释放，禁止跨闭环复用
 ```
 
-Control Center 承载的控制域：route、target、error chain、availability、scope、continuation ownership、stopless/servertool state、lifecycle、admission、provider action gate。
+Control Center 承载的控制域：route、target、error chain、availability、scope、stopless/servertool state、lifecycle、admission、provider action gate。
 
 ### 6. 消息 / 订阅总线
 
@@ -397,7 +396,7 @@ publisher（节点 operator / Control Center 状态机）
 合同：
 
 - bus 只承载通知、诊断、观测、记录事件；
-- bus 不承载 payload，不参与路由/重试/continuation 判定；
+- bus 不承载 payload，不参与路由/重试判定；
 - 订阅者不得基于 bus 事件修改业务结果或控制决策；
 - 控制状态机的状态变更由 Control Center 直接写 typed resource；bus 只广播“已发生”的事实供观察者消费；
 - bus 故障不得改变业务路径；诊断错误必须显式记录，不得静默。

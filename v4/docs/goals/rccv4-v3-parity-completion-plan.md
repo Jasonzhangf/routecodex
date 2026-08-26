@@ -3,7 +3,7 @@
 ## 目标与验收标准
 
 把 RCCV4 从当前独立 runtime admission / flat config 状态推进到可替代 V3
-7777 的生产路径：配置、路由、provider、协议、错误策略、continuation、工具治理、
+7777 的生产路径：配置、路由、provider、协议、错误策略、工具治理、
 生命周期和发布证据全部对齐。V4 必须使用自己的 typed manifest 与 Rust owner，
 不读取 V3 runtime、不调用 V3 runtime、不保留双真源。
 
@@ -22,7 +22,7 @@
 ## 范围与边界
 
 In scope：V4 config compiler、router、provider runtime、protocol adapters、error
-chain、continuation、tool/servertool governance、runtime lifecycle、CLI/build/install
+chain、tool/servertool governance、runtime lifecycle、CLI/build/install
 和 parity evidence。
 
 Out of scope：V3/main tree 改动、V3 fallback/旁路、请求侧 cleanup、payload 注入控制面
@@ -45,8 +45,8 @@ Out of scope：V3/main tree 改动、V3 fallback/旁路、请求侧 cleanup、pa
    protocol、capability、threshold、priority/weight、unknown target fail-fast。
 3. `routecodex-v4-runtime-bin` 与 provider owner：将 manifest target 解析为 provider
    wire request；禁止回读 raw payload 重建控制状态。
-4. protocol / response / continuation owners：分别接入 Chat、Responses、Anthropic 等
-   V3 选定入口，锁定 continuation owner、scope、save/restore 不可变区。
+4. protocol / response owners：分别接入 Chat、Responses、Anthropic 等
+   V3 选定入口；V4 不实现 Responses continuation。
 5. error / health / lifecycle owners：接入统一 ErrorErr01-06、provider failure policy、
    in-flight epoch drain/dispose、restart identity 稳定性。
 6. maps、contracts、wiki、verification/evidence：每个功能同步 owner、edge、gate 和
@@ -66,7 +66,7 @@ Out of scope：V3/main tree 改动、V3 fallback/旁路、请求侧 cleanup、pa
   red tests。
 - router/provider：pool selection、priority/weight/capability/threshold、wire model、
   auth handle、provider error path 正反测试。
-- protocol/lifecycle：Chat/Responses/stream/continuation、scope isolation、epoch
+- protocol/lifecycle：Chat/Responses/stream、scope isolation、epoch
   publish/drain/dispose、restart identity 正反测试。
 - project：workspace cargo test/build、architecture gates、active-link、normalized
   V3/V4 differential、安装/restart/health、在线旧样本 replay。
@@ -78,7 +78,7 @@ Out of scope：V3/main tree 改动、V3 fallback/旁路、请求侧 cleanup、pa
 2. 完成 config consumer：从 manifest 读取 product route/error declarations；通过 config
    differential gate。
 3. 完成 router/provider 接线；通过 target/wire/auth/error 正反测试。
-4. 完成 protocol、continuation、tool governance 与 lifecycle 接线；通过对应 red/green
+4. 完成 protocol、tool governance 与 lifecycle 接线；通过对应 red/green
    gates。
 5. 在主 V4 tree build、安装、聚合 restart，验证 5520 与配置内全部 listener health。
 6. 用相同 requestId/旧样本执行 V3 7777 ↔ V4 5520 differential replay，修复所有未解释

@@ -9,7 +9,7 @@ V4 以 V3 为行为基线，提高工程质量和长期演进能力：职责分�
 - V3 是 compatibility baseline；本阶段只读、只审计、只验证，不修改 V3 runtime。
 - V4 的新代码、合同、实验、测试、Active、Protected、Generated 全部在 `v4/`。
 - V4 core pipeline 不包含 provider-specific 分支。
-- control resources、routing、switching、continuation、retry、health、debug、snapshot、scope、error policy 不进入业务 request/response/provider payload。
+- control resources、routing、switching、retry、health、debug、snapshot、scope、error policy 不进入业务 request/response/provider payload。
 - 共享语义只有一个 owner；禁止重复实现、fallback、双写和 shadow writer。
 
 ## Phase 0 — V3 reuse audit
@@ -60,7 +60,7 @@ Provider runtime 只保留：
 - registered action operators;
 - provider-specific wire mapping at the provider boundary。
 
-Route/pipeline/tool/error/continuation 的通用语义不得下沉为 provider 特例。未注册的 provider action 必须 fail-fast。
+Route/pipeline/tool/error 的通用语义不得下沉为 provider 特例。未注册的 provider action 必须 fail-fast。
 
 ## Phase 3 — Module-by-module migration
 

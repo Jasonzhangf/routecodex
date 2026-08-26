@@ -26,7 +26,7 @@ config / lifecycle 所有链族共用的控制信号注册与消费资源，也�
    - 已释放后 consume / release = 红；
    - consume 不改状态（与已冻结 Edge `ScopeRegistry` 语义一致）。
 3. **typed 控制信号**：`ControlSignalKind` 是显式枚举
-   （route / continuation / stopless / error / scope），禁止自由 JSON。
+   （route / stopless / error / scope），禁止自由 JSON。
    客户端协议字段（`metadata` / `client_metadata` / `x-*`）不是控制信号类别；
    协议 metadata 搬进 MetadataCenter = 红（RED-09）。
 4. **控制信号绝不进入 payload**：`PayloadGate::write_control` 必须 fail-fast 返回错误并记录

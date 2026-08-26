@@ -18,8 +18,8 @@ const SOURCE_PATHS = {
 };
 const CONTRACT_HASHES = {
   forbiddenEdges: 'sha256:af6dea8727859fbe4953293efd1e272f3139a041f63cb0d8183b53652a97d7bc',
-  invariants: 'sha256:c411741d0d3e6ed7e70e3b57d8b560e8f15668ffd5dea74699f66b05731430a9',
-  redGates: 'sha256:16037f265a61606eed0ca5c79e91a8a53b98158f3bb03f7a5ab45afdb2be9c85',
+  invariants: 'sha256:376ca42227cbaded5d2c229b8db34cecac186c1841c962e2a4b9d46f17c6410d',
+  redGates: 'sha256:6f3f6e71647e6110ec4bef014e085e804f385b9bac43cb697919a69069d5dbea',
   activationConditions: 'sha256:820b26c09fad7c191a54df5e61b807bf507eda469cf3a15f532ce0ca174c7006',
 };
 

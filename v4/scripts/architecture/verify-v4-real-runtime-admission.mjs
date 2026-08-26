@@ -25,12 +25,7 @@ const COMPILED_MANIFEST = process.env.RCCV4_MANIFEST
   ?? path.join(process.env.HOME ?? '', '.rcc/v4/manifest.compiled.json');
 let RCCV4_HOST = process.env.RCCV4_LISTEN;
 let ADMISSION_MODEL = process.env.RCCV4_ADMISSION_MODEL;
-// Every live admission run needs a fresh continuation scope. Reusing a fixed
-// session after a prior run leaves an intentionally immutable pending binding
-// in the managed runtime and turns a new first turn into a false double-restore
-// failure. The direct pair below deliberately shares this run-scoped value.
 const admissionRun = `${Date.now()}-${process.pid}`;
-const directSession = `admission-direct-${admissionRun}`;
 const relayJsonSession = `admission-relay-json-${admissionRun}`;
 const relaySseSession = `admission-relay-sse-${admissionRun}`;
 
@@ -240,7 +235,6 @@ if (!RCCV4_HOST || !ADMISSION_MODEL) {
 // Live HTTP tests
 let passed = 0;
 let failed = 0;
-let directResponseId;
 
 try {
   const health = await httpGet(RCCV4_HOST, '/health');
@@ -286,28 +280,10 @@ try {
   if (typeof jsonBody.id !== 'string' || jsonBody.id.length === 0) {
     throw new Error(`response id is empty: ${jsonBody.id}`);
   }
-  directResponseId = jsonBody.id;
   console.log(`[v4_real_runtime_admission] POST /v1/responses JSON OK: id=${jsonBody.id}`);
   passed++;
 } catch (e) {
   console.error(`[v4_real_runtime_admission] POST /v1/responses JSON FAIL: ${e.message}`);
-  failed++;
-}
-
-try {
-  if (!directResponseId) throw new Error('first direct response id unavailable');
-  const continuation = await httpPost(RCCV4_HOST, '/v1/responses', {
-    model: ADMISSION_MODEL,
-    previous_response_id: directResponseId,
-    input: [{ role: 'user', content: 'now say bye in 3 words' }],
-  }, { 'x-rccv4-session-id': directSession }, 60000);
-  if (continuation.status !== 200) throw new Error(`continuation status ${continuation.status}, body=${continuation.body.substring(0, 200)}`);
-  const body = JSON.parse(continuation.body);
-  if (!body.id || body.id === directResponseId) throw new Error('continuation did not produce a new response id');
-  console.log(`[v4_real_runtime_admission] Responses continuation OK: previous=${directResponseId} next=${body.id}`);
-  passed++;
-} catch (e) {
-  console.error(`[v4_real_runtime_admission] Responses continuation FAIL: ${e.message}`);
   failed++;
 }
 

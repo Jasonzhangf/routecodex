@@ -6,7 +6,7 @@
   "owner_module_id": "routecodex-v4-governance",
   "canonical_contract": {
     "path": "v4/docs/goals/v4-feature-completion-plan.md",
-    "sha256": "sha256:21dd9b6551048d900be523a325355e825c67ebb9f93e5b0bad34c3079abf32f0",
+  "sha256": "sha256:54cf791459da9996090c85cef95c26de4a507633948412d3d21a07ecd86b1bdc",
     "required_anchors": [
       "# 28. `RUNTIME-007` 后的分层批量开发与接线计划",
       "同层独立任务全部达到 `source_green` 后才允许 production wiring",

@@ -25,7 +25,6 @@ const REQUIRED_RUNTIME_SYMBOLS = [
   'pub struct MockTransportReport',
   'pub struct MockTransportError',
   'pub struct MockTransportIdentityCounter',
-  'select_relay_operator(&ContinuationFacts::new(',
   'error_chain_client_projection_message(&fault, &request_scope)',
 ];
 

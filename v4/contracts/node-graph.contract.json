@@ -3,7 +3,7 @@
   "contract_id": "v4-node-graph",
   "status": "active",
   "owner_feature_id": "v4.node_graph",
-  "graph_hash": "sha256:45f393fcccb5d429e1b55d8d6dd05e364858c743e02d04c256d11bc26a905930",
+  "graph_hash": "sha256:bb6438fdeb0f9231534b29935fbc496a0b07e398c77f16684932376b02050266",
   "canonical_docs": [
     "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
@@ -24,15 +24,6 @@
           ],
           "data_in_kind": "raw_entry",
           "data_out_kind": "normalized_request"
-        },
-        {
-          "role_id": "request_continuation",
-          "allowed_operator_kinds": [
-            "continuation_classify",
-            "continuation_restore"
-          ],
-          "data_in_kind": "normalized_request",
-          "data_out_kind": "continuation_facts"
         },
         {
           "role_id": "request_chat_process",
@@ -95,15 +86,6 @@
           ],
           "data_in_kind": "parsed_response",
           "data_out_kind": "governed_response"
-        },
-        {
-          "role_id": "response_continuation",
-          "allowed_operator_kinds": [
-            "continuation_commit",
-            "continuation_release"
-          ],
-          "data_in_kind": "governed_response",
-          "data_out_kind": "continuation_truth"
         },
         {
           "role_id": "response_outbound",
@@ -624,9 +606,7 @@
       "sse_boundary_only": true,
       "internal_data_plane": "json_semantic",
       "sse_in_sse_out_coupling": "forbidden; provider SSE must not pipe directly to client SSE",
-      "chat_process": "supernode group with continuation save, response governance, tool harvest, and entry/exit hooks for servertool",
-      "continuation_save_only_at": "V4HubRespChatProcess03Governed",
-      "immutable_interval": "resp_chatprocess save -> next req_chatprocess restore; no semantic transformation in between",
+      "chat_process": "supernode group with response governance, tool harvest, and entry/exit hooks for servertool",
       "terminal": "V4ServerRespOutbound06ClientFrame is the single success terminal",
       "direct_also_uses_chain": true
     }
@@ -763,8 +743,7 @@
       "rule": "servertool uses control_only hooks at chat process group entry/exit",
       "req04_injection": "allowed_registered_only",
       "resp03_stripping": "allowed_matching_provenance_only",
-      "history_mutation": "forbidden",
-      "continuation_immutable_interval_semantics": "forbidden"
+      "history_mutation": "forbidden"
     }
   },
   "group_schema": {
@@ -1090,9 +1069,7 @@
     "wiring_selection": "exactly one active operator per node instance per compiled manifest",
     "selection_facts": [
       "entry_protocol",
-      "provider_wire_protocol",
-      "continuation_owner",
-      "execution_mode"
+      "provider_wire_protocol"
     ],
     "forbidden_selection_facts": [
       "provider_id",
@@ -1270,20 +1247,6 @@
       "owner": "routecodex-v4-config"
     },
     {
-      "node_id": "V4ReqContinuationClassified",
-      "family": "RequestChainNode",
-      "role_id": "request_continuation",
-      "scope": "group_private: request chat-process continuation classify",
-      "owner": "routecodex-v4-runtime"
-    },
-    {
-      "node_id": "V4ChatProcess04ContinuationRestore",
-      "family": "RequestChainNode",
-      "role_id": "request_continuation",
-      "scope": "group_private: request chat-process continuation restore",
-      "owner": "routecodex-v4-runtime"
-    },
-    {
       "node_id": "V4ReqExecutionPlan04",
       "family": "RequestChainNode",
       "role_id": "request_execution",
@@ -1307,20 +1270,6 @@
       "owner": "routecodex-v4-runtime"
     },
     {
-      "node_id": "V4ChatProcess03ContinuationCommit",
-      "family": "ResponseChainNode",
-      "role_id": "response_continuation",
-      "scope": "group_private: response chat-process continuation commit",
-      "owner": "routecodex-v4-runtime"
-    },
-    {
-      "node_id": "V4RespContinuationCommitted",
-      "family": "ResponseChainNode",
-      "role_id": "response_continuation",
-      "scope": "group_private: response continuation truth",
-      "owner": "routecodex-v4-runtime"
-    },
-    {
       "node_id": "V4Router07RouteDecisionExit",
       "family": "RequestChainNode",
       "role_id": "request_execution",
@@ -1331,7 +1280,7 @@
       "node_id": "V4ScopeRegistry",
       "family": "ControlCenterNode",
       "role_id": "control_center",
-      "scope": "continuation scope bind/restore/release control center",
+      "scope": "request/session scope bind/release control center",
       "owner": "routecodex-v4-runtime"
     },
     {
@@ -1750,7 +1699,6 @@
     "every published node/group/chain has its standard test surface",
     "v4 hub request chain is fixed: server -> sse_in -> inbound -> chat_process(group) -> outbound -> compat -> provider_sse_out",
     "v4 hub response chain is the request chain mirror: provider_sse_in -> inbound -> chat_process(group) -> outbound -> client_sse_out -> server",
-    "continuation save occurs only at V4HubRespChatProcess03Governed; resp_chatprocess save -> req_chatprocess restore interval is immutable",
     "sse is transport boundary only; internal data plane is json semantic",
     "sse_in and sse_out cannot be directly coupled",
     "direct and relay share the same chain; they differ only in operator selection and typed facts",
