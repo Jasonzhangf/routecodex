@@ -1243,5 +1243,40 @@
       "input_paths": ["contracts/v4-cordis-concurrency-reconciliation.manifest.json"],
       "required_for": ["merge_queue_admission"]
     }
+    ,{
+      "gate_id": "v4_m11_contract_positive",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.cordis_m11_protocol_tools_admin_contract"],
+      "input_contract_path": "contracts/m11-protocol-tools-admin.contract.json",
+      "input_set_id": "m11_protocol_tools_admin",
+      "command": "node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs",
+      "argv": ["node", "--test", "cordis/routecodex-v4-cordis-host/tests/*.test.mjs"],
+      "producer": {"adapter": "node", "identity": "v4_m11_contract_positive"},
+      "evidence_role": "positive",
+      "input_paths": [
+        "contracts/m11-protocol-tools-admin.contract.json",
+        "contracts/m11-protocol-tools-admin.manifest.json",
+        "cordis/routecodex-v4-cordis-host/tests/m11-protocol-tools-admin-contract.test.mjs"
+      ],
+      "required_for": ["source_green", "routecodex-v4-governance:architecture_stable"]
+    },
+    {
+      "gate_id": "v4_m11_contract_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.cordis_m11_protocol_tools_admin_contract"],
+      "input_contract_path": "contracts/m11-protocol-tools-admin.contract.json",
+      "input_set_id": "m11_protocol_tools_admin",
+      "command": "node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs",
+      "argv": ["node", "--test", "cordis/routecodex-v4-cordis-host/tests/*.test.mjs"],
+      "producer": {"adapter": "node", "identity": "v4_m11_contract_red"},
+      "evidence_role": "red_gate",
+      "input_paths": [
+        "contracts/m11-protocol-tools-admin.contract.json",
+        "cordis/routecodex-v4-cordis-host/tests/m11-protocol-tools-admin-contract.test.mjs"
+      ],
+      "required_for": ["source_green", "routecodex-v4-governance:architecture_stable"]
+    }
   ]
 }
