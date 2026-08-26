@@ -650,14 +650,12 @@ struct ActiveNodeAnchor {
 fn registered_role_chain(role_id: &str) -> Option<&'static str> {
     match role_id {
         "request_inbound"
-        | "request_continuation"
         | "request_chat_process"
         | "request_execution"
         | "request_outbound"
         | "mainline_kernel" => Some("request"),
         "response_inbound"
         | "response_chat_process"
-        | "response_continuation"
         | "response_outbound"
         | "server_frame" => Some("response"),
         "error_source" | "error_classify" | "error_policy" | "error_decision"
