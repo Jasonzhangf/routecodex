@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "lifecycle_id": "v4-cordis-m11-protocol-tools-admin",
+  "status": "design",
+  "owner_feature": "v4.cordis_m11_protocol_tools_admin_contract",
+  "entrypoint": "M11-T01",
+  "return_path": "M11-T01 -> checker -> codex/v4-cordis-refactor-main",
+  "canonical_docs": [
+    "v4/contracts/m11-protocol-tools-admin.contract.json",
+    "v4/docs/goals/v4-cordis-m11-protocol-tools-admin-contract.md",
+    "v4/docs/goals/v4-cordis-m11-protocol-tools-admin-test-design.md"
+  ],
+  "nodes": [
+    {"node_id":"M11-T01-P","kind":"protocol_contract","owner_module_id":"routecodex-v4-standard-plugins","status":"planned"},
+    {"node_id":"M11-T01-T","kind":"tool_contract","owner_module_id":"routecodex-v4-standard-plugins","status":"planned"},
+    {"node_id":"M11-T01-AQ","kind":"admin_query_projection","owner_module_id":"routecodex-v4-runtime-inspector","status":"planned"},
+    {"node_id":"M11-T01-AM","kind":"admin_command_delegation","owner_module_id":"routecodex-v4-admin","status":"planned"},
+    {"node_id":"M11-T01-AP","kind":"admin_publish_lifecycle","owner_module_id":"routecodex-v4-plugin-manager","status":"planned"}
+  ],
+  "edges": [
+    {"from":"M11-T01-P","to":"M11-T01-T","kind":"contract_dependency","status":"planned"},
+    {"from":"M11-T01-T","to":"M11-T01-AQ","kind":"typed_projection_dependency","status":"planned"},
+    {"from":"M11-T01-AQ","to":"M11-T01-AM","kind":"readonly_projection_dependency","status":"planned"},
+    {"from":"M11-T01-AM","to":"M11-T01-AP","kind":"typed_command_dependency","status":"planned"}
+  ],
+  "verification_gates": [
+    "v4_m11_contract_positive",
+    "v4_m11_contract_red",
+    "v4_parity_gate_plane_isolation",
+    "v4_parity_gate_resource_binding"
+  ]
+}
