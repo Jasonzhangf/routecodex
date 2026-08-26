@@ -167,7 +167,7 @@ export function createGitTruth({ repoRoot, v4Root }) {
       }
       entries.push({ status, path: changedPath });
     }
-    return entries.sort((left, right) => left.path.localeCompare(right.path));
+    return entries.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
   }
 
   function changedPathsOutsideV4(baseCommit, headCommit) {
