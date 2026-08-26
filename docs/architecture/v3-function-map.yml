@@ -5529,3 +5529,34 @@ features:
   - git diff --check
   migration_target: rust
   runtime_status: source_controlled_runtime_pending_live_replay
+- feature_id: v3.admin_observability_aggregation
+  status: source_controlled_runtime_pending_live_replay
+  owner_crate: routecodex-v3-admin
+  owner_files:
+  - v3/crates/routecodex-v3-admin/src/api/observability.rs
+  - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
+  - v3/admin-webui/requests.html
+  resource_bindings:
+  - v3.server.internal_observability_projection
+  entry_symbols:
+  - records
+  - poll
+  - fetch_snapshot
+  - merge_stats
+  - build_timeseries
+  allowed_paths:
+  - v3/crates/routecodex-v3-admin/src/api/observability.rs
+  - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
+  - v3/admin-webui/requests.html
+  - v3/admin-webui/styles.css
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  - provider.wire_payload
+  - continuation
+  - protocol.metadata
+  required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin
+  - npm run verify:v3-resource-map
+  - git diff --check
+  runtime_status: source_controlled_runtime_pending_live_replay

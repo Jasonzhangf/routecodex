@@ -3,13 +3,13 @@
 
 use crate::AppState;
 use axum::extract::Query;
+use axum::extract::RawQuery;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
-use axum::extract::RawQuery;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const SOURCE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -52,6 +52,16 @@ pub(crate) struct SourceRow {
     pub failed_attempts: u64,
     pub switches: u64,
     #[serde(default)]
+    pub usage: Option<serde_json::Value>,
+    #[serde(default)]
+    pub timing_internal_ms: Option<u64>,
+    #[serde(default)]
+    pub timing_external_ms: Option<u64>,
+    #[serde(default)]
+    pub servertool: bool,
+    #[serde(default)]
+    pub stopless: bool,
+    #[serde(default)]
     pub tokens_output: Option<u64>,
     #[serde(default)]
     pub raw_artifact_ref: Option<String>,
@@ -73,6 +83,8 @@ pub(crate) struct PortStats {
     pub switches: u64,
     #[serde(default)]
     pub tokens_output: u64,
+    #[serde(default)]
+    pub provider_failures: u64,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -91,6 +103,11 @@ pub(crate) struct SourceStats {
     pub switches: u64,
     #[serde(default)]
     pub tokens_output: u64,
+    /// Aggregate provider-attempt failures (including those that ultimately recovered via switch).
+    #[serde(default)]
+    pub provider_failures: u64,
+    #[serde(default)]
+    pub provider_failure_categories: BTreeMap<String, u64>,
     #[serde(default)]
     pub by_port: BTreeMap<u16, PortStats>,
     #[serde(default)]
@@ -152,6 +169,8 @@ pub(crate) struct RecordQuery {
     error_category: Option<String>,
     session: Option<String>,
     search: Option<String>,
+    range: String,
+    timezone_offset_minutes: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -186,33 +205,101 @@ pub(crate) struct RecordsResponse {
     page_size: u64,
     stats: serde_json::Value,
     facets: BTreeMap<String, BTreeMap<String, u64>>,
+    timeseries: Vec<TimeseriesBucket>,
 }
 
+use super::timeseries::{local_day_start, system_epoch_ms, TimeseriesBucket};
+
 impl RecordQuery {
-    fn from_params(params: &std::collections::HashMap<String, String>) -> Result<Self, String> {
+    fn from_params(
+        params: &std::collections::HashMap<String, String>,
+        timezone_offset_minutes: i32,
+    ) -> Result<Self, String> {
         let mut query = Self {
             page: 1,
             page_size: 50,
             sort_by: "started_epoch_ms".to_string(),
             sort_desc: true,
+            timezone_offset_minutes,
             ..Self::default()
         };
         for (key, value) in params {
             let value = value.trim();
-            if value.is_empty() { continue; }
+            if value.is_empty() {
+                continue;
+            }
             match key.as_str() {
-                "page" => query.page = value.parse().map_err(|_| format!("invalid page: {value}"))?,
-                "page_size" => query.page_size = value.parse().map_err(|_| format!("invalid page_size: {value}"))?,
+                "page" => {
+                    query.page = value
+                        .parse()
+                        .map_err(|_| format!("invalid page: {value}"))?
+                }
+                "page_size" => {
+                    query.page_size = value
+                        .parse()
+                        .map_err(|_| format!("invalid page_size: {value}"))?
+                }
+                "range" => {
+                    if !matches!(value, "today" | "week" | "all") {
+                        return Err(format!("invalid range: {value}"));
+                    }
+                    query.range = value.to_string();
+                }
                 "sort_by" => {
-                    if !matches!(value, "started_epoch_ms" | "updated_epoch_ms" | "finished_epoch_ms" | "duration_ms" | "attempts" | "failed_attempts" | "switches" | "usage_input_tokens" | "usage_output_tokens" | "usage_total_tokens" | "usage_cached_tokens") {
+                    if !matches!(
+                        value,
+                        "started_epoch_ms"
+                            | "updated_epoch_ms"
+                            | "finished_epoch_ms"
+                            | "duration_ms"
+                            | "attempts"
+                            | "failed_attempts"
+                            | "switches"
+                            | "usage_input_tokens"
+                            | "usage_output_tokens"
+                            | "usage_total_tokens"
+                            | "usage_cached_tokens"
+                            | "result"
+                            | "scope.port"
+                            | "meta.entry_protocol"
+                            | "meta.endpoint"
+                            | "meta.route_reason"
+                            | "meta.provider"
+                            | "meta.finish_reason"
+                            | "timing_internal_ms"
+                    ) {
                         return Err(format!("invalid sort field: {value}"));
                     }
                     query.sort_by = value.to_string();
                 }
-                "sort_order" => query.sort_desc = match value { "asc" => false, "desc" => true, _ => return Err(format!("invalid sort order: {value}")) },
-                "time_from_ms" => query.time_from_ms = Some(value.parse().map_err(|_| format!("invalid time_from_ms: {value}"))?),
-                "time_to_ms" => query.time_to_ms = Some(value.parse().map_err(|_| format!("invalid time_to_ms: {value}"))?),
-                "port" => query.port = Some(value.parse().map_err(|_| format!("invalid port: {value}"))?),
+                "sort_order" => {
+                    query.sort_desc = match value {
+                        "asc" => false,
+                        "desc" => true,
+                        _ => return Err(format!("invalid sort order: {value}")),
+                    }
+                }
+                "time_from_ms" => {
+                    query.time_from_ms = Some(
+                        value
+                            .parse()
+                            .map_err(|_| format!("invalid time_from_ms: {value}"))?,
+                    )
+                }
+                "time_to_ms" => {
+                    query.time_to_ms = Some(
+                        value
+                            .parse()
+                            .map_err(|_| format!("invalid time_to_ms: {value}"))?,
+                    )
+                }
+                "port" => {
+                    query.port = Some(
+                        value
+                            .parse()
+                            .map_err(|_| format!("invalid port: {value}"))?,
+                    )
+                }
                 "provider" => query.provider = Some(value.to_string()),
                 "model" => query.model = Some(value.to_string()),
                 "route" => query.route = Some(value.to_string()),
@@ -224,63 +311,205 @@ impl RecordQuery {
                 "error_category" => query.error_category = Some(value.to_string()),
                 "session" => query.session = Some(value.to_string()),
                 "search" => query.search = Some(value.to_string()),
+                "timezone_offset_minutes" => {
+                    query.timezone_offset_minutes = value
+                        .parse()
+                        .map_err(|_| format!("invalid timezone_offset_minutes: {value}"))?
+                }
                 _ => {}
             }
         }
-        if query.page == 0 || query.page_size == 0 || query.page_size > 200 { return Err("page and page_size must be between 1..200".to_string()); }
+        if query.page == 0 || query.page_size == 0 || query.page_size > 300 {
+            return Err("page and page_size must be between 1..300".to_string());
+        }
+        if matches!(query.range.as_str(), "today" | "week") {
+            let now_ms = system_epoch_ms()?;
+            let today_start = local_day_start(now_ms, query.timezone_offset_minutes);
+            query.time_from_ms = Some(match query.range.as_str() {
+                "today" => today_start,
+                _ => today_start.saturating_sub(6 * 24 * 60 * 60 * 1000),
+            });
+        }
         Ok(query)
     }
 
     fn matches(&self, row: &QueryRow) -> bool {
-        if self.time_from_ms.is_some_and(|from| row.started_epoch_ms < from) { return false; }
-        if self.time_to_ms.is_some_and(|to| row.started_epoch_ms > to) { return false; }
-        if self.port.is_some_and(|port| row.scope.port != port) { return false; }
+        if self
+            .time_from_ms
+            .is_some_and(|from| row.started_epoch_ms < from)
+        {
+            return false;
+        }
+        if self.time_to_ms.is_some_and(|to| row.started_epoch_ms > to) {
+            return false;
+        }
+        if self.port.is_some_and(|port| row.scope.port != port) {
+            return false;
+        }
         let meta_value = |name: &str| row.meta.get(name).and_then(serde_json::Value::as_str);
-        if self.provider.as_deref().is_some_and(|value| meta_value("provider") != Some(value)) { return false; }
-        if self.model.as_deref().is_some_and(|value| meta_value("model") != Some(value)) { return false; }
-        if self.route.as_deref().is_some_and(|value| meta_value("route") != Some(value)) { return false; }
-        if self.entry_protocol.as_deref().is_some_and(|value| meta_value("entry_protocol") != Some(value)) { return false; }
-        if self.execution_mode.as_deref().is_some_and(|value| meta_value("execution_mode") != Some(value)) { return false; }
-        if self.transport.as_deref().is_some_and(|value| meta_value("transport") != Some(value)) { return false; }
-        if self.response_type.as_deref().is_some_and(|value| meta_value("response_status") != Some(value)) { return false; }
-        if self.error_category.as_deref().is_some_and(|value| meta_value("error_category") != Some(value)) { return false; }
-        if self.session.as_deref().is_some_and(|value| row.scope.session.as_deref() != Some(value)) { return false; }
-        if let Some(status) = &self.status { if row.result.as_deref() != Some(status) { return false; } }
-        if let Some(search) = self.search.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        if self
+            .provider
+            .as_deref()
+            .is_some_and(|value| meta_value("provider") != Some(value))
+        {
+            return false;
+        }
+        if self
+            .model
+            .as_deref()
+            .is_some_and(|value| meta_value("model") != Some(value))
+        {
+            return false;
+        }
+        if self
+            .route
+            .as_deref()
+            .is_some_and(|value| meta_value("route") != Some(value))
+        {
+            return false;
+        }
+        if self
+            .entry_protocol
+            .as_deref()
+            .is_some_and(|value| meta_value("entry_protocol") != Some(value))
+        {
+            return false;
+        }
+        if self
+            .execution_mode
+            .as_deref()
+            .is_some_and(|value| meta_value("execution_mode") != Some(value))
+        {
+            return false;
+        }
+        if self
+            .transport
+            .as_deref()
+            .is_some_and(|value| meta_value("transport") != Some(value))
+        {
+            return false;
+        }
+        if self
+            .response_type
+            .as_deref()
+            .is_some_and(|value| meta_value("response_status") != Some(value))
+        {
+            return false;
+        }
+        if self
+            .error_category
+            .as_deref()
+            .is_some_and(|value| meta_value("error_category") != Some(value))
+        {
+            return false;
+        }
+        if self
+            .session
+            .as_deref()
+            .is_some_and(|value| row.scope.session.as_deref() != Some(value))
+        {
+            return false;
+        }
+        if let Some(status) = &self.status {
+            if status == "active" {
+                if row.result.is_some() {
+                    return false;
+                }
+            } else if row.result.as_deref() != Some(status) {
+                return false;
+            }
+        }
+        if let Some(search) = self
+            .search
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
             let search = search.to_lowercase();
-            let haystacks = [Some(row.request_key.clone()), row.meta.get("request_id").and_then(Value::as_str).map(str::to_string), row.meta.get("model").and_then(Value::as_str).map(str::to_string), row.meta.get("provider").and_then(Value::as_str).map(str::to_string), row.meta.get("error_detail").and_then(Value::as_str).map(str::to_string), row.scope.workdir.clone(), row.scope.session.clone()];
-            if !haystacks.iter().flatten().any(|value| value.to_lowercase().contains(&search)) { return false; }
+            let haystacks = [
+                Some(row.request_key.clone()),
+                row.meta
+                    .get("request_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                row.meta
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                row.meta
+                    .get("provider")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                row.meta
+                    .get("error_detail")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                row.scope.workdir.clone(),
+                row.scope.session.clone(),
+            ];
+            if !haystacks
+                .iter()
+                .flatten()
+                .any(|value| value.to_lowercase().contains(&search))
+            {
+                return false;
+            }
         }
         true
     }
 
-    fn sort_key(&self, row: &QueryRow) -> (u64, u64) {
+    fn sort_key(&self, row: &QueryRow) -> (String, u64) {
         let usage_number = |field: &str| -> u64 {
-            row.usage.as_ref()
+            row.usage
+                .as_ref()
                 .and_then(|usage| usage.get(field))
                 .and_then(Value::as_u64)
                 .unwrap_or(0)
         };
+        let meta_text = |name: &str| -> String {
+            row.meta
+                .get(name)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let numeric = |value: u64| -> String { format!("{value:020}") };
         let primary = match self.sort_by.as_str() {
-            "updated_epoch_ms" => row.updated_epoch_ms,
-            "finished_epoch_ms" => row.finished_epoch_ms.unwrap_or(u64::MAX),
-            "duration_ms" => row.duration_ms.unwrap_or(u64::MAX),
-            "attempts" => row.attempts,
-            "failed_attempts" => row.failed_attempts,
-            "switches" => row.switches,
-            "usage_input_tokens" => usage_number("input_tokens"),
-            "usage_output_tokens" => usage_number("output_tokens"),
-            "usage_total_tokens" => usage_number("total_tokens"),
-            "usage_cached_tokens" => usage_number("cached_tokens"),
-            _ => row.started_epoch_ms,
+            "result" => row.result.clone().unwrap_or_default(),
+            "scope.port" => numeric(row.scope.port as u64),
+            "meta.entry_protocol" => meta_text("entry_protocol"),
+            "meta.endpoint" => meta_text("endpoint"),
+            "meta.route_reason" => meta_text("route_reason"),
+            "meta.provider" => meta_text("provider"),
+            "meta.finish_reason" => meta_text("finish_reason"),
+            "updated_epoch_ms" => numeric(row.updated_epoch_ms),
+            "finished_epoch_ms" => numeric(row.finished_epoch_ms.unwrap_or(u64::MAX)),
+            "duration_ms" => numeric(row.duration_ms.unwrap_or(u64::MAX)),
+            "timing_internal_ms" => numeric(row.timing_internal_ms.unwrap_or(0)),
+            "attempts" => numeric(row.attempts),
+            "failed_attempts" => numeric(row.failed_attempts),
+            "switches" => numeric(row.switches),
+            "usage_input_tokens" => numeric(usage_number("input_tokens")),
+            "usage_output_tokens" => numeric(usage_number("output_tokens")),
+            "usage_total_tokens" => numeric(usage_number("total_tokens")),
+            "usage_cached_tokens" => numeric(usage_number("cached_tokens")),
+            _ => numeric(row.started_epoch_ms),
         };
         (primary, row.updated_epoch_ms)
     }
 }
 
-fn facet_add(facets: &mut BTreeMap<String, BTreeMap<String, u64>>, name: &str, value: Option<&str>) {
+fn facet_add(
+    facets: &mut BTreeMap<String, BTreeMap<String, u64>>,
+    name: &str,
+    value: Option<&str>,
+) {
     if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-        *facets.entry(name.to_string()).or_default().entry(value.to_string()).or_default() += 1;
+        *facets
+            .entry(name.to_string())
+            .or_default()
+            .entry(value.to_string())
+            .or_default() += 1;
     }
 }
 
@@ -390,6 +619,7 @@ fn merge_stats(target: &mut SourceStats, source: &SourceStats) {
     target.cancelled += source.cancelled;
     target.switches += source.switches;
     target.tokens_output += source.tokens_output;
+    target.provider_failures += source.provider_failures;
     for (port, stats) in &source.by_port {
         let target_port = target.by_port.entry(*port).or_default();
         target_port.total += stats.total;
@@ -399,46 +629,100 @@ fn merge_stats(target: &mut SourceStats, source: &SourceStats) {
         target_port.cancelled += stats.cancelled;
         target_port.switches += stats.switches;
         target_port.tokens_output += stats.tokens_output;
+        target_port.provider_failures += stats.provider_failures;
     }
     for (category, count) in &source.error_categories {
         *target.error_categories.entry(category.clone()).or_default() += count;
     }
+    for (category, count) in &source.provider_failure_categories {
+        *target
+            .provider_failure_categories
+            .entry(category.clone())
+            .or_default() += count;
+    }
 }
 
-async fn records(axum::extract::State(state): axum::extract::State<AppState>, raw_query: RawQuery) -> Response {
-    let params: std::collections::HashMap<String, String> =
-        raw_query
-            .0
-            .map(|query| parse_query_params(&query))
-            .unwrap_or_default();
-    let query = match RecordQuery::from_params(&params) {
+async fn records(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    raw_query: RawQuery,
+) -> Response {
+    let params: std::collections::HashMap<String, String> = raw_query
+        .0
+        .map(|query| parse_query_params(&query))
+        .unwrap_or_default();
+    let timezone_offset_minutes = params
+        .get("timezone_offset_minutes")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(0);
+    let query = match RecordQuery::from_params(&params, timezone_offset_minutes) {
         Ok(query) => query,
-        Err(error) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response(),
+        Err(error) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response()
+        }
     };
     let ports = match configured_ports(&state) {
         Ok(ports) => ports,
-        Err(error) => return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response(),
+        Err(error) => {
+            return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
+        }
     };
     let client = reqwest::Client::new();
     let mut rows = Vec::new();
     for port in ports {
         match fetch_snapshot(&client, port).await {
             Ok(snapshot) => {
-                for (_key, row) in snapshot.requests { rows.push(row); }
+                for (_key, row) in snapshot.requests {
+                    rows.push(row);
+                }
             }
             Err(error) => {
-                return (StatusCode::BAD_GATEWAY, Json(json!({
-                    "error": format!("observability source {port} unavailable: {error}")
-                }))).into_response();
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({
+                        "error": format!("observability source {port} unavailable: {error}")
+                    })),
+                )
+                    .into_response();
             }
         }
     }
-    let rows: Vec<QueryRow> = rows
+    let rows: Vec<QueryRow> = match rows
         .into_iter()
-        .filter_map(|row| serde_json::to_value(row).ok())
-        .filter_map(|value| serde_json::from_value(value).ok())
-        .collect();
+        .map(|row| {
+            let value = serde_json::to_value(row)
+                .map_err(|error| format!("encode observability source row failed: {error}"))?;
+            serde_json::from_value(value)
+                .map_err(|error| format!("decode observability source row failed: {error}"))
+        })
+        .collect()
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
+        }
+    };
     let mut filtered: Vec<QueryRow> = rows.into_iter().filter(|row| query.matches(row)).collect();
+    let timeseries_rows: Vec<super::timeseries::TimeseriesRow<'_>> = filtered
+        .iter()
+        .map(|row| super::timeseries::TimeseriesRow {
+            started_epoch_ms: row.started_epoch_ms,
+            usage: row.usage.as_ref(),
+        })
+        .collect();
+    let timeseries = match super::timeseries::build_timeseries(
+        &timeseries_rows,
+        &query.range,
+        query.timezone_offset_minutes,
+    ) {
+        Ok(timeseries) => timeseries,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": error })),
+            )
+                .into_response()
+        }
+    };
     filtered.sort_by_cached_key(|row| {
         let key = query.sort_key(row);
         std::cmp::Reverse(key)
@@ -446,28 +730,148 @@ async fn records(axum::extract::State(state): axum::extract::State<AppState>, ra
     let total = filtered.len() as u64;
     let offset = ((query.page - 1) * query.page_size) as usize;
     let end = (offset + query.page_size as usize).min(filtered.len());
-    let page_rows: &[QueryRow] = if offset < filtered.len() { &filtered[offset..end] } else { &[] };
-    let mut stats = json!({"count":0,"input_tokens":0,"output_tokens":0,"cached_tokens":0,"cache_hit_rate_percent":0f64,"avg_duration_ms":0f64});
+    let page_rows: &[QueryRow] = if offset < filtered.len() {
+        &filtered[offset..end]
+    } else {
+        &[]
+    };
+    let mut stats = json!({
+        "count":0u64,
+        "success_count":0u64,
+        "error_count":0u64,
+        "cancelled_count":0u64,
+        "active_count":0u64,
+        "switch_count":0u64,
+        "input_tokens":0u64,
+        "output_tokens":0u64,
+        "cached_tokens":0u64,
+        "total_tokens":0u64,
+        "cache_hit_rate_percent":0f64,
+        "avg_duration_ms":0f64,
+        "provider_failure_count":0u64
+    });
     let mut facets = BTreeMap::new();
     let count = filtered.len() as f64;
-    let mut input=0; let mut output=0; let mut cached=0; let mut durations=0u64; let mut with_duration=0u64;
+    let mut input = 0;
+    let mut output = 0;
+    let mut cached = 0;
+    let mut cached_against_input = 0;
+    let mut durations = 0u64;
+    let mut with_duration = 0u64;
+    let mut total_token_count = 0;
     for row in &filtered {
-        input += row.usage.as_ref().and_then(|u| u.get("input_tokens")).and_then(Value::as_u64).unwrap_or(0);
-        output += row.usage.as_ref().and_then(|u| u.get("output_tokens")).and_then(Value::as_u64).unwrap_or(0);
-        cached += row.usage.as_ref().and_then(|u| u.get("cached_tokens")).and_then(Value::as_u64).unwrap_or(0);
-        if let Some(duration)=row.duration_ms { durations+=duration; with_duration+=1; }
+        input += row
+            .usage
+            .as_ref()
+            .and_then(|u| u.get("input_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        output += row
+            .usage
+            .as_ref()
+            .and_then(|u| u.get("output_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        cached += row
+            .usage
+            .as_ref()
+            .and_then(|u| u.get("cached_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        total_token_count += row
+            .usage
+            .as_ref()
+            .and_then(|u| u.get("total_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let row_input = row
+            .usage
+            .as_ref()
+            .and_then(|u| u.get("input_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let row_cached = row
+            .usage
+            .as_ref()
+            .and_then(|u| u.get("cached_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        cached_against_input += row_cached.min(row_input);
+        match row.result.as_deref() {
+            Some("success") => { stats["success_count"] = json!(stats["success_count"].as_u64().unwrap_or(0) + 1); }
+            Some("error") => { stats["error_count"] = json!(stats["error_count"].as_u64().unwrap_or(0) + 1); }
+            Some("cancelled") => { stats["cancelled_count"] = json!(stats["cancelled_count"].as_u64().unwrap_or(0) + 1); }
+            _ => { stats["active_count"] = json!(stats["active_count"].as_u64().unwrap_or(0) + 1); }
+        }
+        stats["switch_count"] = json!(stats["switch_count"].as_u64().unwrap_or(0) + row.switches);
+        let failed_attempts = row.failed_attempts;
+        if failed_attempts > 0 {
+            stats["provider_failure_count"] = json!(
+                stats["provider_failure_count"].as_u64().unwrap_or(0) + failed_attempts
+            );
+        }
+        if let Some(duration) = row.duration_ms {
+            durations += duration;
+            with_duration += 1;
+        }
         facet_add(&mut facets, "ports", Some(&row.scope.port.to_string()));
-        facet_add(&mut facets, "providers", row.meta.get("provider").and_then(Value::as_str));
-        facet_add(&mut facets, "models", row.meta.get("model").and_then(Value::as_str));
-        facet_add(&mut facets, "routes", row.meta.get("route").and_then(Value::as_str));
+        facet_add(
+            &mut facets,
+            "providers",
+            row.meta.get("provider").and_then(Value::as_str),
+        );
+        facet_add(
+            &mut facets,
+            "models",
+            row.meta.get("model").and_then(Value::as_str),
+        );
+        facet_add(
+            &mut facets,
+            "routes",
+            row.meta.get("route").and_then(Value::as_str),
+        );
         facet_add(&mut facets, "sessions", row.scope.session.as_deref());
-        facet_add(&mut facets, "response_types", row.meta.get("response_status").and_then(Value::as_str));
-        facet_add(&mut facets, "error_categories", row.meta.get("error_category").and_then(Value::as_str));
+        facet_add(
+            &mut facets,
+            "response_types",
+            row.meta.get("response_status").and_then(Value::as_str),
+        );
+        facet_add(
+            &mut facets,
+            "error_categories",
+            row.meta.get("error_category").and_then(Value::as_str),
+        );
+        if row.failed_attempts > 0 {
+            facet_add(
+                &mut facets,
+                "provider_failure_categories",
+                row.meta.get("error_category").and_then(Value::as_str),
+            );
+        }
     }
-    stats["count"]=json!(count as u64); stats["input_tokens"]=json!(input); stats["output_tokens"]=json!(output); stats["cached_tokens"]=json!(cached);
-    if input>0 { stats["cache_hit_rate_percent"]=json!((cached as f64 / input as f64)*100f64); }
-    if with_duration>0 { stats["avg_duration_ms"]=json!(durations as f64/with_duration as f64); }
-    Json(RecordsResponse { records:page_rows.to_vec(),total,page:query.page,page_size:query.page_size,stats,facets }).into_response()
+    stats["count"] = json!(count as u64);
+    stats["input_tokens"] = json!(input);
+    stats["output_tokens"] = json!(output);
+    stats["cached_tokens"] = json!(cached);
+    stats["total_tokens"] = json!(total_token_count);
+    if input > 0 {
+        // Clamp per-row cached to its input so cross-row accumulation never exceeds 100%.
+        stats["cache_hit_rate_percent"] =
+            json!((cached_against_input as f64 / input as f64) * 100f64);
+    }
+    if with_duration > 0 {
+        stats["avg_duration_ms"] = json!(durations as f64 / with_duration as f64);
+    }
+    Json(RecordsResponse {
+        records: page_rows.to_vec(),
+        total,
+        page: query.page,
+        page_size: query.page_size,
+        stats,
+        facets,
+        timeseries,
+    })
+    .into_response()
 }
 
 fn parse_query_params(raw: &str) -> std::collections::HashMap<String, String> {
@@ -549,10 +953,14 @@ pub(crate) async fn poll(
             Ok(envelope) if envelope.kind == "events" => {
                 if envelope.resync_required {
                     return (
-                        StatusCode::BAD_GATEWAY,
+                        StatusCode::CONFLICT,
                         Json(serde_json::json!({
-                            "error": format!("observability source {port} requires resync"),
-                            "error_code": "observability_resync_required"
+                            "error": "resync_required",
+                            "detail": format!(
+                                "observability source {port} evicted events below cursor {event_cursor}; caller must re-poll from cursor 0"
+                            ),
+                            "port": port,
+                            "resync_required": true
                         })),
                     )
                         .into_response();

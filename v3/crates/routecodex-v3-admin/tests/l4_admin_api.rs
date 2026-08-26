@@ -528,6 +528,30 @@ async fn observability_poll_aggregates_source_and_advances_cursor() {
 }
 
 #[tokio::test]
+async fn observability_records_terminal_error_not_in_provider_failure_facets() {
+    let _guard = OBSERVABILITY_TEST_LOCK.lock().await;
+    let (base, _state, _home) = bind_test_server().await;
+    let (_source_port, shutdown) = spawn_source_on_configured_port().await;
+
+    let response = http_client()
+        .get(format!("{base}/api/observability/records?page=1&page_size=10"))
+        .send()
+        .await
+        .expect("records response");
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await.expect("records json");
+
+    // Source row has failed_attempts=1, so provider_failure_categories must include it.
+    assert!(
+        body["facets"]["provider_failure_categories"]["provider_http_429"]
+            .as_u64()
+            .is_some(),
+        "provider failure with failed_attempts>0 must appear in facets: {body}"
+    );
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
 async fn observability_poll_fails_fast_when_source_unavailable() {
     let _guard = OBSERVABILITY_TEST_LOCK.lock().await;
     let (base, _state, _home) = bind_test_server().await;
@@ -548,7 +572,7 @@ async fn observability_poll_fails_fast_when_source_unavailable() {
 }
 
 #[tokio::test]
-async fn observability_poll_fails_fast_when_source_requires_resync() {
+async fn observability_poll_recovers_from_resync_using_snapshot_cursor() {
     let _guard = OBSERVABILITY_TEST_LOCK.lock().await;
     let (base, _state, _home) = bind_test_server().await;
     let (source_port, shutdown) = spawn_source_on_configured_port().await;
@@ -561,20 +585,14 @@ async fn observability_poll_fails_fast_when_source_requires_resync() {
         .expect("observability poll response");
     assert_eq!(
         response.status(),
-        reqwest::StatusCode::BAD_GATEWAY,
-        "resync_required must fail fast instead of merging incomplete events"
+        reqwest::StatusCode::OK,
+        "resync_required must recover from the fresh snapshot instead of failing the poll"
     );
     let body: serde_json::Value = response.json().await.expect("poll json");
-    assert!(
-        body["error"]
-            .as_str()
-            .is_some_and(|error| error.contains("resync")),
-        "resync reason present: {body}"
-    );
     assert_eq!(
-        body["error_code"].as_str(),
-        Some("observability_resync_required"),
-        "resync contract must be machine-readable"
+        body["sources"][0]["cursor"],
+        7,
+        "stale cursor must be replaced by the snapshot cursor after resync"
     );
     shutdown.send(()).unwrap();
 }

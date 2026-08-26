@@ -16,10 +16,101 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Unique request key: `<port>:<requestId>`.
 pub(crate) fn build_v3_obs_request_key(port: u16, request_id: &str) -> String {
     format!("{port}:{request_id}")
+}
+
+/// Record the terminal Error06 projection for the WebUI request ledger.
+/// This is the single error-to-WebUI projection owner; callers provide only
+/// the already-projected client status/body and request scope.
+pub(crate) fn record_v3_webui_error_projection(
+    observability: &V3WebuiObservability,
+    port: u16,
+    request_id: &str,
+    endpoint: &str,
+    entry_protocol: &str,
+    project_path: Option<&str>,
+    session: Option<&str>,
+    status: u16,
+    body: Option<&Value>,
+) -> Result<u64, String> {
+    let (error_category, error_detail) = body
+        .map(crate::v3_error_body_code_message)
+        .map(|(code, message)| (code, message))
+        .unwrap_or_else(|| {
+            (
+                format!("http_{status}"),
+                format!("HTTP status {status}"),
+            )
+        });
+    let request_key = build_v3_obs_request_key(port, request_id);
+    let scope = V3ObsScope {
+        port,
+        workdir: project_path.map(str::to_string),
+        session: session.map(str::to_string),
+    };
+    let meta = V3ObsRequestMeta {
+        request_id: request_id.to_string(),
+        endpoint: endpoint.to_string(),
+        entry_protocol: Some(entry_protocol.to_string()),
+        provider_status: Some(status),
+        response_status: Some("error".to_string()),
+        finish_reason: Some("error".to_string()),
+        route: Some("-".to_string()),
+        error_category: Some(error_category),
+        error_detail: Some(error_detail),
+        ..Default::default()
+    };
+    observability.record_observed(
+        V3ObsEventType::Failed,
+        &request_key,
+        scope,
+        meta,
+        &crate::V3RuntimeObservability::default(),
+    )
+}
+
+fn merge_v3_obs_request_meta(
+    previous: V3ObsRequestMeta,
+    incoming: V3ObsRequestMeta,
+) -> V3ObsRequestMeta {
+    let route = incoming
+        .route
+        .filter(|value| !value.trim().is_empty() && value != "-")
+        .or(previous.route);
+    V3ObsRequestMeta {
+        request_id: if incoming.request_id.is_empty() {
+            previous.request_id
+        } else {
+            incoming.request_id
+        },
+        endpoint: if incoming.endpoint.is_empty() {
+            previous.endpoint
+        } else {
+            incoming.endpoint
+        },
+        model: incoming.model.or(previous.model),
+        route,
+        route_reason: incoming.route_reason.or(previous.route_reason),
+        routing_group: incoming.routing_group.or(previous.routing_group),
+        pool: incoming.pool.or(previous.pool),
+        provider_id: incoming.provider_id.or(previous.provider_id),
+        auth_alias: incoming.auth_alias.or(previous.auth_alias),
+        provider_type: incoming.provider_type.or(previous.provider_type),
+        wire_model: incoming.wire_model.or(previous.wire_model),
+        provider: incoming.provider.or(previous.provider),
+        entry_protocol: incoming.entry_protocol.or(previous.entry_protocol),
+        execution_mode: incoming.execution_mode.or(previous.execution_mode),
+        transport: incoming.transport.or(previous.transport),
+        provider_status: incoming.provider_status.or(previous.provider_status),
+        response_status: incoming.response_status.or(previous.response_status),
+        finish_reason: incoming.finish_reason.or(previous.finish_reason),
+        error_category: incoming.error_category.or(previous.error_category),
+        error_detail: incoming.error_detail.or(previous.error_detail),
+    }
 }
 
 /// Event kinds per the observability contract.
@@ -65,6 +156,7 @@ pub(crate) struct V3ObsRequestMeta {
     pub endpoint: String,
     pub model: Option<String>,
     pub route: Option<String>,
+    pub route_reason: Option<String>,
     pub routing_group: Option<String>,
     pub pool: Option<String>,
     pub provider_id: Option<String>,
@@ -179,6 +271,7 @@ pub(crate) struct V3ObsRecordStats {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cached_tokens: u64,
+    pub cache_hit_tokens_clamped: u64,
     pub cache_hit_rate_percent: f64,
     pub avg_duration_ms: f64,
 }
@@ -216,6 +309,10 @@ pub(crate) struct V3ObsStats {
     pub tokens_output: u64,
     pub by_port: BTreeMap<u16, V3ObsPortStats>,
     pub error_categories: BTreeMap<String, u64>,
+    /// Aggregate provider-attempt failures across all rows, including those that ultimately
+    /// recovered via switch. Distinct from `error` (terminal request failures).
+    pub provider_failures: u64,
+    pub provider_failure_categories: BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -227,6 +324,7 @@ pub(crate) struct V3ObsPortStats {
     pub cancelled: u64,
     pub switches: u64,
     pub tokens_output: u64,
+    pub provider_failures: u64,
 }
 
 fn classify_v3_obs_error(
@@ -276,6 +374,7 @@ pub(crate) struct V3WebuiObservability {
 struct V3WebuiObservabilityInner {
     next_sequence: u64,
     requests: BTreeMap<String, V3ObsRequestRow>,
+    persisted_requests: BTreeMap<String, V3ObsRequestRow>,
     terminal_order: VecDeque<String>,
     terminal_keys: BTreeSet<String>,
     terminal_key_order: VecDeque<String>,
@@ -337,7 +436,8 @@ impl V3WebuiObservability {
             .lock()
             .map_err(|_| "v3 webui observability state is poisoned".to_string())?;
         for row in rows {
-            inner.requests.insert(row.request_key.clone(), row);
+            inner.requests.insert(row.request_key.clone(), row.clone());
+            inner.persisted_requests.insert(row.request_key.clone(), row);
         }
         drop(inner);
         Ok(handle)
@@ -404,20 +504,31 @@ impl V3WebuiObservability {
                 event_type_str
             ));
         }
-        if is_terminal
-            && !inner.requests.contains_key(request_key)
-            && inner.terminal_keys.contains(request_key)
-        {
+        if is_terminal && !inner.requests.contains_key(request_key) && inner.terminal_keys.contains(request_key) {
             inner.resync_after_sequence =
                 Some(inner.resync_after_sequence.unwrap_or(0).max(sequence));
+            return Ok(sequence);
+        }
+        let terminal_event_after_terminal_row = is_terminal
+            && inner
+                .requests
+                .get(request_key)
+                .is_some_and(|row| row.result.is_some());
+        if terminal_event_after_terminal_row {
             return Ok(sequence);
         }
 
         let mut row = inner.requests.get(request_key).cloned().unwrap_or_default();
         row.request_key = request_key.to_string();
         row.event_type = event_type_str.clone();
-        row.meta = meta;
-        row.scope = scope.clone();
+        row.meta = merge_v3_obs_request_meta(row.meta, meta);
+        row.scope.port = scope.port;
+        if scope.workdir.is_some() {
+            row.scope.workdir = scope.workdir.clone();
+        }
+        if scope.session.is_some() {
+            row.scope.session = scope.session.clone();
+        }
         row.updated_epoch_ms = now;
         if row.started_epoch_ms == 0 {
             row.started_epoch_ms = now;
@@ -429,8 +540,20 @@ impl V3WebuiObservability {
             V3ObsEventType::ProviderAttemptFailed => {
                 row.failed_attempts += 1;
                 let (category, detail) = classify_v3_obs_error(observability);
-                row.meta.error_category = category;
+                row.meta.error_category = category.clone();
                 row.meta.error_detail = detail;
+                inner.stats.provider_failures =
+                    inner.stats.provider_failures.saturating_add(1);
+                add_port_stats(&mut inner.stats, scope.port, |port| {
+                    port.provider_failures = port.provider_failures.saturating_add(1);
+                });
+                if let Some(category) = category.as_ref() {
+                    *inner
+                        .stats
+                        .provider_failure_categories
+                        .entry(category.clone())
+                        .or_default() += 1;
+                }
             }
             V3ObsEventType::ProviderSwitched => row.switches += 1,
             V3ObsEventType::Completed => {
@@ -449,6 +572,16 @@ impl V3WebuiObservability {
                 row.timing_external_ms = observability.timing.as_ref().map(|t| t.external.as_millis() as u64);
                 row.servertool = false;
                 row.stopless = observability.stopless_activation;
+                // Preserve the most recent provider-failure category for completed-but-recovered rows
+                // so the UI/facets keep the last attempt's error category even when the meta
+                // projection is otherwise rebuilt from a fresh payload here.
+                if row.meta.error_category.is_none() {
+                    let (category, detail) = classify_v3_obs_error(observability);
+                    if category.is_some() {
+                        row.meta.error_category = category;
+                        row.meta.error_detail = detail;
+                    }
+                }
                 inner.active.remove(request_key);
                 if !was_terminal {
                     inner.terminal_order.push_back(request_key.to_string());
@@ -540,6 +673,9 @@ impl V3WebuiObservability {
                 Self::append_persisted_row(path, &row)?;
             }
         }
+        if is_terminal && self.persistence_path.is_some() {
+            inner.persisted_requests.insert(request_key.to_string(), row.clone());
+        }
         while inner.requests.len() > 2048 {
             let Some(eviction_key) = inner.terminal_order.pop_front() else {
                 break;
@@ -579,6 +715,13 @@ impl V3WebuiObservability {
             .lock()
             .map_err(|_| "v3 webui observability state is poisoned".to_string())?;
         let requests = inner.requests.clone();
+        // Overlay persisted rows so dashboard sees rows that survived the 2048-window eviction.
+        let mut requests = requests;
+        for (key, row) in inner.persisted_requests.iter() {
+            if !requests.contains_key(key) {
+                requests.insert(key.clone(), row.clone());
+            }
+        }
         let stats = inner.stats.clone();
         let mut stats = stats;
         for port_stats in stats.by_port.values_mut() {
@@ -687,9 +830,19 @@ impl V3WebuiObservability {
 
     pub(crate) fn records(&self, query: &V3ObsQuery) -> Result<V3ObsRecordsPage, String> {
         let inner = self.inner.lock().map_err(|_| "...".to_string())?;
-        let mut filtered: Vec<_> = inner.requests.values()
+        // Key-indexed overlay: in-memory row takes precedence over persisted state
+        // so each request appears exactly once in records/stats/facets.
+        let mut merged: std::collections::BTreeMap<&str, &V3ObsRequestRow> = std::collections::BTreeMap::new();
+        for (key, row) in inner.persisted_requests.iter() {
+            merged.insert(key.as_str(), row);
+        }
+        for (key, row) in inner.requests.iter() {
+            merged.insert(key.as_str(), row);
+        }
+        let mut filtered: Vec<V3ObsRequestRow> = merged.values()
             .filter(|row| Self::matches_query(row, query))
-            .cloned().collect();
+            .map(|row| (*row).clone())
+            .collect();
         let direction = if query.sort_desc { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
         filtered.sort_by(|left, right| {
             direction.then(Self::sort_value(left, query.sort_by).cmp(&Self::sort_value(right, query.sort_by)))
@@ -701,13 +854,18 @@ impl V3WebuiObservability {
         let records = filtered.get(offset..end).unwrap_or_default().to_vec();
         let mut facet_values = BTreeMap::new();
         let mut stats = V3ObsRecordStats::default();
-        for row in inner.requests.values().filter(|row| Self::matches_query(row, query)) {
+        // Use the same merged authoritative row set for stats/facets as for records/total
+        // so evicted-persisted rows are never omitted from aggregate projections.
+        for row in merged.values().filter(|row| Self::matches_query(row, query)) {
             stats.count += 1;
             if let Some(duration) = row.duration_ms { stats.avg_duration_ms += duration as f64; }
             if let Some(usage) = &row.usage {
+                let row_input = usage.input_tokens.unwrap_or(0);
+                let row_cached = usage.cached_tokens.unwrap_or(0);
                 stats.input_tokens += usage.input_tokens.unwrap_or(0);
                 stats.output_tokens += usage.output_tokens.unwrap_or(0);
                 stats.cached_tokens += usage.cached_tokens.unwrap_or(0);
+                stats.cache_hit_tokens_clamped += row_cached.min(row_input);
             }
             Self::facet("ports", Some(&row.scope.port.to_string()), &mut facet_values);
             Self::facet("providers", row.meta.provider.as_deref(), &mut facet_values);
@@ -718,7 +876,7 @@ impl V3WebuiObservability {
             Self::facet("error_categories", row.meta.error_category.as_deref(), &mut facet_values);
         }
         if stats.count > 0 && stats.input_tokens > 0 {
-            stats.cache_hit_rate_percent = stats.cached_tokens as f64 / stats.input_tokens as f64 * 100.0;
+            stats.cache_hit_rate_percent = stats.cache_hit_tokens_clamped as f64 / stats.input_tokens as f64 * 100.0;
         }
         if stats.count > 0 {
             stats.avg_duration_ms /= stats.count as f64;
@@ -815,6 +973,76 @@ mod tests {
         assert_eq!(row.result.as_deref(), Some("success"));
         assert!(row.duration_ms.is_some());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn provider_attempt_failure_survives_completed_meta_rebuild() {
+        let o = V3WebuiObservability::new();
+        let key = build_v3_obs_request_key(5555, "r-failure-then-success");
+        o.record(V3ObsEventType::Started, &key, scope(5555), meta_with_full("r-failure-then-success"))
+            .unwrap();
+
+        let mut failure_event = crate::V3RuntimeProviderFailureObservation::default();
+        failure_event.error_type = Some("provider_http_502".to_string());
+        failure_event.message = "provider returned HTTP 502".to_string();
+        let mut obs = crate::V3RuntimeObservability::default();
+        obs.provider_failure_events = vec![failure_event];
+
+        let mut failed_meta = meta_with_full("r-failure-then-success");
+        failed_meta.error_category = Some("provider_http_502".to_string());
+        failed_meta.error_detail = Some("provider returned HTTP 502".to_string());
+        o.record_observed(V3ObsEventType::ProviderAttemptFailed, &key, scope(5555), failed_meta, &obs)
+            .unwrap();
+
+        // Completed rebuilds meta from the fresh payload; the category must survive.
+        o.record_observed(V3ObsEventType::Completed, &key, scope(5555), meta_with_full("r-failure-then-success"), &obs)
+            .unwrap();
+        let snapshot = o.snapshot(0).unwrap();
+        let row = snapshot.requests.get(&key).expect("row");
+        assert_eq!(
+            row.meta.error_category.as_deref(),
+            Some("provider_http_502"),
+            "error_category must survive Completed meta rebuild"
+        );
+        assert!(row.failed_attempts >= 1);
+        assert!(snapshot.stats.provider_failures >= 1);
+        assert!(snapshot
+            .stats
+            .provider_failure_categories
+            .get("provider_http_502")
+        .is_some());
+    }
+
+    #[test]
+    fn terminal_provider_attempt_failure_counts_in_snapshot() {
+        let o = V3WebuiObservability::new();
+        let key = build_v3_obs_request_key(5555, "r-failure-terminal");
+        o.record(V3ObsEventType::Started, &key, scope(5555), meta_with_full("r-failure-terminal"))
+            .unwrap();
+
+        let mut failure_event = crate::V3RuntimeProviderFailureObservation::default();
+        failure_event.error_type = Some("provider_http_503".to_string());
+        failure_event.message = "provider returned HTTP 503".to_string();
+        let mut obs = crate::V3RuntimeObservability::default();
+        obs.provider_failure_events = vec![failure_event];
+
+        let mut failed_meta = meta_with_full("r-failure-terminal");
+        failed_meta.error_category = Some("provider_http_503".to_string());
+        failed_meta.error_detail = Some("provider returned HTTP 503".to_string());
+        o.record_observed(V3ObsEventType::ProviderAttemptFailed, &key, scope(5555), failed_meta.clone(), &obs)
+            .unwrap();
+        o.record_observed(V3ObsEventType::Failed, &key, scope(5555), failed_meta, &obs)
+            .unwrap();
+
+        let snapshot = o.snapshot(0).unwrap();
+        assert_eq!(snapshot.stats.error, 1);
+        assert_eq!(snapshot.stats.provider_failures, 1);
+        assert_eq!(snapshot.stats.by_port.get(&5555).map(|p| p.provider_failures), Some(1));
+        assert!(snapshot
+            .stats
+            .provider_failure_categories
+            .get("provider_http_503")
+            .is_some());
     }
 
     #[test]
@@ -935,6 +1163,77 @@ mod tests {
         assert_eq!(row.result.as_deref(), Some("error"));
         assert_eq!(snap.stats.error, 1);
         assert_eq!(snap.stats.success, 0);
+    }
+
+    #[test]
+    fn failed_terminal_cannot_become_completed_or_cancelled() {
+        let o = V3WebuiObservability::new();
+        let key = build_v3_obs_request_key(5555, "r-error-terminal");
+        let mut failed_meta = meta_with_full("r-error-terminal");
+        failed_meta.error_category = Some("provider_http_429".to_string());
+        failed_meta.error_detail = Some("rate limited".to_string());
+
+        o.record(V3ObsEventType::Started, &key, scope(5555), failed_meta.clone())
+            .unwrap();
+        o.record(V3ObsEventType::Failed, &key, scope(5555), failed_meta)
+            .unwrap();
+        o.record(V3ObsEventType::Completed, &key, scope(5555), meta_with_full("r-error-terminal"))
+            .unwrap();
+        o.record(V3ObsEventType::Cancelled, &key, scope(5555), meta_with_full("r-error-terminal"))
+            .unwrap();
+
+        let snapshot = o.snapshot(0).unwrap();
+        let row = snapshot.requests.get(&key).expect("failed row");
+        assert_eq!(row.event_type, "request.failed");
+        assert_eq!(row.result.as_deref(), Some("error"));
+        assert_eq!(row.meta.error_category.as_deref(), Some("provider_http_429"));
+        assert_eq!(snapshot.stats.error, 1);
+        assert_eq!(snapshot.stats.success, 0);
+        assert_eq!(snapshot.stats.cancelled, 0);
+    }
+
+    #[test]
+    fn error_projection_preserves_route_identity_and_updates_error_fields() {
+        let o = V3WebuiObservability::new();
+        let request_id = "r-error-projection";
+        let key = build_v3_obs_request_key(5555, request_id);
+        let mut started = meta_with_full(request_id);
+        started.route_reason = Some("explicit provider target".to_string());
+        started.provider_status = None;
+        o.record(V3ObsEventType::Started, &key, scope(5555), started)
+            .unwrap();
+        o.record(V3ObsEventType::RouteSelected, &key, scope(5555), meta_with_full(request_id))
+            .unwrap();
+
+        let body = serde_json::json!({
+            "error": {
+                "code": "provider_http_599",
+                "message": "provider response parse failed"
+            }
+        });
+        record_v3_webui_error_projection(
+            &o,
+            5555,
+            request_id,
+            "/v1/chat/completions",
+            "openai-chat",
+            Some("/w"),
+            Some("s1"),
+            599,
+            Some(&body),
+        )
+        .unwrap();
+
+        let snapshot = o.snapshot(0).unwrap();
+        let row = snapshot.requests.get(&key).expect("projected error row");
+        assert_eq!(row.result.as_deref(), Some("error"));
+        assert_eq!(row.meta.route.as_deref(), Some("grp.pool"));
+        assert_eq!(row.meta.provider.as_deref(), Some("prov"));
+        assert_eq!(row.meta.model.as_deref(), Some("gpt-test"));
+        assert_eq!(row.meta.route_reason.as_deref(), Some("explicit provider target"));
+        assert_eq!(row.meta.provider_status, Some(599));
+        assert_eq!(row.meta.error_category.as_deref(), Some("provider_http_599"));
+        assert_eq!(row.meta.error_detail.as_deref(), Some("provider response parse failed"));
     }
 
     #[test]
@@ -1082,6 +1381,47 @@ mod tests {
         let snapshot = o.snapshot(0).unwrap();
         assert_eq!(snapshot.requests.len(), 1);
         assert_eq!(snapshot.stats.success, 1);
+    }
+
+    #[test]
+    fn cache_hit_rate_clamps_per_row_under_one_hundred_percent() {
+        let o = V3WebuiObservability::new();
+        let request_id = "cache-clamp";
+        let key = build_v3_obs_request_key(5555, request_id);
+        let m = meta(request_id);
+        let mut obs = crate::V3RuntimeObservability::default();
+        obs.usage = Some(crate::V3RuntimeUsageSummary {
+            input_tokens: Some(100),
+            output_tokens: Some(50),
+            total_tokens: Some(150),
+            cached_tokens: Some(150), // > input; cross-row accumulation would exceed 100%.
+        });
+        o.record(V3ObsEventType::Started, &key, scope(5555), m.clone())
+            .unwrap();
+        o.record_observed(V3ObsEventType::Completed, &key, scope(5555), m, &obs)
+            .unwrap();
+        let query = V3ObsQuery {
+            page: 1,
+            page_size: 10,
+            sort_by: V3ObsSortField::Started,
+            sort_desc: true,
+            time_from_ms: None,
+            time_to_ms: None,
+            port: None,
+            provider: None,
+            model: None,
+            route: None,
+            entry_protocol: None,
+            execution_mode: None,
+            transport: None,
+            status: None,
+            response_type: None,
+            error_category: None,
+            session: None,
+            search: None,
+        };
+        let page = o.records(&query).unwrap();
+        assert_eq!(page.stats.cache_hit_rate_percent, 100.0);
     }
 
     #[test]

@@ -968,6 +968,8 @@ async fn pending_endpoint(
                 V3ErrorProjectionConsoleInput {
                     endpoint: &path,
                     request_id: &request_id,
+                    entry_protocol: &entry_protocol,
+                    session_id: None,
                     status: frame.status,
                     error_chain: &frame.error_chain,
                     body: match &frame.body {
@@ -1039,6 +1041,8 @@ fn pending_binding_output_response(
 struct V3ErrorProjectionConsoleInput<'input> {
     endpoint: &'input str,
     request_id: &'input str,
+    entry_protocol: &'input str,
+    session_id: Option<&'input str>,
     status: u16,
     error_chain: &'input [&'static str],
     body: Option<&'input Value>,
@@ -1049,8 +1053,10 @@ struct V3ErrorProjectionConsoleInput<'input> {
 fn emit_relay_error_chain_if_any(
     state: &Arc<V3ListenerState>,
     trace_scope: &V3DebugTraceScope,
+    entry_protocol: &str,
     path: &str,
     request_id: &str,
+    session_id: Option<&str>,
     status: u16,
     error_chain: Option<&[&'static str]>,
     body: Option<&Value>,
@@ -1063,6 +1069,8 @@ fn emit_relay_error_chain_if_any(
         V3ErrorProjectionConsoleInput {
             endpoint: path,
             request_id,
+            entry_protocol,
+            session_id,
             status,
             error_chain,
             body,
@@ -1100,6 +1108,23 @@ fn record_and_emit_v3_error_projection(
         input.body,
         input.project_path,
     );
+    if let Err(error) = webui_observability::record_v3_webui_error_projection(
+        &state.webui_observability,
+        state.server.port,
+        input.request_id,
+        input.endpoint,
+        input.entry_protocol,
+        input.project_path,
+        input.session_id,
+        input.status,
+        input.body,
+    ) {
+        let line = format_v3_console_timed_content(
+            "[webui-observability]",
+            &format!("req={} error={}", input.request_id, error),
+        );
+        append_v3_human_console_line(state, &line);
+    }
     None
 }
 

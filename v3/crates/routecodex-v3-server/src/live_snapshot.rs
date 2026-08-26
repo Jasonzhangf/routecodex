@@ -853,6 +853,8 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             V3ErrorProjectionConsoleInput {
                 endpoint,
                 request_id,
+                entry_protocol,
+                session_id: Some(&console_context.identity.session_id),
                 status: output.status,
                 error_chain,
                 body: relay_error_body_for_console(&output.client_body),
@@ -885,19 +887,14 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             started_at,
             output.stream_observation.is_none(),
         );
-        // Typed WebUI projection: relay terminal (Completed/Failed).
-        let terminal =
-            if v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref()) {
-                V3ObsEventType::Failed
-            } else {
-                V3ObsEventType::Completed
-            };
-        if let Err(error) = crate::console::record_v3_webui_event_for_context(
-            console_context,
-            terminal,
-            observability,
-        ) {
-            crate::console::emit_v3_webui_projection_failure(console_context, &error);
+        if !v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref()) {
+            if let Err(error) = crate::console::record_v3_webui_event_for_context(
+                console_context,
+                V3ObsEventType::Completed,
+                observability,
+            ) {
+                crate::console::emit_v3_webui_projection_failure(console_context, &error);
+            }
         }
     }
     responses_relay_output_response(
