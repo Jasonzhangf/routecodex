@@ -894,8 +894,13 @@
         "EpochLease::release",
         "ActiveEpochStore",
         "ActiveEpochStore::empty",
+        "ActiveEpochStore::prepare",
+        "ActiveEpochStore::commit",
+        "ActiveEpochStore::abort",
         "ActiveEpochStore::admit",
         "ActiveEpochStore::publish",
+        "ActiveEpochStore::drain",
+        "ActiveEpochStore::rollback",
         "ActiveEpochStore::record_execution_failure",
         "ActiveEpochStore::active_snapshot"
       ],
