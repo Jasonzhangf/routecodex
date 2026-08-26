@@ -1222,5 +1222,26 @@
     ,{"gate_id":"v4_runtime_006_response_error_red","status":"active","owner_module_id":"routecodex-v4-runtime","feature_ids":["V4-RUNTIME-006"],"command":"cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_ports --locked","argv":["cargo","test","--manifest-path","Cargo.toml","-p","routecodex-v4-runtime","--test","l2_ports","--locked"],"producer":{"adapter":"cargo","identity":"v4_runtime_006_response_error_red"},"evidence_role":"red_gate","input_paths":["crates/routecodex-v4-runtime/src/response_error_port.rs","crates/routecodex-v4-runtime/tests/l2_ports.rs"]}
     ,{"gate_id":"v4_runtime_006_response_error_boundary","status":"active","owner_module_id":"routecodex-v4-runtime","feature_ids":["V4-RUNTIME-006"],"command":"cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_ports --locked","argv":["cargo","test","--manifest-path","Cargo.toml","-p","routecodex-v4-runtime","--test","l2_ports","--locked"],"producer":{"adapter":"cargo","identity":"v4_runtime_006_response_error_boundary"},"evidence_role":"boundary_audit","input_paths":["crates/routecodex-v4-runtime/src/response_error_port.rs"]}
     ,{"gate_id":"v4_runtime_006_response_error_plane","status":"active","owner_module_id":"routecodex-v4-runtime","feature_ids":["V4-RUNTIME-006"],"command":"cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_ports --locked","argv":["cargo","test","--manifest-path","Cargo.toml","-p","routecodex-v4-runtime","--test","l2_ports","--locked"],"producer":{"adapter":"cargo","identity":"v4_runtime_006_response_error_plane"},"evidence_role":"plane_isolation","input_paths":["crates/routecodex-v4-runtime/src/response_error_port.rs","crates/routecodex-v4-runtime/tests/l2_ports.rs"]}
+    ,{
+      "gate_id": "v4_cordis_concurrency_reconciliation",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["gate_id:v4.cordis-concurrency-reconciliation"],
+      "command": "node scripts/verify-v4-cordis-concurrency-reconciliation.mjs",
+      "argv": ["node", "scripts/verify-v4-cordis-concurrency-reconciliation.mjs"],
+      "evidence_role": "positive",
+      "input_paths": ["contracts/v4-cordis-concurrency-reconciliation.manifest.json", "docs/goals/v4-cordis-concurrency-reconciliation.md"],
+      "required_for": ["merge_queue_admission"]
+    },{
+      "gate_id": "v4_cordis_concurrency_reconciliation_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["gate_id:v4.cordis-concurrency-reconciliation"],
+      "command": "node scripts/verify-v4-cordis-concurrency-reconciliation.mjs --red-self-test",
+      "argv": ["node", "scripts/verify-v4-cordis-concurrency-reconciliation.mjs", "--red-self-test"],
+      "evidence_role": "red_gate",
+      "input_paths": ["contracts/v4-cordis-concurrency-reconciliation.manifest.json"],
+      "required_for": ["merge_queue_admission"]
+    }
   ]
 }
