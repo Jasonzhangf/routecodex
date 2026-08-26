@@ -554,6 +554,14 @@
       ]
     },
     {
+      "gate_id": "v4_server_wire_evidence_bundle",
+      "command": "cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-server --test l2_server wire_evidence --locked",
+      "required_for": [
+        "v4.server.console_identity_evidence",
+        "v4.error.raw_wire_evidence"
+      ]
+    },
+    {
       "gate_id": "v4_cordis_host_l3_regression",
       "command": "cargo build --manifest-path Cargo.toml -p routecodex-v4-node-container --bin routecodex-v4-node-container-host --locked && node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs",
       "required_for": [

@@ -1811,6 +1811,7 @@ resources:
   owner_symbols:
   - V4ErrorEvidenceFlushOnTerminalFailure
   - WireEvidenceRecord
+  - ProviderExchangeEvidence
   - WireEvidenceError
   identity:
   - entryProtocol

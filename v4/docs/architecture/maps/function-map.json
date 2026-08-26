@@ -592,6 +592,7 @@
         "V4RequestIdCounter::next_request_identity",
         "V4ErrorEvidenceFlushOnTerminalFailure::new",
         "V4ErrorEvidenceFlushOnTerminalFailure::flush",
+        "V4ErrorEvidenceFlushOnTerminalFailure::capture_provider_exchange",
         "V4ErrorEvidenceFlushOnTerminalFailure::records"
       ],
       "required_gates": [
