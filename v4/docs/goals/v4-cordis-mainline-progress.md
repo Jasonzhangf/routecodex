@@ -23,7 +23,7 @@ M00 -> M01 -> M02 --┐
 | M00-T05 live admission closeout | `blocked_by_provider_websocket_v2_endpoint` | T02 + T04 | A 首轮 HTTP 200；同 response-id continuation 要求 Responses WebSocket v2，当前 profile 无 HTTP 101；C continuation 503；不得绕过 |
 | M00-T06 canonical B wire evidence contract | `merged` | T01 + T03 | 已合并主树 `0bcd0e3ff` / merge `9f9ebc25d`；固定同 requestId 的 provider-request/provider-response diagnostic bundle，不改变 provider/continuation 语义 |
 | M00-T07 live B capture binding | `blocked_by_live_transport_owner` | T05 + M08 transport owner | 真实 provider-bound/raw capture 尚未接入 live transport；不得由 server contract 自行重建或伪造 B 证据 |
-| M00-T09 no-active-epoch admission | `in_progress` | T01 + T02 | 为“无 active epoch 不接受业务请求”补可构造的 empty store 与正反测试，owner 为 ActiveEpochStore |
+| M00-T09 no-active-epoch admission | `merged` | T01 + T02 | 已合并独立 task `23220dceb`，V4 主树 merge `4298257666`；ActiveEpochStore 无 active epoch 时 fail-closed，6 项 L2、架构 gates、Active-linked build 与 AGY review 通过 |
 | M01 NativePlugin ABI | `blocked_by_M00` | M00 | M00 完成后可 claim |
 | M02 generic factory | `blocked_by_M01` | M01 | 不可抢跑 |
 | M03 Cordis daemon | `blocked_by_M00` | M00 | M00 后与 M01 并行 |

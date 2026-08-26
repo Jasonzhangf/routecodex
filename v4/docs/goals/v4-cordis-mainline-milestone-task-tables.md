@@ -22,7 +22,7 @@
 | M00-T05 | `feature_id:v4.cordis_m00.live_admission_closeout` | T02 + T04 | blocked_by_provider_websocket_v2_endpoint | `codex/v4-cordis-refactor-main` |
 | M00-T06 | `resource_id:v4.error.raw_wire_evidence` | T01 + T03 | merged (`0bcd0e3ff`, main-tree merge `9f9ebc25d`) | `codex/v4-cordis-refactor-main` |
 | M00-T07 | `feature_id:v4.cordis_m00.live_capture_binding` | T05 + M08 transport owner | blocked_by_live_transport_owner | `codex/v4-cordis-refactor-main` |
-| M00-T09 | `feature_id:v4.cordis_m00.empty_epoch_admission` | T01 + T02 | in_progress | `codex/v4-cordis-refactor-main` |
+| M00-T09 | `feature_id:v4.cordis_m00.empty_epoch_admission` | T01 + T02 | merged (`23220dceb`, main-tree merge `4298257666`) | `codex/v4-cordis-refactor-main` |
 
 ## M01 — NativePlugin ABI
 
