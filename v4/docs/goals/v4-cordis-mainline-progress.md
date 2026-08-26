@@ -30,10 +30,10 @@ M00 -> M01 -> M02 --┐
 | M03 Cordis daemon | `merged` | M00 structural contracts | task `8be1e7ced` 已合入重构主树 `3a425633c`；daemon 3/3、host 联测 30/30、red 10/10、release build 通过 |
 | D0 differential harness | `in_progress` | M00 structural contracts | 已有独立 worker；与 M03/M08 并行，T05 不传播阻塞 |
 | M04 epoch transaction | `merged` | M02 + M03 | task `9914a69fe` 已以 merge `ba4af6c02` 合入重构主树；目标树定向 gates 全部通过，active-link 仍缺 frozen-consumer-registry 环境文件 |
-| M05 ExecutionEngine | `in_progress` | M04 | 已 claim 独立 worktree；源码与 M05 专项验证完成，交付门禁被 Active artifact、feature-layer admission、isolation wiring、install/live 基线阻断；未 AGY/commit/merge |
+| M05 ExecutionEngine | `in_progress` | M04 | 唯一 owner 在原 worktree 继续重跑 `v4/` 入口的 frozen Active artifact、consumer resolver、feature-layer build-guard、isolation；源码/专项验证完成，但尚未通过 admission，未 AGY/commit/merge |
 | M06 request JSON | `blocked` | M05 | 必须串行 |
 | M07 response JSON | `blocked` | M06 | 必须串行 |
-| M08 async data plane | `in_progress_with_execution_boundary` | M00 structural contracts + M00-T07 | 原 worktree/claim 已恢复；native transport、chunked stream、async listener 已推进。runtime handler async stream/cancellation、M00-T07 live evidence、full gates/live/AGY 未闭环；不得覆盖 M05 execution owner |
+| M08 async data plane | `in_progress_with_execution_boundary` | M00 structural contracts + M00-T07 | 原 worktree/claim 已恢复；provider/server native transport、chunked stream、async listener 已推进。已重新派发原 worker继续独立合同/边界/测试/evidence；runtime-bin async stream/cancellation、M00-T07 live evidence、full gates/live/AGY 未闭环；不得覆盖 M05 execution owner |
 | M09 SSE | `blocked` | M07 + M08 | 必须串行 |
 | M10 state semantics | `blocked` | M09 | 必须串行 |
 | M11 protocols/tools/admin | `contract_preflight_merged` | M10 | M11-T01 前置合同已合入；实现仍依赖 M10，既有 host owner/catalog drift 仍需后续治理 |
@@ -51,10 +51,19 @@ M00 -> M01 -> M02 --┐
 |---|---|---|---|---|
 | execution owner | M05-T01 | `in_progress` | 否 | 唯一 ExecutionEngine 正在退役旧 runtime execution surface；完成 Active/feature-layer/install/live 前不得 AGY、commit、merge |
 | differential governance | D0-T01 | `in_progress` | 否 | 已有独立 worker/claim 处理 layer-batch gate；不得重复 claim 或抢改其 gate 文件 |
-| async data plane | M08-T01 | `in_progress_with_execution_boundary` | 是（受边界约束） | 已复用原会话继续；只推进 native async transport/handler/cancellation/evidence，遇 M05 execution-owner 同语义冲突即停并报告，不覆盖 M05 |
+| async data plane | M08-T01 | `in_progress_with_execution_boundary` | 是（受边界约束） | 已复用原会话继续；只推进 provider/server native async transport/handler contract/cancellation/evidence，遇 M05 execution-owner 同语义冲突即停并报告，不覆盖 M05 |
 | provider live admission | M00-T05 | `blocked` | 否 | Responses WebSocket v2 / credential blocker；不得猜 endpoint、伪造 101 或绕过真实 continuation |
 | next dependency | M06-T01 | `blocked` | 否 | 必须等待 M05 合入重构主 tree 并完成主树复验 |
 | governance audit | M00-T10 | `merged_and_cleaned` | 否 | merge `de7596514`；red/positive 主树复验通过；claim、worktree、branch 已释放/清理 |
 | protocol/tools/admin contract | M11-T01 | `merged_and_cleaned` | 否 | merge `d48956155`；合同/host/red gates 主树复验通过；resource binding 的既有 host owner/catalog drift 已记录；claim、worktree、branch 已释放/清理 |
 
-当前可并发 lane：M08-T01，以及后续经 owner 审核开放的独立治理 lane。M00-T10、M11-T01 已完成合入并清理；不得重复 claim。M08 使用既有 worktree，继续受 M05 execution-owner 边界约束。M05、D0 继续保持原 owner；M06 仍等待 M05 合入并完成主树复验。
+当前可并发 lane：M08-T01 的 provider/server 独立 slice；D0-T01 仍由既有 owner 处理。M05 是唯一 execution owner，正在正确的 `v4/` 工作目录重跑 Active/admission gate；M06 及后续 milestone 继续等待 M05 合入重构主树并完成主树复验。M00-T10、M11-T01 已完成合入并清理，不得重复 claim；M08 使用既有 worktree，未获 M05 明确交接前不得修改 runtime-bin、maps、ExecutionEngine 或 NodeContainer。
+
+## 当前派发记录（2026-08-26，证据优先）
+
+| worker | 已派发动作 | 当前结论 |
+|---|---|---|
+| M05-T01（原会话复用） | 从声明 worktree 的 `v4/` 入口重跑 frozen Active、consumer resolver、feature-layer build-guard、isolation；若全过再执行 install → managed restart → health/live → AGY → commit/queue | 进行中；在 admission 与 live 证据闭环前禁止交付、合并或清理 |
+| M08-T01（原会话复用） | 只完成 provider/server async transport、chunked response、cancellation/deadline、合同/边界/定向 red/green/evidence；等待 M05 交接后再接 runtime-bin | 进行中但受 execution-owner 边界约束；不得宣称完整 M08 |
+| D0-T01（既有 owner） | 继续其 differential/build-guard gate 收口 | 已有 claim，禁止重复派发或抢改 gate 文件 |
+| M00-T10 / M11-T01 | 已合入重构主树后完成主树复验、release claim、worktree/branch cleanup | 已完成并清理 |
