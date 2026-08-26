@@ -317,8 +317,8 @@
       {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:19a38f374876225682de890790957a2416b42343c72d4803774868871b6732d8"},
       {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:b41d13a123a6d9b6e38281fa535143de683938d875d74f4bf895d6301d59da6e"}
     ],
-    "wiring_started": true,
-    "wiring_edges": ["surface:crates/routecodex-v4-runtime-bin/**:sha256:b41d13a123a6d9b6e38281fa535143de683938d875d74f4bf895d6301d59da6e"],
+    "wiring_started": false,
+    "wiring_edges": [],
     "resource_refs": {
       "merge_queue_state": ".appsdk/records/merge-queue-state.json",
       "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"
