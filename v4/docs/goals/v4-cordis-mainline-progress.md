@@ -54,5 +54,7 @@ M00 -> M01 -> M02 --┐
 | async data plane | M08-T01 | `paused` | 否 | 与 M05 共享 runtime-bin 语义和文件；待 M05 merge 或明确交接后恢复，原 worktree/dirty 保留 |
 | provider live admission | M00-T05 | `blocked` | 否 | Responses WebSocket v2 / credential blocker；不得猜 endpoint、伪造 101 或绕过真实 continuation |
 | next dependency | M06-T01 | `blocked` | 否 | 必须等待 M05 合入重构主 tree 并完成主树复验 |
+| governance audit | M00-T10 | `dispatched` | 是 | 已复用 M02 会话；仅治理文档/机器任务清单/红测，独立于 M05/D0/M08；等待新 claim/worktree/evidence |
+| protocol/tools/admin contract | M11-T01 | `dispatched` | 是 | 已复用 M03 会话；仅 M11 前置合同与验证映射，独立于 M05/D0/M08；等待新 claim/worktree/evidence |
 
-结论：当前无新的可安全 claim 的并发任务。新增 worker 会与 M05、D0 或 M08 产生 owner/file 竞争；先完成现有 lane 的 merge/复验/清理，再开放后续 milestone。
+当前可并发 lane：M00-T10 与 M11-T01。两者均必须从 `codex/v4-cordis-refactor-main` 当前 HEAD 建立独立 worktree，并分别完成 claim、red-first、边界审计、定向验证、evidence、merge queue；不得修改父任务进度文件、M05 runtime-bin、D0 gate 或 M08 async data-plane。M05、D0、M08 继续保持原 owner；M06 仍等待 M05 合入并完成主树复验。
