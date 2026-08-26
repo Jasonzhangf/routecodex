@@ -4,7 +4,7 @@
 //! `V4HubRespInbound02Parsed`. It only consumes the adjacent
 //! `v4.response.provider_raw` resource and writes the adjacent
 //! `v4.response.normal_payload` resource. It never performs response
-//! governance, tool harvest, continuation save/release or provider/client
+//! governance, tool harvest or provider/client
 //! repair, and it never writes control/error/debug/snapshot facts into data.
 
 use routecodex_v4_cordis_bridge::ExecCtx;

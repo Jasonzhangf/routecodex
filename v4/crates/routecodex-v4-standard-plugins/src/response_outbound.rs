@@ -3,7 +3,7 @@
 //! This module owns the `client_semantic_projection` and `frame_build`
 //! descriptors/handles for `V4HubRespOutbound04ClientSemantic` and
 //! `V4ServerRespOutbound06ClientFrame`. It only performs adjacent response
-//! projection; it does not implement continuation save/release, SSE framing,
+//! projection; it does not implement SSE framing,
 //! provider-specific repair, tool harvest or response governance.
 
 use routecodex_v4_cordis_bridge::ExecCtx;
