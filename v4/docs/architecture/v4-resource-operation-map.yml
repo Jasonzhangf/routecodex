@@ -1836,6 +1836,43 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
+- resource_id: v4.provider.bound_raw_evidence
+  axis: diagnostic
+  verification_gate:
+  - v4_provider_bound_raw_evidence_positive
+  - v4_provider_bound_raw_evidence_red
+  resource_kind: provider_bound_failure_scoped_diagnostic_artifact
+  lifecycle: v4.provider.bound_raw_evidence
+  owner_crate: routecodex-v4-provider
+  owner_node: V4ProviderSseOut07WireBoundary
+  owner_symbols:
+  - PROVIDER_BOUND_RAW_EVIDENCE_OWNER
+  - ProviderBoundRawEvidence
+  - ProviderBoundRawEvidenceOwnerContract
+  - ProviderBoundRawEvidenceBindingError
+  identity:
+  - requestId
+  semantic_contract:
+    contract_only: true
+    live_transport_owner: m08_async_native_provider_transport
+    provider_bound_only: true
+    raw_pair_required: true
+    same_request_id_required: true
+    failure_behavior: fail_closed
+    may_enter_metadata_center: false
+  allowed_writers:
+  - ProviderBoundRawEvidenceOwnerContract::bind
+  allowed_readers:
+  - developer_diagnostics
+  - incident_replay
+  forbidden_writers:
+  - routecodex-v4-server
+  - routecodex-v4-runtime
+  - routecodex-v4-runtime-bin
+  - V4ControlMetadataCenter
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
 - resource_id: v4.plugin_management.active_pointer
   axis: control
   verification_gate:

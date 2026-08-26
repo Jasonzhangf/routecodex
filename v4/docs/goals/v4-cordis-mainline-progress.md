@@ -22,7 +22,7 @@ M00 -> M01 -> M02 --┐
 | M00-T04 每 milestone 独立 claim 表 | `merged` | T03 | 已合并 `5e0090f9d` |
 | M00-T05 live admission closeout | `blocked_by_provider_websocket_v2_endpoint` | T02 + T04 | A 首轮 HTTP 200；同 response-id continuation 要求 Responses WebSocket v2，当前 profile 无 HTTP 101；C continuation 503；不得绕过 |
 | M00-T06 canonical B wire evidence contract | `merged` | T01 + T03 | 已合并主树 `0bcd0e3ff` / merge `9f9ebc25d`；固定同 requestId 的 provider-request/provider-response diagnostic bundle，不改变 provider/continuation 语义 |
-| M00-T07 live B capture binding contract | `available` | T06 | M00 只绑定未来 live transport 的真实 provider-bound/raw evidence owner；不实现 M08 runtime、不伪造 B 证据；M08 完成后再做 live integration |
+| M00-T07 live B capture binding contract | `in_progress` | T06 | 绑定 provider-owned raw pair contract；无合法 owner/binding fail-closed；不实现 M08 runtime、不伪造 B 证据；M08 完成后再做 live integration |
 | M00-T08 dependency reconciliation | `merged` | T01 + T03 + T04 | 已合并独立 task `764351194`，V4 主树 merge `0f353bee8`；拆分 T07 contract 与 M08 async/native runtime，消除循环依赖 |
 | M00-T09 no-active-epoch admission | `merged` | T01 + T02 | 已合并独立 task `23220dceb`，V4 主树 merge `4298257666`；ActiveEpochStore 无 active epoch 时 fail-closed，6 项 L2、架构 gates、Active-linked build 与 AGY review 通过 |
 | M01 NativePlugin ABI | `blocked_by_M00` | M00 | M00 完成后可 claim |

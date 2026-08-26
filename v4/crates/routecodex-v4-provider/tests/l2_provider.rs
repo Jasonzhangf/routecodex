@@ -4,7 +4,9 @@ use routecodex_v4_provider::{
     build_anthropic_messages_wire, build_openai_chat_wire, build_protocol_wire,
     build_responses_local_continuation_wire, load_profile, normalize_provider_response,
     normalize_provider_sse_frame, send_openai_chat, validate_auth_alias, verify_profile_auth,
-    AvailabilityRecord, AvailabilityState, V4Availability01SessionScoped,
+    AvailabilityRecord, AvailabilityState, ProviderBoundRawEvidenceBindingError,
+    ProviderBoundRawEvidenceOwnerContract, V4Availability01SessionScoped,
+    PROVIDER_BOUND_RAW_EVIDENCE_OWNER,
 };
 use serde_json::json;
 use std::fs;
@@ -57,6 +59,62 @@ fn session_scoped_availability_positive_and_red() {
         .mark_success("srv-1", "rg-1", "session-a", "provider-1")
         .expect("success clears cooldown");
     assert!(registry.is_eligible("srv-1", "rg-1", "session-a", "provider-1"));
+}
+
+#[test]
+fn provider_bound_raw_evidence_owner_binding_positive_and_red() {
+    let bound = ProviderBoundRawEvidenceOwnerContract::bind(
+        PROVIDER_BOUND_RAW_EVIDENCE_OWNER,
+        "req-live-b-1",
+        br#"{"model":"wire"}"#,
+        br#"{"error":{"code":"upstream"}}"#,
+    )
+    .expect("canonical provider owner must bind both raw artifacts");
+    assert_eq!(bound.request_id, "req-live-b-1");
+    assert_eq!(bound.provider_request, br#"{"model":"wire"}"#);
+    assert_eq!(bound.provider_response, br#"{"error":{"code":"upstream"}}"#);
+
+    assert_eq!(
+        ProviderBoundRawEvidenceOwnerContract::bind(
+            "routecodex-v4-server::V4ErrorEvidenceFlushOnTerminalFailure",
+            "req-live-b-1",
+            b"request",
+            b"response",
+        )
+        .expect_err("diagnostic server owner cannot claim provider-bound evidence"),
+        ProviderBoundRawEvidenceBindingError::InvalidOwner {
+            owner: "routecodex-v4-server::V4ErrorEvidenceFlushOnTerminalFailure".to_string(),
+        }
+    );
+}
+
+#[test]
+fn provider_bound_raw_evidence_binding_fails_closed_on_missing_owner_or_artifact() {
+    assert_eq!(
+        ProviderBoundRawEvidenceOwnerContract::bind("", "req-1", b"request", b"response")
+            .expect_err("missing owner must fail closed"),
+        ProviderBoundRawEvidenceBindingError::MissingOwner
+    );
+    assert_eq!(
+        ProviderBoundRawEvidenceOwnerContract::bind(
+            PROVIDER_BOUND_RAW_EVIDENCE_OWNER,
+            "req-1",
+            b"",
+            b"response",
+        )
+        .expect_err("missing provider request must fail closed"),
+        ProviderBoundRawEvidenceBindingError::MissingProviderRequest
+    );
+    assert_eq!(
+        ProviderBoundRawEvidenceOwnerContract::bind(
+            PROVIDER_BOUND_RAW_EVIDENCE_OWNER,
+            "req-1",
+            b"request",
+            b"",
+        )
+        .expect_err("missing provider response must fail closed"),
+        ProviderBoundRawEvidenceBindingError::MissingProviderResponse
+    );
 }
 
 #[test]

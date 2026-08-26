@@ -537,6 +537,32 @@
       ]
     },
     {
+      "gate_id": "v4_provider_bound_raw_evidence_positive",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-provider",
+      "feature_ids": [
+        "v4.cordis_m00.live_capture_binding"
+      ],
+      "command": "cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-provider --test l2_provider provider_bound_raw_evidence_owner_binding_positive_and_red --locked",
+      "evidence_role": "positive",
+      "required_for": [
+        "v4.provider.bound_raw_evidence_binding"
+      ]
+    },
+    {
+      "gate_id": "v4_provider_bound_raw_evidence_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-provider",
+      "feature_ids": [
+        "v4.cordis_m00.live_capture_binding"
+      ],
+      "command": "cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-provider --test l2_provider provider_bound_raw_evidence_binding_fails_closed_on_missing_owner_or_artifact --locked",
+      "evidence_role": "red_gate",
+      "required_for": [
+        "v4.provider.bound_raw_evidence_binding"
+      ]
+    },
+    {
       "gate_id": "v4_provider_availability_runtime_regression",
       "command": "cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-provider --test l2_provider session_scoped_availability_positive_and_red --locked && cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-runtime-bin --locked",
       "required_for": [
