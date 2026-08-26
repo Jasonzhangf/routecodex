@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "v4://contracts/native-plugin-catalog.schema.json",
+  "title": "V4 Native Plugin Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "catalog_hash", "plugins"],
+  "properties": {"schema_version": {"const": 1}, "catalog_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "plugins": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["plugin_id", "version", "owner", "artifact_hash", "contract_hash", "supported_node_roles", "services_provided", "services_injected", "resources_read", "resources_written", "required_tests"], "properties": {"plugin_id": {"type": "string", "minLength": 1}, "version": {"type": "string", "minLength": 1}, "owner": {"type": "string", "minLength": 1}, "artifact_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "contract_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "supported_node_roles": {"type": "array", "items": {"type": "string"}}, "services_provided": {"type": "array", "items": {"type": "string"}}, "services_injected": {"type": "array", "items": {"type": "string"}}, "resources_read": {"type": "array", "items": {"type": "string"}}, "resources_written": {"type": "array", "items": {"type": "string"}}, "required_tests": {"type": "array", "items": {"type": "string"}, "minItems": 1}}}}}
+}
