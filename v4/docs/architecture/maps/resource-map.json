@@ -1034,6 +1034,21 @@
       "status": "active"
     },
     {
+      "resource_id": "v4.cordis.host_daemon",
+      "owner": "routecodex-v4-cordis-host::CordisHostDaemon",
+      "truth_store": "cordis/routecodex-v4-cordis-host/src/daemon.mjs",
+      "allowed_operations": [
+        "start",
+        "handshake",
+        "snapshot",
+        "heartbeat",
+        "reconcile",
+        "shutdown"
+      ],
+      "status": "active",
+      "feature_id": "v4.cordis_host_daemon"
+    },
+    {
       "resource_id": "v4.node_container.lifecycle",
       "owner": "routecodex-v4-node-container::NodeContainer",
       "truth_store": "crates/routecodex-v4-node-container/src/lib.rs",

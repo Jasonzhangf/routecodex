@@ -941,6 +941,37 @@
       ]
     },
     {
+      "function_id": "v4.cordis.host_daemon",
+      "owner": "routecodex-v4-cordis-host",
+      "feature_id": "v4.cordis_host_daemon",
+      "status": "active",
+      "entry_symbols": [
+        "startCordisHostDaemon",
+        "CordisHostDaemonClient",
+        "CordisHostDaemonClient::connect",
+        "CordisHostDaemonClient::querySnapshot",
+        "CordisHostDaemonClient::heartbeat",
+        "CordisHostDaemonClient::reconcile",
+        "CordisHostDaemonError"
+      ],
+      "entry_paths": [
+        "cordis/routecodex-v4-cordis-host/src/daemon.mjs"
+      ],
+      "source_paths": [
+        "cordis/routecodex-v4-cordis-host/src/daemon.mjs",
+        "cordis/routecodex-v4-cordis-host/tests/daemon.test.mjs",
+        "cordis/routecodex-v4-cordis-host/tests/resources/daemon-child.mjs"
+      ],
+      "required_gates": [
+        "v4_cordis_host_l3_regression",
+        "v4_parity_gate_cordis_host",
+        "v4_parity_gate_cordis_host_red"
+      ],
+      "resource_bindings": ["v4.cordis.host_daemon"],
+      "resource_ids": ["v4.cordis.host_daemon"],
+      "mainline_binding": "forbidden_before_integration"
+    },
+    {
       "function_id": "v4.node_container.lifecycle_dispatch",
       "owner": "routecodex-v4-node-container",
       "entry_symbols": [

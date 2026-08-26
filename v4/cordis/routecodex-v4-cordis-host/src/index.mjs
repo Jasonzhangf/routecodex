@@ -741,3 +741,10 @@ export function createNodePlugin(id, factory, config = undefined, planEntry = un
   }
   return Object.freeze({ id, factory, config, planEntry });
 }
+
+export {
+  CORDIS_HOST_PROTOCOL_VERSION,
+  CordisHostDaemonClient,
+  CordisHostDaemonError,
+  startCordisHostDaemon,
+} from './daemon.mjs';
