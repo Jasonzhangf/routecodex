@@ -26,6 +26,7 @@ const COMPILED_MANIFEST = process.env.RCCV4_MANIFEST
 let RCCV4_HOST = process.env.RCCV4_LISTEN;
 let ADMISSION_MODEL = process.env.RCCV4_ADMISSION_MODEL;
 const admissionRun = `${Date.now()}-${process.pid}`;
+const directSession = `admission-direct-${admissionRun}`;
 const relayJsonSession = `admission-relay-json-${admissionRun}`;
 const relaySseSession = `admission-relay-sse-${admissionRun}`;
 
