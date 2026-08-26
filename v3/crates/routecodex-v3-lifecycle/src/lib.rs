@@ -22,6 +22,8 @@ mod control_plane;
 use control_plane::*;
 mod exec_restart;
 use exec_restart::*;
+mod foreground;
+use foreground::*;
 mod fs_locks;
 use fs_locks::*;
 mod pid_scan;
@@ -524,8 +526,7 @@ impl V3ManagedLifecycle {
                 None,
             )?;
         }
-        self.run_managed_child_with_declaration(executable_path, declaration, manifest)
-            .await
+        exec_foreground_start(executable_path.as_ref(), &declaration, self, &instance_dir)
     }
 
     pub async fn status(

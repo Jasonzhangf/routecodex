@@ -320,6 +320,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         V3ErrorProjectionConsoleInput {
                             endpoint: &path,
                             request_id: &request_id,
+                            entry_protocol: &entry_protocol,
+                            session_id: None,
                             status: frame.status,
                             error_chain: &frame.error_chain,
                             body: match &frame.body {
@@ -374,6 +376,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     V3ErrorProjectionConsoleInput {
                         endpoint: &path,
                         request_id: &request_id,
+                        entry_protocol: &entry_protocol,
+                        session_id: None,
                         status: frame.status,
                         error_chain: &frame.error_chain,
                         body: match &frame.body {
@@ -939,35 +943,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
             };
         if output.error_chain.is_some() {
-            let console_context = build_v3_console_emission_context(
-                &state,
-                &entry_protocol,
-                &path,
-                &request_identity,
-                &request_headers,
-                &payload,
-            );
-            if let Err(error) = record_v3_webui_projected_runtime_failure_for_context(
-                &console_context,
-                output
-                    .error_class
-                    .expect("terminal Error06 output must carry Error02 classification"),
-                Some(
-                    output
-                        .error_detail
-                        .as_deref()
-                        .expect("terminal Error06 output must carry source detail"),
-                ),
-                output.status,
-                "json",
-            ) {
-                emit_v3_webui_projection_failure(&console_context, &error);
-            }
             if let Some(response) = emit_relay_error_chain_if_any(
                 &state,
                 &trace_scope,
+                &entry_protocol,
                 &path,
                 &request_id,
+                snapshot_session_id.as_deref(),
                 output.status,
                 output.error_chain.as_deref(),
                 openai_chat_error_body_for_console(&output.client_body),
@@ -1069,8 +1051,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         if let Some(response) = emit_relay_error_chain_if_any(
             &state,
             &trace_scope,
+            &entry_protocol,
             &path,
             &request_id,
+            snapshot_session_id.as_deref(),
             output.status,
             output.error_chain.as_deref(),
             Some(&output.client_response),
@@ -1129,8 +1113,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         if let Some(response) = emit_relay_error_chain_if_any(
             &state,
             &trace_scope,
+            &entry_protocol,
             &path,
             &request_id,
+            snapshot_session_id.as_deref(),
             output.status,
             output.error_chain.as_deref(),
             gemini_error_body_for_console(&output.client_body),

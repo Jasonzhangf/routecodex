@@ -314,6 +314,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                 server_id: standardized.server_id.clone(),
                 routing_group_id,
                 pool_id: "continuation_exact_pin".to_string(),
+                route_classification_reason: "default:route-selected".to_string(),
                 target_index: 0,
                 target_kind: routecodex_v3_config::V3RouteTargetKind::ProviderModel,
                 target_id: None,

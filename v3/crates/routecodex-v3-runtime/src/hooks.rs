@@ -1040,6 +1040,7 @@ mod tests {
                     server_id: "direct-model-binding".to_string(),
                     routing_group_id: "direct-model-binding".to_string(),
                     pool_id: "default".to_string(),
+                    route_classification_reason: "direct:model-binding".to_string(),
                     target_index: 0,
                     target_kind: V3RouteTargetKind::ProviderModel,
                     target_id: None,

@@ -793,6 +793,7 @@ fn test_direct_observability(
         execution_mode: "direct".to_string(),
         transport: "json".to_string(),
         routing_group_id: Some("coding".to_string()),
+        route_classification_reason: Some("direct:model-binding".to_string()),
         pool_id: Some("direct".to_string()),
         provider_id: Some("second".to_string()),
         auth_alias: Some("key".to_string()),
@@ -2957,6 +2958,8 @@ fn error_projection_appends_human_console_failure_line() {
         V3ErrorProjectionConsoleInput {
             endpoint: "/v1/responses",
             request_id: "req-error-console",
+            entry_protocol: "responses",
+            session_id: None,
             status: 500,
             error_chain: &routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS,
             body: Some(&json!({
@@ -2970,6 +2973,14 @@ fn error_projection_appends_human_console_failure_line() {
     );
 
     assert!(response.is_none());
+    let snapshot = state.webui_observability.snapshot(0).unwrap();
+    let row = snapshot
+        .requests
+        .get(&format!("{}:req-error-console", state.server.port))
+        .expect("Error06 projection must create a WebUI request row");
+    assert_eq!(row.result.as_deref(), Some("error"));
+    assert_eq!(row.meta.provider_status, Some(500));
+    assert_eq!(row.meta.error_category.as_deref(), Some("runtime_error"));
     let log = std::fs::read_to_string(&log_file).unwrap();
     let plain_log = strip_test_ansi(&log);
     assert!(

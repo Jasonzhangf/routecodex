@@ -943,14 +943,18 @@ pub(crate) fn emit_v3_observability_console_lines(
     if include_usage {
         let elapsed = started_at.elapsed();
         emit_v3_stopless_console_line(context, observability);
-        if v3_webui_terminal_event_for_response(status, observability)
-            == V3ObsEventType::Completed
-        {
+        let terminal_event = v3_webui_terminal_event_for_response(status, observability);
+        if terminal_event == V3ObsEventType::Completed {
             if let Err(error) = record_v3_webui_event_for_context(
                 context,
                 V3ObsEventType::Completed,
                 observability,
             ) {
+                emit_v3_webui_projection_failure(context, &error);
+            }
+        }
+        if terminal_event == V3ObsEventType::Failed {
+            if let Err(error) = record_v3_webui_error_for_context(context, status, None) {
                 emit_v3_webui_projection_failure(context, &error);
             }
         }

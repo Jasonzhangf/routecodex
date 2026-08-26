@@ -3,6 +3,7 @@ pub mod dashboard;
 pub mod observability;
 pub mod providers;
 pub mod reload;
+pub mod timeseries;
 pub mod routes;
 
 use crate::AppState;

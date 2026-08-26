@@ -218,6 +218,7 @@ pub struct V3RuntimeObservability {
     pub execution_mode: String,
     pub transport: String,
     pub routing_group_id: Option<String>,
+    pub route_classification_reason: Option<String>,
     pub pool_id: Option<String>,
     pub provider_id: Option<String>,
     pub auth_alias: Option<String>,

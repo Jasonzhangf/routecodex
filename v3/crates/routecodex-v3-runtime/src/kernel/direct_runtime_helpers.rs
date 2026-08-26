@@ -644,6 +644,7 @@ pub(crate) fn build_v3_direct_runtime_observability(
         execution_mode: "direct".to_string(),
         transport: transport.to_string(),
         routing_group_id: Some(selected.route.routing_group_id.clone()),
+        route_classification_reason: Some(selected.route.route_classification_reason.clone()),
         pool_id: Some(selected.route.pool_id.clone()),
         provider_id: Some(selected.candidate.provider_id.clone()),
         auth_alias: Some(selected.candidate.auth_alias.clone()),

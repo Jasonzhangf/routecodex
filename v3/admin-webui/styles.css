@@ -120,6 +120,69 @@ h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
 .panel .row .name { font-weight: 600; flex: 1; min-width: 0; }
 .panel .row .meta { color: var(--text-dim); font-size: 12px; font-family: var(--mono); }
 
+.chart-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 220px));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.chart-controls label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.chart-controls select,
+.pagination select {
+  min-height: 38px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.chart-panel { padding: 18px; }
+.bar-chart {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  min-height: 190px;
+}
+.bar-column {
+  flex: 1 1 0;
+  min-width: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 7px;
+  text-align: center;
+}
+.bar-column .bar {
+  width: 100%;
+  min-height: 1px;
+  border: 1px solid var(--border-strong, #666);
+  border-bottom: none;
+  background: linear-gradient(to top, #2a2a2a, #4d4d4d);
+}
+.bar-column .axis {
+  height: 18px;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  padding: 2px 0;
+}
+.empty-chart { min-height: 190px; display: grid; place-items: center; }
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -208,7 +271,28 @@ h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
   border-color: #fff;
 }
 .table-panel { overflow-x: auto; }
-.request-table th:nth-child(-n+7), .request-table td:nth-child(-n+7) { white-space: nowrap; }
+.request-table { table-layout: fixed; min-width: 1320px; width: 100%; }
+.request-table col.col-status { width: 80px; }
+.request-table col.col-port { width: auto; min-width: 40px; }
+.request-table col.col-endpoint { width: 200px; }
+.request-table col.col-route { width: 160px; }
+.request-table col.col-provider { width: 130px; }
+.request-table col.col-time { width: 130px; }
+.request-table col.col-intext { width: 110px; }
+.request-table col.col-usage { width: 150px; }
+.request-table col.col-finish { width: 80px; }
+.request-table .status-cell { font-variant-numeric: tabular-nums; font-weight: 600; }
+.request-table .status-cell.error { color: var(--red); }
+.request-table .status-cell.success { color: var(--green); }
+.request-table .status-cell.active,
+.request-table .status-cell.retrying { color: var(--blue); }
+.request-table td,
+.request-table .status-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.request-table th, .request-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.request-table th { position: sticky; top: 0; z-index: 2; background: var(--panel); cursor: pointer; user-select: none; }
+.request-table th.sorted { color: var(--text); }
+.request-table th .sort-indicator { margin-left: 4px; font-size: 10px; color: var(--text-dim); }
+.request-table td:nth-child(-n+7) { white-space: nowrap; }
 .request-table td:last-child { min-width: 100px; }
 .request-table details summary { cursor: pointer; color: var(--text); }
 .group-row td { background: var(--bg-soft); color: var(--text); font-weight: 650; letter-spacing: 0.02em; }

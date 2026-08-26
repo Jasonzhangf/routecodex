@@ -28,9 +28,16 @@
     <div class="section">
       <h2>Statistics</h2>
       <div class="cards" id="summary-cards"></div>
+      <div class="chart-controls">
+        <label>Range<select id="chart-range"><option value="today">Today</option><option value="week">Last 7 days</option><option value="all">All time</option></select></label>
+        <label>Metric<select id="chart-metric"><option value="count">Requests</option><option value="total_tokens">Total tokens</option><option value="input_tokens">Input tokens</option><option value="output_tokens">Output tokens</option><option value="cached_tokens">Cached tokens</option></select></label>
+      </div>
+      <div class="panel chart-panel">
+        <div id="usage-chart" class="bar-chart" role="img" aria-label="Requests and token usage by day"></div>
+      </div>
       <div class="layout">
-        <div class="panel"><table id="ports-table"><thead><tr><th>Port</th><th class="num">Total</th><th class="num">Active</th><th class="num">Success</th><th class="num">Error</th><th class="num">Cancelled</th></tr></thead><tbody><tr><td colspan="6" class="loading">loading…</td></tr></tbody></table></div>
-        <div class="panel"><table id="errors-table"><thead><tr><th>Error category</th><th class="num">Count</th><th>Latest</th></tr></thead><tbody><tr><td colspan="3" class="loading">no errors</td></tr></tbody></table></div>
+        <div class="panel"><table id="ports-table"><thead><tr><th>Port</th><th class="num">Total</th><th class="num">Active</th><th class="num">Success</th><th class="num">Error</th><th class="num">Failed attempts</th><th class="num">Cancelled</th></tr></thead><tbody><tr><td colspan="7" class="loading">loading…</td></tr></tbody></table></div>
+        <div class="panel"><table id="errors-table"><thead><tr><th>Error category</th><th class="num">Total</th><th class="num">Recovered</th></tr></thead><tbody><tr><td colspan="3" class="loading">no errors</td></tr></tbody></table></div>
       </div>
     </div>
 
@@ -43,13 +50,14 @@
       <label>Protocol<select id="protocol-filter"><option value="all">all</option></select></label>
       <label>Mode<select id="mode-filter"><option value="all">all</option><option value="direct">direct</option><option value="relay">relay</option></select></label>
       <label>Search<input id="search-filter" type="search" placeholder="request, model, provider, route, error"></label>
-      <label>Sort by<select id="sort-field"><option value="started_epoch_ms">Started</option><option value="updated_epoch_ms">Updated</option><option value="finished_epoch_ms">Finished</option><option value="duration_ms">Duration</option><option value="attempts">Attempts</option><option value="failed_attempts">Failures</option><option value="switches">Switches</option><option value="usage_input_tokens">Input tokens</option><option value="usage_output_tokens">Output tokens</option><option value="usage_total_tokens">Total tokens</option><option value="usage_cached_tokens">Cached tokens</option></select></label>
+      <label>Sort by<select id="sort-field"><option value="started_epoch_ms">Started</option><option value="updated_epoch_ms">Updated</option><option value="finished_epoch_ms">Finished</option><option value="duration_ms">Duration</option><option value="attempts">Attempts</option><option value="failed_attempts">Failures</option><option value="switches">Switches</option><option value="usage_input_tokens">Input tokens</option><option value="usage_output_tokens">Output tokens</option><option value="usage_total_tokens">Total tokens</option><option value="usage_cached_tokens">Cached tokens</option><option value="result">Status</option><option value="scope.port">Port</option><option value="meta.entry_protocol">Protocol</option><option value="meta.endpoint">Endpoint</option><option value="meta.route_reason">Route reason</option><option value="meta.provider">Provider</option><option value="timing_internal_ms">Internal</option><option value="meta.finish_reason">Finish reason</option></select></label>
       <label>Order<select id="sort-order"><option value="desc">Descending</option><option value="asc">Ascending</option></select></label>
     </div>
 
     <div class="pagination">
       <button class="btn" id="page-prev" type="button">&#8592; Prev</button>
       <span id="page-info" class="muted">page — of — · — records</span>
+      <label>Page size<select id="page-size"><option value="100">100</option><option value="200">200</option><option value="300">300</option></select></label>
       <button class="btn" id="page-next" type="button">Next &#8594;</button>
     </div>
 
@@ -71,12 +79,52 @@
 
   <script src="/app.embedded.txt"></script>
   <script>
-    const PAGE_SIZE = 50;
+    // Compact numeric formatting for token counts and request totals.
+    function fmtCompact(n) {
+      const value = Number(n || 0);
+      if (!Number.isFinite(value)) return "0";
+      if (Math.abs(value) >= 1e9) return `${(value / 1e9).toFixed(value >= 1e10 ? 0 : 1)}B`;
+      if (Math.abs(value) >= 1e6) return `${(value / 1e6).toFixed(value >= 1e7 ? 0 : 1)}M`;
+      if (Math.abs(value) >= 1e4) return `${(value / 1e3).toFixed(value >= 1e5 ? 0 : 1)}K`;
+      return value.toLocaleString();
+    }
+
+    function fmtMs(value) {
+      if (value == null || !Number.isFinite(Number(value))) return "—";
+      const ms = Number(value);
+      if (ms < 1000) return `${Math.round(ms)}ms`;
+      if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+      return `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`;
+    }
+
+    function statusText(row) {
+      const http = row.meta?.provider_status;
+      if (http != null && Number.isFinite(Number(http))) {
+        return String(http);
+      }
+      return "—";
+    }
+    function compactFinishReason(row) {
+      const reason = row.meta?.finish_reason;
+      if (!reason || reason === "—") return "—";
+      const map = {
+        tool_calls: "tool_calls",
+        stop: "stop",
+        length: "length",
+        content_filter: "filter",
+        requires_action: "action",
+        completed: "done",
+        error: "error",
+      };
+      return map[reason] || reason;
+    }
     const state = {
       records: [],
       page: 1,
+      pageSize: 100,
       total: 0,
       stats: {},
+      timeseries: [],
       facets: { ports: {}, providers: {}, models: {}, routes: {}, sessions: {}, response_types: {}, error_categories: {} },
       liveStats: {},
       selected: null,
@@ -99,17 +147,20 @@
     }
     function usageText(usage) {
       if (!usage) return "—";
-      const parts = [];
-      if (usage.input_tokens != null) parts.push(`in ${Number(usage.input_tokens).toLocaleString()}`);
-      if (usage.output_tokens != null) parts.push(`out ${Number(usage.output_tokens).toLocaleString()}`);
-      if (usage.cached_tokens != null) parts.push(`cache ${Number(usage.cached_tokens).toLocaleString()}`);
-      if (usage.total_tokens != null) parts.push(`total ${Number(usage.total_tokens).toLocaleString()}`);
-      return parts.length ? parts.join(" / ") : "—";
+      const input = Number(usage.input_tokens ?? 0);
+      const output = Number(usage.output_tokens ?? 0);
+      const cached = Math.min(Number(usage.cached_tokens ?? 0), input);
+      const hit = input > 0 ? `${((cached / input) * 100).toFixed(1)}%` : "—";
+      return `${fmtCompact(input)} / ${fmtCompact(output)} · ${hit}`;
     }
 
     function timeText(value) {
       if (!value) return "—";
-      return new Date(value).toLocaleString([], { hour12: false });
+      const d = new Date(value);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      const ss = String(d.getSeconds()).padStart(2, "0");
+      return `${hh}:${mm}:${ss}`;
     }
 
     function metaValue(row, key) {
@@ -134,14 +185,14 @@
       try {
         const params = new URLSearchParams();
         params.set("page", String(state.page));
-        params.set("page_size", String(PAGE_SIZE));
+        params.set("page_size", String(state.pageSize));
+        params.set("range", document.getElementById("chart-range").value);
+        params.set("timezone_offset_minutes", String(new Date().getTimezoneOffset()));
         params.set("sort_by", document.getElementById("sort-field").value);
         params.set("sort_order", document.getElementById("sort-order").value);
         const status = document.getElementById("status-filter").value;
         if (status !== "all") {
-          const map = { success: "success", error: "error", cancelled: "cancelled", active: "", retrying: "" };
-          const serverStatus = map[status];
-          if (serverStatus) params.set("status", serverStatus);
+          params.set("status", status);
         }
         const port = document.getElementById("port-filter").value;
         if (port !== "all") params.set("port", port);
@@ -161,6 +212,7 @@
         state.records = response.records || [];
         state.total = response.total || 0;
         state.stats = response.stats || {};
+        state.timeseries = response.timeseries || [];
         state.facets = response.facets || state.facets;
         renderAll();
       } catch (error) {
@@ -201,66 +253,52 @@
       hideStatus();
     }
 
-    function matches(row) {
-      const statusFilter = document.getElementById("status-filter").value;
-      const portFilter = document.getElementById("port-filter").value;
-      const search = document.getElementById("search-filter").value.trim().toLowerCase();
-      const status = statusOf(row);
-      if (statusFilter !== "all" && status !== statusFilter) return false;
-      if (portFilter !== "all" && String(row.scope?.port) !== portFilter) return false;
-      if (!search) return true;
-      const values = [row.request_key, row.meta?.request_id, row.meta?.model, row.meta?.provider, row.meta?.route, row.scope?.session, row.scope?.workdir, row.meta?.error_category, row.meta?.error_detail];
-      return values.some((value) => String(value ?? "").toLowerCase().includes(search));
-    }
-
-    function sortRows(rows) {
-      const field = document.getElementById("sort-field").value;
-      const direction = document.getElementById("sort-order").value === "asc" ? 1 : -1;
-      const grouped = document.getElementById("group-toggle").checked;
-      return rows.sort((left, right) => {
-        if (grouped) {
-          const portOrder = Number(left.scope?.port ?? Number.MAX_SAFE_INTEGER) -
-            Number(right.scope?.port ?? Number.MAX_SAFE_INTEGER);
-          if (portOrder) return portOrder;
-        }
-        let a = left[field];
-        let b = right[field];
-        if (field === "finished_epoch_ms") { a = a ?? Number.MAX_SAFE_INTEGER; b = b ?? Number.MAX_SAFE_INTEGER; }
-        else { a = a ?? 0; b = b ?? 0; }
-        return direction * ((a > b) - (b > a) || String(left.request_key).localeCompare(right.request_key));
-      });
-    }
-
     function renderStats(stats) {
       stats = stats || {};
-      const cards = document.getElementById("summary-cards");
-      cards.replaceChildren();
-      const values = [["Total", stats.total], ["Active", stats.active], ["Success", stats.success], ["Error", stats.error], ["Cancelled", stats.cancelled], ["Switches", stats.switches], ["Output tokens", stats.tokens_output]];
-      for (const [label, value] of values) {
-        const card = el("div", `card stat-${label.toLowerCase().replace(/\s+/g, "-")}`);
-        card.appendChild(el("div", "label", label));
-        card.appendChild(el("div", "value", Number(value || 0).toLocaleString()));
-        cards.appendChild(card);
-      }
       const portBody = document.querySelector("#ports-table tbody");
       const ports = [...(stats.by_port ? Object.entries(stats.by_port) : [])].sort(([a], [b]) => Number(a) - Number(b));
       portBody.replaceChildren(...ports.map(([port, item]) => {
-        const row = el("tr", item.error ? "status-error" : item.active ? "status-active" : "status-success");
-        row.append(el("td", null, String(port)), numberCell(item.total), numberCell(item.active), numberCell(item.success), numberCell(item.error), numberCell(item.cancelled));
+        const failed = Number(item.provider_failures || 0);
+        const cls = item.error ? "status-error" : failed > 0 ? "status-retrying" : item.active ? "status-active" : "status-success";
+        const row = el("tr", cls);
+        row.append(el("td", null, String(port)), numberCell(item.total), numberCell(item.active), numberCell(item.success), numberCell(item.error), numberCell(failed), numberCell(item.cancelled));
         return row;
       }));
       if (!ports.length) {
         const cell = document.createElement("td");
-        cell.colSpan = 6;
+        cell.colSpan = 7;
         const emptyRow = document.createElement("tr");
         emptyRow.appendChild(cell);
         portBody.replaceChildren(emptyRow);
       }
       const errorBody = document.querySelector("#errors-table tbody");
-      const categories = Object.entries(state.facets.error_categories || {}).sort(([, a], [, b]) => b - a);
-      errorBody.replaceChildren(...categories.map(([category, count]) => {
+      // Merge terminal error_categories with provider-failure categories so the user can
+      // see both terminal failures and recovered-switch provider failures in one place.
+      const errorMap = new Map();
+      for (const [cat, count] of Object.entries(state.facets.error_categories || {})) {
+        errorMap.set(cat, { terminal: count, recovered: 0 });
+      }
+      for (const [cat, count] of Object.entries(state.facets.provider_failure_categories || {})) {
+        const entry = errorMap.get(cat) || { terminal: 0, recovered: 0 };
+        entry.recovered = count;
+        errorMap.set(cat, entry);
+      }
+      const categories = [...errorMap.entries()]
+        .map(([cat, v]) => [cat, v.terminal + v.recovered])
+        .sort(([, a], [, b]) => b - a);
+      errorBody.replaceChildren(...categories.map(([category, _]) => {
+        const entry = errorMap.get(category);
         const row = el("tr", "status-error");
-        row.append(el("td", null, category), numberCell(count));
+        row.style.cursor = "pointer";
+        row.title = `Filter requests by error category "${category}"`;
+        row.addEventListener("click", () => {
+          const filter = document.getElementById("search-filter");
+          filter.value = category;
+          state.page = 1;
+          document.getElementById("status-filter").value = "error";
+          loadRecords();
+        });
+        row.append(el("td", null, category), numberCell((entry?.terminal || 0) + (entry?.recovered || 0)), numberCell(entry?.recovered || 0));
         return row;
       }));
       if (!categories.length) {
@@ -360,14 +398,23 @@
       tr.style.cursor = "pointer";
       tr.addEventListener("click", () => openRequestDetail(row));
       const usage = row.usage || {};
-      tr.appendChild(el("td", "status-cell", status));
-      tr.appendChild(el("td", "mono", `${row.scope?.port ?? "?"}:${row.meta?.request_id ?? row.request_key}`));
+      // Compact port: strip the leading zero-width space so a 4-digit port stays narrow.
+      const portValue = row.scope?.port;
+      const portText = portValue == null ? "—" : String(portValue);
+      const statusCell = el("td", `status-cell ${status}`, statusText(row));
+      statusCell.title = row.meta?.error_category
+        ? `${row.meta.error_category}: ${row.meta.error_detail || ""}`.trim()
+        : `${status}`;
+      tr.appendChild(statusCell);
+      tr.appendChild(el("td", "mono num", portText));
       tr.appendChild(el("td", null, `${metaValue(row, "endpoint")} · ${metaValue(row, "model")}`));
-      tr.appendChild(el("td", null, `${metaValue(row, "route")} · ${metaValue(row, "provider")}`));
-      tr.appendChild(el("td", "num", `${row.attempts || 0}/${row.failed_attempts || 0}`));
-      tr.appendChild(el("td", "num", fmtMs(row.duration_ms)));
+      tr.appendChild(el("td", "muted", metaValue(row, "route_reason")));
+      tr.appendChild(el("td", null, metaValue(row, "provider")));
+      tr.appendChild(el("td", "mono", timeText(row.started_epoch_ms)));
+      tr.appendChild(el("td", "mono", timeText(status === "active" || status === "retrying" ? row.updated_epoch_ms : row.finished_epoch_ms)));
+      tr.appendChild(el("td", "num", `${row.timing_internal_ms != null ? fmtMs(row.timing_internal_ms) : "—"} / ${row.timing_external_ms != null ? fmtMs(row.timing_external_ms) : "—"}`));
       tr.appendChild(el("td", "mono", usageText(usage)));
-      tr.appendChild(el("td", "muted", timeText(status === "success" || status === "error" || status === "cancelled" ? row.finished_epoch_ms : row.updated_epoch_ms)));
+      tr.appendChild(el("td", "muted", compactFinishReason(row)));
       return tr;
     }
 
@@ -395,7 +442,44 @@
       if (!rows.length) { panel.replaceChildren(el("div", "loading", "no matching requests")); return; }
       const table = el("table", "request-table");
       const head = el("tr");
-      ["Status", "Port · Request", "Endpoint · Model", "Route · Provider", "Try/Fail", "Duration", "Usage", "Time"].forEach((label) => head.appendChild(el("th", null, label)));
+      const columns = [
+        { key: "result", label: "Status", colClass: "col-status" },
+        { key: "scope.port", label: "Port", colClass: "col-port" },
+        { key: "meta.endpoint", label: "Endpoint · Model", colClass: "col-endpoint" },
+        { key: "meta.route_reason", label: "Route reason", colClass: "col-route" },
+        { key: "meta.provider", label: "Provider", colClass: "col-provider" },
+        { key: "started_epoch_ms", label: "Sent", colClass: "col-time" },
+        { key: "finished_epoch_ms", label: "Responded", colClass: "col-time" },
+        { key: "timing_internal_ms", label: "Internal / External", colClass: "col-intext" },
+        { key: "usage_total_tokens", label: "Usage · Hit", colClass: "col-usage" },
+        { key: "meta.finish_reason", label: "Finish", colClass: "col-finish" },
+      ];
+      const colgroup = el("colgroup");
+      columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
+      table.appendChild(colgroup);
+      columns.forEach((col, index) => {
+        const th = el("th", "sortable", col.label);
+        th.dataset.sortKey = col.key;
+        const active = document.getElementById("sort-field").value === col.key;
+        if (active) {
+          const dir = document.getElementById("sort-order").value === "desc" ? "▼" : "▲";
+          th.classList.add("sorted");
+          th.appendChild(el("span", "sort-indicator", dir));
+        }
+        th.addEventListener("click", () => {
+          const fieldEl = document.getElementById("sort-field");
+          const orderEl = document.getElementById("sort-order");
+          if (fieldEl.value === col.key) {
+            orderEl.value = orderEl.value === "desc" ? "asc" : "desc";
+          } else {
+            fieldEl.value = col.key;
+            orderEl.value = "desc";
+          }
+          state.page = 1;
+          loadRecords();
+        });
+        head.appendChild(th);
+      });
       const tableHead = document.createElement("thead");
       tableHead.appendChild(head);
       table.appendChild(tableHead);
@@ -412,24 +496,53 @@
       const cards = document.getElementById("summary-cards");
       cards.replaceChildren();
       const total = Number(stats.count || 0);
+      const providerFails = Number(stats.provider_failure_count ?? 0);
       const values = [
-        ["Total", total],
-        ["Input tokens", Number(stats.input_tokens || 0)],
-        ["Output tokens", Number(stats.output_tokens || 0)],
-        ["Cached tokens", Number(stats.cached_tokens || 0)],
+        ["Requests", total],
+        ["Success", Number(stats.success_count ?? 0)],
+        ["Errors", Number(stats.error_count ?? 0), stats.error_count > 0 ? "bad" : ""],
+        ["Provider fails", providerFails, providerFails > 0 ? "bad" : ""],
+        ["Input tokens", fmtCompact(Number(stats.input_tokens || 0))],
+        ["Output tokens", fmtCompact(Number(stats.output_tokens || 0))],
+        ["Cached tokens", fmtCompact(Number(stats.cached_tokens || 0))],
+        ["Total tokens", fmtCompact(Number(stats.total_tokens || 0))],
         ["Avg cache hit", stats.cache_hit_rate_percent != null ? `${Number(stats.cache_hit_rate_percent).toFixed(1)}%` : "—"],
         ["Avg duration", stats.avg_duration_ms != null ? `${Math.round(Number(stats.avg_duration_ms))} ms` : "—"],
       ];
-      for (const [label, value] of values) {
-        const card = el("div", `card stat-${label.toLowerCase().replace(/\s+/g, "-")}`);
+      for (const item of values) {
+        const [label, value, tone = ""] = item;
+        const card = el("div", `card stat-${label.toLowerCase().replace(/\s+/g, "-")}${tone ? ` ${tone}` : ""}`);
         card.appendChild(el("div", "label", label));
-        card.appendChild(el("div", "value", String(value)));
+        card.appendChild(el("div", `value${tone ? ` ${tone}` : ""}`, String(value)));
         cards.appendChild(card);
       }
     }
 
+    function renderTimeseries() {
+      const chart = document.getElementById("usage-chart");
+      const metric = document.getElementById("chart-metric").value;
+      const buckets = state.timeseries || [];
+      if (!buckets.length) {
+        chart.replaceChildren(el("div", "empty-chart muted", "no data in selected range"));
+        return;
+      }
+      const maximum = Math.max(...buckets.map((bucket) => Number(bucket[metric] || 0)), 1);
+      const bars = buckets.map((bucket) => {
+        const value = Number(bucket[metric] || 0);
+        const column = el("div", "bar-column");
+        const bar = el("div", "bar");
+        bar.style.height = `${Math.max(1, Math.round((value / maximum) * 100))}%`;
+        bar.title = `${bucket.date}: ${value.toLocaleString()} (${bucket.count.toLocaleString()} requests)`;
+        const label = el("span", "axis", bucket.date.slice(5));
+        label.title = bucket.date;
+        column.append(bar, label);
+        return column;
+      });
+      chart.replaceChildren(...bars);
+    }
+
     function renderPagination() {
-      const pages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+      const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
       const info = document.getElementById("page-info");
       info.textContent = `page ${state.page} of ${pages} · ${state.total.toLocaleString()} records`;
       document.getElementById("page-prev").disabled = state.page <= 1;
@@ -439,6 +552,7 @@
     function renderAll() {
       renderStatsCards();
       renderStats(state.liveStats);
+      renderTimeseries();
       renderRequests();
       renderPagination();
       renderRequestDetail();
@@ -450,6 +564,9 @@
     document.getElementById("pause-btn").addEventListener("click", (event) => {
       state.paused = !state.paused;
       event.currentTarget.textContent = state.paused ? "Resume" : "Pause";
+    });
+    ["chart-range","chart-metric"].forEach((id) => {
+      document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });
     });
     ["status-filter","port-filter","provider-filter","model-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
       const input = document.getElementById(id);
@@ -466,8 +583,13 @@
     document.getElementById("page-prev").addEventListener("click", () => {
       if (state.page > 1) { state.page -= 1; loadRecords(); }
     });
+    document.getElementById("page-size").addEventListener("change", (event) => {
+      state.pageSize = Number(event.currentTarget.value);
+      state.page = 1;
+      loadRecords();
+    });
     document.getElementById("page-next").addEventListener("click", () => {
-      const pages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+      const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
       if (state.page < pages) { state.page += 1; loadRecords(); }
     });
     document.getElementById("drawer-cancel")?.addEventListener("click", closePanel);
