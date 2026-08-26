@@ -26,7 +26,7 @@ M00 -> M01 -> M02 --┐
 | M00-T08 dependency reconciliation | `merged` | T01 + T03 + T04 | 已合并独立 task `764351194`，V4 主树 merge `0f353bee8`；拆分 T07 contract 与 M08 async/native runtime，消除循环依赖 |
 | M00-T09 no-active-epoch admission | `merged` | T01 + T02 | 已合并独立 task `23220dceb`，V4 主树 merge `4298257666`；ActiveEpochStore 无 active epoch 时 fail-closed，6 项 L2、架构 gates、Active-linked build 与 AGY review 通过 |
 | M01 NativePlugin ABI | `merged` | M00 structural contracts | task `7c7e141f5` 已合入重构主树 `100b9fd12`；主树 contract/catalog tests、plugin plan、resource binding `91/91`、diff check 通过；T05 独立保留 |
-| M02 generic factory | `blocked_by_M01` | M01 | 不可抢跑 |
+| M02 generic factory | `available` | M01 | M01 已合并并通过主树复验；可与 M03/M08/D0 并行 claim |
 | M03 Cordis daemon | `available` | M00 structural contracts | 与 M01 后续阶段并行；T05 不传播阻塞 |
 | D0 differential harness | `in_progress` | M00 structural contracts | 已有独立 worker；与 M03/M08 并行，T05 不传播阻塞 |
 | M04 epoch transaction | `blocked` | M02 + M03 | 必须串行收敛 |
