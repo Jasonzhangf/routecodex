@@ -7,6 +7,19 @@ const sourcePath = path.join(root, 'cordis/routecodex-v4-cordis-host/src/index.m
 const testsPath = path.join(root, 'cordis/routecodex-v4-cordis-host/tests/host.test.mjs');
 const bindingTestsPath = path.join(root, 'cordis/routecodex-v4-cordis-host/tests/host-binding.test.mjs');
 const bindingContractPath = path.join(root, 'contracts/node-container-host-binding.contract.json');
+const ratchetPath = path.join(root, 'contracts/cordis-mainline-ratchet.json');
+const ratchetBaselineIds = [
+  'internal_rust_node_container',
+  'static_plugin_registry',
+  'runtime_bin_direct_business_calls',
+  'discarded_node_output',
+  'test_only_cordis_binding_in_production_shape',
+];
+const ratchetCanonicalDocs = [
+  'docs/architecture/v4-cordis-mainline-adr.md',
+  'docs/goals/v4-cordis-mainline-migration-plan.md',
+];
+const ratchetForbiddenPlanPattern = /v4\.test\.[A-Za-z0-9_-]+/;
 const functionMapPath = path.join(root, 'docs/architecture/maps/function-map.json');
 const mainlinePath = path.join(root, 'docs/architecture/maps/mainline-call-map.json');
 const resourceMapPath = path.join(root, 'docs/architecture/maps/resource-map.json');
@@ -162,6 +175,37 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
   return failures;
 }
 
+function validateRatchet(ratchet, canonicalDocs, migrationPlan) {
+  const failures = [];
+  if (!ratchet || ratchet.status !== 'active') failures.push('Cordis mainline ratchet must be active');
+  if (ratchet?.owner_feature_id !== 'v4.cordis.mainline') failures.push('Cordis mainline ratchet owner drifted');
+  if (!ratchet?.rule?.includes('count may only decrease') || !ratchet?.rule?.includes('new bypasses fail')) {
+    failures.push('Cordis mainline ratchet must declare monotonic bypass reduction');
+  }
+  if (JSON.stringify(ratchet?.baseline_exception_ids ?? []) !== JSON.stringify(ratchetBaselineIds)) {
+    failures.push('Cordis mainline ratchet baseline exception set drifted');
+  }
+  const exceptions = ratchet?.known_exceptions ?? [];
+  const ids = exceptions.map((entry) => entry?.id);
+  if (new Set(ids).size !== ids.length || ids.some((id) => !ratchetBaselineIds.includes(id))) {
+    failures.push('Cordis mainline ratchet contains a new or duplicate bypass exception');
+  }
+  if (exceptions.length > ratchetBaselineIds.length) {
+    failures.push('Cordis mainline ratchet bypass count increased');
+  }
+  for (const entry of exceptions) {
+    const evidencePath = typeof entry?.evidence === 'string' ? entry.evidence.split(':', 1)[0] : '';
+    if (!evidencePath || !fs.existsSync(path.join(root, evidencePath))
+        || !ratchetCanonicalDocs.every((doc) => canonicalDocs.includes(doc))) {
+      failures.push(`Cordis mainline ratchet evidence/doc binding invalid for ${entry?.id ?? '(missing)'}`);
+    }
+  }
+  if (typeof migrationPlan !== 'string' || ratchetForbiddenPlanPattern.test(migrationPlan)) {
+    failures.push('active migration plan reintroduces v4.test.* production bypass');
+  }
+  return failures;
+}
+
 function runSelfTest() {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const tests = fs.readFileSync(testsPath, 'utf8');
@@ -170,6 +214,9 @@ function runSelfTest() {
   const functionMap = JSON.parse(fs.readFileSync(functionMapPath, 'utf8'));
   const mainline = JSON.parse(fs.readFileSync(mainlinePath, 'utf8'));
   const resourceMap = JSON.parse(fs.readFileSync(resourceMapPath, 'utf8'));
+  const ratchet = JSON.parse(fs.readFileSync(ratchetPath, 'utf8'));
+  const canonicalDocs = ratchetCanonicalDocs.filter((doc) => fs.existsSync(path.join(root, doc)));
+  const migrationPlan = fs.readFileSync(path.join(root, 'docs/goals/v4-cordis-mainline-migration-plan.md'), 'utf8');
   const cases = [
     ['real Cordis import removed', (candidate) => candidate.replace("from 'cordis'", "from 'fake-cordis'")],
     ['real Context removed', (candidate) => candidate.replace('new Context()', 'new FakeContext()')],
@@ -204,6 +251,22 @@ function runSelfTest() {
       missed += 1;
     } else {
       console.log(`[v4 cordis host red] ${name}: FAIL as expected (${failures.length})`);
+    }
+  }
+  if (missed > 0) process.exit(1);
+  const ratchetCases = [
+    ['new bypass exception', (candidate) => ({ ratchet: { ...candidate, known_exceptions: [...candidate.known_exceptions, { id: 'new_bypass', evidence: 'new' }] } })],
+    ['baseline drift', (candidate) => ({ ratchet: { ...candidate, baseline_exception_ids: ['new_bypass'] } })],
+    ['plan reintroduces test bypass', (candidate) => ({ ratchet: candidate, migrationPlan: 'v4.test.fake production plan' })],
+  ];
+  for (const [name, mutate] of ratchetCases) {
+    const mutated = mutate(ratchet);
+    const ratchetFailures = validateRatchet(mutated.ratchet ?? ratchet, canonicalDocs, mutated.migrationPlan ?? migrationPlan);
+    if (ratchetFailures.length === 0) {
+      console.error(`[v4 cordis host red] ${name}: expected FAIL, got PASS`);
+      missed += 1;
+    } else {
+      console.log(`[v4 cordis host red] ${name}: FAIL as expected (${ratchetFailures.length})`);
     }
   }
   if (missed > 0) process.exit(1);
@@ -265,6 +328,10 @@ const failures = validate(
   JSON.parse(fs.readFileSync(mainlinePath, 'utf8')),
   JSON.parse(fs.readFileSync(resourceMapPath, 'utf8')),
 );
+const ratchet = JSON.parse(fs.readFileSync(ratchetPath, 'utf8'));
+const canonicalDocs = ratchetCanonicalDocs.filter((doc) => fs.existsSync(path.join(root, doc)));
+const migrationPlan = fs.readFileSync(path.join(root, 'docs/goals/v4-cordis-mainline-migration-plan.md'), 'utf8');
+failures.push(...validateRatchet(ratchet, canonicalDocs, migrationPlan));
 if (failures.length) {
   console.error(failures.join('\n'));
   process.exit(1);
