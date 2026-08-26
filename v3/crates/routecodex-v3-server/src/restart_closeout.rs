@@ -78,6 +78,10 @@ impl V3FrontTransportCloseoutState {
         self.closed.load(Ordering::Acquire)
     }
 
+    pub(crate) fn is_peer_disconnected(&self) -> bool {
+        self.peer_disconnected.load(Ordering::Acquire)
+    }
+
     pub(crate) fn mark_peer_disconnected(&self) {
         if !self.peer_disconnected.swap(true, Ordering::AcqRel) {
             self.peer_disconnect_notify.notify_waiters();

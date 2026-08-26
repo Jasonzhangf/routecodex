@@ -95,3 +95,43 @@ async fn front_socket_writes_configured_sse_terminal_after_headers() {
     assert_eq!(response, expected);
     accept.await.unwrap();
 }
+
+#[tokio::test]
+async fn peer_eof_closes_front_socket_and_write_worker() {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let broker = V3FrontTransportBroker::new(0);
+    let connection_identity = broker.allocate_connection_identity();
+    let service = axum::Router::new().into_service();
+    let accept_broker = broker.clone();
+    let accept = tokio::spawn(async move {
+        let (stream, remote_addr) = listener.accept().await.unwrap();
+        serve_v3_front_http_connection(
+            stream,
+            remote_addr,
+            connection_identity,
+            accept_broker,
+            service,
+        )
+        .await
+        .unwrap();
+    });
+
+    let client = tokio::net::TcpStream::connect(address).await.unwrap();
+    drop(client);
+    tokio::time::timeout(Duration::from_secs(1), accept)
+        .await
+        .expect("peer EOF must terminate the front connection")
+        .unwrap();
+
+    let socket = broker
+        .front_sockets
+        .lock()
+        .expect("front socket registry lock")
+        .get(&connection_identity)
+        .cloned()
+        .expect("accepted front socket must remain inspectable");
+    assert!(socket.is_closed(), "peer EOF must close the write worker");
+}
