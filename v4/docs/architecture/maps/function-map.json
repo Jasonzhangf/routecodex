@@ -807,6 +807,30 @@
       ]
     },
     {
+      "function_id": "v4.cordis.generic_factory",
+      "owner": "routecodex-v4-cordis-host",
+      "status": "active",
+      "feature_id": "v4.cordis_generic_factory",
+      "entry_symbols": [
+        "cordisCatalogIdentityKey",
+        "createCordisPluginFactory",
+        "createCordisPluginFactory::createPlugin",
+        "createCordisPluginFactory::createPlugins"
+      ],
+      "entry_paths": [
+        "cordis/routecodex-v4-cordis-host/src/index.mjs"
+      ],
+      "resource_bindings": [
+        "v4.plugin.catalog",
+        "v4.cordis.plugin_fibers"
+      ],
+      "required_gates": [
+        "v4_cordis_host_l3_regression",
+        "v4_parity_gate_cordis_host",
+        "v4_parity_gate_cordis_host_red"
+      ]
+    },
+    {
       "function_id": "v4.cordis.host",
       "owner": "routecodex-v4-cordis-host",
       "entry_symbols": [
