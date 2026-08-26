@@ -44,3 +44,5 @@
 - [ ] M00-T02 ratchet 已合并主树，但 canonical live admission 仍被 5 个 upstream HTTP 502 样本阻塞。
 - [x] M00-T03 审计面已合并 V4 重构主树：`c4d13d7b8`。
 - [x] M00-T04 每个 milestone 独立 claim 表已建立并合并 V4 重构主树：`5e0090f9d`。
+- [ ] M00-T05 live admission closeout：当前被 provider Responses WebSocket v2 endpoint 阻塞；不得以 HTTP continuation 或 fallback 替代。
+- [ ] M00-T06 canonical B wire evidence：同 requestId provider-request/provider-response 诊断 bundle 尚待 task worktree 验证并合并。

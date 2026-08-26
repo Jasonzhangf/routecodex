@@ -99,3 +99,15 @@ fn wire_evidence_terminal_failure_positive_and_red() {
         Err(WireEvidenceError::EmptyRequestId)
     ));
 }
+
+#[test]
+fn provider_exchange_evidence_requires_canonical_same_request_bundle() {
+    let mut evidence = V4ErrorEvidenceFlushOnTerminalFailure::new();
+    let bundle = evidence
+        .capture_provider_exchange("responses", "/v1/responses", 5520, "req-1", b"{}", b"{}");
+    let bundle = bundle.expect("canonical provider exchange must be captured");
+    assert_eq!(bundle.provider_request.artifact_name, "provider-request.json");
+    assert_eq!(bundle.provider_response.artifact_name, "provider-response.json");
+    assert_eq!(bundle.provider_request.request_id, bundle.provider_response.request_id);
+    assert_eq!(evidence.records().count(), 2);
+}

@@ -522,6 +522,15 @@ pub struct WireEvidenceRecord {
     pub wire_bytes: Vec<u8>,
 }
 
+/// The two provider-side artifacts needed to attribute one request without
+/// reconstructing it from a client payload. Both records carry the same
+/// request identity and remain diagnostic-only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderExchangeEvidence {
+    pub provider_request: WireEvidenceRecord,
+    pub provider_response: WireEvidenceRecord,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WireEvidenceError {
     EmptyRequestId,
@@ -573,5 +582,39 @@ impl V4ErrorEvidenceFlushOnTerminalFailure {
 
     pub fn records(&self) -> impl Iterator<Item = &WireEvidenceRecord> {
         self.records.iter()
+    }
+
+    /// Capture the canonical B-side pair for one terminal failure. The
+    /// method fixes artifact names at the owner boundary so callers cannot
+    /// create an unrelated or cross-request evidence bundle.
+    pub fn capture_provider_exchange(
+        &mut self,
+        entry_protocol: &str,
+        endpoint: &str,
+        port: u16,
+        request_id: &str,
+        provider_request: &[u8],
+        provider_response: &[u8],
+    ) -> Result<ProviderExchangeEvidence, WireEvidenceError> {
+        let request = self.flush(
+            entry_protocol,
+            endpoint,
+            port,
+            request_id,
+            "provider-request.json",
+            provider_request,
+        )?;
+        let response = self.flush(
+            entry_protocol,
+            endpoint,
+            port,
+            request_id,
+            "provider-response.json",
+            provider_response,
+        )?;
+        Ok(ProviderExchangeEvidence {
+            provider_request: request,
+            provider_response: response,
+        })
     }
 }
