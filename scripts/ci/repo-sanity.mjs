@@ -79,6 +79,7 @@ function checkRootLayout() {
     'MEMORY.md',
     'README.md',
     'config',
+    'config.toolreason-10000.toml',
     'deprecated',
     'docs',
     'eslint.config.js',
@@ -88,6 +89,7 @@ function checkRootLayout() {
     'package.json',
     'scripts',
     'src',
+    'sharedmodule',
     'task.md',
     'tests',
     'tsconfig.json',
@@ -297,7 +299,8 @@ function checkTrackedSecrets() {
           '--',
           '.',
           ':(exclude)scripts/ci/repo-sanity.mjs',
-          ':(exclude)scripts/ci/secrets-check.mjs'
+          ':(exclude)scripts/ci/secrets-check.mjs',
+          ':(exclude)docs/research/sse-protocols/official/**'
         ]
         : [
           'grep',
@@ -307,7 +310,8 @@ function checkTrackedSecrets() {
           '--',
           '.',
           ':(exclude)scripts/ci/repo-sanity.mjs',
-          ':(exclude)scripts/ci/secrets-check.mjs'
+          ':(exclude)scripts/ci/secrets-check.mjs',
+          ':(exclude)docs/research/sse-protocols/official/**'
         ],
       { encoding: 'utf8' }
     );

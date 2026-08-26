@@ -6,6 +6,7 @@ modules:
   owned_paths:
   - .gitignore
   - scripts/ci/repo-sanity.mjs
+  - scripts/ci/mempalace-scan-artifact-audit.mjs
   - scripts/architecture/verify-repository-filesystem-governance.mjs
   - scripts/architecture/verify-architecture-mainline-manifest-sync.mjs
   - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
@@ -16,7 +17,8 @@ modules:
   - v3/package.json
   - v3/README.md
   - v3/fixtures
-  - deprecated/v2
+  - docs/audits/repository-root-layout-v3-v2-audit.md
+  - docs/goals/repository-root-retirement-v4-v3-integration-plan.md
   - .agents/skills/rcc-dev-skills/SKILL.md
   - .agents/skills/rcc-dev-skills/references
   - .agents/skills/rcc-v3-architecture/SKILL.md
@@ -37,7 +39,6 @@ modules:
   - docs/architecture/wiki/mainline-call-graph.md
   - docs/architecture/wiki/html/mainline-call-graph.html
   - docs/design/payload-copy-hotspot-inventory.md
-  - deprecated/v2/retirement-manifest.yml
   - scripts/architecture/verify-agent-p0-payload-control-guard.mjs
   - scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs
   - docs/architecture/reviews/agent-worker-p0-architecture-guard-audit.md

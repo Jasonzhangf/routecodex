@@ -24,7 +24,8 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: npm ci --ignore-scripts
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Repo sanity (no root junk)
         run: npm run verify:repo-sanity
       - name: Fallback and internal policy hardcode gate
@@ -83,7 +84,6 @@ jobs:
       - name: Install built V3 CLI shim
         run: npm run fix:cli-shim
       - name: Run host tests
-        env:
         run: npm run test:v3-workspace
 
   v4-build:
@@ -107,6 +107,8 @@ jobs:
       - name: V4 install local build dependencies
         run: npm ci --prefix v4 --ignore-scripts
       - name: V4 canonical verification (build/test/gates/red/isolation)
+        env:
+          RCCV4_REAL_RUNTIME_ADMISSION_MODE: contract
         run: npm --prefix v4 run verify:ci
 
   v4-appsdk-admission:
@@ -116,12 +118,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Install global AppSDK from release artifact
+      - name: Build global AppSDK from locked release source
         run: |
+          git clone --depth 1 --branch v0.1.5 \
+            https://github.com/Jasonzhangf/appsdk.git "$RUNNER_TEMP/appsdk-src"
+          cargo build --release --locked \
+            --manifest-path "$RUNNER_TEMP/appsdk-src/rust/Cargo.toml"
           mkdir -p "$HOME/.local/bin"
-          curl -fsSL -o "$HOME/.local/bin/appsdk" \
-            https://github.com/Jasonzhangf/appsdk/releases/download/v0.1.2/appsdk-0.1.2-macos-arm64
-          chmod +x "$HOME/.local/bin/appsdk"
+          install -m 0755 \
+            "$RUNNER_TEMP/appsdk-src/rust/target/release/appsdk" \
+            "$HOME/.local/bin/appsdk"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: V4 AppSDK admission
         run: |

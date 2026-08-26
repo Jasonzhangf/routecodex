@@ -24,8 +24,8 @@
     {
       "output_path": "repo/.github/workflows/test.yml",
       "source_path": ".github/workflows/test.yml",
-      "source_commit": "d8d607e64709ee8c68ac92cd9de86068faa82c02",
-      "sha256": "c54b489cabb110538436f557ea33fe63b02af80484482de6043745ef28d8d25f"
+      "source_commit": "61eb7acec0368e5b2d7e6d963a8ddb48cde0d99c",
+      "sha256": "688cc534e4fbe4471038b1126d3b9e02a3fb16e9f14b83306ed7b0d0b30cf7f2"
     },
     {
       "output_path": "repo/docs/architecture/README.md",
@@ -798,7 +798,7 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "9526a98aa61722d36a49ab2f8bde4feb82bb0227",
+      "source_commit": "fa7cef2484607b9156ccac71ede566ea3f46a645",
       "sha256": "d39e1d7ab3a43a0698da51a2fb14178b7b9a6438359c05d91b1b72cde7b602a5"
     },
     {
@@ -828,7 +828,7 @@
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "9526a98aa61722d36a49ab2f8bde4feb82bb0227",
+      "source_commit": "fa7cef2484607b9156ccac71ede566ea3f46a645",
       "sha256": "d9565279bd4fb7ac69a662b95a9b4dff90e42003c9978d8307e03ccc8a20cc2c"
     },
     {
@@ -2508,7 +2508,7 @@
     {
       "output_path": "repo/docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md",
       "source_path": "docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md",
-      "source_commit": "19a122ba866dc4ffa6edb893d22ac5622dec6d6e",
+      "source_commit": "fa7cef2484607b9156ccac71ede566ea3f46a645",
       "sha256": "29a236792c04cf3444354824b3dc9866215601c7ece3b69e157a726773a0deed"
     },
     {
@@ -2938,5 +2938,5 @@
       "sha256": "5cc420540dffe755ef55174e73198b28d7b0142769fd3fbae89c5c8016250e79"
     }
   ],
-  "manifest_digest": "0370888521a7b268f8117f8b6e0113f580c11b59ab763799207f7838382d10e3"
+  "manifest_digest": "7c41d3f4165f4700e86f274b8314e304c77acc0c32c6aea02ce12de88f7d2f7b"
 }
