@@ -702,8 +702,8 @@
     {
       "output_path": "repo/docs/architecture/repository-filesystem-module-registry.yml",
       "source_path": "docs/architecture/repository-filesystem-module-registry.yml",
-      "source_commit": "3af7b50bfd38618f0a4c1acd18a8fd57f6941dcb",
-      "sha256": "0aa1b0869331157cf9397e5faab58a392a0412cb148c496dd75e9bf801688b81"
+      "source_commit": "453e7916d32012fbcad9237321a7b91b3eef64f7",
+      "sha256": "ff04f9268dc158088f1c5719d707cc12ee8d504db0b5da0824f42763c53fc19b"
     },
     {
       "output_path": "repo/docs/architecture/resource-global-coverage-report.json",
@@ -2938,5 +2938,5 @@
       "sha256": "5cc420540dffe755ef55174e73198b28d7b0142769fd3fbae89c5c8016250e79"
     }
   ],
-  "manifest_digest": "7c41d3f4165f4700e86f274b8314e304c77acc0c32c6aea02ce12de88f7d2f7b"
+  "manifest_digest": "b2125b471e120ea59251dbb21b8cb447c9fe4928ad9cd87b6af135ff76c463d0"
 }
