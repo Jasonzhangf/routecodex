@@ -4,8 +4,10 @@ import path from 'node:path';
 
 const root = path.resolve(new URL('.', import.meta.url).pathname, '..', '..');
 const sourcePath = path.join(root, 'cordis/routecodex-v4-cordis-host/src/index.mjs');
+const daemonSourcePath = path.join(root, 'cordis/routecodex-v4-cordis-host/src/daemon.mjs');
 const testsPath = path.join(root, 'cordis/routecodex-v4-cordis-host/tests/host.test.mjs');
 const bindingTestsPath = path.join(root, 'cordis/routecodex-v4-cordis-host/tests/host-binding.test.mjs');
+const daemonTestsPath = path.join(root, 'cordis/routecodex-v4-cordis-host/tests/daemon.test.mjs');
 const bindingContractPath = path.join(root, 'contracts/node-container-host-binding.contract.json');
 const ratchetPath = path.join(root, 'contracts/cordis-mainline-ratchet.json');
 const ratchetBaselineIds = [
@@ -58,8 +60,17 @@ const forbidden = [
   'async request(op, fields = {})',
 ];
 
-function validate(source, tests, bindingTests, bindingContract, functionMap, mainline, resourceMap) {
+function validate(source, daemonSource, tests, bindingTests, daemonTests, bindingContract, functionMap, mainline, resourceMap) {
   const failures = required.filter((token) => !source.includes(token));
+  failures.push(...[
+    'startCordisHostDaemon',
+    'CordisHostDaemonClient',
+    'CORDIS_HOST_PROTOCOL_VERSION',
+    'generation',
+    'graphHash',
+    'lastHeartbeatAt',
+    'reconcile',
+  ].filter((token) => !daemonSource.includes(token)).map((token) => `daemon missing ${token}`));
   if (forbidden.some((token) => source.includes(token))) {
     failures.push('Cordis host contains forbidden synthetic/control pattern');
   }
@@ -93,6 +104,13 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     || !bindingTests.includes('JS execution response decoder rejects missing output')
   ) {
     failures.push('joint Cordis/Rust lifecycle/execution tests missing');
+  }
+  if (
+    !daemonTests.includes('daemon startup performs version/capability handshake')
+    || !daemonTests.includes('heartbeat, reconnect, generation and graph reconciliation fail closed')
+    || !daemonTests.includes('daemon refuses a second owner')
+  ) {
+    failures.push('Cordis host daemon tests missing');
   }
   if (
     bindingContract.status !== 'active'
@@ -208,8 +226,10 @@ function validateRatchet(ratchet, canonicalDocs, migrationPlan) {
 
 function runSelfTest() {
   const source = fs.readFileSync(sourcePath, 'utf8');
+  const daemonSource = fs.readFileSync(daemonSourcePath, 'utf8');
   const tests = fs.readFileSync(testsPath, 'utf8');
   const bindingTests = fs.readFileSync(bindingTestsPath, 'utf8');
+  const daemonTests = fs.readFileSync(daemonTestsPath, 'utf8');
   const bindingContract = JSON.parse(fs.readFileSync(bindingContractPath, 'utf8'));
   const functionMap = JSON.parse(fs.readFileSync(functionMapPath, 'utf8'));
   const mainline = JSON.parse(fs.readFileSync(mainlinePath, 'utf8'));
@@ -244,7 +264,8 @@ function runSelfTest() {
   let missed = 0;
   for (const [name, mutate] of cases) {
     const failures = validate(
-      mutate(source), tests, bindingTests, bindingContract, functionMap, mainline, resourceMap,
+      mutate(source), daemonSource, tests, bindingTests, daemonTests, bindingContract,
+      functionMap, mainline, resourceMap,
     );
     if (failures.length === 0) {
       console.error(`[v4 cordis host red] ${name}: expected FAIL, got PASS`);
@@ -277,7 +298,8 @@ function runSelfTest() {
   ];
   for (const [name, candidate] of bindingCases) {
     const failures = validate(
-      candidate, tests, bindingTests, bindingContract, functionMap, mainline, resourceMap,
+      candidate, daemonSource, tests, bindingTests, daemonTests, bindingContract,
+      functionMap, mainline, resourceMap,
     );
     if (failures.length === 0) {
       console.error(`[v4 cordis host red] ${name}: expected FAIL, got PASS`);
@@ -301,7 +323,7 @@ function runSelfTest() {
     (entry) => entry.resource_id !== 'v4.node_container.execution_failure',
   );
   const executionResourceFailures = validate(
-    source, tests, bindingTests, bindingContract, functionMap,
+    source, daemonSource, tests, bindingTests, daemonTests, bindingContract, functionMap,
     executionMaps.mainline, executionMaps.resourceMap,
   );
   if (executionResourceFailures.length === 0) {
@@ -321,8 +343,10 @@ if (process.argv.includes('--red-self-test')) {
 
 const failures = validate(
   fs.readFileSync(sourcePath, 'utf8'),
+  fs.readFileSync(daemonSourcePath, 'utf8'),
   fs.readFileSync(testsPath, 'utf8'),
   fs.readFileSync(bindingTestsPath, 'utf8'),
+  fs.readFileSync(daemonTestsPath, 'utf8'),
   JSON.parse(fs.readFileSync(bindingContractPath, 'utf8')),
   JSON.parse(fs.readFileSync(functionMapPath, 'utf8')),
   JSON.parse(fs.readFileSync(mainlinePath, 'utf8')),
