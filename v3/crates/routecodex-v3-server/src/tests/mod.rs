@@ -2762,6 +2762,37 @@ async fn direct_stream_request_error06_projects_sse_error_not_json() {
     }
 }
 
+#[test]
+fn direct_stream_error_projection_response_uses_error_channel() {
+    let frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {
+                "code": "target_pool_exhausted",
+                "message": "34 candidates unavailable"
+            }
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "V3Error06ClientProjected",
+        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        error_body: None,
+        node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
+        observability: None,
+        stream_observation: None,
+    };
+
+    let response = responses_direct_output_response(
+        project_v3_responses_direct_stream_error_frame_if_requested(frame, true),
+        None,
+    );
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "text/event-stream"
+    );
+}
+
 #[tokio::test]
 async fn direct_continuation_scope_error_for_stream_request_projects_sse_not_json() {
     let log_file = test_v3_console_log_file("direct-continuation-scope-sse-error");

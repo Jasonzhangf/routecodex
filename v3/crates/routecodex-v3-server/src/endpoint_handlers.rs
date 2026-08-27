@@ -1420,6 +1420,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     }
                     let stream_console_finalizer =
                         emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
+                    let frame = project_v3_responses_direct_stream_error_frame_if_requested(
+                        frame, true,
+                    );
                     return responses_direct_output_response_with_console(
                         frame,
                         stream_console_finalizer,
