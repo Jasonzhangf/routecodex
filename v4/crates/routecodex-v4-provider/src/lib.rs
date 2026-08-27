@@ -239,7 +239,7 @@ impl NativeProviderTransport {
             .to_string();
         Ok(NativeProviderResponseStream {
             body: Box::pin(response.bytes_stream()),
-            pending: Vec::new(),
+            pending: Bytes::new(),
             seen: 0,
             max_buffer_bytes: self.max_buffer_bytes,
             deadline: Instant::now() + self.deadline,
@@ -323,7 +323,7 @@ impl NativeProviderTransport {
 
 pub struct NativeProviderResponseStream {
     body: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
-    pending: Vec<u8>,
+    pending: Bytes,
     seen: usize,
     max_buffer_bytes: usize,
     deadline: Instant,
@@ -340,7 +340,7 @@ impl NativeProviderResponseStream {
         &self.content_type
     }
 
-    pub async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, ProviderTransportError> {
+    pub async fn next_chunk(&mut self) -> Result<Option<Bytes>, ProviderTransportError> {
         if !self.pending.is_empty() {
             return Ok(Some(std::mem::take(&mut self.pending)));
         }
@@ -373,12 +373,11 @@ impl NativeProviderResponseStream {
                 status: Some(self.status),
             });
         }
-        let bytes = bytes.to_vec();
         let split_at = bytes.len().min(NATIVE_MAX_CHUNK_BYTES);
-        if split_at < bytes.len() {
-            self.pending.extend_from_slice(&bytes[split_at..]);
-        }
-        Ok(Some(bytes[..split_at].to_vec()))
+        let mut bytes = bytes;
+        let remainder = bytes.split_off(split_at);
+        self.pending = remainder;
+        Ok(Some(bytes))
     }
 }
 
