@@ -108,3 +108,8 @@ M00 -> M01 -> M02 --┐
 - managed restart 后最终短请求复验：Responses HTTP 200 `status=completed`、Chat HTTP 200 `object=chat.completion`；M05 candidate 已取得 AGY controller `pass`，进入精确合并队列。
 
 补充：M05 已合入并完成目标树复验，M06-T01 与 M08-T01 现具备并发启动条件；M08 仅可复用既有 provider/server claim 继续 runtime-bin async stream/cancellation 与 M00-T07 live binding，不得重复修改已合入 slice。
+
+并发派发记录（2026-08-27）：
+
+- M06-T01 已从 `80ebaac9b` 后的 `48cad1947` 基线创建全新独立 claim/branch/worktree，负责 Responses JSON request 主线；未触碰 M08/M05 worktree。
+- M08-T01 已复用原会话，收到 M05 合入通知，开始 runtime-bin async stream/cancellation 与 M00-T07 live binding；不得覆盖 M05 ExecutionEngine 或已合入 provider/server slice。
