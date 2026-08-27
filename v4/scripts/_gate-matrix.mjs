@@ -45,7 +45,7 @@ export const RUST_GATES = [
 ];
 
 export const RUST_GATES_RED = [
-  ['v4_control_event_domains_red', 'cargo test -p routecodex-v4-control --locked --offline'],
+  ['v4_control_event_domains_red', 'cargo test -p routecodex-v4-control --test l2_control_red --locked --offline'],
 ];
 
 export const RED_SUITES = [

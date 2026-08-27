@@ -1324,13 +1324,13 @@
       "status": "active",
       "owner_module_id": "routecodex-v4-control",
       "feature_ids": ["v4.control.event_domains"],
-      "command": "cargo test -p routecodex-v4-control --locked --offline",
-      "argv": ["cargo", "test", "-p", "routecodex-v4-control", "--locked", "--offline"],
+      "command": "cargo test -p routecodex-v4-control --test l2_control_red --locked --offline",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-control", "--test", "l2_control_red", "--locked", "--offline"],
       "producer": {"adapter": "cargo", "identity": "v4_control_event_domains_red"},
       "evidence_role": "negative",
       "input_paths": [
         "crates/routecodex-v4-control/src/lib.rs",
-        "crates/routecodex-v4-control/tests/l2_control.rs",
+        "crates/routecodex-v4-control/tests/l2_control_red.rs",
         "docs/architecture/v4-control-event-sse-audit.md"
       ],
       "required_for": ["v4.control.event_domains:source_green"]
