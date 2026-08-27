@@ -1,7 +1,7 @@
 version: 1
-status: retired
+status: active
 owner_feature_id: v4.compat.relay_continuation
-compatibility_target: direct_provider_continuation_only
+compatibility_target: relay_continuation
 canonical_inputs:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-resource-operation-map.yml
@@ -12,13 +12,14 @@ canonical_inputs:
   - v4/docs/architecture/v4-resource-operation-map.yml
   - v4/docs/architecture/v4-v3-feature-mapping.yml
 notes: |
-  Retired V4 Relay + local Continuation compatibility slice. Relay and Direct share
+  V4 Relay + Continuation compatibility evidence slice. Relay and Direct share
   the same Hub chain and differ only in typed-facts operator selection
   (entry_protocol / provider_wire_protocol / continuation_owner /
   execution_mode; provider_id / model_prefix / payload_shape_guess forbidden).
-  Local relay continuation is unsupported and must fail fast. Only direct
-  provider-owned Responses continuation may save/restore at the ChatProcess
-  boundary; the interval between save and restore is immutable. Every V3 semantic stage across the
+  Continuation save occurs only at V4HubRespChatProcess03Governed and restore
+  only at the next request ChatProcess continuation node; the interval between
+  save and restore is immutable (no semantic transformation, no history/tool
+  patch, no provider/client body rebuild). Every V3 semantic stage across the
   six required surfaces maps to exactly one V4 container + checkpoint +
   resource + verification gate with evidence. Any entry with
   diff_status=unexplained is RED (unexplained_diff must be 0).

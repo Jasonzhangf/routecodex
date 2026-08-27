@@ -17,7 +17,6 @@ use routecodex_v4_lifecycle::{
     V4LifecyclePaths,
 };
 use routecodex_v4_standard_plugins::diagnostic;
-use routecodex_v4_standard_plugins::chat_to_responses::project_chat_request_to_responses;
 use routecodex_v4_provider::{
     build_protocol_wire, load_profile, send_responses,
     send_responses_streaming, write_provider_profile,
@@ -32,7 +31,7 @@ use routecodex_v4_router::{
 };
 use routecodex_v4_runtime::{
     parse_responses_provider_payload,
-    project_runtime_fault, project_runtime_fault_with_policy,
+    project_chat_request_to_responses, project_runtime_fault, project_runtime_fault_with_policy,
     ResponsesProviderPayload, RuntimeFault, SkeletonRuntime,
 };
 use routecodex_v4_server::{HttpHandler, HttpRequest, HttpResponse, ResponseStream, V4HttpServer};

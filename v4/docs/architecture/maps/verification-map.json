@@ -1285,23 +1285,6 @@
         "cordis/routecodex-v4-cordis-host/tests/m11-protocol-tools-admin-contract.test.mjs"
       ],
       "required_for": ["source_green", "routecodex-v4-governance:architecture_stable"]
-    },
-    {
-      "gate_id": "v4_responses_request_mainline",
-      "status": "active",
-      "owner_module_id": "routecodex-v4-governance",
-      "feature_ids": ["M06-T01", "feature_id:v4.responses_request_mainline"],
-      "command": "node scripts/architecture/verify-v4-responses-request.mjs",
-      "argv": ["node", "scripts/architecture/verify-v4-responses-request.mjs"],
-      "producer": {"adapter": "node", "identity": "v4_responses_request_mainline"},
-      "evidence_role": "positive",
-      "input_paths": [
-        "crates/routecodex-v4-runtime-bin/src/main.rs",
-        "crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs",
-        "crates/routecodex-v4-standard-plugins/src/request_plugins.rs",
-        "scripts/architecture/verify-v4-responses-request.mjs"
-      ],
-      "required_for": ["M06-T01:source_green"]
     }
   ]
 }

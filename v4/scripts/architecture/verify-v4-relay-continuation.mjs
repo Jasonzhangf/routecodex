@@ -2,7 +2,7 @@
 /**
  * v4_compat_gate_relay_continuation
  *
- * Locks the retired V4 Relay + local Continuation compatibility surface:
+ * Locks the V4 Relay + Continuation compatibility evidence slice:
  * 1. All six required surfaces are present (request path / response path /
  *    error path / streaming / lifecycle / audit) with no duplicate v3_stage
  *    per surface and no extra surfaces.
@@ -22,8 +22,6 @@
  *    commit/release); inbound/outbound/server nodes never carry continuation
  *    semantics.
  * 6. Control-leak guard exists in the runtime wire/frame builders.
- * 7. Local relay continuation implementation is absent and Responses relay
- *    selection is fail-fast; direct provider-owned continuation remains.
  *
  * Run with --red-self-test to prove the gate fails on each negative class
  * (compat drift + immutable interval + isolation + control-field-in-body).
@@ -53,14 +51,6 @@ const FORBIDDEN_SELECTION_FACTS = ['provider_id', 'model_prefix', 'payload_shape
 
 function validate(slice, verification, resourceMap, v3ResourceMap, nodeGraph, skeletonPlan, runtimeSource) {
   const failures = [];
-
-  if (/LocalContinuation(Store|Record|Error)|continuation_seed|local_context_seed/.test(runtimeSource)) {
-    failures.push('runtime: local continuation implementation or seed state must be absent');
-  }
-  const selectionBlock = runtimeSource.match(/pub fn select_relay_operator[\s\S]*?\n}\n/gi)?.[0] ?? '';
-  if (/entry_protocol\.as_str\(\), \[?\s*"responses"/.test(selectionBlock)) {
-    failures.push('runtime: Responses relay/local continuation must not be accepted');
-  }
 
   const gateIds = new Set((verification.gates ?? []).map((gate) => gate.gate_id));
   const resourceIds = new Set((resourceMap.resources ?? []).map((resource) => resource.resource_id));

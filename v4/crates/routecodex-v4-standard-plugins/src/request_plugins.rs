@@ -35,44 +35,6 @@ fn require_object(ctx: &ExecCtx<'_>, name: &str) -> Result<Map<String, Value>, S
         .ok_or_else(|| format!("{name} requires an object request"))
 }
 
-/// Protocol-owner projection used by the production request adapter.
-pub fn project_chat_request_to_responses(body: &Value) -> Result<Value, String> {
-    let object = body
-        .as_object()
-        .cloned()
-        .ok_or_else(|| "Chat request must be an object".to_string())?;
-    let messages = object
-        .get("messages")
-        .and_then(Value::as_array)
-        .cloned()
-        .ok_or_else(|| "Chat request messages must be an array".to_string())?;
-    let mut projected = object;
-    projected.remove("messages");
-    projected.insert("input".to_string(), Value::Array(messages));
-    if let Some(max_tokens) = projected.remove("max_tokens") {
-        projected.insert("max_output_tokens".to_string(), max_tokens);
-    }
-    if let Some(tools) = projected.get("tools").and_then(Value::as_array) {
-        let projected_tools = tools
-            .iter()
-            .map(|tool| {
-                let function = tool
-                    .get("function")
-                    .ok_or_else(|| "function tool body is required".to_string())?;
-                Ok(json!({
-                    "type": "function",
-                    "name": function.get("name").cloned().unwrap_or(Value::Null),
-                    "description": function.get("description").cloned().unwrap_or(Value::Null),
-                    "parameters": function.get("parameters").cloned().unwrap_or_else(|| json!({}))
-                }))
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        projected.insert("tools".to_string(), Value::Array(projected_tools));
-    }
-    projected.insert("protocol".to_string(), json!("responses"));
-    Ok(Value::Object(projected))
-}
-
 pub(crate) fn request_normalize(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = require_object(ctx, "request_normalize")?;
     reject_control(&object)?;

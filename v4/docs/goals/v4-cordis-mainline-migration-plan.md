@@ -74,14 +74,6 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 
 迁移 admission、normalize、Responses direct-provider continuation classify、governance、route facts、target、provider semantic、wire build；本地/relay continuation、seed、context materialization 物理删除，旧 helper 只作不发送请求的 shadow baseline。Responses relay/local `previous_response_id` 在 owning boundary fail-fast。退出：同 request old/new provider-bound wire 无 unexplained diff，control 不进 wire。
 
-#### M06-T02 — 本地 continuation 退役（Jason 决策）
-
-- 唯一 owner：`routecodex-v4-runtime` / `routecodex-v4-runtime-bin` / `routecodex-v4-provider` 的 continuation boundary。
-- 目标：物理删除 relay/local continuation store、seed/context materialization 与对应测试、map、gate 声明；Responses relay/local `previous_response_id` 必须 fail-fast，禁止 fallback 或静默接受。
-- 保留：Responses direct provider-owned continuation；Chat→Responses 的协议投影不得被解释为本地 continuation。
-- 并行任务表：runtime core/test 清理（已派发，当前由 master 接管）；provider direct-only 校验（可独立）；runtime-bin relay rejection/SSE 无本地上下文（可独立）；maps/docs/gate 对齐（可独立）。
-- 依赖：四项完成后统一跑 runtime/provider/runtime-bin 定向测试、release/build、install/restart/health/live replay、AGY，再精确合入 `codex/v4-cordis-refactor-main`。
-
 ### M07 — Responses JSON response 主线
 
 迁移 raw decode、response governance、tool harvest、direct-provider continuation commit、client semantic、frame build；不得生成本地 continuation record/seed；旧/新 projector 对同一 raw response differential。退出：JSON/tool/usage/error fixtures 全绿，direct save 唯一归 RespChatProcess。
@@ -96,7 +88,7 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 
 ### M10 — Router/Error/Health/Continuation
 
-把 route group/pool/capability/priority/weight、provider error policy、health scope/recovery、direct provider-owned continuation 接入唯一 Rust owner 与 typed chain；本地 relay continuation 物理删除并 fail-fast。退出：正反状态、错误、session 隔离、direct continuation 多轮 differential/live 全绿，无 fallback。
+把 route group/pool/capability/priority/weight、provider error policy、health scope/recovery、direct-provider continuation 接入唯一 Rust owner 与 typed chain；本地/relay continuation 标记 retired 并由 gate 锁死。退出：正反状态、错误、session 隔离、direct continuation 多轮 differential/live 全绿，无 fallback。
 
 ### M11 — 协议、工具与管理面
 
