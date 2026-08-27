@@ -67,6 +67,8 @@ M00 -> M01 -> M02 --┐
 
 > 收口：D0 的遗留 status-sync worktree（`6757f163e`，已包含在重构主 tree）亦已核对 clean 并删除，未触碰 M05/B01/B02/M08 的未完成改动。
 
+> 收口：M00 初始 architecture-freeze worktree 已核对其两个未跟踪文档均为主树已有的旧版本；删除旧副本后 worktree clean，分支已删除。主树现有审计 checklist/progress 版本保留。
+
 | worker | 已派发动作 | 当前结论 |
 |---|---|---|
 | M05-T01（原会话复用） | 已恢复自身 `runtime → plugin-contract` 边；A=26 保留，B=3 获父任务授权纳入 claim，C=6 已标明返还对应 owner；等待 B01/B02 输入后重跑 `v4/` Active/admission/build/install/live/AGY | scope 分类已完成；当前仍被真实 Active/build-link 输入阻塞；C 不得进入 M05 candidate，禁止自行清理、伪造 artifact、allowlist、clean、AGY、commit、merge、cleanup |
