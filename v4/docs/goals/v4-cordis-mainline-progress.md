@@ -30,7 +30,7 @@ M00 -> M01 -> M02 --┐
 | M03 Cordis daemon | `merged` | M00 structural contracts | task `8be1e7ced` 已合入重构主树 `3a425633c`；daemon 3/3、host 联测 30/30、red 10/10、release build 通过 |
 | D0 differential harness | `merged` | M00 structural contracts | commit `2a48fe256` 已在 `codex/v4-cordis-refactor-main`；AGY PASS、merge queue 状态 `merged_main_tree`，worktree clean，无需重复实现 |
 | M04 epoch transaction | `merged` | M02 + M03 | task `9914a69fe` 已以 merge `ba4af6c02` 合入重构主树；目标树定向 gates 全部通过，active-link 仍缺 frozen-consumer-registry 环境文件 |
-| M05 ExecutionEngine | `in_progress` | M04 | 唯一 owner 已恢复其 runtime→plugin-contract 边并完成 red/partial-green；其独立 candidate 仍缺 build-link 注册、新 Active binding、candidate/protected projection，未 build/install/live/AGY/commit/merge |
+| M05 ExecutionEngine | `merged_to_refactor_main_reverify_pass` | M04 | 精确 11 文件提交 `02c1b410b`，合入重构主树 `80ebaac9b`；runtime/node-container locked tests、execution-binding red 7/7、node/plugin gates、workspace locked build、managed restart/5520 health、Responses/Chat 短请求真实复验、AGY controller pass |
 | M06 request JSON | `blocked` | M05 | 必须串行 |
 | M07 response JSON | `blocked` | M06 | 必须串行 |
 | M08 async data plane | `blocked_waiting_m05_handoff` | M00 structural contracts + M00-T07 | provider/server 独立 slice 已交接（5/5 provider、2/2 server、locked check、diff-check、handoff PASS）；整体无合法并发实现面，待 M05 明确交接，runtime-bin async stream/cancellation、M00-T07 live evidence、full gates/live/AGY 未闭环；不得覆盖 M05 execution owner |
@@ -49,13 +49,13 @@ M00 -> M01 -> M02 --┐
 
 | lane | task | 状态 | 是否可再派发 | 原因 / 收口条件 |
 |---|---|---|---|---|
-| execution owner | M05-T01 | `blocked_external_input_with_scope_ruling` | 否 | 父审计已完成 35 个物理文件分类：A=26 个在 claim 内，B=3 个 M05 gate 已获父任务批准扩展 claim，C=6 个 standard-plugins/real-pipeline gate 必须返还其他 owner；真实 Active-link/isolation 输入仍缺失；不得清理 C、伪造 artifact、clean、AGY、commit、merge |
+| execution owner | M05-T01 | `merged_to_refactor_main` | 否 | 精确提交 `02c1b410b` 已合入 `codex/v4-cordis-refactor-main` 为 `80ebaac9b`；目标树复验、managed restart/health、Responses/Chat 真实短请求、AGY pass 均有证据；原 worktree 保留待 checker receipt 后清理 |
 | build-link owner | B01 | `blocked_external_input` | 否 | 独立 claim/worktree 内已完成并验证真实 consumer registry/mainline edge（23/23 resolver red、Active-link、execution-binding）；canonical `gen-index/verify-index` 对隔离 worktree 缺真实 frozen Active fail-fast，不得复制、伪造、软链或 allowlist；等待 Active/record-graph owner 提供 exact target input |
 | Active lifecycle owner | B02 | `blocked_owner_handoff` | 否 | B02 隔离 worktree 的 `begin-version`/`publish-active`/`gen-index`/`verify-index` 均 fail-closed：`ACTIVE_INDEX_MISSING`、`MISSING_RECORD:module-artifact`、`ActiveLinkErr03ArtifactMissing`；AppSDK 0.1.5 源码确认 `module-artifact` 只能由 `compile_module→promote_module→freeze_module` 产生，现有 records/protected history 没有合法恢复命令。主 tree 的 canonical index 虽可生成，但其 `source_commit=555bee…` 与当前重构主 tree HEAD=`228130e96…` 不一致，不能作为 exact candidate；等待 `appsdk::lifecycle` / `appsdk::record_graph` 为当前 candidate 提供 module-artifact/Active input，禁止复制、软链、手写或 allowlist |
 | differential governance | D0-T01 | `merged_and_ready_for_cleanup` | 否 | `2a48fe256` 已在重构主 tree；queue 标记 `merged_main_tree`，AGY PASS，worktree clean；可释放 claim/cleanup，不再阻塞 M05 |
 | async data plane | M08-T01 | `blocked_waiting_m05_handoff` | 否 | provider/server 独立 slice 已完成并写入 handoff；整体无合法并发实现面，runtime-bin async stream/cancellation 尚未完成，必须等待 M05 交接，不覆盖 M05 |
 | provider live admission | M00-T05 | `blocked` | 否 | Responses WebSocket v2 / credential blocker；不得猜 endpoint、伪造 101 或绕过真实 continuation |
-| next dependency | M06-T01 | `blocked` | 否 | 必须等待 M05 合入重构主 tree 并完成主树复验 |
+| next dependency | M06-T01 | `ready_after_sync` | 否 | M05 已合入重构主 tree 并完成目标树复验；按计划先同步主树基线，再建立独立 M06 claim/worktree |
 | governance audit | M00-T10 | `merged_and_cleaned` | 否 | merge `de7596514`；red/positive 主树复验通过；claim、worktree、branch 已释放/清理 |
 | protocol/tools/admin contract | M11-T01 | `merged_and_cleaned` | 否 | merge `d48956155`；合同/host/red gates 主树复验通过；resource binding 的既有 host owner/catalog drift 已记录；claim、worktree、branch 已释放/清理 |
 
@@ -106,3 +106,5 @@ M00 -> M01 -> M02 --┐
 - M05 真实 `/v1/responses` replay 返回 HTTP 200，响应 `status=completed` 且输出文本 `LIVE_RESPONSES_OK`。
 - 首次 Chat replay 曾返回 HTTP 503（`curl: (16) Error in the HTTP2 framing layer`），但同语义 A/B/C 对照与后续短请求均 HTTP 200；该失败不可复现，未证明为 M05 代码根因。
 - managed restart 后最终短请求复验：Responses HTTP 200 `status=completed`、Chat HTTP 200 `object=chat.completion`；M05 candidate 已取得 AGY controller `pass`，进入精确合并队列。
+
+补充：M05 已合入并完成目标树复验，M06-T01 与 M08-T01 现具备并发启动条件；M08 仅可复用既有 provider/server claim 继续 runtime-bin async stream/cancellation 与 M00-T07 live binding，不得重复修改已合入 slice。
