@@ -455,6 +455,14 @@ where
                             }
                         }
                     }
+                    Some(Err(error)) if state.client_released => {
+                        // The protocol terminal already crossed the client commit boundary.
+                        // A late transport error is closeout noise, not a new provider attempt;
+                        // handing it off here rewrites a completed response into a switch/error.
+                        let _ = error;
+                        state.done = true;
+                        return None;
+                    }
                     Some(Err(error)) => {
                         state.attempt.discard();
                         if decrement_budget(&mut state.handoff_budget) {

@@ -1259,6 +1259,31 @@ async fn direct_sse_full_attempt_commit_does_not_mix_failed_attempt_bytes() {
 }
 
 #[tokio::test]
+async fn direct_sse_full_attempt_commit_ignores_late_error_after_terminal() {
+    use futures_util::StreamExt;
+
+    let source: V3ClientSseStream = Box::pin(stream::iter([
+        Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"completed\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"completed\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec()),
+        Err(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_stream",
+            "late provider close error",
+        )),
+    ]));
+    let client = wrap_direct_sse_provider_handoff_stream(
+        source,
+        V3HubProviderWireProtocol::Responses,
+        |_| async { panic!("terminal stream must not be handed off") },
+        Some(1),
+    );
+    let frames = client.collect::<Vec<_>>().await;
+    assert_eq!(frames.len(), 1);
+    let text = String::from_utf8(frames.into_iter().next().unwrap().unwrap()).unwrap();
+    assert!(text.contains("response.completed"));
+}
+
+#[tokio::test]
 async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
     use futures_util::StreamExt;
 

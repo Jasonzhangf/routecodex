@@ -165,10 +165,12 @@ mod tests {
             TimeseriesRow {
                 started_epoch_ms: morning,
                 usage: Some(&usage),
+                result: Some("success"),
             },
             TimeseriesRow {
                 started_epoch_ms: evening,
                 usage: Some(&usage),
+                result: Some("success"),
             },
         ];
         let buckets = build_timeseries(&rows, "today", timezone_offset_minutes).unwrap();
