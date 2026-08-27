@@ -72,11 +72,11 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 
 ### M06 — Responses JSON request 主线
 
-迁移 admission、normalize、continuation classify/restore、governance、route facts、target、provider semantic、wire build；旧 helper 只作不发送请求的 shadow baseline。退出：同 request old/new provider-bound wire 无 unexplained diff，control 不进 wire。
+迁移 admission、normalize、Responses direct-provider continuation classify、governance、route facts、target、provider semantic、wire build；本地/relay continuation、seed、context materialization 物理删除，旧 helper 只作不发送请求的 shadow baseline。Responses relay/local `previous_response_id` 在 owning boundary fail-fast。退出：同 request old/new provider-bound wire 无 unexplained diff，control 不进 wire。
 
 ### M07 — Responses JSON response 主线
 
-迁移 raw decode、response governance、tool harvest、continuation commit、client semantic、frame build；旧/新 projector 对同一 raw response differential。退出：JSON/tool/usage/error fixtures 全绿，save 唯一归 RespChatProcess。
+迁移 raw decode、response governance、tool harvest、direct-provider continuation commit、client semantic、frame build；不得生成本地 continuation record/seed；旧/新 projector 对同一 raw response differential。退出：JSON/tool/usage/error fixtures 全绿，direct save 唯一归 RespChatProcess。
 
 ### M08 — Async server 与 native provider transport
 
@@ -88,7 +88,7 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 
 ### M10 — Router/Error/Health/Continuation
 
-把 route group/pool/capability/priority/weight、provider error policy、health scope/recovery、direct/relay continuation 接入唯一 Rust owner 与 typed chain。退出：正反状态、错误、session 隔离、continuation 多轮 differential/live 全绿，无 fallback。
+把 route group/pool/capability/priority/weight、provider error policy、health scope/recovery、direct-provider continuation 接入唯一 Rust owner 与 typed chain；本地/relay continuation 标记 retired 并由 gate 锁死。退出：正反状态、错误、session 隔离、direct continuation 多轮 differential/live 全绿，无 fallback。
 
 ### M11 — 协议、工具与管理面
 
