@@ -173,6 +173,19 @@ impl V3ProviderCooldownCoordinator {
             .collect()
     }
 
+    /// Preserve cooldown deadlines across restart, but always begin a fresh
+    /// startup probe cycle for every persisted entry.
+    pub fn reset_probe_schedule_for_startup(&mut self) -> Result<(), String> {
+        if self.entries.is_empty() {
+            return Ok(());
+        }
+        for entry in self.entries.values_mut() {
+            entry.next_probe_at_ms = 0;
+            entry.probe_in_flight = false;
+        }
+        self.persist()
+    }
+
     pub fn replace_entries(
         &mut self,
         entries: Vec<(V3ProviderCooldownKey, u64, u64)>,

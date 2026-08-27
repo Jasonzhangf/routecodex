@@ -545,7 +545,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
         let startup_key_result = probe_health
             .run_due_provider_key_health_probes(
                 startup_now_ms,
-                true,
+                false,
                 move |provider_id, auth_alias, model_id| {
                     let startup_key_manifest = Arc::clone(&startup_key_manifest);
                     async move {

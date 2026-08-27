@@ -22,13 +22,15 @@ fn restart_loads_cooldown_and_startup_probe_is_the_only_recovery_path() {
         .unwrap();
     let mut restarted = V3ProviderCooldownCoordinator::load(path, 5 * 60 * 60_000).unwrap();
     assert!(!restarted.availability("p", Some("k"), Some("m"), 2_000));
-    let permit = restarted.acquire_startup_probe().unwrap();
+    restarted.reset_probe_schedule_for_startup().unwrap();
+    assert!(!restarted.availability("p", Some("k"), Some("m"), 2_000));
+    let permit = restarted.acquire_due_probe(2_000).unwrap();
     restarted.apply_probe_failure(permit, 2_001).unwrap();
     assert!(!restarted.availability("p", Some("k"), Some("m"), 2_002));
 }
 
 #[test]
-fn health_store_loads_persisted_provider_probe_before_listener_ready() {
+fn health_store_restores_cooldown_but_resets_probe_deadline_after_restart() {
     let manifest = compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
             r#"
@@ -60,6 +62,12 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         .unwrap();
     drop(first);
     let restored = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path);
+    assert_eq!(
+        restored
+            .provider_cooldown_probe_keys_due(2_000)
+            .unwrap(),
+        vec![("p".into(), Some("k".into()), Some("m".into()))]
+    );
     let scope = V3ProviderFailureSessionScope::new("s", "g", "session").unwrap();
     let projection = V3ProviderSessionAvailabilityReader::new(restored, scope).availability(
         "p",
@@ -68,4 +76,51 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         2_000,
     );
     assert!(!projection.available);
+}
+
+#[test]
+fn failed_probe_uses_five_minute_second_probe_cadence() {
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://provider.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "k", env = "KEY" }] }
+[providers.p.models.m]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "routecodex-health-probe-cadence-{}.json",
+        std::process::id()
+    ));
+    let store = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path);
+    store
+        .record_provider_cooldown_failure("p", Some("k"), Some("m"), "timeout", 1_000, 1)
+        .unwrap();
+    store
+        .try_acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap();
+    store
+        .complete_provider_cooldown_probe_failure("p", Some("k"), Some("m"), 2_000)
+        .unwrap();
+    assert!(store
+        .provider_cooldown_probe_keys_due(301_999)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        store.provider_cooldown_probe_keys_due(302_000).unwrap(),
+        vec![("p".into(), Some("k".into()), Some("m".into()))]
+    );
 }
