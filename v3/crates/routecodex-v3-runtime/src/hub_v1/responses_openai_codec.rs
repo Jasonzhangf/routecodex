@@ -189,6 +189,19 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     tool_result,
                 )?;
             }
+            "agent_message" => {
+                let (content, _) = build_v3_openai_chat_content_from_responses_content(
+                    item.get("content"),
+                )?;
+                append_v3_openai_chat_message_preserving_tool_adjacency(
+                    &mut messages,
+                    &mut pending_tool_message_index,
+                    &pending_tool_call_ids,
+                    json!({"role": "user", "content": content}),
+                    turn_assistant_tail_index,
+                )?;
+                turn_assistant_tail_index = None;
+            }
             "compaction" => {
                 // Client session-compaction marker. Its encrypted_content is Fernet
                 // ciphertext of prior context and must be discarded here, never

@@ -848,15 +848,17 @@ impl V3ProviderFailureRuntimeHealth {
         _error_family: &str,
         reason: &str,
     ) -> Result<(), String> {
-        // post-commit SSE 流失败只在当前 session/key 内记录；不能写 provider
-        // 级共享 cooldown，否则一个断流会污染其他 session 和其他 key。
-        self.record_provider_transient_bypass_in_session(
+        // Post-commit SSE failures are provider-health events. They share the
+        // same recoverable score/cooldown policy as pre-commit SSE failures.
+        let action = V3ProviderFailureAction::recoverable(_error_family);
+        self.record_provider_failure_record_with_action(
             failure_session_scope,
             provider_id,
             auth_alias,
             model_id,
             Some(reason),
             v3_relay_provider_policy_now_epoch_ms()?,
+            &action,
         )?;
         self.record_provider_action_failure_in_scope(
             failure_session_scope,
@@ -1092,10 +1094,11 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         // Keep it health-neutral so all keys do not enter cooldown for the
         // same request-shaped failure.
         || status == 400
-        // 瞬态失败第 3 次尝试后：health-neutral 切 provider/terminal
-        // （复用 request-local 的 synthetic health record + request-local
-        // recovery witness，不写 provider health store）。
-        || transient;
+        ;
+        // SSE/transport failures are provider-health events as well. The
+        // failure action builder classifies them as recoverable, so they enter
+        // the shared rolling score/cooldown path instead of a synthetic local
+        // record.
     let health_record = if is_request_local_compat_failure {
         V3ProviderFailureRecord {
             scope_label: candidate_key.clone(),

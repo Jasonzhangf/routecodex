@@ -1542,7 +1542,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected_over_limit = target
+    let exhaustion_over_limit = target
         .select_available(
             expanded,
             &Availability {
@@ -1550,12 +1550,11 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
             },
             0,
         )
-        .unwrap();
-    assert_eq!(selected_over_limit.candidate.provider_id, "pinned");
-    assert_eq!(
-        selected_over_limit.unavailable_candidates,
-        vec!["pinned:key:m:context_window_exceeded(input_tokens=1500,max_context_tokens=1000)"]
-    );
+        .expect_err("context-ineligible candidates must not enter the pool");
+    assert!(exhaustion_over_limit
+        .attempted_candidates
+        .iter()
+        .any(|entry| entry.contains("context_window_exceeded(")));
 }
 
 #[test]
@@ -1665,7 +1664,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected_floor = target
+    let exhaustion_floor = target
         .select_available(
             expanded,
             &Availability {
@@ -1673,10 +1672,9 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
             },
             0,
         )
-        .unwrap();
-    assert_eq!(selected_floor.candidate.provider_id, "pinned");
-    assert!(selected_floor
-        .unavailable_candidates
+        .expect_err("default floor must not admit an over-context candidate");
+    assert!(exhaustion_floor
+        .attempted_candidates
         .iter()
         .any(|entry| entry.contains("context_window_exceeded(")));
 }

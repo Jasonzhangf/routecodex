@@ -786,8 +786,7 @@ port = 4446
 "#
     );
     let manifest =
-        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&with_admin).unwrap())
-            .unwrap();
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&with_admin).unwrap()).unwrap();
     assert_eq!(manifest.servers.len(), 2);
 
     let duplicate = format!(
@@ -801,7 +800,9 @@ port = 4444
     );
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&duplicate).unwrap())
         .unwrap_err();
-    assert!(error.to_string().contains("admin_webui shares listen address"));
+    assert!(error
+        .to_string()
+        .contains("admin_webui shares listen address"));
 }
 
 #[test]

@@ -703,8 +703,8 @@ impl V3ProviderHealthStore {
         })
     }
 
-    /// 成功响应清零该 key 的连续失败与 session cooldown。已经形成的
-    /// provider cooldown/probe block 只能由注册 probe 的 2xx 完成事件清除。
+    /// 成功响应清零该完整 provider/key/model 的连续失败与 cooldown，
+    /// 让其他 session 也能立即恢复该精确 key/model。
     pub fn record_provider_success_in_session(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
@@ -2459,7 +2459,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
     }
 
     #[test]
-    fn success_after_provider_cooldown_expires_still_requires_probe() {
+    fn success_in_any_session_recovers_the_same_provider_key_and_model() {
         let store = V3ProviderHealthStore::default();
         store
             .record_provider_cooldown_failure(
@@ -2471,7 +2471,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                 10,
             )
             .unwrap();
-        // 冷却未到期（blocked_until=110 > 105）：session 成功不清 provider 级冷却。
+        // 未到期的 provider cooldown 也由同一 key/model 的真实成功立即恢复。
         store
             .record_provider_success_in_session(
                 &session("session-a"),
@@ -2482,7 +2482,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
             )
             .unwrap();
         assert!(
-            !store
+            store
                 .availability_for_session(
                     &session("session-a"),
                     "provider-a",
@@ -2491,43 +2491,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                     105,
                 )
                 .available,
-            "unexpired provider cooldown must still require probe before revival"
-        );
-        // 冷却已到期（110）但 probe 尚未跑：业务成功只清失败计数，不能复活。
-        store
-            .record_provider_success_in_session(
-                &session("session-a"),
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                110,
-            )
-            .unwrap();
-        assert!(
-            !store
-                .availability_for_session(
-                    &session("session-a"),
-                    "provider-a",
-                    Some("key-a"),
-                    Some("gpt-5.5"),
-                    111,
-                )
-                .available,
-            "expired provider cooldown must remain blocked until a provider probe succeeds"
-        );
-        store
-            .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("gpt-5.5"))
-            .unwrap();
-        assert!(
-            store
-                .availability_for_session(
-                    &session("session-a"),
-                    "provider-a",
-                    Some("key-a"),
-                    Some("gpt-5.5"),
-                    112,
-                )
-                .available
+            "a real success must recover the exact provider key/model across sessions"
         );
     }
 

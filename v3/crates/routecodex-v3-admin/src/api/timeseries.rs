@@ -15,6 +15,12 @@ pub(crate) struct TimeseriesBucket {
     pub output_tokens: u64,
     pub cached_tokens: u64,
     pub total_tokens: u64,
+    /// Cache hit rate within this bucket, clamped to 0..=100. 0 when no
+    /// effective input. Effective input uses raw `input_tokens` (which
+    /// already absorbs cache_read/cache_creation contributions) and falls
+    /// back to `cached_tokens` only when raw input is smaller than cached.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_hit_rate_percent: Option<f64>,
 }
 
 pub(crate) struct TimeseriesRow<'a> {
@@ -127,14 +133,17 @@ pub(crate) fn build_timeseries(
             utc_date_for_local_day(row.started_epoch_ms, timezone_offset_minutes)
         };
 
-        let bucket = buckets.entry(key.clone()).or_insert_with(|| TimeseriesBucket {
-            date: key,
-            count: 0,
-            input_tokens: 0,
-            output_tokens: 0,
-            cached_tokens: 0,
-            total_tokens: 0,
-        });
+        let bucket = buckets
+            .entry(key.clone())
+            .or_insert_with(|| TimeseriesBucket {
+                date: key,
+                count: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                cached_tokens: 0,
+                total_tokens: 0,
+                cache_hit_rate_percent: None,
+            });
         bucket.count += 1;
         // Token sums follow the same aggregate rule as the records stats: only
         // successful terminal responses have billable/cacheable usage.
@@ -146,9 +155,15 @@ pub(crate) fn build_timeseries(
                     .and_then(Value::as_u64)
                     .unwrap_or(0)
             };
-            bucket.input_tokens += token("input_tokens");
-            bucket.output_tokens += token("output_tokens");
-            bucket.cached_tokens += token("cached_tokens");
+            let row_input = token("input_tokens");
+            let row_output = token("output_tokens");
+            let row_cached = token("cached_tokens");
+            let row_effective = row_input.max(row_cached);
+            bucket.input_tokens += row_input;
+            bucket.output_tokens += row_output;
+            // Clamp bucket cached so cross-row accumulation never exceeds bucket
+            // effective input (raw input tokens already include cache_read).
+            bucket.cached_tokens += row_cached.min(row_effective);
             bucket.total_tokens += token("total_tokens");
         }
     }
@@ -162,14 +177,17 @@ pub(crate) fn build_timeseries(
             for hour in 0..24 {
                 let hour_ms_val = today_start + (hour as u64) * hour_ms;
                 let key = utc_hour_label(hour_ms_val, timezone_offset_minutes);
-                buckets.entry(key.clone()).or_insert_with(|| TimeseriesBucket {
-                    date: key,
-                    count: 0,
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cached_tokens: 0,
-                    total_tokens: 0,
-                });
+                buckets
+                    .entry(key.clone())
+                    .or_insert_with(|| TimeseriesBucket {
+                        date: key,
+                        count: 0,
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cached_tokens: 0,
+                        total_tokens: 0,
+                        cache_hit_rate_percent: None,
+                    });
             }
         } else if is_month {
             let now_ms = system_epoch_ms()?;
@@ -179,34 +197,43 @@ pub(crate) fn build_timeseries(
             let today_start = local_day_start(now_ms, timezone_offset_minutes);
             while week_start <= today_start {
                 let key = utc_date_for_local_day(week_start, timezone_offset_minutes);
-                buckets.entry(key.clone()).or_insert_with(|| TimeseriesBucket {
-                    date: key,
-                    count: 0,
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cached_tokens: 0,
-                    total_tokens: 0,
-                });
+                buckets
+                    .entry(key.clone())
+                    .or_insert_with(|| TimeseriesBucket {
+                        date: key,
+                        count: 0,
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cached_tokens: 0,
+                        total_tokens: 0,
+                        cache_hit_rate_percent: None,
+                    });
                 week_start += 7 * day_ms;
             }
         } else {
             // "week": fill every day from first data to today.
             let first = local_day_start(
-                rows.iter().map(|r| r.started_epoch_ms).min().unwrap_or(now_ms),
+                rows.iter()
+                    .map(|r| r.started_epoch_ms)
+                    .min()
+                    .unwrap_or(now_ms),
                 timezone_offset_minutes,
             );
             let today_start = local_day_start(now_ms, timezone_offset_minutes);
             let mut day = first;
             while day <= today_start {
                 let key = utc_date_for_local_day(day, timezone_offset_minutes);
-                buckets.entry(key.clone()).or_insert_with(|| TimeseriesBucket {
-                    date: key,
-                    count: 0,
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cached_tokens: 0,
-                    total_tokens: 0,
-                });
+                buckets
+                    .entry(key.clone())
+                    .or_insert_with(|| TimeseriesBucket {
+                        date: key,
+                        count: 0,
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cached_tokens: 0,
+                        total_tokens: 0,
+                        cache_hit_rate_percent: None,
+                    });
                 day += day_ms;
             }
         }
@@ -248,9 +275,21 @@ mod tests {
             "total_tokens": 202
         });
         let rows = vec![
-            TimeseriesRow { started_epoch_ms: h2, usage: Some(&usage), result: Some("success") },
-            TimeseriesRow { started_epoch_ms: h2, usage: Some(&usage), result: Some("success") },
-            TimeseriesRow { started_epoch_ms: h5, usage: Some(&usage), result: Some("success") },
+            TimeseriesRow {
+                started_epoch_ms: h2,
+                usage: Some(&usage),
+                result: Some("success"),
+            },
+            TimeseriesRow {
+                started_epoch_ms: h2,
+                usage: Some(&usage),
+                result: Some("success"),
+            },
+            TimeseriesRow {
+                started_epoch_ms: h5,
+                usage: Some(&usage),
+                result: Some("success"),
+            },
         ];
         let buckets = build_timeseries(&rows, "today", tz).unwrap();
         // 24 hours should be present; only 02:00 and 05:00 have data.
@@ -283,8 +322,16 @@ mod tests {
             "total_tokens": 150
         });
         let rows = vec![
-            TimeseriesRow { started_epoch_ms: monday + 1000, usage: Some(&usage), result: Some("success") },
-            TimeseriesRow { started_epoch_ms: saturday + 1000, usage: Some(&usage), result: Some("success") },
+            TimeseriesRow {
+                started_epoch_ms: monday + 1000,
+                usage: Some(&usage),
+                result: Some("success"),
+            },
+            TimeseriesRow {
+                started_epoch_ms: saturday + 1000,
+                usage: Some(&usage),
+                result: Some("success"),
+            },
         ];
         let buckets = build_timeseries(&rows, "month", tz).unwrap();
         let monday_label = utc_date_for_local_day(monday, tz);
@@ -314,9 +361,21 @@ mod tests {
             "total_tokens": 999
         });
         let rows = vec![
-            TimeseriesRow { started_epoch_ms: day_start + 1000, usage: Some(&success_usage), result: Some("success") },
-            TimeseriesRow { started_epoch_ms: day_start + 2000, usage: Some(&error_usage), result: Some("error") },
-            TimeseriesRow { started_epoch_ms: day_start + 3000, usage: Some(&error_usage), result: None },
+            TimeseriesRow {
+                started_epoch_ms: day_start + 1000,
+                usage: Some(&success_usage),
+                result: Some("success"),
+            },
+            TimeseriesRow {
+                started_epoch_ms: day_start + 2000,
+                usage: Some(&error_usage),
+                result: Some("error"),
+            },
+            TimeseriesRow {
+                started_epoch_ms: day_start + 3000,
+                usage: Some(&error_usage),
+                result: None,
+            },
         ];
 
         let buckets = build_timeseries(&rows, "week", 0).unwrap();
@@ -340,8 +399,16 @@ mod tests {
             "total_tokens": 2
         });
         let rows = vec![
-            TimeseriesRow { started_epoch_ms: day_start + 1000, usage: Some(&usage), result: Some("cancelled") },
-            TimeseriesRow { started_epoch_ms: day_start + 2000, usage: Some(&usage), result: None },
+            TimeseriesRow {
+                started_epoch_ms: day_start + 1000,
+                usage: Some(&usage),
+                result: Some("cancelled"),
+            },
+            TimeseriesRow {
+                started_epoch_ms: day_start + 2000,
+                usage: Some(&usage),
+                result: None,
+            },
         ];
 
         let buckets = build_timeseries(&rows, "week", 0).unwrap();

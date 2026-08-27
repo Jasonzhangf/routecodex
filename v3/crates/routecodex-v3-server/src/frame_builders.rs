@@ -762,7 +762,7 @@ fn v3_io_sse_body_for_protocol(
                 )),
             };
             match next {
-                Some((Ok(bytes), state)) => Some((Ok(bytes), state)),
+            Some((Ok(bytes), state)) => Some((Ok(bytes), state)),
                 Some((Err(error), (stream, interval, _, keepalive_chunk))) => {
                     let frame = v3_sse_runtime_error_source_chunk_for_protocol(
                         "V3ServerRespOutbound05ClientFrame",

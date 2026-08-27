@@ -1,10 +1,10 @@
 use super::*;
-use crate::kernel::direct_sse_consumers::{
-    build_v3_sse_transport_error_source, V3DirectSseContentConsumer,
-};
 use crate::hub_v1::{
     classify_v3_provider_sse_json_data, normalize_v3_provider_sse_json_data_for_event_name,
     V3ProviderResponsesJsonFrameOutcome,
+};
+use crate::kernel::direct_sse_consumers::{
+    build_v3_sse_transport_error_source, V3DirectSseContentConsumer,
 };
 use std::collections::VecDeque;
 use std::future::Future;
@@ -278,9 +278,7 @@ pub(crate) fn wrap_direct_sse_provider_handoff_stream<F, Fut>(
 ) -> V3ClientSseStream
 where
     F: Fn(V3Error01SourceRaised) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = Result<Option<V3ClientSseStream>, V3Error01SourceRaised>>
-        + Send
-        + 'static,
+    Fut: Future<Output = Result<Option<V3ClientSseStream>, V3Error01SourceRaised>> + Send + 'static,
 {
     struct StreamState<F> {
         source: V3ClientSseStream,
@@ -291,6 +289,7 @@ where
         attempt: V3DirectSseAttemptBuffer,
         client_released: bool,
         done_seen: bool,
+        client_output_seen: bool,
         done: bool,
     }
 
@@ -310,6 +309,7 @@ where
         chunk: &[u8],
         decoder: &mut SseIncrementalDecoder,
         done_seen: &mut bool,
+        client_output_seen: &mut bool,
     ) -> Result<(bool, bool), V3Error01SourceRaised> {
         let frames = decoder
             .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
@@ -344,19 +344,22 @@ where
             if is_v3_provider_sse_keepalive_text(&data) {
                 continue;
             }
-            if let Some(outcome) = classify_v3_provider_sse_json_data(protocol, &data).map_err(
-                |message| {
+            if let Some(outcome) =
+                classify_v3_provider_sse_json_data(protocol, &data).map_err(|message| {
                     build_v3_error_01_source_raised(
                         V3ErrorSourceKind::ProviderFailure,
                         "V3ProviderResp14Raw",
                         "provider_response_sse_event_invalid",
                         message,
                     )
-                },
-            )? {
+                })?
+            {
                 if protocol == V3HubProviderWireProtocol::OpenAiChat
                     && *done_seen
-                    && !matches!(outcome, V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
+                    && !matches!(
+                        outcome,
+                        V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
+                    )
                 {
                     return Err(build_v3_error_01_source_raised(
                         V3ErrorSourceKind::ProviderFailure,
@@ -366,15 +369,22 @@ where
                     ));
                 }
                 match outcome {
-                    V3ProviderResponsesJsonFrameOutcome::StartClientStream => admitted = true,
+                    V3ProviderResponsesJsonFrameOutcome::StartClientStream => {
+                        admitted = true;
+                        *client_output_seen = true;
+                    }
                     V3ProviderResponsesJsonFrameOutcome::Terminal => terminal = true,
                     V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput => {
-                        return Err(build_v3_error_01_source_raised(
-                            V3ErrorSourceKind::ProviderFailure,
-                            "V3ProviderResp14Raw",
-                            "provider_response_sse_empty",
-                            "provider SSE reached terminal without client output",
-                        ));
+                        if *client_output_seen || admitted {
+                            terminal = true;
+                        } else {
+                            return Err(build_v3_error_01_source_raised(
+                                V3ErrorSourceKind::ProviderFailure,
+                                "V3ProviderResp14Raw",
+                                "provider_response_sse_empty",
+                                "provider SSE reached terminal without client output",
+                            ));
+                        }
                     }
                     V3ProviderResponsesJsonFrameOutcome::ContinueBuffering => {}
                     V3ProviderResponsesJsonFrameOutcome::Failure { code, message } => {
@@ -401,6 +411,7 @@ where
             attempt: V3DirectSseAttemptBuffer::new(),
             client_released: false,
             done_seen: false,
+            client_output_seen: false,
             done: false,
         },
         |mut state| async move {
@@ -425,6 +436,7 @@ where
                             &chunk,
                             &mut state.decoder,
                             &mut state.done_seen,
+                            &mut state.client_output_seen,
                         ) {
                             Ok((_admitted, terminal)) if terminal => {
                                 state.attempt.finish_terminal();
@@ -438,8 +450,11 @@ where
                                     match state.handoff.clone()(error.clone()).await {
                                         Ok(Some(next)) => {
                                             state.source = next;
-                                            state.decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+                                            state.decoder = SseIncrementalDecoder::new(
+                                                SseTransportLimits::default(),
+                                            );
                                             state.done_seen = false;
+                                            state.client_output_seen = false;
                                             state.client_released = false;
                                             continue;
                                         }
@@ -469,8 +484,10 @@ where
                             match state.handoff.clone()(error.clone()).await {
                                 Ok(Some(next)) => {
                                     state.source = next;
-                                    state.decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+                                    state.decoder =
+                                        SseIncrementalDecoder::new(SseTransportLimits::default());
                                     state.done_seen = false;
+                                    state.client_output_seen = false;
                                     state.client_released = false;
                                     continue;
                                 }
@@ -512,8 +529,11 @@ where
                                 match state.handoff.clone()(error.clone()).await {
                                     Ok(Some(next)) => {
                                         state.source = next;
-                                        state.decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+                                        state.decoder = SseIncrementalDecoder::new(
+                                            SseTransportLimits::default(),
+                                        );
                                         state.done_seen = false;
+                                        state.client_output_seen = false;
                                         state.client_released = false;
                                         continue;
                                     }
@@ -585,8 +605,8 @@ mod direct_sse_timing_tests {
             replacement,
             Some(1),
         )
-            .collect::<Vec<_>>()
-            .await;
+        .collect::<Vec<_>>()
+        .await;
 
         assert_eq!(frames.len(), 1);
         assert!(frames.iter().all(Result::is_ok));
@@ -641,19 +661,16 @@ mod direct_sse_timing_tests {
 
     #[tokio::test]
     async fn direct_sse_broker_waits_for_provider_terminal_before_client_release() {
-        let provider = Box::pin(stream::unfold(
-            0usize,
-            |index| async move {
-                if index == 0 {
-                    return Some((
+        let provider = Box::pin(stream::unfold(0usize, |index| async move {
+            if index == 0 {
+                return Some((
                         Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec()),
                         1,
                     ));
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                None
-            },
-        ));
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            None
+        }));
         let client = wrap_direct_sse_provider_handoff_stream(
             Box::pin(provider),
             crate::hub_v1::V3HubProviderWireProtocol::Responses,
@@ -661,9 +678,12 @@ mod direct_sse_timing_tests {
             Some(0),
         );
         assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(100), client.collect::<Vec<_>>())
-                .await
-                .is_err(),
+            tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                client.collect::<Vec<_>>()
+            )
+            .await
+            .is_err(),
             "partial provider bytes must remain buffered before protocol terminal"
         );
     }

@@ -200,11 +200,9 @@ mod tests {
     fn read_missing_file_ok() {
         let path = std::path::Path::new("/nonexistent/this/file/does/not/exist.jsonl");
         assert!(v3_webui_observability_read_rows(path).unwrap().is_empty());
-        assert!(
-            v3_webui_observability_read_raw_rows(path)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(v3_webui_observability_read_raw_rows(path)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

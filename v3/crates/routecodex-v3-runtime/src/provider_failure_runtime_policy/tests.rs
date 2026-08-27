@@ -549,7 +549,7 @@ fn post_commit_response_stream_failure_updates_global_key_health() {
             1,
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
         );
-    assert_eq!(projection.score_milli, 700);
+    assert_eq!(projection.score_milli, 850);
     assert!(!projection.available);
 }
 
@@ -589,7 +589,7 @@ fn incomplete_key_identity_fails_before_provider_cooldown_write() {
 }
 
 #[test]
-fn post_commit_sse_failures_never_cool_provider_or_block_fresh_session() {
+fn post_commit_sse_failures_cool_provider_and_block_fresh_session() {
     let manifest = target_resolution_manifest("post_commit_sse_transient");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let failed_session = test_provider_failure_scope(
@@ -623,32 +623,26 @@ fn post_commit_sse_failures_never_cool_provider_or_block_fresh_session() {
     }
 
     let now_ms = v3_relay_provider_policy_now_epoch_ms().expect("current epoch");
-    assert!(
-        health
-            .store()
-            .availability_for_session(
-                &fresh_session,
-                "primary",
-                Some("key1"),
-                Some("gpt-test"),
-                now_ms,
-            )
-            .available,
-        "SSE transport/decode/EOF failures must not blacklist a provider for another session"
-    );
-    assert!(
-        health
-            .store()
-            .provider_cooldown_probe_keys_due(u64::MAX)
-            .expect("provider cooldown probe query")
-            .is_empty(),
-        "SSE transient failures must not create provider cooldown probe state"
-    );
+    assert!(!health
+        .store()
+        .availability_for_session(
+            &fresh_session,
+            "primary",
+            Some("key1"),
+            Some("gpt-test"),
+            now_ms,
+        )
+        .available);
+    assert!(!health
+        .store()
+        .provider_cooldown_probe_keys_due(u64::MAX)
+        .expect("provider cooldown probe query")
+        .is_empty());
     let after = routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
         &health, "primary", "key1", "gpt-test", 1, 1, 2_000_000,
     );
-    assert_eq!(after.available, before.available);
-    assert_eq!(after.effective_weight_milli, before.effective_weight_milli);
+    assert!(!after.available);
+    assert!(after.effective_weight_milli < before.effective_weight_milli);
 }
 
 #[tokio::test]

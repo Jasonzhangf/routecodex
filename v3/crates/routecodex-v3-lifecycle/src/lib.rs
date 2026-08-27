@@ -1,8 +1,6 @@
 #![cfg_attr(test, allow(unused_variables, clippy::zombie_processes))]
 
-use routecodex_v3_config::{
-    V3AdminWebuiManifest, V3Config05ManifestPublished, V3ConfigStore,
-};
+use routecodex_v3_config::{V3AdminWebuiManifest, V3Config05ManifestPublished, V3ConfigStore};
 use routecodex_v3_server::{spawn_v3_server_aggregate_with_admin, V3ServerAggregateHandle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -877,27 +875,24 @@ impl V3ManagedLifecycle {
         let admin_config_path = admin_webui
             .as_ref()
             .map(|_| PathBuf::from(&declaration.config_path));
-        let handle = match spawn_v3_server_aggregate_with_admin(
-            manifest,
-            admin_webui,
-            admin_config_path,
-        )
-        .await
-        {
-            Ok(handle) => handle,
-            Err(error) => {
-                write_status(
-                    &instance_dir,
-                    &declaration.instance_id,
-                    V3ManagedRunState::Failed,
-                    Some(error.to_string()),
-                )?;
-                let _ = fs::remove_file(instance_dir.join("pid.cache"));
-                let _ = fs::remove_file(instance_dir.join("control.json"));
-                let _ = fs::remove_file(&socket_path);
-                return Err(error.into());
-            }
-        };
+        let handle =
+            match spawn_v3_server_aggregate_with_admin(manifest, admin_webui, admin_config_path)
+                .await
+            {
+                Ok(handle) => handle,
+                Err(error) => {
+                    write_status(
+                        &instance_dir,
+                        &declaration.instance_id,
+                        V3ManagedRunState::Failed,
+                        Some(error.to_string()),
+                    )?;
+                    let _ = fs::remove_file(instance_dir.join("pid.cache"));
+                    let _ = fs::remove_file(instance_dir.join("control.json"));
+                    let _ = fs::remove_file(&socket_path);
+                    return Err(error.into());
+                }
+            };
         let handle = handle;
         let handoff_path = instance_dir.join(FRONT_HANDOFF_FILE);
         if handoff_path.exists() {

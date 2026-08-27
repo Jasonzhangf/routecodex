@@ -39,7 +39,7 @@ impl V3ProviderFailureAction {
             class_code: class_code.to_string(),
             recovery: V3ProviderRecoveryKind::RecoverableCounted,
             scope: V3ProviderHealthScope::GlobalProviderKey,
-            score_delta_milli: -100,
+            score_delta_milli: -50,
             failure_threshold: 3,
             cooldown_ms: 15 * 60_000,
         }
@@ -92,7 +92,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             class_code: classified.source.code.clone(),
             recovery: V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
             scope: V3ProviderHealthScope::GlobalProviderKey,
-            score_delta_milli: -400,
+            score_delta_milli: -200,
             failure_threshold: 1,
             cooldown_ms: classified
                 .provider_global_cooldown_ms
@@ -286,7 +286,7 @@ mod tests {
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
         assert_eq!(action.failure_threshold, 3);
-        assert_eq!(action.score_delta_milli, -100);
+        assert_eq!(action.score_delta_milli, -50);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderRespInbound01Raw",
@@ -296,7 +296,7 @@ mod tests {
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
         assert_eq!(action.failure_threshold, 3);
-        assert_eq!(action.score_delta_milli, -100);
+        assert_eq!(action.score_delta_milli, -50);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",
@@ -306,6 +306,6 @@ mod tests {
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
         assert_eq!(action.failure_threshold, 3);
-        assert_eq!(action.score_delta_milli, -100);
+        assert_eq!(action.score_delta_milli, -50);
     }
 }

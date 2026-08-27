@@ -103,7 +103,9 @@ pub(crate) fn record_v3_webui_error_for_context(
 
 /// Started projection: uses only scope + identity (route/model/provider unknown
 /// until routing). Same typed side-channel as the rest of the projection.
-pub(crate) fn record_v3_webui_started_for_context(context: &V3ConsoleEmissionContext) -> Result<u64, String> {
+pub(crate) fn record_v3_webui_started_for_context(
+    context: &V3ConsoleEmissionContext,
+) -> Result<u64, String> {
     let request_key = build_v3_obs_request_key(
         context.state.server.port,
         &context.request_identity.request_id,

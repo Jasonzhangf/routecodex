@@ -215,7 +215,6 @@ pub(crate) struct V3ObsUsageSummary {
     pub cached_tokens: Option<u64>,
 }
 
-
 /// Shared per-listener projection state. The mutable map is only an
 /// in-process cache used to merge lifecycle fields and enforce terminal
 /// immutability; every accepted event is also appended to the JSONL store.
@@ -424,7 +423,6 @@ impl V3WebuiObservability {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -631,7 +629,6 @@ mod tests {
         );
     }
 
-
     fn meta(req: &str) -> V3ObsRequestMeta {
         V3ObsRequestMeta {
             request_id: req.to_string(),
@@ -642,7 +639,6 @@ mod tests {
             ..Default::default()
         }
     }
-
 
     #[test]
     fn request_key_is_port_plus_rid() {

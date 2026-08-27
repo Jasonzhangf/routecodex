@@ -215,7 +215,15 @@ impl V3FrontSseAcceptSkeleton {
             rx.recv().await.map(|item| (item, rx))
         });
         let body = v3_io_sse_body(Box::pin(client_stream), Some(keepalive_interval));
-        if let Some(identity) = front_connection_identity { front_transport_broker.front_socket(identity).map(|socket| socket.set_exec_closeout_frame(v3_responses_sse_error_event_chunk(503, "server_restart_in_progress", "RouteCodex restarted before this response completed"))); }
+        if let Some(identity) = front_connection_identity {
+            front_transport_broker.front_socket(identity).map(|socket| {
+                socket.set_exec_closeout_frame(v3_responses_sse_error_event_chunk(
+                    503,
+                    "server_restart_in_progress",
+                    "RouteCodex restarted before this response completed",
+                ))
+            });
+        }
         Response::builder()
             .status(axum::http::StatusCode::OK)
             .header("content-type", "text/event-stream")

@@ -66,10 +66,48 @@ where
     C::Standardized: Send + Sync + 'static,
     C::Policy: Send + Sync + 'static,
 {
+    execute_v3_direct_runtime_kernel_core_with_handoff_budget::<C, T>(
+        control,
+        manifest,
+        raw,
+        transport,
+        provider_health,
+        now_epoch_ms,
+        allow_exhaustion_rescue_probe,
+        provider_failure_event_sink,
+        route_selection_event_sink,
+        request_key_catalog,
+        8,
+    )
+    .await
+}
+
+async fn execute_v3_direct_runtime_kernel_core_with_handoff_budget<
+    C: V3DirectProtocolCodec,
+    T: ResponsesTransport + ?Sized + 'static,
+>(
+    mut control: C::Control,
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    transport: &T,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    now_epoch_ms: u64,
+    allow_exhaustion_rescue_probe: bool,
+    provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
+    route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
+    request_key_catalog: &crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog,
+    handoff_budget: usize,
+) -> V3ResponsesDirectRuntimeOutput
+where
+    C: Send + Sync + 'static,
+    C::Control: Clone + Send + Sync + 'static,
+    C::Standardized: Send + Sync + 'static,
+    C::Policy: Send + Sync + 'static,
+{
     let raw_for_handoff = raw.clone();
     let manifest_for_handoff = manifest.clone();
     let control_for_handoff = control.clone();
-    let transport_for_handoff = transport.handoff_handle();
+    let transport_for_handoff = (handoff_budget > 0).then(|| transport.handoff_handle()).flatten();
     let provider_failure_event_sink_for_handoff = provider_failure_event_sink.cloned();
     let route_selection_event_sink_for_handoff = route_selection_event_sink.cloned();
     let accumulator = V3RuntimeObservabilityAccumulator::start();
@@ -916,7 +954,7 @@ where
                                             .map_err(|error| error.to_string())?;
                                         let request_key_catalog = crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog();
                                         Ok::<_, String>(runtime.block_on(
-                                            execute_v3_direct_runtime_kernel_core_with_key_catalog::<C, Arc<dyn ResponsesTransport>>(
+                                            execute_v3_direct_runtime_kernel_core_with_handoff_budget::<C, Arc<dyn ResponsesTransport>>(
                                                 control,
                                                 &manifest,
                                                 raw,
@@ -927,6 +965,7 @@ where
                                                 provider_failure_event_sink.as_ref(),
                                                 route_selection_event_sink.as_ref(),
                                                 &request_key_catalog,
+                                                handoff_budget.saturating_sub(1),
                                             ),
                                         ))
                                     })
@@ -968,7 +1007,7 @@ where
                         stream,
                         response_projection.compat_plan.provider_protocol,
                         handoff,
-                        Some(8),
+                        Some(handoff_budget),
                     )
                 } else {
                     crate::kernel::direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream(

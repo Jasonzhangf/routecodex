@@ -13,20 +13,20 @@ fn recoverable_failures_lower_score_then_cool_on_third_failure() {
     let first = store
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 100)
         .expect("first failure");
-    assert_eq!(first.score_milli, 900);
+    assert_eq!(first.score_milli, 950);
     assert_eq!(first.success_streak, 0);
     assert!(first.available);
 
     let second = store
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 101)
         .expect("second failure");
-    assert_eq!(second.score_milli, 800);
+    assert_eq!(second.score_milli, 900);
     assert!(!second.cooldown);
 
     let third = store
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 102)
         .expect("third failure");
-    assert_eq!(third.score_milli, 700);
+    assert_eq!(third.score_milli, 850);
     assert!(third.cooldown);
     assert!(!third.available);
 }
@@ -104,7 +104,7 @@ fn success_increases_score_but_probe_success_controls_cooldown_recovery() {
     let blocked_success = store
         .record_provider_success("provider-a", "key-a", "model-a", 103)
         .expect("success evidence");
-    assert_eq!(blocked_success.score_milli, 720);
+    assert_eq!(blocked_success.score_milli, 860);
     assert_eq!(blocked_success.success_streak, 1);
     assert!(blocked_success.cooldown);
     assert!(!blocked_success.available);
@@ -114,6 +114,51 @@ fn success_increases_score_but_probe_success_controls_cooldown_recovery() {
         .expect("probe success");
     assert!(recovered.available);
     assert!(recovered.score_milli >= 600);
+}
+
+#[test]
+fn health_score_uses_only_the_latest_100_calls() {
+    let store = V3ProviderHealthStore::default();
+    let failure = V3ProviderFailureAction::recoverable("transport");
+    for now_ms in 0..100 {
+        store
+            .record_provider_failure_action("p", "k", "m", &failure, now_ms)
+            .expect("failure");
+    }
+    let before = store
+        .scheduling_projection("p", "k", "m", 100, 1, 100)
+        .expect("projection");
+    assert_eq!(before.score_milli, 0);
+    let success = store
+        .record_provider_success("p", "k", "m", 101)
+        .expect("success");
+    assert_eq!(success.score_milli, 0);
+    for now_ms in 102..202 {
+        store
+            .record_provider_success("p", "k", "m", now_ms)
+            .expect("success");
+    }
+    let after = store
+        .scheduling_projection("p", "k", "m", 100, 1, 202)
+        .expect("projection");
+    assert_eq!(after.score_milli, 1_500);
+}
+
+#[test]
+fn successful_calls_cap_health_at_150() {
+    let store = V3ProviderHealthStore::default();
+    for now_ms in 0..100 {
+        store
+            .record_provider_success("p", "k", "m", now_ms)
+            .expect("success");
+    }
+    assert_eq!(
+        store
+            .scheduling_projection("p", "k", "m", 100, 1, 100)
+            .unwrap()
+            .score_milli,
+        1_500
+    );
 }
 
 #[test]

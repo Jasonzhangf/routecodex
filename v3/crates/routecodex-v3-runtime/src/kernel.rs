@@ -107,11 +107,32 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     hook_registry: V3HookRegistry,
     transport: &T,
 ) -> V3ResponsesDirectRuntimeOutput {
+    execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget(
+        state,
+        manifest,
+        raw,
+        hook_registry,
+        transport,
+        8,
+    )
+    .await
+}
+
+async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
+    T: ResponsesTransport + ?Sized,
+>(
+    state: V3ResponsesDirectRuntimeCoreState,
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    hook_registry: V3HookRegistry,
+    transport: &T,
+    handoff_budget: usize,
+) -> V3ResponsesDirectRuntimeOutput {
     let raw_for_sse_handoff = raw.clone();
     let manifest_for_sse_handoff = manifest.clone();
     let state_for_sse_handoff = state.clone();
     let hook_registry_for_sse_handoff = hook_registry;
-    let transport_for_sse_handoff = transport.handoff_handle();
+    let transport_for_sse_handoff = (handoff_budget > 0).then(|| transport.handoff_handle()).flatten();
     let accumulator = state
         .observability_accumulator
         .clone()
@@ -1622,12 +1643,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                                                     .build()
                                                     .map_err(|error| error.to_string())?;
                                             Ok::<_, String>(runtime.block_on(
-                                                execute_v3_responses_direct_runtime_kernel_core(
+                                                execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget(
                                                     state,
                                                     &manifest,
                                                     raw,
                                                     hooks,
                                                     transport.as_ref(),
+                                                    handoff_budget.saturating_sub(1),
                                                 ),
                                             ))
                                         })
@@ -1656,7 +1678,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
                                         }
                                     }
                                 },
-                                Some(8),
+                                Some(handoff_budget),
                             )
                         }
                         None => {

@@ -306,13 +306,13 @@ h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
 .table-panel { overflow-x: auto; }
 .request-table { table-layout: fixed; min-width: 1280px; width: 100%; }
 .request-table col.col-status { width: 72px; }
-.request-table col.col-port { width: 64px; }
-.request-table col.col-endpoint { width: 220px; }
-.request-table col.col-route { width: 160px; }
-.request-table col.col-provider { width: 140px; }
-.request-table col.col-time { width: 96px; }
+.request-table col.col-port { width: 44px; }
+.request-table col.col-endpoint { width: 96px; }
+.request-table col.col-route { width: 110px; }
+.request-table col.col-provider { width: 240px; }
+.request-table col.col-time { width: 76px; }
 .request-table col.col-intext { width: 110px; }
-.request-table col.col-usage { width: 150px; }
+.request-table col.col-usage { width: 156px; }
 .request-table col.col-finish { width: 80px; }
 .request-table th.col-port,
 .request-table th.col-status,

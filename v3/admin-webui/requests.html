@@ -283,6 +283,26 @@
       return row.meta?.[key] ?? "—";
     }
 
+    function endpointLabel(endpoint) {
+      // Shorten canonical V3 entry paths so the Endpoint column stays compact
+      // without losing the protocol identity; non-canonical paths pass through.
+      if (endpoint == null || endpoint === "—") return "—";
+      if (endpoint === "/v1/responses") return "responses";
+      if (endpoint === "/v1/chat/completions") return "chat";
+      if (endpoint === "/v1/messages") return "messages";
+      if (endpoint === "/v1beta/models") return "gemini";
+      return endpoint;
+    }
+
+    function providerModelCell(row) {
+      const provider = metaValue(row, "provider");
+      const model = metaValue(row, "model");
+      if (provider === "—" && model === "—") return "—";
+      if (provider === "—") return model;
+      if (model === "—") return provider;
+      return `${provider} · ${model}`;
+    }
+
     async function loadRecords() {
       if (state.loading) return;
       state.loading = true;
@@ -509,9 +529,9 @@
         : `${status}`;
       tr.appendChild(statusCell);
       tr.appendChild(el("td", "col-port", portText));
-      tr.appendChild(el("td", null, `${metaValue(row, "endpoint")} · ${metaValue(row, "model")}`));
+      tr.appendChild(el("td", null, endpointLabel(metaValue(row, "endpoint"))));
       tr.appendChild(el("td", "muted", metaValue(row, "route_reason")));
-      tr.appendChild(el("td", null, metaValue(row, "provider")));
+      tr.appendChild(el("td", null, providerModelCell(row)));
       tr.appendChild(el("td", "mono", timeText(row.started_epoch_ms)));
       tr.appendChild(el("td", "mono", timeText(status === "active" || status === "retrying" ? row.updated_epoch_ms : row.finished_epoch_ms)));
       tr.appendChild(el("td", "num", `${row.timing_internal_ms != null ? fmtMs(row.timing_internal_ms) : "—"} / ${row.timing_external_ms != null ? fmtMs(row.timing_external_ms) : "—"}`));
@@ -658,9 +678,9 @@
       statusCell.title = detail;
       tr.appendChild(statusCell);
       tr.appendChild(el("td", "col-port", portText));
-      tr.appendChild(el("td", null, `${metaValue(row, "endpoint")} · ${metaValue(row, "model")}`));
+      tr.appendChild(el("td", null, endpointLabel(metaValue(row, "endpoint"))));
       tr.appendChild(el("td", "muted", metaValue(row, "route_reason")));
-      tr.appendChild(el("td", null, metaValue(row, "provider")));
+      tr.appendChild(el("td", null, providerModelCell(row)));
       tr.appendChild(el("td", "mono", timeText(row.updated_epoch_ms)));
       tr.appendChild(el("td", "num", row.duration_ms != null ? fmtMs(row.duration_ms) : "—"));
       tr.appendChild(el("td", "mono", detail));
