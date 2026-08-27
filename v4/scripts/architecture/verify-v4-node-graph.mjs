@@ -419,6 +419,17 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
   const skeletonSource = sources?.skeleton ?? '';
   if (runtimeSource) {
     for (const [symbol, label] of [
+      ['pub struct NodePluginPlan', 'NodePluginPlan'],
+      ['pub struct NodeContainer', 'NodeContainer'],
+      ['pub static PLUGIN_REGISTRY', 'PLUGIN_REGISTRY'],
+      ['pub const EXTERNAL_CHAIN_PLUGINS', 'EXTERNAL_CHAIN_PLUGINS'],
+      ['fn run_chain(', 'run_chain'],
+    ]) {
+      if (runtimeSource.includes(symbol)) {
+        failures.push(`runtime contains retired ${label} (${symbol})`);
+      }
+    }
+    for (const [symbol, label] of [
       ['pub struct SkeletonRuntime', 'SkeletonRuntime'],
       ['pub fn execution_binding(', 'execution_binding'],
       ['pub struct ExecutionContext', 'ExecutionContext'],
@@ -833,7 +844,7 @@ function runSelfTest() {
     d.sources.runtime = d.sources.runtime.replace('pub struct SkeletonRuntime', 'pub struct GhostRuntime');
   }, 'SkeletonRuntime');
   add('runtime PLUGIN_REGISTRY ghost', (d) => {
-    d.sources.runtime = d.sources.runtime.replace('pub static PLUGIN_REGISTRY', 'pub static GHOST_REGISTRY');
+    d.sources.runtime = `${d.sources.runtime}\npub static PLUGIN_REGISTRY: &[()] = &[];`;
   }, 'PLUGIN_REGISTRY');
   add('skeleton plan plugin without runtime implementation', (d) => {
     d.sources.runtime = d.sources.runtime.replace('"protocol_parse"', '"ghost_plugin"');
