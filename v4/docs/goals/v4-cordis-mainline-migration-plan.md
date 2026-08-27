@@ -82,6 +82,14 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 - 并行任务表：runtime core/test 清理（已派发，当前由 master 接管）；provider direct-only 校验（可独立）；runtime-bin relay rejection/SSE 无本地上下文（可独立）；maps/docs/gate 对齐（可独立）。
 - 依赖：四项完成后统一跑 runtime/provider/runtime-bin 定向测试、release/build、install/restart/health/live replay、AGY，再精确合入 `codex/v4-cordis-refactor-main`。
 
+#### M06-T02 — 本地 continuation 退役（Jason 决策）
+
+- 唯一 owner：`routecodex-v4-runtime` / `routecodex-v4-runtime-bin` / `routecodex-v4-provider` 的 continuation boundary。
+- 目标：物理删除 relay/local continuation store、seed/context materialization 与对应测试、map、gate 声明；Responses relay/local `previous_response_id` 必须 fail-fast，禁止 fallback 或静默接受。
+- 保留：Responses direct provider-owned continuation；Chat→Responses 的协议投影不得被解释为本地 continuation。
+- 并行任务表：runtime core/test 清理（已派发，当前由 master 接管）；provider direct-only 校验（可独立）；runtime-bin relay rejection/SSE 无本地上下文（可独立）；maps/docs/gate 对齐（可独立）。
+- 依赖：四项完成后统一跑 runtime/provider/runtime-bin 定向测试、release/build、install/restart/health/live replay、AGY，再精确合入 `codex/v4-cordis-refactor-main`。
+
 ### M07 — Responses JSON response 主线
 
 迁移 raw decode、response governance、tool harvest、direct-provider continuation commit、client semantic、frame build；不得生成本地 continuation record/seed；旧/新 projector 对同一 raw response differential。退出：JSON/tool/usage/error fixtures 全绿，direct save 唯一归 RespChatProcess。
