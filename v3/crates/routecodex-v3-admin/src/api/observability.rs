@@ -716,6 +716,42 @@ fn facet_add_status_code_label(
         .or_default() += 1;
 }
 
+fn usage_value(row: &QueryRow, key: &str) -> u64 {
+    row.usage
+        .as_ref()
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn row_input_value(row: &QueryRow) -> u64 {
+    usage_value(row, "input_tokens")
+}
+
+fn row_output_value(row: &QueryRow) -> u64 {
+    usage_value(row, "output_tokens")
+}
+
+fn row_cached_value(row: &QueryRow) -> u64 {
+    usage_value(row, "cached_tokens")
+}
+
+fn row_total_value(row: &QueryRow) -> u64 {
+    usage_value(row, "total_tokens")
+}
+
+// Effective input tokens for cache-hit calculation.
+//
+// OpenAI/Responses and Anthropic both report `cached_tokens` as a sub-count
+// of `input_tokens` (cached prompt tokens or cache_read_input_tokens). The
+// raw provider `input_tokens` already includes the cache-read increment, so
+// the cache hit is cached / raw_input. When the upstream reports a smaller
+// raw input than cache (legacy non-normalized shape), fall back to cached
+// so the hit rate never exceeds 100%.
+fn row_effective_input(row: &QueryRow) -> u64 {
+    row_input_value(row).max(row_cached_value(row))
+}
+
 fn configured_ports(state: &AppState) -> Result<Vec<u16>, String> {
     let authoring = state
         .store
@@ -874,10 +910,11 @@ async fn records(
     let mut input = 0;
     let mut output = 0;
     let mut cached = 0;
-    let mut cached_against_input = 0;
     let mut durations = 0u64;
     let mut with_duration = 0u64;
     let mut total_token_count = 0;
+    let mut hit_against_effective = 0u64;
+    let mut effective_input_total = 0u64;
     let mut attempt_keys = HashSet::new();
     for row in &filtered {
         if row.result.as_deref() == Some("failed-attempt") {
@@ -889,43 +926,16 @@ async fn records(
         // Failed, cancelled, and still-running rows remain visible in counts/facets.
         let is_success = usage_is_countable(row.result.as_deref());
         if is_success {
-            input += row
-                .usage
-                .as_ref()
-                .and_then(|u| u.get("input_tokens"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            output += row
-                .usage
-                .as_ref()
-                .and_then(|u| u.get("output_tokens"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            cached += row
-                .usage
-                .as_ref()
-                .and_then(|u| u.get("cached_tokens"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            total_token_count += row
-                .usage
-                .as_ref()
-                .and_then(|u| u.get("total_tokens"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let row_input = row
-                .usage
-                .as_ref()
-                .and_then(|u| u.get("input_tokens"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let row_cached = row
-                .usage
-                .as_ref()
-                .and_then(|u| u.get("cached_tokens"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            cached_against_input += row_cached.min(row_input);
+            let row_input = row_input_value(row);
+            let row_output = row_output_value(row);
+            let row_cached = row_cached_value(row);
+            let row_effective = row_effective_input(row);
+            input += row_input;
+            output += row_output;
+            cached += row_cached;
+            total_token_count += row_total_value(row);
+            hit_against_effective += row_cached.min(row_effective);
+            effective_input_total += row_effective;
             if let Some(duration) = row.duration_ms {
                 durations += duration;
                 with_duration += 1;
@@ -1027,10 +1037,11 @@ async fn records(
     stats["output_tokens"] = json!(output);
     stats["cached_tokens"] = json!(cached);
     stats["total_tokens"] = json!(total_token_count);
-    if input > 0 {
-        // Clamp per-row cached to its input so cross-row accumulation never exceeds 100%.
+    if effective_input_total > 0 {
+        // Per-row cached is clamped to row_effective_input (= max(input, cached))
+        // so cross-row accumulation stays <=100% across the filtered set.
         stats["cache_hit_rate_percent"] =
-            json!((cached_against_input as f64 / input as f64) * 100f64);
+            json!((hit_against_effective as f64 / effective_input_total as f64) * 100f64);
     }
     if with_duration > 0 {
         stats["avg_duration_ms"] = json!(durations as f64 / with_duration as f64);
@@ -1081,7 +1092,80 @@ fn urldecode_component(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::error_category_status_code;
+    use super::{
+        error_category_status_code, row_cached_value, row_effective_input, row_input_value,
+        row_output_value, row_total_value, QueryRow, SourceScope,
+    };
+    use serde_json::{json, Value};
+
+    #[test]
+    fn effective_input_uses_input_tokens_when_cached_is_subset() {
+        // OpenAI/Responses shape: input_tokens already includes cached_tokens;
+        // cache hit is cached / input_tokens.
+        let row = build_usage_row(json!({
+            "input_tokens": 1000,
+            "output_tokens": 200,
+            "cached_tokens": 250,
+            "total_tokens": 1200,
+        }));
+        assert_eq!(row_input_value(&row), 1000);
+        assert_eq!(row_output_value(&row), 200);
+        assert_eq!(row_cached_value(&row), 250);
+        assert_eq!(row_total_value(&row), 1200);
+        assert_eq!(row_effective_input(&row), 1000);
+    }
+
+    #[test]
+    fn effective_input_handles_anthropic_inclusive_input() {
+        // Anthropic shape: input_tokens already includes cache_read +
+        // cache_creation; cached_tokens is the cache_read subset.
+        let row = build_usage_row(json!({
+            "input_tokens": 800,
+            "output_tokens": 150,
+            "cached_tokens": 600,
+            "total_tokens": 950,
+        }));
+        assert_eq!(row_input_value(&row), 800);
+        assert_eq!(row_cached_value(&row), 600);
+        assert_eq!(row_effective_input(&row), 800);
+    }
+
+    #[test]
+    fn effective_input_falls_back_to_cached_when_raw_input_is_smaller() {
+        // Defensive: malformed usage where raw input < cached must not produce
+        // a >100% rate; fall back to cached so the divisor equals the cache
+        // hit (i.e. 100%).
+        let row = build_usage_row(json!({
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cached_tokens": 30,
+            "total_tokens": 35,
+        }));
+        assert_eq!(row_effective_input(&row), 30);
+    }
+
+    fn build_usage_row(usage: Value) -> QueryRow {
+        QueryRow {
+            request_key: "k".to_string(),
+            event_type: "request.completed".to_string(),
+            started_epoch_ms: 0,
+            updated_epoch_ms: 0,
+            finished_epoch_ms: Some(0),
+            duration_ms: Some(0),
+            meta: json!({}),
+            scope: SourceScope::default(),
+            result: Some("success".to_string()),
+            attempts: 1,
+            failed_attempts: 0,
+            switches: 0,
+            usage: Some(usage),
+            timing_internal_ms: None,
+            timing_external_ms: None,
+            servertool: false,
+            stopless: false,
+            raw_artifact_ref: None,
+        }
+    }
 
     #[test]
     fn error_categories_always_have_numbered_status_projection() {
