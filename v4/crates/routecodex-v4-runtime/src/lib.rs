@@ -416,6 +416,7 @@ impl ContinuationKey {
 pub enum ScopeError {
     AlreadyBound,
     NotBound,
+    LocalContinuationUnsupported,
     InvalidBridgeControl,
     OwnerMismatch,
     EntryProtocolMismatch,
@@ -433,6 +434,7 @@ impl fmt::Display for ScopeError {
         let message = match self {
             Self::AlreadyBound => "continuation key already bound",
             Self::NotBound => "continuation key not bound",
+            Self::LocalContinuationUnsupported => "local continuation is unsupported",
             Self::InvalidBridgeControl => "invalid typed continuation bridge control",
             Self::OwnerMismatch => "continuation owner mismatch (direct/relay cross-continuation)",
             Self::EntryProtocolMismatch => {
@@ -505,6 +507,9 @@ impl ScopeRegistry {
             Some(hash) => Some(hash.to_string()),
             None => return Err(ScopeError::FullInputMissing),
         };
+        if key.entry_protocol != "responses" || key.continuation_owner != "direct" {
+            return Err(ScopeError::LocalContinuationUnsupported);
+        }
         self.bindings.insert(
             key.clone(),
             ScopeBinding {
@@ -1488,6 +1493,13 @@ impl RuntimeOperator for ContinuationCommit {
             return Ok(());
         };
         if owner == "none" {
+            return Ok(());
+        }
+        // Relay/local continuation is intentionally not implemented. Relay
+        // requests may still use the normal protocol projection path, but
+        // they never create a local save/restore binding. Only a direct
+        // provider-owned Responses continuation may be persisted here.
+        if owner == "relay" {
             return Ok(());
         }
         let protocol = ctx.information.protocol.as_deref().unwrap_or("unknown");
