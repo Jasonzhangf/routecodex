@@ -150,3 +150,14 @@ AppSDK admission / Active artifact / record graph 不是外部依赖，也不是
 5. 只有 Active/index 的 `source_commit`、tree hash、artifact hash、public API hash 与当前 `v4-cordis` HEAD 全部一致后，才允许继续 isolation、build、install、restart、live replay 和 AGY。
 
 AppSDK 阻塞的完成信号：当前 tree `appsdk verify --admission .` PASS，Active artifact 与 index 可由 canonical resolver 验证，且所有治理记录均绑定当前 candidate；任何历史 candidate/evidence 只可作为审计背景，不得作为输入。
+## Master 自解决 AppSDK 阻塞（当前执行合同）
+
+本任务不把 AppSDK 视为外部依赖或等待项。`v4-cordis` master 对以下内容负全责：
+
+- 从当前 branch 的真实 HEAD 重建 fresh、HEAD-bound 的 AppSDK governance record graph；旧 candidate/evidence/Active/index 只可撤销或隔离，不得消费。
+- 通过 AppSDK lifecycle/record-graph 唯一 owner 生成并验证 worktree、reproduction、evidence、fix-candidate、pre-review、review、effectiveness、merge、promotion、regression、freeze records，以及合法 `module.compiled.json`、`current.json`、`active-v2/artifact.json`。
+- 修复导致 `MISSING_RECORD`、`ACTIVE_ARTIFACT_MISSING`、`CANDIDATE_CONTROLLED_SOURCE_DRIFT`、`ACTIVE_ARTIFACT_HASH_MISMATCH`、`ACTIVE_INDEX_MISSING`、`MERGE_QUEUE_RECORD_INVALID`、`INTEGRATION_RECORD_INVALID` 的真实根因；不得伪造记录、复制/软链 ignored 产物、修改 gate 期望、改 hash/date 冒充当前治理或添加 fallback。
+- 由当前 master 生成并校验 `build-control/active-index.json`，完成 AppSDK admission、build-link index、feature-layer admission 和 isolation；这些均是本 goal 的实现与验收范围，不得标记为 external blocker。
+- 若现有 CLI 缺少所需生命周期动作，master 必须在当前 `v4-cordis` tree 内补齐正确的 owner 接线/最小实现与 red-first 验证，或通过真实源码/编译产物修复调用链；不得把阻塞转交给 B01/B02 或历史 branch。
+
+AppSDK 阻塞的完成证据必须同时包含：当前 HEAD/source-tree/API hash 绑定证明、全量 records 可解析且生命周期闭环、`appsdk verify` 与 `appsdk verify --admission` 通过、module artifact/Active artifact/index 非空且可验证、gen-index/verify-index/isolation/feature-layer admission 通过。任何一项缺失都不算恢复。
