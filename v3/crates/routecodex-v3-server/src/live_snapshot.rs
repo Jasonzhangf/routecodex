@@ -1,4 +1,3 @@
-use crate::webui_observability::V3ObsEventType;
 use crate::*;
 use axum::body::Body;
 use axum::http::Response;
@@ -887,15 +886,6 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             started_at,
             output.stream_observation.is_none(),
         );
-        if !v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref()) {
-            if let Err(error) = crate::console::record_v3_webui_event_for_context(
-                console_context,
-                V3ObsEventType::Completed,
-                observability,
-            ) {
-                crate::console::emit_v3_webui_projection_failure(console_context, &error);
-            }
-        }
     }
     responses_relay_output_response(
         output,

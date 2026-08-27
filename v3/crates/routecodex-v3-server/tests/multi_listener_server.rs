@@ -4969,6 +4969,7 @@ async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
 #[tokio::test]
 async fn observability_projection_is_isolated_per_listener() {
     let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("observability-isolation");
     let (provider_base_url, _captures, shutdown) =
         start_controlled_responses_relay_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-webui-port-isolation");
@@ -4997,42 +4998,44 @@ async fn observability_projection_is_isolated_per_listener() {
         assert_eq!(response.status(), StatusCode::OK);
     }
 
-    let mut seen_ports = Vec::new();
-    for listener in [&first, &second] {
-        let snapshot: Value = client
-            .get(format!(
-                "http://{}/_routecodex/observability/snapshot",
-                listener.addr
-            ))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        let expected_port = listener.addr.port();
-        seen_ports.push(expected_port);
-        let unexpected_port = if expected_port == first.addr.port() {
-            second.addr.port()
-        } else {
-            first.addr.port()
-        };
-        let serialized = serde_json::to_string(&snapshot).unwrap();
+    for expected_port in [first.addr.port(), second.addr.port()] {
+        let store_path = home_guard
+            .path
+            .join(".rcc")
+            .join("logs")
+            .join(format!("server-v3-{expected_port}.request-records.jsonl"));
         assert!(
-            !serialized.contains(&format!("\"{unexpected_port}:")),
-            "listener {expected_port} must not project requests owned by {unexpected_port}: {serialized}"
+            store_path.exists(),
+            "listener {expected_port} must create its own persisted observability store at {}",
+            store_path.display()
+        );
+        let content = fs::read_to_string(&store_path).unwrap();
+        let envelopes = content
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert!(
+            envelopes.len() >= 2,
+            "listener {expected_port} must persist lifecycle updates, got {}",
+            envelopes.len()
         );
         assert_eq!(
-            snapshot["stats"]["by_port"][expected_port.to_string()]["total"],
-            1,
-            "listener {expected_port} must count its own request"
+            envelopes
+                .first()
+                .and_then(|envelope| envelope.get("row"))
+                .and_then(|row| row.get("event_type"))
+                .and_then(Value::as_str),
+            Some("request.started")
         );
-        assert!(
-            snapshot["stats"]["by_port"][unexpected_port.to_string()].is_null(),
-            "listener {expected_port} must not create stats for {unexpected_port}"
-        );
+        for envelope in envelopes {
+            let row = envelope.get("row").unwrap();
+            let port = row["scope"]["port"].as_u64().unwrap() as u16;
+            assert!(
+                port == expected_port,
+                "listener {expected_port} leaked a request owned by port {port}"
+            );
+        }
     }
-    assert_ne!(seen_ports[0], seen_ports[1]);
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();

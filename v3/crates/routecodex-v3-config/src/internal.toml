@@ -89,3 +89,7 @@
   unrecoverable_failure_threshold = 2
   unrecoverable_cooldown_ms = 3600000
   unrecoverable_probe_interval_ms = 3600000
+
+# WebUI observability persistence guard: one persisted row must stay bounded.
+[observability]
+  max_record_bytes = 104857600

@@ -3416,26 +3416,28 @@ features:
 - feature_id: v3.server_internal_observability_projection
   status: source_active_live_verified
   owner_kind: rust_v3_bounded_internal_observability_projection
-  owner_scope: Server owns bounded typed diagnostic projection state; no public observability API is registered on ordinary listeners.
+  owner_scope: Server appends typed lifecycle rows to a per-listener JSONL store; Admin reads the same store directly and no public observability API is registered on ordinary listeners.
   unit:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  - v3/crates/routecodex-v3-config/src/v3_webui_observability_io.rs
   contract:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
-  - Terminal rows remain bounded at 2048.
-  - Relay provider-request and provider-response snapshot carriers persist under the same canonical request id and never enter client payload.
-  - Terminal tombstones remain bounded at 4096.
-  - Repeated terminal events do not duplicate statistics or tombstones.
-  - Evicted terminal replay returns an explicit resync_required result and does not recreate a row.
-  - Event-log cursor older than the retained sequence boundary returns an explicit resync_required result.
-  - Sequence exhaustion returns an explicit error and never reuses a sequence number.
+  - Every accepted lifecycle event appends one typed row to the per-listener JSONL store.
+  - Reader folds lifecycle rows by request_key and returns only the latest row.
+  - Each listener writes its own isolated request-records file and never leaks another listener's port.
+  - Error terminal rows preserve the raw numeric provider status and error category.
+  - Terminal rows are immutable; a later Started/Completed/Failed cannot reopen or rewrite a terminal result.
+  - Per-record JSONL writes are bounded by the internal observability max record bytes setting.
   required_negative:
   - Projection state does not enter provider/client payload, protocol metadata, continuation, or history.
   - Ordinary listeners do not expose /api/observability snapshot, stats, or events routes.
+  - Admin does not use SSE, snapshot polling, or loopback HTTP transport to read request records.
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --lib v3_webui_observability_io
   - npm run verify:v3-resource-map
   - npm run verify-architecture-mainline-call-map
   - git diff --check

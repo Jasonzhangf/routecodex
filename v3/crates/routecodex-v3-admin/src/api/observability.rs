@@ -1,27 +1,17 @@
 // feature_id: v3.webui_request_observability
-// Aggregates loopback-only typed listener projections for the single WebUI.
+// Aggregates per-listener persisted JSONL projections for the single WebUI.
 
 use crate::AppState;
-use axum::extract::Query;
 use axum::extract::RawQuery;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::time::Duration;
-
-const SOURCE_TIMEOUT: Duration = Duration::from_secs(2);
+use std::path::PathBuf;
 
 pub(crate) fn routes() -> axum::Router<crate::AppState> {
-    axum::Router::new()
-        .route("/api/observability/poll", axum::routing::get(poll))
-        .route("/api/observability/records", axum::routing::get(records))
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct PollQuery {
-    pub sources: Option<String>,
+    axum::Router::new().route("/api/observability/records", axum::routing::get(records))
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -65,88 +55,6 @@ pub(crate) struct SourceRow {
     pub tokens_output: Option<u64>,
     #[serde(default)]
     pub raw_artifact_ref: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub(crate) struct PortStats {
-    #[serde(default)]
-    pub total: u64,
-    #[serde(default)]
-    pub active: u64,
-    #[serde(default)]
-    pub success: u64,
-    #[serde(default)]
-    pub error: u64,
-    #[serde(default)]
-    pub cancelled: u64,
-    #[serde(default)]
-    pub switches: u64,
-    #[serde(default)]
-    pub tokens_output: u64,
-    #[serde(default)]
-    pub provider_failures: u64,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub(crate) struct SourceStats {
-    #[serde(default)]
-    pub total: u64,
-    #[serde(default)]
-    pub active: u64,
-    #[serde(default)]
-    pub success: u64,
-    #[serde(default)]
-    pub error: u64,
-    #[serde(default)]
-    pub cancelled: u64,
-    #[serde(default)]
-    pub switches: u64,
-    #[serde(default)]
-    pub tokens_output: u64,
-    /// Aggregate provider-attempt failures (including those that ultimately recovered via switch).
-    #[serde(default)]
-    pub provider_failures: u64,
-    #[serde(default)]
-    pub provider_failure_categories: BTreeMap<String, u64>,
-    #[serde(default)]
-    pub by_port: BTreeMap<u16, PortStats>,
-    #[serde(default)]
-    pub error_categories: BTreeMap<String, u64>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct SourceSnapshot {
-    cursor: u64,
-    requests: BTreeMap<String, SourceRow>,
-    stats: SourceStats,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub(crate) struct SourceEvent {
-    sequence: u64,
-    timestamp_epoch_ms: u64,
-    row: SourceRow,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct SourceEventEnvelope {
-    kind: String,
-    #[serde(default)]
-    cursor: Option<u64>,
-    #[serde(default)]
-    resync_required: bool,
-    #[serde(default)]
-    events: Vec<SourceEvent>,
-    #[serde(default)]
-    error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct AggregatePoll {
-    pub requests: BTreeMap<String, SourceRow>,
-    pub stats: SourceStats,
-    pub sources: Vec<SourceCursor>,
-    pub recent_events: Vec<SourceEvent>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -559,12 +467,6 @@ fn facet_add_status_code(
         .or_default() += 1;
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct SourceCursor {
-    port: u16,
-    cursor: u64,
-}
-
 fn configured_ports(state: &AppState) -> Result<Vec<u16>, String> {
     let authoring = state
         .store
@@ -584,108 +486,19 @@ fn configured_ports(state: &AppState) -> Result<Vec<u16>, String> {
     Ok(ports)
 }
 
-fn requested_ports(state: &AppState, query: &PollQuery) -> Result<BTreeMap<u16, u64>, String> {
-    let configured = configured_ports(state)?;
-    let mut cursors = configured.iter().copied().map(|port| (port, 0)).collect();
-    let Some(raw) = query.sources.as_deref().filter(|value| !value.is_empty()) else {
-        return Ok(cursors);
-    };
-    for item in raw.split(',') {
-        let (port, cursor) = item
-            .split_once(':')
-            .ok_or_else(|| format!("invalid source cursor {item:?}"))?;
-        let port = port
-            .parse::<u16>()
-            .map_err(|_| format!("invalid source cursor port {port:?}"))?;
-        let cursor = cursor
-            .parse::<u64>()
-            .map_err(|_| format!("invalid source cursor sequence {cursor:?}"))?;
-        if !configured.contains(&port) {
-            return Err(format!("source cursor port {port} is not configured"));
-        }
-        cursors.insert(port, cursor);
-    }
-    Ok(cursors)
-}
-
-async fn fetch_snapshot(client: &reqwest::Client, port: u16) -> Result<SourceSnapshot, String> {
-    let response = tokio::time::timeout(
-        SOURCE_TIMEOUT,
-        client
-            .get(format!(
-                "http://127.0.0.1:{port}/_routecodex/observability/snapshot"
-            ))
-            .send(),
-    )
-    .await
-    .map_err(|_| "source request timed out".to_string())?
-    .map_err(|error| error.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("source returned HTTP {}", response.status()));
-    }
-    response
-        .json()
-        .await
-        .map_err(|error| format!("invalid snapshot schema: {error}"))
-}
-
-async fn fetch_events(
-    client: &reqwest::Client,
-    port: u16,
-    cursor: u64,
-) -> Result<SourceEventEnvelope, String> {
-    let response = tokio::time::timeout(
-        SOURCE_TIMEOUT,
-        client
-            .get(format!(
-                "http://127.0.0.1:{port}/_routecodex/observability/events?cursor={cursor}&once=true"
-            ))
-            .send(),
-    )
-    .await
-    .map_err(|_| "source event request timed out".to_string())?
-    .map_err(|error| error.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "source event endpoint returned HTTP {}",
-            response.status()
-        ));
-    }
-    response
-        .json()
-        .await
-        .map_err(|error| format!("invalid source event schema: {error}"))
-}
-
-fn merge_stats(target: &mut SourceStats, source: &SourceStats) {
-    target.total += source.total;
-    target.active += source.active;
-    target.success += source.success;
-    target.error += source.error;
-    target.cancelled += source.cancelled;
-    target.switches += source.switches;
-    target.tokens_output += source.tokens_output;
-    target.provider_failures += source.provider_failures;
-    for (port, stats) in &source.by_port {
-        let target_port = target.by_port.entry(*port).or_default();
-        target_port.total += stats.total;
-        target_port.active += stats.active;
-        target_port.success += stats.success;
-        target_port.error += stats.error;
-        target_port.cancelled += stats.cancelled;
-        target_port.switches += stats.switches;
-        target_port.tokens_output += stats.tokens_output;
-        target_port.provider_failures += stats.provider_failures;
-    }
-    for (category, count) in &source.error_categories {
-        *target.error_categories.entry(category.clone()).or_default() += count;
-    }
-    for (category, count) in &source.provider_failure_categories {
-        *target
-            .provider_failure_categories
-            .entry(category.clone())
-            .or_default() += count;
-    }
+/// Per-listener JSONL store path. Server and Admin derive the same path from
+/// the shared config helper using the authoring debug log file truth.
+fn observability_store_path(state: &AppState, port: u16) -> Result<PathBuf, String> {
+    let authoring = state
+        .store
+        .read_authoring()
+        .map_err(|error| format!("observability config read failed: {error}"))?;
+    let debug_log = authoring.debug.log_file.as_deref();
+    Ok(routecodex_v3_config::v3_webui_observability_store_path(
+        &state.config_path,
+        debug_log,
+        port,
+    ))
 }
 
 async fn records(
@@ -712,23 +525,47 @@ async fn records(
             return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
         }
     };
-    let client = reqwest::Client::new();
     let mut rows = Vec::new();
     for port in ports {
-        match fetch_snapshot(&client, port).await {
-            Ok(snapshot) => {
-                for (_key, row) in snapshot.requests {
-                    rows.push(row);
-                }
-            }
+        let path = match observability_store_path(&state, port) {
+            Ok(path) => path,
             Err(error) => {
                 return (
                     StatusCode::BAD_GATEWAY,
                     Json(json!({
-                        "error": format!("observability source {port} unavailable: {error}")
+                        "error": format!("observability store path {port} unavailable: {error}")
                     })),
                 )
                     .into_response();
+            }
+        };
+        let values = match routecodex_v3_config::v3_webui_observability_read_rows(&path) {
+            Ok(values) => values,
+            Err(error) => {
+                if path.exists() {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        Json(json!({
+                            "error": format!("observability store {port} unavailable: {error}")
+                        })),
+                    )
+                        .into_response();
+                }
+                continue;
+            }
+        };
+        for value in values {
+            match serde_json::from_value::<SourceRow>(value) {
+                Ok(row) => rows.push(row),
+                Err(error) => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        Json(json!({
+                            "error": format!("decode observability store {port} row failed: {error}")
+                        })),
+                    )
+                        .into_response();
+                }
             }
         }
     }
@@ -740,7 +577,7 @@ async fn records(
             serde_json::from_value(value)
                 .map_err(|error| format!("decode observability source row failed: {error}"))
         })
-        .collect()
+        .collect::<Result<Vec<_>, String>>()
     {
         Ok(rows) => rows,
         Err(error) => {
@@ -953,90 +790,4 @@ fn urldecode_component(value: &str) -> String {
         index += 1;
     }
     String::from_utf8(bytes).unwrap_or_else(|_| value.to_string())
-}
-
-pub(crate) async fn poll(
-    axum::extract::State(state): axum::extract::State<AppState>,
-    Query(query): Query<PollQuery>,
-) -> Response {
-    let cursors = match requested_ports(&state, &query) {
-        Ok(cursors) => cursors,
-        Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": error})),
-            )
-                .into_response();
-        }
-    };
-    let client = reqwest::Client::new();
-    let mut aggregate = AggregatePoll {
-        requests: BTreeMap::new(),
-        stats: SourceStats::default(),
-        sources: Vec::new(),
-        recent_events: Vec::new(),
-    };
-    for (port, cursor) in cursors {
-        let snapshot_result = fetch_snapshot(&client, port).await;
-        let snapshot = match snapshot_result {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(serde_json::json!({
-                        "error": format!("observability source {port} unavailable: {error}")
-                    })),
-                )
-                    .into_response();
-            }
-        };
-        let event_cursor = if cursor == 0 { snapshot.cursor } else { cursor };
-        let events_result = fetch_events(&client, port, event_cursor).await;
-        merge_stats(&mut aggregate.stats, &snapshot.stats);
-        aggregate.requests.extend(snapshot.requests);
-        aggregate.sources.push(SourceCursor {
-            port,
-            cursor: snapshot.cursor,
-        });
-        // A resync envelope is non-fatal here: the fresh snapshot above already
-        // replaces the stale caller cursor with the source's current sequence.
-        match events_result {
-            Ok(envelope) if envelope.kind == "events" => {
-                if envelope.resync_required {
-                    continue;
-                }
-                if let Some(cursor) = envelope.cursor {
-                    if let Some(source) = aggregate.sources.last_mut() {
-                        source.cursor = source.cursor.max(cursor);
-                    }
-                }
-                aggregate.recent_events.extend(envelope.events);
-            }
-            Ok(envelope) => {
-                let reason = envelope
-                    .error
-                    .unwrap_or_else(|| "unexpected event kind".to_string());
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(serde_json::json!({
-                        "error": format!("observability source {port} schema invalid: {reason}")
-                    })),
-                )
-                    .into_response();
-            }
-            Err(error) => {
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(serde_json::json!({
-                        "error": format!("observability source {port} events unavailable: {error}")
-                    })),
-                )
-                    .into_response();
-            }
-        }
-    }
-    aggregate.recent_events.sort_by_key(|event| event.sequence);
-    aggregate.recent_events.reverse();
-    aggregate.recent_events.truncate(256);
-    Json(aggregate).into_response()
 }

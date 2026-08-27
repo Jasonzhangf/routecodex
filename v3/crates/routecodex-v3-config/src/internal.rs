@@ -30,6 +30,8 @@ struct InternalConfig {
     debug_samples: DebugSamples,
     #[serde(default)]
     error_handling: ErrorHandling,
+    #[serde(default)]
+    observability: Observability,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +137,17 @@ struct HiddenModels {
     exact: Vec<String>,
     #[serde(default)]
     prefixes: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Observability {
+    #[serde(default = "default_max_record_bytes")]
+    max_record_bytes: u64,
+}
+
+fn default_max_record_bytes() -> u64 {
+    100 * 1024 * 1024
 }
 
 static INTERNAL_CONFIG: LazyLock<InternalConfig> = LazyLock::new(|| {
@@ -381,6 +394,11 @@ pub fn v3_error_sample_skip_statuses() -> &'static [u16] {
     &INTERNAL_CONFIG.debug_samples.error_sample_skip_statuses
 }
 
+/// Maximum serialized bytes for one persisted WebUI observability record.
+pub fn v3_observability_max_record_bytes() -> u64 {
+    INTERNAL_CONFIG.observability.max_record_bytes
+}
+
 pub fn is_v3_gpt_family_model(model_id: &str) -> bool {
     let normalized = normalized_model_id(model_id);
     let Some(family) = INTERNAL_CONFIG.model_families.get(GPT_FAMILY_KEY) else {
@@ -401,6 +419,7 @@ mod tests {
     fn debug_sample_policy_is_internal_and_defaulted() {
         assert!(v3_error_samples_only());
         assert_eq!(v3_error_sample_skip_statuses(), &[401, 402, 403, 429, 503]);
+        assert_eq!(v3_observability_max_record_bytes(), 100 * 1024 * 1024);
     }
 
     #[test]

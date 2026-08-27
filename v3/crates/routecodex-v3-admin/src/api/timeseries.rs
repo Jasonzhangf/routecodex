@@ -153,8 +153,14 @@ mod tests {
             "total_tokens": 202
         });
         let rows = vec![
-            TimeseriesRow { started_epoch_ms: morning, usage: Some(&usage) },
-            TimeseriesRow { started_epoch_ms: evening, usage: Some(&usage) },
+            TimeseriesRow {
+                started_epoch_ms: morning,
+                usage: Some(&usage),
+            },
+            TimeseriesRow {
+                started_epoch_ms: evening,
+                usage: Some(&usage),
+            },
         ];
         let buckets = build_timeseries(&rows, "today", timezone_offset_minutes).unwrap();
         assert_eq!(buckets.len(), 1);

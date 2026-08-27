@@ -2,8 +2,8 @@ use crate::{
     build_v3_config_04_resource_registry_from_v3_config_03, parse_v3_config_02_authoring,
     provider_directory::V3Config02AuthoringResolved,
     publish_v3_config_05_manifest_from_v3_config_04, read_v3_config_01_file_source,
-    validate_v3_config_03_schema_from_v3_config_02, V3Config02AuthoringParsed,
-    V3AdminWebuiManifest, V3Config05ManifestPublished, V3ConfigError,
+    validate_v3_config_03_schema_from_v3_config_02, V3AdminWebuiManifest,
+    V3Config02AuthoringParsed, V3Config05ManifestPublished, V3ConfigError,
 };
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -131,4 +131,27 @@ fn source_closure_sha256(
 
 pub fn default_v3_config_path(home: impl AsRef<Path>) -> PathBuf {
     home.as_ref().join(".rcc").join("config.v3.toml")
+}
+
+/// Canonical per-listener request-records store. Server and Admin must derive
+/// the same path; the debug log file is the live path truth when configured.
+pub fn v3_webui_observability_store_path(
+    config_path: impl AsRef<Path>,
+    debug_log_path: Option<&str>,
+    port: u16,
+) -> PathBuf {
+    let default_log_path = config_path
+        .as_ref()
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("logs")
+        .join(format!("server-v3-{port}.log"));
+    let log_path = debug_log_path
+        .map(PathBuf::from)
+        .unwrap_or(default_log_path);
+    let store_name = format!("server-v3-{port}.request-records.jsonl");
+    match log_path.parent() {
+        Some(parent) => parent.join(store_name),
+        None => PathBuf::from(store_name),
+    }
 }

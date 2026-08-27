@@ -1974,23 +1974,45 @@ resources:
     owner_feature_id: v3.server_internal_observability_projection
     owner_crate: routecodex-v3-server
     owner_node: V3WebuiObservability
-    identity: [port, requestKey, sequence]
+    identity: [port, requestKey]
     semantic_contract:
       public_http_api: retired
-      request_rows_max: 2048
-      terminal_tombstones_max: 4096
-      evicted_terminal_replay: explicit_resync_required
-      event_log_cursor_gap: explicit_resync_required
-      sequence_overflow: explicit_error
+      store_format: per_listener_jsonl
+      row_limit_bytes: internal_observability_max_record_bytes
+      terminal_row_immutable: true
+      reader_folds_by_request_key: true
       control_state_in_payload: forbidden
-    allowed_writers: [emit_v3_request_console_observation]
-    allowed_readers: [V3WebuiObservability::snapshot, V3WebuiObservability::since]
+    allowed_writers: [record_v3_observability_event, record_v3_webui_error_projection]
+    allowed_readers: [v3_webui_observability_read_rows, records]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: source_controlled
     required_gates: [cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests, npm run verify:v3-resource-map]
+
+  - resource_id: v3.config.webui_observability_store
+    resource_kind: diagnostic_persistence
+    lifecycle: v3.server.console_projection
+    owner_feature_id: v3.server_internal_observability_projection
+    owner_crate: routecodex-v3-config
+    owner_node: V3WebuiObservabilityStore
+    identity: [configPath, debugLogPath, port]
+    semantic_contract:
+      format: jsonl_envelope
+      schema_version: 1
+      append_only: true
+      reader_folds_by_request_key: true
+      record_limit_bytes: internal_observability_max_record_bytes
+      control_state_in_payload: forbidden
+    allowed_writers: [v3_webui_observability_append_row]
+    allowed_readers: [v3_webui_observability_read_rows]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --lib v3_webui_observability_io, npm run verify:v3-resource-map]
 
   - resource_id: v3.build.assembled_binary
     resource_kind: assembled_release_candidate

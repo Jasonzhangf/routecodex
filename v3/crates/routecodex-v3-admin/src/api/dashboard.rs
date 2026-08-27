@@ -2,9 +2,11 @@
 // Dashboard API：runtime/port/provider 状态、流量概览、修订历史。
 use crate::{metrics, AppState};
 use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -37,10 +39,10 @@ pub struct TrafficSummary {
     pub total_requests: u64,
     pub daily_requests: u64,
     pub last_request_at_epoch_ms: Option<u64>,
-    pub log_tail_received: u64,
-    pub log_tail_provider_errors: u64,
+    pub persisted_received: u64,
+    pub persisted_provider_errors: u64,
     pub route_targets: BTreeMap<String, u64>,
-    pub log_sources: Vec<String>,
+    pub store_sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,18 +59,24 @@ pub struct Overview {
     pub revisions: Vec<routecodex_v3_config_mgmt::ConfigRevision>,
 }
 
-async fn overview(State(state): State<AppState>) -> Json<Overview> {
+async fn overview(State(state): State<AppState>) -> Response {
     let config_dir = state
         .config_path
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
 
-    let authoring = state.store.read_authoring().ok();
-    let servers: Vec<_> = authoring
-        .as_ref()
-        .map(|authoring| authoring.servers.iter().collect())
-        .unwrap_or_default();
+    let authoring = match state.store.read_authoring() {
+        Ok(authoring) => authoring,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("observability config read failed: {error}") })),
+            )
+                .into_response();
+        }
+    };
+    let servers: Vec<_> = authoring.servers.iter().collect();
 
     let mut probes = Vec::new();
     for (server_id, server) in &servers {
@@ -98,36 +106,65 @@ async fn overview(State(state): State<AppState>) -> Json<Overview> {
     let counter_path = config_dir.join("state").join("global-request-counter.json");
     let counter = read_request_counter(&counter_path);
 
-    let mut log_sources = Vec::new();
-    let mut log_stats = metrics::LogTrafficStats::default();
-    if let Ok(entries) = std::fs::read_dir(&config_dir.join("logs")) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if name.starts_with("server-v3-") && name.ends_with(".log") {
-                log_sources.push(path.clone());
-                let stats = metrics::scan_server_log(&path);
-                log_stats.received_total += stats.received_total;
-                log_stats.provider_errors_total += stats.provider_errors_total;
-                for (target, count) in stats.route_targets {
-                    *log_stats.route_targets.entry(target).or_default() += count;
-                }
+    let debug_log = authoring.debug.log_file.as_deref();
+    let mut store_sources = Vec::new();
+    let mut persisted_stats = PersistedTrafficStats::default();
+    for server in authoring.servers.values().filter(|server| server.enabled) {
+        let path = routecodex_v3_config::v3_webui_observability_store_path(
+            &state.config_path,
+            debug_log,
+            server.port,
+        );
+        let values = match routecodex_v3_config::v3_webui_observability_read_rows(&path) {
+            Ok(values) => values,
+            Err(error) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": format!(
+                            "observability store {} unavailable: {error}",
+                            server.port
+                        )
+                    })),
+                )
+                    .into_response();
             }
+        };
+        store_sources.push(path.display().to_string());
+        for value in values {
+            let row = match serde_json::from_value::<PersistedTrafficRow>(value) {
+                Ok(row) => row,
+                Err(error) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({
+                            "error": format!(
+                                "decode observability store {} row failed: {error}",
+                                server.port
+                            )
+                        })),
+                    )
+                        .into_response();
+                }
+            };
+            persisted_stats.merge(row);
         }
     }
 
-    let revisions = state
-        .store
-        .revision_store()
-        .list()
-        .unwrap_or_default()
-        .into_iter()
-        .rev()
-        .take(10)
-        .collect();
+    let revisions = match state.store.revision_store().list() {
+        Ok(revisions) => revisions,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("revision list failed: {error}") })),
+            )
+                .into_response();
+        }
+    }
+    .into_iter()
+    .rev()
+    .take(10)
+    .collect();
 
     Json(Overview {
         runtime: RuntimeStatus {
@@ -144,16 +181,47 @@ async fn overview(State(state): State<AppState>) -> Json<Overview> {
             total_requests: counter.total_requests,
             daily_requests: counter.daily_requests,
             last_request_at_epoch_ms: counter.last_request_at_epoch_ms,
-            log_tail_received: log_stats.received_total,
-            log_tail_provider_errors: log_stats.provider_errors_total,
-            route_targets: log_stats.route_targets,
-            log_sources: log_sources
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect(),
+            persisted_received: persisted_stats.received,
+            persisted_provider_errors: persisted_stats.provider_errors,
+            route_targets: persisted_stats.route_targets,
+            store_sources,
         },
         revisions,
     })
+    .into_response()
+}
+
+#[derive(Debug, Clone, Default)]
+struct PersistedTrafficStats {
+    received: u64,
+    provider_errors: u64,
+    route_targets: BTreeMap<String, u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PersistedTrafficRow {
+    #[serde(default)]
+    result: Option<String>,
+    #[serde(default)]
+    failed_attempts: u64,
+    meta: serde_json::Value,
+}
+
+impl PersistedTrafficStats {
+    fn merge(&mut self, row: PersistedTrafficRow) {
+        self.received += 1;
+        if row.result.as_deref() == Some("error") || row.failed_attempts > 0 {
+            self.provider_errors += 1;
+        }
+        if let Some(route) = row
+            .meta
+            .get("route")
+            .and_then(serde_json::Value::as_str)
+            .filter(|route| !route.trim().is_empty() && *route != "-")
+        {
+            *self.route_targets.entry(route.to_string()).or_default() += 1;
+        }
+    }
 }
 
 async fn futures_join_all<T>(futures: Vec<impl std::future::Future<Output = T>>) -> Vec<T> {

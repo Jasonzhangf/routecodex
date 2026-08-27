@@ -7482,35 +7482,35 @@ chains:
 
 - chain_id: v3.server.internal_observability_projection
   owner_feature_id: v3.server_internal_observability_projection
-  summary: Server-owned typed diagnostic projection records bounded request lifecycle observations; evicted terminal replay reports resync requirement without entering business payload.
+  summary: Server-owned typed diagnostic projection appends every lifecycle update to a per-listener JSONL store; Admin reads and folds the same store by request key without SSE or poll transport.
   edges:
   - step_id: v3-server-observability-record
     from_node: V3ServerConsoleObservation
     to_node: V3WebuiObservability
-    caller_symbol: emit_v3_request_console_observation
-    caller_file: v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
-    callee_symbol: V3WebuiObservability::record
-    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
-    status: anchored
-    owner_feature_id: v3.server_internal_observability_projection
-    resource_flow:
-      consumes: [v3.runtime.responses_observability]
-      produces: [v3.server.internal_observability_projection]
-      side_channel_reads: [v3.runtime.responses_observability]
-      side_channel_writes: [v3.server.internal_observability_projection]
-  - step_id: v3-server-observability-resync
-    from_node: V3WebuiObservability
-    to_node: V3ObsSinceResult
-    caller_symbol: V3WebuiObservability::since
+    caller_symbol: record_v3_observability_event
     caller_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
-    callee_symbol: V3ObsSinceResult
-    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    callee_symbol: v3_webui_observability_append_row
+    callee_file: v3/crates/routecodex-v3-config/src/v3_webui_observability_io.rs
     status: anchored
     owner_feature_id: v3.server_internal_observability_projection
     resource_flow:
-      consumes: [v3.server.internal_observability_projection]
-      produces: [v3.server.internal_observability_projection]
-      side_channel_reads: [v3.server.internal_observability_projection]
+      consumes: [v3.runtime.responses_observability, v3.server.internal_observability_projection]
+      produces: [v3.config.webui_observability_store]
+      side_channel_reads: [v3.runtime.responses_observability, v3.server.internal_observability_projection]
+      side_channel_writes: [v3.config.webui_observability_store]
+  - step_id: v3-admin-observability-read
+    from_node: V3WebuiObservabilityStore
+    to_node: V3AdminObservabilityAggregation
+    caller_symbol: records
+    caller_file: v3/crates/routecodex-v3-admin/src/api/observability.rs
+    callee_symbol: v3_webui_observability_read_rows
+    callee_file: v3/crates/routecodex-v3-config/src/v3_webui_observability_io.rs
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes: [v3.config.webui_observability_store]
+      produces: []
+      side_channel_reads: [v3.config.webui_observability_store]
       side_channel_writes: []
 
 - chain_id: v3.route_policy.condition_evaluation

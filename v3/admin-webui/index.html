@@ -76,8 +76,8 @@ function renderSummary(data) {
     ["Ports", `${healthyPorts} / ${data.runtime.ports.length}`, "healthy / total", healthyPorts === data.runtime.ports.length ? "ok" : "warn"],
     ["Providers", data.providers.total, `${data.providers.enabled} enabled · ${data.providers.disabled} disabled`, "ok"],
     ["Requests (total)", data.traffic.total_requests.toLocaleString(), `daily ${data.traffic.daily_requests.toLocaleString()}`, "ok"],
-    ["Log tail received", data.traffic.log_tail_received.toLocaleString(), "last 32MB of logs", "ok"],
-    ["Provider errors", data.traffic.log_tail_provider_errors.toLocaleString(), "last 32MB of logs", data.traffic.log_tail_provider_errors > 0 ? "bad" : "ok"],
+    ["Persisted received", data.traffic.persisted_received.toLocaleString(), "request records store", "ok"],
+    ["Provider errors", data.traffic.persisted_provider_errors.toLocaleString(), "request records store", data.traffic.persisted_provider_errors > 0 ? "bad" : "ok"],
     ["Revisions", data.revisions.length, "latest 10", "ok"],
   ];
   for (const [label, value, hint, kind] of cardsData) {
@@ -125,11 +125,11 @@ function openDashboardDetail(label, data) {
     if (data.traffic.last_request_at_epoch_ms) {
       grid.appendChild(dashboardField("Last request", new Date(data.traffic.last_request_at_epoch_ms).toLocaleString([], { hour12: false })));
     }
-  } else if (label === "Log tail received") {
-    grid.appendChild(dashboardField("Received", data.traffic.log_tail_received.toLocaleString()));
-    grid.appendChild(dashboardField("Source", `${data.traffic.log_sources?.length ?? 0} log files`));
+  } else if (label === "Persisted received") {
+    grid.appendChild(dashboardField("Received", data.traffic.persisted_received.toLocaleString()));
+    grid.appendChild(dashboardField("Source", `${data.traffic.store_sources?.length ?? 0} request record stores`));
   } else if (label === "Provider errors") {
-    grid.appendChild(dashboardField("Errors", data.traffic.log_tail_provider_errors.toLocaleString()));
+    grid.appendChild(dashboardField("Errors", data.traffic.persisted_provider_errors.toLocaleString()));
     for (const [target, count] of Object.entries(data.traffic.route_targets || {}).sort(([, a], [, b]) => b - a)) {
       grid.appendChild(dashboardField(target, count.toLocaleString()));
     }
@@ -166,7 +166,7 @@ function renderTraffic(data) {
   const targets = data.traffic.route_targets;
   const entries = Object.entries(targets).sort((a, b) => b[1] - a[1]);
   if (!entries.length) {
-    panel.appendChild(el("div", "loading", "no route_selected events in recent logs"));
+    panel.appendChild(el("div", "loading", "no routed records in persisted store"));
     return;
   }
   const max = entries[0][1];

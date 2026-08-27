@@ -5431,13 +5431,17 @@ features:
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/v3_webui_observability_io.rs
+  - v3/crates/routecodex-v3-config/src/store.rs
   resource_bindings:
   - v3.server.internal_observability_projection
+  - v3.config.webui_observability_store
   entry_symbols:
-  - V3WebuiObservability::record
-  - V3WebuiObservability::snapshot
-  - V3WebuiObservability::since
-  - V3ObsSinceResult
+  - record_v3_observability_event
+  - record_v3_webui_error_projection
+  - v3_webui_observability_append_row
+  - v3_webui_observability_read_rows
+  - v3_webui_observability_store_path
   - cooldown_pool
   - emit_v3_request_console_observation
   - capture_v3_relay_provider_snapshots
@@ -5447,6 +5451,8 @@ features:
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/v3_webui_observability_io.rs
+  - v3/crates/routecodex-v3-config/src/store.rs
   forbidden_paths:
   - request.normal_payload
   - response.client_payload
@@ -5528,4 +5534,33 @@ features:
   - npm run verify:v3-module-boundaries
   - git diff --check
   migration_target: rust
+  runtime_status: source_controlled_runtime_pending_live_replay
+- feature_id: v3.admin_observability_aggregation
+  status: source_controlled_runtime_pending_live_replay
+  owner_crate: routecodex-v3-admin
+  owner_files:
+  - v3/crates/routecodex-v3-admin/src/api/observability.rs
+  - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
+  - v3/admin-webui/requests.html
+  resource_bindings:
+  - v3.config.webui_observability_store
+  entry_symbols:
+  - records
+  - v3_webui_observability_read_rows
+  - build_timeseries
+  allowed_paths:
+  - v3/crates/routecodex-v3-admin/src/api/observability.rs
+  - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
+  - v3/admin-webui/requests.html
+  - v3/admin-webui/styles.css
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  - provider.wire_payload
+  - continuation
+  - protocol.metadata
+  required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin
+  - npm run verify:v3-resource-map
+  - git diff --check
   runtime_status: source_controlled_runtime_pending_live_replay

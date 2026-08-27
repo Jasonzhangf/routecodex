@@ -8,8 +8,8 @@ mod metadata_center;
 mod models_catalog;
 mod request_id;
 mod responses_direct_server_outcome;
-mod restart_handoff;
 mod restart_closeout;
+mod restart_handoff;
 mod scope_metadata;
 mod session_admission;
 mod websocket;
@@ -58,8 +58,8 @@ use responses_direct_server_outcome::{
 };
 use routecodex_v3_config::{
     collect_v3_route_group_catalog_model_refs, resolve_routecodex_package_version_from_executable,
-    V3AdminWebuiManifest, V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode,
-    V3ServerManifest,
+    V3AdminWebuiManifest, V3Config05ManifestPublished, V3DebugManifest,
+    V3EntryProtocolExecutionMode, V3ServerManifest,
 };
 use routecodex_v3_debug::{
     V3DebugBoundedTextCapture, V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig,
@@ -404,6 +404,11 @@ pub async fn spawn_v3_server_aggregate_with_admin(
     // broker must already carry a valid positive runtime generation.
     let front_transport_broker = V3FrontTransportBroker::new(1);
     let admin_config_path_for_router = admin_config_path.clone();
+    let canonical_admin_config_path = admin_config_path.clone().or_else(|| {
+        std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .map(routecodex_v3_config::default_v3_config_path)
+    });
     let mut listeners = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
@@ -414,12 +419,17 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                     "admin_webui requires a canonical config path",
                 )
             })?;
-            routecodex_v3_admin::router(routecodex_v3_admin::AppState::new(
-                config_path,
-            ))
+            routecodex_v3_admin::router(routecodex_v3_admin::AppState::new(config_path))
         } else {
-            let observability_store_path = observability_store_path_for_listener(
-                manifest.debug.log_file.as_deref().map(std::path::Path::new),
+            let config_path = canonical_admin_config_path.as_ref().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "observability requires HOME or an explicit canonical config path",
+                )
+            })?;
+            let observability_store_path = routecodex_v3_config::v3_webui_observability_store_path(
+                config_path,
+                manifest.debug.log_file.as_deref(),
                 server.port,
             );
             let webui_observability =
@@ -613,14 +623,6 @@ pub async fn spawn_v3_server_aggregate_with_admin(
     })
 }
 
-fn observability_store_path_for_listener(log_path: Option<&std::path::Path>, port: u16) -> std::path::PathBuf {
-    const DEFAULT_LOG_PATH: &str = "server.log";
-    match log_path {
-        Some(path) => path.with_extension("request-records.jsonl"),
-        None => std::path::PathBuf::from(format!("{DEFAULT_LOG_PATH}.port-{port}.request-records.jsonl")),
-    }
-}
-
 pub async fn serve_v3_server_aggregate_until_shutdown(
     manifest: V3Config05ManifestPublished,
 ) -> Result<(), std::io::Error> {
@@ -660,14 +662,6 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         .route("/_routecodex/debug/logs", get(debug_logs))
         .route("/_routecodex/debug/snapshots", get(debug_snapshots))
         .route("/_routecodex/debug/dry-run", post(debug_dry_run))
-        .route(
-            "/_routecodex/observability/snapshot",
-            get(webui_observability_endpoints::observability_snapshot),
-        )
-        .route(
-            "/_routecodex/observability/events",
-            get(webui_observability_endpoints::observability_events),
-        )
         .route(
             "/_routecodex/diagnostics/virtual-router",
             get(virtual_router_status),

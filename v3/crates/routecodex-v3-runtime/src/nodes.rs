@@ -320,9 +320,6 @@ impl Stream for V3ObservedCommittedSseStream {
         match Pin::new(&mut self.source).poll_next(cx) {
             Poll::Ready(Some(frame)) => {
                 (self.on_frame)(&frame);
-                if self.source.next_frame_index > self.source.terminal_frame_index {
-                    self.finish(V3CommittedSseTerminal::Completed);
-                }
                 Poll::Ready(Some(frame))
             }
             Poll::Ready(None) => {

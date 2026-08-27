@@ -1,24 +1,24 @@
 lifecycle_id: v3.webui_request_observability.mainline
-summary: Server projects already-typed Runtime observability into one bounded request
-  row, exposes a loopback-only listener projection, and Admin aggregates it read-only
-  for the single WebUI.
+summary: Server appends already-typed Runtime and Error06 lifecycle rows to one
+  per-listener JSONL store; Admin reads the same store directly and folds rows by
+  request_key for the single WebUI. There is no loopback snapshot or event transport.
 owner_feature_id: v3.server_internal_observability_projection
 entrypoint:
   node_id: V3RuntimeTimingServerProjection
   wiki_page: null
   call_map_chain_id: v3.webui_request_observability.mainline
 node_ids:
-  - V3AdminObservabilityPoll
+  - V3AdminObservabilityAggregation
   - V3AdminRequestedPorts
   - V3AdminRequestsPage
   - V3OpenAiChatRelayError06Projection
   - V3RuntimeTimingServerProjection
-  - V3WebuiObservabilityLoopbackProjection
-  - V3WebuiObservabilityProjection
+  - V3WebuiObservability
+  - V3WebuiObservabilityStore
 edges:
   - step_id: v3-webui-observability-01
     from_node: V3RuntimeTimingServerProjection
-    to_node: V3WebuiObservabilityProjection
+    to_node: V3WebuiObservability
     status: anchored
     owner_feature_id: v3.server_internal_observability_projection
     binding_pending: null
@@ -34,7 +34,7 @@ edges:
         - v3.server.internal_observability_projection
   - step_id: v3-webui-observability-error-sse
     from_node: V3OpenAiChatRelayError06Projection
-    to_node: V3WebuiObservabilityProjection
+    to_node: V3WebuiObservability
     status: anchored
     owner_feature_id: v3.server_internal_observability_projection
     binding_pending: null
@@ -50,7 +50,7 @@ edges:
         - v3.server.internal_observability_projection
   - step_id: v3-webui-observability-error-json
     from_node: V3OpenAiChatRelayError06Projection
-    to_node: V3WebuiObservabilityProjection
+    to_node: V3WebuiObservability
     status: anchored
     owner_feature_id: v3.server_internal_observability_projection
     binding_pending: null
@@ -64,9 +64,9 @@ edges:
         - v3.error.chain
       side_channel_writes:
         - v3.server.internal_observability_projection
-  - step_id: v3-webui-observability-02
-    from_node: V3WebuiObservabilityProjection
-    to_node: V3WebuiObservabilityLoopbackProjection
+  - step_id: v3-webui-observability-store
+    from_node: V3WebuiObservability
+    to_node: V3WebuiObservabilityStore
     status: anchored
     owner_feature_id: v3.server_internal_observability_projection
     binding_pending: null
@@ -74,12 +74,14 @@ edges:
     resource_flow:
       consumes:
         - v3.server.internal_observability_projection
-      produces: []
+      produces:
+        - v3.config.webui_observability_store
       side_channel_reads:
         - v3.server.internal_observability_projection
-      side_channel_writes: []
+      side_channel_writes:
+        - v3.config.webui_observability_store
   - step_id: v3-webui-observability-config
-    from_node: V3AdminObservabilityPoll
+    from_node: V3AdminRequestsPage
     to_node: V3AdminRequestedPorts
     status: anchored
     owner_feature_id: v3.server_internal_observability_projection
@@ -91,44 +93,19 @@ edges:
       produces: []
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-webui-observability-03
+  - step_id: v3-webui-observability-read
     from_node: V3AdminRequestedPorts
-    to_node: V3WebuiObservabilityLoopbackProjection
+    to_node: V3AdminObservabilityAggregation
     status: anchored
     owner_feature_id: v3.server_internal_observability_projection
     binding_pending: null
     split_binding_id: null
     resource_flow:
-      consumes: []
+      consumes:
+        - v3.config.webui_observability_store
       produces: []
       side_channel_reads:
-        - v3.server.internal_observability_projection
-      side_channel_writes: []
-  - step_id: v3-webui-observability-events-http
-    from_node: V3AdminRequestedPorts
-    to_node: V3WebuiObservabilityLoopbackProjection
-    status: anchored
-    owner_feature_id: v3.server_internal_observability_projection
-    binding_pending: null
-    split_binding_id: null
-    resource_flow:
-      consumes: []
-      produces: []
-      side_channel_reads:
-        - v3.server.internal_observability_projection
-      side_channel_writes: []
-  - step_id: v3-webui-observability-04
-    from_node: V3AdminRequestsPage
-    to_node: V3AdminObservabilityPoll
-    status: anchored
-    owner_feature_id: v3.server_internal_observability_projection
-    binding_pending: null
-    split_binding_id: null
-    resource_flow:
-      consumes: []
-      produces: []
-      side_channel_reads:
-        - v3.server.internal_observability_projection
+        - v3.config.webui_observability_store
       side_channel_writes: []
 canonical_docs:
   - docs/architecture/v3-resource-operation-map.yml
@@ -139,3 +116,5 @@ verification_gates:
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-mainline-caller-flow
+  - npm run render:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs

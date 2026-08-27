@@ -4,6 +4,7 @@ mod provider_directory;
 mod store;
 mod types;
 mod v2_compat;
+mod v3_webui_observability_io;
 pub use v2_compat::{
     generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderAuthConfig,
     V2ProviderAuthEntry, V2ProviderConcurrencyConfig, V2ProviderConfig, V2ProviderConfigFile,
@@ -16,8 +17,15 @@ mod validate_auth_tests;
 mod validate_debug_tests;
 mod validate_relations;
 
-pub use store::{default_v3_config_path, V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan};
+pub use store::{
+    default_v3_config_path, v3_webui_observability_store_path, V3ConfigLoadedSnapshot,
+    V3ConfigStore, V3ConfigWritePlan,
+};
 pub use types::*;
+pub use v3_webui_observability_io::{
+    v3_webui_observability_append_row, v3_webui_observability_read_rows,
+    V3WebuiObservabilityStoreError, V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;

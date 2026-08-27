@@ -2110,9 +2110,8 @@ fn nonstream_relay_terminal_projects_webui_success_and_failure() {
         true,
     );
 
-    let snapshot = state.webui_observability.snapshot(0).unwrap();
-    let row = snapshot
-        .requests
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
         .get("4444:req-nonstream-success")
         .expect("terminal nonstream request row");
     assert_eq!(row.result.as_deref(), Some("success"));
@@ -2138,9 +2137,8 @@ fn nonstream_relay_terminal_projects_webui_success_and_failure() {
         true,
     );
 
-    let snapshot = state.webui_observability.snapshot(0).unwrap();
-    let row = snapshot
-        .requests
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
         .get("4444:req-nonstream-failure")
         .expect("terminal nonstream failure row");
     assert_eq!(row.result.as_deref(), Some("error"));
@@ -2973,9 +2971,8 @@ fn error_projection_appends_human_console_failure_line() {
     );
 
     assert!(response.is_none());
-    let snapshot = state.webui_observability.snapshot(0).unwrap();
-    let row = snapshot
-        .requests
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
         .get(&format!("{}:req-error-console", state.server.port))
         .expect("Error06 projection must create a WebUI request row");
     assert_eq!(row.result.as_deref(), Some("error"));

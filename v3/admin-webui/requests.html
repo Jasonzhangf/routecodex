@@ -16,7 +16,6 @@
       <a href="/requests.html" class="active">Requests</a>
     </nav>
     <div class="spacer"></div>
-    <button class="btn" id="pause-btn" type="button">Pause</button>
     <button class="btn primary" id="reload-btn" type="button">Reload</button>
   </header>
 
@@ -77,6 +76,8 @@
   </div>
 </div>
 
+<div class="row-popover" id="row-popover" role="tooltip" aria-hidden="true"></div>
+
   <script src="/app.embedded.txt"></script>
   <script>
     // Compact numeric formatting for token counts and request totals.
@@ -102,7 +103,34 @@
       if (http != null && Number.isFinite(Number(http))) {
         return String(http);
       }
+      const fallback = row.result;
+      if (fallback) {
+        if (fallback === "success") return "200";
+        if (fallback === "error") return "5xx";
+        if (fallback === "cancelled") return "499";
+        return fallback;
+      }
       return "—";
+    }
+
+    function compactErrorReason(row) {
+      const ec = row.meta?.error_category;
+      if (!ec) return "—";
+      const map = {
+        provider_http_400: "400",
+        provider_http_401: "401",
+        provider_http_402: "402",
+        provider_http_403: "403",
+        provider_http_429: "429",
+        provider_http_500: "500",
+        provider_http_502: "502",
+        provider_http_503: "503",
+        provider_http_504: "504",
+        target_pool: "exhausted",
+        internal_request_lane: "598",
+        internal_response_lane: "599",
+      };
+      return map[ec] || ec;
     }
     function compactFinishReason(row) {
       const reason = row.meta?.finish_reason;
@@ -115,9 +143,80 @@
         requires_action: "action",
         completed: "done",
         error: "error",
+        cancel: "cancel",
+        client_disconnected: "client drop",
+        provider_http_400: "http_400",
+        provider_http_401: "http_401",
+        provider_http_402: "http_402",
+        provider_http_403: "http_403",
+        provider_http_429: "http_429",
+        provider_http_500: "http_500",
+        provider_http_502: "http_502",
+        provider_http_503: "http_503",
+        provider_http_504: "http_504",
       };
       return map[reason] || reason;
     }
+
+    function buildRowPopover(row) {
+      const usage = row.usage || {};
+      const fields = [
+        ["request id", row.meta?.request_id || row.request_key],
+        ["port", row.scope?.port], ["protocol", row.meta?.entry_protocol],
+        ["endpoint", row.meta?.endpoint], ["model", row.meta?.model],
+        ["wire model", row.meta?.wire_model], ["provider", row.meta?.provider],
+        ["provider status", row.meta?.provider_status], ["response status", row.meta?.response_status],
+        ["finish reason", compactFinishReason(row)],
+        ["error", compactErrorReason(row)],
+        ["attempts", `${row.attempts}/${row.failed_attempts}/${row.switches}`],
+        ["tokens in/out/cache", `${fmtCompact(usage.input_tokens)}/${fmtCompact(usage.output_tokens)}/${fmtCompact(usage.cached_tokens)}`],
+        ["internal / external", `${row.timing_internal_ms != null ? fmtMs(row.timing_internal_ms) : "—"} / ${row.timing_external_ms != null ? fmtMs(row.timing_external_ms) : "—"}`],
+        ["duration", fmtMs(row.duration_ms)],
+      ];
+      const box = el("div", "row-popover-body");
+      for (const [label, value] of fields) {
+        const line = el("div", "row-popover-row");
+        line.append(el("span", "label", label), el("span", "value", String(value ?? "—")));
+        box.appendChild(line);
+      }
+      if (row.meta?.error_detail) {
+        const detail = el("div", "row-popover-detail muted", row.meta.error_detail);
+        box.appendChild(detail);
+      }
+      return box;
+    }
+
+    function showRowPopover(row, event) {
+      const popover = document.getElementById("row-popover");
+      if (!popover) return;
+      popover.replaceChildren(buildRowPopover(row));
+      popover.setAttribute("aria-hidden", "false");
+      popover.classList.add("show");
+      positionRowPopover(event);
+    }
+
+    function positionRowPopover(event) {
+      const popover = document.getElementById("row-popover");
+      if (!popover || !popover.classList.contains("show")) return;
+      const margin = 12;
+      const rect = popover.getBoundingClientRect();
+      let x = event.clientX + margin;
+      let y = event.clientY + margin;
+      const overflowX = x + rect.width - window.innerWidth;
+      if (overflowX > 0) x = Math.max(margin, event.clientX - rect.width - margin);
+      const overflowY = y + rect.height - window.innerHeight;
+      if (overflowY > 0) y = Math.max(margin, event.clientY - rect.height - margin);
+      popover.style.left = `${x}px`;
+      popover.style.top = `${y}px`;
+    }
+
+    function hideRowPopover() {
+      const popover = document.getElementById("row-popover");
+      if (!popover) return;
+      popover.classList.remove("show");
+      popover.setAttribute("aria-hidden", "true");
+    }
+
     const state = {
       records: [],
       page: 1,
@@ -127,15 +226,8 @@
       timeseries: [],
       facets: { ports: {}, providers: {}, models: {}, routes: {}, sessions: {}, response_types: {}, error_status_codes: {} },
       errorStatusCode: null,
-      liveStats: {},
       selected: null,
       loading: false,
-      eventLog: new Map(),
-      sourceCursors: new Map(),
-      recentEvents: [],
-      resyncing: false,
-      pollTimer: null,
-      paused: false,
     };
 
     function statusOf(row) {
@@ -166,18 +258,6 @@
 
     function metaValue(row, key) {
       return row.meta?.[key] ?? "—";
-    }
-
-    function applyPoll(data) {
-      if (!data || typeof data !== "object") throw new Error("invalid observability poll");
-      for (const source of data.sources || []) state.sourceCursors.set(source.port, source.cursor);
-      for (const event of data.recent_events || []) {
-        state.eventLog.set(`${event.row?.scope?.port}:${event.sequence}`, event);
-      }
-      while (state.eventLog.size > 2048) state.eventLog.delete(state.eventLog.keys().next().value);
-      state.recentEvents = data.recent_events || [];
-      state.liveStats = data.stats || {};
-      renderStats(data.stats || {});
     }
 
     async function loadRecords() {
@@ -224,30 +304,7 @@
       }
     }
 
-    async function pollLifecycle() {
-      const params = new URLSearchParams();
-      if (state.sourceCursors.size) {
-        params.set("sources", [...state.sourceCursors.entries()].sort(([a], [b]) => a - b).map(([port, cursor]) => `${port}:${cursor}`).join(","));
-      }
-      const data = await api(`/api/observability/poll?${params}`);
-      applyPoll(data);
-    }
-
-    function schedulePoll() {
-      if (state.pollTimer) clearTimeout(state.pollTimer);
-      state.pollTimer = setTimeout(async () => {
-        state.pollTimer = null;
-        if (!state.paused) {
-          try { await pollLifecycle(); } catch (error) { showStatus("err", `observability failed: ${error.message}`); }
-          await loadRecords();
-        }
-        schedulePoll();
-      }, 2000);
-    }
-
     async function load() {
-      state.sourceCursors.clear();
-      try { await pollLifecycle(); } catch (error) { /* ignore */ }
       await loadRecords();
     }
 
@@ -360,36 +417,15 @@
       return grid;
     }
 
-    function requestTimeline(requestKey) {
-      const events = [...state.eventLog.values()]
-        .filter((event) => event.row?.request_key === requestKey)
-        .sort((left, right) => left.sequence - right.sequence);
-      const section = el("section", "request-timeline");
-      section.appendChild(el("h3", null, "Lifecycle"));
-      if (!events.length) {
-        section.appendChild(el("div", "muted", "No lifecycle events retained"));
-        return section;
-      }
-      const list = el("ol");
-      for (const event of events) {
-        const item = el("li", `status-${statusOf(event.row)}`);
-        item.append(
-          el("time", "muted", timeText(event.timestamp_epoch_ms)),
-          el("strong", null, event.row.event_type),
-          el("span", "muted", `${event.row.meta?.provider || "—"} · ${event.row.meta?.route || "—"}`)
-        );
-        list.appendChild(item);
-      }
-      section.appendChild(list);
-      return section;
-    }
-
     function requestRow(row) {
       const status = statusOf(row);
       const tr = el("tr", `request-row status-${status}`);
       tr.dataset.requestKey = row.request_key;
       tr.style.cursor = "pointer";
       tr.addEventListener("click", () => openRequestDetail(row));
+      tr.addEventListener("mouseenter", (event) => showRowPopover(row, event));
+      tr.addEventListener("mousemove", (event) => positionRowPopover(event));
+      tr.addEventListener("mouseleave", hideRowPopover);
       const usage = row.usage || {};
       // Compact port: strip the leading zero-width space so a 4-digit port stays narrow.
       const portValue = row.scope?.port;
@@ -426,7 +462,7 @@
         return;
       }
       document.getElementById("drawer-title").textContent = `Request ${row.meta?.request_id || row.request_key}`;
-      body.replaceChildren(detailGrid(row), requestTimeline(row.request_key));
+      body.replaceChildren(detailGrid(row));
     }
 
     function renderRequests() {
@@ -544,7 +580,6 @@
 
     function renderAll() {
       renderStatsCards();
-      renderStats(state.liveStats);
       renderTimeseries();
       renderRequests();
       renderPagination();
@@ -554,10 +589,6 @@
     function render() { renderAll(); }
 
     document.getElementById("reload-btn").addEventListener("click", () => load().catch((error) => showStatus("err", error.message)));
-    document.getElementById("pause-btn").addEventListener("click", (event) => {
-      state.paused = !state.paused;
-      event.currentTarget.textContent = state.paused ? "Resume" : "Pause";
-    });
     ["chart-range","chart-metric"].forEach((id) => {
       document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });
     });
@@ -594,7 +625,6 @@
     document.getElementById("drawer-close")?.addEventListener("click", closePanel);
 
     load().catch((error) => showStatus("err", `observability failed: ${error.message}`));
-    schedulePoll();
   </script>
 </body>
 </html>

@@ -24,7 +24,7 @@
     {
       "output_path": "repo/.github/workflows/test.yml",
       "source_path": ".github/workflows/test.yml",
-      "source_commit": "61eb7acec0368e5b2d7e6d963a8ddb48cde0d99c",
+      "source_commit": "c1cb8125d874d33b36fbef0c76919aa7b5e6ad11",
       "sha256": "8a65603352b270808e94a275e6a162a16aa2cd489725197dc96f0ce9efe5ed2f"
     },
     {
@@ -655,7 +655,7 @@
       "output_path": "repo/docs/architecture/manifests/v3.webui_request_observability.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.webui_request_observability.mainline.yml",
       "source_commit": "290594ba8cbd27572f0c18fd8894845c7741f3a9",
-      "sha256": "6986bc1612d962de5873f45837db8f9d5e1755c3f4e16e305fae34ad9b6689ee"
+      "sha256": "533d2b8adb1294cfb5fa144dd857a4df1b243906ac2a64adf65744dc8cd8a7c9"
     },
     {
       "output_path": "repo/docs/architecture/manifests/vr.hit_log_projection.mainline.yml",
@@ -696,8 +696,8 @@
     {
       "output_path": "repo/docs/architecture/no-fallback-diff-rules.json",
       "source_path": "docs/architecture/no-fallback-diff-rules.json",
-      "source_commit": "63cc68ef5b0a5ecc6b621ad19a39bbc614883d4b",
-      "sha256": "5c6f26970b1d61f54663be8f52975935dd76cf75308647b05fa7c3ddf24519f7"
+      "source_commit": "9a28cff6d2d1ba83a9f411a42f3dc6c5eb67b8c3",
+      "sha256": "0632d1ebe2c1a25548d0edc84024c57a4fa3e8e9bb94155b4847d48637435fee"
     },
     {
       "output_path": "repo/docs/architecture/repository-filesystem-module-registry.yml",
@@ -798,8 +798,8 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "fa7cef2484607b9156ccac71ede566ea3f46a645",
-      "sha256": "d39e1d7ab3a43a0698da51a2fb14178b7b9a6438359c05d91b1b72cde7b602a5"
+      "source_commit": "fd2bf43d2f1300dc7037cdae16d92d40b25c42f3",
+      "sha256": "08907cbd65b58f6a09d25f653719701af63a2c79ca5b94d0e9966b4d3aef361d"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -811,13 +811,13 @@
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
       "source_commit": "9526a98aa61722d36a49ab2f8bde4feb82bb0227",
-      "sha256": "52aec33a4b967321187f2ee1700880d2201f7b5158f80959850c5c588db77b7e"
+      "sha256": "4de5bbd6a1bb9b3d8f611b2608e26ffd1453de5fb8ef0a3c24198d57cab0c6dc"
     },
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
       "source_commit": "9526a98aa61722d36a49ab2f8bde4feb82bb0227",
-      "sha256": "b566d9fe636f635a51dbae71f9b30ce329f557bff7454dc349e05df469b2b63d"
+      "sha256": "8c87a8d64be7eaffb54554bd5424fb1414c8033266149ce3f325151ebc0bc44b"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
@@ -829,7 +829,7 @@
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
       "source_commit": "fa7cef2484607b9156ccac71ede566ea3f46a645",
-      "sha256": "d9565279bd4fb7ac69a662b95a9b4dff90e42003c9978d8307e03ccc8a20cc2c"
+      "sha256": "d0834396e2e230ba7b034f2824a6f724058e77faac1ed34510f19786d234bf93"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -1009,7 +1009,7 @@
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_commit": "b2f5c5231df7aca3f5d6f5c781e19c6bad5ea5ce",
-      "sha256": "370eba4efcdecd2d9b92c371a24423b28272cc1c1e2ba563dc1c2a2d7465ebf7"
+      "sha256": "b62d2e61a4585e6e2bdb158b9e98001db7a7883e7db02ef50b3863eacf0b1811"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-skeleton-sop.html",
@@ -1267,7 +1267,7 @@
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_commit": "b2f5c5231df7aca3f5d6f5c781e19c6bad5ea5ce",
-      "sha256": "8efbd9c05b2cb2b2e201ee72903d2a6a852726dc929423ef2358ba8e0a7821d4"
+      "sha256": "dc1735de481d6e7304d81f2200ffe5b07a1f65fe13b8cf530995b6f0afcc774d"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-skeleton-sop.md",
@@ -1574,6 +1574,12 @@
       "source_path": "docs/design/v3-system-definition.md",
       "source_commit": "358abe78e6b6c5b12b72467842e8c6639f9e50ad",
       "sha256": "90cca3ebb5405a8b4c45f92966dee4a8c10983472f416c18e69bbb092ae130e3"
+    },
+    {
+      "output_path": "repo/docs/design/virtual-router-risk-audit.md",
+      "source_path": "docs/design/virtual-router-risk-audit.md",
+      "source_commit": "c8453b6d5288f747313d95820ce91ae15dbf07ec",
+      "sha256": "425d1162a794992f3a13a90a27a99889faed252d0fcf3619420901448ed98faf"
     },
     {
       "output_path": "repo/docs/design/virtual-router-simplification-design.md",
@@ -2338,6 +2344,12 @@
       "sha256": "3f6a64cb97b7df4cb4a3544e6ae02ba0f4aca7541b8cf1f583fc2d902ba2b09c"
     },
     {
+      "output_path": "repo/docs/goals/v3-openai-chat-invalid-http-response-diagnosis-and-fix-plan.md",
+      "source_path": "docs/goals/v3-openai-chat-invalid-http-response-diagnosis-and-fix-plan.md",
+      "source_commit": "c8453b6d5288f747313d95820ce91ae15dbf07ec",
+      "sha256": "cf9cc88124711526b4494bbc576c64e16239f5c9a28de112c478bda6ebdb5a03"
+    },
+    {
       "output_path": "repo/docs/goals/v3-openai-chat-relay-runtime-integration-plan.md",
       "source_path": "docs/goals/v3-openai-chat-relay-runtime-integration-plan.md",
       "source_commit": "7c3a1cc3b6f299ba22c94881cc0bc1ff0da93b97",
@@ -2456,6 +2468,12 @@
       "source_path": "docs/goals/v3-relay-tool-servertool-multiturn-parity-closeout-plan.md",
       "source_commit": "e332265d4e688ed1f2a05ab04f469ff70b5ef703",
       "sha256": "3952ca038baf1e6c85c80b46d60a269ec030b9c0a5dcb8d6eb1d24eec11d0fb2"
+    },
+    {
+      "output_path": "repo/docs/goals/v3-remove-websocket-local-continuation-and-performance-audit-plan.md",
+      "source_path": "docs/goals/v3-remove-websocket-local-continuation-and-performance-audit-plan.md",
+      "source_commit": "c8453b6d5288f747313d95820ce91ae15dbf07ec",
+      "sha256": "a4cda6f429b603331a35a124eecfcde0fb37e6c651999056bb8dcee6ad47679d"
     },
     {
       "output_path": "repo/docs/goals/v3-resp03-tool-governance-gap-closeout-plan.md",
@@ -2938,5 +2956,5 @@
       "sha256": "5cc420540dffe755ef55174e73198b28d7b0142769fd3fbae89c5c8016250e79"
     }
   ],
-  "manifest_digest": "af4105f8d3a5a8e35fe5d6e6af86b0187c33eb8358706a4b3280b5833c0be6d2"
+  "manifest_digest": "3c05d3a5d78a740f0d0f4b8e878f1f9e5487a29f5a8f0b61577c8a7211eed574"
 }
