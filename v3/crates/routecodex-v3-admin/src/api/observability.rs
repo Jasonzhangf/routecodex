@@ -7,7 +7,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 pub(crate) fn routes() -> axum::Router<crate::AppState> {
@@ -150,8 +150,8 @@ impl RecordQuery {
                         .parse()
                         .map_err(|_| format!("invalid page_size: {value}"))?
                 }
-                "range" => {
-                    if !matches!(value, "today" | "week" | "all") {
+               "range" => {
+                    if !matches!(value, "today" | "week" | "month" | "all") {
                         return Err(format!("invalid range: {value}"));
                     }
                     query.range = value.to_string();
@@ -239,12 +239,14 @@ impl RecordQuery {
         if query.page == 0 || query.page_size == 0 || query.page_size > 300 {
             return Err("page and page_size must be between 1..300".to_string());
         }
-        if matches!(query.range.as_str(), "today" | "week") {
+        if matches!(query.range.as_str(), "today" | "week" | "month") {
             let now_ms = system_epoch_ms()?;
             let today_start = local_day_start(now_ms, query.timezone_offset_minutes);
             query.time_from_ms = Some(match query.range.as_str() {
                 "today" => today_start,
-                _ => today_start.saturating_sub(6 * 24 * 60 * 60 * 1000),
+                "week" => today_start.saturating_sub(6 * 24 * 60 * 60 * 1000),
+                "month" => today_start.saturating_sub(29 * 24 * 60 * 60 * 1000),
+                _ => unreachable!("range is restricted to today, week, or month"),
             });
         }
         Ok(query)
@@ -320,11 +322,6 @@ impl RecordQuery {
         {
             return false;
         }
-        if let Some(status_code) = self.error_status_code.as_deref() {
-            if row_status_code(row) != status_code {
-                return false;
-            }
-        }
         if self
             .session
             .as_deref()
@@ -333,11 +330,31 @@ impl RecordQuery {
             return false;
         }
         if let Some(status) = &self.status {
-            if status == "active" {
+            if status == "retrying" {
+                if row.result.as_deref() != Some("failed-attempt") {
+                    return false;
+                }
+            } else if status == "active" {
                 if row.result.is_some() {
                     return false;
                 }
+            } else if status == "error" {
+                if !matches!(
+                    row.result.as_deref(),
+                    Some("error") | Some("failed-attempt")
+                ) {
+                    return false;
+                }
             } else if row.result.as_deref() != Some(status) {
+                return false;
+            }
+        }
+        if let Some(status_code) = self.error_status_code.as_deref() {
+            let attempt_matches = row.result.as_deref() == Some("failed-attempt")
+                && attempt_status_code(row) == Some(status_code.to_string());
+            let terminal_matches =
+                row.result.as_deref() == Some("error") && row_status_code(row) == status_code;
+            if !attempt_matches && !terminal_matches {
                 return false;
             }
         }
@@ -457,6 +474,77 @@ fn row_status_code(row: &QueryRow) -> String {
     status_code_label(row.meta.get("provider_status"))
 }
 
+fn is_provider_attempt_failure(row: &SourceRow) -> bool {
+    row.event_type == "request.provider_attempt_failed"
+}
+
+fn attempt_status_code(row: &QueryRow) -> Option<String> {
+    if row.result.as_deref() != Some("failed-attempt")
+        || row.event_type != "request.provider_attempt_failed"
+    {
+        return None;
+    }
+    Some(status_code_label(row.meta.get("provider_status")))
+}
+
+/// Projects the raw lifecycle stream into the WebUI query surface.
+///
+/// The latest row per request remains the terminal request row. Every
+/// `provider_attempt_failed` row is additionally kept as a separate
+/// `failed-attempt` query row with its original status/category/detail, so a
+/// retry that eventually succeeds does not hide the non-normal attempt.
+fn project_query_rows(rows: Vec<SourceRow>) -> Vec<QueryRow> {
+    let mut latest: BTreeMap<String, SourceRow> = BTreeMap::new();
+    let mut attempt_rows: Vec<SourceRow> = Vec::new();
+    for row in rows {
+        if is_provider_attempt_failure(&row) {
+            attempt_rows.push(row);
+        } else {
+            latest.insert(row.request_key.clone(), row);
+        }
+    }
+
+    let mut query_rows = Vec::with_capacity(latest.len() + attempt_rows.len());
+    for row in latest.into_values() {
+        query_rows.push(to_query_row(row));
+    }
+    query_rows.extend(
+        attempt_rows
+            .into_iter()
+            .map(|row| to_attempt_query_row(row))
+            .collect::<Vec<_>>(),
+    );
+    query_rows
+}
+
+fn to_query_row(row: SourceRow) -> QueryRow {
+    let value = serde_json::to_value(row).expect("source row serializes");
+    serde_json::from_value(value).expect("query row shape is compatible")
+}
+
+fn to_attempt_query_row(row: SourceRow) -> QueryRow {
+    QueryRow {
+        request_key: row.request_key,
+        event_type: row.event_type,
+        started_epoch_ms: row.started_epoch_ms,
+        updated_epoch_ms: row.updated_epoch_ms,
+        finished_epoch_ms: row.finished_epoch_ms,
+        duration_ms: row.duration_ms,
+        meta: row.meta,
+        scope: row.scope,
+        result: Some("failed-attempt".to_string()),
+        attempts: row.attempts,
+        failed_attempts: row.failed_attempts,
+        switches: row.switches,
+        usage: row.usage,
+        timing_internal_ms: row.timing_internal_ms,
+        timing_external_ms: row.timing_external_ms,
+        servertool: row.servertool,
+        stopless: row.stopless,
+        raw_artifact_ref: row.raw_artifact_ref,
+    }
+}
+
 fn facet_add_status_code(
     facets: &mut BTreeMap<String, BTreeMap<String, u64>>,
     name: &str,
@@ -541,7 +629,7 @@ async fn records(
                     .into_response();
             }
         };
-        let values = match routecodex_v3_config::v3_webui_observability_read_rows(&path) {
+        let values = match routecodex_v3_config::v3_webui_observability_read_raw_rows(&path) {
             Ok(values) => values,
             Err(error) => {
                 if path.exists() {
@@ -571,21 +659,7 @@ async fn records(
             }
         }
     }
-    let rows: Vec<QueryRow> = match rows
-        .into_iter()
-        .map(|row| {
-            let value = serde_json::to_value(row)
-                .map_err(|error| format!("encode observability source row failed: {error}"))?;
-            serde_json::from_value(value)
-                .map_err(|error| format!("decode observability source row failed: {error}"))
-        })
-        .collect::<Result<Vec<_>, String>>()
-    {
-        Ok(rows) => rows,
-        Err(error) => {
-            return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
-        }
-    };
+    let rows = project_query_rows(rows);
     let mut filtered: Vec<QueryRow> = rows.into_iter().filter(|row| query.matches(row)).collect();
     let timeseries_rows: Vec<super::timeseries::TimeseriesRow<'_>> = filtered
         .iter()
@@ -645,6 +719,12 @@ async fn records(
     let mut durations = 0u64;
     let mut with_duration = 0u64;
     let mut total_token_count = 0;
+    let mut attempt_keys = HashSet::new();
+    for row in &filtered {
+        if row.result.as_deref() == Some("failed-attempt") {
+            attempt_keys.insert(row.request_key.clone());
+        }
+    }
     for row in &filtered {
         // Only successful terminal responses contribute usage, cache, and duration.
         // Failed, cancelled, and still-running rows remain visible in counts/facets.
@@ -692,27 +772,40 @@ async fn records(
                 with_duration += 1;
             }
         }
+        if row.result.as_deref() == Some("failed-attempt") {
+            if let Some(status) = attempt_status_code(row) {
+                facet_add_status_code(
+                    &mut facets,
+                    "error_status_codes",
+                    Some(&json!(status)),
+                );
+            }
+        }
         match row.result.as_deref() {
             Some("success") => {
                 stats["success_count"] = json!(stats["success_count"].as_u64().unwrap_or(0) + 1);
             }
             Some("error") => {
                 stats["error_count"] = json!(stats["error_count"].as_u64().unwrap_or(0) + 1);
+                if !attempt_keys.contains(&row.request_key) && row.failed_attempts > 0 {
+                    stats["provider_failure_count"] =
+                        json!(stats["provider_failure_count"].as_u64().unwrap_or(0) + 1);
+                }
             }
             Some("cancelled") => {
                 stats["cancelled_count"] =
                     json!(stats["cancelled_count"].as_u64().unwrap_or(0) + 1);
+            }
+            Some("failed-attempt") => {
+                stats["error_count"] = json!(stats["error_count"].as_u64().unwrap_or(0) + 1);
+                stats["provider_failure_count"] =
+                    json!(stats["provider_failure_count"].as_u64().unwrap_or(0) + 1);
             }
             _ => {
                 stats["active_count"] = json!(stats["active_count"].as_u64().unwrap_or(0) + 1);
             }
         }
         stats["switch_count"] = json!(stats["switch_count"].as_u64().unwrap_or(0) + row.switches);
-        let failed_attempts = row.failed_attempts;
-        if failed_attempts > 0 {
-            stats["provider_failure_count"] =
-                json!(stats["provider_failure_count"].as_u64().unwrap_or(0) + failed_attempts);
-        }
         facet_add(&mut facets, "ports", Some(&row.scope.port.to_string()));
         facet_add(
             &mut facets,
@@ -741,9 +834,52 @@ async fn records(
                 "error_status_codes",
                 row.meta.get("provider_status"),
             );
+        } else if row.result.as_deref() == Some("cancelled") {
+            facet_add_status_code(
+                &mut facets,
+                "error_status_codes",
+                Some(&json!("499")),
+            );
         }
     }
     stats["count"] = json!(count as u64);
+    let mut by_port: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+    for row in &filtered {
+        let port = row.scope.port.to_string();
+        let item = by_port
+            .entry(port)
+            .or_insert_with(|| {
+                json!({
+                    "total": 0u64,
+                    "active": 0u64,
+                    "success": 0u64,
+                    "error": 0u64,
+                    "provider_failures": 0u64,
+                    "cancelled": 0u64
+                })
+            });
+        item["total"] = json!(item["total"].as_u64().unwrap_or(0) + 1);
+        match row.result.as_deref() {
+            Some("success") => {
+                item["success"] = json!(item["success"].as_u64().unwrap_or(0) + 1);
+            }
+            Some("error") => {
+                item["error"] = json!(item["error"].as_u64().unwrap_or(0) + 1);
+            }
+            Some("cancelled") => {
+                item["cancelled"] = json!(item["cancelled"].as_u64().unwrap_or(0) + 1);
+            }
+            Some("failed-attempt") => {
+                item["error"] = json!(item["error"].as_u64().unwrap_or(0) + 1);
+                item["provider_failures"] =
+                    json!(item["provider_failures"].as_u64().unwrap_or(0) + 1);
+            }
+            _ => {
+                item["active"] = json!(item["active"].as_u64().unwrap_or(0) + 1);
+            }
+        }
+    }
+    stats["by_port"] = json!(by_port);
     stats["input_tokens"] = json!(input);
     stats["output_tokens"] = json!(output);
     stats["cached_tokens"] = json!(cached);

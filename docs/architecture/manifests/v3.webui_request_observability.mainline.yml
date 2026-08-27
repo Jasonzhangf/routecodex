@@ -1,7 +1,8 @@
 lifecycle_id: v3.webui_request_observability.mainline
 summary: Server appends already-typed Runtime and Error06 lifecycle rows to one
-  per-listener JSONL store; Admin reads the same store directly and folds rows by
-  request_key for the single WebUI. There is no loopback snapshot or event transport.
+  per-listener JSONL store; Admin reads raw lifecycle rows, projects failed
+  provider attempts, and folds terminal state for the single WebUI. There is no
+  loopback snapshot or event transport.
 owner_feature_id: v3.server_internal_observability_projection
 entrypoint:
   node_id: V3RuntimeTimingServerProjection

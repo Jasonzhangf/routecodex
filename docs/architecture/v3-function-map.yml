@@ -5546,7 +5546,7 @@ features:
   - v3.config.webui_observability_store
   entry_symbols:
   - records
-  - v3_webui_observability_read_rows
+  - v3_webui_observability_read_raw_rows
   - build_timeseries
   allowed_paths:
   - v3/crates/routecodex-v3-admin/src/api/observability.rs

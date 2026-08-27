@@ -208,6 +208,41 @@ fn observability_row_with_result(request_key: &str, result: Option<&str>) -> ser
     })
 }
 
+fn observability_attempt_row(request_key: &str, provider_status: u16) -> serde_json::Value {
+    observability_attempt_row_with_failed(request_key, provider_status, 1)
+}
+
+fn observability_attempt_row_with_failed(
+    request_key: &str,
+    provider_status: u16,
+    failed_attempts: u64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "request_key": request_key,
+        "event_type": "request.provider_attempt_failed",
+        "started_epoch_ms": 1,
+        "updated_epoch_ms": 2,
+        "finished_epoch_ms": null,
+        "duration_ms": null,
+        "meta": {
+            "request_id": request_key.split(':').last().unwrap_or(request_key),
+            "endpoint": "/v1/chat/completions",
+            "provider_status": provider_status,
+            "error_category": format!("provider_http_{provider_status}"),
+            "error_detail": format!("provider returned HTTP {provider_status}"),
+            "provider": "p1",
+            "model": "m1",
+            "route_reason": "default:first-try"
+        },
+        "scope": {"port": 19999},
+        "result": null,
+        "attempts": 0,
+        "failed_attempts": failed_attempts,
+        "switches": 0,
+        "usage": null
+    })
+}
+
 #[tokio::test]
 async fn overview_returns_runtime_state() {
     let (base, _state, _home) = bind_test_server().await;
@@ -453,8 +488,13 @@ async fn observability_records_group_terminal_errors_by_raw_status_code() {
         .send()
         .await
         .expect("records response");
-    assert!(response.status().is_success());
-    let body: serde_json::Value = response.json().await.expect("records json");
+    let response_status = response.status();
+    let response_body = response.text().await.expect("records body");
+    assert!(
+        response_status.is_success(),
+        "records request failed: {response_status} {response_body}"
+    );
+    let body: serde_json::Value = serde_json::from_str(&response_body).expect("records json");
 
     assert_eq!(body["facets"]["error_status_codes"]["429"], 1);
     assert!(
@@ -498,8 +538,13 @@ async fn observability_stats_exclude_non_success_usage_but_keep_request_counts()
         .send()
         .await
         .expect("records response");
-    assert!(response.status().is_success());
-    let body: serde_json::Value = response.json().await.expect("records json");
+    let response_status = response.status();
+    let response_body = response.text().await.expect("records body");
+    assert!(
+        response_status.is_success(),
+        "records request failed: {response_status} {response_body}"
+    );
+    let body: serde_json::Value = serde_json::from_str(&response_body).expect("records json");
     let stats = &body["stats"];
     assert_eq!(stats["count"], 4);
     assert_eq!(stats["success_count"], 1);
@@ -512,6 +557,12 @@ async fn observability_stats_exclude_non_success_usage_but_keep_request_counts()
     assert_eq!(stats["total_tokens"], 120);
     assert_eq!(stats["cache_hit_rate_percent"], 50.0);
     assert_eq!(stats["avg_duration_ms"], 10.0);
+    assert_eq!(stats["by_port"]["19999"]["total"], 4);
+    assert_eq!(stats["by_port"]["19999"]["success"], 1);
+    assert_eq!(stats["by_port"]["19999"]["error"], 1);
+    assert_eq!(stats["by_port"]["19999"]["provider_failures"], 0);
+    assert_eq!(stats["by_port"]["19999"]["cancelled"], 1);
+    assert_eq!(stats["by_port"]["19999"]["active"], 1);
 
     let timeseries = &body["timeseries"];
     assert_eq!(timeseries[0]["count"], 4);
@@ -519,4 +570,71 @@ async fn observability_stats_exclude_non_success_usage_but_keep_request_counts()
     assert_eq!(timeseries[0]["output_tokens"], 20);
     assert_eq!(timeseries[0]["cached_tokens"], 50);
     assert_eq!(timeseries[0]["total_tokens"], 120);
+}
+
+#[tokio::test]
+async fn observability_keeps_provider_attempt_failures_visible_after_success() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[
+            observability_row_with_result("19999:recovered", Some("success")),
+            observability_attempt_row("19999:recovered", 502),
+            observability_attempt_row_with_failed("19999:recovered", 503, 2),
+            observability_attempt_row_with_failed("19999:terminal", 429, 3),
+        ],
+    );
+
+    let response = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("records response");
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await.expect("records json");
+
+    assert_eq!(body["facets"]["error_status_codes"]["502"], 1);
+    assert_eq!(body["facets"]["error_status_codes"]["503"], 1);
+    assert_eq!(body["facets"]["error_status_codes"]["429"], 1);
+    assert_eq!(body["stats"]["provider_failure_count"], 3);
+    assert_eq!(body["stats"]["success_count"], 1);
+    assert_eq!(body["stats"]["error_count"], 3);
+    assert_eq!(body["stats"]["by_port"]["19999"]["total"], 4);
+    assert_eq!(body["stats"]["by_port"]["19999"]["success"], 1);
+    assert_eq!(body["stats"]["by_port"]["19999"]["error"], 3);
+    assert_eq!(body["stats"]["by_port"]["19999"]["provider_failures"], 3);
+
+    let filtered = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&status=retrying&error_status_code=502"
+        ))
+        .send()
+        .await
+        .expect("attempt filtered response");
+    assert!(filtered.status().is_success());
+    let filtered_body: serde_json::Value = filtered.json().await.expect("filtered json");
+    assert_eq!(filtered_body["total"], 1);
+    assert_eq!(filtered_body["records"][0]["event_type"], "request.provider_attempt_failed");
+    assert_eq!(filtered_body["records"][0]["result"], "failed-attempt");
+    assert_eq!(
+        filtered_body["records"][0]["meta"]["provider_status"],
+        502
+    );
+
+    let error_filtered = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&status=error&error_status_code=502"
+        ))
+        .send()
+        .await
+        .expect("error filtered response");
+    assert!(error_filtered.status().is_success());
+    let error_filtered_body: serde_json::Value = error_filtered.json().await.expect("error json");
+    assert_eq!(error_filtered_body["total"], 1);
+    assert_eq!(
+        error_filtered_body["records"][0]["result"],
+        "failed-attempt"
+    );
 }

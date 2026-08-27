@@ -36096,3 +36096,39 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - 修复 owner：`v3/crates/routecodex-v3-runtime/src/diagnostics.rs`；keyless target 先展开 manifest auth entries，再逐 key 投影健康；priority/weight、Target selection、provider wire、handler/SSE 未改。
 - 证据：红测先验证旧 projection 返回 `test.test` 且无法反映 key1 cooldown；绿测 diagnostics key-level 正反覆盖通过。合入 main `67a3622c3`，build PASS `0.90.4609`，install/restart 后 7777/4444 health=200、build_version=`0.90.4610`。
 - 7777 live status 已显示 `cc-sol.key1.gpt-5.6-sol` 与所有具体 DeepSeek keys；当前 status 显示 cc-sol key1 available，dry-run `pool_match:thinking` 选择 `cc-sol:key1:gpt-5.6-sol`。AGY review `RCC-20260826-vr-status-projection-7777` PASS，无 findings。
+
+## 2026-08-27 Audit: WebUI observability cache/usage statistics filter
+
+### Root cause
+`v3/crates/routecodex-v3-admin/src/api/observability.rs` 聚合循环无条件遍历所有 filtered 行并累加 `usage`。`result="error"` / `result=null` (active) / `result="cancelled"` 行无 usage 时恰好结果正确，但逻辑上错误行若含 usage 就会被统计。
+
+### Fix
+- `observability.rs`：只有 `result == "success"` 时才累加 `input_tokens`、`output_tokens`、`cached_tokens`、`total_tokens`、`cached_against_input`、`duration_ms`。
+- `timeseries.rs`：同规则，`result == "success"` 才把 token 加入每日 bucket。
+- `timeseries.rs` 新增 `usage_is_countable(result)` 共享 helper，`observability.rs` 也调用它。
+- 统计 count、success_count、error_count、cancelled_count、active_count、switch_count、provider_failure_count 和 facets 仍遍历所有行（包括 error/cancelled/active）。
+
+### Files changed
+- `v3/crates/routecodex-v3-admin/src/api/observability.rs`
+- `v3/crates/routecodex-v3-admin/src/api/timeseries.rs`
+- `v3/crates/routecodex-v3-admin/tests/l4_admin_api.rs`（新增 HTTP 集成测试）
+- `v3/crates/routecodex-v3-admin/src/api/timeseries.rs`（新增单元测试）
+
+### Verification
+- `cargo check -p routecodex-v3-admin --offline`：通过
+- `npm run verify:v3-resource-map`：通过
+- `npm run verify:v3-module-boundaries`：通过
+- `routecodex restart`：0.90.4632，7777/4444/8777 全部 200
+- `curl records API`：stats 返回正常，`error_count` 72，`success_count` 38677，`cache_hit_rate_percent` 92.02%（与修复前 92.01% 接近，因为 error 行 usage=null）
+- V3 server 测试锁被 `multi_listener_server` 占用，等锁释放后跑 `cargo test -p routecodex-v3-admin`
+
+## 2026-08-27 WebUI auto-refresh fix
+
+- Root cause: requests.html only loaded once on page open; Dashboard/Providers/Routes had no polling either.
+- Fix:
+  - app.embedded.txt: shared `startAutoRefresh(loadFn, intervalMs)` helper, skips hidden tabs and concurrent fetches.
+  - requests.html: refresh every 5s.
+  - index.html/providers.html: refresh every 10s via shared helper.
+  - routes.html intentionally left manual (editor page).
+- Verified: build/install 0.90.4633 sha256=c159949e, restart 7777/4444/8777 all 200, camo headless rendered /requests.html with no JS errors and confirmed startAutoRefresh wiring in served page.
+- Commit `7a335e2c8`, pushed to main.

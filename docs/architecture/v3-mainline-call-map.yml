@@ -7482,7 +7482,7 @@ chains:
 
 - chain_id: v3.server.internal_observability_projection
   owner_feature_id: v3.server_internal_observability_projection
-  summary: Server-owned typed diagnostic projection appends every lifecycle update to a per-listener JSONL store; Admin reads and folds the same store by request key without SSE or poll transport.
+  summary: Server-owned typed diagnostic projection appends every lifecycle update to a per-listener JSONL store; Admin reads raw lifecycle rows, projects failed provider attempts, and folds terminal state without SSE or poll transport.
   edges:
   - step_id: v3-server-observability-record
     from_node: V3ServerConsoleObservation
@@ -7503,7 +7503,7 @@ chains:
     to_node: V3AdminObservabilityAggregation
     caller_symbol: records
     caller_file: v3/crates/routecodex-v3-admin/src/api/observability.rs
-    callee_symbol: v3_webui_observability_read_rows
+    callee_symbol: v3_webui_observability_read_raw_rows
     callee_file: v3/crates/routecodex-v3-config/src/v3_webui_observability_io.rs
     status: anchored
     owner_feature_id: v3.server_internal_observability_projection

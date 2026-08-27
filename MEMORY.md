@@ -5816,3 +5816,14 @@ Tags: #v3 #restart #keepalive #InvalidHTTPResponse #front-closeout #request-cycl
 - V4 currently requires `version = 4`, `runtime.id = "rccv4"`, and a compiled manifest; V3 7777 uses `version = 3` with route groups, multiple pools, multiple protocols, and provider-specific policies. V4 does not yet consume or compile the V3 config and cannot claim equivalent routing/provider/config behavior.
 - Completion claims must follow the product definition in `v4/docs/goals/v4-feature-completion-plan.md`: all selected V3 features must reach differential/live parity, not merely mapped/source/production-canary states. Keep the V4 independent runtime admission milestone explicitly separate from the V4 product-parity milestone.
 - 2026-08-24 Jason correction: RCCV4 install/restart/live verification must use only global `rccv4`; never use `routecodex` as the V4 lifecycle command. Any V4 evidence must bind installed binary identity, `rccv4 restart`, 5520 health, and live samples to the same V4 artifact.
+
+### 2026-08-27 WebUI observability stats filter (Jason audit)
+- `v3/crates/routecodex-v3-admin/src/api/observability.rs`：统计聚合只有 `result == "success"` 时才累加 usage/cache/duration；count/switch/provider_failure/facets 仍覆盖所有行。
+- `v3/crates/routecodex-v3-admin/src/api/timeseries.rs`：每日 bucket token 总数同上过滤；新增 `usage_is_countable()` 共享 helper。
+- 合入 main `daadf919b`，build/install 0.90.4632 sha256=fa1c8bb7，restart 7777/4444/8777 全部 200，records API 正常。
+- GitHub 需要 test CI 通过才能 merge PR；V3 server `multi_listener_server` 测试锁由 v3-unified-observability-persist worktree 持有，admin tests 等待释放。
+
+### 2026-08-27 WebUI auto-refresh from persisted records
+- WebUI pages now poll the persisted records API instead of requiring manual Reload: Requests 5s, Dashboard/Providers 10s, Routes remains manual.
+- Shared helper `startAutoRefresh(loadFn, intervalMs)` in `v3/admin-webui/app.embedded.txt`; skips hidden tabs and overlapping fetches.
+- Committed `7a335e2c8`, installed 0.90.4633 sha256=c159949e, restart 7777/4444/8777 200, camo browser smoke passed.

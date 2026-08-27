@@ -3426,9 +3426,9 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
   - Every accepted lifecycle event appends one typed row to the per-listener JSONL store.
-  - Reader folds lifecycle rows by request_key and returns only the latest row.
+  - Folded reader returns the latest lifecycle row per request_key; raw reader preserves every lifecycle row so failed provider attempts stay visible.
   - Each listener writes its own isolated request-records file and never leaks another listener's port.
-  - Error terminal rows preserve the raw numeric provider status and error category.
+  - Error terminal rows and provider-attempt rows preserve the raw numeric provider status and error category.
   - Terminal rows are immutable; a later Started/Completed/Failed cannot reopen or rewrite a terminal result.
   - Per-record JSONL writes are bounded by the internal observability max record bytes setting.
   required_negative:

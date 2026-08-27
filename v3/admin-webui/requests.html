@@ -28,11 +28,11 @@
       <h2>Statistics</h2>
       <div class="cards" id="summary-cards"></div>
       <div class="chart-controls">
-        <label>Range<select id="chart-range"><option value="today">Today</option><option value="week">Last 7 days</option><option value="all">All time</option></select></label>
+        <label>Range<select id="chart-range"><option value="today">Today</option><option value="week">Last 7 days</option><option value="month">Last 30 days</option></select></label>
         <label>Metric<select id="chart-metric"><option value="count">Requests</option><option value="total_tokens">Total tokens</option><option value="input_tokens">Input tokens</option><option value="output_tokens">Output tokens</option><option value="cached_tokens">Cached tokens</option></select></label>
       </div>
       <div class="panel chart-panel">
-        <div id="usage-chart" class="bar-chart" role="img" aria-label="Requests and token usage by day"></div>
+        <div id="usage-chart" class="bar-chart" role="img" aria-label="Requests and token usage over selected range"></div>
       </div>
       <div class="layout">
         <div class="panel"><table id="ports-table"><thead><tr><th>Port</th><th class="num">Total</th><th class="num">Active</th><th class="num">Success</th><th class="num">Error</th><th class="num">Failed attempts</th><th class="num">Cancelled</th></tr></thead><tbody><tr><td colspan="7" class="loading">loading…</td></tr></tbody></table></div>
@@ -235,7 +235,7 @@
       if (r === "success") return "success";
       if (r === "error") return "error";
       if (r === "cancelled") return "cancelled";
-      if (row.event_type === "request.provider_attempt_failed") return "retrying";
+      if (r === "failed-attempt") return "error";
       return "active";
     }
     function usageText(usage) {
@@ -318,7 +318,7 @@
       const ports = [...(stats.by_port ? Object.entries(stats.by_port) : [])].sort(([a], [b]) => Number(a) - Number(b));
       portBody.replaceChildren(...ports.map(([port, item]) => {
         const failed = Number(item.provider_failures || 0);
-        const cls = item.error ? "status-error" : failed > 0 ? "status-retrying" : item.active ? "status-active" : "status-success";
+        const cls = item.error || failed > 0 ? "status-error" : item.active ? "status-active" : "status-success";
         const row = el("tr", cls);
         row.append(el("td", null, String(port)), numberCell(item.total), numberCell(item.active), numberCell(item.success), numberCell(item.error), numberCell(failed), numberCell(item.cancelled));
         return row;
@@ -547,32 +547,56 @@
       }
     }
 
+    function chartLabel(bucket, range) {
+      if (range === "today") return bucket.date.slice(11, 16);
+      if (range === "month") return `${bucket.date.slice(5)} w`;
+      return bucket.date.slice(5);
+    }
+
     function renderTimeseries() {
       const chart = document.getElementById("usage-chart");
       const metric = document.getElementById("chart-metric").value;
+      const range = document.getElementById("chart-range").value;
       const buckets = state.timeseries || [];
       if (!buckets.length) {
         chart.replaceChildren(el("div", "empty-chart muted", "no data in selected range"));
         return;
       }
-      const chartHeight = Math.max(160, chart.clientHeight || 0);
-      const axisHeight = 18;
-      const barArea = Math.max(40, chartHeight - axisHeight - 8);
+      // Per Jason spec: x-axis is date (one column per bucket), y-axis is the
+      // selected metric normalized to the bucket maximum, with the tallest bar
+      // at 80% of the chart area height.
+      const chartHeight = Math.max(200, chart.clientHeight || 0);
+      const axisHeight = 22;
+      const gap = 8;
+      const usableHeight = chartHeight - axisHeight - gap;
+      const fillHeight = Math.max(20, Math.round(usableHeight * 0.8));
       const maximum = Math.max(...buckets.map((bucket) => Number(bucket[metric] || 0)), 1);
-      const bars = buckets.map((bucket) => {
+
+      const yAxis = el("div", "chart-y-axis");
+      yAxis.style.height = `${chartHeight}px`;
+      for (const ratio of [1, 0.8, 0.6, 0.4, 0.2, 0]) {
+        const label = el("span", "chart-y-label", fmtCompact(maximum * ratio));
+        label.style.bottom = `${Math.round(usableHeight * ratio)}px`;
+        yAxis.appendChild(label);
+      }
+
+      const bars = el("div", "chart-bars");
+      for (const bucket of buckets) {
         const value = Number(bucket[metric] || 0);
         const column = el("div", "bar-column");
         column.style.height = `${chartHeight}px`;
+        const spacer = el("div", "bar-spacer");
+        spacer.style.height = `${Math.max(0, usableHeight - fillHeight)}px`;
         const bar = el("div", "bar");
-        const heightPx = Math.max(2, Math.round((value / maximum) * barArea));
+        const heightPx = Math.max(2, Math.round((value / maximum) * fillHeight));
         bar.style.height = `${heightPx}px`;
-        bar.title = `${bucket.date}: ${value.toLocaleString()} (${bucket.count.toLocaleString()} requests)`;
-        const label = el("span", "axis", bucket.date.slice(5));
+        bar.title = `${bucket.date}: ${fmtCompact(value)} (${bucket.count.toLocaleString()} requests)`;
+        const label = el("span", "axis", chartLabel(bucket, range));
         label.title = bucket.date;
-        column.append(bar, label);
-        return column;
-      });
-      chart.replaceChildren(...bars);
+        column.append(spacer, bar, label);
+        bars.appendChild(column);
+      }
+      chart.replaceChildren(yAxis, bars);
     }
 
     function renderPagination() {

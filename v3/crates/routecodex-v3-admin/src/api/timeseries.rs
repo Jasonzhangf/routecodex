@@ -1,5 +1,5 @@
 // feature_id: v3.admin_observability_aggregation
-// Daily timeseries projection for the admin observability records endpoint.
+// Daily/Hourly timeseries projection for the admin observability records endpoint.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub(crate) struct TimeseriesBucket {
+    /// YYYY-MM-DD for day buckets, YYYY-MM-DD HH:00 for hour buckets.
     pub date: String,
     pub count: u64,
     pub input_tokens: u64,
@@ -37,12 +38,33 @@ fn floor_div(value: i64, divisor: i64) -> i64 {
     value.div_euclid(divisor)
 }
 
+/// Returns the epoch-ms of the local calendar-day start (00:00 in the given
+/// timezone) for the given instant.
 pub(crate) fn local_day_start(epoch_ms: u64, timezone_offset_minutes: i32) -> u64 {
     let offset_ms = timezone_offset_minutes as i64 * 60_000;
     let local_ms = epoch_ms as i64 - offset_ms;
     (floor_div(local_ms, 86_400_000) * 86_400_000 + offset_ms) as u64
 }
 
+/// Returns the epoch-ms of the local calendar-hour start for the given instant.
+fn local_hour_start(epoch_ms: u64, timezone_offset_minutes: i32) -> u64 {
+    let offset_ms = timezone_offset_minutes as i64 * 60_000;
+    let local_ms = epoch_ms as i64 - offset_ms;
+    (floor_div(local_ms, 3_600_000) * 3_600_000 + offset_ms) as u64
+}
+
+/// Returns the epoch-ms of the local week start (Monday 00:00) for the given
+/// instant. The Unix epoch (1970-01-01) is a Thursday, so Monday is 3 days
+/// earlier in that week.
+fn local_monday_start(epoch_ms: u64, timezone_offset_minutes: i32) -> u64 {
+    let offset_ms = timezone_offset_minutes as i64 * 60_000;
+    let local_ms = epoch_ms as i64 - offset_ms;
+    let local_day = floor_div(local_ms, 86_400_000);
+    let weekday = (local_day + 3).rem_euclid(7);
+    ((local_day - weekday) * 86_400_000 + offset_ms) as u64
+}
+
+/// Formats a UTC date string "YYYY-MM-DD".
 fn utc_date_for_local_day(epoch_ms: u64, timezone_offset_minutes: i32) -> String {
     let offset_ms = timezone_offset_minutes as i64 * 60_000;
     let days = floor_div((epoch_ms as i64 - offset_ms) / 1_000, 86_400);
@@ -66,6 +88,16 @@ fn utc_date_for_local_day(epoch_ms: u64, timezone_offset_minutes: i32) -> String
     format!("{year:04}-{month:02}-{day:02}")
 }
 
+/// Formats an hour-bucket label "YYYY-MM-DD HH:00".
+fn utc_hour_label(epoch_ms: u64, timezone_offset_minutes: i32) -> String {
+    let offset_ms = timezone_offset_minutes as i64 * 60_000;
+    let local_ms = epoch_ms as i64 - offset_ms;
+    let total_minutes = floor_div(local_ms, 60_000);
+    let hour = ((total_minutes % 1_440) / 60) as i32;
+    let date_part = utc_date_for_local_day(epoch_ms, timezone_offset_minutes);
+    format!("{date_part} {hour:02}:00")
+}
+
 pub(crate) fn build_timeseries(
     rows: &[TimeseriesRow<'_>],
     range: &str,
@@ -74,11 +106,29 @@ pub(crate) fn build_timeseries(
     if rows.is_empty() {
         return Ok(Vec::new());
     }
-    let mut buckets = BTreeMap::new();
+
+    let is_today = range == "today";
+    let is_month = range == "month";
+    let hour_ms = 3_600_000_u64;
+    let day_ms = 86_400_000_u64;
+
+    let mut buckets: BTreeMap<String, TimeseriesBucket> = BTreeMap::new();
+
     for row in rows {
-        let date = utc_date_for_local_day(row.started_epoch_ms, timezone_offset_minutes);
-        let bucket = buckets.entry(date).or_insert(TimeseriesBucket {
-            date: String::new(),
+        let key = if is_today {
+            let hour = local_hour_start(row.started_epoch_ms, timezone_offset_minutes);
+            utc_hour_label(hour, timezone_offset_minutes)
+        } else if is_month {
+            utc_date_for_local_day(
+                local_monday_start(row.started_epoch_ms, timezone_offset_minutes),
+                timezone_offset_minutes,
+            )
+        } else {
+            utc_date_for_local_day(row.started_epoch_ms, timezone_offset_minutes)
+        };
+
+        let bucket = buckets.entry(key.clone()).or_insert_with(|| TimeseriesBucket {
+            date: key,
             count: 0,
             input_tokens: 0,
             output_tokens: 0,
@@ -102,32 +152,66 @@ pub(crate) fn build_timeseries(
             bucket.total_tokens += token("total_tokens");
         }
     }
+
+    // Fill in empty buckets so the chart shows a continuous axis.
     if range != "all" {
         let now_ms = system_epoch_ms()?;
-        let today_start = local_day_start(now_ms, timezone_offset_minutes);
-        let day_ms = 86_400_000_u64;
-        let first_day = local_day_start(
-            rows.iter()
-                .map(|row| row.started_epoch_ms)
-                .min()
-                .unwrap_or(now_ms),
-            timezone_offset_minutes,
-        );
-        let mut day = first_day;
-        while day <= today_start {
-            buckets
-                .entry(utc_date_for_local_day(day, timezone_offset_minutes))
-                .or_insert_with(|| TimeseriesBucket {
-                    date: utc_date_for_local_day(day, timezone_offset_minutes),
+        if is_today {
+            let today_start = local_day_start(now_ms, timezone_offset_minutes);
+            // Always emit all 24 hours of the current local day.
+            for hour in 0..24 {
+                let hour_ms_val = today_start + (hour as u64) * hour_ms;
+                let key = utc_hour_label(hour_ms_val, timezone_offset_minutes);
+                buckets.entry(key.clone()).or_insert_with(|| TimeseriesBucket {
+                    date: key,
                     count: 0,
                     input_tokens: 0,
                     output_tokens: 0,
                     cached_tokens: 0,
                     total_tokens: 0,
                 });
-            day += day_ms;
+            }
+        } else if is_month {
+            let now_ms = system_epoch_ms()?;
+            let range_start = local_day_start(now_ms, timezone_offset_minutes)
+                .saturating_sub(29 * 24 * 60 * 60 * 1000);
+            let mut week_start = local_monday_start(range_start, timezone_offset_minutes);
+            let today_start = local_day_start(now_ms, timezone_offset_minutes);
+            while week_start <= today_start {
+                let key = utc_date_for_local_day(week_start, timezone_offset_minutes);
+                buckets.entry(key.clone()).or_insert_with(|| TimeseriesBucket {
+                    date: key,
+                    count: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cached_tokens: 0,
+                    total_tokens: 0,
+                });
+                week_start += 7 * day_ms;
+            }
+        } else {
+            // "week": fill every day from first data to today.
+            let first = local_day_start(
+                rows.iter().map(|r| r.started_epoch_ms).min().unwrap_or(now_ms),
+                timezone_offset_minutes,
+            );
+            let today_start = local_day_start(now_ms, timezone_offset_minutes);
+            let mut day = first;
+            while day <= today_start {
+                let key = utc_date_for_local_day(day, timezone_offset_minutes);
+                buckets.entry(key.clone()).or_insert_with(|| TimeseriesBucket {
+                    date: key,
+                    count: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cached_tokens: 0,
+                    total_tokens: 0,
+                });
+                day += day_ms;
+            }
         }
     }
+
     Ok(buckets
         .into_iter()
         .map(|(date, mut bucket)| {
@@ -150,11 +234,13 @@ mod tests {
     }
 
     #[test]
-    fn daily_buckets_sum_typed_usage_from_filtered_rows() {
-        let timezone_offset_minutes = 420;
+    fn hourly_buckets_sum_typed_usage_from_filtered_rows() {
+        let tz = 0; // UTC
+        let hour_ms = 3_600_000_u64;
         let now_ms = system_epoch_ms().unwrap();
-        let morning = local_day_start(now_ms, timezone_offset_minutes) + 3_600_000;
-        let evening = morning + 7 * 3_600_000;
+        let day_start = local_day_start(now_ms, tz);
+        let h2 = day_start + 2 * hour_ms;
+        let h5 = day_start + 5 * hour_ms;
         let usage = json!({
             "input_tokens": 100,
             "output_tokens": 102,
@@ -162,24 +248,53 @@ mod tests {
             "total_tokens": 202
         });
         let rows = vec![
-            TimeseriesRow {
-                started_epoch_ms: morning,
-                usage: Some(&usage),
-            },
-            TimeseriesRow {
-                started_epoch_ms: evening,
-                usage: Some(&usage),
-            },
+            TimeseriesRow { started_epoch_ms: h2, usage: Some(&usage), result: Some("success") },
+            TimeseriesRow { started_epoch_ms: h2, usage: Some(&usage), result: Some("success") },
+            TimeseriesRow { started_epoch_ms: h5, usage: Some(&usage), result: Some("success") },
         ];
-        let buckets = build_timeseries(&rows, "today", timezone_offset_minutes).unwrap();
-        assert_eq!(buckets.len(), 1);
-        let bucket = &buckets[0];
-        assert_eq!(bucket.count, 2);
-        assert_eq!(bucket.input_tokens, 200);
-        assert_eq!(bucket.output_tokens, 204);
-        assert_eq!(bucket.cached_tokens, 100);
-        assert_eq!(bucket.total_tokens, 404);
-        assert!(bucket.date.matches('-').count() == 2);
+        let buckets = build_timeseries(&rows, "today", tz).unwrap();
+        // 24 hours should be present; only 02:00 and 05:00 have data.
+        assert_eq!(buckets.len(), 24);
+        let h2_bucket = buckets.iter().find(|b| b.date.contains(" 02:00")).unwrap();
+        assert_eq!(h2_bucket.count, 2);
+        assert_eq!(h2_bucket.input_tokens, 200);
+        let h5_bucket = buckets.iter().find(|b| b.date.contains(" 05:00")).unwrap();
+        assert_eq!(h5_bucket.count, 1);
+        assert_eq!(h5_bucket.total_tokens, 202);
+        // Empty buckets have zero usage.
+        let h0_bucket = buckets.iter().find(|b| b.date.contains(" 00:00")).unwrap();
+        assert_eq!(h0_bucket.count, 0);
+        assert_eq!(h0_bucket.input_tokens, 0);
+    }
+
+    #[test]
+    fn monthly_buckets_aggregate_by_local_monday() {
+        let tz = 0;
+        let now_ms = system_epoch_ms().unwrap();
+        let today_start = local_day_start(now_ms, tz);
+        // Anchor one row on the current Monday and one six days later so both
+        // stay in the same calendar week and must share one bucket.
+        let monday = local_monday_start(today_start, tz);
+        let saturday = monday + 6 * 86_400_000_u64;
+        let usage = json!({
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cached_tokens": 30,
+            "total_tokens": 150
+        });
+        let rows = vec![
+            TimeseriesRow { started_epoch_ms: monday + 1000, usage: Some(&usage), result: Some("success") },
+            TimeseriesRow { started_epoch_ms: saturday + 1000, usage: Some(&usage), result: Some("success") },
+        ];
+        let buckets = build_timeseries(&rows, "month", tz).unwrap();
+        let monday_label = utc_date_for_local_day(monday, tz);
+        assert!(buckets.iter().any(|b| b.date == monday_label));
+        let monday_bucket = buckets.iter().find(|b| b.date == monday_label).unwrap();
+        assert_eq!(monday_bucket.count, 2);
+        assert_eq!(monday_bucket.input_tokens, 200);
+        assert_eq!(monday_bucket.output_tokens, 100);
+        assert_eq!(monday_bucket.cached_tokens, 60);
+        assert_eq!(monday_bucket.total_tokens, 300);
     }
 
     #[test]
@@ -199,24 +314,12 @@ mod tests {
             "total_tokens": 999
         });
         let rows = vec![
-            TimeseriesRow {
-                started_epoch_ms: day_start + 1000,
-                usage: Some(&success_usage),
-                result: Some("success"),
-            },
-            TimeseriesRow {
-                started_epoch_ms: day_start + 2000,
-                usage: Some(&error_usage),
-                result: Some("error"),
-            },
-            TimeseriesRow {
-                started_epoch_ms: day_start + 3000,
-                usage: Some(&error_usage),
-                result: None,
-            },
+            TimeseriesRow { started_epoch_ms: day_start + 1000, usage: Some(&success_usage), result: Some("success") },
+            TimeseriesRow { started_epoch_ms: day_start + 2000, usage: Some(&error_usage), result: Some("error") },
+            TimeseriesRow { started_epoch_ms: day_start + 3000, usage: Some(&error_usage), result: None },
         ];
 
-        let buckets = build_timeseries(&rows, "today", 0).unwrap();
+        let buckets = build_timeseries(&rows, "week", 0).unwrap();
         assert_eq!(buckets.len(), 1);
         let bucket = &buckets[0];
         assert_eq!(bucket.count, 3);
@@ -237,19 +340,11 @@ mod tests {
             "total_tokens": 2
         });
         let rows = vec![
-            TimeseriesRow {
-                started_epoch_ms: day_start + 1000,
-                usage: Some(&usage),
-                result: Some("cancelled"),
-            },
-            TimeseriesRow {
-                started_epoch_ms: day_start + 2000,
-                usage: Some(&usage),
-                result: None,
-            },
+            TimeseriesRow { started_epoch_ms: day_start + 1000, usage: Some(&usage), result: Some("cancelled") },
+            TimeseriesRow { started_epoch_ms: day_start + 2000, usage: Some(&usage), result: None },
         ];
 
-        let buckets = build_timeseries(&rows, "today", 0).unwrap();
+        let buckets = build_timeseries(&rows, "week", 0).unwrap();
         assert_eq!(buckets.len(), 1);
         let bucket = &buckets[0];
         assert_eq!(bucket.count, 2);

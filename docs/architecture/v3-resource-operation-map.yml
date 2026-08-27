@@ -1981,9 +1981,10 @@ resources:
       row_limit_bytes: internal_observability_max_record_bytes
       terminal_row_immutable: true
       reader_folds_by_request_key: true
+      raw_lifecycle_preserved: true
       control_state_in_payload: forbidden
     allowed_writers: [record_v3_observability_event, record_v3_webui_error_projection]
-    allowed_readers: [v3_webui_observability_read_rows, records]
+    allowed_readers: [v3_webui_observability_read_rows, v3_webui_observability_read_raw_rows, records]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -2003,10 +2004,11 @@ resources:
       schema_version: 1
       append_only: true
       reader_folds_by_request_key: true
+      raw_lifecycle_preserved: true
       record_limit_bytes: internal_observability_max_record_bytes
       control_state_in_payload: forbidden
     allowed_writers: [v3_webui_observability_append_row]
-    allowed_readers: [v3_webui_observability_read_rows]
+    allowed_readers: [v3_webui_observability_read_rows, v3_webui_observability_read_raw_rows]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false

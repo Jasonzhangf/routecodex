@@ -74,41 +74,7 @@ pub fn v3_webui_observability_read_rows(
     let mut latest_by_key = BTreeMap::<String, Value>::new();
     let mut order = Vec::<String>::new();
     for (line_number, line) in BufReader::new(file).lines().enumerate() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let envelope: Value = serde_json::from_str(&line).map_err(|error| {
-            V3WebuiObservabilityStoreError::Decode(format!(
-                "invalid observability record {}:{}: {error}",
-                path.display(),
-                line_number + 1
-            ))
-        })?;
-        let schema = envelope
-            .get("schema_version")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| {
-                V3WebuiObservabilityStoreError::Decode(format!(
-                    "observability record {}:{} has no schema_version",
-                    path.display(),
-                    line_number + 1
-                ))
-            })?;
-        if schema != V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION {
-            return Err(V3WebuiObservabilityStoreError::UnsupportedSchema {
-                path: path.display().to_string(),
-                line: line_number as u64 + 1,
-                schema,
-            });
-        }
-        let row = envelope.get("row").cloned().ok_or_else(|| {
-            V3WebuiObservabilityStoreError::Decode(format!(
-                "observability record {}:{} has no row",
-                path.display(),
-                line_number + 1
-            ))
-        })?;
+        let row = decode_observability_row(path, line_number, line?)?;
         let key = row
             .get("request_key")
             .and_then(Value::as_str)
@@ -128,6 +94,72 @@ pub fn v3_webui_observability_read_rows(
         .into_iter()
         .filter_map(|key| latest_by_key.remove(&key))
         .collect())
+}
+
+/// Reads the store in file order without folding lifecycle rows by request_key.
+/// Admin uses this raw view so every failed provider attempt remains visible
+/// even when a later retry or completion succeeds.
+pub fn v3_webui_observability_read_raw_rows(
+    path: &Path,
+) -> Result<Vec<Value>, V3WebuiObservabilityStoreError> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let file = fs::File::open(path)?;
+    let mut rows = Vec::new();
+    for (line_number, line) in BufReader::new(file).lines().enumerate() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        rows.push(decode_observability_row(path, line_number, line)?);
+    }
+    Ok(rows)
+}
+
+fn decode_observability_row(
+    path: &Path,
+    line_number: usize,
+    line: String,
+) -> Result<Value, V3WebuiObservabilityStoreError> {
+    if line.trim().is_empty() {
+        return Err(V3WebuiObservabilityStoreError::Decode(format!(
+            "observability record {}:{} is empty",
+            path.display(),
+            line_number + 1
+        )));
+    }
+    let envelope: Value = serde_json::from_str(&line).map_err(|error| {
+        V3WebuiObservabilityStoreError::Decode(format!(
+            "invalid observability record {}:{}: {error}",
+            path.display(),
+            line_number + 1
+        ))
+    })?;
+    let schema = envelope
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            V3WebuiObservabilityStoreError::Decode(format!(
+                "observability record {}:{} has no schema_version",
+                path.display(),
+                line_number + 1
+            ))
+        })?;
+    if schema != V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION {
+        return Err(V3WebuiObservabilityStoreError::UnsupportedSchema {
+            path: path.display().to_string(),
+            line: line_number as u64 + 1,
+            schema,
+        });
+    }
+    envelope.get("row").cloned().ok_or_else(|| {
+        V3WebuiObservabilityStoreError::Decode(format!(
+            "observability record {}:{} has no row",
+            path.display(),
+            line_number + 1
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -168,6 +200,11 @@ mod tests {
     fn read_missing_file_ok() {
         let path = std::path::Path::new("/nonexistent/this/file/does/not/exist.jsonl");
         assert!(v3_webui_observability_read_rows(path).unwrap().is_empty());
+        assert!(
+            v3_webui_observability_read_raw_rows(path)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -231,6 +268,66 @@ mod tests {
         assert_eq!(
             rows[1].get("request_key").and_then(Value::as_str),
             Some("r2")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn raw_reader_preserves_provider_attempt_failure_rows() {
+        let dir = temp_dir("raw-attempt");
+        let path = dir.join("records-attempt.jsonl");
+        v3_webui_observability_append_row(
+            &path,
+            &json!({
+                "request_key": "r1",
+                "event_type": "request.started",
+                "started_epoch_ms": 1,
+                "updated_epoch_ms": 1
+            }),
+        )
+        .unwrap();
+        v3_webui_observability_append_row(
+            &path,
+            &json!({
+                "request_key": "r1",
+                "event_type": "request.provider_attempt_failed",
+                "started_epoch_ms": 1,
+                "updated_epoch_ms": 2,
+                "meta": {"provider_status": 502}
+            }),
+        )
+        .unwrap();
+        v3_webui_observability_append_row(
+            &path,
+            &json!({
+                "request_key": "r1",
+                "event_type": "request.completed",
+                "started_epoch_ms": 1,
+                "updated_epoch_ms": 3,
+                "result": "success"
+            }),
+        )
+        .unwrap();
+
+        let folded = v3_webui_observability_read_rows(&path).unwrap();
+        assert_eq!(folded.len(), 1);
+        assert_eq!(
+            folded[0].get("event_type").and_then(Value::as_str),
+            Some("request.completed")
+        );
+
+        let raw = v3_webui_observability_read_raw_rows(&path).unwrap();
+        assert_eq!(raw.len(), 3);
+        assert_eq!(
+            raw[1].get("event_type").and_then(Value::as_str),
+            Some("request.provider_attempt_failed")
+        );
+        assert_eq!(
+            raw[1]
+                .get("meta")
+                .and_then(|meta| meta.get("provider_status"))
+                .and_then(Value::as_u64),
+            Some(502)
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

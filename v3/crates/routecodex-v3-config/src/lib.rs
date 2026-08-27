@@ -23,8 +23,9 @@ pub use store::{
 };
 pub use types::*;
 pub use v3_webui_observability_io::{
-    v3_webui_observability_append_row, v3_webui_observability_read_rows,
-    V3WebuiObservabilityStoreError, V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION,
+    v3_webui_observability_append_row, v3_webui_observability_read_raw_rows,
+    v3_webui_observability_read_rows, V3WebuiObservabilityStoreError,
+    V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
