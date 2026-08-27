@@ -429,27 +429,9 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
         .finish()
         .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
     if !terminal_seen {
-        // Clean EOF without a tool call is the compatibility terminal boundary.
-        // A complete tool call remains semantic output even when this Chat
-        // gateway omits finish_reason; do not fabricate stop for that case.
-        // Incomplete tool-call data still fails in materialize_completion and is
-        // retried as an explicit codec/projection error.
-        let mut response = reducer.materialize_completion().map_err(|error| {
-            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
-        })?;
-        if !reducer.has_tool_calls() {
-            if let Some(choices) = response.get_mut("choices").and_then(Value::as_array_mut) {
-                for choice in choices {
-                    if choice.get("finish_reason").is_none_or(Value::is_null) {
-                        choice["finish_reason"] = Value::String("stop".to_string());
-                    }
-                }
-            }
-        }
-        observation
-            .record_provider_event_json(&response)
-            .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-        return Ok(response);
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "OpenAI Chat provider stream reached EOF without a semantic terminal".to_string(),
+        ));
     }
     reducer.materialize_completion().map_err(|error| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
@@ -600,32 +582,39 @@ mod tests {
             b"data: {\"id\":\"chatcmpl_eof\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n".to_vec(),
         )]));
 
-        let output = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+        let error = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
             provider,
             &observation,
         )
         .await
-        .expect("clean EOF without a tool call is a stop completion");
+        .expect_err("clean EOF without a semantic terminal must fail");
 
-        assert_eq!(output["choices"][0]["finish_reason"], "stop");
+        assert!(matches!(
+            error,
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message)
+                if message.contains("EOF") || message.contains("terminal")
+        ));
     }
 
     #[tokio::test]
-    async fn done_without_finish_reason_is_transport_closeout_for_text_completion() {
+    async fn done_without_finish_reason_is_not_a_semantic_terminal() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![Ok(
             b"data: {\"id\":\"chatcmpl_done\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n".to_vec(),
         )]));
 
-        let output = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+        let error = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
             provider,
             &observation,
         )
         .await
-        .expect("[DONE] must close a text completion without fabricating provider events");
+        .expect_err("[DONE] without a semantic terminal must fail");
 
-        assert_eq!(output["choices"][0]["message"]["content"], "ok");
-        assert_eq!(output["choices"][0]["finish_reason"], "stop");
+        assert!(matches!(
+            error,
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message)
+                if message.contains("EOF") && message.contains("terminal")
+        ));
     }
 
     #[tokio::test]
@@ -643,29 +632,29 @@ mod tests {
         assert!(matches!(
             error,
             V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message)
-                if message.contains("choices")
+                if message.contains("EOF") && message.contains("terminal")
         ));
     }
 
     #[tokio::test]
-    async fn clean_eof_with_complete_tool_call_preserves_tool_call_without_reason() {
+    async fn clean_eof_with_complete_tool_call_is_not_a_semantic_terminal() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![Ok(
             b"data: {\"id\":\"chatcmpl_tool_eof\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n".to_vec(),
         )]));
 
-        let output = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+        let error = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
             provider,
             &observation,
         )
         .await
-        .expect("complete tool call must survive missing finish_reason");
+        .expect_err("tool call without a semantic terminal must fail");
 
-        assert_eq!(output["choices"][0]["finish_reason"], Value::Null);
-        assert_eq!(
-            output["choices"][0]["message"]["tool_calls"][0]["id"],
-            "call_1"
-        );
+        assert!(matches!(
+            error,
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message)
+                if message.contains("EOF") && message.contains("terminal")
+        ));
     }
 
     #[tokio::test]
