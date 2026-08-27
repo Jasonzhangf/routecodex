@@ -16,6 +16,7 @@
     "verify:ci": "node scripts/verify-ci.mjs",
     "verify:isolation": "node scripts/verify-isolation.mjs",
     "verify:v4-active-link": "node scripts/architecture/verify-v4-active-link.mjs",
+    "verify:v4-relay-continuation": "node scripts/architecture/verify-v4-relay-continuation.mjs",
     "verify:v4-feature-layer-batches": "node scripts/architecture/verify-v4-feature-layer-batches.mjs",
     "verify:v4-feature-layer-batches-self-test": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --self-test",
     "verify:v4-feature-layer-batches-admission": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
