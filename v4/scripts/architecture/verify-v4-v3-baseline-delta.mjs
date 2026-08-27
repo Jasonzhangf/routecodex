@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Candidate binding marker: baseline delta is part of the v4-cordis tree.
 // Candidate boundary: baseline delta remains source-only until wiring.
 import fs from 'node:fs';
 import path from 'node:path';
