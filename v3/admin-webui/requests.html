@@ -103,6 +103,10 @@
       if (http != null && Number.isFinite(Number(http))) {
         return String(http);
       }
+      const errorCode = compactErrorReason(row);
+      if (/^\d+$/.test(errorCode)) {
+        return errorCode;
+      }
       const fallback = row.result;
       if (fallback) {
         if (fallback === "success") return "200";
@@ -128,7 +132,12 @@
         provider_http_504: "504",
         target_pool: "exhausted",
         internal_request_lane: "598",
+        v3_debug_failure: "598",
+        debug_sink: "598",
         internal_response_lane: "599",
+        provider_response_sse_event_invalid: "599",
+        provider_response_body_error: "599",
+        provider_stream_handoff_runtime_failed: "599",
       };
       return map[ec] || ec;
     }
@@ -337,7 +346,7 @@
         errorMap.set(code, { terminal: count });
       }
       const statusCodes = [...errorMap.entries()]
-        .sort(([left], [right]) => left === "unknown" ? 1 : right === "unknown" ? -1 : Number(left) - Number(right));
+        .sort(([left], [right]) => Number(left) - Number(right));
       errorBody.replaceChildren(...statusCodes.map(([statusCode, entry]) => {
         const row = el("tr", "status-error");
         row.style.cursor = "pointer";

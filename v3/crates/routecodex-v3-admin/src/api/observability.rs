@@ -470,8 +470,26 @@ fn status_code_label(value: Option<&Value>) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-fn row_status_code(row: &QueryRow) -> String {
-    status_code_label(row.meta.get("provider_status"))
+fn error_category_status_code(category: Option<&str>) -> Option<String> {
+    let category = category?.trim();
+    if let Some(code) = category.strip_prefix("provider_http_") {
+        if code.parse::<u16>().is_ok() {
+            return Some(code.to_string());
+        }
+    }
+    match category {
+        "malformed_json" | "content_type_required" | "content_type_unsupported" => {
+            Some("400".to_string())
+        }
+        "internal_request_lane" | "v3_debug_failure" | "debug_sink" => {
+            Some("598".to_string())
+        }
+        "internal_response_lane"
+        | "provider_response_sse_event_invalid"
+        | "provider_response_body_error"
+        | "provider_stream_handoff_runtime_failed" => Some("599".to_string()),
+        _ => None,
+    }
 }
 
 fn is_provider_attempt_failure(row: &SourceRow) -> bool {
@@ -545,15 +563,28 @@ fn to_attempt_query_row(row: SourceRow) -> QueryRow {
     }
 }
 
-fn facet_add_status_code(
+fn row_status_code(row: &QueryRow) -> String {
+    let provider_status = status_code_label(row.meta.get("provider_status"));
+    if provider_status != "unknown" {
+        return provider_status;
+    }
+    error_category_status_code(
+        row.meta
+            .get("error_category")
+            .and_then(Value::as_str),
+    )
+    .unwrap_or_else(|| "599".to_string())
+}
+
+fn facet_add_status_code_label(
     facets: &mut BTreeMap<String, BTreeMap<String, u64>>,
     name: &str,
-    value: Option<&Value>,
+    label: String,
 ) {
     *facets
         .entry(name.to_string())
         .or_default()
-        .entry(status_code_label(value))
+        .entry(label)
         .or_default() += 1;
 }
 
@@ -774,10 +805,10 @@ async fn records(
         }
         if row.result.as_deref() == Some("failed-attempt") {
             if let Some(status) = attempt_status_code(row) {
-                facet_add_status_code(
+                facet_add_status_code_label(
                     &mut facets,
                     "error_status_codes",
-                    Some(&json!(status)),
+                    status,
                 );
             }
         }
@@ -829,16 +860,16 @@ async fn records(
             row.meta.get("response_status").and_then(Value::as_str),
         );
         if row.result.as_deref() == Some("error") {
-            facet_add_status_code(
+            facet_add_status_code_label(
                 &mut facets,
                 "error_status_codes",
-                row.meta.get("provider_status"),
+                row_status_code(row),
             );
         } else if row.result.as_deref() == Some("cancelled") {
-            facet_add_status_code(
+            facet_add_status_code_label(
                 &mut facets,
                 "error_status_codes",
-                Some(&json!("499")),
+                "499".to_string(),
             );
         }
     }
@@ -934,4 +965,26 @@ fn urldecode_component(value: &str) -> String {
         index += 1;
     }
     String::from_utf8(bytes).unwrap_or_else(|_| value.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::error_category_status_code;
+
+    #[test]
+    fn error_categories_always_have_numbered_status_projection() {
+        assert_eq!(
+            error_category_status_code(Some("malformed_json")),
+            Some("400".to_string())
+        );
+        assert_eq!(
+            error_category_status_code(Some("provider_response_sse_event_invalid")),
+            Some("599".to_string())
+        );
+        assert_eq!(
+            error_category_status_code(Some("v3_debug_failure")),
+            Some("598".to_string())
+        );
+        assert_eq!(error_category_status_code(Some("unclassified")), None);
+    }
 }
