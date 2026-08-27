@@ -79,3 +79,4 @@ fn response_receipt_preserves_immutable_execution_identity() {
     assert_eq!(receipt.binding.plan_epoch, 7);
     assert_eq!(request.lease_snapshot().execution_identity, "exec-7");
 }
+// v4-cordis candidate binding marker.
