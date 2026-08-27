@@ -10,9 +10,14 @@
 //!   on success paths.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener as TokioTcpListener, TcpStream as TokioTcpStream};
+use tokio_util::sync::CancellationToken;
 
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -88,6 +93,217 @@ pub trait HttpHandler {
     fn handle(&mut self, request: HttpRequest) -> HttpResponse;
 }
 
+pub trait AsyncHttpHandler: Send + Sync + 'static {
+    fn handle_async<'a>(
+        &'a self,
+        request: HttpRequest,
+        cancellation: CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = HttpResponse> + Send + 'a>>;
+}
+
+/// Tokio listener owner. Each accepted connection is an independent task;
+/// admission and response buffers stay bounded and client write failure
+/// cancels the request-local provider operation.
+pub struct AsyncHttpServer {
+    listener: TokioTcpListener,
+    max_request_bytes: usize,
+}
+
+impl AsyncHttpServer {
+    pub async fn bind(listen_address: &str) -> Result<Self, HttpServerError> {
+        let listener = TokioTcpListener::bind(listen_address)
+            .await
+            .map_err(HttpServerError::Bind)?;
+        Ok(Self {
+            listener,
+            max_request_bytes: MAX_BODY_BYTES,
+        })
+    }
+
+    pub fn local_address(&self) -> Result<String, HttpServerError> {
+        self.listener
+            .local_addr()
+            .map(|address| address.to_string())
+            .map_err(HttpServerError::Bind)
+    }
+
+    pub async fn run_until<H: AsyncHttpHandler>(
+        self,
+        handler: std::sync::Arc<H>,
+        stop: CancellationToken,
+    ) -> Result<(), HttpServerError> {
+        loop {
+            let accepted = tokio::select! { _ = stop.cancelled() => return Ok(()), result = self.listener.accept() => result };
+            let (stream, _) = accepted.map_err(HttpServerError::Accept)?;
+            let handler = std::sync::Arc::clone(&handler);
+            let connection_stop = stop.child_token();
+            let max_request_bytes = self.max_request_bytes;
+            tokio::spawn(async move {
+                let _ = serve_async_connection(stream, handler, connection_stop, max_request_bytes)
+                    .await;
+            });
+        }
+    }
+}
+
+async fn serve_async_connection<H: AsyncHttpHandler>(
+    mut stream: TokioTcpStream,
+    handler: std::sync::Arc<H>,
+    server_stop: CancellationToken,
+    max_request_bytes: usize,
+) -> Result<(), std::io::Error> {
+    let mut request_bytes = Vec::with_capacity(4096);
+    let header_end = loop {
+        let mut chunk = [0u8; 4096];
+        let count = tokio::select! { _ = server_stop.cancelled() => return Ok(()), result = stream.read(&mut chunk) => result? };
+        if count == 0 {
+            return Ok(());
+        }
+        request_bytes.extend_from_slice(&chunk[..count]);
+        if let Some(position) = request_bytes
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+        {
+            break position;
+        }
+        if request_bytes.len() > MAX_HEADER_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "HTTP headers too large",
+            ));
+        }
+    };
+    let head = std::str::from_utf8(&request_bytes[..header_end]).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "HTTP headers are not UTF-8",
+        )
+    })?;
+    let mut lines = head.lines();
+    let request_line = lines.next().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "HTTP request line missing")
+    })?;
+    let mut parts = request_line.split_whitespace();
+    let method = parts
+        .next()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "HTTP method missing"))?
+        .to_string();
+    let path = parts
+        .next()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "HTTP path missing"))?
+        .to_string();
+    let headers: Vec<(String, String)> = lines
+        .map(|line| {
+            line.split_once(':')
+                .map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_string()))
+                .ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "HTTP header malformed")
+                })
+        })
+        .collect::<Result<_, _>>()?;
+    let content_length = headers
+        .iter()
+        .find(|(name, _)| name == "content-length")
+        .map(|(_, value)| {
+            value.parse::<usize>().map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "content-length invalid")
+            })
+        })
+        .transpose()?
+        .unwrap_or(0);
+    if content_length > max_request_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "HTTP body too large",
+        ));
+    }
+    let body_start = header_end + 4;
+    while request_bytes.len() < body_start + content_length {
+        let mut chunk = [0u8; 8192];
+        let count = stream.read(&mut chunk).await?;
+        if count == 0 {
+            return Ok(());
+        }
+        request_bytes.extend_from_slice(&chunk[..count]);
+    }
+    let request = HttpRequest {
+        method,
+        path,
+        headers,
+        body: request_bytes[body_start..body_start + content_length].to_vec(),
+        request_id: String::new(),
+        server_id: String::new(),
+        port: 0,
+    };
+    let cancellation = server_stop.child_token();
+    let response = handler.handle_async(request, cancellation.clone()).await;
+    let streaming = response.stream.is_some();
+    let head = if streaming {
+        format!(
+            "HTTP/1.1 {} OK\r\ncontent-type: {}\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+            response.status, response.content_type
+        )
+    } else {
+        format!(
+            "HTTP/1.1 {} OK\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            response.status,
+            response.content_type,
+            response.body.len()
+        )
+    };
+    if stream.write_all(head.as_bytes()).await.is_err() {
+        cancellation.cancel();
+        return Ok(());
+    }
+    if let Some(mut response_stream) = response.stream {
+        loop {
+            let result = tokio::task::spawn_blocking(move || {
+                let mut response_stream = response_stream;
+                let mut chunk = Vec::new();
+                let result = response_stream.next_chunk(&mut chunk);
+                (response_stream, result, chunk)
+            })
+            .await;
+            let (next_stream, result, chunk) = match result {
+                Ok(value) => value,
+                Err(_) => {
+                    cancellation.cancel();
+                    return Ok(());
+                }
+            };
+            response_stream = next_stream;
+            let has_chunk = match result {
+                Ok(value) => value,
+                Err(_) => {
+                    cancellation.cancel();
+                    return Ok(());
+                }
+            };
+            if !has_chunk {
+                if stream.write_all(b"0\r\n\r\n").await.is_err() {
+                    cancellation.cancel();
+                }
+                break;
+            }
+            if chunk.is_empty() {
+                cancellation.cancel();
+                break;
+            }
+            let prefix = format!("{:X}\r\n", chunk.len());
+            if stream.write_all(prefix.as_bytes()).await.is_err()
+                || stream.write_all(&chunk).await.is_err()
+                || stream.write_all(b"\r\n").await.is_err()
+            {
+                cancellation.cancel();
+                break;
+            }
+        }
+    } else if stream.write_all(&response.body).await.is_err() {
+        cancellation.cancel();
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 pub enum HttpServerError {
     Bind(io::Error),
@@ -116,7 +332,9 @@ pub struct V4HttpServer {
 impl V4HttpServer {
     pub fn bind(listen_address: &str) -> Result<Self, HttpServerError> {
         let listener = TcpListener::bind(listen_address).map_err(HttpServerError::Bind)?;
-        listener.set_nonblocking(true).map_err(HttpServerError::Bind)?;
+        listener
+            .set_nonblocking(true)
+            .map_err(HttpServerError::Bind)?;
         let local = listener.local_addr().map_err(HttpServerError::Bind)?;
         Ok(Self {
             listener,
