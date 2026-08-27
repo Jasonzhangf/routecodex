@@ -4,7 +4,7 @@
   "module_id":"routecodex-v4-base-node",
   "fix_candidate_id":"v4-cordis-base-node-candidate",
   "candidate_commit":"0ef7b916731963922f57e97aee176600c2282545",
-  "candidate_tree_hash":"b7d4a12cc7d7b7698c355dd4681763f714a70e41",
+  "candidate_tree_hash":"74e830c48da6afc37e71038929400cac354b9853",
   "artifact_hash":"sha256:a988314c65bc74f6a7e6e38ad6c045ac91c2d516f3ec01c65f5f029fde6c2a4d",
   "whitebox_producer":{"adapter":"cargo","identity":"routecodex-v4-base-node-l0"},
   "whitebox_evidence_ids":["v4-cordis-base-node-prereview-positive","v4-cordis-base-node-prereview-negative"],

@@ -20,7 +20,7 @@
   "reviewed_commit": "8f906514a9a454add8dabc129b24d0852d43a724",
   "reviewed_diff_hash": "sha256:46d4550e501b2a6355ce40a93022216c8308079c8d030905bba49e4c0e64cf65",
   "reviewed_scope_hash": "sha256:7d1e6dda7043dedd559eb5c13df6ae94d7c49165b54e4602ecbd29ad5c6c6de9",
-  "reviewed_tree_hash": "b7d4a12cc7d7b7698c355dd4681763f714a70e41",
+  "reviewed_tree_hash": "74e830c48da6afc37e71038929400cac354b9853",
   "reviewer": {
     "adapter": "master-architecture-review",
     "identity": "v4-cordis-master"
