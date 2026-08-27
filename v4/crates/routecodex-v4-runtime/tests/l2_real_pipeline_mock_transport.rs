@@ -151,7 +151,7 @@ fn positive_responses_direct_operator_accepted() {
 }
 
 #[test]
-fn positive_responses_relay_operator_accepted() {
+fn red_responses_relay_operator_rejected() {
     let runtime = load_runtime();
     let mut counter = MockTransportIdentityCounter::new();
     let fixture = responses_fixture();
@@ -168,12 +168,8 @@ fn positive_responses_relay_operator_accepted() {
         "responses",
         "relay",
     );
-    let report = outcome.expect("responses + relay owner must use local materialization");
-    assert!(report.error.is_none(), "no fault expected: {:?}", report.error);
-    assert!(report.relay_operator_accepted, "responses+relay selects relay operator");
-    assert_eq!(report.fixture_path, "/v1/responses");
-    assert!(report.continuation_committed, "responses/relay commits local continuation");
-    assert_eq!(report.continuation_owner, "relay");
+    let error = outcome.expect_err("responses + relay owner must fail fast");
+    assert!(error.to_string().contains("not accepted"));
 }
 
 #[test]

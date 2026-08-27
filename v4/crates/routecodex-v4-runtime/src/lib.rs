@@ -362,12 +362,13 @@ pub enum RelayOperator {
 /// responses + direct owner selects Direct; an explicit relay owner selects
 /// Relay for supported entries, including V4-local Responses materialization.
 /// Unsupported pairs fail fast: there is no fallback and no provider-specific
-/// selection.
+/// selection. Responses relay/local continuation is intentionally unsupported;
+/// only direct provider-owned Responses continuation is accepted.
 pub fn select_relay_operator(facts: &ContinuationFacts) -> Result<RelayOperator, RuntimeFault> {
     if facts.entry_protocol == "responses" && facts.continuation_owner == "direct" {
         Ok(RelayOperator::Direct)
     } else if facts.continuation_owner == "relay"
-        && matches!(facts.entry_protocol.as_str(), "responses" | "chat" | "messages" | "anthropic" | "gemini")
+        && matches!(facts.entry_protocol.as_str(), "chat" | "messages" | "anthropic" | "gemini")
     {
         Ok(RelayOperator::Relay)
     } else {
@@ -471,127 +472,6 @@ pub struct ScopeRecord {
     pub operation: String,
     pub request_id: String,
     pub sequence: u64,
-}
-
-/// V4-owned local continuation context. This store is deliberately separate
-/// from the scope binding: the scope binding carries only typed lifecycle and
-/// isolation facts, while this record carries the immutable ordered data
-/// context needed by an explicitly selected relay transport.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LocalContinuationRecord {
-    pub key: ContinuationKey,
-    pub response_id: String,
-    pub ordered_context: String,
-    pub released: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LocalContinuationError {
-    EmptyResponseId,
-    EmptyContext,
-    AlreadyBound,
-    NotBound,
-    ResponseIdMismatch,
-    Released,
-}
-
-impl fmt::Display for LocalContinuationError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match self {
-            Self::EmptyResponseId => "local continuation response id is empty",
-            Self::EmptyContext => "local continuation ordered context is empty",
-            Self::AlreadyBound => "local continuation key already bound",
-            Self::NotBound => "local continuation key not bound",
-            Self::ResponseIdMismatch => "local continuation response id mismatch",
-            Self::Released => "local continuation binding already released",
-        };
-        write!(formatter, "{message}")
-    }
-}
-
-impl std::error::Error for LocalContinuationError {}
-
-#[derive(Debug, Default)]
-pub struct LocalContinuationStore {
-    records: HashMap<ContinuationKey, LocalContinuationRecord>,
-}
-
-impl LocalContinuationStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn commit(
-        &mut self,
-        key: ContinuationKey,
-        response_id: &str,
-        ordered_context: &str,
-    ) -> Result<(), LocalContinuationError> {
-        if response_id.trim().is_empty() {
-            return Err(LocalContinuationError::EmptyResponseId);
-        }
-        if ordered_context.trim().is_empty() {
-            return Err(LocalContinuationError::EmptyContext);
-        }
-        if self.records.get(&key).is_some_and(|record| !record.released) {
-            return Err(LocalContinuationError::AlreadyBound);
-        }
-        self.records.insert(
-            key.clone(),
-            LocalContinuationRecord {
-                key,
-                response_id: response_id.to_string(),
-                ordered_context: ordered_context.to_string(),
-                released: false,
-            },
-        );
-        Ok(())
-    }
-
-    pub fn load(
-        &self,
-        key: &ContinuationKey,
-        response_id: &str,
-    ) -> Result<&LocalContinuationRecord, LocalContinuationError> {
-        let record = self
-            .records
-            .get(key)
-            .ok_or(LocalContinuationError::NotBound)?;
-        if record.released {
-            return Err(LocalContinuationError::Released);
-        }
-        if record.response_id != response_id {
-            return Err(LocalContinuationError::ResponseIdMismatch);
-        }
-        Ok(record)
-    }
-
-    pub fn rotate(
-        &mut self,
-        key: ContinuationKey,
-        response_id: &str,
-        ordered_context: &str,
-    ) -> Result<(), LocalContinuationError> {
-        if self.records.get(&key).is_some_and(|record| !record.released) {
-            self.records
-                .get_mut(&key)
-                .expect("record exists")
-                .released = true;
-        }
-        self.commit(key, response_id, ordered_context)
-    }
-
-    pub fn release(&mut self, key: &ContinuationKey) -> Result<(), LocalContinuationError> {
-        let record = self
-            .records
-            .get_mut(key)
-            .ok_or(LocalContinuationError::NotBound)?;
-        if record.released {
-            return Err(LocalContinuationError::Released);
-        }
-        record.released = true;
-        Ok(())
-    }
 }
 
 /// Scope session registry: bind (save at resp chat process), restore (three-key
@@ -950,7 +830,6 @@ pub struct DataView {
 pub struct ControlView {
     pub continuation_scope: Option<String>,
     pub continuation_owner: Option<String>,
-    pub continuation_seed: Option<String>,
     pub execution_mode: Option<String>,
     pub relay_operator_selected: bool,
     pub governance_applied: bool,
@@ -1028,7 +907,6 @@ impl ExecutionContext {
             control: ControlView {
                 continuation_scope: None,
                 continuation_owner: None,
-                continuation_seed: None,
                 execution_mode: None,
                 relay_operator_selected: false,
                 governance_applied: false,
@@ -1090,7 +968,6 @@ pub fn assert_no_control_leak(ctx: &ExecutionContext) -> Result<(), RuntimeFault
 pub struct RuntimeRegistries<'a> {
     pub scope: &'a mut ScopeRegistry,
     pub payload_cycle: &'a mut PayloadCycleRegistry,
-    pub local_continuation: &'a mut LocalContinuationStore,
 }
 
 trait RuntimeOperator: Send + Sync {
@@ -1647,45 +1524,6 @@ impl RuntimeOperator for ContinuationCommit {
             .as_deref()
             .map(sha256_control_digest)
             .ok_or_else(|| RuntimeFault::new("continuation_commit", "response payload missing"))?;
-        if protocol == "responses" && owner == "relay" {
-            let seed = ctx
-                .control
-                .continuation_seed
-                .as_deref()
-                .ok_or_else(|| RuntimeFault::new("continuation_commit", "request input context is missing"))?;
-            let seed: Value = serde_json::from_str(seed)
-                .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))?;
-            let mut context = match seed {
-                Value::Array(items) => items,
-                Value::String(text) => vec![Value::String(text)],
-                Value::Object(object) => vec![Value::Object(object)],
-                _ => {
-                    return Err(RuntimeFault::new(
-                        "continuation_commit",
-                        "request input must be a string, object, or array",
-                    ))
-                }
-            };
-            let response: Value = serde_json::from_str(&ctx.data.parsed_response.clone().unwrap())
-                .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))?;
-            let response = response.get("response").unwrap_or(&response);
-            let response_id = response
-                .get("id")
-                .and_then(Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| RuntimeFault::new("continuation_commit", "response id is missing"))?;
-            let output = response
-                .get("output")
-                .and_then(Value::as_array)
-                .ok_or_else(|| RuntimeFault::new("continuation_commit", "response output is missing"))?;
-            context.extend(output.iter().cloned());
-            let ordered_context = serde_json::to_string(&Value::Array(context))
-                .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))?;
-            registries
-                .local_continuation
-                .rotate(key.clone(), response_id, &ordered_context)
-                .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))?;
-        }
         let control_key = format!("continuation.commit:{}", ctx.request_id());
         ctx.control
             .metadata
@@ -2162,7 +2000,6 @@ struct RuntimeExecutionState {
     ctx: ExecutionContext,
     scopes: ScopeRegistry,
     payload_cycles: PayloadCycleRegistry,
-    local_continuations: LocalContinuationStore,
 }
 
 /// Skeleton runtime: loads the hash-locked immutable plan and delegates every
@@ -2175,7 +2012,6 @@ pub struct SkeletonRuntime {
     active_requests: RefCell<HashSet<String>>,
     scopes: RefCell<ScopeRegistry>,
     payload_cycles: RefCell<PayloadCycleRegistry>,
-    local_continuations: RefCell<LocalContinuationStore>,
 }
 
 impl SkeletonRuntime {
@@ -2249,32 +2085,7 @@ impl SkeletonRuntime {
             active_requests: RefCell::new(HashSet::new()),
             scopes: RefCell::new(ScopeRegistry::new()),
             payload_cycles: RefCell::new(PayloadCycleRegistry::new()),
-            local_continuations: RefCell::new(LocalContinuationStore::new()),
         })
-    }
-
-    pub fn load_local_continuation(
-        &self,
-        key: &ContinuationKey,
-        response_id: &str,
-    ) -> Result<LocalContinuationRecord, RuntimeFault> {
-        self.local_continuations
-            .borrow()
-            .load(key, response_id)
-            .cloned()
-            .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))
-    }
-
-    pub fn commit_local_continuation(
-        &self,
-        key: ContinuationKey,
-        response_id: &str,
-        ordered_context: &str,
-    ) -> Result<(), RuntimeFault> {
-        self.local_continuations
-            .borrow_mut()
-            .commit(key, response_id, ordered_context)
-            .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))
     }
 
     pub fn plan(&self) -> &SkeletonPlan {
@@ -2390,7 +2201,7 @@ impl SkeletonRuntime {
         provider_raw: &str,
         request_id: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
-        self.execute_provider_response_scoped_with_seed(
+        self.execute_provider_response_scoped(
             provider_raw,
             request_id,
             0,
@@ -2398,7 +2209,6 @@ impl SkeletonRuntime {
             "",
             "responses",
             "none",
-            None,
         )
     }
 
@@ -2414,29 +2224,6 @@ impl SkeletonRuntime {
         entry_protocol: &str,
         continuation_owner: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
-        self.execute_provider_response_scoped_with_seed(
-            provider_raw,
-            request_id,
-            port,
-            session_scope,
-            conversation_scope,
-            entry_protocol,
-            continuation_owner,
-            None,
-        )
-    }
-
-    pub fn execute_provider_response_scoped_with_seed(
-        &self,
-        provider_raw: &str,
-        request_id: &str,
-        port: u16,
-        session_scope: &str,
-        conversation_scope: &str,
-        entry_protocol: &str,
-        continuation_owner: &str,
-        local_context_seed: Option<String>,
-    ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
         let result = self.execute_path(
             "response",
@@ -2448,7 +2235,6 @@ impl SkeletonRuntime {
                 ctx.data.provider_raw = Some(provider_raw.to_string());
                 ctx.information.protocol = Some(entry_protocol.to_string());
                 ctx.control.continuation_owner = Some(continuation_owner.to_string());
-                ctx.control.continuation_seed = local_context_seed;
                 ctx.control.execution_mode = Some(if continuation_owner == "relay" {
                     "relay".to_string()
                 } else {
@@ -2538,7 +2324,6 @@ impl SkeletonRuntime {
             ctx,
             scopes: std::mem::take(&mut *self.scopes.borrow_mut()),
             payload_cycles: std::mem::take(&mut *self.payload_cycles.borrow_mut()),
-            local_continuations: std::mem::take(&mut *self.local_continuations.borrow_mut()),
         }));
         let nodes = specs
             .iter()
@@ -2561,12 +2346,10 @@ impl SkeletonRuntime {
                             ctx,
                             scopes,
                             payload_cycles,
-                            local_continuations,
                         } = &mut *state;
                         let mut registries = RuntimeRegistries {
                             scope: scopes,
                             payload_cycle: payload_cycles,
-                            local_continuation: local_continuations,
                         };
                         plugins
                             .iter()
@@ -2618,7 +2401,6 @@ impl SkeletonRuntime {
             .map_err(|_| RuntimeFault::new("execution_state_lock", "execution state lock poisoned"))?;
         *self.scopes.borrow_mut() = state.scopes;
         *self.payload_cycles.borrow_mut() = state.payload_cycles;
-        *self.local_continuations.borrow_mut() = state.local_continuations;
         if let NodeOutcome::Failure { error } = outcome {
             let mut fault = RuntimeFault::new(
                 error.get("code").and_then(Value::as_str).unwrap_or("execution_failure"),
@@ -2957,9 +2739,7 @@ pub fn execute_mock_transport_slice(
     // error projection below uses the exact scope the request chain bound
     // for this same request id.
     let request_scope = request_report.scope.clone();
-    let continuation_seed = (entry_protocol == "responses" && continuation_owner == "relay")
-        .then(|| fixture.body.strip_prefix("responses:").unwrap_or("").to_string());
-    let response_result = runtime.execute_provider_response_scoped_with_seed(
+    let response_result = runtime.execute_provider_response_scoped(
         mock_provider_frame,
         &identity.request_id,
         port,
@@ -2967,7 +2747,6 @@ pub fn execute_mock_transport_slice(
         conversation_scope,
         entry_protocol,
         continuation_owner,
-        continuation_seed,
     );
     let mut trace = request_report.trace.clone();
     let response_report = match response_result {
