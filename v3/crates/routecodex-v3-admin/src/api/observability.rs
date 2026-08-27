@@ -804,13 +804,7 @@ async fn records(
             }
         }
         if row.result.as_deref() == Some("failed-attempt") {
-            if let Some(status) = attempt_status_code(row) {
-                facet_add_status_code_label(
-                    &mut facets,
-                    "error_status_codes",
-                    status,
-                );
-            }
+            facet_add_status_code_label(&mut facets, "error_status_codes", row_status_code(row));
         }
         match row.result.as_deref() {
             Some("success") => {
