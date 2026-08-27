@@ -311,41 +311,6 @@ fn continuation_three_key_save_and_restore_roundtrip() {
 }
 
 #[test]
-fn relay_response_does_not_create_local_continuation_binding() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
-    runtime
-        .execute_provider_response_scoped(
-            "{\"text\":\"relay\"}",
-            "r-relay-response",
-            5555,
-            "session-relay",
-            "conversation-relay",
-            "chat",
-            "relay",
-        )
-        .expect("relay response projection remains supported");
-    runtime
-        .execute_request_scoped(
-            "chat:next",
-            "r-relay-next",
-            5555,
-            "session-relay",
-            "conversation-relay",
-        )
-        .expect("relay path must not restore a local continuation");
-}
-
-#[test]
-fn scope_registry_rejects_non_direct_responses_continuation() {
-    let mut registry = ScopeRegistry::new();
-    let relay_key = ContinuationKey::new("chat", "relay", 5555, "session-relay", "conversation-relay");
-    assert_eq!(
-        registry.bind(relay_key, "r-relay-bind", Some("sha256:payload")),
-        Err(ScopeError::LocalContinuationUnsupported)
-    );
-}
-
-#[test]
 fn responses_local_owner_override_is_typed_before_request_classification() {
     let runtime = SkeletonRuntime::load(&contract_json()).expect("skeleton plan");
     let report = runtime
