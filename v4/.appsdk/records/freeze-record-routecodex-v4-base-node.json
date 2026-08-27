@@ -1,8 +1,8 @@
 {
   "active_version": "active-v3",
-  "artifact_record_id": "v4-cordis-base-node-candidate",
+  "artifact_record_id": "v4-cordis-base-node-current-candidate",
   "clean_scope": {
-    "base_commit": "0ef7b916731963922f57e97aee176600c2282545",
+    "base_commit": "8f906514a9a454add8dabc129b24d0852d43a724",
     "changed_paths": [
       "v4/.appsdk/records/**"
     ],
@@ -29,10 +29,10 @@
   "previous_active_immutable": true,
   "previous_active_version": "active-v2",
   "promotion_id": "v4-cordis-base-node-promotion",
-  "promotion_record_hash": "sha256:f9207ca90627e68a786df2f41ace7b2db8ef6d1c3a7dcbacc25dd3fe7f789217",
+  "promotion_record_hash": "sha256:4d884576ee73d3e3fa07f44b0e98d258deca1f41ea19a45a927a1266c67ae546",
   "public_api_hash": "sha256:4fde764e2ba6dcd121e980143ce7d9de1eb6518cd9aee52124c668bc76e3e7ce",
-  "regression_report_hash": "sha256:ec8888231ec24fbeed9e9cd3b3d028689e5d3e9c57c24f0668aca36a29679552",
+  "regression_report_hash": "sha256:d30bf19f1fb77d805529c684e7e716639e71bbb62e9f5cc62493a2fb1faf501f",
   "regression_report_id": "v4-cordis-base-node-regression",
   "review_id": "v4-cordis-base-node-review",
-  "source_commit_or_tag": "0ef7b916731963922f57e97aee176600c2282545"
+  "source_commit_or_tag": "dad0742a457276d1ed8e9da2fe1f3c35b0bc4889"
 }
