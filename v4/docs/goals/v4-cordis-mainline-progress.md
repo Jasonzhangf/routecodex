@@ -71,3 +71,10 @@ M00 -> M01 -> M02 --┐
 | M08-T01（原会话复用） | provider/server async transport、chunked response、cancellation/deadline、合同/边界/定向 red/green/evidence 已完成；等待 M05 execution owner 明确交接后再接 runtime-bin | 独立 slice ready；整体状态 `BLOCKED`，当前无合法并发实现面，不得提前合并或宣称完成 |
 | D0-T01（既有 owner） | 继续其 differential/build-guard gate 收口；当前等待 stale owner handoff | claim 仍占用 gate projection；原 worker 会话不可见，禁止重复派发、抢改 gate 文件或自动接管 |
 | M00-T10 / M11-T01 | 已合入重构主树后完成主树复验、release claim、worktree/branch cleanup | 已完成并清理 |
+
+## 主树治理修复记录（2026-08-26）
+
+- 在 `codex/v4-cordis-refactor-main` 内修复 `.appsdk/project.json` 的治理模块边界：移除不存在的 `playground/**` owned path。该路径位于主树外，导致官方 `appsdk compile .` 在进入模块编译前错误退出 `MODULE_PATH_MISSING`。
+- 修复后官方 `appsdk compile .` 已越过路径门禁并继续到真实依赖检查，准确暴露 `MODULE_DEPENDENCY_ARTIFACT_MISSING:routecodex-v4-base-node`；`appsdk verify --admission .` 通过，build-link `gen-index` / `verify-index` 通过。
+- 仍未通过的唯一真实阻塞是 frozen BaseNode 缺失 canonical `generated/modules/routecodex-v4-base-node/module.compiled.json`。AppSDK 正式语义只允许 `compile_module → promote_module → freeze_module` 产生该文件；当前模块已 frozen，不能复制 Protected/其他 tree 产物、手写生成物或用 allowlist/fallback 绕过。
+- B02 已被唤醒继续核对正式 owner-flow；在其返回前，M05/B01 的隔离 worktree 仍不得消费主树 ignored 产物。下一合法动作是由 AppSDK lifecycle owner 处理 frozen BaseNode 的 version/artifact 状态，再重新执行 B02 → B01 → M05 的验证链。

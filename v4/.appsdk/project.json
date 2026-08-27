@@ -107,8 +107,7 @@
         "contracts/**",
         "docs/**",
         "scripts/**",
-        ".gitignore",
-        "playground/**"
+        ".gitignore"
       ],
       "regression": {
         "allow_skipped": false,
