@@ -69,6 +69,8 @@ M00 -> M01 -> M02 --┐
 
 > 收口：M00 初始 architecture-freeze worktree 已核对其两个未跟踪文档均为主树已有的旧版本；删除旧副本后 worktree clean，分支已删除。主树现有审计 checklist/progress 版本保留。
 
+> M08-T01 provider/server 独立 slice 已提交 `0f9d49d72`，7 个声明路径、provider 5/5、server 2/2、locked check、legacy transport scan、diff-check 均通过；merge queue `20260826T110000Z-M08-T01-provider-server-slice.json` 等 checker。整体 M08 仍等待 M05-owned runtime-bin async stream/cancellation、M00-T07 live evidence、full gates/live/AGY，不提前合入或宣称 milestone 完成。
+
 | worker | 已派发动作 | 当前结论 |
 |---|---|---|
 | M05-T01（原会话复用） | 已恢复自身 `runtime → plugin-contract` 边；A=26 保留，B=3 获父任务授权纳入 claim，C=6 已标明返还对应 owner；等待 B01/B02 输入后重跑 `v4/` Active/admission/build/install/live/AGY | scope 分类已完成；当前仍被真实 Active/build-link 输入阻塞；C 不得进入 M05 candidate，禁止自行清理、伪造 artifact、allowlist、clean、AGY、commit、merge、cleanup |
