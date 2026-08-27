@@ -676,7 +676,9 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         )
         .route(
             "/_routecodex/health/cooldown-pool",
-            get(webui_observability_endpoints::cooldown_pool),
+            get(webui_observability_endpoints::cooldown_pool).post(
+                webui_observability_endpoints::remove_cooldown,
+            ),
         )
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(path_not_found)

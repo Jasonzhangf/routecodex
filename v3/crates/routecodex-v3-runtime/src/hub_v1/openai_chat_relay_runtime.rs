@@ -811,6 +811,12 @@ fn enqueue_sse_client_chunks(
             &mut semantic_hook,
         )
         .map_err(|error| error.to_string())?;
+        // Usage 必须经唯一观测入口写入 stream_observation；最终由
+        // merge_v3_runtime_stream_observation 合并进 observability.usage。
+        state
+            .stream_observation
+            .record_provider_event_json(&semantic.to_normalized_value())
+            .map_err(|error| error.to_string())?;
         let projected_payload = project_v3_openai_chat_sse_chunk_json(&semantic);
         let client_payload = project_sse_event_payload(
             state.request_id.as_str(),
@@ -871,7 +877,7 @@ fn project_responses_sse_as_openai_chat_stream(
     web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
-    _stream_observation: V3RuntimeStreamObservation,
+    stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3RelayProjectedSseStream {
     use futures_util::StreamExt;
@@ -889,6 +895,7 @@ fn project_responses_sse_as_openai_chat_stream(
             VecDeque::<Vec<u8>>::new(),
             false,
             false,
+            stream_observation,
             compatibility_profile,
             web_search_execution_mode,
             web_search_center_state,
@@ -904,6 +911,7 @@ fn project_responses_sse_as_openai_chat_stream(
             mut pending,
             mut done_seen,
             mut finished,
+            stream_observation,
             compatibility_profile,
             web_search_execution_mode,
             web_search_center_state,
@@ -926,6 +934,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                 pending,
                                 done_seen,
                                 finished,
+                                stream_observation,
                                 compatibility_profile,
                                 web_search_execution_mode,
                                 web_search_center_state,
@@ -962,6 +971,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                     pending,
                                     done_seen,
                                     finished,
+                                    stream_observation,
                                     compatibility_profile,
                                     web_search_execution_mode,
                                     web_search_center_state,
@@ -993,6 +1003,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                     pending,
                                     done_seen,
                                     finished,
+                                    stream_observation,
                                     compatibility_profile,
                                     web_search_execution_mode,
                                     web_search_center_state,
@@ -1080,6 +1091,11 @@ fn project_responses_sse_as_openai_chat_stream(
                                 .and_then(Value::as_str)
                                 .unwrap_or_default()
                                 .to_string();
+                            // 统一 usage 观测入口：Responses SSE 事件也必须写入
+                            // stream_observation，避免转译为 Chat SSE 后丢失 usage。
+                            stream_observation
+                                .record_provider_event_json(&event)
+                                .map_err(|error| error.to_string())?;
                             for mut payload in transducer.push_event(event)? {
                                 if tool_thinking_enabled {
                                     crate::hub_v1::collect_v3_responses_sse_tool_name_at_resp03(
@@ -1151,6 +1167,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                         pending,
                                         done_seen,
                                         finished,
+                                        stream_observation,
                                         compatibility_profile,
                                         web_search_execution_mode,
                                         web_search_center_state,
@@ -1174,6 +1191,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                         pending,
                                         done_seen,
                                         finished,
+                                        stream_observation,
                                         compatibility_profile,
                                         web_search_execution_mode,
                                         web_search_center_state,
@@ -1194,6 +1212,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                     pending,
                                     done_seen,
                                     finished,
+                                    stream_observation,
                                     compatibility_profile,
                                     web_search_execution_mode,
                                     web_search_center_state,

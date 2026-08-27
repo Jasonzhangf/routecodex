@@ -1,302 +1,534 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RouteCodex — Routes</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111827'/%3E%3Cpath d='M9 23 23 9M9 9l14 14' stroke='%235b8cff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/styles.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/styles.css">
+  <title>Routes — RouteCodex</title>
 </head>
 <body>
 <header>
-  <div class="brand">Route<span class="accent">Codex</span></div>
-  <nav aria-label="Primary">
-    <a href="/">Dashboard</a>
-    <a href="/routes.html" class="active">Routes</a>
-    <a href="/providers.html">Providers</a>
-    <a href="/requests.html">Requests</a>
-  </nav>
+  <div class="brand">RouteCodex <span class="accent">V3</span></div>
+  <nav id="nav"></nav>
   <div class="spacer"></div>
-  <button class="btn" id="validate-btn" type="button">Validate</button>
-  <button class="btn primary" id="save-btn" type="button">Save</button>
-  <button class="btn primary" id="reload-btn" type="button">Reload</button>
+  <button class="btn" id="apply-btn">Apply</button>
+  <button class="btn primary" id="apply-save-btn">Apply &amp; save</button>
+  <button class="btn primary" id="save-btn">Save</button>
+  <button class="btn" id="export-btn">Export</button>
+  <button class="btn" id="discard-btn">Discard</button>
+  <button class="btn" id="reload-btn">Reload</button>
 </header>
 <main>
-  <h1>Routes</h1>
-  <div class="sub">Port → Route Pool → Route Tier → Provider Member</div>
-  <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
-  <div class="panel">
-    <div class="tree" id="route-tree"><div class="loading">loading…</div></div>
+<div class="status-bar" id="status-bar" style="display:none"></div>
+<div class="toolbar" id="toolbar">
+  <input id="search-filter" placeholder="Filter pools, providers, models…" style="min-height:44px;flex:1;"/>
+  <button class="btn primary" id="validate-btn">Validate</button>
+  <button class="btn primary" id="save-btn">Save</button>
+</div>
+<div id="group-tabs"></div>
+<div id="route-tree" class="tree"></div>
+<section class="section cooldown-section" aria-labelledby="cooldown-title">
+  <div class="section-heading">
+    <h2 id="cooldown-title">Cooldown pool</h2>
+    <span class="muted tiny" id="cooldown-updated">—</span>
   </div>
+  <div class="panel table-panel">
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Port</th><th>Provider</th><th>Key</th><th>Model</th>
+            <th>State</th><th>Reason</th><th>Remaining</th><th class="num">Failures</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="cooldown-body"><tr><td colspan="9" class="loading">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</section>
 </main>
-
-<div class="drawer-backdrop" id="drawer-backdrop"></div>
-<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
-  <button class="btn close" id="drawer-close" type="button" aria-label="Close editor">✕</button>
-  <h2 id="drawer-title">Edit</h2>
+<div id="drawer" class="drawer" tabindex="-1">
+  <div style="display:flex;align-items:center;margin-bottom:20px">
+    <h2 id="drawer-title" style="flex:1;margin:0"></h2>
+    <button class="btn" id="drawer-close" aria-label="Close">✕</button>
+  </div>
   <div id="drawer-body"></div>
   <div class="actions">
-    <button class="btn" id="drawer-delete" type="button" style="display:none">Delete</button>
-    <div style="flex:1"></div>
-    <button class="btn" id="drawer-cancel" type="button">Cancel</button>
-    <button class="btn primary" id="drawer-save" type="button">Save</button>
+    <button class="btn danger" id="drawer-delete" style="display:none">Delete</button>
+    <div class="spacer"></div>
+    <button class="btn" id="drawer-cancel">Cancel</button>
+    <button class="btn primary" id="drawer-save">Save</button>
   </div>
 </div>
-
+<div id="drawer-backdrop" class="drawer-backdrop"></div>
+<div id="provider-picker" class="drawer" tabindex="-1">
+  <div style="display:flex;align-items:center;margin-bottom:20px">
+    <h2 style="flex:1;margin:0">Add Member</h2>
+    <button class="btn" id="picker-close" aria-label="Close">✕</button>
+  </div>
+  <div class="field">
+    <label>Filter provider or model</label>
+    <input id="picker-filter" placeholder="e.g. opencode, claude…" autocomplete="off"/>
+  </div>
+  <div id="picker-list" style="max-height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:8px"></div>
+  <div class="actions" style="margin-top:14px">
+    <div class="spacer"></div>
+    <button class="btn" id="picker-cancel">Cancel</button>
+    <button class="btn primary" id="picker-confirm" disabled>Add Member</button>
+  </div>
+</div>
+<div id="picker-backdrop" class="drawer-backdrop"></div>
 <script src="/app.embedded.txt"></script>
 <script>
+
 let groups = [];
+let activeGroup = null;
+let searchQuery = "";
+let pickerTiers = null;
+let pickerCandidates = [];
+let pickerSelected = null;
+let cooldownEntries = [];
+
+function esc(text) {
+  const d = document.createElement("div");
+  d.textContent = text;
+  return d.innerHTML;
+}
+function matches(q, ...parts) {
+  if (!q) return true;
+  const lo = q.toLowerCase();
+  return parts.some(p => p && p.toLowerCase().includes(lo));
+}
+function matchLabel(rule) {
+  if (!rule) return '<span class="muted tiny">no match</span>';
+  const parts = [];
+  if (rule.entry_protocol) parts.push(rule.entry_protocol);
+  if (rule.required_capabilities) parts.push(...rule.required_capabilities);
+  if (rule.models) parts.push(...rule.models.slice(0, 2));
+  if (rule.precedence !== undefined) parts.push(`P${rule.precedence}`);
+  return `<span class="muted tiny">${esc(parts.join(" · "))}</span>`;
+}
+
+function renderGroupTabs() {
+  const el = document.getElementById("group-tabs");
+  const ids = [...new Set(groups.flatMap(g => g.ports.map(p => p.routing_group)))].sort();
+  if (!activeGroup && ids.length) activeGroup = ids[0];
+  el.innerHTML = ids.map(id => {
+    const active = id === activeGroup ? "active" : "";
+    const count = groups.reduce((n, g) => n + g.ports.filter(p => p.routing_group === id).length, 0);
+    return `<button class="tab-btn ${active}" data-group="${esc(id)}">${esc(id)} <span class="tab-count">${count}</span></button>`;
+  }).join("");
+  el.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      activeGroup = btn.dataset.group;
+      renderGroupTabs();
+      render();
+    });
+  });
+}
+
+function render() {
+  const q = searchQuery.toLowerCase();
+  const root = document.getElementById("route-tree");
+  const ports = groups.flatMap(g => g.ports).filter(p => !activeGroup || p.routing_group === activeGroup);
+  root.innerHTML = "";
+
+  for (const port of ports) {
+    const portDiv = document.createElement("div");
+    portDiv.className = "port-block";
+
+    const hdr = document.createElement("div");
+    hdr.className = "port-header";
+    hdr.innerHTML = `<span class="port-badge">:${port.port}</span> <span class="muted">${esc(port.endpoints.join(", "))}</span> ${port.enabled ? "" : '<span class="badge neutral">disabled</span>'}`;
+    portDiv.appendChild(hdr);
+
+    for (const pool of port.pools) {
+      if (q && !matches(q, pool.name)) {
+        const hasMatch = pool.tiers.some(t => t.members.some(m => matches(q, m.provider, m.model)));
+        if (!hasMatch) continue;
+      }
+
+      const poolDiv = document.createElement("div");
+      poolDiv.className = "pool-block";
+
+      const poolHdr = document.createElement("div");
+      poolHdr.className = "pool-header";
+      poolHdr.innerHTML = `
+        <span class="pool-name">${esc(pool.name)}</span>
+        ${matchLabel(pool.match_rule)}
+        <span class="muted tiny">${pool.selection_strategy}</span>
+        <span class="muted tiny">${pool.tiers.length} tier${pool.tiers.length !== 1 ? "s" : ""}</span>`;
+      poolDiv.appendChild(poolHdr);
+
+      const poolBody = document.createElement("div");
+      poolBody.className = "pool-body";
+
+      for (let ti = 0; ti < pool.tiers.length; ti++) {
+        const tier = pool.tiers[ti];
+
+        const tierRow = document.createElement("div");
+        tierRow.className = "tier-row";
+        const canUp = ti > 0;
+        const canDown = ti < pool.tiers.length - 1;
+        tierRow.innerHTML = `
+          <div class="tier-left">
+            <span class="tier-priority">Tier ${tier.priority}</span>
+            <span class="muted tiny">${tier.members.length} member${tier.members.length !== 1 ? "s" : ""}</span>
+          </div>
+          <div class="tier-right">
+            <button class="icon-btn" data-action="add-member" data-g="${esc(port.routing_group)}" data-port="${port.port}" data-pool="${esc(pool.name)}" data-ti="${ti}" title="Add member to this tier">+</button>
+          </div>`;
+        poolBody.appendChild(tierRow);
+
+        for (let mi = 0; mi < tier.members.length; mi++) {
+          const m = tier.members[mi];
+          const mRow = document.createElement("div");
+          mRow.className = "member-row";
+          mRow.innerHTML = `
+            <div class="member-left">
+              <button class="icon-btn" ${canUp ? "" : "disabled"} data-action="member-up" data-g="${esc(port.routing_group)}" data-port="${port.port}" data-pool="${esc(pool.name)}" data-ti="${ti}" data-mi="${mi}" title="Move to higher tier">↑</button>
+              <button class="icon-btn" ${canDown ? "" : "disabled"} data-action="member-down" data-g="${esc(port.routing_group)}" data-port="${port.port}" data-pool="${esc(pool.name)}" data-ti="${ti}" data-mi="${mi}" title="Move to lower tier">↓</button>
+            </div>
+            <div class="member-identity">
+              <span class="provider">${esc(m.provider || m.kind || "—")}</span>
+              <span class="model">${m.model ? "." + esc(m.model) : ""}</span>
+            </div>
+            <div class="member-weight">
+              <label class="weight-label">wt</label>
+              <input type="number" min="0" value="${m.weight ?? ""}" placeholder="—" class="weight-input"
+                data-action="weight-change" data-g="${esc(port.routing_group)}" data-port="${port.port}" data-pool="${esc(pool.name)}" data-ti="${ti}" data-mi="${mi}"/>
+            </div>
+            <div class="member-actions">
+              <button class="icon-btn danger" data-action="member-del" data-g="${esc(port.routing_group)}" data-port="${port.port}" data-pool="${esc(pool.name)}" data-ti="${ti}" data-mi="${mi}" title="Remove">✕</button>
+            </div>`;
+          poolBody.appendChild(mRow);
+        }
+
+        const addRow = document.createElement("div");
+        addRow.className = "add-member-row";
+        addRow.innerHTML = `<button class="add-member-btn" data-action="add-member" data-g="${esc(port.routing_group)}" data-port="${port.port}" data-pool="${esc(pool.name)}" data-ti="${ti}">+ Add member</button>`;
+        poolBody.appendChild(addRow);
+      }
+
+      poolDiv.appendChild(poolBody);
+      portDiv.appendChild(poolDiv);
+    }
+    root.appendChild(portDiv);
+  }
+
+  if (!root.children.length) {
+    root.innerHTML = '<div class="loading">No matching pools</div>';
+  }
+
+  root.onclick = handleTreeClick;
+  root.onchange = handleTreeChange;
+}
+
+function handleTreeClick(e) {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const { action, g, port, pool, ti, mi } = btn.dataset;
+  const portObj = groups.flatMap(x => x.ports).find(p => p.routing_group === g && p.port == port);
+  if (!portObj) return;
+  const poolObj = portObj.pools.find(p => p.name === pool);
+  if (!poolObj) return;
+
+  if (action === "member-up" || action === "member-down") {
+    const sourceIdx = parseInt(ti, 10);
+    const targetIdx = sourceIdx + (action === "member-up" ? -1 : 1);
+    if (targetIdx < 0 || targetIdx >= poolObj.tiers.length) return;
+    const sourceTier = poolObj.tiers[sourceIdx];
+    const targetTier = poolObj.tiers[targetIdx];
+    const [item] = sourceTier.members.splice(parseInt(mi, 10), 1);
+    item.priority = targetTier.priority;
+    targetTier.members.push(item);
+    if (sourceTier.members.length === 0) poolObj.tiers.splice(sourceIdx, 1);
+    render();
+    showStatus("info", "edits staged — Save to commit");
+    return;
+  }
+
+  if (action === "member-del") {
+    const tier = poolObj.tiers[parseInt(ti, 10)];
+    tier.members.splice(parseInt(mi, 10), 1);
+    if (tier.members.length === 0) poolObj.tiers.splice(parseInt(ti, 10), 1);
+    render();
+    showStatus("info", "edits staged — Save to commit");
+    return;
+  }
+
+  if (action === "add-member") {
+    openProviderPicker(g, port, pool, ti);
+  }
+}
+
+function handleTreeChange(e) {
+  if (!e.target.matches(".weight-input")) return;
+  const { g, port, pool, ti, mi } = e.target.dataset;
+  const portObj = groups.flatMap(x => x.ports).find(p => p.routing_group === g && p.port == port);
+  if (!portObj) return;
+  const poolObj = portObj.pools.find(p => p.name === pool);
+  const m = poolObj.tiers[parseInt(ti, 10)]?.members[parseInt(mi, 10)];
+  if (!m) return;
+  m.weight = e.target.value === "" ? null : (parseInt(e.target.value, 10) || null);
+  showStatus("info", "edits staged — Save to commit");
+}
+
+async function openProviderPicker(g, port, pool, ti) {
+  pickerTiers = { g, port, pool, ti: parseInt(ti, 10) };
+  pickerSelected = null;
+  pickerCandidates = [];
+
+  const pickerEl = document.getElementById("provider-picker");
+  const backdrop = document.getElementById("picker-backdrop");
+  const filterInput = document.getElementById("picker-filter");
+  const confirmBtn = document.getElementById("picker-confirm");
+
+  let providers = [];
+  try {
+    providers = await api("/api/providers");
+  } catch (error) {
+    showStatus("err", `load providers failed: ${error.message}`);
+  }
+
+  const details = await Promise.all(providers.map(async p => {
+    try {
+      return await api(`/api/providers/${encodeURIComponent(p.id)}`);
+    } catch (error) {
+      showStatus("err", `load provider ${p.id} failed: ${error.message}`);
+      return null;
+    }
+  }));
+  for (const detail of details) {
+    for (const [modelId] of Object.entries(detail?.config?.provider?.models || {})) {
+      pickerCandidates.push({ provider: detail.id, model: modelId });
+    }
+  }
+  pickerCandidates.sort((a, b) => (a.provider + a.model).localeCompare(b.provider + b.model));
+  pickerSelected = pickerCandidates[0] || null;
+
+  filterInput.value = "";
+  confirmBtn.disabled = !pickerSelected;
+  renderPickerList("");
+  backdrop.classList.add("is-open");
+  pickerEl.classList.remove("is-closing");
+  pickerEl.classList.add("is-open");
+  filterInput.focus();
+
+  confirmBtn.onclick = () => {
+    if (!pickerSelected) return;
+    const { g: rg, port: pn, pool: poolName, ti: tierIdx } = pickerTiers;
+    const portObj = groups.flatMap(x => x.ports).find(p => p.routing_group === rg && p.port == pn);
+    const poolObj = portObj.pools.find(p => p.name === poolName);
+    const tier = poolObj.tiers[tierIdx];
+    tier.members.push({
+      kind: "provider_model",
+      provider: pickerSelected.provider,
+      model: pickerSelected.model,
+      priority: tier.priority,
+      weight: null,
+    });
+    closeProviderPicker();
+    render();
+    showStatus("info", "edits staged — Save to commit");
+  };
+}
+
+function closeProviderPicker() {
+  const pickerEl = document.getElementById("provider-picker");
+  const backdrop = document.getElementById("picker-backdrop");
+  pickerEl.classList.remove("is-open");
+  pickerEl.classList.add("is-closing");
+  backdrop.classList.remove("is-open");
+  setTimeout(() => pickerEl.classList.remove("is-closing"), 180);
+}
+
+function renderPickerList(q) {
+  const listEl = document.getElementById("picker-list");
+  const filtered = pickerCandidates.filter(c => matches(q, c.provider, c.model));
+  if (!filtered.length) {
+    listEl.innerHTML = '<div class="loading">No providers match</div>';
+    return;
+  }
+  listEl.innerHTML = filtered.map(c => {
+    const isSelected = pickerSelected && c.provider === pickerSelected.provider && c.model === pickerSelected.model;
+    return `<div class="picker-item ${isSelected ? "selected" : ""}" data-provider="${esc(c.provider)}" data-model="${esc(c.model)}">
+      <span class="provider">${esc(c.provider)}</span><span class="model">.${esc(c.model)}</span>
+    </div>`;
+  }).join("");
+  listEl.querySelectorAll(".picker-item").forEach(item => {
+    item.addEventListener("click", () => {
+      pickerSelected = { provider: item.dataset.provider, model: item.dataset.model };
+      renderPickerList(document.getElementById("picker-filter").value);
+      document.getElementById("picker-confirm").disabled = false;
+    });
+  });
+}
+
+document.getElementById("picker-filter").addEventListener("input", e => renderPickerList(e.target.value));
+document.getElementById("picker-close").addEventListener("click", closeProviderPicker);
+document.getElementById("picker-cancel").addEventListener("click", closeProviderPicker);
+document.getElementById("picker-backdrop")?.addEventListener("click", closeProviderPicker);
+document.getElementById("apply-btn")?.addEventListener("click", async () => {
+  try {
+    const result = await api("/api/reload", { method: "POST" });
+    showStatus(result.ok ? "ok" : "err", result.detail || (result.ok ? "apply requested" : "apply failed"));
+  } catch (error) {
+    showStatus("err", `apply failed: ${error.message}`);
+  }
+});
+document.getElementById("apply-save-btn")?.addEventListener("click", async () => {
+  const btn = document.getElementById("apply-save-btn");
+  btn.disabled = true;
+  try {
+    const saved = await api("/api/routes", {
+      method: "PUT",
+      body: JSON.stringify({ groups, reason: "webui routes update" }),
+    });
+    groups = saved.groups;
+    const result = await api("/api/reload", { method: "POST" });
+    if (!result.ok) throw new Error(result.detail || "reload failed");
+    showStatus("ok", `saved and applied — revision #${saved.revision_seq}`);
+  } catch (error) {
+    showStatus("err", `apply & save failed: ${error.message}`);
+  } finally {
+    btn.disabled = false;
+  }
+});
+document.getElementById("export-btn")?.addEventListener("click", () => {
+  try {
+    const blob = new Blob([JSON.stringify({ groups }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `routecodex-routes-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    showStatus("ok", "routes exported");
+  } catch (error) {
+    showStatus("err", `export failed: ${error.message}`);
+  }
+});
+document.getElementById("discard-btn")?.addEventListener("click", async () => {
+  try {
+    const data = await api("/api/routes");
+    groups = data.groups;
+    renderGroupTabs();
+    render();
+    showStatus("info", "edits discarded");
+  } catch (error) {
+    showStatus("err", `discard failed: ${error.message}`);
+  }
+});
+document.getElementById("reload-btn")?.addEventListener("click", async () => {
+  try {
+    const result = await api("/api/reload", { method: "POST" });
+    showStatus(result.ok ? "ok" : "err", result.detail || (result.ok ? "reload requested" : "reload failed"));
+  } catch (error) {
+    showStatus("err", `reload failed: ${error.message}`);
+  }
+});
+
+document.getElementById("search-filter").addEventListener("input", e => {
+  searchQuery = e.target.value;
+  render();
+});
 
 async function load() {
   try {
     const data = await api("/api/routes");
     groups = data.groups;
+    renderGroupTabs();
     render();
   } catch (error) {
-    showStatus("err", `load routes failed: ${error.message}`);
+    showStatus("err", `load failed: ${error.message}`);
   }
 }
 
-function render() {
-  const tree = document.getElementById("route-tree");
-  tree.innerHTML = "";
-  if (!groups.length) {
-    tree.appendChild(el("div", "loading", "no route groups configured"));
+function formatRemaining(ms) {
+  if (ms == null) return "—";
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}m ${String(rest).padStart(2, "0")}s`;
+}
+
+function renderCooldownPool(payload) {
+  const body = document.getElementById("cooldown-body");
+  const entries = (payload?.listeners || []).flatMap(listener =>
+    (listener.entries || []).map(entry => ({ ...entry, port: listener.port }))
+  );
+  cooldownEntries = entries;
+  document.getElementById("cooldown-updated").textContent =
+    `updated ${new Date().toLocaleTimeString()}`;
+  if (!entries.length) {
+    body.innerHTML = '<tr><td colspan="9" class="loading">Cooldown pool is empty</td></tr>';
     return;
   }
-  for (const group of groups) {
-    const groupNode = el("div", "tree-node collapsed");
-    const head = el("div", "head");
-    head.appendChild(el("span", "caret", "▾"));
-    head.appendChild(el("span", "tag", group.group_id));
-    head.appendChild(el("span", "meta", `${group.ports.length} port${group.ports.length === 1 ? "" : "s"}`));
-    head.addEventListener("click", () => groupNode.classList.toggle("collapsed"));
-    groupNode.appendChild(head);
-    const children = el("div", "tree-children");
-    for (const port of group.ports) {
-      const portNode = el("div", "tree-node collapsed");
-      const portHead = el("div", "head");
-      portHead.appendChild(el("span", "caret", "▾"));
-      portHead.appendChild(el("span", "tag", `Port ${port.port}`));
-      portHead.appendChild(el("span", "meta", `${port.server_id} · ${port.pools.length} pools`));
-      const actions = el("div", "actions");
-      const addPool = el("button", "btn", "+ Pool");
-      addPool.addEventListener("click", (event) => { event.stopPropagation(); openPoolDrawer(group, port, null); });
-      actions.appendChild(addPool);
-      portHead.appendChild(actions);
-      portHead.addEventListener("click", () => portNode.classList.toggle("collapsed"));
-      portNode.appendChild(portHead);
-      const portChildren = el("div", "tree-children");
-      for (const pool of port.pools) {
-        portChildren.appendChild(renderPool(group, port, pool));
+  body.innerHTML = entries.map((entry, index) => `
+    <tr class="status-red">
+      <td class="mono">${esc(String(entry.port ?? "—"))}</td>
+      <td class="mono">${esc(entry.provider_id || "—")}</td>
+      <td class="mono">${esc(entry.auth_alias || "—")}</td>
+      <td class="mono">${esc(entry.model_id || "—")}</td>
+      <td><span class="status-label">${esc(entry.state || "—")}</span></td>
+      <td class="truncate" title="${esc(entry.reason || "")}">${esc(entry.reason || "—")}</td>
+      <td class="mono">${formatRemaining(entry.remaining_ms)}</td>
+      <td class="num">${entry.failure_count ?? "—"}</td>
+      <td><button class="btn small cooldown-remove" data-index="${index}" title="Remove this cooldown">Remove</button></td>
+    </tr>`).join("");
+  body.querySelectorAll(".cooldown-remove").forEach(button => {
+    button.addEventListener("click", async () => {
+      const entry = cooldownEntries[Number(button.dataset.index)];
+      if (!entry) return;
+      button.disabled = true;
+      try {
+        const result = await api("/api/observability/cooldown-pool", {
+          method: "POST",
+          body: JSON.stringify({
+            port: entry.port,
+            provider_id: entry.provider_id,
+            auth_alias: entry.auth_alias,
+            model_id: entry.model_id,
+            kind: entry.kind,
+          }),
+        });
+        showStatus(result.removed ? "ok" : "info",
+          result.removed ? "cooldown removed" : "cooldown entry already cleared");
+        await loadCooldownPool();
+      } catch (error) {
+        showStatus("err", `remove cooldown failed: ${error.message}`);
+        button.disabled = false;
       }
-      portNode.appendChild(portChildren);
-      children.appendChild(portNode);
-    }
-    groupNode.appendChild(children);
-    tree.appendChild(groupNode);
-  }
-}
-
-function renderPool(group, port, pool) {
-  const node = el("div", "tree-node collapsed");
-  const head = el("div", "head");
-  head.appendChild(el("span", "caret", "▾"));
-  head.appendChild(el("span", "tag", pool.name));
-  head.appendChild(el("span", "meta", `strategy ${pool.selection_strategy} · ${pool.tiers.length} tier${pool.tiers.length === 1 ? "" : "s"}`));
-  const actions = el("div", "actions");
-  const addTier = el("button", "btn", "+ Tier");
-  addTier.addEventListener("click", (event) => { event.stopPropagation(); openTierDrawer(group, port, pool, null); });
-  actions.appendChild(addTier);
-  head.appendChild(actions);
-  head.addEventListener("click", () => node.classList.toggle("collapsed"));
-  head.addEventListener("dblclick", (event) => { event.stopPropagation(); openPoolDrawer(group, port, pool); });
-  node.appendChild(head);
-  const children = el("div", "tree-children");
-  for (const tier of pool.tiers) {
-    const tierNode = el("div", "tree-node collapsed");
-    const tierHead = el("div", "head");
-    tierHead.appendChild(el("span", "caret", "▾"));
-    tierHead.appendChild(el("span", "tag", `Tier ${tier.priority}`));
-    tierHead.appendChild(el("span", "meta", `${tier.members.length} member${tier.members.length === 1 ? "" : "s"}`));
-    const tierActions = el("div", "actions");
-    const addMember = el("button", "btn", "+ Member");
-    addMember.addEventListener("click", (event) => { event.stopPropagation(); openMemberDrawer(group, port, pool, tier, null); });
-    tierActions.appendChild(addMember);
-    tierHead.appendChild(tierActions);
-    tierHead.addEventListener("click", () => tierNode.classList.toggle("collapsed"));
-    tierHead.addEventListener("dblclick", (event) => { event.stopPropagation(); openTierDrawer(group, port, pool, tier); });
-    tierNode.appendChild(tierHead);
-    const memberChildren = el("div", "tree-children");
-    for (const member of tier.members) {
-      const row = el("div", "member-row");
-      row.appendChild(el("span", "provider", member.provider || member.kind));
-      row.appendChild(el("span", "model", member.model || ""));
-      if (member.key) row.appendChild(el("span", "meta", `[${member.key}]`));
-      if (member.weight !== undefined && member.weight !== null) row.appendChild(el("span", "weight", `w=${member.weight}`));
-      const rowActions = el("div", "actions");
-      const editBtn = el("button", "btn", "Edit");
-      editBtn.addEventListener("click", (event) => { event.stopPropagation(); openMemberDrawer(group, port, pool, tier, member); });
-      rowActions.appendChild(editBtn);
-      row.appendChild(rowActions);
-      memberChildren.appendChild(row);
-    }
-    tierNode.appendChild(memberChildren);
-    children.appendChild(tierNode);
-  }
-  node.appendChild(children);
-  return node;
-}
-
-function openPoolDrawer(group, port, pool) {
-  const isNew = !pool;
-  const draft = pool ? { ...pool, tiers: pool.tiers.map((tier) => ({ ...tier, members: tier.members.map((m) => ({ ...m })) })) } : { name: "", selection_strategy: "priority", match_rule: null, tiers: [] };
-  const title = isNew ? "New Pool" : `Pool ${draft.name}`;
-  openDrawer(title, () => {
-    const body = document.getElementById("drawer-body");
-    body.innerHTML = "";
-    body.appendChild(field("name", "Name", draft.name, (value) => { draft.name = value; }));
-    body.appendChild(selectField("selection_strategy", "Strategy", ["priority", "weighted", "round_robin"], draft.selection_strategy, (value) => { draft.selection_strategy = value; }));
-    setDrawerSave(async () => {
-      if (!draft.name.trim()) { showStatus("err", "pool name is required"); return; }
-      if (isNew) {
-        port.pools.push(draft);
-      } else {
-        const index = port.pools.findIndex((candidate) => candidate.name === pool.name);
-        if (index >= 0) port.pools[index] = draft;
-      }
-      render();
-      closeDrawer();
-      showStatus("info", "edits staged — Save to commit");
-    });
-    setDrawerDelete(isNew ? null : () => {
-      port.pools = port.pools.filter((candidate) => candidate.name !== pool.name);
-      render();
-      closeDrawer();
-      showStatus("info", "edits staged — Save to commit");
     });
   });
 }
 
-function openTierDrawer(group, port, pool, tier) {
-  const isNew = !tier;
-  const draft = tier ? { ...tier, members: tier.members.map((m) => ({ ...m })) } : { priority: 1, members: [] };
-  const title = isNew ? "New Tier" : `Tier ${draft.priority}`;
-  openDrawer(title, () => {
-    const body = document.getElementById("drawer-body");
-    body.innerHTML = "";
-    body.appendChild(field("priority", "Priority", String(draft.priority), (value) => { draft.priority = parseInt(value, 10) || 0; }));
-    setDrawerSave(async () => {
-      if (isNew) {
-        pool.tiers.push(draft);
-        pool.tiers.sort((a, b) => a.priority - b.priority);
-      } else {
-        const index = pool.tiers.findIndex((candidate) => candidate.priority === tier.priority);
-        if (index >= 0) pool.tiers[index] = draft;
-        pool.tiers.sort((a, b) => a.priority - b.priority);
-      }
-      render();
-      closeDrawer();
-      showStatus("info", "edits staged — Save to commit");
-    });
-    setDrawerDelete(isNew ? null : () => {
-      pool.tiers = pool.tiers.filter((candidate) => candidate.priority !== tier.priority);
-      render();
-      closeDrawer();
-      showStatus("info", "edits staged — Save to commit");
-    });
-  });
-}
-
-function openMemberDrawer(group, port, pool, tier, member) {
-  const isNew = !member;
-  const draft = member ? { ...member } : { kind: "provider_model", provider: "", model: "", key: "", priority: tier.priority, weight: null };
-  const title = isNew ? "New Member" : `Member ${member.provider || member.kind}`;
-  openDrawer(title, () => {
-    const body = document.getElementById("drawer-body");
-    body.innerHTML = "";
-    body.appendChild(field("provider", "Provider", draft.provider || "", (value) => { draft.provider = value; }));
-    body.appendChild(field("model", "Model", draft.model || "", (value) => { draft.model = value; }));
-    body.appendChild(field("key", "Key alias", draft.key || "", (value) => { draft.key = value; }));
-    body.appendChild(field("priority", "Priority (tier)", String(draft.priority), (value) => { draft.priority = parseInt(value, 10) || 0; }));
-    body.appendChild(field("weight", "Weight (weighted strategy)", draft.weight === null || draft.weight === undefined ? "" : String(draft.weight), (value) => { draft.weight = value === "" ? null : (parseInt(value, 10) || 0); }));
-    setDrawerSave(async () => {
-      if (!draft.provider.trim()) { showStatus("err", "provider is required"); return; }
-      const memberData = {
-        kind: draft.kind || "provider_model",
-        provider: draft.provider,
-        model: draft.model || undefined,
-        key: draft.key || undefined,
-        priority: draft.priority,
-        weight: draft.weight,
-      };
-      if (isNew) {
-        tier.members.push(memberData);
-      } else {
-        const index = tier.members.findIndex((candidate) => candidate === member);
-        if (index >= 0) tier.members[index] = memberData;
-      }
-      render();
-      closeDrawer();
-      showStatus("info", "edits staged — Save to commit");
-    });
-    setDrawerDelete(isNew ? null : () => {
-      tier.members = tier.members.filter((candidate) => candidate !== member);
-      render();
-      closeDrawer();
-      showStatus("info", "edits staged — Save to commit");
-    });
-  });
-}
-
-function field(id, label, value, onChange) {
-  const wrapper = el("div", "field");
-  const labelNode = el("label", null, label);
-  labelNode.htmlFor = id;
-  wrapper.appendChild(labelNode);
-  const input = el("input");
-  input.id = id;
-  input.value = value;
-  input.addEventListener("input", (event) => onChange(event.target.value));
-  wrapper.appendChild(input);
-  return wrapper;
-}
-
-function selectField(id, label, options, value, onChange) {
-  const wrapper = el("div", "field");
-  const labelNode = el("label", null, label);
-  labelNode.htmlFor = id;
-  wrapper.appendChild(labelNode);
-  const select = el("select");
-  select.id = id;
-  for (const option of options) {
-    const optionNode = el("option", null, option);
-    if (option === value) optionNode.selected = true;
-    select.appendChild(optionNode);
+async function loadCooldownPool() {
+  try {
+    renderCooldownPool(await api("/api/observability/cooldown-pool"));
+  } catch (error) {
+    document.getElementById("cooldown-body").innerHTML =
+      `<tr><td colspan="9" class="loading">Cooldown pool unavailable: ${esc(error.message)}</td></tr>`;
   }
-  select.addEventListener("change", (event) => onChange(event.target.value));
-  wrapper.appendChild(select);
-  return wrapper;
 }
 
 let drawerSave = null;
 let drawerDelete = null;
-
 function openDrawer(title, build) {
   document.getElementById("drawer-title").textContent = title;
   build();
   document.getElementById("drawer-delete").style.display = drawerDelete ? "inline-block" : "none";
   openPanel();
 }
-
 function closeDrawer() {
   drawerSave = null;
   drawerDelete = null;
   closePanel();
 }
-
-function setDrawerSave(handler) { drawerSave = handler; }
-function setDrawerDelete(handler) { drawerDelete = handler; }
+function setDrawerSave(h) { drawerSave = h; }
+function setDrawerDelete(h) { drawerDelete = h; }
 
 document.getElementById("drawer-cancel").addEventListener("click", closeDrawer);
 document.getElementById("drawer-save").addEventListener("click", () => { if (drawerSave) drawerSave(); });
@@ -304,7 +536,10 @@ document.getElementById("drawer-delete").addEventListener("click", () => { if (d
 
 document.getElementById("validate-btn").addEventListener("click", async () => {
   try {
-    const result = await api("/api/routes/validate", { method: "POST", body: JSON.stringify({ groups, reason: "validate" }) });
+    const result = await api("/api/routes/validate", {
+      method: "POST",
+      body: JSON.stringify({ groups, reason: "validate" }),
+    });
     showStatus(result.ok ? "ok" : "err", result.ok ? "configuration valid" : `invalid: ${result.error}`);
   } catch (error) {
     showStatus("err", `validate failed: ${error.message}`);
@@ -312,21 +547,37 @@ document.getElementById("validate-btn").addEventListener("click", async () => {
 });
 
 document.getElementById("save-btn").addEventListener("click", async () => {
-  const button = document.getElementById("save-btn");
-  button.disabled = true;
+  const btn = document.getElementById("save-btn");
+  btn.disabled = true;
   try {
-    const result = await api("/api/routes", { method: "PUT", body: JSON.stringify({ groups, reason: "webui routes update" }) });
+    const result = await api("/api/routes", {
+      method: "PUT",
+      body: JSON.stringify({ groups, reason: "webui routes update" }),
+    });
     groups = result.groups;
+    renderGroupTabs();
     render();
     showStatus("ok", `saved — revision #${result.revision_seq}${result.backup ? ` · backup ${result.backup.split("/").pop()}` : ""}. Press Reload to apply.`);
   } catch (error) {
     showStatus("err", `save failed: ${error.message}`);
   } finally {
-    button.disabled = false;
+    btn.disabled = false;
   }
 });
 
-load();
+const navItems = [
+  ["/", "Dashboard"],
+  ["/routes.html", "Routes"],
+  ["/providers.html", "Providers"],
+  ["/requests.html", "Requests"],
+];
+document.getElementById("nav").innerHTML = navItems.map(([href, label]) =>
+  `<a href="${href}"${href === "/routes.html" ? ' class="active"' : ""}>${label}</a>`
+).join("");
+
+startAutoRefresh(loadCooldownPool, 5000);
+loadCooldownPool();
+
 </script>
 </body>
 </html>

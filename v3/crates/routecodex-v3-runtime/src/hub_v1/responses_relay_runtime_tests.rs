@@ -612,6 +612,36 @@ fn usage_summary_counts_cache_reads_but_not_cache_writes() {
 }
 
 #[test]
+fn usage_summary_accepts_integer_valued_floats_and_rejects_fractions() {
+    let summary = extract_v3_runtime_usage_summary(&json!({
+        "usage": {
+            "input_tokens": 59_842.0,
+            "output_tokens": 822.0,
+            "total_tokens": 60_664.0,
+            "input_tokens_details": {
+                "cached_tokens": 41_984.0
+            }
+        }
+    }))
+    .expect("integer-valued float usage summary");
+    assert_eq!(summary.input_tokens, Some(59_842));
+    assert_eq!(summary.output_tokens, Some(822));
+    assert_eq!(summary.total_tokens, Some(60_664));
+    assert_eq!(summary.cached_tokens, Some(41_984));
+
+    let fractional = extract_v3_runtime_usage_summary(&json!({
+        "usage": {
+            "input_tokens": 1.5,
+            "output_tokens": 2.25
+        }
+    }));
+    assert!(
+        fractional.is_none(),
+        "fractional usage must not be silently truncated to integer tokens"
+    );
+}
+
+#[test]
 fn openai_chat_zero_output_upstream_diagnostic_is_provider_error() {
     let error = build_v3_responses_provider_response_from_openai_chat_payload(
         &json!({

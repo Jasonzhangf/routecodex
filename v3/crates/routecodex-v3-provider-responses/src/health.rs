@@ -1412,7 +1412,6 @@ impl V3ProviderHealthStore {
     }
 }
 
-
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct V3CooldownPoolEntry {
     pub provider_id: String,
@@ -1427,6 +1426,71 @@ pub struct V3CooldownPoolEntry {
 }
 
 impl V3ProviderHealthStore {
+    /// Explicit operator action: remove matching cooldown/probe state and
+    /// persist the resulting global cooldown projection.
+    pub fn remove_cooldown_entry(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        kind: &str,
+    ) -> Result<bool, V3ProviderHealthError> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        let mut removed = false;
+        match kind {
+            "session" => {
+                let prefix = match auth_alias {
+                    Some(alias) => format!("{provider_id}:{alias}"),
+                    None => provider_id.to_string(),
+                };
+                let keys = state
+                    .cooldowns
+                    .keys()
+                    .filter(|key| {
+                        key.provider_runtime_identity == prefix
+                            || (auth_alias.is_none()
+                                && key
+                                    .provider_runtime_identity
+                                    .starts_with(&format!("{prefix}:")))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for key in keys {
+                    removed |= state.cooldowns.remove(&key).is_some();
+                    state.consecutive_failures.remove(&key);
+                }
+            }
+            "auth_key" | "probe" => {
+                let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
+                if kind == "auth_key" {
+                    removed |= state.auth_key_cooldowns.remove(&key).is_some();
+                    state.auth_key_consecutive_failures.remove(&key);
+                }
+                if kind == "probe" || kind == "auth_key" {
+                    if let Some(probe) = state.provider_cooldown_probes.remove(&key) {
+                        removed = true;
+                        probe.completion.send_replace(true);
+                    }
+                }
+                if kind == "probe" || kind == "auth_key" {
+                    removed |= state.auth_key_cooldowns.remove(&key).is_some();
+                    state.auth_key_consecutive_failures.remove(&key);
+                }
+                if removed {
+                    state.adaptive_history.remove(&key);
+                }
+            }
+            _ => return Ok(false),
+        }
+        if removed {
+            persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
+        }
+        Ok(removed)
+    }
+
     /// Returns all current cooldown entries (session + auth_key + provider-level probes).
     /// Entries with no remaining time are excluded.
     pub fn cooldown_entries(&self, now_ms: u64) -> Vec<V3CooldownPoolEntry> {
@@ -1444,7 +1508,12 @@ impl V3ProviderHealthStore {
             }
             let failure_count = state.consecutive_failures.get(key).map(|f| f.failure_count);
             entries.push(V3CooldownPoolEntry {
-                provider_id: key.provider_runtime_identity.split(':').next().unwrap_or(&key.provider_runtime_identity).to_string(),
+                provider_id: key
+                    .provider_runtime_identity
+                    .split(':')
+                    .next()
+                    .unwrap_or(&key.provider_runtime_identity)
+                    .to_string(),
                 auth_alias: key
                     .provider_runtime_identity
                     .split(':')
@@ -1466,7 +1535,10 @@ impl V3ProviderHealthStore {
             if remaining.is_some_and(|r| r <= 0) {
                 continue;
             }
-            let failure_count = state.auth_key_consecutive_failures.get(key).map(|f| f.failure_count);
+            let failure_count = state
+                .auth_key_consecutive_failures
+                .get(key)
+                .map(|f| f.failure_count);
             entries.push(V3CooldownPoolEntry {
                 provider_id: key.provider_id.clone(),
                 auth_alias: key.auth_alias.clone(),
@@ -1491,7 +1563,8 @@ impl V3ProviderHealthStore {
                 continue;
             }
             let blocked = probe.blocked_until_ms.is_some_and(|u| u > now_ms);
-            let probing = probe.probe_in_flight || probe.next_probe_at_ms.is_some_and(|n| n > now_ms);
+            let probing =
+                probe.probe_in_flight || probe.next_probe_at_ms.is_some_and(|n| n > now_ms);
             let state_str = if probe.probe_in_flight {
                 "probing".to_string()
             } else if blocked {
@@ -1507,7 +1580,9 @@ impl V3ProviderHealthStore {
                 model_id: key.model_id.clone(),
                 state: state_str,
                 until_ms: probe.blocked_until_ms.filter(|u| *u > now_ms),
-                remaining_ms: probe.blocked_until_ms.map(|u| u.saturating_sub(now_ms) as i64),
+                remaining_ms: probe
+                    .blocked_until_ms
+                    .map(|u| u.saturating_sub(now_ms) as i64),
                 reason: None,
                 failure_count: Some(u32::from(probe.probe_failure_count)),
                 kind: "probe".to_string(),
@@ -2068,6 +2143,39 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                     Some("gpt-5.5"),
                     103,
                 )
+                .available
+        );
+    }
+
+    #[test]
+    fn operator_can_remove_auth_key_cooldown_and_probe_state() {
+        let store = V3ProviderHealthStore::default();
+        for now_ms in 100..103 {
+            store
+                .record_provider_failure_in_session(
+                    &session("session-a"),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("gpt-5.5"),
+                    Some("controlled failure"),
+                    now_ms,
+                )
+                .unwrap();
+        }
+        assert!(store
+            .cooldown_entries(103)
+            .iter()
+            .any(|entry| entry.kind == "auth_key"));
+        assert!(store
+            .remove_cooldown_entry("provider-a", Some("key-a"), Some("gpt-5.5"), "auth_key")
+            .unwrap());
+        assert!(!store
+            .cooldown_entries(103)
+            .iter()
+            .any(|entry| entry.kind == "auth_key"));
+        assert!(
+            store
+                .availability("provider-a", Some("key-a"), Some("gpt-5.5"), 103)
                 .available
         );
     }

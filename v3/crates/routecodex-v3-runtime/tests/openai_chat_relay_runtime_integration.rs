@@ -29,7 +29,11 @@ fn ensure_openai_chat_relay_test_state_dir() {
         ));
         std::fs::create_dir_all(&state_dir)
             .expect("OpenAI Chat Relay tests must own an isolated provider state directory");
-        std::env::set_var("ROUTECODEX_V3_STATE_DIR", state_dir);
+        std::env::set_var("ROUTECODEX_V3_STATE_DIR", &state_dir);
+        std::env::set_var(
+            "ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE",
+            &state_dir.join("provider-cooldowns.json"),
+        );
     });
 }
 
@@ -39,7 +43,14 @@ async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
     transport: &T,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     ensure_openai_chat_relay_test_state_dir();
-    execute_v3_openai_chat_relay_runtime_impl(manifest, input, transport).await
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
+    execute_v3_openai_chat_relay_runtime_with_provider_health(
+        manifest,
+        input,
+        transport,
+        provider_health.runtime_health(),
+    )
+    .await
 }
 
 struct JsonTransport {
@@ -282,7 +293,7 @@ impl ResponsesTransport for ClientDisconnectTransport {
 #[tokio::test]
 async fn client_disconnect_is_typed_terminal_and_does_not_mutate_health_or_action_gate() {
     let manifest = manifest();
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     for index in 0..3 {
         let started = Instant::now();
         let output = execute_v3_openai_chat_relay_runtime_with_provider_health(
@@ -901,6 +912,17 @@ data: [DONE]
     assert_eq!(usage["choices"], json!([]));
     assert_eq!(usage["usage"]["total_tokens"], 8);
     assert_eq!(events[3], "data: [DONE]\n\n");
+    let stream_observation = output
+        .stream_observation
+        .as_ref()
+        .expect("chat relay SSE success must carry stream observation");
+    let snapshot = stream_observation.snapshot().unwrap();
+    let usage = snapshot
+        .usage
+        .expect("chat relay SSE usage chunk must be recorded into stream observation");
+    assert_eq!(usage.input_tokens, Some(7));
+    assert_eq!(usage.output_tokens, Some(1));
+    assert_eq!(usage.total_tokens, Some(8));
 }
 
 type ControlledSseReceiver = tokio::sync::mpsc::Receiver<Result<Vec<u8>, V3ProviderError>>;
@@ -1206,7 +1228,7 @@ async fn sse_done_before_terminal_fails_and_terminal_without_done_succeeds() {
 async fn failed_sse_attempt_projects_only_error06_after_pool_exhaustion() {
     let server_id = "openai_chat_failed_attempt_error06";
     let manifest = manifest_with_identity(server_id);
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let failing = StaticSseTransport {
         chunks: Mutex::new(Some(vec![
             br#"data: {"id":"partial","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}
@@ -1263,8 +1285,8 @@ async fn terminal_sse_attempt_commits_after_eof_and_releases_a_fresh_request() {
     let server_id = "openai_chat_terminal_commit";
     const FAILURE_SESSION_ID: &str = "openai-chat-terminal-commit-session";
     let manifest = manifest_with_identity(server_id);
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
-    let success_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let success_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let failing = StaticSseTransport {
         chunks: Mutex::new(Some(vec![b"data: {malformed-json}\n\n".to_vec()])),
     };
@@ -1399,8 +1421,8 @@ async fn active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds() {
     let server_id = "openai_chat_active_recovery";
     const FAILURE_SESSION_ID: &str = "openai-chat-active-recovery-session";
     let manifest = manifest_with_two_providers_for_scope(server_id);
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
-    let waiting_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let waiting_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let (terminal_sender, terminal_receiver) = tokio::sync::mpsc::channel(2);
     let (secondary_started_sender, secondary_started_receiver) = tokio::sync::oneshot::channel();
     terminal_sender
@@ -2031,7 +2053,7 @@ async fn openai_chat_anthropic_sse_complete_stream_emits_client_done_without_pro
     // sentinel，且缺失 [DONE] 不记录 provider-health 失败。
     use futures_util::StreamExt;
     let manifest = manifest_with_anthropic_multimodal("complete_stream");
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let transport = AnthropicSseTransport {
         captured_url: Mutex::new(None),
         chunks: Mutex::new(Some(vec![br#"event: message_start

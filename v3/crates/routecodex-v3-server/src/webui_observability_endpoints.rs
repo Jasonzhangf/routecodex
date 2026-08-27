@@ -51,3 +51,59 @@ pub(crate) async fn cooldown_pool(
     }))
     .into_response()
 }
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct RemoveCooldownRequest {
+    pub provider_id: String,
+    #[serde(default)]
+    pub auth_alias: Option<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    pub kind: String,
+}
+
+/// POST /_routecodex/health/cooldown-pool/remove — explicit operator action.
+pub(crate) async fn remove_cooldown(
+    State(state): State<Arc<V3ListenerState>>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    Json(request): Json<RemoveCooldownRequest>,
+) -> Response {
+    if let Some(response) =
+        loopback_guard(&state, "/_routecodex/health/cooldown-pool/remove", remote)
+    {
+        return response;
+    }
+    if request.provider_id.trim().is_empty()
+        || !matches!(request.kind.as_str(), "session" | "auth_key" | "probe")
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "invalid cooldown removal request" })),
+        )
+            .into_response();
+    }
+    let removed = match state.provider_health.store().remove_cooldown_entry(
+        request.provider_id.trim(),
+        request.auth_alias.as_deref(),
+        request.model_id.as_deref(),
+        &request.kind,
+    ) {
+        Ok(removed) => removed,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": error.to_string() })),
+            )
+                .into_response()
+        }
+    };
+    Json(serde_json::json!({
+        "ok": true,
+        "removed": removed,
+        "provider_id": request.provider_id,
+        "auth_alias": request.auth_alias,
+        "model_id": request.model_id,
+        "kind": request.kind,
+    }))
+    .into_response()
+}

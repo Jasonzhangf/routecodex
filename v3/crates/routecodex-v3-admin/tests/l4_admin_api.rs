@@ -616,12 +616,12 @@ async fn observability_keeps_provider_attempt_failures_visible_after_success() {
     assert!(filtered.status().is_success());
     let filtered_body: serde_json::Value = filtered.json().await.expect("filtered json");
     assert_eq!(filtered_body["total"], 1);
-    assert_eq!(filtered_body["records"][0]["event_type"], "request.provider_attempt_failed");
-    assert_eq!(filtered_body["records"][0]["result"], "failed-attempt");
     assert_eq!(
-        filtered_body["records"][0]["meta"]["provider_status"],
-        502
+        filtered_body["records"][0]["event_type"],
+        "request.provider_attempt_failed"
     );
+    assert_eq!(filtered_body["records"][0]["result"], "failed-attempt");
+    assert_eq!(filtered_body["records"][0]["meta"]["provider_status"], 502);
 
     let error_filtered = http_client()
         .get(format!(

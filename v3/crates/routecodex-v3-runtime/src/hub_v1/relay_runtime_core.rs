@@ -1132,6 +1132,10 @@ where
                     build_v3_relay_observability(C::ENTRY_KIND, &selected, "sse");
                 observability.provider_status = Some(provider_status);
                 observability.response_status = Some("completed".to_string());
+                observability.usage = stream_observation
+                    .snapshot()
+                    .ok()
+                    .and_then(|snapshot| snapshot.usage);
                 observability.timing = Some(
                     runtime_timing
                         .finish_runtime()

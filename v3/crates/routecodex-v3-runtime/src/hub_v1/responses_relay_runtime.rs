@@ -82,6 +82,12 @@ impl V3ResponsesRelayProviderHealthHandle {
         }
     }
 
+    pub fn from_manifest_without_persistence(manifest: &V3Config05ManifestPublished) -> Self {
+        Self {
+            runtime_health: V3ProviderFailureRuntimeHealth::from_manifest_for_tests(manifest),
+        }
+    }
+
     pub fn store(&self) -> V3ProviderHealthStore {
         self.runtime_health.store()
     }
@@ -928,6 +934,18 @@ fn read_v3_usage_u64(value: &Value, path: &[&str]) -> Option<u64> {
         current
             .as_i64()
             .and_then(|number| u64::try_from(number).ok())
+    })
+    .or_else(|| {
+        current.as_f64().and_then(|number| {
+            if !number.is_finite() || number < 0.0 {
+                return None;
+            }
+            let rounded = number.round();
+            if (rounded - number).abs() > f64::EPSILON * 16.0 {
+                return None;
+            }
+            u64::try_from(rounded as i128).ok()
+        })
     })
 }
 

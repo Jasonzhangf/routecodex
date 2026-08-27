@@ -2,7 +2,7 @@
 // Aggregates per-listener persisted JSONL projections for the single WebUI.
 
 use crate::AppState;
-use axum::extract::RawQuery;
+use axum::extract::{RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,143 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 pub(crate) fn routes() -> axum::Router<crate::AppState> {
-    axum::Router::new().route("/api/observability/records", axum::routing::get(records))
+    axum::Router::new()
+        .route("/api/observability/records", axum::routing::get(records))
+        .route(
+            "/api/observability/cooldown-pool",
+            axum::routing::get(cooldown_pool).post(remove_cooldown),
+        )
+}
+
+async fn cooldown_pool(State(state): axum::extract::State<AppState>) -> Response {
+    let ports = match configured_ports(&state) {
+        Ok(ports) => ports,
+        Err(error) => {
+            return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
+        }
+    };
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("cooldown client build failed: {error}") })),
+            )
+                .into_response()
+        }
+    };
+    let mut listeners = Vec::new();
+    for port in ports {
+        let url = format!("http://127.0.0.1:{port}/_routecodex/health/cooldown-pool");
+        let response = match client.get(&url).send().await {
+            Ok(response) => response,
+            Err(error) => return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": format!("cooldown listener {port} unavailable: {error}") })),
+            )
+                .into_response(),
+        };
+        let status = response.status();
+        let body = match response.json::<Value>().await {
+            Ok(body) => body,
+            Err(error) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({ "error": format!("cooldown listener {port} invalid response: {error}") })),
+                )
+                    .into_response()
+            }
+        };
+        if !status.is_success() {
+            return (StatusCode::BAD_GATEWAY, Json(body)).into_response();
+        }
+        listeners.push(body);
+    }
+    Json(json!({ "listeners": listeners })).into_response()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct RemoveCooldownRequest {
+    port: u16,
+    provider_id: String,
+    #[serde(default)]
+    auth_alias: Option<String>,
+    #[serde(default)]
+    model_id: Option<String>,
+    kind: String,
+}
+
+async fn remove_cooldown(
+    State(state): axum::extract::State<AppState>,
+    Json(request): Json<RemoveCooldownRequest>,
+) -> Response {
+    if request.provider_id.trim().is_empty()
+        || !matches!(request.kind.as_str(), "session" | "auth_key" | "probe")
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "invalid cooldown removal request" })),
+        )
+            .into_response();
+    }
+    let ports = match configured_ports(&state) {
+        Ok(ports) => ports,
+        Err(error) => {
+            return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
+        }
+    };
+    if !ports.contains(&request.port) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("port {} is not configured", request.port) })),
+        )
+            .into_response();
+    }
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("cooldown client build failed: {error}") })),
+            )
+                .into_response()
+        }
+    };
+    let url = format!(
+        "http://127.0.0.1:{}/_routecodex/health/cooldown-pool",
+        request.port
+    );
+    let response = match client.post(url).json(&request).send().await {
+        Ok(response) => response,
+        Err(error) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": format!("cooldown listener {} unavailable: {error}", request.port) })),
+            )
+                .into_response()
+        }
+    };
+    let status = response.status();
+    let body = match response.json::<Value>().await {
+        Ok(body) => body,
+        Err(error) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": format!("cooldown listener response invalid: {error}") })),
+            )
+                .into_response()
+        }
+    };
+    if !status.is_success() {
+        return (StatusCode::BAD_GATEWAY, Json(body)).into_response();
+    }
+    Json(body).into_response()
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -117,9 +253,7 @@ pub(crate) struct RecordsResponse {
     timeseries: Vec<TimeseriesBucket>,
 }
 
-use super::timeseries::{
-    local_day_start, system_epoch_ms, usage_is_countable, TimeseriesBucket,
-};
+use super::timeseries::{local_day_start, system_epoch_ms, usage_is_countable, TimeseriesBucket};
 
 impl RecordQuery {
     fn from_params(
@@ -150,7 +284,7 @@ impl RecordQuery {
                         .parse()
                         .map_err(|_| format!("invalid page_size: {value}"))?
                 }
-               "range" => {
+                "range" => {
                     if !matches!(value, "today" | "week" | "month" | "all") {
                         return Err(format!("invalid range: {value}"));
                     }
@@ -481,9 +615,7 @@ fn error_category_status_code(category: Option<&str>) -> Option<String> {
         "malformed_json" | "content_type_required" | "content_type_unsupported" => {
             Some("400".to_string())
         }
-        "internal_request_lane" | "v3_debug_failure" | "debug_sink" => {
-            Some("598".to_string())
-        }
+        "internal_request_lane" | "v3_debug_failure" | "debug_sink" => Some("598".to_string()),
         "internal_response_lane"
         | "provider_response_sse_event_invalid"
         | "provider_response_body_error"
@@ -568,12 +700,8 @@ fn row_status_code(row: &QueryRow) -> String {
     if provider_status != "unknown" {
         return provider_status;
     }
-    error_category_status_code(
-        row.meta
-            .get("error_category")
-            .and_then(Value::as_str),
-    )
-    .unwrap_or_else(|| "599".to_string())
+    error_category_status_code(row.meta.get("error_category").and_then(Value::as_str))
+        .unwrap_or_else(|| "599".to_string())
 }
 
 fn facet_add_status_code_label(
@@ -854,35 +982,25 @@ async fn records(
             row.meta.get("response_status").and_then(Value::as_str),
         );
         if row.result.as_deref() == Some("error") {
-            facet_add_status_code_label(
-                &mut facets,
-                "error_status_codes",
-                row_status_code(row),
-            );
+            facet_add_status_code_label(&mut facets, "error_status_codes", row_status_code(row));
         } else if row.result.as_deref() == Some("cancelled") {
-            facet_add_status_code_label(
-                &mut facets,
-                "error_status_codes",
-                "499".to_string(),
-            );
+            facet_add_status_code_label(&mut facets, "error_status_codes", "499".to_string());
         }
     }
     stats["count"] = json!(count as u64);
     let mut by_port: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     for row in &filtered {
         let port = row.scope.port.to_string();
-        let item = by_port
-            .entry(port)
-            .or_insert_with(|| {
-                json!({
-                    "total": 0u64,
-                    "active": 0u64,
-                    "success": 0u64,
-                    "error": 0u64,
-                    "provider_failures": 0u64,
-                    "cancelled": 0u64
-                })
-            });
+        let item = by_port.entry(port).or_insert_with(|| {
+            json!({
+                "total": 0u64,
+                "active": 0u64,
+                "success": 0u64,
+                "error": 0u64,
+                "provider_failures": 0u64,
+                "cancelled": 0u64
+            })
+        });
         item["total"] = json!(item["total"].as_u64().unwrap_or(0) + 1);
         match row.result.as_deref() {
             Some("success") => {
