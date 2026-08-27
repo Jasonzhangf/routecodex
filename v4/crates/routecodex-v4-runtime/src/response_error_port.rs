@@ -52,4 +52,3 @@ fn validate_binding(
     }
     Ok(())
 }
-// v4-cordis candidate binding marker.

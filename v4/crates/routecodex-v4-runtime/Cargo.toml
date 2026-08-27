@@ -1,5 +1,4 @@
 [package]
-# v4-cordis candidate binding marker.
 name = "routecodex-v4-runtime"
 version = "0.1.0"
 edition = "2021"
