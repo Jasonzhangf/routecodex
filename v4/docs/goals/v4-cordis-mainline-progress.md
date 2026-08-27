@@ -91,3 +91,10 @@ M00 -> M01 -> M02 --┐
 - 本轮再次尝试正式 `begin-version active-v2→active-v3` / `compile-module`：编译器生成新候选后，`promote-module --to architecture_stable` 以 `INVALID_LIFECYCLE_TRANSITION: source_implemented->architecture_stable` fail-closed；随后已精确恢复 Protected history、`.appsdk/project.json` 与本轮生成的 ignored candidate 输出。当前主树恢复 clean，未留下错误 Active 状态；合法重建仍需 AppSDK lifecycle/record-graph owner 先生成与当前 candidate 一致的 evidence graph。
 - 进一步按真实状态机依次探测 `source_implemented→contract_bound→compiled→controlled_verified→architecture_stable`：前四步均可执行，最终 architecture-stable 仍以 `CANDIDATE_CONTROLLED_SOURCE_DRIFT` fail-closed；中间 lifecycle 状态已撤销，主树保持 clean。该证据将阻塞定位为旧 candidate evidence graph 与当前 refactor HEAD 不一致，而非 CLI 顺序错误。
 - 本轮真实验证：`cargo test --locked -p routecodex-v4-base-node --test l0_base_node` = 12/12；生命周期重建仍不能宣称完成，因当前 candidate 缺合法的最新 install/restart/blackbox evidence graph。
+
+## 主树 Active 恢复重建（2026-08-27）
+
+- 使用 AppSDK recovery binary 的正式 `restore-active` 在重构主树恢复四个已有 frozen archive：`routecodex-v4-base-node@active-v2`、`routecodex-v4-control@active-v3`、`routecodex-v4-edge@active-v4`、`routecodex-v4-error@active-v4`；恢复产物包含 `active/lib/**/artifact.json`、`current.json` 与 `generated/modules/*/module.compiled.json`，未复制其他 tree ignored 输出。
+- 由 `routecodex-v4-build-link` owner 生成并校验 `build-control/active-index.json`：`V4_ACTIVE_INDEX_OK`；`verify:v4-active-link` PASS。
+- 仍未形成当前 refactor HEAD 的完整 evidence graph：`appsdk verify` 为 `INVALID_ARTIFACT_SCHEMA`，base-node review admission 为 `CANDIDATE_CONTROLLED_SOURCE_DRIFT`；`verify:isolation` 仍受隔离 checkout 的 js-yaml 解析基线阻断。该恢复是解除 artifact 缺失的前置，不是 M05 或 V4 完成声明。
+- M05 已重新启动独立 worktree 重实现；B01 已重新启动 build-link admission 验证；M08 provider/server slice 已合入，runtime-bin async 接线继续等待 M05 handoff。
