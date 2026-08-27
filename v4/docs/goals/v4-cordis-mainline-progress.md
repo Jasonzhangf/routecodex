@@ -98,3 +98,11 @@ M00 -> M01 -> M02 --┐
 - 由 `routecodex-v4-build-link` owner 生成并校验 `build-control/active-index.json`：`V4_ACTIVE_INDEX_OK`；`verify:v4-active-link` PASS。
 - 仍未形成当前 refactor HEAD 的完整 evidence graph：`appsdk verify` 为 `INVALID_ARTIFACT_SCHEMA`，base-node review admission 为 `CANDIDATE_CONTROLLED_SOURCE_DRIFT`；`verify:isolation` 仍受隔离 checkout 的 js-yaml 解析基线阻断。该恢复是解除 artifact 缺失的前置，不是 M05 或 V4 完成声明。
 - M05 已重新启动独立 worktree 重实现；B01 已重新启动 build-link admission 验证；M08 provider/server slice 已合入，runtime-bin async 接线继续等待 M05 handoff。
+
+## 受管实例恢复与真实请求复验（2026-08-27）
+
+- 发现 `/Users/fanzhang/.rcc/v4/instance.json` 指向已退出 PID=3443，`control.sock` 缺失；该记录已保留为可恢复备份 `instance.json.stale-20260827T015500Z`。
+- 通过全局 `/Users/fanzhang/.local/bin/rccv4` 建立 managed instance，随后执行 `rccv4 restart` 成功；`rccv4 status=running`，当前 manifest 仅声明 `127.0.0.1:5520`，该端口 `/health` 返回有效 V4 JSON。
+- M05 真实 `/v1/responses` replay 返回 HTTP 200，响应 `status=completed` 且输出文本 `LIVE_RESPONSES_OK`。
+- 首次 Chat replay 曾返回 HTTP 503（`curl: (16) Error in the HTTP2 framing layer`），但同语义 A/B/C 对照与后续短请求均 HTTP 200；该失败不可复现，未证明为 M05 代码根因。
+- managed restart 后最终短请求复验：Responses HTTP 200 `status=completed`、Chat HTTP 200 `object=chat.completion`；M05 candidate 已取得 AGY controller `pass`，进入精确合并队列。
