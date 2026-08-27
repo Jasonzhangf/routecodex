@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// v4-cordis parity candidate binding.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
