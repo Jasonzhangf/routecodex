@@ -1024,7 +1024,7 @@
     },
     {
       "resource_id": "v4.cordis.host_daemon",
-      "owner": "routecodex-v4-cordis-host::CordisHostDaemon",
+      "owner": "routecodex-v4-cordis-host::CordisNodeHost",
       "truth_store": "cordis/routecodex-v4-cordis-host/src/daemon.mjs",
       "allowed_operations": [
         "start",

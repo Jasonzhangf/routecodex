@@ -714,7 +714,6 @@ resources:
   owner_symbols:
   - SkeletonRuntime
   - ExecutionContext
-  - NodePluginPlan
   identity:
   - requestId
   - pipelineId
@@ -2019,7 +2018,7 @@ resources:
   owner_crate: routecodex-v4-cordis-host
   owner_node: V4CordisNodeHost
   owner_symbols:
-  - CordisHostDaemon
+  - CordisNodeHost
   - startCordisHostDaemon
   - CordisHostDaemonClient
   identity:
