@@ -4,13 +4,13 @@
   "module_id":"routecodex-v4-base-node",
   "worktree_id":"v4-cordis-base-node-worktree",
   "base_commit":"8f906514a9a454add8dabc129b24d0852d43a724",
-  "head_commit":"0ef7b916731963922f57e97aee176600c2282545",
-  "tree_hash":"74e830c48da6afc37e71038929400cac354b9853",
-  "diff_hash":"sha256:46d4550e501b2a6355ce40a93022216c8308079c8d030905bba49e4c0e64cf65",
+  "head_commit":"dad0742a457276d1ed8e9da2fe1f3c35b0bc4889",
+  "tree_hash":"266bdf4e21cb087288563e5a7399ca650dbc0d31",
+  "diff_hash":"sha256:2bd91fe6908d5c95e515155cc0330551f603144a54178456e65c8b87eba21ff2",
   "design_id":"v4-cordis-mainline-migration",
   "owner":"routecodex-v4-base-node",
   "scope_hash":"sha256:7d1e6dda7043dedd559eb5c13df6ae94d7c49165b54e4602ecbd29ad5c6c6de9",
-  "changed_paths":["v4/crates/routecodex-v4-base-node/**","v4/.appsdk/records/**"],
-  "verification_evidence_ids":["v4-cordis-base-node-candidate","v4-cordis-base-node-positive","v4-cordis-base-node-negative"],
+  "changed_paths":["v4/.appsdk/project.json"],
+  "verification_evidence_ids":["v4-cordis-base-node-current-candidate","v4-cordis-base-node-current-positive-intervention","v4-cordis-base-node-current-negative-intervention"],
   "created_at":"2026-08-27T14:46:00Z"
 }

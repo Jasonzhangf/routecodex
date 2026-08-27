@@ -4,7 +4,7 @@
   "experiment_id": "v4-cordis-base-node",
   "phase": "deployment_install",
   "kind": "install",
-  "source_commit": "0ef7b916731963922f57e97aee176600c2282545",
+  "source_commit": "dad0742a457276d1ed8e9da2fe1f3c35b0bc4889",
   "artifact_hash": "sha256:a988314c65bc74f6a7e6e38ad6c045ac91c2d516f3ec01c65f5f029fde6c2a4d",
   "execution_surface": "deployed_blackbox",
   "environment_id": "v4-cordis-local",
