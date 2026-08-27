@@ -71,7 +71,7 @@ fn non_target_runtime_failure_remains_runtime_error() {
 }
 
 #[test]
-fn client_inbound_reasoning_effort_validation_failure_projects_http_400() {
+fn client_inbound_reasoning_effort_validation_failure_projects_client_400() {
     let output = project_v3_responses_relay_runtime_failure(
         V3ResponsesRelayRuntimeError::ClientInboundCanonical(
             "Responses inbound canonicalization failed: Responses reasoning.effort has an invalid value"
@@ -98,21 +98,21 @@ fn client_inbound_reasoning_effort_validation_failure_projects_http_400() {
 }
 
 #[test]
-fn provider_response_projection_failure_is_not_client_invalid_request() {
+fn provider_response_projection_failure_projects_internal_599() {
     let output = project_v3_responses_relay_runtime_failure(
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             "Anthropic provider response projection failed".to_string(),
         ),
     );
 
-    assert_eq!(output.status, 598);
+    assert_eq!(output.status, 599);
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => {
             panic!("provider response projection failure must project as JSON")
         }
     };
-    assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
+    assert_eq!(body["error"]["code"], "provider_response_sse_event_invalid");
     assert_ne!(body["error"]["code"], "invalid_responses_request");
 }
 

@@ -448,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn request_shape_compat_failure_projects_400_without_provider_failure_status() {
+    fn request_shape_compat_failure_projects_internal_598_without_provider_failure_status() {
         let profile = V3ProviderCompatProfileId::Passthrough;
         let error = classify_v3_provider_compat_error(
             "request",
@@ -461,7 +461,7 @@ mod tests {
             None,
         )
         .expect("request compat failure must become terminal client error");
-        assert_eq!(failure.status, 400);
+        assert_eq!(failure.status, 598);
         assert!(failure.terminal_projection.is_some());
         assert_eq!(failure.policy_error_type, "provider_request_compat_error");
     }

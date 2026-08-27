@@ -71,11 +71,12 @@ pub(crate) fn provider_request_payload_source(
     source_stage: &'static str,
     error: &V3ProviderCompatError,
 ) -> routecodex_v3_error::V3Error01SourceRaised {
-    routecodex_v3_error::build_v3_error_01_source_raised(
-        routecodex_v3_error::V3ErrorSourceKind::InvalidRequest,
+    routecodex_v3_error::build_v3_error_01_source_raised_internal(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
         source_stage,
         "provider_request_payload_invalid",
         error.to_string(),
+        routecodex_v3_error::V3InternalErrorCode::V3Provider12ResponsesWirePayload,
     )
 }
 

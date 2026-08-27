@@ -1417,10 +1417,11 @@ pub fn raise_v3_provider_compat_payload_boundary_violation(
         field,
         reason.into()
     );
-    build_v3_error_01_source_raised(
-        V3ErrorSourceKind::InvalidRequest,
+    build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::RuntimeFailure,
         source_stage,
         V3_PROVIDER_COMPAT_PAYLOAD_BOUNDARY_VIOLATION_CODE,
         message,
+        V3InternalErrorCode::V3Provider12ResponsesWirePayload,
     )
 }

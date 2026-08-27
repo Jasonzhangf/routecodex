@@ -86,7 +86,7 @@ impl ResponsesTransport for RecordingChatTransport {
 }
 
 #[tokio::test]
-async fn target_protocol_unmapped_field_projects_client_400_without_switching_provider() {
+async fn target_protocol_unmapped_field_projects_internal_598_without_switching_provider() {
     std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
     std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
     let manifest = anthropic_then_openai_chat_manifest();
@@ -125,7 +125,7 @@ async fn target_protocol_unmapped_field_projects_client_400_without_switching_pr
     .await
     .expect("unmapped target field must project as client request error");
 
-    assert_eq!(output.status, 400);
+    assert_eq!(output.status, 598);
     assert!(!output
         .node_trace
         .iter()

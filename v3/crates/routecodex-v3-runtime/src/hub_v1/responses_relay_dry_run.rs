@@ -300,13 +300,23 @@ pub fn project_v3_responses_relay_runtime_failure(
             error_output(source, projected.status, "none", Vec::new(), None, 0)
         }
         V3ResponsesRelayRuntimeError::ClientInboundCanonical(message) => {
-            let source = build_v3_error_01_source_raised(
+            let source = routecodex_v3_error::build_v3_error_01_source_raised(
                 V3ErrorSourceKind::InvalidRequest,
                 "V3HubReqInbound02Normalized",
                 "invalid_responses_request",
                 message,
             );
             error_output(source, 400, "none", Vec::new(), None, 0)
+        }
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message) => {
+            let source = routecodex_v3_error::build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ProviderResp14Raw",
+                "provider_response_sse_event_invalid",
+                message,
+                routecodex_v3_error::V3InternalErrorCode::V3ProviderResp14Raw,
+            );
+            error_output(source, 599, "none", Vec::new(), None, 0)
         }
         error => {
             let message = error.to_string();
