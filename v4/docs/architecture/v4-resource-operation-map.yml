@@ -2017,7 +2017,7 @@ resources:
   resource_kind: managed_daemon
   lifecycle: v4.plugin_management
   owner_crate: routecodex-v4-cordis-host
-  owner_node: V4CordisHostDaemon
+  owner_node: V4CordisNodeHost
   owner_symbols:
   - CordisHostDaemon
   - startCordisHostDaemon
@@ -2027,12 +2027,12 @@ resources:
   - generation
   - graphHash
   allowed_writers:
-  - V4CordisHostDaemon
+  - V4CordisNodeHost
   allowed_readers:
-  - V4CordisHostDaemonClient
+  - V4CordisNodeHost
   forbidden_writers:
   - V4NodeContainer
-  - V4Runtime
+  - V4Runtime01MainlineKernel
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored

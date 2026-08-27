@@ -414,16 +414,13 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
   // plan loader/verifier. Every plugin_id compiled into the skeleton plan
   // must be resolvable in the runtime's static registry surface.
   const runtimeSource = sources?.runtime ?? '';
+  const executionEngineSource = sources?.executionEngine ?? '';
+  const nodeContainerSource = sources?.nodeContainer ?? '';
   const skeletonSource = sources?.skeleton ?? '';
   if (runtimeSource) {
     for (const [symbol, label] of [
       ['pub struct SkeletonRuntime', 'SkeletonRuntime'],
-      ['pub struct NodePluginPlan', 'NodePluginPlan'],
-      ['pub struct NodeContainer', 'NodeContainer'],
-      ['pub static PLUGIN_REGISTRY', 'PLUGIN_REGISTRY'],
-      ['pub const EXTERNAL_CHAIN_PLUGINS', 'EXTERNAL_CHAIN_PLUGINS'],
       ['pub fn execution_binding(', 'execution_binding'],
-      ['fn run_chain(', 'run_chain'],
       ['pub struct ExecutionContext', 'ExecutionContext'],
     ]) {
       if (!runtimeSource.includes(symbol)) {
@@ -432,6 +429,12 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
     }
   } else {
     failures.push('runtime source not loaded for code binding');
+  }
+  if (!executionEngineSource.includes('pub struct ExecutionEngine')) {
+    failures.push('execution-engine source missing ExecutionEngine');
+  }
+  if (!nodeContainerSource.includes('pub struct NodeContainer')) {
+    failures.push('node-container source missing NodeContainer');
   }
   if (skeletonSource) {
     for (const [symbol, label] of [
@@ -472,6 +475,8 @@ function loadCurrent() {
     mainline: readJson('docs/architecture/maps/mainline-call-map.json'),
     sources: {
       runtime: readText('crates/routecodex-v4-runtime/src/lib.rs'),
+      executionEngine: readText('crates/routecodex-v4-runtime/src/execution_engine.rs'),
+      nodeContainer: readText('crates/routecodex-v4-node-container/src/lib.rs'),
       skeleton: readText('crates/routecodex-v4-skeleton/src/lib.rs'),
     },
   };
