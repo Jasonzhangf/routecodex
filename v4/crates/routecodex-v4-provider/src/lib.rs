@@ -575,13 +575,11 @@ pub fn load_profile(path: &str) -> Result<ProviderProfile, ProviderTransportErro
             id,
         })
         .collect();
-    if file.provider.responses_continuation != "direct"
-        && file.provider.responses_continuation != "relay"
-    {
+    if file.provider.responses_continuation != "direct" {
         return Err(ProviderTransportError {
             code: "provider_continuation_owner_invalid".to_string(),
             message: format!(
-                "responsesContinuation must be direct or relay, got {}",
+                "responsesContinuation must be direct; local relay continuation is unsupported, got {}",
                 file.provider.responses_continuation
             ),
             status: None,
@@ -771,68 +769,6 @@ pub fn build_protocol_wire(
             status: None,
         }),
     }
-}
-
-/// Build an explicitly V4-owned Responses relay continuation request.
-///
-/// This is not a cleanup path for a direct request: the caller must have
-/// already selected the relay continuation owner and provide the immutable
-/// ordered context captured at the previous response Chat Process commit.
-/// The provider receives the materialized input and never receives the
-/// control-plane `previous_response_id` locator.
-pub fn build_responses_local_continuation_wire(
-    prior_context: &Value,
-    current_request: &Value,
-    wire_model: &str,
-    stream: bool,
-) -> Result<Value, ProviderTransportError> {
-    let prior_items = prior_context
-        .as_array()
-        .ok_or_else(|| ProviderTransportError {
-            code: "continuation_context_invalid".to_string(),
-            message: "relay continuation context must be an ordered input array".to_string(),
-            status: None,
-        })?;
-    let current_input = current_request
-        .get("input")
-        .ok_or_else(|| ProviderTransportError {
-            code: "continuation_input_missing".to_string(),
-            message: "relay continuation request input is missing".to_string(),
-            status: None,
-        })?;
-    let current_items = match current_input {
-        Value::Array(items) => items.clone(),
-        Value::String(text) => vec![Value::String(text.clone())],
-        value if value.is_object() => vec![value.clone()],
-        _ => {
-            return Err(ProviderTransportError {
-                code: "continuation_input_invalid".to_string(),
-                message: "relay continuation input must be a string, object, or array".to_string(),
-                status: None,
-            })
-        }
-    };
-    let mut input = Vec::with_capacity(prior_items.len() + current_items.len());
-    input.extend(prior_items.iter().cloned());
-    input.extend(current_items);
-    let mut wire = current_request.clone();
-    let object = wire.as_object_mut().ok_or_else(|| ProviderTransportError {
-        code: "provider_request_invalid".to_string(),
-        message: "Responses request must be a JSON object".to_string(),
-        status: None,
-    })?;
-    if object.contains_key("metadata") {
-        return Err(ProviderTransportError {
-            code: "provider_control_payload_leak".to_string(),
-            message: "internal metadata cannot enter provider wire payload".to_string(),
-            status: None,
-        });
-    }
-    object.remove("previous_response_id");
-    object.insert("model".to_string(), Value::String(wire_model.to_string()));
-    object.insert("input".to_string(), Value::Array(input));
-    object.insert("stream".to_string(), Value::Bool(stream));
-    Ok(wire)
 }
 
 pub fn send_responses(
