@@ -278,31 +278,17 @@ pub(crate) fn format_v3_provider_failure_console_content(
         .as_deref()
         .map(format_v3_console_provider_key_label)
         .unwrap_or_else(|| "-".to_string());
-    let mut fields = if event.action == "switch_provider" && event.next_provider_key.is_some() {
-        format!(
-            "req={} [switch to:{}] [switch from:{}] model={} result={} causeStatus={} failures={} health={}",
-            request_id,
-            next,
-            provider,
-            event.model_id,
-            event.action,
-            event.status,
-            event.failure_count,
-            event.health_state
-        )
-    } else {
-        format!(
-            "req={} target={} model={} result={} next={} causeStatus={} failures={} health={}",
-            request_id,
-            provider,
-            event.model_id,
-            event.action,
-            next,
-            event.status,
-            event.failure_count,
-            event.health_state
-        )
-    };
+    let mut fields = format!(
+        "req={} target={} model={} result={} next={} causeStatus={} failures={} health={}",
+        request_id,
+        provider,
+        event.model_id,
+        event.action,
+        next,
+        event.status,
+        event.failure_count,
+        event.health_state
+    );
     if let Some(cooldown_until_ms) = event.cooldown_until_ms {
         fields.push_str(&format!(" cooldownUntilMs={cooldown_until_ms}"));
     }
@@ -346,19 +332,13 @@ pub(crate) fn colorize_v3_provider_failure_console_content(
         .map(format_v3_console_provider_key_label)
         .unwrap_or_else(|| "-".to_string());
     let mut colorized = content.to_string();
-    for token in [
-        format!("[switch from:{provider}]"),
-        format!("target={provider}"),
-    ] {
+    for token in [format!("target={provider}")] {
         colorized = colorized.replace(
             &token,
             &format!("{ANSI_ERROR_TEXT_WHITE}{token}{ANSI_ERROR_RED}"),
         );
     }
-    if event.next_provider_key.is_some() {
-        let token = format!("[switch to:{target}]");
-        colorized = colorized.replace(&token, &format!("{ANSI_RESET}{token}{ANSI_ERROR_RED}"));
-    } else if target != "-" {
+    if target != "-" {
         let token = format!("next={target}");
         colorized = colorized.replace(&token, &format!("{ANSI_RESET}{token}{ANSI_ERROR_RED}"));
     }

@@ -1785,19 +1785,13 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
     };
     let error_content = format_v3_provider_failure_console_content("req-provider-switch", &event);
     assert!(error_content.contains("❌ [provider-error]"));
-    assert!(error_content.contains("[switch to:minimax[key1].MiniMax-M3]"));
-    assert!(error_content.contains("[switch from:limited[key1].gpt-5.5]"));
+    assert!(error_content.contains("target=limited[key1].gpt-5.5"));
+    assert!(error_content.contains("next=minimax[key1].MiniMax-M3"));
+    assert!(!error_content.contains("[switch to:"));
+    assert!(!error_content.contains("[switch from:"));
     assert!(error_content.contains("result=switch_provider"));
     assert!(
-        error_content
-            .find("[switch to:minimax[key1].MiniMax-M3]")
-            .unwrap()
-            < error_content.find("causeStatus=502").unwrap()
-    );
-    assert!(
-        error_content
-            .find("[switch from:limited[key1].gpt-5.5]")
-            .unwrap()
+        error_content.find("target=limited[key1].gpt-5.5").unwrap()
             < error_content.find("causeStatus=502").unwrap()
     );
     assert!(error_content.contains("failures=3"));
@@ -1817,10 +1811,10 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
 
     let inline_colored = colorize_v3_provider_failure_console_content(&error_content, &event);
     assert!(inline_colored.contains(&format!(
-        "{ANSI_ERROR_TEXT_WHITE}[switch from:limited[key1].gpt-5.5]{ANSI_ERROR_RED}"
+        "{ANSI_ERROR_TEXT_WHITE}target=limited[key1].gpt-5.5{ANSI_ERROR_RED}"
     )));
     assert!(inline_colored.contains(&format!(
-        "{ANSI_RESET}[switch to:minimax[key1].MiniMax-M3]{ANSI_ERROR_RED}"
+        "{ANSI_RESET}next=minimax[key1].MiniMax-M3{ANSI_ERROR_RED}"
     )));
     assert!(inline_colored.contains(&format!(
         "{ANSI_ERROR_TEXT_WHITE}causeStatus=502{ANSI_ERROR_RED}"
@@ -1933,7 +1927,7 @@ fn realtime_provider_failure_sink_prints_before_final_and_final_dedupes() {
         .lines()
         .find(|line| {
             line.contains("❌ [provider-error]")
-                && line.contains("[switch from:first[key].gpt-5.5]")
+                && line.contains("target=first[key].gpt-5.5")
         })
         .unwrap_or_else(|| {
             panic!("missing provider-error line for failed provider: {after_realtime}")
@@ -1947,12 +1941,13 @@ fn realtime_provider_failure_sink_prints_before_final_and_final_dedupes() {
         "provider failure line must not be displayed under the next provider target: {provider_error_line}"
     );
     assert!(
-        provider_error_line.contains("[switch to:second[key].gpt-5.5]"),
-        "provider failure line must label the selected next provider: {provider_error_line}"
+        provider_error_line.contains("next=second[key].gpt-5.5")
+            && !provider_error_line.contains("[switch "),
+        "provider failure line must preserve the selected next target without switch labels: {provider_error_line}"
     );
     assert_eq!(
         after_realtime
-            .matches("[switch from:first[key].gpt-5.5]")
+            .matches("target=first[key].gpt-5.5")
             .count(),
         1,
         "one provider switch must emit one failed-provider line: {after_realtime}"
