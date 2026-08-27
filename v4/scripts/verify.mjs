@@ -37,6 +37,10 @@ for (const gate of ARCHITECTURE_GATES) {
   run(`node scripts/architecture/${gate}`);
 }
 
+// The control-event lifecycle gate is a Rust owner gate, so invoke its
+// positive/negative suite explicitly in the canonical admission path.
+run('cargo test -p routecodex-v4-control --locked --offline');
+
 for (const [consumer, deps, ...extra] of CONSUMER_REGRESSIONS) {
   const extraArgs = extra.length > 0 ? ` ${extra.join(' ')}` : '';
   run(
