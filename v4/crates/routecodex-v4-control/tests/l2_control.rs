@@ -219,8 +219,11 @@ fn every_control_domain_uses_event_lifecycle() {
             .register(ControlSignal::new(kind, &key, "sha256:event", scope.clone(), None))
             .unwrap();
         assert_eq!(center.consume(&key).unwrap().kind, kind);
+        center.release(&key).unwrap();
+        assert!(matches!(center.consume(&key), Err(ControlError::ConsumeAfterRelease)));
+        assert!(matches!(center.release(&key), Err(ControlError::AlreadyReleased)));
     }
-    assert_eq!(center.records().count(), kinds.len() * 2);
+    assert_eq!(center.records().count(), kinds.len() * 3);
 }
 
 #[test]

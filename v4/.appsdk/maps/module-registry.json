@@ -156,6 +156,7 @@
       ],
       "verification_gates": [
         "v4_control_l2_regression",
+        "v4_control_event_domains",
         "v4_parity_gate_resource_binding",
         "fix_lifecycle_graph",
         "mainline_merge_identity",
