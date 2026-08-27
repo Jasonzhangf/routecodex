@@ -836,45 +836,6 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
-- resource_id: v4.continuation.local_context
-  axis: control
-  verification_gate:
-  - v4_runtime_l2_regression
-  - v4_parity_gate_plane_isolation
-  resource_kind: continuation_context_store
-  lifecycle: v4.continuation.relay_local_materialization
-  owner_crate: routecodex-v4-runtime
-  owner_node: V4HubRespChatProcess03Governed
-  owner_symbols:
-  - LocalContinuationStore
-  - LocalContinuationRecord
-  identity:
-  - entryProtocol
-  - continuationOwner
-  - port
-  - sessionScope
-  - conversationScope
-  - responseId
-  semantic_contract:
-    ordered_context_immutable_between_commit_and_restore: true
-    exact_response_locator_required: true
-    control_plane_only: true
-  allowed_writers:
-  - V4HubRespChatProcess03Governed
-  - LocalContinuationStore::commit
-  - LocalContinuationStore::rotate
-  - LocalContinuationStore::release
-  allowed_readers:
-  - V4HubReqChatProcess04Governed
-  - LocalContinuationStore::load
-  forbidden_writers:
-  - V4HubReqInbound03Normalized
-  - V4ProviderReqCompat06Compat
-  - V4HubRespOutbound04ClientSemantic
-  - V4ServerRespOutbound06ClientFrame
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  binding_status: anchored
 - resource_id: v4.control.stopless_state
   axis: control
   verification_gate:
@@ -2447,7 +2408,6 @@ resources:
   - ProviderRawResponse
   - send_responses
   - send_responses_streaming
-  - build_responses_local_continuation_wire
   identity:
   - requestId
   - providerId
