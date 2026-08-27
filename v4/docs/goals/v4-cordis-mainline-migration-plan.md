@@ -136,3 +136,17 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 旧 governance candidate/evidence 只作不可消费审计历史。当前 candidate、manifest、evidence 必须从 `v4-cordis` 当前 Git tree 重新生成，禁止复制 ignored Active、伪造 artifact、allowlist、fallback 或放宽 drift gate。
 
 本地 continuation 已退役：只保留 direct provider-owned Responses continuation；local/relay continuation、seed、context materialization、restore/save store 必须物理不存在；`responses + relay/local previous_response_id` 必须在 owning boundary fail-fast。
+
+## 9. AppSDK 阻塞自解决合同（master 必须执行）
+
+AppSDK admission / Active artifact / record graph 不是外部依赖，也不是可向 Jason 转交的 blocker；它们属于本重构 master 的明确交付范围。出现 `ACTIVE_ARTIFACT_MISSING`、`ARTIFACT_MODULE_MISMATCH`、`MISSING_RECORD:module-artifact`、`CANDIDATE_*_DRIFT`、`EXPIRED_EVIDENCE_RECORD`、`ACTIVE_INDEX_MISSING` 或 merge/integration identity drift 时，master 必须在 `v4-cordis` 当前 tree 内追踪并修复唯一 `appsdk::lifecycle` / `appsdk::record_graph` owner flow。
+
+禁止把上述失败仅汇报为 blocker、等待旧 worker、要求 Jason 代为生成 artifact，或消费其他 tree 的 ignored 输出。master 必须：
+
+1. 从当前 `v4-cordis` HEAD 重建 candidate source/tree identity、evidence、review、promotion、regression、freeze、module artifact、Active current record；
+2. 撤销/移除不属于当前 tree 的旧 candidate、integration、merge-queue 记录，禁止改 hash、改日期、复制、软链或手写旧 artifact 冒充新治理；
+3. 依次执行并留存证据：`appsdk verify .` → `appsdk verify --admission .` → 合法 compile/promote/freeze/publish-active → build-link `gen-index` → `verify-index`；
+4. 若 CLI 或 owner flow 本身拒绝当前合法 candidate，master 必须修复其真实 owner 输入/记录图或在当前 tree 提交最小根因修复，再重新执行全链；不得修改 gate 期望绕过；
+5. 只有 Active/index 的 `source_commit`、tree hash、artifact hash、public API hash 与当前 `v4-cordis` HEAD 全部一致后，才允许继续 isolation、build、install、restart、live replay 和 AGY。
+
+AppSDK 阻塞的完成信号：当前 tree `appsdk verify --admission .` PASS，Active artifact 与 index 可由 canonical resolver 验证，且所有治理记录均绑定当前 candidate；任何历史 candidate/evidence 只可作为审计背景，不得作为输入。
