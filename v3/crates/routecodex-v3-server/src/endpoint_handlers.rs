@@ -13,11 +13,15 @@ fn v3_front_chunk_is_transport_keepalive(bytes: &[u8]) -> bool {
 }
 
 fn v3_front_json_body_to_sse_frame(bytes: &[u8]) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(bytes.len() + 8);
-    frame.extend_from_slice(b"data: ");
-    frame.extend_from_slice(bytes);
-    frame.extend_from_slice(b"\n\n");
-    frame
+    let value = serde_json::from_slice::<Value>(bytes).unwrap_or_else(|_| {
+        json!({"error": {"code": "front_json_error", "message": "invalid JSON error body"}})
+    });
+    let error = value.get("error").cloned().unwrap_or(value);
+    let event = json!({
+        "type": "response.failed",
+        "response": {"status": "failed", "error": error}
+    });
+    format!("event: response.failed\ndata: {event}\n\n").into_bytes()
 }
 
 pub(crate) fn v3_front_sse_worker_panic_frame(message: &str) -> Vec<u8> {
@@ -33,11 +37,7 @@ pub(crate) fn v3_front_sse_worker_panic_frame(message: &str) -> Vec<u8> {
         panic!("Front worker panic must project JSON Error06 body");
     };
     let bytes = serde_json::to_vec(&value).expect("typed Front worker panic Error06 projection");
-    let mut sse_frame = Vec::with_capacity(bytes.len() + 24);
-    sse_frame.extend_from_slice(b"data: ");
-    sse_frame.extend_from_slice(&bytes);
-    sse_frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
-    sse_frame
+    v3_front_json_body_to_sse_frame(&bytes)
 }
 
 pub(crate) async fn pending_endpoint_after_responses_admission(
@@ -163,11 +163,7 @@ impl V3FrontSseAcceptSkeleton {
                             };
                             let bytes = serde_json::to_vec(&value)
                                 .expect("typed Front response Error06 projection");
-                            let mut sse_frame = Vec::with_capacity(bytes.len() + 8);
-                            sse_frame.extend_from_slice(b"data: ");
-                            sse_frame.extend_from_slice(&bytes);
-                            sse_frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
-                            let _ = tx.send(Ok(sse_frame)).await;
+                            let _ = tx.send(Ok(v3_front_json_body_to_sse_frame(&bytes))).await;
                             return;
                         }
                     }
@@ -201,11 +197,7 @@ impl V3FrontSseAcceptSkeleton {
                     };
                     let bytes = serde_json::to_vec(&value)
                         .expect("typed Front empty response Error06 projection");
-                    let mut sse_frame = Vec::with_capacity(bytes.len() + 8);
-                    sse_frame.extend_from_slice(b"data: ");
-                    sse_frame.extend_from_slice(&bytes);
-                    sse_frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
-                    let _ = tx.send(Ok(sse_frame)).await;
+                    let _ = tx.send(Ok(v3_front_json_body_to_sse_frame(&bytes))).await;
                 }
             };
             if let Err(payload) = AssertUnwindSafe(worker).catch_unwind().await {
@@ -1861,7 +1853,7 @@ mod front_sse_contract_tests {
         let frame = v3_front_sse_worker_panic_frame("worker panic");
         assert_eq!(
             frame,
-            b"data: {\"error\":{\"code\":\"front_sse_worker_panicked\",\"message\":\"worker panic\"}}\n\ndata: [DONE]\n\n"
+            b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"front_sse_worker_panicked\",\"message\":\"worker panic\"},\"status\":\"failed\"},\"type\":\"response.failed\"}\n\n"
         );
     }
 
@@ -1880,7 +1872,7 @@ mod front_sse_contract_tests {
     fn front_json_error_is_projected_as_one_sse_data_frame() {
         assert_eq!(
             v3_front_json_body_to_sse_frame(br#"{"error":{"code":"internal"}}"#),
-            b"data: {\"error\":{\"code\":\"internal\"}}\n\n"
+            b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"internal\"},\"status\":\"failed\"},\"type\":\"response.failed\"}\n\n"
         );
     }
 

@@ -343,10 +343,13 @@ pub(super) async fn execute_responses_direct_server_outcome(
         Some(json!({"status": output.client_payload.status})),
     ) {
         return V3ResponsesDirectServerOutcome::DirectFrame(
-            build_v3_server_16_http_frame_from_v3_foundation_output(project_v3_debug_failure(
-                "V3Server16HttpFrame",
-                error,
-            )),
+            project_v3_responses_direct_stream_error_frame_if_requested(
+                build_v3_server_16_http_frame_from_v3_foundation_output(project_v3_debug_failure(
+                    "V3Server16HttpFrame",
+                    error,
+                )),
+                requested_stream,
+            ),
         );
     }
     let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(
