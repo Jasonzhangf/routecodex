@@ -50,6 +50,7 @@ fn temp_fixture(tag: &str) -> PathBuf {
 }
 
 fn install_protected_version(root: &Path, module_id: &str, version: &str) {
+    let fixture = fixture_root();
     let project = v4_root();
     let protected = project.join("protected/history").join(module_id);
     let active = root.join("active/lib").join(module_id).join(version);
@@ -68,7 +69,7 @@ fn install_protected_version(root: &Path, module_id: &str, version: &str) {
     ] {
         let record_name = format!("{record_kind}-{module_id}.json");
         fs::copy(
-            project.join(".appsdk/records").join(&record_name),
+            fixture.join(".appsdk/records").join(&record_name),
             root.join(".appsdk/records").join(record_name),
         )
         .expect("copy current record graph");
