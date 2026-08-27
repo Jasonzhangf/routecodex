@@ -318,7 +318,7 @@
       {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:7be75f404fbd1f510c6497f0bef8ab0b0292307a148478650903d1a81f5b577d"}
     ],
     "wiring_started": true,
-    "wiring_edges": ["surface:crates/routecodex-v4-runtime-bin/**:sha256:b41d13a123a6d9b6e38281fa535143de683938d875d74f4bf895d6301d59da6e"],
+    "wiring_edges": ["added:mainline:undefined:routecodex-v4-plugin-catalog->routecodex-v4-cordis-host:routecodex-v4-cordis-host::createCordisPluginFactory","surface:crates/routecodex-v4-runtime-bin/**:sha256:7542a013da66a3e0593967f6b2245bbb76d21ce49396bd260e42609979cb19f8","surface:docs/architecture/maps/mainline-call-map.json:sha256:1f6680281eac0bcba954622d9c937a7f55a0a79535345bdc770ff93ae5324374"],
     "resource_refs": {
       "merge_queue_state": ".appsdk/records/merge-queue-state.json",
       "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"

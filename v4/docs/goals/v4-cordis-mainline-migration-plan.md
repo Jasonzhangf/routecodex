@@ -24,7 +24,7 @@
 4. 数据 payload 不经过 Cordis event bus；routing、switching、continuation、retry、health、debug、snapshot、error、scope、servertool/stopless 控制语义不进入正常 payload、协议 metadata、provider body 或 client body。
 5. `runtime-bin` 不拥有生产路由、provider、retry、continuation、tool、协议 projection 业务编排，不维护第二套 plugin graph/registry/NodeContainer。
 6. Responses、Chat、Anthropic、Gemini、WebSocket 与保留 tools/servertool/stopless 功能完成 differential pass、live pass，并具备 prepare/commit/abort/drain/rollback、canary、审计和 release evidence。
-7. 每个 milestone 都有独立 claim/branch/worktree、red/green/build/evidence，精确合并到 V4 重构主树；milestone 完成后再合并仓库 `main`，在 `main` 复验并同步后才能开始下一 milestone。
+7. 每个 milestone 都有独立 claim/branch/worktree、red/green/build/evidence，精确合并到独立 `v4-cordis` 主树；不得合入仓库 `main` 或旧 `codex/v4-cordis-refactor-main`，同步 `v4-cordis` 后才能开始下一 milestone。
 
 ## 2. 范围与硬边界
 
@@ -106,8 +106,8 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 4. 完成定向测试、locked build，以及适用时的全局安装、聚合 `routecodex restart`、全部成员 health、在线旧样本 replay；写入 evidence.jsonl。
 5. checker 核对 change set、dirty 文件、owner 边界、相邻调用边、payload/control isolation、无 fallback/重复实现和 evidence；通过后写 merge queue。
 6. 只把声明 change set 精确合并到 `codex/v4-cordis-refactor-main`，在重构主树运行受影响 gates。主树复验失败时不得推进依赖 task。
-7. 一个 milestone 的全部 task 合并且主树复验通过后，才把 V4 重构主树整体精确合并仓库 `main`；在仓库 `main` 复验，并让 V4 重构主树同步新的 `main`。
-8. 下一 milestone 只能从同步后的已验证 `main` 创建新 claim/worktree；不得从旧 branch/worktree 开始。
+7. 一个 milestone 的全部 task 合并且 `v4-cordis` 主树复验通过后，才关闭该 milestone；不得把重构提交合入仓库 `main`。
+8. 下一 milestone 只能从同步后的已验证 `v4-cordis` 创建新 claim/worktree；不得从旧 branch/worktree 开始。
 
 ## 6. 必须证据与正反测试
 
