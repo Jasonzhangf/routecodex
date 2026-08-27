@@ -29,11 +29,4 @@ provider transport bytes -> provider protocol normalization
 
 The provider owns transport and raw bytes only. Runtime owns semantic frame decisions and continuation/error control. Server owns client framing and backpressure. The SSE stream does not publish frames to the Cordis event bus and does not read client metadata as control state.
 
-Payload bytes remain complete. Native async provider chunks use shared `Bytes` ownership and bounded splitting; no payload fields are removed to reduce allocation. Any remaining `Vec` materialization is at a boundary that must outlive the source buffer and is covered by stream integrity tests.
-
-Required regressions:
-
-- provider async stream: chunk cap, concatenation equality, deadline, cancellation, bounded overflow;
-- runtime-bin SSE: normal terminal, malformed frame, provider read failure, premature EOF, client projection;
-- server stream: bounded writes and client disconnect cancellation;
-- control plane: all ten typed domains plus payload/metadata leakage negatives.
+Payload bytes remain complete. Native async provider chunks use shared `Bytes` ownership and bounded splitting; no payload fields are removed to reduce allocation. The changed provider test directly proves chunk-cap and concatenation equality; runtime-bin and server stream behavior remain covered by their existing focused suites. Control-plane coverage is the ten-domain lifecycle test plus payload/metadata leakage negatives.
