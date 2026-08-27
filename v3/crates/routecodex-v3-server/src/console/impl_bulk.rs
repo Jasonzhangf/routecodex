@@ -1,4 +1,4 @@
-use crate::webui_observability::{build_v3_obs_request_key, V3ObsEventType};
+use crate::webui_observability::V3ObsEventType;
 use crate::*;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -59,8 +59,15 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
     let identity = context.identity.clone();
     let route = resolve_v3_console_route_projection(observability);
     for event in &observability.provider_failure_events {
+        let already_projected = context
+            .realtime_provider_failure_event_keys
+            .lock()
+            .expect("V3 console provider-failure dedupe mutex poisoned")
+            .contains(&format_v3_provider_failure_console_event_key(event));
         emit_v3_provider_failure_console_event(context, observability, event);
-        record_v3_webui_provider_failure(context, event);
+        if !already_projected {
+            record_v3_webui_provider_failure(context, observability, event);
+        }
         if event.health_state == "cooldown" {
             context
                 .state
@@ -169,17 +176,10 @@ pub(crate) fn build_v3_provider_failure_event_sink(
     let context = context.clone();
     Arc::new(move |observability, event| {
         emit_v3_provider_failure_console_event(&context, observability, event);
-        // Typed WebUI projection: provider attempt failed (typed side-channel).
-        if let Err(error) = record_v3_webui_event_for_context(
-            &context,
-            V3ObsEventType::ProviderAttemptFailed,
-            observability,
-        ) {
-            emit_v3_webui_projection_failure(&context, &error);
-        }
         // Typed WebUI projection: persist the raw HTTP status (e.g. 502/503)
-        // into the JSONL row so error facets and the requests table show it.
-        record_v3_webui_provider_failure(&context, event);
+        // into the non-terminal attempt event so error facets and the requests
+        // table show it without closing the request lifecycle.
+        record_v3_webui_provider_failure(&context, observability, event);
         // Typed WebUI projection: provider switched (mirrors the console
         // switch_provider discriminator; only when a next provider was chosen).
         if event.action == "switch_provider" && event.next_provider_key.is_some() {

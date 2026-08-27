@@ -1979,6 +1979,78 @@ fn realtime_provider_failure_sink_prints_before_final_and_final_dedupes() {
 }
 
 #[test]
+fn provider_attempt_failure_does_not_close_webui_request_before_terminal_error() {
+    let log_file = test_v3_console_log_file("provider-failure-nonterminal-lifecycle");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 7777);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-provider-nonterminal",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let sink = build_v3_provider_failure_event_sink(&context);
+    let first = test_provider_failure_observation();
+    let first_observability = test_direct_observability(vec![first.clone()]);
+    sink(&first_observability, &first);
+
+    let row = state
+        .webui_observability
+        .rows()
+        .unwrap()
+        .remove("7777:req-provider-nonterminal")
+        .expect("provider attempt row");
+    assert_eq!(
+        row.result, None,
+        "provider attempt must remain non-terminal"
+    );
+    assert_eq!(row.failed_attempts, 1);
+    assert!(
+        row.meta.error_category.is_some(),
+        "attempt keeps error code"
+    );
+
+    let mut second = first.clone();
+    second.provider_key = "second:key:gpt-5.5".to_string();
+    second.next_provider_key = None;
+    second.action = "provider_exhausted".to_string();
+    sink(&test_direct_observability(vec![second.clone()]), &second);
+    let row = state
+        .webui_observability
+        .rows()
+        .unwrap()
+        .remove("7777:req-provider-nonterminal")
+        .expect("provider retry row");
+    assert_eq!(row.result, None, "all attempts precede terminal Error06");
+    assert_eq!(row.failed_attempts, 2);
+    assert!(
+        !std::fs::read_to_string(&log_file)
+            .unwrap()
+            .contains("already terminal; refusing request.provider_attempt_failed"),
+        "provider attempts must not be projected after a premature terminal row"
+    );
+
+    let body = json!({"error":{"code":"provider_pool_exhausted","message":"exhausted"}});
+    record_v3_webui_error_for_context(&context, 502, Some(&body)).unwrap();
+    let row = state
+        .webui_observability
+        .rows()
+        .unwrap()
+        .remove("7777:req-provider-nonterminal")
+        .expect("terminal error row");
+    assert_eq!(row.result.as_deref(), Some("error"));
+    assert_eq!(row.failed_attempts, 2);
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("provider_pool_exhausted")
+    );
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[test]
 fn cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_lines() {
     let log_file = test_v3_console_log_file("provider-cooldown-transition");
     let _ = std::fs::remove_file(&log_file);

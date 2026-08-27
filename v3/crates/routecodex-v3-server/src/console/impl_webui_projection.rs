@@ -134,25 +134,43 @@ pub(crate) fn record_v3_webui_started_for_context(context: &V3ConsoleEmissionCon
     )
 }
 
-/// Map a provider_failure observation into a typed WebUI error projection so
-/// every switch/error event lands in the persisted JSONL row. Returns true
-/// when a projection was attempted (success or recorded error).
+/// Map a provider_failure observation into a typed, non-terminal WebUI attempt
+/// event. The final Error06 projection remains the only terminal error owner.
 pub(crate) fn record_v3_webui_provider_failure(
     context: &V3ConsoleEmissionContext,
+    observability: &V3RuntimeObservability,
     event: &V3RuntimeProviderFailureObservation,
 ) -> bool {
     let status = event.status;
-    let body = serde_json::json!({
-        "error": {
-            "code": event
-                .error_type
-                .clone()
-                .or_else(|| event.external_error_code.clone())
-                .unwrap_or_else(|| format!("http_{status}")),
-            "message": event.message.clone(),
-        }
-    });
-    if let Err(error) = record_v3_webui_error_for_context(context, status, Some(&body)) {
+    let request_key = build_v3_obs_request_key(
+        context.state.server.port,
+        &context.request_identity.request_id,
+    );
+    let scope = V3ObsScope {
+        port: context.state.server.port,
+        workdir: context.identity.project_path.clone(),
+        session: Some(context.identity.session_id.clone()),
+    };
+    let mut meta = build_v3_webui_meta_for_context(context, observability);
+    meta.provider_status = Some(status);
+    meta.response_status = Some("error".to_string());
+    meta.finish_reason = Some("error".to_string());
+    meta.error_category = Some(
+        event
+            .error_type
+            .clone()
+            .or_else(|| event.external_error_code.clone())
+            .unwrap_or_else(|| format!("http_{status}")),
+    );
+    meta.error_detail = Some(event.message.clone());
+    if let Err(error) = record_v3_observability_event(
+        &context.state.webui_observability,
+        V3ObsEventType::ProviderAttemptFailed,
+        &request_key,
+        scope,
+        meta,
+        &crate::V3RuntimeObservability::default(),
+    ) {
         emit_v3_webui_projection_failure(context, &error);
         return false;
     }
