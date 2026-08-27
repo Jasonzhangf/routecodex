@@ -555,12 +555,17 @@
         chart.replaceChildren(el("div", "empty-chart muted", "no data in selected range"));
         return;
       }
+      const chartHeight = Math.max(160, chart.clientHeight || 0);
+      const axisHeight = 18;
+      const barArea = Math.max(40, chartHeight - axisHeight - 8);
       const maximum = Math.max(...buckets.map((bucket) => Number(bucket[metric] || 0)), 1);
       const bars = buckets.map((bucket) => {
         const value = Number(bucket[metric] || 0);
         const column = el("div", "bar-column");
+        column.style.height = `${chartHeight}px`;
         const bar = el("div", "bar");
-        bar.style.height = `${Math.max(1, Math.round((value / maximum) * 100))}%`;
+        const heightPx = Math.max(2, Math.round((value / maximum) * barArea));
+        bar.style.height = `${heightPx}px`;
         bar.title = `${bucket.date}: ${value.toLocaleString()} (${bucket.count.toLocaleString()} requests)`;
         const label = el("span", "axis", bucket.date.slice(5));
         label.title = bucket.date;
@@ -579,6 +584,7 @@
     }
 
     function renderAll() {
+      renderStats(state.stats);
       renderStatsCards();
       renderTimeseries();
       renderRequests();
