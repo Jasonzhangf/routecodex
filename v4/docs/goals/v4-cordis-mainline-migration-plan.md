@@ -116,3 +116,15 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 ## 7. 当前启动点
 
 首个执行单元是 M00。先完成本计划、ADR、合同、ratchet 和 canonical gate 闭包；在 M00 全部 task 合并并复验前，不得 claim M01/M03/D0/M08，也不得自动切换 V3。
+
+## 8. 并发执行合同（v4-cordis）
+
+`v4-cordis` 是唯一重构 branch/worktree。每个 milestone 必须拆成独立 subagent lane、独立 claim、独立 worktree；worker 只改 declared paths、写 evidence/handoff、提交并通知 master。master 只做审计、精确合并、主树复验、同步基线和关闭已合并 worktree。
+
+并发顺序：M00 合同/地图完成后，M01 Cordis host、M02 plugin plan/catalog、M03 NodeContainer/epoch 可并行；M04 ExecutionEngine 依赖 M02+M03；M05 request/response 依赖 M04；M06 async data plane 依赖 M05；M07 SSE 与 M08 router/error/health 在各自依赖满足后并行；M09 protocol/tools/admin 依赖 M07+M08；M10 parity/release 依赖 M09。
+
+每个 lane 必须先 red 后实现，完成模块边界审计、定向正反测试、locked build、必要安装/restart/health/live replay、AGY review，再写 merge queue。只允许精确合入 `v4-cordis`；主树复验通过且同步后才开放下一个依赖 milestone。
+
+旧 governance candidate/evidence 只作不可消费审计历史。当前 candidate、manifest、evidence 必须从 `v4-cordis` 当前 Git tree 重新生成，禁止复制 ignored Active、伪造 artifact、allowlist、fallback 或放宽 drift gate。
+
+本地 continuation 已退役：只保留 direct provider-owned Responses continuation；local/relay continuation、seed、context materialization、restore/save store 必须物理不存在；`responses + relay/local previous_response_id` 必须在 owning boundary fail-fast。
