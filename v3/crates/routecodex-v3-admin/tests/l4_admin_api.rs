@@ -166,6 +166,48 @@ fn write_observability_store(home: &std::path::Path) {
     std::fs::write(store_path, format!("{line}\n")).expect("observability store");
 }
 
+fn write_observability_rows(home: &std::path::Path, rows: &[serde_json::Value]) {
+    let store_path = home
+        .join("logs")
+        .join("server-v3-19999.request-records.jsonl");
+    std::fs::create_dir_all(store_path.parent().unwrap()).expect("logs dir");
+    let content = rows
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "schema_version": 1,
+                "row": row
+            })
+            .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(store_path, format!("{content}\n")).expect("observability store");
+}
+
+fn observability_row_with_result(request_key: &str, result: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "request_key": request_key,
+        "event_type": "request.completed",
+        "started_epoch_ms": 1,
+        "updated_epoch_ms": 3,
+        "finished_epoch_ms": 2,
+        "duration_ms": 10,
+        "meta": {},
+        "scope": {"port": 19999},
+        "result": result,
+        "attempts": 1,
+        "failed_attempts": 0,
+        "switches": 0,
+        "usage": {
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "cached_tokens": 50,
+            "total_tokens": 120
+        }
+    })
+}
+
 #[tokio::test]
 async fn overview_returns_runtime_state() {
     let (base, _state, _home) = bind_test_server().await;
@@ -434,4 +476,47 @@ async fn observability_records_group_terminal_errors_by_raw_status_code() {
         filtered_body["records"][0]["request_key"],
         "19999:req-source"
     );
+}
+
+#[tokio::test]
+async fn observability_stats_exclude_non_success_usage_but_keep_request_counts() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[
+            observability_row_with_result("19999:success", Some("success")),
+            observability_row_with_result("19999:error", Some("error")),
+            observability_row_with_result("19999:cancelled", Some("cancelled")),
+            observability_row_with_result("19999:active", None),
+        ],
+    );
+
+    let response = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("records response");
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await.expect("records json");
+    let stats = &body["stats"];
+    assert_eq!(stats["count"], 4);
+    assert_eq!(stats["success_count"], 1);
+    assert_eq!(stats["error_count"], 1);
+    assert_eq!(stats["cancelled_count"], 1);
+    assert_eq!(stats["active_count"], 1);
+    assert_eq!(stats["input_tokens"], 100);
+    assert_eq!(stats["output_tokens"], 20);
+    assert_eq!(stats["cached_tokens"], 50);
+    assert_eq!(stats["total_tokens"], 120);
+    assert_eq!(stats["cache_hit_rate_percent"], 50.0);
+    assert_eq!(stats["avg_duration_ms"], 10.0);
+
+    let timeseries = &body["timeseries"];
+    assert_eq!(timeseries[0]["count"], 4);
+    assert_eq!(timeseries[0]["input_tokens"], 100);
+    assert_eq!(timeseries[0]["output_tokens"], 20);
+    assert_eq!(timeseries[0]["cached_tokens"], 50);
+    assert_eq!(timeseries[0]["total_tokens"], 120);
 }

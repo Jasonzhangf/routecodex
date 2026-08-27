@@ -117,7 +117,9 @@ pub(crate) struct RecordsResponse {
     timeseries: Vec<TimeseriesBucket>,
 }
 
-use super::timeseries::{local_day_start, system_epoch_ms, TimeseriesBucket};
+use super::timeseries::{
+    local_day_start, system_epoch_ms, usage_is_countable, TimeseriesBucket,
+};
 
 impl RecordQuery {
     fn from_params(
@@ -590,6 +592,7 @@ async fn records(
         .map(|row| super::timeseries::TimeseriesRow {
             started_epoch_ms: row.started_epoch_ms,
             usage: row.usage.as_ref(),
+            result: row.result.as_deref(),
         })
         .collect();
     let timeseries = match super::timeseries::build_timeseries(
@@ -643,43 +646,52 @@ async fn records(
     let mut with_duration = 0u64;
     let mut total_token_count = 0;
     for row in &filtered {
-        input += row
-            .usage
-            .as_ref()
-            .and_then(|u| u.get("input_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        output += row
-            .usage
-            .as_ref()
-            .and_then(|u| u.get("output_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        cached += row
-            .usage
-            .as_ref()
-            .and_then(|u| u.get("cached_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        total_token_count += row
-            .usage
-            .as_ref()
-            .and_then(|u| u.get("total_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let row_input = row
-            .usage
-            .as_ref()
-            .and_then(|u| u.get("input_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let row_cached = row
-            .usage
-            .as_ref()
-            .and_then(|u| u.get("cached_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        cached_against_input += row_cached.min(row_input);
+        // Only successful terminal responses contribute usage, cache, and duration.
+        // Failed, cancelled, and still-running rows remain visible in counts/facets.
+        let is_success = usage_is_countable(row.result.as_deref());
+        if is_success {
+            input += row
+                .usage
+                .as_ref()
+                .and_then(|u| u.get("input_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            output += row
+                .usage
+                .as_ref()
+                .and_then(|u| u.get("output_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            cached += row
+                .usage
+                .as_ref()
+                .and_then(|u| u.get("cached_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            total_token_count += row
+                .usage
+                .as_ref()
+                .and_then(|u| u.get("total_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let row_input = row
+                .usage
+                .as_ref()
+                .and_then(|u| u.get("input_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let row_cached = row
+                .usage
+                .as_ref()
+                .and_then(|u| u.get("cached_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            cached_against_input += row_cached.min(row_input);
+            if let Some(duration) = row.duration_ms {
+                durations += duration;
+                with_duration += 1;
+            }
+        }
         match row.result.as_deref() {
             Some("success") => {
                 stats["success_count"] = json!(stats["success_count"].as_u64().unwrap_or(0) + 1);
@@ -700,10 +712,6 @@ async fn records(
         if failed_attempts > 0 {
             stats["provider_failure_count"] =
                 json!(stats["provider_failure_count"].as_u64().unwrap_or(0) + failed_attempts);
-        }
-        if let Some(duration) = row.duration_ms {
-            durations += duration;
-            with_duration += 1;
         }
         facet_add(&mut facets, "ports", Some(&row.scope.port.to_string()));
         facet_add(

@@ -19,6 +19,11 @@ pub(crate) struct TimeseriesBucket {
 pub(crate) struct TimeseriesRow<'a> {
     pub started_epoch_ms: u64,
     pub usage: Option<&'a Value>,
+    pub result: Option<&'a str>,
+}
+
+pub(crate) fn usage_is_countable(result: Option<&str>) -> bool {
+    result == Some("success")
 }
 
 pub(crate) fn system_epoch_ms() -> Result<u64, String> {
@@ -72,13 +77,6 @@ pub(crate) fn build_timeseries(
     let mut buckets = BTreeMap::new();
     for row in rows {
         let date = utc_date_for_local_day(row.started_epoch_ms, timezone_offset_minutes);
-        let usage = row.usage;
-        let token = |name: &str| {
-            usage
-                .and_then(|usage| usage.get(name))
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-        };
         let bucket = buckets.entry(date).or_insert(TimeseriesBucket {
             date: String::new(),
             count: 0,
@@ -88,10 +86,21 @@ pub(crate) fn build_timeseries(
             total_tokens: 0,
         });
         bucket.count += 1;
-        bucket.input_tokens += token("input_tokens");
-        bucket.output_tokens += token("output_tokens");
-        bucket.cached_tokens += token("cached_tokens");
-        bucket.total_tokens += token("total_tokens");
+        // Token sums follow the same aggregate rule as the records stats: only
+        // successful terminal responses have billable/cacheable usage.
+        if usage_is_countable(row.result) {
+            let usage = row.usage;
+            let token = |name: &str| {
+                usage
+                    .and_then(|usage| usage.get(name))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+            };
+            bucket.input_tokens += token("input_tokens");
+            bucket.output_tokens += token("output_tokens");
+            bucket.cached_tokens += token("cached_tokens");
+            bucket.total_tokens += token("total_tokens");
+        }
     }
     if range != "all" {
         let now_ms = system_epoch_ms()?;
@@ -171,5 +180,82 @@ mod tests {
         assert_eq!(bucket.cached_tokens, 100);
         assert_eq!(bucket.total_tokens, 404);
         assert!(bucket.date.matches('-').count() == 2);
+    }
+
+    #[test]
+    fn timeseries_only_success_rows_contribute_usage() {
+        let now_ms = system_epoch_ms().unwrap();
+        let day_start = local_day_start(now_ms, 0);
+        let success_usage = json!({
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cached_tokens": 30,
+            "total_tokens": 150
+        });
+        let error_usage = json!({
+            "input_tokens": 999,
+            "output_tokens": 999,
+            "cached_tokens": 999,
+            "total_tokens": 999
+        });
+        let rows = vec![
+            TimeseriesRow {
+                started_epoch_ms: day_start + 1000,
+                usage: Some(&success_usage),
+                result: Some("success"),
+            },
+            TimeseriesRow {
+                started_epoch_ms: day_start + 2000,
+                usage: Some(&error_usage),
+                result: Some("error"),
+            },
+            TimeseriesRow {
+                started_epoch_ms: day_start + 3000,
+                usage: Some(&error_usage),
+                result: None,
+            },
+        ];
+
+        let buckets = build_timeseries(&rows, "today", 0).unwrap();
+        assert_eq!(buckets.len(), 1);
+        let bucket = &buckets[0];
+        assert_eq!(bucket.count, 3);
+        assert_eq!(bucket.input_tokens, 100);
+        assert_eq!(bucket.output_tokens, 50);
+        assert_eq!(bucket.cached_tokens, 30);
+        assert_eq!(bucket.total_tokens, 150);
+    }
+
+    #[test]
+    fn timeseries_cancelled_rows_do_not_contribute_usage() {
+        let now_ms = system_epoch_ms().unwrap();
+        let day_start = local_day_start(now_ms, 0);
+        let usage = json!({
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "cached_tokens": 1,
+            "total_tokens": 2
+        });
+        let rows = vec![
+            TimeseriesRow {
+                started_epoch_ms: day_start + 1000,
+                usage: Some(&usage),
+                result: Some("cancelled"),
+            },
+            TimeseriesRow {
+                started_epoch_ms: day_start + 2000,
+                usage: Some(&usage),
+                result: None,
+            },
+        ];
+
+        let buckets = build_timeseries(&rows, "today", 0).unwrap();
+        assert_eq!(buckets.len(), 1);
+        let bucket = &buckets[0];
+        assert_eq!(bucket.count, 2);
+        assert_eq!(bucket.input_tokens, 0);
+        assert_eq!(bucket.output_tokens, 0);
+        assert_eq!(bucket.cached_tokens, 0);
+        assert_eq!(bucket.total_tokens, 0);
     }
 }
