@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// v4-cordis parity candidate binding.
 // Candidate boundary: ledger validation remains source-only until wiring.
 import fs from 'node:fs';
 import path from 'node:path';
