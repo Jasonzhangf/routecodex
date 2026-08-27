@@ -691,6 +691,7 @@ impl ActiveEpochStore {
         self.active_snapshot().ok_or(EpochError::LeaseUnavailable)
     }
 
+    /// Opens a single immutable epoch transaction; callers must explicitly commit or abort.
     pub fn prepare(
         &self,
         transaction_id: impl Into<String>,

@@ -251,4 +251,5 @@ fn transaction_abort_and_rollback_are_explicit_and_do_not_fallback() {
         store.commit("rollback"),
         Err(EpochError::InvalidTransactionState { .. })
     ));
+    assert_eq!(store.active_snapshot().unwrap().plan_epoch, 5);
 }
