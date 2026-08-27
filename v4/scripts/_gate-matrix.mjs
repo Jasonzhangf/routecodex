@@ -38,6 +38,12 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-real-runtime-admission.mjs',
 ];
 
+// Rust-owner gates are executed by verify.mjs alongside script gates. Keeping
+// the identifiers here lets isolation verify declared/executed parity too.
+export const RUST_GATES = [
+  'v4_control_event_domains',
+];
+
 export const RED_SUITES = [
   ['verify-v4-cordis-bridge.mjs', '--red-self-test'],
   ['verify-v4-execution-binding.mjs', '--red-self-test'],
