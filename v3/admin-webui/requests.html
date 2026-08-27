@@ -621,6 +621,7 @@
       const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
       if (state.page < pages) { state.page += 1; loadRecords(); }
     });
+    startAutoRefresh(() => loadRecords(), 5000);
     document.getElementById("drawer-cancel")?.addEventListener("click", closePanel);
     document.getElementById("drawer-close")?.addEventListener("click", closePanel);
 

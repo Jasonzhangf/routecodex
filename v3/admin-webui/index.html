@@ -205,6 +205,7 @@ function renderRevisions(data) {
 document.getElementById("refresh-btn").addEventListener("click", load);
 document.getElementById("reload-btn").addEventListener("click", reload);
 document.getElementById("drawer-cancel")?.addEventListener("click", closePanel);
+startAutoRefresh(load);
 load();
 </script>
 </body>
