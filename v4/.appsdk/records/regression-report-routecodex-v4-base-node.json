@@ -25,7 +25,7 @@
   "result": "pass",
   "scope_hash": "sha256:7d1e6dda7043dedd559eb5c13df6ae94d7c49165b54e4602ecbd29ad5c6c6de9",
   "skipped": 0,
-  "source_commit": "0ef7b916731963922f57e97aee176600c2282545",
+  "source_commit": "dad0742a457276d1ed8e9da2fe1f3c35b0bc4889",
   "suite_id": "v4-base-node-l0-regression",
   "test_characteristics": {
     "blackbox": true,
