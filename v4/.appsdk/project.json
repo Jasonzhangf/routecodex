@@ -69,7 +69,7 @@
     "zone_transition_contract": "contracts/transitions/zone-transition-manifest.json"
   },
   "lifecycle": {
-    "stage": "contract_bound"
+    "stage": "compiled"
   },
   "lifecycles": {
     "artifact": "generated",
