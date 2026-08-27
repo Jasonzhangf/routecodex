@@ -19,6 +19,7 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-relay-continuation.mjs',
   'verify-v4-resource-binding.mjs',
   'verify-v4-responses-direct-compat.mjs',
+  'verify-v4-responses-request.mjs',
   'verify-v4-product-differential.mjs',
   'verify-v4-product-parity-ledger.mjs',
   'verify-v4-product-parity-status.mjs',
