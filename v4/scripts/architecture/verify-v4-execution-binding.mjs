@@ -79,17 +79,14 @@ function validateCodeBinding(runtimeSource, skeletonSource) {
   if (!/execution_binding\(&self\.plan\)/.test(runtimeSource)) {
     problems.push('runtime: execution_binding() is not consumed by the chain runner');
   }
-  if (!/pub struct SkeletonRuntime\b/.test(runtimeSource)) {
-    problems.push('runtime: pub struct SkeletonRuntime missing (mainline executor is not implemented)');
+  for (const symbol of ['pub struct ExecutionEngine', 'pub struct NodeExecutionFrame', 'pub enum NodeOutcome']) {
+    if (!runtimeSource.includes(symbol)) problems.push(`runtime: ${symbol} missing`);
   }
-  if (!/pub struct NodePluginPlan\b/.test(runtimeSource)) {
-    problems.push('runtime: pub struct NodePluginPlan missing (compiled plan type is not implemented)');
+  if (!/pub fn execute\(/.test(runtimeSource) || !/\.execute\(\s*entrypoint/.test(runtimeSource)) {
+    problems.push('runtime: ExecutionEngine::execute is not consumed by the runtime path');
   }
-  if (!/pub static PLUGIN_REGISTRY\b/.test(runtimeSource)) {
-    problems.push('runtime: pub static PLUGIN_REGISTRY missing (plugin registry is not implemented)');
-  }
-  if (!/fn run_chain\(/.test(runtimeSource)) {
-    problems.push('runtime: run_chain() missing (chain execution path is not implemented)');
+  for (const forbidden of ['pub struct NodePluginPlan', 'pub struct NodeContainer', 'pub static PLUGIN_REGISTRY', 'fn run_chain(']) {
+    if (runtimeSource.includes(forbidden)) problems.push(`runtime: legacy execution owner remains (${forbidden})`);
   }
 
   if (!/pub struct SkeletonPlan\b/.test(skeletonSource)) {
@@ -108,8 +105,10 @@ function validateCodeBinding(runtimeSource, skeletonSource) {
 }
 
 function loadSource() {
+  const runtimeRoot = readText('crates/routecodex-v4-runtime/src/lib.rs');
+  const engine = readText('crates/routecodex-v4-runtime/src/execution_engine.rs');
   return {
-    runtime: readText('crates/routecodex-v4-runtime/src/lib.rs'),
+    runtime: `${runtimeRoot}\n${engine}`,
     skeleton: readText('crates/routecodex-v4-skeleton/src/lib.rs'),
   };
 }
@@ -119,18 +118,18 @@ function runSelfTest() {
   const nodeContainer = readJson('contracts/node-container.contract.json');
   const base = loadSource();
   const cases = [
-    ['runtime ExecutionBinding ghost', (s) => {
-      s.runtime = s.runtime.replace('pub struct ExecutionBinding', 'pub struct GhostBinding');
-    }, 'ExecutionBinding missing'],
-    ['binding field removed', (s) => {
-      s.runtime = s.runtime.replace('    pub plan_hash: String,', '');
-    }, 'missing field plan_hash'],
-    ['runtime execution_binding fn ghost', (s) => {
-      s.runtime = s.runtime.replace('pub fn execution_binding(', 'pub fn ghost_binding(');
-    }, 'execution_binding() missing'],
-    ['binding not consumed', (s) => {
-      s.runtime = s.runtime.replace('execution_binding(&self.plan)', 'ghost_binding(&self.plan)');
-    }, 'not consumed'],
+    ['execution engine removed', (s) => {
+      s.runtime = s.runtime.replace('pub struct ExecutionEngine', 'pub struct GhostEngine');
+    }, 'pub struct ExecutionEngine missing'],
+    ['node outcome removed', (s) => {
+      s.runtime = s.runtime.replace('pub enum NodeOutcome', 'pub enum GhostOutcome');
+    }, 'pub enum NodeOutcome missing'],
+    ['legacy registry reintroduced', (s) => {
+      s.runtime = `${s.runtime}\npub static PLUGIN_REGISTRY: &[()] = &[];`;
+    }, 'legacy execution owner remains'],
+    ['legacy container reintroduced', (s) => {
+      s.runtime = `${s.runtime}\npub struct NodeContainer;`;
+    }, 'legacy execution owner remains'],
     ['skeleton plan_hash ghost', (s) => {
       s.skeleton = s.skeleton.replace('pub fn plan_hash(', 'pub fn ghost_hash(');
     }, 'plan_hash() missing'],

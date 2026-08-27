@@ -480,6 +480,14 @@
       ]
     },
     {
+      "gate_id": "v4_execution_engine_l2_regression",
+      "command": "cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-runtime --test l2_execution_engine --locked",
+      "argv": ["cargo", "test", "--manifest-path", "v4/Cargo.toml", "-p", "routecodex-v4-runtime", "--test", "l2_execution_engine", "--locked"],
+      "producer": {"adapter": "cargo", "identity": "v4_execution_engine_l2_regression"},
+      "evidence_role": "execution_engine_positive_negative",
+      "required_for": ["routecodex-v4-runtime:architecture_stable", "V4-RUNTIME-002:source_green"]
+    },
+    {
       "gate_id": "v4_runtime_l2_regression",
       "command": "cargo build --release --manifest-path Cargo.toml --locked -p routecodex-v4-skeleton && cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-skeleton,routecodex-v4-plugin-contract",
       "required_for": [

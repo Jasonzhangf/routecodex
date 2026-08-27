@@ -1,7 +1,7 @@
 //! routecodex-v4-runtime — minimal skeleton runtime vertical slice (Phase 4).
 //!
 //! Owns:
-//! - `NodeContainer` + `NodePluginPlan` compiled from the immutable
+//! - protocol, continuation and resource views for the immutable
 //!   `SkeletonPlan` (owned by routecodex-v4-skeleton);
 //! - the typed carrier (`ExecutionContext` with data/control/information/
 //!   diagnostic views; Phase 7: MetadataCenter is owned by `control_view`);
@@ -27,19 +27,25 @@ use routecodex_v4_error::{
     RetryPolicy,
 };
 use routecodex_v4_skeleton::SkeletonPlan;
+use routecodex_v4_node_container::{
+    ActiveEpochStore, ActiveExecutionEpoch, ExecutionEpochIdentity, NodeContainer, PlanBindings,
+};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::{Arc, Mutex};
 
 mod control_resources;
+mod execution_engine;
 
 pub mod request_port;
 pub mod response_error_port;
 
 pub use control_resources::*;
+pub use execution_engine::{ExecutionEngine, ExecutionError, ExecutionNode, NodeExecutionFrame, NodeOutcome};
 // Single source of truth: `PluginKind` is owned by routecodex-v4-plugin-contract
 // (v4/contracts/node-plugin.contract.json kinds). The runtime never defines a
 // second plugin-kind taxonomy; it only re-exports the contract type.
@@ -1087,7 +1093,7 @@ pub struct RuntimeRegistries<'a> {
     pub local_continuation: &'a mut LocalContinuationStore,
 }
 
-pub trait NodePlugin: Send + Sync {
+trait RuntimeOperator: Send + Sync {
     fn plugin_id(&self) -> &'static str;
     fn kind(&self) -> PluginKind;
     fn execute(
@@ -1098,7 +1104,7 @@ pub trait NodePlugin: Send + Sync {
 }
 
 struct ProtocolParse;
-impl NodePlugin for ProtocolParse {
+impl RuntimeOperator for ProtocolParse {
     fn plugin_id(&self) -> &'static str {
         "protocol_parse"
     }
@@ -1128,7 +1134,7 @@ impl NodePlugin for ProtocolParse {
 }
 
 struct Normalize;
-impl NodePlugin for Normalize {
+impl RuntimeOperator for Normalize {
     fn plugin_id(&self) -> &'static str {
         "normalize"
     }
@@ -1151,7 +1157,7 @@ impl NodePlugin for Normalize {
 }
 
 struct InputValidate;
-impl NodePlugin for InputValidate {
+impl RuntimeOperator for InputValidate {
     fn plugin_id(&self) -> &'static str {
         "input_validate"
     }
@@ -1185,7 +1191,7 @@ impl NodePlugin for InputValidate {
 }
 
 struct ContinuationClassify;
-impl NodePlugin for ContinuationClassify {
+impl RuntimeOperator for ContinuationClassify {
     fn plugin_id(&self) -> &'static str {
         "continuation_classify"
     }
@@ -1229,7 +1235,7 @@ impl NodePlugin for ContinuationClassify {
 }
 
 struct ContinuationRestore;
-impl NodePlugin for ContinuationRestore {
+impl RuntimeOperator for ContinuationRestore {
     fn plugin_id(&self) -> &'static str {
         "continuation_restore"
     }
@@ -1289,7 +1295,7 @@ impl NodePlugin for ContinuationRestore {
 }
 
 struct Governance;
-impl NodePlugin for Governance {
+impl RuntimeOperator for Governance {
     fn plugin_id(&self) -> &'static str {
         "governance"
     }
@@ -1307,7 +1313,7 @@ impl NodePlugin for Governance {
 }
 
 struct ExecutionPlan;
-impl NodePlugin for ExecutionPlan {
+impl RuntimeOperator for ExecutionPlan {
     fn plugin_id(&self) -> &'static str {
         "execution_plan"
     }
@@ -1338,7 +1344,7 @@ impl NodePlugin for ExecutionPlan {
 }
 
 struct SemanticProjection;
-impl NodePlugin for SemanticProjection {
+impl RuntimeOperator for SemanticProjection {
     fn plugin_id(&self) -> &'static str {
         "semantic_projection"
     }
@@ -1360,7 +1366,7 @@ impl NodePlugin for SemanticProjection {
 }
 
 struct WireBuild;
-impl NodePlugin for WireBuild {
+impl RuntimeOperator for WireBuild {
     fn plugin_id(&self) -> &'static str {
         "wire_build"
     }
@@ -1383,7 +1389,7 @@ impl NodePlugin for WireBuild {
 }
 
 struct OutputValidate;
-impl NodePlugin for OutputValidate {
+impl RuntimeOperator for OutputValidate {
     fn plugin_id(&self) -> &'static str {
         "output_validate"
     }
@@ -1406,7 +1412,7 @@ impl NodePlugin for OutputValidate {
 }
 
 struct FrameParse;
-impl NodePlugin for FrameParse {
+impl RuntimeOperator for FrameParse {
     fn plugin_id(&self) -> &'static str {
         "frame_parse"
     }
@@ -1440,7 +1446,7 @@ impl NodePlugin for FrameParse {
 }
 
 struct JsonParse;
-impl NodePlugin for JsonParse {
+impl RuntimeOperator for JsonParse {
     fn plugin_id(&self) -> &'static str {
         "json_parse"
     }
@@ -1481,7 +1487,7 @@ impl NodePlugin for JsonParse {
 }
 
 struct ProtocolDecode;
-impl NodePlugin for ProtocolDecode {
+impl RuntimeOperator for ProtocolDecode {
     fn plugin_id(&self) -> &'static str {
         "protocol_decode"
     }
@@ -1502,7 +1508,7 @@ impl NodePlugin for ProtocolDecode {
 }
 
 struct ResponseGovernance;
-impl NodePlugin for ResponseGovernance {
+impl RuntimeOperator for ResponseGovernance {
     fn plugin_id(&self) -> &'static str {
         "response_governance"
     }
@@ -1520,7 +1526,7 @@ impl NodePlugin for ResponseGovernance {
 }
 
 struct ToolHarvest;
-impl NodePlugin for ToolHarvest {
+impl RuntimeOperator for ToolHarvest {
     fn plugin_id(&self) -> &'static str {
         "tool_harvest"
     }
@@ -1584,7 +1590,7 @@ impl NodePlugin for ToolHarvest {
 }
 
 struct ContinuationCommit;
-impl NodePlugin for ContinuationCommit {
+impl RuntimeOperator for ContinuationCommit {
     fn plugin_id(&self) -> &'static str {
         "continuation_commit"
     }
@@ -1894,7 +1900,7 @@ fn project_responses_event_to_chat(value: &Value) -> Value {
     })
 }
 
-impl NodePlugin for ClientSemanticProjection {
+impl RuntimeOperator for ClientSemanticProjection {
     fn plugin_id(&self) -> &'static str {
         "client_semantic_projection"
     }
@@ -1938,7 +1944,7 @@ impl NodePlugin for ClientSemanticProjection {
 }
 
 struct SseFrame;
-impl NodePlugin for SseFrame {
+impl RuntimeOperator for SseFrame {
     fn plugin_id(&self) -> &'static str {
         "sse_frame"
     }
@@ -1993,7 +1999,7 @@ impl NodePlugin for SseFrame {
 }
 
 struct FrameBuild;
-impl NodePlugin for FrameBuild {
+impl RuntimeOperator for FrameBuild {
     fn plugin_id(&self) -> &'static str {
         "frame_build"
     }
@@ -2015,34 +2021,7 @@ impl NodePlugin for FrameBuild {
     }
 }
 
-/// Static plugin registry: every request/response plugin is declared here.
-/// Dynamic plugin discovery is forbidden.
-pub static PLUGIN_REGISTRY: &[&dyn NodePlugin] = &[
-    &ProtocolParse,
-    &Normalize,
-    &InputValidate,
-    &ContinuationClassify,
-    &ContinuationRestore,
-    &Governance,
-    &ExecutionPlan,
-    &SemanticProjection,
-    &WireBuild,
-    &OutputValidate,
-    &FrameParse,
-    &JsonParse,
-    &ProtocolDecode,
-    &ResponseGovernance,
-    &ToolHarvest,
-    &ContinuationCommit,
-    &ClientSemanticProjection,
-    &SseFrame,
-    &FrameBuild,
-];
-
-/// Chain plugins owned by other crates. The runtime never executes them; a
-/// plan containing them is compiled into `PluginRef::External` and executing
-/// such a node fails fast (`external_owner_violation`).
-pub const EXTERNAL_CHAIN_PLUGINS: &[(&str, &str)] = &[
+const EXTERNAL_CHAIN_PLUGINS: &[(&str, &str)] = &[
     ("error_source_capture", "routecodex-v4-error"),
     ("error_classify", "routecodex-v4-error"),
     ("error_policy_apply", "routecodex-v4-error"),
@@ -2054,122 +2033,103 @@ pub const EXTERNAL_CHAIN_PLUGINS: &[(&str, &str)] = &[
     ("manifest_publish", "routecodex-v4-config"),
 ];
 
-fn resolve_local_plugin(plugin_id: &str) -> Option<&'static dyn NodePlugin> {
-    PLUGIN_REGISTRY
-        .iter()
-        .copied()
-        .find(|plugin| plugin.plugin_id() == plugin_id)
+fn is_local_plugin(plugin_id: &str) -> bool {
+    matches!(
+        plugin_id,
+        "protocol_parse"
+            | "normalize"
+            | "input_validate"
+            | "continuation_classify"
+            | "continuation_restore"
+            | "governance"
+            | "execution_plan"
+            | "semantic_projection"
+            | "wire_build"
+            | "output_validate"
+            | "frame_parse"
+            | "json_parse"
+            | "protocol_decode"
+            | "response_governance"
+            | "tool_harvest"
+            | "continuation_commit"
+            | "client_semantic_projection"
+            | "sse_frame"
+            | "frame_build"
+    )
 }
 
-fn resolve_plugin(plugin_id: &str) -> Result<PluginRef, RuntimeFault> {
-    if let Some((id, owner)) = EXTERNAL_CHAIN_PLUGINS
-        .iter()
-        .copied()
-        .find(|(candidate, _)| *candidate == plugin_id)
-    {
-        return Ok(PluginRef::External {
-            plugin_id: id,
-            owner,
-        });
-    }
-    resolve_local_plugin(plugin_id)
-        .map(PluginRef::Local)
-        .ok_or_else(|| {
-            RuntimeFault::new(
-                "unknown_plugin",
-                format!("plugin {plugin_id} is not in the static registry"),
-            )
-        })
-}
-
-/// Resolved plugin slot: either a local static plugin or an externally owned
-/// chain plugin (error/config owner).
-#[derive(Clone, Copy)]
-pub enum PluginRef {
-    Local(&'static dyn NodePlugin),
-    External {
-        plugin_id: &'static str,
-        owner: &'static str,
-    },
-}
-
-impl fmt::Debug for PluginRef {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Local(plugin) => write!(formatter, "Local({})", plugin.plugin_id()),
-            Self::External { plugin_id, owner } => {
-                write!(formatter, "External({plugin_id}@{owner})")
-            }
-        }
-    }
-}
-
-/// One compiled skeleton node with its resolved plugin slots.
-#[derive(Debug)]
-pub struct NodeContainer {
-    pub node_id: String,
-    pub chain: String,
-    pub position: u32,
-    pub role_id: String,
-    pub terminal: bool,
-    pub kernel: bool,
-    pub plugins: Vec<PluginRef>,
-}
-
-/// Immutable compiled plugin plan: the runtime-consumable form of the skeleton.
-#[derive(Debug)]
-pub struct NodePluginPlan {
-    chains: Vec<(String, Vec<NodeContainer>)>,
-}
-
-impl NodePluginPlan {
-    /// Compile the skeleton plan into per-chain node containers. Fails fast on
-    /// unknown plugins and non-consecutive positions (topology is already
-    /// hash-locked by `SkeletonPlan::from_contract_json`; this is the second
-    /// gate at the runtime boundary).
-    pub fn build(plan: &SkeletonPlan) -> Result<Self, RuntimeFault> {
-        let mut chains = Vec::with_capacity(plan.chains.len());
-        for chain in &plan.chains {
-            let nodes: Vec<NodeContainer> = chain
-                .nodes
-                .iter()
-                .map(|slot| -> Result<NodeContainer, RuntimeFault> {
-                    Ok(NodeContainer {
-                        node_id: slot.node_id.clone(),
-                        chain: slot.chain.clone(),
-                        position: slot.position,
-                        role_id: slot.role_id.clone(),
-                        terminal: slot.terminal,
-                        kernel: slot.kernel,
-                        plugins: slot
-                            .plugins
-                            .iter()
-                            .map(|binding| resolve_plugin(&binding.plugin_id))
-                            .collect::<Result<Vec<_>, _>>()?,
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let mut positions: Vec<u32> = nodes.iter().map(|node| node.position).collect();
-            positions.sort_unstable();
-            for window in positions.windows(2) {
-                if window[1] != window[0] + 1 {
+/// Validate the canonical skeleton path before handing it to the execution
+/// engine.  This is validation only; it does not materialize a second plan or
+/// container and preserves the source order supplied by Cordis.
+pub fn validate_execution_plan(plan: &SkeletonPlan) -> Result<(), RuntimeFault> {
+    for chain in &plan.chains {
+        let mut previous_position = None;
+        for slot in &chain.nodes {
+            if let Some(previous) = previous_position {
+                if slot.position != previous + 1 {
                     return Err(RuntimeFault::new(
                         "non_adjacent_chain",
                         format!("chain {} positions are not consecutive", chain.chain_id),
                     ));
                 }
             }
-            chains.push((chain.chain_id.clone(), nodes));
+            previous_position = Some(slot.position);
+            for binding in &slot.plugins {
+                if !is_local_plugin(&binding.plugin_id)
+                    && !EXTERNAL_CHAIN_PLUGINS
+                        .iter()
+                        .any(|(plugin_id, _)| *plugin_id == binding.plugin_id)
+                {
+                    return Err(RuntimeFault::new(
+                        "unknown_plugin",
+                        format!("plugin {} is not registered", binding.plugin_id),
+                    ));
+                }
+            }
         }
-        Ok(Self { chains })
     }
+    Ok(())
+}
 
-    pub fn chain(&self, chain_id: &str) -> Result<&[NodeContainer], RuntimeFault> {
-        self.chains
-            .iter()
-            .find(|(id, _)| id == chain_id)
-            .map(|(_, nodes)| nodes.as_slice())
-            .ok_or_else(|| RuntimeFault::new("unknown_chain", format!("chain {chain_id} missing")))
+fn execute_local_plugin(
+    plugin_id: &str,
+    ctx: &mut ExecutionContext,
+    registries: &mut RuntimeRegistries<'_>,
+) -> Result<(), RuntimeFault> {
+    macro_rules! dispatch {
+        ($ty:ident) => {{
+            let plugin = $ty;
+            plugin.execute(ctx, registries)
+        }};
+    }
+    match plugin_id {
+        "protocol_parse" => dispatch!(ProtocolParse),
+        "normalize" => dispatch!(Normalize),
+        "input_validate" => dispatch!(InputValidate),
+        "continuation_classify" => dispatch!(ContinuationClassify),
+        "continuation_restore" => dispatch!(ContinuationRestore),
+        "governance" => dispatch!(Governance),
+        "execution_plan" => dispatch!(ExecutionPlan),
+        "semantic_projection" => dispatch!(SemanticProjection),
+        "wire_build" => dispatch!(WireBuild),
+        "output_validate" => dispatch!(OutputValidate),
+        "frame_parse" => dispatch!(FrameParse),
+        "json_parse" => dispatch!(JsonParse),
+        "protocol_decode" => dispatch!(ProtocolDecode),
+        "response_governance" => dispatch!(ResponseGovernance),
+        "tool_harvest" => dispatch!(ToolHarvest),
+        "continuation_commit" => dispatch!(ContinuationCommit),
+        "client_semantic_projection" => dispatch!(ClientSemanticProjection),
+        "sse_frame" => dispatch!(SseFrame),
+        "frame_build" => dispatch!(FrameBuild),
+        plugin_id => Err(RuntimeFault::new(
+            "external_owner_violation",
+            EXTERNAL_CHAIN_PLUGINS
+                .iter()
+                .find(|(id, _)| *id == plugin_id)
+                .map(|(_, owner)| format!("plugin {plugin_id} must execute in {owner}"))
+                .unwrap_or_else(|| format!("unknown plugin {plugin_id}")),
+        )),
     }
 }
 
@@ -2192,11 +2152,26 @@ pub struct ExecutionReport {
     pub trace: Vec<String>,
 }
 
-/// Skeleton runtime: loads the hash-locked immutable plan, compiles the plugin
-/// plan, and executes chains with per-request scope isolation.
+#[derive(Debug, Clone)]
+struct NodeSpec {
+    node_id: String,
+    plugins: Vec<String>,
+}
+
+struct RuntimeExecutionState {
+    ctx: ExecutionContext,
+    scopes: ScopeRegistry,
+    payload_cycles: PayloadCycleRegistry,
+    local_continuations: LocalContinuationStore,
+}
+
+/// Skeleton runtime: loads the hash-locked immutable plan and delegates every
+/// node path to the single `ExecutionEngine`.  Protocol, continuation and
+/// resource stores remain here; graph execution does not.
 pub struct SkeletonRuntime {
     plan: SkeletonPlan,
-    containers: NodePluginPlan,
+    chains: HashMap<String, Vec<NodeSpec>>,
+    epoch_store: ActiveEpochStore,
     active_requests: RefCell<HashSet<String>>,
     scopes: RefCell<ScopeRegistry>,
     payload_cycles: RefCell<PayloadCycleRegistry>,
@@ -2207,10 +2182,70 @@ impl SkeletonRuntime {
     pub fn load(contract_json: &str) -> Result<Self, RuntimeFault> {
         let plan = SkeletonPlan::from_contract_json(contract_json)
             .map_err(|error| RuntimeFault::new("plan_invalid", error.to_string()))?;
-        let containers = NodePluginPlan::build(&plan)?;
+        validate_execution_plan(&plan)?;
+        let mut chains = HashMap::new();
+        for chain in &plan.chains {
+            let mut specs = Vec::with_capacity(chain.nodes.len());
+            let mut previous_position = None;
+            for slot in &chain.nodes {
+                if let Some(previous) = previous_position {
+                    debug_assert_eq!(slot.position, previous + 1);
+                }
+                previous_position = Some(slot.position);
+                for binding in &slot.plugins {
+                }
+                specs.push(NodeSpec {
+                    node_id: slot.node_id.clone(),
+                    plugins: slot
+                        .plugins
+                        .iter()
+                        .map(|binding| binding.plugin_id.clone())
+                        .collect(),
+                });
+            }
+            chains.insert(chain.chain_id.clone(), specs);
+        }
+        let epoch_plan = routecodex_v4_plugin_plan::NodePluginPlan {
+            node_id: "v4-runtime-execution".to_string(),
+            position: 1,
+            role_id: "execution_engine".to_string(),
+            chain: "runtime".to_string(),
+            entries: Vec::new(),
+            selection_groups: Vec::new(),
+            hash: String::new(),
+        };
+        let epoch_hash = epoch_plan.plan_hash();
+        let mut epoch_container = NodeContainer::declare(
+            "v4-runtime-execution",
+            routecodex_v4_plugin_plan::NodePluginPlan {
+                hash: epoch_hash.clone(),
+                ..epoch_plan
+            },
+            PlanBindings {
+                graph_hash: epoch_hash.clone(),
+                manifest_hash: epoch_hash.clone(),
+                loaded_plan_hash: epoch_hash,
+            },
+        )
+        .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
+        epoch_container
+            .context_created()
+            .and_then(|_| epoch_container.plugins_mounted())
+            .and_then(|_| epoch_container.publish())
+            .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
+        let epoch = ActiveExecutionEpoch::new(
+            epoch_container,
+            ExecutionEpochIdentity {
+                plan_epoch: plan.plan_epoch,
+                manifest_hash: plan.manifest_hash.clone(),
+                execution_identity: "v4-runtime-execution".to_string(),
+            },
+        )
+        .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
         Ok(Self {
             plan,
-            containers,
+            chains,
+            epoch_store: ActiveEpochStore::new(epoch),
             active_requests: RefCell::new(HashSet::new()),
             scopes: RefCell::new(ScopeRegistry::new()),
             payload_cycles: RefCell::new(PayloadCycleRegistry::new()),
@@ -2306,7 +2341,7 @@ impl SkeletonRuntime {
         continuation_owner: Option<&str>,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain(
+        let result = self.execute_path(
             "request",
             request_id,
             port,
@@ -2336,7 +2371,7 @@ impl SkeletonRuntime {
         conversation_scope: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain("request", request_id, port, session_scope, conversation_scope, |ctx| {
+        let result = self.execute_path("request", request_id, port, session_scope, conversation_scope, |ctx| {
             ctx.data.raw_entry = Some(fixture.body.clone());
             ctx.data.request_method = Some(fixture.method.clone());
             ctx.data.request_path = Some(fixture.path.clone());
@@ -2403,7 +2438,7 @@ impl SkeletonRuntime {
         local_context_seed: Option<String>,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain(
+        let result = self.execute_path(
             "response",
             request_id,
             port,
@@ -2473,12 +2508,12 @@ impl SkeletonRuntime {
         request_id: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain(chain_id, request_id, 0, "", "", |_| {});
+        let result = self.execute_path(chain_id, request_id, 0, "", "", |_| {});
         self.release(request_id);
         result
     }
 
-    fn run_chain(
+    fn execute_path(
         &self,
         chain_id: &str,
         request_id: &str,
@@ -2487,7 +2522,10 @@ impl SkeletonRuntime {
         conversation_scope: &str,
         seed: impl FnOnce(&mut ExecutionContext),
     ) -> Result<ExecutionReport, RuntimeFault> {
-        let nodes = self.containers.chain(chain_id)?;
+        let specs = self
+            .chains
+            .get(chain_id)
+            .ok_or_else(|| RuntimeFault::new("unknown_chain", format!("chain {chain_id} missing")))?;
         let mut ctx = ExecutionContext::with_scope(
             request_id,
             execution_binding(&self.plan),
@@ -2495,42 +2533,103 @@ impl SkeletonRuntime {
             session_scope,
             conversation_scope,
         );
-        let mut scopes = self.scopes.borrow_mut();
-        let mut payload_cycles = self.payload_cycles.borrow_mut();
-        let mut local_continuations = self.local_continuations.borrow_mut();
-        let mut registries = RuntimeRegistries {
-            scope: &mut scopes,
-            payload_cycle: &mut payload_cycles,
-            local_continuation: &mut local_continuations,
-        };
         seed(&mut ctx);
-        for node in nodes {
-            let binding_before = ctx.binding().clone();
-            for plugin in &node.plugins {
-                match plugin {
-                    PluginRef::Local(plugin) => plugin
-                        .execute(&mut ctx, &mut registries)
-                        .map_err(|fault| fault.with_node(&node.node_id))?,
-                    PluginRef::External { plugin_id, owner } => {
-                        return Err(RuntimeFault::new(
-                            "external_owner_violation",
-                            format!(
-                                "plugin {plugin_id} owned by {owner} must not execute inside the skeleton runtime; route through its owner"
-                            ),
-                        )
-                        .with_node(&node.node_id));
+        let state = Arc::new(Mutex::new(RuntimeExecutionState {
+            ctx,
+            scopes: std::mem::take(&mut *self.scopes.borrow_mut()),
+            payload_cycles: std::mem::take(&mut *self.payload_cycles.borrow_mut()),
+            local_continuations: std::mem::take(&mut *self.local_continuations.borrow_mut()),
+        }));
+        let nodes = specs
+            .iter()
+            .map(|spec| {
+                let state = Arc::clone(&state);
+                let node_id = spec.node_id.clone();
+                let plugins = spec.plugins.clone();
+                ExecutionNode::new(node_id.clone(), move |frame| {
+                    let mut state = match state.lock() {
+                        Ok(state) => state,
+                        Err(_) => {
+                            return NodeOutcome::Failure {
+                                error: serde_json::json!({"code":"execution_state_lock"}),
+                            }
+                        }
+                    };
+                    let binding_before = state.ctx.binding().clone();
+                    let plugin_fault = {
+                        let RuntimeExecutionState {
+                            ctx,
+                            scopes,
+                            payload_cycles,
+                            local_continuations,
+                        } = &mut *state;
+                        let mut registries = RuntimeRegistries {
+                            scope: scopes,
+                            payload_cycle: payload_cycles,
+                            local_continuation: local_continuations,
+                        };
+                        plugins
+                            .iter()
+                            .find_map(|plugin_id| execute_local_plugin(plugin_id, ctx, &mut registries).err())
+                    };
+                    if let Some(fault) = plugin_fault {
+                        return NodeOutcome::Failure {
+                            error: serde_json::json!({
+                                "code": fault.code,
+                                "message": fault.message,
+                                "node_id": node_id,
+                            }),
+                        };
                     }
-                }
+                    if state.ctx.binding() != &binding_before {
+                        return NodeOutcome::Failure {
+                            error: serde_json::json!({"code":"binding_drift","node_id":node_id}),
+                        };
+                    }
+                    state.ctx.record_trace(node_id.clone());
+                    NodeOutcome::Continue { data: frame.data, control: frame.control }
+                })
+            })
+            .collect::<Vec<_>>();
+        let engine = ExecutionEngine::try_new(nodes)
+            .map_err(|error| RuntimeFault::new("execution_engine", error.to_string()))?;
+        let entrypoint = specs
+            .first()
+            .map(|spec| spec.node_id.as_str())
+            .ok_or_else(|| RuntimeFault::new("unknown_chain", format!("chain {chain_id} has no nodes")))?;
+        let lease = self
+            .epoch_store
+            .admit()
+            .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
+        let outcome = engine
+            .execute(
+                entrypoint,
+                NodeExecutionFrame::new(
+                    Value::Object(Default::default()),
+                    Value::Object(Default::default()),
+                ),
+                lease,
+            )
+            .map_err(|error| RuntimeFault::new("execution_engine", error.to_string()))?;
+        drop(engine);
+        let state = Arc::try_unwrap(state)
+            .map_err(|_| RuntimeFault::new("execution_state_shared", "execution state remained shared"))?
+            .into_inner()
+            .map_err(|_| RuntimeFault::new("execution_state_lock", "execution state lock poisoned"))?;
+        *self.scopes.borrow_mut() = state.scopes;
+        *self.payload_cycles.borrow_mut() = state.payload_cycles;
+        *self.local_continuations.borrow_mut() = state.local_continuations;
+        if let NodeOutcome::Failure { error } = outcome {
+            let mut fault = RuntimeFault::new(
+                error.get("code").and_then(Value::as_str).unwrap_or("execution_failure"),
+                error.get("message").and_then(Value::as_str).unwrap_or("execution failed"),
+            );
+            if let Some(node_id) = error.get("node_id").and_then(Value::as_str) {
+                fault = fault.with_node(node_id);
             }
-            if ctx.binding() != &binding_before {
-                return Err(RuntimeFault::new(
-                    "binding_drift",
-                    format!("execution binding changed at {}", node.node_id),
-                )
-                .with_node(&node.node_id));
-            }
-            ctx.record_trace(node.node_id.clone());
+            return Err(fault);
         }
+        let ctx = state.ctx;
         Ok(ExecutionReport {
             request_id: request_id.to_string(),
             binding: ctx.binding().clone(),

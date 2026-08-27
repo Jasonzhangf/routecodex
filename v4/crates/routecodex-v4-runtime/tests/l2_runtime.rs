@@ -9,7 +9,7 @@ use routecodex_v4_runtime::{
     assert_no_control_leak, bind_scope_via_bridge, execution_binding, project_runtime_fault,
     project_runtime_fault_with_policy,
     release_scope_via_bridge, select_relay_operator, ContinuationFacts, ContinuationKey,
-    ExecutionBinding, ExecutionContext, NodePluginPlan, PayloadCycleError, PayloadCycleRegistry,
+    ExecutionBinding, ExecutionContext, PayloadCycleError, PayloadCycleRegistry,
     PayloadCycleState, RelayOperator, ScopeError, ScopeRegistry, SkeletonRuntime,
     LocalContinuationError, LocalContinuationStore,
 };
@@ -796,7 +796,8 @@ fn red_unknown_plugin_fails_fast() {
         edges: vec![],
         checkpoints: vec![],
     }]);
-    let error = NodePluginPlan::build(&plan).expect_err("unknown plugin must fail plan compile");
+    let error = routecodex_v4_runtime::validate_execution_plan(&plan)
+        .expect_err("unknown plugin must fail plan validation");
     assert_eq!(error.code, "unknown_plugin");
     assert!(error.message.contains("mystery_plugin"));
 }
@@ -827,7 +828,8 @@ fn red_non_adjacent_chain_fails_plan_compile() {
         }],
         checkpoints: vec![],
     }]);
-    let error = NodePluginPlan::build(&plan).expect_err("non-consecutive positions must fail");
+    let error = routecodex_v4_runtime::validate_execution_plan(&plan)
+        .expect_err("non-consecutive positions must fail");
     assert_eq!(error.code, "non_adjacent_chain");
 }
 

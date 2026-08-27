@@ -14,6 +14,7 @@ routecodex-v4-cordis-bridge = { path = "../routecodex-v4-cordis-bridge" }
 routecodex-v4-control = { path = "../routecodex-v4-control" }
 routecodex-v4-error = { path = "../routecodex-v4-error" }
 routecodex-v4-node-container = { path = "../routecodex-v4-node-container" }
+routecodex-v4-plugin-plan = { path = "../routecodex-v4-plugin-plan" }
 routecodex-v4-plugin-contract = { path = "../routecodex-v4-plugin-contract" }
 routecodex-v4-skeleton = { path = "../routecodex-v4-skeleton" }
 serde = { version = "1", features = ["derive"] }

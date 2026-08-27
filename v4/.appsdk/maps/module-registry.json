@@ -364,6 +364,7 @@
         "contract_valid",
         "record_graph",
         "v4_runtime_l2_regression",
+        "v4_execution_engine_l2_regression",
         "v4_runtime_005_request_port_positive",
         "v4_runtime_005_request_port_red",
         "v4_runtime_005_request_port_boundary",

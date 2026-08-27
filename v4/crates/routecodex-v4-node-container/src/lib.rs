@@ -516,6 +516,49 @@ impl EpochLease {
         self.epoch.snapshot()
     }
 
+    /// Execute against the immutable container pinned by this lease.  The
+    /// lease owns the epoch admission; callers cannot substitute another plan
+    /// or container while the request is in flight.
+    pub fn execute(
+        &self,
+        input: NodeExecutionInput,
+        registry: &dyn HandleRegistry,
+    ) -> Result<NodeExecutionOutput, NodeContainerError> {
+        if self.snapshot().state == ExecutionEpochState::Disposed {
+            return Err(NodeContainerError::InvalidState {
+                state: NodeContainerState::Disposed,
+                operation: "execute",
+            });
+        }
+        let container = self
+            .epoch
+            .inner
+            .container
+            .lock()
+            .expect("epoch container lock poisoned");
+        let container = container.as_ref().ok_or(NodeContainerError::InvalidState {
+            state: NodeContainerState::Disposed,
+            operation: "execute",
+        })?;
+        container.execute(input, registry)
+    }
+
+    pub fn plan_hash(&self) -> Result<String, NodeContainerError> {
+        let container = self
+            .epoch
+            .inner
+            .container
+            .lock()
+            .expect("epoch container lock poisoned");
+        container
+            .as_ref()
+            .map(|container| container.plan().hash.clone())
+            .ok_or(NodeContainerError::InvalidState {
+                state: NodeContainerState::Disposed,
+                operation: "read_plan_hash",
+            })
+    }
+
     pub fn release(mut self) -> Result<ExecutionEpochSnapshot, EpochError> {
         if self.released {
             return Err(EpochError::LeaseUnavailable);
