@@ -1302,6 +1302,22 @@
         "scripts/architecture/verify-v4-responses-request.mjs"
       ],
       "required_for": ["M06-T01:source_green"]
+    },
+    {
+      "gate_id": "v4_control_event_domains",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-control",
+      "feature_ids": ["v4.control.event_domains"],
+      "command": "cargo test -p routecodex-v4-control --locked --offline",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-control", "--locked", "--offline"],
+      "producer": {"adapter": "cargo", "identity": "v4_control_event_domains"},
+      "evidence_role": "positive_and_negative",
+      "input_paths": [
+        "crates/routecodex-v4-control/src/lib.rs",
+        "crates/routecodex-v4-control/tests/l2_control.rs",
+        "docs/architecture/v4-control-event-sse-audit.md"
+      ],
+      "required_for": ["v4.control.event_domains:source_green"]
     }
   ]
 }
