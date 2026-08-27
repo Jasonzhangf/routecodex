@@ -304,16 +304,28 @@ h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
   border-color: #fff;
 }
 .table-panel { overflow-x: auto; }
-.request-table { table-layout: fixed; min-width: 1320px; width: 100%; }
-.request-table col.col-status { width: 80px; }
-.request-table col.col-port { width: auto; min-width: 40px; }
-.request-table col.col-endpoint { width: 200px; }
+.request-table { table-layout: fixed; min-width: 1280px; width: 100%; }
+.request-table col.col-status { width: 72px; }
+.request-table col.col-port { width: 64px; }
+.request-table col.col-endpoint { width: 220px; }
 .request-table col.col-route { width: 160px; }
-.request-table col.col-provider { width: 130px; }
-.request-table col.col-time { width: 130px; }
+.request-table col.col-provider { width: 140px; }
+.request-table col.col-time { width: 96px; }
 .request-table col.col-intext { width: 110px; }
 .request-table col.col-usage { width: 150px; }
 .request-table col.col-finish { width: 80px; }
+.request-table th.col-port,
+.request-table th.col-status,
+.request-table th.col-finish,
+.request-table td.col-port,
+.request-table td.col-status,
+.request-table td.col-finish { text-align: center; }
+.request-table td.col-port { font-variant-numeric: tabular-nums; font-family: var(--mono); }
+.requests-tab-bar { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+.requests-tab-bar .tab-btn { background: transparent; border: 1px solid transparent; border-bottom: none; color: var(--text-dim); padding: 6px 14px; min-height: 36px; border-radius: 8px 8px 0 0; cursor: pointer; font-weight: 500; }
+.requests-tab-bar .tab-btn:hover { color: var(--text); background: var(--panel); }
+.requests-tab-bar .tab-btn.active { color: var(--text); background: var(--panel); border-color: var(--border); }
+.requests-tab-bar .tab-btn .tab-count { margin-left: 6px; color: var(--text-dim); font-size: 12px; }
 .request-table .status-cell { font-variant-numeric: tabular-nums; font-weight: 600; }
 .request-table .status-cell.error { color: var(--red); }
 .request-table .status-cell.success { color: var(--green); }
@@ -392,6 +404,8 @@ tr.status-success > td:first-child,
 .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
 
 .drawer .actions { display: flex; gap: 10px; margin-top: 20px; }
+.drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.drawer-head .btn { min-height: 32px; }
 
 .status-bar { display: flex; gap: 12px; align-items: center; padding: 10px 18px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
 .status-bar.info, .status-bar.ok, .status-bar.err {

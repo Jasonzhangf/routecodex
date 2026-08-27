@@ -61,13 +61,21 @@
     </div>
 
     <div class="section">
+      <nav class="requests-tab-bar" id="requests-tab-bar">
+        <button class="tab-btn active" data-tab="entries" type="button">Entries <span class="tab-count" id="tab-count-entries">—</span></button>
+        <button class="tab-btn" data-tab="attempts" type="button">Attempts <span class="tab-count" id="tab-count-attempts">—</span></button>
+        <button class="tab-btn" data-tab="errors" type="button">Errors <span class="tab-count" id="tab-count-errors">—</span></button>
+      </nav>
       <div class="panel table-panel" id="requests-panel"><div class="loading">loading…</div></div>
     </div>
   </main>
 
 <div class="drawer-backdrop" id="drawer-backdrop"></div>
 <div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
-  <button class="btn close" id="drawer-close" type="button" aria-label="Close details">&#10005;</button>
+  <div class="drawer-head">
+    <button class="btn" id="drawer-back" type="button" aria-label="Back to list">&#859; Back</button>
+    <button class="btn close" id="drawer-close" type="button" aria-label="Close details">&#10005;</button>
+  </div>
   <h2 id="drawer-title">Details</h2>
   <div id="drawer-body"></div>
   <div class="actions">
@@ -228,9 +236,15 @@
 
     const state = {
       records: [],
+      attemptRecords: [],
+      errorFacets: [],
       page: 1,
       pageSize: 100,
       total: 0,
+      attemptsTotal: 0,
+      attemptsPage: 1,
+      errorStatuses: 0,
+      tab: "entries",
       stats: {},
       timeseries: [],
       facets: { ports: {}, providers: {}, models: {}, routes: {}, sessions: {}, response_types: {}, error_status_codes: {} },
@@ -305,11 +319,61 @@
         state.stats = response.stats || {};
         state.timeseries = response.timeseries || [];
         state.facets = response.facets || state.facets;
+        await Promise.all([loadAttempts(), loadErrors()]);
         renderAll();
       } catch (error) {
         showStatus("err", `records query failed: ${error.message}`);
       } finally {
         state.loading = false;
+      }
+    }
+
+    async function loadAttempts() {
+      try {
+        const params = new URLSearchParams();
+        params.set("status", "error");
+        params.set("page", String(state.attemptsPage));
+        params.set("page_size", "50");
+        params.set("sort_by", "updated_epoch_ms");
+        params.set("sort_order", "desc");
+        params.set("range", "today");
+        const response = await api(`/api/observability/records?${params}`);
+        state.attemptRecords = (response.records || []).filter((row) => row.result === "failed-attempt");
+        state.attemptsTotal = state.attemptRecords.length;
+      } catch (error) {
+        state.attemptRecords = [];
+        state.attemptsTotal = 0;
+      }
+    }
+
+    async function loadErrors() {
+      try {
+        const codes = Object.entries(state.facets.error_status_codes || {})
+          .map(([code, count]) => ({ code, count }))
+          .sort((a, b) => b.count - a.count);
+        state.errorFacets = codes;
+        state.errorStatuses = codes.reduce((sum, item) => sum + Number(item.count || 0), 0);
+        state.errorExamples = {};
+        await Promise.all(codes.slice(0, 12).map(async (item) => {
+          try {
+            const params = new URLSearchParams();
+            params.set("status", "error");
+            params.set("error_status_code", item.code);
+            params.set("page", "1");
+            params.set("page_size", "1");
+            params.set("range", "today");
+            const response = await api(`/api/observability/records?${params}`);
+            const first = (response.records || [])[0];
+            state.errorExamples[item.code] = first?.meta?.error_detail
+              || first?.meta?.error_category
+              || "—";
+          } catch (error) {
+            state.errorExamples[item.code] = "—";
+          }
+        }));
+      } catch (error) {
+        state.errorFacets = [];
+        state.errorStatuses = 0;
       }
     }
 
@@ -444,7 +508,7 @@
         ? `${row.meta.error_category}: ${row.meta.error_detail || ""}`.trim()
         : `${status}`;
       tr.appendChild(statusCell);
-      tr.appendChild(el("td", "mono num", portText));
+      tr.appendChild(el("td", "col-port", portText));
       tr.appendChild(el("td", null, `${metaValue(row, "endpoint")} · ${metaValue(row, "model")}`));
       tr.appendChild(el("td", "muted", metaValue(row, "route_reason")));
       tr.appendChild(el("td", null, metaValue(row, "provider")));
@@ -452,7 +516,7 @@
       tr.appendChild(el("td", "mono", timeText(status === "active" || status === "retrying" ? row.updated_epoch_ms : row.finished_epoch_ms)));
       tr.appendChild(el("td", "num", `${row.timing_internal_ms != null ? fmtMs(row.timing_internal_ms) : "—"} / ${row.timing_external_ms != null ? fmtMs(row.timing_external_ms) : "—"}`));
       tr.appendChild(el("td", "mono", usageText(usage)));
-      tr.appendChild(el("td", "muted", compactFinishReason(row)));
+      tr.appendChild(el("td", "col-finish", compactFinishReason(row)));
       return tr;
     }
 
@@ -476,6 +540,19 @@
 
     function renderRequests() {
       const panel = document.getElementById("requests-panel");
+      const tab = state.tab || "entries";
+      if (tab === "attempts") {
+        renderAttemptsPanel(panel);
+        return;
+      }
+      if (tab === "errors") {
+        renderErrorsPanel(panel);
+        return;
+      }
+      renderEntriesPanel(panel);
+    }
+
+    function renderEntriesPanel(panel) {
       const rows = state.records;
       if (!rows.length) { panel.replaceChildren(el("div", "loading", "no matching requests")); return; }
       const table = el("table", "request-table");
@@ -496,7 +573,7 @@
       columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
       table.appendChild(colgroup);
       columns.forEach((col, index) => {
-        const th = el("th", "sortable", col.label);
+        const th = el("th", `sortable ${col.colClass}`, col.label);
         th.dataset.sortKey = col.key;
         const active = document.getElementById("sort-field").value === col.key;
         if (active) {
@@ -526,6 +603,105 @@
       rows.forEach((row) => body.appendChild(requestRow(row)));
       table.appendChild(body);
       panel.replaceChildren(table);
+      requestAnimationFrame(() => body.classList.remove("is-updating"));
+    }
+
+    function renderAttemptsPanel(panel) {
+      const rows = state.attemptRecords || [];
+      if (!rows.length) {
+        panel.replaceChildren(el("div", "loading", "no failed attempts"));
+        return;
+      }
+      const table = el("table", "request-table");
+      const head = el("tr");
+      const columns = [
+        { key: "status", label: "Status", colClass: "col-status" },
+        { key: "scope.port", label: "Port", colClass: "col-port" },
+        { key: "meta.endpoint", label: "Endpoint · Model", colClass: "col-endpoint" },
+        { key: "meta.route_reason", label: "Route reason", colClass: "col-route" },
+        { key: "meta.provider", label: "Failed provider", colClass: "col-provider" },
+        { key: "updated_epoch_ms", label: "When", colClass: "col-time" },
+        { key: "duration_ms", label: "Duration", colClass: "col-intext" },
+        { key: "error", label: "Error", colClass: "col-usage" },
+        { key: "switches", label: "Next", colClass: "col-finish" },
+      ];
+      const colgroup = el("colgroup");
+      columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
+      table.appendChild(colgroup);
+      const trh = el("tr");
+      columns.forEach((col) => trh.appendChild(el("th", col.colClass, col.label)));
+      const tableHead = document.createElement("thead");
+      tableHead.appendChild(trh);
+      table.appendChild(tableHead);
+      const body = document.createElement("tbody");
+      body.className = "request-body is-updating";
+      rows.forEach((row) => body.appendChild(attemptRow(row)));
+      table.appendChild(body);
+      panel.replaceChildren(table);
+      requestAnimationFrame(() => body.classList.remove("is-updating"));
+    }
+
+    function attemptRow(row) {
+      const tr = el("tr", "request-row status-error");
+      tr.dataset.requestKey = row.request_key;
+      tr.style.cursor = "pointer";
+      tr.addEventListener("click", () => openRequestDetail(row));
+      tr.addEventListener("mouseenter", (event) => showRowPopover(row, event));
+      tr.addEventListener("mousemove", (event) => positionRowPopover(event));
+      tr.addEventListener("mouseleave", hideRowPopover);
+      const portValue = row.scope?.port;
+      const portText = portValue == null ? "—" : String(portValue);
+      const statusCell = el("td", `status-cell error`, statusText(row));
+      const detail = row.meta?.error_category
+        ? `${row.meta.error_category}: ${row.meta.error_detail || ""}`.trim()
+        : "—";
+      statusCell.title = detail;
+      tr.appendChild(statusCell);
+      tr.appendChild(el("td", "col-port", portText));
+      tr.appendChild(el("td", null, `${metaValue(row, "endpoint")} · ${metaValue(row, "model")}`));
+      tr.appendChild(el("td", "muted", metaValue(row, "route_reason")));
+      tr.appendChild(el("td", null, metaValue(row, "provider")));
+      tr.appendChild(el("td", "mono", timeText(row.updated_epoch_ms)));
+      tr.appendChild(el("td", "num", row.duration_ms != null ? fmtMs(row.duration_ms) : "—"));
+      tr.appendChild(el("td", "mono", detail));
+      tr.appendChild(el("td", "col-finish", row.switches > 0 ? `switched` : "terminal"));
+      return tr;
+    }
+
+    function renderErrorsPanel(panel) {
+      const codes = state.errorFacets || [];
+      if (!codes.length) {
+        panel.replaceChildren(el("div", "loading", "no errors"));
+        return;
+      }
+      const wrapper = el("div", "errors-grid");
+      const table = el("table", "request-table");
+      const columns = [
+        { key: "code", label: "Status", colClass: "col-status" },
+        { key: "count", label: "Count", colClass: "col-port" },
+        { key: "example", label: "Example detail", colClass: "col-usage" },
+      ];
+      const colgroup = el("colgroup");
+      columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
+      table.appendChild(colgroup);
+      const trh = el("tr");
+      columns.forEach((col) => trh.appendChild(el("th", col.colClass, col.label)));
+      const head = document.createElement("thead");
+      head.appendChild(trh);
+      table.appendChild(head);
+      const body = document.createElement("tbody");
+      body.className = "request-body is-updating";
+      codes.forEach((item) => {
+        const tr = el("tr", "status-error");
+        tr.appendChild(el("td", "col-status", item.code));
+        tr.appendChild(el("td", "col-port", String(item.count)));
+        tr.appendChild(el("td", "mono", state.errorExamples?.[item.code] || "—"));
+        body.appendChild(tr);
+      });
+      table.appendChild(body);
+      const summary = el("div", "muted", `Total error requests: ${state.errorStatuses}`);
+      wrapper.append(summary, table);
+      panel.replaceChildren(wrapper);
       requestAnimationFrame(() => body.classList.remove("is-updating"));
     }
 
@@ -620,14 +796,34 @@
       renderStats(state.stats);
       renderStatsCards();
       renderTimeseries();
+      renderTabCounts();
       renderRequests();
       renderPagination();
       renderRequestDetail();
     }
 
+    function renderTabCounts() {
+      const entriesCount = document.getElementById("tab-count-entries");
+      const attemptsCount = document.getElementById("tab-count-attempts");
+      const errorsCount = document.getElementById("tab-count-errors");
+      if (entriesCount) entriesCount.textContent = state.total ? `${state.total}` : "0";
+      if (attemptsCount) attemptsCount.textContent = state.attemptsTotal ? `${state.attemptsTotal}` : "0";
+      if (errorsCount) errorsCount.textContent = state.errorStatuses ? `${state.errorStatuses}` : "0";
+      document.querySelectorAll("#requests-tab-bar .tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tab === (state.tab || "entries"));
+      });
+    }
+
     function render() { renderAll(); }
 
     document.getElementById("reload-btn").addEventListener("click", () => load().catch((error) => showStatus("err", error.message)));
+    document.querySelectorAll("#requests-tab-bar .tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.tab = btn.dataset.tab;
+        if (state.tab === "attempts" && !state.attemptRecords.length) loadAttempts().then(renderAll);
+        else renderAll();
+      });
+    });
     ["chart-range","chart-metric"].forEach((id) => {
       document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });
     });
@@ -663,6 +859,25 @@
     startAutoRefresh(() => loadRecords(), 5000);
     document.getElementById("drawer-cancel")?.addEventListener("click", closePanel);
     document.getElementById("drawer-close")?.addEventListener("click", closePanel);
+    document.getElementById("drawer-back")?.addEventListener("click", () => {
+      const previous = state.drawerSourceTab;
+      closePanel();
+      if (previous && previous !== state.tab) {
+        state.tab = previous;
+        renderAll();
+      }
+    });
+    document.getElementById("drawer")?.addEventListener("transitionend", (event) => {
+      if (event.propertyName !== "transform" && event.propertyName !== "opacity") return;
+      const drawer = document.getElementById("drawer");
+      if (!drawer || drawer.classList.contains("is-open")) return;
+      const previous = state.drawerSourceTab;
+      state.drawerSourceTab = null;
+      if (previous && previous !== state.tab) {
+        state.tab = previous;
+        renderAll();
+      }
+    });
 
     load().catch((error) => showStatus("err", `observability failed: ${error.message}`));
   </script>
