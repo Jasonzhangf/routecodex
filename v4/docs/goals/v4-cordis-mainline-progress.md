@@ -28,7 +28,7 @@ M00 -> M01 -> M02 --┐
 | M01 NativePlugin ABI | `merged` | M00 structural contracts | task `7c7e141f5` 已合入重构主树 `100b9fd12`；主树 contract/catalog tests、plugin plan、resource binding `91/91`、diff check 通过；T05 独立保留 |
 | M02 generic factory | `merged` | M01 | task `ff9065c8c` 已合入重构主树 `aa5518b50`；主树 host 30/30、red 10/10、release build、plugin tests 通过 |
 | M03 Cordis daemon | `merged` | M00 structural contracts | task `8be1e7ced` 已合入重构主树 `3a425633c`；daemon 3/3、host 联测 30/30、red 10/10、release build 通过 |
-| D0 differential harness | `stale_owner_handoff_required` | M00 structural contracts | `gate_id:V4-LAYER-GATE-001` 仍占用 feature-layer projection/build paths；原 run/worktree 已不可见，需 owner handoff 后才能修复 M05 admission，不得抢改 |
+| D0 differential harness | `merged` | M00 structural contracts | commit `2a48fe256` 已在 `codex/v4-cordis-refactor-main`；AGY PASS、merge queue 状态 `merged_main_tree`，worktree clean，无需重复实现 |
 | M04 epoch transaction | `merged` | M02 + M03 | task `9914a69fe` 已以 merge `ba4af6c02` 合入重构主树；目标树定向 gates 全部通过，active-link 仍缺 frozen-consumer-registry 环境文件 |
 | M05 ExecutionEngine | `in_progress` | M04 | 唯一 owner 已恢复其 runtime→plugin-contract 边并完成 red/partial-green；其独立 candidate 仍缺 build-link 注册、新 Active binding、candidate/protected projection，未 build/install/live/AGY/commit/merge |
 | M06 request JSON | `blocked` | M05 | 必须串行 |
@@ -52,7 +52,7 @@ M00 -> M01 -> M02 --┐
 | execution owner | M05-T01 | `blocked_external_input_with_scope_ruling` | 否 | 父审计已完成 35 个物理文件分类：A=26 个在 claim 内，B=3 个 M05 gate 已获父任务批准扩展 claim，C=6 个 standard-plugins/real-pipeline gate 必须返还其他 owner；真实 Active-link/isolation 输入仍缺失；不得清理 C、伪造 artifact、clean、AGY、commit、merge |
 | build-link owner | B01 | `blocked_external_input` | 否 | 独立 claim/worktree 内已完成并验证真实 consumer registry/mainline edge（23/23 resolver red、Active-link、execution-binding）；canonical `gen-index/verify-index` 对隔离 worktree 缺真实 frozen Active fail-fast，不得复制、伪造、软链或 allowlist；等待 Active/record-graph owner 提供 exact target input |
 | Active lifecycle owner | B02 | `blocked_owner_handoff` | 否 | B02 隔离 worktree 的 `begin-version`/`publish-active`/`gen-index`/`verify-index` 均 fail-closed：`ACTIVE_INDEX_MISSING`、`MISSING_RECORD:module-artifact`、`ActiveLinkErr03ArtifactMissing`；AppSDK 0.1.5 源码确认 `module-artifact` 只能由 `compile_module→promote_module→freeze_module` 产生，现有 records/protected history 没有合法恢复命令。主 tree 的 canonical index 虽可生成，但其 `source_commit=555bee…` 与当前重构主 tree HEAD=`228130e96…` 不一致，不能作为 exact candidate；等待 `appsdk::lifecycle` / `appsdk::record_graph` 为当前 candidate 提供 module-artifact/Active input，禁止复制、软链、手写或 allowlist |
-| differential governance | D0-T01 | `stale_owner_handoff_required` | 否 | claim 仍 active 但原 feature-layer worktree 已不存在且无可调用会话；必须先完成 owner handoff，M05 不得抢改其 gate 文件 |
+| differential governance | D0-T01 | `merged_and_ready_for_cleanup` | 否 | `2a48fe256` 已在重构主 tree；queue 标记 `merged_main_tree`，AGY PASS，worktree clean；可释放 claim/cleanup，不再阻塞 M05 |
 | async data plane | M08-T01 | `blocked_waiting_m05_handoff` | 否 | provider/server 独立 slice 已完成并写入 handoff；整体无合法并发实现面，runtime-bin async stream/cancellation 尚未完成，必须等待 M05 交接，不覆盖 M05 |
 | provider live admission | M00-T05 | `blocked` | 否 | Responses WebSocket v2 / credential blocker；不得猜 endpoint、伪造 101 或绕过真实 continuation |
 | next dependency | M06-T01 | `blocked` | 否 | 必须等待 M05 合入重构主 tree 并完成主树复验 |
@@ -62,6 +62,8 @@ M00 -> M01 -> M02 --┐
 当前无可执行的 V4 并发实现 lane：重构主 tree 的 canonical Active/index 已可生成并通过自身 `verify-index`/`verify:isolation`，但 B02 目标 worktree 仍缺同一真实输入，不能把 ignored 输出当隔离 admission 证据；B02 继续负责唯一 owner handoff，B01 只读等待，M05 保留 dirty candidate 等待 B01/B02；M08 的 provider/server slice 已 ready，但整体 runtime-bin 接线等待 M05 明确交接；D0-T01 是 stale owner handoff，不能抢改。M06 及后续 milestone 继续等待 M05 合入重构主树并完成主树复验。M00-T10、M11-T01、M03-T01 已完成合入并清理，不得重复 claim；不为填充并发槽位新开会话或 worktree。下一次可派发条件是 B02 在自身 worktree 通过正式 lifecycle 并提供真实 Active/index，随后并发唤醒 B01 与 M05；在此之前只保留既有 claims/worktrees，不做无效派发。
 
 ## 当前派发记录（2026-08-26，证据优先）
+
+> 更正：D0-T01 已实际合入（`2a48fe256`），queue 状态为 `merged_main_tree`，worktree clean；不再视为 stale owner blocker，可在本轮完成 release claim/cleanup。
 
 | worker | 已派发动作 | 当前结论 |
 |---|---|---|
