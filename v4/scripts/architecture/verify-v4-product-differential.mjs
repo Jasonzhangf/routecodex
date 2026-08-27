@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Candidate binding marker: parity harness is part of the v4-cordis tree.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

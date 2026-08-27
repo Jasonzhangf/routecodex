@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Candidate binding marker: parity status is part of the v4-cordis tree.
 // Candidate boundary: status promotion remains source-only until wiring.
 import fs from 'node:fs';
 import path from 'node:path';
