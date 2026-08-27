@@ -4,7 +4,7 @@
   "experiment_id": "v4-runtime-002-epoch-lifecycle",
   "phase": "negative_intervention",
   "kind": "red_test",
-  "source_commit": "8d52c146766313adfd9e9cd80ab3a95cc2d75cfb",
+  "source_commit": "a5b629bad00fc2f5c2cec548617936b633c2a3fe",
   "scope": {"feature_id": "V4-RUNTIME-002", "module_id": "routecodex-v4-node-container"},
   "producer": {"adapter": "cargo", "identity": "v4_node_container_epoch_red"},
   "command_argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
@@ -12,6 +12,6 @@
   "result": "pass",
   "created_at": "2026-08-24T04:40:00Z",
   "expires_at": "2026-08-30T04:40:00Z",
-  "input_hashes": ["sha256:af7c23560f49dda80fa73d848a810347654b421621e98ce667a9698029a25b1c", "sha256:bc5c15eb270ac41adb6807a6dcc6c13b0241abbb153967a039a1d8323dae42d5"],
-  "scope_hash": "sha256:4efbeba34c360589f7a3832803a8c29d704a7fb352c3d2c1ab7aa022cfd566e3"
+  "input_hashes": ["sha256:239a9cfd4c51ca7d8fc2e8725ccb18eb492b6fea356efa18cf4cba9c37927c6f", "sha256:8ab634e61f4b37bc53874ea67a0e9660e8e55d57a1d2fb224e25464808837d2d"],
+  "scope_hash": "sha256:d6244efbc433fcbc59d9b295c339506455c911241341fd0cb63b004dddd24504"
 }
