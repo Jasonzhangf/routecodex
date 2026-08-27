@@ -1230,7 +1230,7 @@
       "entry_symbols": ["ControlSignalKind", "MetadataCenter::register", "MetadataCenter::consume", "PayloadGate::write_control"],
       "resource_ids": ["v4.control.side_channel", "v4.control.metadata_center"],
       "source_paths": ["crates/routecodex-v4-control/src/lib.rs", "crates/routecodex-v4-control/tests/l2_control.rs"],
-      "required_gates": ["v4_control_event_domains"]
+      "required_gates": ["v4_control_event_domains", "v4_control_event_domains_red"]
     }
     ,{
       "function_id":"v4.plugin.request.responses_normalize","status":"active","feature_id":"V4-PLUGIN-001","owner":"routecodex-v4-standard-plugins","entry_symbols":["request_normalize","request_normalize_entry"],"resource_ids":["v4.plugin.request.responses_normalize"],"source_paths":["crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/src/request_normalize.rs"],"required_gates":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"]

@@ -39,11 +39,7 @@ for (const gate of ARCHITECTURE_GATES) {
 
 // The control-event lifecycle gate is a Rust owner gate, so invoke its
 // positive/negative suite explicitly in the canonical admission path.
-for (const gate of RUST_GATES) {
-  if (gate === 'v4_control_event_domains') {
-    run('cargo test -p routecodex-v4-control --locked --offline');
-  }
-}
+for (const [, command] of RUST_GATES) run(command);
 
 for (const [consumer, deps, ...extra] of CONSUMER_REGRESSIONS) {
   const extraArgs = extra.length > 0 ? ` ${extra.join(' ')}` : '';

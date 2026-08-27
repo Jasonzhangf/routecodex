@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import yaml from 'js-yaml';
 import { v4Root, runCapture } from './_common.mjs';
-import { ARCHITECTURE_GATES, RED_SUITES, CONSUMER_REGRESSIONS, RUST_GATES } from './_gate-matrix.mjs';
+import { ARCHITECTURE_GATES, RED_SUITES, CONSUMER_REGRESSIONS, RUST_GATES, RUST_GATES_RED } from './_gate-matrix.mjs';
 import { loadV3Baseline } from './architecture/_v3-baseline.mjs';
 
 const failures = [];
@@ -473,8 +473,8 @@ function checkDeclaredExecutedBinding(
     }
     seenGateIds.add(gate.gate_id);
     const command = String(gate.command ?? '');
-    if (command.includes('cargo test -p routecodex-v4-control --locked --offline')) {
-      declaredGates.add('v4_control_event_domains');
+    for (const [gateId, gateCommand] of [...RUST_GATES, ...RUST_GATES_RED]) {
+      if (command === gateCommand) declaredGates.add(gateId);
     }
     for (const match of command.matchAll(/node scripts\/architecture\/(verify-v4-[a-z0-9_-]+\.mjs)/g)) {
       declaredGates.add(match[1]);
@@ -493,7 +493,8 @@ function checkDeclaredExecutedBinding(
     declaredConsumerDetails.set(consumer, { deps, sourceDeps });
   }
   const executedGates = new Set(ARCHITECTURE_GATES);
-  for (const gate of RUST_GATES) executedGates.add(gate);
+  for (const [gate] of RUST_GATES) executedGates.add(gate);
+  for (const [gate] of RUST_GATES_RED) executedGates.add(gate);
   for (const [gate] of RED_SUITES) executedGates.add(gate);
   const executedConsumers = new Set(CONSUMER_REGRESSIONS.map(([consumer]) => consumer));
   const executedConsumerDetails = new Map();
@@ -514,7 +515,7 @@ function checkDeclaredExecutedBinding(
     out.push(`architecture gates registered in verification-map.json but not executed: ${neverExecuted.join(', ')}`);
   }
   for (const gate of declaredGates) {
-    if (!RUST_GATES.includes(gate) && !fs.existsSync(path.join(architectureDir, gate))) {
+    if (![...RUST_GATES, ...RUST_GATES_RED].some(([gateId]) => gateId === gate) && !fs.existsSync(path.join(architectureDir, gate))) {
       out.push(`architecture gate file missing: ${gate}`);
     }
   }

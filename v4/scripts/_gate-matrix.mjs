@@ -41,7 +41,11 @@ export const ARCHITECTURE_GATES = [
 // Rust-owner gates are executed by verify.mjs alongside script gates. Keeping
 // the identifiers here lets isolation verify declared/executed parity too.
 export const RUST_GATES = [
-  'v4_control_event_domains',
+  ['v4_control_event_domains', 'cargo test -p routecodex-v4-control --locked --offline'],
+];
+
+export const RUST_GATES_RED = [
+  ['v4_control_event_domains_red', 'cargo test -p routecodex-v4-control --locked --offline'],
 ];
 
 export const RED_SUITES = [
