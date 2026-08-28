@@ -25,7 +25,7 @@
   "module_id": "routecodex-v4-error",
   "new_active_version": "active-v4",
   "playground_cleanup_record_id": "v4-cordis-error-cleanup-current",
-  "previous_active_version": "active-v3",
+  "previous_active_version": null,
   "promotion_id": "v4-cordis-error-promotion-current",
   "public_api_hash": "sha256:ec13d529b2c91b8e57dd50e8c896fb6d1cc53909c97097b6830041ebba22592f",
   "reproduction_record_id": "v4-cordis-error-reproduction-current",

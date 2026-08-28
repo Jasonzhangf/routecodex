@@ -14,7 +14,7 @@
   "freeze_id": "v4-cordis-error-freeze-current",
   "git_clean": true,
   "issue_id": "v4-cordis-error-rebuild-current",
-  "library_hash": "sha256:988609a37c6fb6d3ca9463c5e15e74471c3fec7414c634902a2009c4903461dc",
+  "library_hash": "sha256:bff3769dd59162068bf94d51457863f6207fa0c19380b83b6a0d92e759871a95",
   "module_id": "routecodex-v4-error",
   "owners": {
     "api_extractor": "appsdk-0.1.5",
@@ -23,8 +23,8 @@
     "review": "v4-cordis-master",
     "vcs": "git"
   },
-  "previous_active_immutable": true,
-  "previous_active_version": "active-v3",
+  "previous_active_immutable": false,
+  "previous_active_version": null,
   "promotion_id": "v4-cordis-error-promotion-current",
   "promotion_record_hash": "sha256:4edc69bae9677d914f6593a2bc4e495e8814aaa624c53a6accae4e3a797af2a2",
   "public_api_hash": "sha256:ec13d529b2c91b8e57dd50e8c896fb6d1cc53909c97097b6830041ebba22592f",
