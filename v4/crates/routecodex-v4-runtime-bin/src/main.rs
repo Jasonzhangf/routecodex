@@ -12,7 +12,8 @@ use routecodex_v4_config::{
 use routecodex_v4_error::ErrorChain;
 use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
-    exec_managed_restart, request_restart, request_stop, start_managed, status_managed,
+    exec_managed_restart, repair_stale, request_restart, request_stop, start_managed,
+    status_managed,
     ManagedAction, ManagedControlPlane, ManagedInstanceRecord, ManagedSpawnOptions,
     V4LifecyclePaths,
 };
@@ -71,6 +72,7 @@ fn dispatch(command: V4CommandIntent) -> Result<Option<String>, String> {
         V4CommandIntent::Init(intent) => initialize(intent).map(Some),
         V4CommandIntent::Start(intent) => start(intent).map(Some),
         V4CommandIntent::Status(intent) => status(intent).map(Some),
+        V4CommandIntent::RepairStale(intent) => repair_stale_state(intent).map(Some),
         V4CommandIntent::Restart(intent) => restart(intent).map(Some),
         V4CommandIntent::Stop(intent) => stop(intent).map(Some),
         V4CommandIntent::Servertool {
@@ -233,6 +235,15 @@ fn status(intent: ConfigPathIntent) -> Result<String, String> {
         Some(record) => format_status(&status.state, &record),
         None => "state=stopped identity=rccv4".to_string(),
     })
+}
+
+fn repair_stale_state(intent: ConfigPathIntent) -> Result<String, String> {
+    if let Some(path) = intent.config {
+        compile_runtime_config_file(&path).map_err(|error| error.to_string())?;
+    }
+    let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
+    repair_stale(&paths).map_err(|error| error.to_string())?;
+    Ok("state=stopped identity=rccv4 repaired=stale".to_string())
 }
 
 fn restart(intent: RestartIntent) -> Result<String, String> {

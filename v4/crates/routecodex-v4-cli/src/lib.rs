@@ -42,6 +42,7 @@ pub enum V4CommandIntent {
     Init(InitIntent),
     Start(StartIntent),
     Status(ConfigPathIntent),
+    RepairStale(ConfigPathIntent),
     Restart(RestartIntent),
     Stop(StopIntent),
     Servertool {

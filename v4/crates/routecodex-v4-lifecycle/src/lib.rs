@@ -249,6 +249,34 @@ pub fn status_managed(paths: &V4LifecyclePaths) -> Result<ManagedStatus, Lifecyc
     }
 }
 
+/// Remove only a provably stale V4 instance declaration.  A live process or
+/// responsive control socket is never touched; callers must run the normal
+/// managed `restart` command after this explicit repair.
+pub fn repair_stale(paths: &V4LifecyclePaths) -> Result<(), LifecycleError> {
+    let record = read_record(paths)?.ok_or_else(|| {
+        if paths.control_socket.exists() {
+            LifecycleError::StaleState
+        } else {
+            LifecycleError::NotRunning
+        }
+    })?;
+    if request_control(paths, "status").is_ok() {
+        return Err(LifecycleError::AlreadyManaged);
+    }
+    let process_alive = unsafe { libc::kill(record.pid as libc::pid_t, 0) == 0 }
+        || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
+    if process_alive {
+        return Err(LifecycleError::AlreadyManaged);
+    }
+    fs::remove_file(&paths.record_path)
+        .map_err(|error| io_error(&paths.record_path, error))?;
+    if paths.control_socket.exists() {
+        fs::remove_file(&paths.control_socket)
+            .map_err(|error| io_error(&paths.control_socket, error))?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ManagedSpawnOptions {
     pub snap: bool,
