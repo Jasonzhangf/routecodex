@@ -257,7 +257,7 @@
         "suite_id": "v4-base-node-l0-regression"
       },
       "source_owner": "routecodex-v4-base-node",
-      "stage": "source_implemented",
+      "stage": "architecture_stable",
       "version_base": {
         "base_artifact_hash": "sha256:a988314c65bc74f6a7e6e38ad6c045ac91c2d516f3ec01c65f5f029fde6c2a4d",
         "base_source_commit": "dad0742a457276d1ed8e9da2fe1f3c35b0bc4889",
