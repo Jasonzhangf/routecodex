@@ -13,13 +13,7 @@
   "issue_id": "v4-cordis-control-fresh-governance",
   "library_hash": "sha256:cf200dbd7f3e1a6284477035ef57b5d6bc0596bda36c29a1704461d12dbae469",
   "module_id": "routecodex-v4-control",
-  "owners": {
-    "vcs": "git",
-    "compiler": "appsdk",
-    "api_extractor": "appsdk",
-    "review": "dsh",
-    "artifact_registry": "appsdk"
-  },
+  "owners": {"vcs": "git", "compiler": "appsdk", "api_extractor": "appsdk", "review": "dsh", "artifact_registry": "appsdk"},
   "previous_active_immutable": true,
   "promotion_id": "v4-cordis-control-promotion-current",
   "promotion_record_hash": "sha256:6738354b76458af92fc78681c5944531771a2a8e3afcd11615e211fe65409ec0",
