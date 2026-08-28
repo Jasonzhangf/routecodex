@@ -41,11 +41,13 @@ const GOVERNANCE_CLOSURE_PREFIXES = [
   'crates/routecodex-v4-standard-plugins/src/lib.rs',
   'crates/routecodex-v4-standard-plugins/src/response_inbound.rs',
   'crates/routecodex-v4-standard-plugins/src/response_outbound.rs',
+  'scripts/tests/v4-feature-layer-batches-red-fixtures.mjs',
 ];
 
 function isGovernanceClosurePath(relativePath) {
-  return SHARED_PROJECTION_PATHS.has(relativePath)
-    || GOVERNANCE_CLOSURE_PREFIXES.some((prefix) => relativePath.startsWith(prefix));
+  const normalized = relativePath.startsWith('v4/') ? relativePath.slice(3) : relativePath;
+  return SHARED_PROJECTION_PATHS.has(normalized)
+    || GOVERNANCE_CLOSURE_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
 function readJsonAt(truth, commit, relativePath, failures, code, context) {
