@@ -1,0 +1,43 @@
+{
+  "artifact_hash": "sha256:bff3769dd59162068bf94d51457863f6207fa0c19380b83b6a0d92e759871a95",
+  "command": {
+    "args": [
+      "run",
+      "--quiet",
+      "--release",
+      "-p",
+      "routecodex-v4-build-link",
+      "--",
+      "test-consumer",
+      "--root",
+      ".",
+      "--consumer",
+      "routecodex-v4-error",
+      "--deps",
+      "routecodex-v4-base-node"
+    ],
+    "program": "cargo",
+    "working_directory": "."
+  },
+  "created_at": "2026-08-28T08:51:00Z",
+  "failed": 0,
+  "input_hash": "sha256:bff3769dd59162068bf94d51457863f6207fa0c19380b83b6a0d92e759871a95",
+  "module_id": "routecodex-v4-error",
+  "passed": 23,
+  "producer": {
+    "adapter": "cargo",
+    "identity": "v4-cordis-error-l2"
+  },
+  "public_api_hash": "sha256:ec13d529b2c91b8e57dd50e8c896fb6d1cc53909c97097b6830041ebba22592f",
+  "regression_report_id": "v4-cordis-error-regression-current",
+  "result": "pass",
+  "scope_hash": "sha256:30ef63cd3f0c43027927565d2a5d7f15afc84d0611f5acdbe65ee27aff902f27",
+  "skipped": 0,
+  "source_commit": "47927fe2405c9989c5effff83f84c55c19b1c3b1",
+  "suite_id": "v4-error-l2-regression",
+  "test_characteristics": {
+    "blackbox": true,
+    "whitebox": true
+  },
+  "test_count": 23
+}

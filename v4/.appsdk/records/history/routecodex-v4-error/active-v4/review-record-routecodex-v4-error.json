@@ -1,0 +1,38 @@
+{
+  "ai_confidence": 1,
+  "confidence_rationale": "Current tree records and mapped error gates reviewed.",
+  "created_at": "2026-08-28T09:50:00Z",
+  "evidence_ids": [
+    "v4-cordis-error-positive-current",
+    "error-sdk013-candidate",
+    "error-sdk013-positive",
+    "error-sdk013-negative"
+  ],
+  "fix_candidate_id": "v4-cordis-error-candidate-current",
+  "function_map_hash": "sha256:69f16dfe5d056634f6164cd325dbdbdf134588890b69f101c0d9045e6a01d776",
+  "issue_id": "v4-cordis-error-rebuild-current",
+  "mainline_call_map_hash": "sha256:c36e4f9d5cff527d7f98b339772a53c87f420db58bb2215b6b68210e01124673",
+  "pre_review_validation_id": "v4-cordis-error-prereview-current",
+  "promotion_id": "v4-cordis-error-promotion-current",
+  "resource_map_hash": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
+  "review_id": "v4-cordis-error-review-current",
+  "review_kind": "architecture",
+  "reviewed_artifact_hash": "sha256:bff3769dd59162068bf94d51457863f6207fa0c19380b83b6a0d92e759871a95",
+  "reviewed_commit": "47927fe2405c9989c5effff83f84c55c19b1c3b1",
+  "reviewed_diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "reviewed_scope_hash": "sha256:30ef63cd3f0c43027927565d2a5d7f15afc84d0611f5acdbe65ee27aff902f27",
+  "reviewed_tree_hash": "0ab70c6852498972581f04d0b8b4ce9b8fafd317",
+  "reviewer": {
+    "adapter": "dsh",
+    "identity": "dsh/rcc/gpt-5.5"
+  },
+  "v4_product_map_root": "docs/architecture/maps",
+  "v4_product_map_hashes": {
+    "function_map_hash": "sha256:48249a023243234d56002aa55430f531444b0c5a3440dd8c84491d2d33e40410",
+    "resource_map_hash": "sha256:8ec2f6ad0b8bd9c3f414ef3bfed571bf90efaf9b052b08ba31916921207cbb19",
+    "mainline_call_map_hash": "sha256:1e6fa787f9b2fa00a4f780f11d8725465ff5b7390fbeca54e9de5477bd5dd287",
+    "verification_map_hash": "sha256:3bba52855b6c65b412f69408d379b88d8e9f5ab76f1aff2acdaafbfe542ce4b9"
+  },
+  "verdict": "pass",
+  "verification_map_hash": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230"
+}

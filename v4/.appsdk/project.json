@@ -331,7 +331,13 @@
         "suite_id": "v4-edge-l1-regression"
       },
       "source_owner": "routecodex-v4-edge",
-      "stage": "frozen"
+      "stage": "architecture_stable",
+      "version_base": {
+        "base_artifact_hash": "sha256:83728d3d7967db171cfb627301ba8e8d636eaf6015101f70e316a5234c260ea6",
+        "base_source_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
+        "new_active_version": "active-v5",
+        "previous_active_version": "active-v4"
+      }
     },
     {
       "active_artifact": "active/lib/routecodex-v4-control/**",
@@ -406,7 +412,13 @@
         "suite_id": "v4-control-l2-regression"
       },
       "source_owner": "routecodex-v4-control",
-      "stage": "frozen"
+      "stage": "controlled_verified",
+      "version_base": {
+        "base_artifact_hash": "sha256:e280965a718eeaaee59725a1703dd58b16a875b616e6b0e8c65bf5b2b4a28676",
+        "base_source_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
+        "new_active_version": "active-v4",
+        "previous_active_version": "active-v3"
+      }
     },
     {
       "active_artifact": "active/lib/routecodex-v4-error/**",
@@ -477,7 +489,13 @@
         "suite_id": "v4-error-l2-regression"
       },
       "source_owner": "routecodex-v4-error",
-      "stage": "frozen"
+      "stage": "architecture_stable",
+      "version_base": {
+        "base_artifact_hash": "sha256:988609a37c6fb6d3ca9463c5e15e74471c3fec7414c634902a2009c4903461dc",
+        "base_source_commit": "47927fe2405c9989c5effff83f84c55c19b1c3b1",
+        "new_active_version": "active-v5",
+        "previous_active_version": "active-v4"
+      }
     },
     {
       "active_artifact": "active/lib/routecodex-v4-config/**",
