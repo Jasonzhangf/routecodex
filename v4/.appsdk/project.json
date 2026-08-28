@@ -406,7 +406,7 @@
         "suite_id": "v4-control-l2-regression"
       },
       "source_owner": "routecodex-v4-control",
-      "stage": "contract_bound"
+      "stage": "controlled_verified"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-error/**",
@@ -477,7 +477,7 @@
         "suite_id": "v4-error-l2-regression"
       },
       "source_owner": "routecodex-v4-error",
-      "stage": "contract_bound"
+      "stage": "controlled_verified"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-config/**",
