@@ -307,7 +307,7 @@
     "guard_commit": "1f06454eee65c69668be9885daa29d7025871dc1",
     "guarded_surfaces": [
       {"path":"Cargo.toml","scope_hash":"sha256:5ce83c9e3837823b19aa44dfdc28948a0123973fcb5e853e385f42aff3add62e"},
-      {"path":"scripts/build.mjs","scope_hash":"sha256:1bdbf1af66d5b14f9fa717eee2957652e9c2f57c7324c1cb56a7e1ea3d45774c"},
+      {"path":"scripts/build.mjs","scope_hash":"sha256:05aeafe77409e087d83bb02dfa4a4f154d68d2377a3857bff8b35d0bfd26976b"},
       {"path":"scripts/verify.mjs","scope_hash":"sha256:03e8560ec63150660bd82b8455b3505b831171fb340cb0e79f57d2abca6bd3ac"},
       {"path":"scripts/verify-ci.mjs","scope_hash":"sha256:eb651c0850179ca96482f0f3a6b4b7084be7102e2be64d6e8d93726a40cf2b4c"},
       {"path":"scripts/install-rccv4.mjs","scope_hash":"sha256:f449b083e44fe025134eb48f84fefd964b7445e793ec8cad318c386ca003254e"},
