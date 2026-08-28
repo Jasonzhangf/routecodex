@@ -324,6 +324,59 @@ fn direct_provider_model_respects_request_local_exclusion() {
 }
 
 #[test]
+fn structured_output_named_schema_does_not_select_anthropic_candidate() {
+    let mut manifest = manifest();
+    manifest.providers.get_mut("b").unwrap().provider_type = "anthropic".into();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client".into()),
+                capabilities: BTreeSet::from(["structured_output".into()]),
+                input_tokens: 10,
+                route_classification: test_route("default", &["default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    let target = V3TargetInterpreter::default();
+    let mut expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    expanded.route.request_capabilities = BTreeSet::from(["structured_output".into()]);
+    let selected = target
+        .select_available(
+            expanded.clone(),
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .expect("compatible Responses candidate must remain selectable");
+    assert_eq!(selected.candidate.provider_type, "responses");
+    let exhausted = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::from(["a:ka:m".into()]),
+            },
+            0,
+        )
+        .expect_err("unsupported Anthropic candidate must not be selected");
+    assert_eq!(
+        exhausted.attempted_candidates,
+        vec!["a:ka:m:availability(a:ka:m)", "b:kb:m:capability_mismatch"]
+    );
+}
+
+#[test]
 fn requested_forwarder_model_filters_default_pool_candidates() {
     let source = r#"
 version = 3

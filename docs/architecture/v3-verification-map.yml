@@ -1227,6 +1227,7 @@ features:
   - docs/architecture/wiki/v3-responses-direct-mainline.md
   required_unit:
   - typed Responses request facts preserve client model, capabilities, and deterministic input-token estimate
+  - named Responses JSON Schema is a typed structured_output request capability; target selection admits only Responses/OpenAI Chat wire providers and rejects Anthropic candidates before ProviderReqCompat06
   - input-token estimate uses tiktoken BPE with the legacy model-to-encoding table (cl100k fallback), max-merges chat messages and responses context, and omits media payload bytes
   - non-default pool match and no-match/default behavior
   - lower explicit precedence wins and only equal-best valid matches are rejected as ambiguous
