@@ -41,9 +41,9 @@
       "skills/appsdk-project-governance/SKILL.md"
     ]
   },
-  "compiler_digest": "sha256:069c1b40071579432dacc30d5b731ea7e9a1c39c4062f07ced723b5c3858cbaf",
+  "compiler_digest": "sha256:32a9a965448f0ae659742cc238b7ff3106fb5afb11e3905045a6f210352ec61b",
   "contract_schema": 1,
-  "digest": "sha256:069c1b40071579432dacc30d5b731ea7e9a1c39c4062f07ced723b5c3858cbaf",
+  "digest": "sha256:32a9a965448f0ae659742cc238b7ff3106fb5afb11e3905045a6f210352ec61b",
   "sdk": "appsdk",
   "version": "0.1.5"
 }
