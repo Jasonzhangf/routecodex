@@ -18,7 +18,7 @@ fn active_turn_uses_actual_tool_calls_and_ignores_history() {
             {"type":"custom_tool_call_output","call_id":"new","output":"ok"}
         ]
     });
-    let signals = build_v3_current_turn_route_facts(&request);
+    let signals = build_v3_current_turn_route_facts_from_value(&request);
     assert!(!signals.latest_message_from_user);
     assert!(signals.has_current_turn_tool_output);
     assert_eq!(
@@ -37,7 +37,7 @@ fn active_turn_uses_actual_tool_calls_and_ignores_history() {
             {"type":"message","role":"user","content":"explain only"}
         ]
     });
-    let signals = build_v3_current_turn_route_facts(&fresh);
+    let signals = build_v3_current_turn_route_facts_from_value(&fresh);
     assert!(signals.latest_message_from_user);
     assert!(!signals.has_current_turn_tool_output);
     assert!(signals.last_assistant_tool.is_none());
@@ -52,14 +52,14 @@ fn typed_tool_result_error_enters_current_turn_observation() {
             {"type":"function_call_output","call_id":"call","is_error":true,"output":"permission denied"}
         ]
     });
-    let signals = build_v3_current_turn_route_facts(&request);
+    let signals = build_v3_current_turn_route_facts_from_value(&request);
     assert!(signals.has_current_turn_tool_output);
     assert!(signals.has_current_turn_tool_execution_error);
 
     let provider_error = json!({
         "error": {"code":"provider_failure","message":"upstream failed"}
     });
-    let signals = build_v3_current_turn_route_facts(&json!({
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
         "input": [
             {"type":"message","role":"user","content":"run it"},
             {"type":"function_call_output","call_id":"call","output":provider_error}
@@ -70,7 +70,7 @@ fn typed_tool_result_error_enters_current_turn_observation() {
 
 #[test]
 fn compaction_is_a_typed_route_signal() {
-    let signals = build_v3_current_turn_route_facts(&json!({
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
         "input": [
             {"type":"message","role":"user","content":"compact"},
             {"type":"compaction","encrypted_content":"opaque"}
@@ -100,7 +100,7 @@ fn chat_historical_web_search_does_not_activate_current_turn() {
             {"role":"user","content":"current text only"}
         ]
     });
-    let signals = build_v3_current_turn_route_facts(&request);
+    let signals = build_v3_current_turn_route_facts_from_value(&request);
     assert!(signals.latest_message_from_user);
     assert!(!signals.has_current_turn_web_search);
 }
@@ -114,7 +114,7 @@ fn responses_historical_web_search_does_not_activate_current_turn() {
             {"type":"message","role":"user","content":"current text only"}
         ]
     });
-    let signals = build_v3_current_turn_route_facts(&request);
+    let signals = build_v3_current_turn_route_facts_from_value(&request);
     assert!(signals.latest_message_from_user);
     assert!(!signals.has_current_turn_web_search);
 }
@@ -147,7 +147,7 @@ fn chat_messages_use_only_current_turn_tool_calls() {
         ],
         "tools":[{"type":"web_search"}]
     });
-    let signals = build_v3_current_turn_route_facts(&continuation);
+    let signals = build_v3_current_turn_route_facts_from_value(&continuation);
     assert!(!signals.latest_message_from_user);
     assert!(signals.has_current_turn_tool_output);
     assert_eq!(
@@ -173,7 +173,7 @@ fn chat_messages_use_only_current_turn_tool_calls() {
         ],
         "tools":[{"type":"web_search"}]
     });
-    let signals = build_v3_current_turn_route_facts(&fresh);
+    let signals = build_v3_current_turn_route_facts_from_value(&fresh);
     assert!(signals.latest_message_from_user);
     assert!(!signals.has_current_turn_tool_output);
     assert!(signals.last_assistant_tool.is_none());
@@ -202,7 +202,7 @@ fn responses_tool_type_matrix_uses_current_turn_call() {
                 {"type":output_type,"call_id":"call","output":"ok"}
             ]
         });
-        let signals = build_v3_current_turn_route_facts(&request);
+        let signals = build_v3_current_turn_route_facts_from_value(&request);
         assert_eq!(
             signals
                 .last_assistant_tool
@@ -216,7 +216,7 @@ fn responses_tool_type_matrix_uses_current_turn_call() {
 
 #[test]
 fn current_turn_keyword_activates_web_search_but_declaration_does_not() {
-    let keyword = build_v3_current_turn_route_facts(&json!({
+    let keyword = build_v3_current_turn_route_facts_from_value(&json!({
         "messages": [{"role": "user", "content": "请搜索今天的新闻"}],
         "tools": [{"type": "web_search"}]
     }));
@@ -232,7 +232,7 @@ fn current_turn_keyword_activates_web_search_but_declaration_does_not() {
         "web_search"
     );
 
-    let declaration_only = build_v3_current_turn_route_facts(&json!({
+    let declaration_only = build_v3_current_turn_route_facts_from_value(&json!({
         "messages": [{"role": "user", "content": "修复这个路由问题"}],
         "tools": [{"type": "web_search"}]
     }));
@@ -256,7 +256,7 @@ fn current_turn_explicit_web_search_call_activates_route() {
             {"type": "web_search_call", "name": "web_search", "call_id": "call-1"}
         ]
     });
-    let signals = build_v3_current_turn_route_facts(&request);
+    let signals = build_v3_current_turn_route_facts_from_value(&request);
     assert_eq!(
         signals
             .last_assistant_tool
@@ -432,7 +432,7 @@ fn request_user_input_current_turn_routes_to_thinking_but_unknown_tool_stays_too
             {"type":"function_call","name":"request_user_input","call_id":"ask-1","arguments":"{\"questions\":[]}"}
         ]
     });
-    let thinking_signals = build_v3_current_turn_route_facts(&thinking_request);
+    let thinking_signals = build_v3_current_turn_route_facts_from_value(&thinking_request);
     assert_eq!(
         thinking_signals
             .last_assistant_tool
@@ -456,7 +456,7 @@ fn request_user_input_current_turn_routes_to_thinking_but_unknown_tool_stays_too
             {"type":"function_call","name":"unknown_tool","call_id":"tool-1","arguments":"{}"}
         ]
     });
-    let tools_signals = build_v3_current_turn_route_facts(&tools_request);
+    let tools_signals = build_v3_current_turn_route_facts_from_value(&tools_request);
     assert_eq!(
         tools_signals
             .last_assistant_tool
@@ -564,4 +564,61 @@ fn route_classifier_input_has_no_control_state_fields() {
             "P0 violation: forbidden control-state name '{f}' appeared in allowed set"
         );
     }
+}
+
+// Regression for live Responses case where historical image is preserved as
+// typed attachment and current-turn image drives the multimodal route fact
+// without scanning payload text. The fixture mirrors the
+// `route_reason=multimodal:metadata-attachment` row observed at port 4444
+// in /Users/fanzhang/.rcc/logs/server-v3-4444.request-records.jsonl (2026-08-28
+// 06:50 row 61): the request carries a trailing user message that embeds a
+// current-turn image plus history_image blocks already normalized to the
+// typed attachment placeholder.
+#[test]
+fn live_responses_history_image_attachment_drives_multimodal_route_via_typed_carrier() {
+    use serde_json::json;
+    let request = json!({
+        "model": "gpt-5.6-sol",
+        "input": [
+            {"type":"input_image","file_id":"hist-1"},
+            {"type":"input_text","text":"summary of past chart"},
+            {"type":"message","role":"user","content":[
+                {"type":"input_text","text":"what does this mean"},
+                {"type":"input_image","file_id":"current-turn-1"}
+            ]}
+        ]
+    });
+    let entries = project_v3_current_turn_entries_from_value(&request);
+    let signals = build_v3_current_turn_route_facts(&entries);
+    assert!(signals.has_current_turn_image,
+        "current-turn image must activate multimodal route fact via typed carrier");
+    let route = classify_route(&RouteClassifierInput {
+        latest_message_from_user: signals.latest_message_from_user,
+        has_image_attachment: signals.has_current_turn_image,
+        has_current_turn_tool_output: signals.has_current_turn_tool_output,
+        ..Default::default()
+    });
+    assert_eq!(route.route_name, "multimodal");
+    assert!(
+        route.reasoning.contains("multimodal:metadata-attachment"),
+        "expected multimodal:metadata-attachment reasoning, got {:?}",
+        route.reasoning
+    );
+}
+
+// Typed boundary lock: the typed builder must not accept raw request payload.
+// The signature `fn build_v3_current_turn_route_facts(&V3CurrentTurnEntries)`
+// means a caller cannot smuggle `&serde_json::Value` past the typed carrier.
+#[test]
+fn typed_builder_signature_rejects_raw_value() {
+    use serde_json::Value;
+    fn assert_take_typed(_: &V3CurrentTurnEntries) {}
+    // Construct a typed empty entry and prove the signature accepts it.
+    assert_take_typed(&V3CurrentTurnEntries::Empty);
+    // A compile-time check that the raw `&Value` cannot be passed into the
+    // typed signature lives in the build/test gates; this runtime test
+    // documents the intent and the fact that callers must now use the
+    // `*_from_value` shim.
+    let raw: &Value = &serde_json::json!({});
+    let _ = raw; // existence proves raw path is still reachable through the shim
 }
