@@ -29,7 +29,7 @@
   "previous_active_immutable": false,
   "previous_active_version": null,
   "promotion_id": "v4-cordis-plugin-contract-promotion-current",
-  "promotion_record_hash": "sha256:2f7c833788f902a7db8715c8784e0d8eccf2583df64b700272702fef51581a7a",
+  "promotion_record_hash": "sha256:9bdf7ca07e6cbf8f6b466dbf6bd8d58e4bd583081d15db2dc5586ecc60474924",
   "public_api_hash": "sha256:4cdd9d5d2c8b8a041379347c3480dc994388abc12fcacfdf75350a503f09dc66",
   "regression_report_hash": "sha256:af1df794ddd0f118026733281d0c995c7ec154fa3f13db9ce4f22c1db69b7930",
   "regression_report_id": "v4-cordis-plugin-contract-regression-current",
