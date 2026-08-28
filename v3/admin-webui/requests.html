@@ -29,7 +29,7 @@
       <div class="cards" id="summary-cards"></div>
       <div class="chart-controls">
         <label>Range<select id="chart-range"><option value="today">Today</option><option value="week">Last 7 days</option><option value="month">Last 30 days</option></select></label>
-        <label>Metric<select id="chart-metric"><option value="count">Requests</option><option value="total_tokens">Total tokens</option><option value="input_tokens">Input tokens</option><option value="output_tokens">Output tokens</option><option value="cached_tokens">Cached tokens</option></select></label>
+        <label>Metric<select id="chart-metric"><option value="count">Requests</option><option value="total_tokens">Total tokens</option><option value="input_tokens">Input tokens</option><option value="output_tokens">Output tokens</option><option value="cached_tokens">Cached tokens</option><option value="cache_hit_rate_percent">Cache hit rate</option></select></label>
       </div>
       <div class="panel chart-panel">
         <div id="usage-chart" class="bar-chart" role="img" aria-label="Requests and token usage over selected range"></div>
@@ -86,6 +86,27 @@
 
 <div class="row-popover" id="row-popover" role="tooltip" aria-hidden="true"></div>
 
+  <script>
+    // Endpoint label: shorten canonical V3 entry paths so the Endpoint column
+    // stays compact without losing the protocol identity; non-canonical paths
+    // pass through.
+    function endpointLabel(endpoint) {
+      if (endpoint == null || endpoint === "—") return "—";
+      if (endpoint === "/v1/responses") return "responses";
+      if (endpoint === "/v1/chat/completions") return "chat";
+      if (endpoint === "/v1/messages") return "messages";
+      if (endpoint === "/v1beta/models") return "gemini";
+      return endpoint;
+    }
+    function providerModelCell(row) {
+      const provider = (row && row.meta && row.meta.provider) ?? "—";
+      const model = (row && row.meta && row.meta.model) ?? "—";
+      if (provider === "—" && model === "—") return "—";
+      if (provider === "—") return model;
+      if (model === "—") return provider;
+      return `${provider} · ${model}`;
+    }
+  </script>
   <script src="/app.embedded.txt"></script>
   <script>
     // Compact numeric formatting for token counts and request totals.
@@ -540,6 +561,17 @@
       return tr;
     }
 
+    function drilldownErrorStatus(code) {
+      // Preserve current toolbar filters, then drill into Entries tab with
+      // status=error and the clicked status code. After viewing, the user
+      // can return to the Errors tab via the tabs themselves.
+      state.page = 1;
+      document.getElementById("status-filter").value = "error";
+      state.errorStatusCode = code;
+      state.tab = "entries";
+      loadRecords();
+    }
+
     function openRequestDetail(row) {
       state.selected = row;
       renderRequestDetail();
@@ -574,15 +606,33 @@
 
     function renderEntriesPanel(panel) {
       const rows = state.records;
-      if (!rows.length) { panel.replaceChildren(el("div", "loading", "no matching requests")); return; }
+      // Single-action return-to-errors banner: keeps the prior status_code
+      // context visible and offers one click to clear it.
+      const fragments = [];
+      if (state.errorStatusCode) {
+        const banner = el("div", "status-bar info", `Filtered by error status ${state.errorStatusCode}. `);
+        const clear = el("button", "btn", "Clear filter");
+        clear.addEventListener("click", () => {
+          state.errorStatusCode = null;
+          state.page = 1;
+          loadRecords();
+        });
+        banner.appendChild(clear);
+        fragments.push(banner);
+      }
+      if (!rows.length) {
+        fragments.push(el("div", "loading", "no matching requests"));
+        panel.replaceChildren(...fragments);
+        return;
+      }
       const table = el("table", "request-table");
       const head = el("tr");
       const columns = [
         { key: "result", label: "Status", colClass: "col-status" },
         { key: "scope.port", label: "Port", colClass: "col-port" },
-        { key: "meta.endpoint", label: "Endpoint · Model", colClass: "col-endpoint" },
+        { key: "meta.endpoint", label: "Endpoint", colClass: "col-endpoint" },
         { key: "meta.route_reason", label: "Route reason", colClass: "col-route" },
-        { key: "meta.provider", label: "Provider", colClass: "col-provider" },
+        { key: "meta.provider", label: "Provider · Model", colClass: "col-provider" },
         { key: "started_epoch_ms", label: "Sent", colClass: "col-time" },
         { key: "finished_epoch_ms", label: "Responded", colClass: "col-time" },
         { key: "timing_internal_ms", label: "Internal / External", colClass: "col-intext" },
@@ -622,7 +672,7 @@
       body.className = "request-body is-updating";
       rows.forEach((row) => body.appendChild(requestRow(row)));
       table.appendChild(body);
-      panel.replaceChildren(table);
+      panel.replaceChildren(...fragments, table);
       requestAnimationFrame(() => body.classList.remove("is-updating"));
     }
 
@@ -637,9 +687,9 @@
       const columns = [
         { key: "status", label: "Status", colClass: "col-status" },
         { key: "scope.port", label: "Port", colClass: "col-port" },
-        { key: "meta.endpoint", label: "Endpoint · Model", colClass: "col-endpoint" },
+        { key: "meta.endpoint", label: "Endpoint", colClass: "col-endpoint" },
         { key: "meta.route_reason", label: "Route reason", colClass: "col-route" },
-        { key: "meta.provider", label: "Failed provider", colClass: "col-provider" },
+        { key: "meta.provider", label: "Provider · Model", colClass: "col-provider" },
         { key: "updated_epoch_ms", label: "When", colClass: "col-time" },
         { key: "duration_ms", label: "Duration", colClass: "col-intext" },
         { key: "error", label: "Error", colClass: "col-usage" },
@@ -713,6 +763,12 @@
       body.className = "request-body is-updating";
       codes.forEach((item) => {
         const tr = el("tr", "status-error");
+        tr.style.cursor = "pointer";
+        tr.title = `View Requests filtered by status ${item.code}`;
+        // Drilldown: jump to Entries tab with status=error + error_status_code
+        // set, keeping all other toolbar filters. Single action; no separate
+        // modal or extra navigation step.
+        tr.addEventListener("click", () => drilldownErrorStatus(item.code));
         tr.appendChild(el("td", "col-status", item.code));
         tr.appendChild(el("td", "col-port", String(item.count)));
         tr.appendChild(el("td", "mono", state.errorExamples?.[item.code] || "—"));
@@ -780,7 +836,8 @@
       const yAxis = el("div", "chart-y-axis");
       yAxis.style.height = `${chartHeight}px`;
       for (const ratio of [1, 0.8, 0.6, 0.4, 0.2, 0]) {
-        const label = el("span", "chart-y-label", fmtCompact(maximum * ratio));
+        const axisValue = maximum * ratio;
+        const label = el("span", "chart-y-label", metric === "cache_hit_rate_percent" ? `${axisValue.toFixed(0)}%` : fmtCompact(axisValue));
         label.style.bottom = `${Math.round(usableHeight * ratio)}px`;
         yAxis.appendChild(label);
       }
@@ -795,7 +852,8 @@
         const bar = el("div", "bar");
         const heightPx = Math.max(2, Math.round((value / maximum) * fillHeight));
         bar.style.height = `${heightPx}px`;
-        bar.title = `${bucket.date}: ${fmtCompact(value)} (${bucket.count.toLocaleString()} requests)`;
+        const displayValue = metric === "cache_hit_rate_percent" ? `${value.toFixed(1)}%` : fmtCompact(value);
+        bar.title = `${bucket.date}: ${displayValue} (${bucket.count.toLocaleString()} requests)`;
         const label = el("span", "axis", chartLabel(bucket, range));
         label.title = bucket.date;
         column.append(spacer, bar, label);

@@ -15,10 +15,11 @@ pub(crate) struct TimeseriesBucket {
     pub output_tokens: u64,
     pub cached_tokens: u64,
     pub total_tokens: u64,
-    /// Cache hit rate within this bucket, clamped to 0..=100. 0 when no
-    /// effective input. Effective input uses raw `input_tokens` (which
-    /// already absorbs cache_read/cache_creation contributions) and falls
-    /// back to `cached_tokens` only when raw input is smaller than cached.
+    /// Cache hit rate within this bucket, clamped to 0..=100. None when the
+    /// bucket has no effective input. Effective input uses raw `input_tokens`
+    /// (which already absorbs cache_read/cache_creation contributions) and
+    /// falls back to `cached_tokens` only when raw input is smaller than
+    /// cached.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_hit_rate_percent: Option<f64>,
 }
@@ -243,6 +244,15 @@ pub(crate) fn build_timeseries(
         .into_iter()
         .map(|(date, mut bucket)| {
             bucket.date = date;
+            // Effective input uses max(raw_input, cached). With the per-row
+            // clamp during accumulation, bucket cached is already <= input;
+            // the rate uses raw input as denominator.
+            let effective = bucket.input_tokens.max(bucket.cached_tokens);
+            bucket.cache_hit_rate_percent = if effective > 0 {
+                Some((bucket.cached_tokens as f64 / effective as f64) * 100.0)
+            } else {
+                None
+            };
             bucket
         })
         .collect())
