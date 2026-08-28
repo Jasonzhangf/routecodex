@@ -4411,6 +4411,28 @@ mod tests {
     }
 
     #[test]
+    fn resp03_toolreason_reason_length_is_not_a_hard_rejection() {
+        let accepted_reason = "确认当前工作目录并继续执行用户请求";
+        let accepted = serde_json::json!({
+            "reason": accepted_reason,
+            "goal_alignment_confidence": 100
+        });
+        assert_eq!(
+            classify_v3_toolreason_observation_at_resp03(Some(&accepted.to_string())).0,
+            V3ToolreasonObservationStatus::Ok
+        );
+
+        let rejected = serde_json::json!({
+            "reason": "这是一段超过五十字符上限的工具调用说明，用于锁定无效合同",
+            "goal_alignment_confidence": 100
+        });
+        assert_eq!(
+            classify_v3_toolreason_observation_at_resp03(Some(&rejected.to_string())).0,
+            V3ToolreasonObservationStatus::Ok
+        );
+    }
+
+    #[test]
     fn resp03_harvests_responses_think_block_into_reasoning_summary() {
         let mut payload = json!({
             "id": "resp_think_visible",

@@ -25,10 +25,14 @@ fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
     assert!(guidance.contains("工具调用协议（只适用于本轮工具调用"));
     assert!(guidance.contains("工具参数 JSON 对象本层"));
     assert!(guidance.contains("Anthropic 的 `input`、Responses/Chat 的 `arguments`"));
-    assert!(guidance.contains("goal_alignment_confidence"));
-    assert!(guidance.contains("model_id"));
-    assert!(guidance.contains("可选字段不要用占位值"));
+    assert!(guidance.contains("不超过 50 个字符"));
+    assert!(!guidance.contains("goal_alignment_confidence"));
+    assert!(!guidance.contains("model_id"));
     assert_eq!(payload["tools"][1]["description"], "internal");
+    assert!(payload["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("不超过 50 个字符"));
 }
 
 #[test]
@@ -115,6 +119,19 @@ fn req04_tool_thinking_guidance_is_not_injected_twice() {
 }
 
 #[test]
+fn req04_tool_thinking_guidance_mounts_anthropic_system_prompt() {
+    let mut payload = json!({
+        "system": "existing system",
+        "tools": [{"name":"exec","description":"run","input_schema":{"type":"object"}}]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject");
+    let system = payload["system"].as_str().unwrap();
+    assert!(system.starts_with("existing system\n\n"));
+    assert!(system.contains("不超过 50 个字符"));
+}
+
+#[test]
 fn req04_tool_thinking_injects_into_canonical_chat_system_message() {
     let mut payload = json!({
         "messages": [
@@ -125,7 +142,7 @@ fn req04_tool_thinking_injects_into_canonical_chat_system_message() {
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject into canonical chat system");
-    let content = payload["tools"][0]["description"].as_str().unwrap();
+    let content = payload["messages"][0]["content"].as_str().unwrap();
     assert!(content.contains("工具调用协议（只适用于本轮工具调用"));
     assert_eq!(payload["messages"].as_array().unwrap().len(), 2);
 }
@@ -169,7 +186,7 @@ fn req04_tool_thinking_injects_only_current_system_message() {
         .as_str()
         .unwrap()
         .contains("工具调用协议"));
-    assert!(!payload["messages"][2]["content"]
+    assert!(payload["messages"][2]["content"]
         .as_str()
         .unwrap()
         .contains("工具调用协议"));
@@ -232,10 +249,17 @@ fn req04_tool_thinking_reaches_anthropic_wire_system_field() {
         "wire: {wire}"
     );
     assert!(
-        tool_description.contains("goal_alignment_confidence"),
+        wire["system"]
+            .as_str()
+            .unwrap()
+            .contains("不超过 50 个字符"),
         "wire: {wire}"
     );
-    assert!(tool_description.contains("model_id"), "wire: {wire}");
+    assert!(
+        !tool_description.contains("goal_alignment_confidence"),
+        "wire: {wire}"
+    );
+    assert!(!tool_description.contains("model_id"), "wire: {wire}");
     assert!(!wire.to_string().contains("<legacy-control>"));
 }
 
@@ -249,11 +273,15 @@ fn req04_tool_thinking_injects_anthropic_tool_list_and_parameter_schema() {
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject into Anthropic system");
-    assert!(payload["tools"][0]["description"]
+    assert!(payload["system"]
+        .as_str()
+        .unwrap()
+        .contains("不超过 50 个字符"));
+    assert!(!payload["tools"][0]["description"]
         .as_str()
         .unwrap()
         .contains("goal_alignment_confidence"));
-    assert!(payload["tools"][0]["description"]
+    assert!(!payload["tools"][0]["description"]
         .as_str()
         .unwrap()
         .contains("model_id"));

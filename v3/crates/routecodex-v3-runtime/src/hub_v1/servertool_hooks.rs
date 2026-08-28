@@ -20,18 +20,14 @@ const STOPLESS_CLI_COMMAND: &str = "routecodex hook run reasoningStop";
 pub(crate) const V3_TOOL_THINKING_GUIDANCE: &str = r#"工具调用协议（只适用于本轮工具调用，不适用于普通回答）：
 
 每次发起工具调用时，必须在工具参数 JSON 对象本层增加 `reason`，并立即输出工具调用：
-`reason`：现在调用该工具的唯一直接动机；短句，只说动机，不写计划、步骤、结果或工具参数。
-`goal_alignment_confidence`：可选。以用户上一轮目标为标准，当前工具调用与目标的一致性评分；如提供，只能是 0 到 100 的整数，100 表示直接需要，0 表示完全无关。
-`model_id`：可选。如提供，填写本次响应实际使用的精确模型 ID。
+`reason`：现在调用该工具的唯一直接动机；只说动机，不写计划、步骤、结果或工具参数；不超过 50 个字符。
 
 字段必须和原生工具参数处于同一个参数对象层级；对于 Anthropic 的 `input`、Responses/Chat 的 `arguments` 或其他参数容器，字段放在该容器对象的顶层。不要把字段嵌套到命令参数对象内部；RouteCodex 会在工具执行前剥离这三个辅助字段。
 
-正确：`{"name":"pwd","arguments":"{\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"<本次 provider-bound 请求的精确 model 值>\"}"}`
+正确：`{"name":"pwd","arguments":"{\"reason\":\"确认当前工作目录\"}"}`
 错误：`{"name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"metadata\":{\"reason\":\"确认当前工作目录\"}}"}`
 
-`<本次 provider-bound 请求的精确 model 值>` 只是格式示意，绝不能原样输出；模型只有在提供 `model_id` 时才填写本次请求实际使用的 provider-bound model 值。
-
-同一轮多个工具调用时，每个工具调用对象分别填写 `reason`；可选字段不要用占位值。不要输出 fence、preamble、普通解释或第二份原因文本。
+同一轮多个工具调用时，每个工具调用对象分别填写 `reason`。不要输出 fence、preamble、普通解释或第二份原因文本。
 "#;
 
 pub(crate) const V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER: &str =
@@ -104,6 +100,7 @@ pub(crate) fn compile_v3_tool_thinking_turn_context_at_req04(
     inject_v3_tool_thinking_fields_into_tool_schemas(payload)
         .map_err(|reason| V3HubRelayRequestError::ToolThinkingSchemaInvalid { reason })?;
     let original_custom_tool_names = wrap_v3_custom_tools_at_req04(payload)?;
+    inject_v3_tool_thinking_guidance_into_prompt(payload, current_payload_start);
     inject_tool_thinking_into_tool_list_guidance(payload);
     if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
         if current_payload_start > messages.len() {
@@ -116,6 +113,31 @@ pub(crate) fn compile_v3_tool_thinking_turn_context_at_req04(
     Ok(V3ToolThinkingTurnContext::enabled(
         original_custom_tool_names,
     ))
+}
+
+fn inject_v3_tool_thinking_guidance_into_prompt(payload: &mut Value, current_payload_start: usize) {
+    for key in ["instructions", "system"] {
+        if let Some(value) = payload.get_mut(key) {
+            append_v3_tool_thinking_guidance_to_text(value);
+            return;
+        }
+    }
+    if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
+        if let Some(message) = messages
+            .iter_mut()
+            .skip(current_payload_start)
+            .find(|message| {
+                matches!(
+                    message.get("role").and_then(Value::as_str),
+                    Some("system" | "developer")
+                )
+            })
+        {
+            if let Some(content) = message.get_mut("content") {
+                append_v3_tool_thinking_guidance_to_text(content);
+            }
+        }
+    }
 }
 
 fn wrap_v3_custom_tools_at_req04(
