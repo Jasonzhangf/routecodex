@@ -1,5 +1,5 @@
 {
-  "active_version": "active-v4",
+  "active_version": "active-v5",
   "artifact_record_id": "v4-cordis-edge-positive-current",
   "clean_scope": {
     "base_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
@@ -17,7 +17,7 @@
   "freeze_id": "v4-cordis-edge-freeze-v4-cordis",
   "git_clean": true,
   "issue_id": "v4-cordis-edge-fresh-governance",
-  "library_hash": "sha256:83728d3d7967db171cfb627301ba8e8d636eaf6015101f70e316a5234c260ea6",
+  "library_hash": "sha256:425b50dc8136d5920b21467d6efa4489f1cb10df9bc2ad87f519693b410d806c",
   "module_id": "routecodex-v4-edge",
   "owners": {
     "api_extractor": "appsdk-0.1.5",
