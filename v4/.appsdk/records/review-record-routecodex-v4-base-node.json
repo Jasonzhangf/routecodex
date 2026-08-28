@@ -17,10 +17,10 @@
   "review_id": "v4-cordis-base-node-review",
   "review_kind": "architecture",
   "reviewed_artifact_hash": "sha256:a988314c65bc74f6a7e6e38ad6c045ac91c2d516f3ec01c65f5f029fde6c2a4d",
-  "reviewed_commit": "dad0742a457276d1ed8e9da2fe1f3c35b0bc4889",
+  "reviewed_commit": "884bdd8ec71d241b718a79778ca63b2b27aa3707",
   "reviewed_diff_hash": "sha256:2bd91fe6908d5c95e515155cc0330551f603144a54178456e65c8b87eba21ff2",
   "reviewed_scope_hash": "sha256:7d1e6dda7043dedd559eb5c13df6ae94d7c49165b54e4602ecbd29ad5c6c6de9",
-  "reviewed_tree_hash": "266bdf4e21cb087288563e5a7399ca650dbc0d31",
+  "reviewed_tree_hash": "00da5eed7cb10b6127a27c2251a0c5f568d93bae",
   "reviewer": {
     "adapter": "master-architecture-review",
     "identity": "v4-cordis-master"
