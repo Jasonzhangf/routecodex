@@ -50,6 +50,15 @@ fn start_snapshot_flags_are_typed() {
 }
 
 #[test]
+fn start_foreground_is_explicit_and_typed() {
+    let cli = parse(&["rccv4", "start", "--foreground"]).expect("parse");
+    match cli.command.expect("command") {
+        V4CommandIntent::Start(intent) => assert!(intent.foreground),
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
 fn hidden_managed_child_requires_absolute_inputs_from_dispatcher() {
     let cli = parse(&[
         "rccv4",

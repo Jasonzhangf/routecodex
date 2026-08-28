@@ -107,6 +107,8 @@ pub struct SnapshotIntent {
 pub struct StartIntent {
     #[arg(short = 'c', long = "config")]
     pub config: Option<PathBuf>,
+    #[arg(long)]
+    pub foreground: bool,
     #[command(flatten)]
     pub snapshot: SnapshotIntent,
 }

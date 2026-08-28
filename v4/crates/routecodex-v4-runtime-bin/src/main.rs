@@ -12,7 +12,7 @@ use routecodex_v4_config::{
 use routecodex_v4_error::ErrorChain;
 use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
-    exec_managed_restart, repair_stale, request_restart, request_stop,
+    exec_managed_restart, repair_stale, request_restart, request_stop, start_managed,
     status_managed, ManagedAction, ManagedControlPlane, ManagedInstanceRecord, ManagedSpawnOptions,
     V4LifecyclePaths,
 };
@@ -209,10 +209,26 @@ fn start(intent: StartIntent) -> Result<String, String> {
     let config = config_path(ConfigPathIntent {
         config: intent.config,
     })?;
-    let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
+    if intent.foreground {
+        let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
+        print_startup(&manifest);
+        run_foreground(manifest)?;
+        return Ok("state=stopped identity=rccv4 foreground=true".to_string());
+    }
+    let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
     print_startup(&manifest);
-    run_foreground(manifest)?;
-    Ok("state=stopped identity=rccv4 foreground=true".to_string())
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let record = start_managed(
+        &paths,
+        &executable,
+        &config,
+        &paths.manifest_path,
+        &spawn_options(&intent.snapshot),
+        Duration::from_secs(15),
+    )
+    .map_err(|error| error.to_string())?;
+    println!("state=running identity=rccv4 pid={} listeners={}", record.pid, record.listeners.join(","));
+    Ok(format_status("running", &record))
 }
 
 fn status(intent: ConfigPathIntent) -> Result<String, String> {
@@ -261,6 +277,7 @@ fn server_start(intent: ServerStartIntent) -> Result<String, String> {
     if !intent.foreground {
         return start(StartIntent {
             config: intent.config,
+            foreground: false,
             snapshot: intent.snapshot,
         });
     }
