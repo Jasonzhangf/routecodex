@@ -29,7 +29,7 @@
 - cooldown、`blocked_until_ms`、`next_probe_at_ms`、`probe_in_flight`；
 - restart/load、startup/due probe、probe failure reschedule、probe success clear；
 - Target-facing read-only availability projection；
-- 同 priority weighted scope 的 route contract；
+- priority/weight route contract；health score projection 已接入 Target 的有效 priority；
 - provider action gate 和 Error05 recovery admission。
 
 代码/合同锚点：
@@ -48,10 +48,10 @@
 | --- | --- | --- |
 | 分类到恢复策略 | failure class 存在；分类、scope、cooldown action、score delta 未统一为一个 typed action | `V3ProviderFailureAction` 唯一策略产物 |
 | 不可恢复/可恢复边界 | global cooldown 与 threshold 路径存在，但组合合同需显式锁定 | 不可恢复 immediate global；可恢复 count=3；health-neutral 不计入 |
-| key 级健康分 | 无 canonical `score` | ProviderKeyHealthState 持有 0..1000 score |
+| key 级健康分 | 无 canonical `score` | ProviderKeyHealthState 持有 0..1500 score，1000 为基线 |
 | 成功涨分 | 有 success 清理部分 failure/cooldown 状态 | success 产生明确 score delta；probe success 受 recovery floor 约束 |
 | score 持久化 | 持久化对象主要是 cooldown/probe | score 与 generation 一致性一并持久化 |
-| 同 priority 调度 | route contract 有 priority/weight；V3 health score projection 未接入 | Target 消费 typed scheduling projection；score 只影响同 priority |
+| priority/health 调度 | route contract 有 priority/weight；旧实现按小数值优先且把 score 乘入 weight | Target 消费 typed scheduling projection；大数值优先，score 调整 effective priority，weight 只在同 effective priority 内生效 |
 | 文档一致性 | 旧 health-weighted Router 文档与 V3 health-blind Router owner 口径不完全收敛 | canonical V3 文档锁定 Target owner 与 projection 边界 |
 | 架构地图 | 现有 health/global probe 已登记；score resource/function/edge/gate 尚未登记 | 先补 resource/function/mainline/verification map，再实现 |
 
@@ -97,8 +97,8 @@ Virtual Router 只生成 route pool、priority、base weight 和 opaque target p
 Target 在已选 route plan 内：
 
 1. 过滤 unavailable/cooldown key；
-2. 保留最高可用 priority bucket；
-3. 只在该 bucket 内消费 score/weight projection；
+2. 计算 `effective_priority = configured_priority + (score_milli - 1000)`，保留最高可用 bucket；
+3. 只在同一 effective priority bucket 内按配置 weight 调度；
 4. 执行 deterministic selection；
 5. provider failure 后做 target-local reselect，不重新进入 VR，不跨 immutable target plan。
 
@@ -175,8 +175,8 @@ pub struct V3ProviderSchedulingProjection {
     pub key: V3ProviderKeyHealthKey,
     pub available: bool,
     pub blocked_scopes: Vec<String>,
-    pub score_milli: u16,
-    pub effective_weight_milli: u32,
+    pub score_milli: u32,
+    pub effective_weight_milli: u64,
     pub score_generation: u64,
 }
 ```
@@ -355,17 +355,12 @@ deterministic round-robin cursor
 
 ```text
 1. remove configured-disabled / cooldown / request-excluded keys
-2. choose minimum numeric priority bucket
-3. within bucket:
-     effective_weight = base_weight * score_multiplier(score)
-4. select by deterministic SWRR
-5. tie-break by stable key order/cursor
-```
-
-建议 score multiplier：
-
-```text
-score_multiplier_milli = 500 + score_milli
+2. choose maximum numeric effective priority bucket
+3. effective_priority = configured_priority + (score_milli - 1000)
+4. within bucket:
+     effective_weight = base_weight
+5. select by deterministic SWRR
+6. tie-break by stable key order/cursor
 ```
 
 即：
@@ -449,10 +444,10 @@ HealthNeutral
 
 ### Target black-box
 
-- lower numeric priority wins regardless of score;
-- equal priority uses score-weighted deterministic scheduling;
+- higher numeric effective priority wins;
+- health score changes effective priority; weight is used only within the highest effective-priority bucket;
 - cooldown key never selected;
-- low score key remains selectable above minimum multiplier;
+- low score changes effective priority but does not itself make a key unavailable;
 - request-local exclusion does not mutate persistent score;
 - target reselect does not re-enter Virtual Router.
 

@@ -338,8 +338,16 @@ impl V3TargetInterpreter {
                 near_limit = true;
             } else {
             }
+            // Earlier route tiers have precedence over later/default tiers.
+            // Keep that precedence while candidate priority itself is ordered
+            // descending (larger configured values win).
             let route_tier_index = Self::route_tier_index(&expanded.route, candidate);
-            let effective_priority = (route_tier_index as i32)
+            let route_tier_rank = expanded
+                .route
+                .target_plan
+                .len()
+                .saturating_sub(route_tier_index);
+            let effective_priority = (route_tier_rank as i32)
                 .saturating_mul(1_000_000)
                 .saturating_add(candidate.priority);
             let projection = scheduling.scheduling_projection(
@@ -385,10 +393,10 @@ impl V3TargetInterpreter {
         if eligible.is_empty() {
             eligible = near_limit_eligible;
         }
-        let Some(min_priority) = eligible
+        let Some(max_priority) = eligible
             .iter()
-            .map(|(_, _, projection)| projection.priority)
-            .min()
+            .map(|(_, _, projection)| projection.effective_priority)
+            .max()
         else {
             return Err(V3TargetExhaustion {
                 route: Box::new(expanded.route),
@@ -397,7 +405,7 @@ impl V3TargetInterpreter {
         };
         let mut tier = eligible
             .into_iter()
-            .filter(|(_, _, projection)| projection.priority == min_priority)
+            .filter(|(_, _, projection)| projection.effective_priority == max_priority)
             .collect::<Vec<_>>();
         let total_weight = tier
             .iter()

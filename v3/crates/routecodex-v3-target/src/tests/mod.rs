@@ -160,7 +160,7 @@ fn weighted_priority_forwarder_manifest() -> V3Config05ManifestPublished {
 }
 
 #[test]
-fn weighted_forwarder_advances_priority_only_after_current_session_exhausts_lower_tier() {
+fn weighted_forwarder_advances_to_lower_priority_only_after_higher_tier_exhausts() {
     let manifest = weighted_priority_forwarder_manifest();
     let target = V3TargetInterpreter::default();
     let all_available = Availability {
@@ -169,7 +169,7 @@ fn weighted_forwarder_advances_priority_only_after_current_session_exhausts_lowe
     let selected = target
         .select_available(expanded_with(&manifest, &target, 4), &all_available, 0)
         .unwrap();
-    assert_ne!(selected.candidate.provider_id, "c");
+    assert_eq!(selected.candidate.provider_id, "c");
 
     let one_priority_one_available = Availability {
         blocked: BTreeSet::from(["b:kb:m".into()]),
@@ -181,7 +181,7 @@ fn weighted_forwarder_advances_priority_only_after_current_session_exhausts_lowe
             0,
         )
         .unwrap();
-    assert_eq!(selected.candidate.provider_id, "a");
+    assert_eq!(selected.candidate.provider_id, "c");
 
     let only_priority_two_available = Availability {
         blocked: BTreeSet::from(["a:ka:m".into(), "b:kb:m".into()]),
@@ -372,7 +372,7 @@ fn structured_output_named_schema_does_not_select_anthropic_candidate() {
         .expect_err("unsupported Anthropic candidate must not be selected");
     assert_eq!(
         exhausted.attempted_candidates,
-        vec!["a:ka:m:availability(a:ka:m)", "b:kb:m:capability_mismatch"]
+        vec!["b:kb:m:capability_mismatch", "a:ka:m:availability(a:ka:m)"]
     );
 }
 
@@ -686,7 +686,7 @@ targets = [
             .iter()
             .map(|candidate| candidate.provider_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["minimax_anthropic", "minimax_openai"]
+        vec!["minimax_openai", "minimax_anthropic"]
     );
     let selected = target
         .select_available(
@@ -778,7 +778,7 @@ targets = [
             .iter()
             .map(|candidate| candidate.provider_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["default_gpt", "minimax"]
+        vec!["minimax", "default_gpt"]
     );
     let selected = target
         .select_available(
@@ -789,8 +789,7 @@ targets = [
             0,
         )
         .unwrap();
-    assert_eq!(selected.candidate.provider_id, "default_gpt");
-    assert_eq!(selected.candidate.model_id, "gpt-5.5");
+    assert_eq!(selected.candidate.provider_id, "minimax");
 }
 
 #[test]
@@ -800,19 +799,19 @@ fn nested_forwarder_expands_and_reselects_inside_same_route_hit() {
     assert_eq!(expanded.candidates.len(), 2);
     assert_eq!(
         expanded.candidates[0].compatibility_profile.as_deref(),
-        Some("chat:minimax")
+        None
     );
+    assert!(expanded.candidates[0]
+        .provider_request_cleanup
+        .historical_fields
+        .is_empty());
+    assert_eq!(expanded.candidates[1].compatibility_profile.as_deref(), Some("chat:minimax"));
     assert_eq!(
-        expanded.candidates[0]
+        expanded.candidates[1]
             .provider_request_cleanup
             .historical_fields,
         vec!["reasoning.encrypted_content"]
     );
-    assert_eq!(expanded.candidates[1].compatibility_profile, None);
-    assert!(expanded.candidates[1]
-        .provider_request_cleanup
-        .historical_fields
-        .is_empty());
     let selected = V3TargetInterpreter::default()
         .select_available(
             expanded,
@@ -824,7 +823,7 @@ fn nested_forwarder_expands_and_reselects_inside_same_route_hit() {
         .unwrap();
     assert_eq!(selected.route.hit_count, 1);
     assert_eq!(selected.candidate.provider_id, "b");
-    assert_eq!(selected.attempts, 2);
+    assert_eq!(selected.attempts, 1);
 }
 
 #[test]
@@ -1011,8 +1010,8 @@ fn default_floor_does_not_reselect_request_local_failed_candidate() {
     assert_eq!(
         exhausted.attempted_candidates,
         vec![
-            "a:ka:m:availability(request_local_provider_failure)".to_string(),
             "b:kb:m:availability(request_local_provider_failure)".to_string(),
+            "a:ka:m:availability(request_local_provider_failure)".to_string(),
         ]
     );
 }
@@ -1336,7 +1335,7 @@ targets = [
         )
         .unwrap();
 
-    assert_eq!(selected.candidate.provider_id, "short");
+    assert_eq!(selected.candidate.provider_id, "long");
     assert!(selected.unavailable_candidates.is_empty());
 
     let classified = router

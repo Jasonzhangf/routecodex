@@ -21,6 +21,7 @@ pub struct V3ProviderSchedulingProjection {
     pub auth_alias: String,
     pub model_id: String,
     pub priority: i32,
+    pub effective_priority: i32,
     pub score_milli: u32,
     pub base_weight: u32,
     pub effective_weight_milli: u64,
@@ -90,15 +91,18 @@ impl V3ProviderSchedulingProjection {
         score_milli: u32,
         base_weight: u32,
     ) -> Self {
-        let score_multiplier = 500_u64.saturating_add(u64::from(score_milli));
+        let health_adjustment = i32::try_from(score_milli)
+            .unwrap_or(i32::MAX)
+            .saturating_sub(1_000);
         Self {
             provider_id: provider_id.to_string(),
             auth_alias: auth_alias.to_string(),
             model_id: model_id.to_string(),
             priority,
+            effective_priority: priority.saturating_add(health_adjustment),
             score_milli,
             base_weight,
-            effective_weight_milli: u64::from(base_weight.max(1)) * score_multiplier,
+            effective_weight_milli: u64::from(base_weight.max(1)),
             available: true,
             blocked_scopes: Vec::new(),
             score_generation: 0,

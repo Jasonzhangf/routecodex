@@ -658,7 +658,7 @@ fn post_commit_sse_failures_cool_provider_and_block_fresh_session() {
         &health, "primary", "key1", "gpt-test", 1, 1, 2_000_000,
     );
     assert!(!after.available);
-    assert!(after.effective_weight_milli < before.effective_weight_milli);
+    assert!(after.effective_priority < before.effective_priority);
 }
 
 #[tokio::test]
@@ -1013,16 +1013,16 @@ capabilities = ["text", "tools", "reasoning"]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
 targets = [
-  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 3 },
   { kind = "provider_model", provider = "first", model = "gpt-test", key = "key2", priority = 2 },
-  { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = 3 }
+  { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = 1 }
 ]
 [route_groups.__SCOPE__.pools.default]
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 3 },
   { kind = "provider_model", provider = "first", model = "gpt-test", key = "key2", priority = 2 },
-  { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = 3 }
+  { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = 1 }
 ]
 "#
     .replace("__SCOPE__", scope);
