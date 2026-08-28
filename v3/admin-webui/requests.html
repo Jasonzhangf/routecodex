@@ -102,16 +102,6 @@
       if (endpoint === "/v1beta/models") return "gemini";
       return endpoint;
     }
-    function providerModelCell(row) {
-      const provider = (row && row.meta && row.meta.provider) ?? "—";
-      const model = (row && row.meta && row.meta.model) ?? "—";
-      if (provider === "—" && model === "—") return "—";
-      if (provider === "—") return model;
-      if (model === "—") return provider;
-      return `${provider} · ${model}`;
-    }
-
-// X
   </script>
   <script src="/app.embedded.txt"></script>
   <script>
@@ -273,7 +263,6 @@
       errorStatuses: 0,
       tab: "entries",
       entriesGroup: "pool",
-      tableWidths: { entries: null, attempts: null, errors: null },
       stats: {},
       timeseries: [],
       facets: { ports: {}, providers: {}, models: {}, routes: {}, sessions: {}, response_types: {}, error_status_codes: {} },
@@ -291,12 +280,17 @@
       if (r === "failed-attempt") return "error";
       return "active";
     }
+    // Row hit rate mirrors backend observability.rs row_effective_input =
+    // max(input, cached) so cached-only rows (legacy cache_read responses)
+    // report 100% instead of —, and per-row cached is clamped to effective
+    // so the value never exceeds 100%.
     function usageText(usage) {
       if (!usage) return "—";
       const input = Number(usage.input_tokens ?? 0);
       const output = Number(usage.output_tokens ?? 0);
-      const cached = Math.min(Number(usage.cached_tokens ?? 0), input);
-      const hit = input > 0 ? `${((cached / input) * 100).toFixed(1)}%` : "—";
+      const cached = Math.min(Number(usage.cached_tokens ?? 0), Math.max(input, Number(usage.cached_tokens ?? 0)));
+      const effective = Math.max(input, cached);
+      const hit = effective > 0 ? `${((cached / effective) * 100).toFixed(1)}%` : "—";
       return `${fmtCompact(input)} / ${fmtCompact(output)} · ${hit}`;
     }
 
@@ -464,7 +458,6 @@
     async function loadRecords() {
       if (state.loading) return;
       state.loading = true;
-      // placeholder
       try {
         const params = new URLSearchParams();
         params.set("page", String(state.page));
