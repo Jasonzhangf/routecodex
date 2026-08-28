@@ -226,21 +226,7 @@ impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
                 Some(auth_alias),
                 Some(model_id),
             ));
-        let session_has_cooldown = session
-            .blocked_scopes
-            .iter()
-            .any(|scope| scope.starts_with("provider_failure_session:"));
         projection.blocked_scopes.extend(session.blocked_scopes);
-        if session_has_cooldown
-            && !projection
-                .blocked_scopes
-                .iter()
-                .any(|scope| scope == "provider_cooldown_probe_pending")
-        {
-            projection
-                .blocked_scopes
-                .push("provider_cooldown_probe_pending".to_string());
-        }
         if excluded {
             projection
                 .blocked_scopes

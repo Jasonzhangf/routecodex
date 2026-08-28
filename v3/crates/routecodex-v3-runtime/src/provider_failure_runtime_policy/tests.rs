@@ -435,6 +435,55 @@ fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_al
 }
 
 #[test]
+fn session_transient_bypass_is_not_labeled_as_global_probe_pending() {
+    let scope = "session_transient_bypass";
+    let manifest = global_pool_alive_manifest(scope);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let session = test_provider_failure_scope(scope, scope, "session-only")
+        .expect("failure session scope");
+    health
+        .store()
+        .record_provider_transient_bypass_in_session(
+            &session,
+            "first",
+            Some("key1"),
+            Some("gpt-test"),
+            Some("transient session bypass"),
+            2_000_000,
+        )
+        .expect("session transient bypass should be recorded");
+
+    let session_availability = health.session_bound_availability(&session);
+    let reader = V3SessionGlobalSchedulingReader {
+        session: &session_availability,
+        global: &health,
+        excluded: &BTreeSet::new(),
+    };
+    let scheduling = V3ProviderSchedulingReader::scheduling_projection(
+        &reader,
+        "first",
+        "key1",
+        "gpt-test",
+        1,
+        1,
+        2_000_001,
+    );
+    assert!(!scheduling.available);
+    assert!(!scheduling
+        .blocked_scopes
+        .iter()
+        .any(|scope| scope == "provider_cooldown_probe_pending"));
+    let projection = health
+        .store()
+        .availability_for_session(&session, "first", Some("key1"), Some("gpt-test"), 2_000_001);
+    assert!(!projection.available);
+    assert!(projection
+        .blocked_scopes
+        .iter()
+        .any(|scope| scope.starts_with("provider_failure_session:")));
+}
+
+#[test]
 fn exhaustion_rescue_identity_is_model_scoped() {
     let mut identities = BTreeSet::new();
     assert!(identities.insert((
