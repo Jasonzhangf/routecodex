@@ -1,6 +1,6 @@
 # V4 Cordis 主线进度表
 
-主树：`codex/v4-cordis-refactor-main`。所有 task merge target 固定为该主树；每个 milestone 完成后再合并仓库 `main`。
+主树：`v4-cordis`（当前 worktree `/Users/fanzhang/Documents/github/routecodex/playground/v4-cordis-20260826T043500Z`）。所有 task merge target 固定为该主树；V3 与仓库 `main` 保持并行且不触碰。
 
 ## 依赖图
 
