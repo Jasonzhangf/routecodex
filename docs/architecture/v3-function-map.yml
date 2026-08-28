@@ -769,8 +769,10 @@ features:
   - Request image/media facts are normal request data and must enter V3RouterRequestFacts
     as multimodal/vision before pool matching.
   - Request tool facts include top-level tools and Responses additional_tools; Codex
-    coding tools set coding, tool_search sets search, and web_search/web_search_preview
-    set web_search before pool matching.
+    coding tools set coding and tool_search sets search from current-turn calls.
+    web_search route activation requires strict current-user keyword intent or an
+    explicit current-turn model web-search call; exposed tool declarations alone
+    never set the web_search route or capability.
   - V3Router07OpaqueTargetHitOnce carries request route facts to Target as route/pool
     selection signals; route selection is not model capability filtering.
   - 'Target hard capability_mismatch is allowed only for capabilities the selected

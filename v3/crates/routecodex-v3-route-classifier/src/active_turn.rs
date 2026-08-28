@@ -1,6 +1,6 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::{classify_tool_call, RouteToolCallClassification};
+use crate::{RouteToolCallClassification, classify_tool_call};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct V3CurrentTurnSignals {
@@ -11,6 +11,7 @@ pub struct V3CurrentTurnSignals {
     pub has_current_turn_web_search: bool,
     pub has_current_turn_image: bool,
     pub last_assistant_tool: Option<RouteToolCallClassification>,
+    pub current_user_text: String,
 }
 
 pub fn build_v3_current_turn_route_facts(request: &Value) -> V3CurrentTurnSignals {
@@ -110,6 +111,10 @@ fn extract_message_signals(messages: &[Value]) -> V3CurrentTurnSignals {
     let Some(segment) = active_segment(messages, latest_user_index, latest_role.as_deref()) else {
         return V3CurrentTurnSignals {
             latest_message_from_user: latest_role.as_deref() == Some("user"),
+            current_user_text: latest_user_index
+                .and_then(|index| messages.get(index))
+                .map(extract_user_text)
+                .unwrap_or_default(),
             has_current_turn_web_search: latest_user_index
                 .and_then(|index| messages.get(index))
                 .is_some_and(message_contains_web_search),
@@ -173,6 +178,7 @@ fn extract_message_signals(messages: &[Value]) -> V3CurrentTurnSignals {
     }
     V3CurrentTurnSignals {
         latest_message_from_user: latest_role.as_deref() == Some("user"),
+        current_user_text: String::new(),
         has_current_turn_tool_output,
         has_current_turn_tool_execution_error,
         is_compaction,
@@ -197,6 +203,10 @@ fn extract_responses_signals(entries: &[Value]) -> V3CurrentTurnSignals {
             .unwrap_or(0);
         return V3CurrentTurnSignals {
             latest_message_from_user: latest_role.as_deref() == Some("user"),
+            current_user_text: latest_user_index
+                .and_then(|index| entries.get(index))
+                .map(extract_user_text)
+                .unwrap_or_default(),
             is_compaction: latest_user_index.is_some_and(|index| {
                 entries[index..]
                     .iter()
@@ -267,6 +277,7 @@ fn extract_responses_signals(entries: &[Value]) -> V3CurrentTurnSignals {
     }
     V3CurrentTurnSignals {
         latest_message_from_user: latest_role.as_deref() == Some("user"),
+        current_user_text: String::new(),
         has_current_turn_tool_output,
         has_current_turn_tool_execution_error,
         is_compaction,
@@ -323,6 +334,37 @@ fn message_contains_web_search(message: &Value) -> bool {
                 .iter()
                 .any(|item| entry_type(item).as_str() == "web_search")
         })
+}
+
+fn extract_user_text(value: &Value) -> String {
+    fn collect(value: &Value, output: &mut Vec<String>) {
+        match value {
+            Value::String(text) if !text.trim().is_empty() => {
+                output.push(text.trim().to_string());
+            }
+            Value::Array(items) => items.iter().for_each(|item| collect(item, output)),
+            Value::Object(fields) => {
+                if let Some(text) = fields.get("text") {
+                    collect(text, output);
+                } else if let Some(content) = fields.get("content") {
+                    collect(content, output);
+                } else if let Some(parts) = fields.get("parts") {
+                    collect(parts, output);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut output = Vec::new();
+    if let Some(content) = value.get("content") {
+        collect(content, &mut output);
+    } else if value.get("type").and_then(Value::as_str) == Some("input_text") {
+        if let Some(text) = value.get("text") {
+            collect(text, &mut output);
+        }
+    }
+    output.join(" ")
 }
 
 fn message_contains_image(message: &Value) -> bool {

@@ -1181,7 +1181,7 @@ features:
   - Router cannot import Provider availability and Target cannot mutate Provider health
   - P5 Runtime stops before Provider send and only full selected-target exhaustion enters Error01-Error06
   - Request image/media facts survive trailing tool/function outputs and are carried to Target as multimodal/vision requirements
-  - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools, tool_search, and web_search surfaces become routing capabilities before pool matching
+  - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools and tool_search calls become routing facts, while web_search requires strict current-turn keyword intent or an explicit model call and never activates from a declaration alone
   - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding/longcontext/remote_continuation/local_materialization
       never hard-reject a candidate
   - After genuine web_search/search and multimodal/vision capability validation, Target10 preserves configured candidate order among candidates within their declared context window; a candidate whose max_context_tokens is below request_input_tokens is marked context_window_exceeded and skipped before availability/transport. Explicit direct pins and the default-pool floor remain last-resort eligible with the typed overflow reason, while provider health and request-local provider-failure exclusion remain explicit switch inputs

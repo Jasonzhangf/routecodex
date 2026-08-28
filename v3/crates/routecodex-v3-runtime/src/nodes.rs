@@ -687,9 +687,6 @@ fn build_v3_router_request_facts_for_entry_with_control(
     }
     let active_turn = build_v3_current_turn_route_facts(body);
     let has_image_attachment = active_turn.has_current_turn_image;
-    // 客户端显式声明 websearch 工具（function/custom 名为 websearch/web_search）
-    // 是 typed current-turn 路由事实：候选 Mode B pool 必须据此命中，禁止依赖
-    // 请求文本意图推断（r4 typed facts 设计：不扫描 payload 文本重建控制）。
     let declares_web_search_tool = request_declares_v3_web_search_tool(body, manifest);
     let route_facts = V3CurrentTurnRouteFacts {
         reached_long_context: longcontext_threshold_tokens
@@ -700,13 +697,13 @@ fn build_v3_router_request_facts_for_entry_with_control(
         stopless_followup,
         has_current_turn_tool_output: active_turn.has_current_turn_tool_output,
         has_current_turn_tool_execution_error: active_turn.has_current_turn_tool_execution_error,
-        has_current_turn_web_search: active_turn.has_current_turn_web_search
-            || declares_web_search_tool,
+        has_current_turn_web_search: active_turn.has_current_turn_web_search,
         last_assistant_tool_category: active_turn
             .last_assistant_tool
             .as_ref()
             .map(|tool| tool.category.clone()),
         has_background_keyword: false,
+        current_user_text: active_turn.current_user_text.clone(),
     };
     let route_classification = classify_route(&route_facts);
     for capability in &route_classification.required_capabilities {
@@ -1154,6 +1151,32 @@ mod tests {
             .route_classification
             .reasoning
             .contains("compact:registered-ingress"));
+    }
+
+    #[test]
+    fn declared_web_search_tool_does_not_activate_web_search_route() {
+        let request = serde_json::json!({
+            "model": "gpt-5.5",
+            "messages": [{"role": "user", "content": "fix the routing bug"}],
+            "tools": [{"type": "function", "function": {
+                "name": "web_search",
+                "description": "search the web",
+                "parameters": {"type": "object"}
+            }}]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(&request, "chat", None);
+        assert_ne!(
+            facts.route_classification.route_name, "web_search",
+            "declared tools are not current-turn web-search evidence"
+        );
+        assert!(
+            !facts
+                .route_classification
+                .required_capabilities
+                .iter()
+                .any(|capability| capability == "web_search")
+        );
     }
 
     #[test]

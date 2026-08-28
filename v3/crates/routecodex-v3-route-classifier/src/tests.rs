@@ -1,5 +1,5 @@
 use super::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[test]
 fn active_turn_uses_actual_tool_calls_and_ignores_history() {
@@ -215,6 +215,68 @@ fn responses_tool_type_matrix_uses_current_turn_call() {
 }
 
 #[test]
+fn current_turn_keyword_activates_web_search_but_declaration_does_not() {
+    let keyword = build_v3_current_turn_route_facts(&json!({
+        "messages": [{"role": "user", "content": "请搜索今天的新闻"}],
+        "tools": [{"type": "web_search"}]
+    }));
+    assert!(keyword.latest_message_from_user);
+    assert_eq!(keyword.current_user_text, "请搜索今天的新闻");
+    assert!(
+        classify_route(&RouteClassifierInput {
+            latest_message_from_user: keyword.latest_message_from_user,
+            current_user_text: keyword.current_user_text,
+            ..Default::default()
+        })
+        .route_name
+            == "web_search"
+    );
+
+    let declaration_only = build_v3_current_turn_route_facts(&json!({
+        "messages": [{"role": "user", "content": "修复这个路由问题"}],
+        "tools": [{"type": "web_search"}]
+    }));
+    assert!(declaration_only.current_user_text.is_empty() == false);
+    assert_ne!(
+        classify_route(&RouteClassifierInput {
+            latest_message_from_user: declaration_only.latest_message_from_user,
+            current_user_text: declaration_only.current_user_text,
+            ..Default::default()
+        })
+        .route_name,
+        "web_search"
+    );
+}
+
+#[test]
+fn current_turn_explicit_web_search_call_activates_route() {
+    let request = json!({
+        "input": [
+            {"type": "message", "role": "user", "content": "search"},
+            {"type": "web_search_call", "name": "web_search", "call_id": "call-1"}
+        ]
+    });
+    let signals = build_v3_current_turn_route_facts(&request);
+    assert_eq!(
+        signals
+            .last_assistant_tool
+            .as_ref()
+            .map(|tool| tool.category.as_str()),
+        Some("websearch")
+    );
+    assert_eq!(
+        classify_route(&RouteClassifierInput {
+            latest_message_from_user: signals.latest_message_from_user,
+            has_current_turn_tool_output: signals.has_current_turn_tool_output,
+            last_assistant_tool_category: signals.last_assistant_tool.map(|tool| tool.category),
+            ..Default::default()
+        })
+        .route_name,
+        "web_search"
+    );
+}
+
+#[test]
 fn shared_route_priority_matches_v2() {
     let fresh = classify_route(&RouteClassifierInput {
         latest_message_from_user: true,
@@ -316,9 +378,11 @@ fn explicit_web_search_part_in_current_user_turn_is_routed_to_web_search() {
         ..Default::default()
     });
     assert_eq!(classified.route_name, "web_search");
-    assert!(classified
-        .required_capabilities
-        .contains(&"web_search".to_string()));
+    assert!(
+        classified
+            .required_capabilities
+            .contains(&"web_search".to_string())
+    );
 }
 
 #[test]

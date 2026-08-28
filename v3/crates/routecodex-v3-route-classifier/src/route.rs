@@ -12,6 +12,7 @@ pub struct V3CurrentTurnRouteFacts {
     pub has_current_turn_web_search: bool,
     pub last_assistant_tool_category: Option<String>,
     pub has_background_keyword: bool,
+    pub current_user_text: String,
 }
 
 pub type RouteClassifierInput = V3CurrentTurnRouteFacts;
@@ -66,7 +67,13 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
     let web_search_tool_intent = continuation && last_tool_category == "websearch";
     let other_tool_continuation = continuation && last_tool_category == "other";
     let unknown_tool_continuation = continuation && last_tool_category.is_empty();
-    let web_search = web_search_tool_intent || input.has_current_turn_web_search;
+    let current_user_web_search_intent = input.latest_message_from_user
+        && !input.has_current_turn_tool_output
+        && !input.has_image_attachment
+        && crate::tools::has_web_search_intent(&input.current_user_text);
+    let web_search = web_search_tool_intent
+        || input.has_current_turn_web_search
+        || current_user_web_search_intent;
 
     let evaluation = vec![
         ("compact", input.is_compaction, "compact:registered-ingress"),
@@ -86,6 +93,8 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
             web_search,
             if web_search_tool_intent {
                 "web_search:tool-intent"
+            } else if current_user_web_search_intent {
+                "web_search:user-text-intent"
             } else {
                 "web_search:explicit-or-intent"
             },
