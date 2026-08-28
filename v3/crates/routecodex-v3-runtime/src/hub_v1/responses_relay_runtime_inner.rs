@@ -791,6 +791,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     }
                     Err(error) => handle_error_before_resp03!(Err(error)),
                 };
+                repair_v3_runtime_input_usage_from_request(
+                    &mut finalized_provider_value,
+                    provider_semantic_body.as_ref(),
+                );
                 apply_v3_responses_relay_stopless_control_transition(
                     manifest,
                     &input.server_id,
@@ -1134,6 +1138,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     }
                     Err(error) => handle_error_before_resp03!(Err(error)),
                 };
+                repair_v3_runtime_input_usage_from_request(
+                    &mut finalized_provider_value,
+                    provider_semantic_body.as_ref(),
+                );
                 apply_v3_responses_relay_stopless_control_transition(
                     manifest,
                     &input.server_id,

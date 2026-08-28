@@ -925,6 +925,44 @@ pub(crate) fn extract_v3_runtime_usage_summary(value: &Value) -> Option<V3Runtim
     }
 }
 
+pub(crate) fn repair_v3_runtime_input_usage_from_request(
+    response: &mut Value,
+    request: &Value,
+) {
+    let estimated_input_tokens = crate::token_estimation::estimate_v3_request_tokens(request);
+    if estimated_input_tokens == 0 {
+        return;
+    }
+    let Some(response_object) = response.as_object_mut() else {
+        return;
+    };
+    let usage = response_object
+        .entry("usage")
+        .or_insert_with(|| Value::Object(Map::new()));
+    let Some(usage_object) = usage.as_object_mut() else {
+        return;
+    };
+    let input_tokens = usage_object
+        .get("input_tokens")
+        .and_then(Value::as_u64);
+    if input_tokens.is_some_and(|tokens| tokens > 0) {
+        return;
+    }
+    usage_object.insert(
+        "input_tokens".to_string(),
+        Value::from(estimated_input_tokens),
+    );
+    if let Some(output_tokens) = usage_object
+        .get("output_tokens")
+        .and_then(Value::as_u64)
+    {
+        usage_object.insert(
+            "total_tokens".to_string(),
+            Value::from(estimated_input_tokens.saturating_add(output_tokens)),
+        );
+    }
+}
+
 fn read_v3_usage_u64(value: &Value, path: &[&str]) -> Option<u64> {
     let mut current = value;
     for segment in path {
