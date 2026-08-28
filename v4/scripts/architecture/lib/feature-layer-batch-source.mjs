@@ -44,8 +44,9 @@ const GOVERNANCE_CLOSURE_PREFIXES = [
 ];
 
 function isGovernanceClosurePath(relativePath) {
-  return SHARED_PROJECTION_PATHS.has(relativePath)
-    || GOVERNANCE_CLOSURE_PREFIXES.some((prefix) => relativePath.startsWith(prefix));
+  const normalized = relativePath.startsWith('v4/') ? relativePath.slice(3) : relativePath;
+  return SHARED_PROJECTION_PATHS.has(normalized)
+    || GOVERNANCE_CLOSURE_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
 function readJsonAt(truth, commit, relativePath, failures, code, context) {
