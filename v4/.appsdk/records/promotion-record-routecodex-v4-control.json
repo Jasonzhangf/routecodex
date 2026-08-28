@@ -1,6 +1,7 @@
 {
   "architecture_review_id": "v4-cordis-control-architecture-review-current",
   "artifact_hash": "sha256:cf200dbd7f3e1a6284477035ef57b5d6bc0596bda36c29a1704461d12dbae469",
+  "base_artifact_hash": "sha256:bf6b8e426f5bda1962b5c0c4b82bde1be090294eed5e44bbfdc49d7cdc0e0103",
   "base_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
   "candidate_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
   "change_reason_comment": "Rebuild control governance records from current v4-cordis source and artifact; preserve control/data isolation.",
