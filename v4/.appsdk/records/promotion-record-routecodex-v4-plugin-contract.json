@@ -6,10 +6,11 @@
   "change_reason_comment": "Bind current v4-cordis plugin contract artifact and evidence graph.",
   "change_set_id": "v4-cordis-plugin-contract-current",
   "compatibility_level": "compatible",
-  "created_at": "2026-08-28T11:12:40Z",
+  "created_at": "2026-08-28T11:37:00Z",
   "design_id": "v4-cordis-mainline-migration",
   "effectiveness_record_id": "v4-cordis-plugin-contract-effectiveness-current",
   "evidence_ids": [
+    "v4-cordis-plugin-contract-candidate-current",
     "v4-cordis-plugin-contract-positive-current",
     "v4-cordis-plugin-contract-negative-current",
     "v4-cordis-plugin-contract-blackbox-current"
