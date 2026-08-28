@@ -3,6 +3,7 @@ use routecodex_v4_cordis_bridge::ExecCtx;
 // Candidate scope is verified independently from production dispatch.
 // Gate input closure is recorded before integration.
 // Boundary gate executable is part of the candidate contract.
+// Provider semantic projection never owns transport, routing, or client framing.
 
 pub fn provider_semantic_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     super::request_plugins::provider_semantic(ctx)

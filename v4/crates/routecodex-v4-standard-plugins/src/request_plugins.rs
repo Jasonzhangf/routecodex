@@ -6,6 +6,7 @@
 //! Boundary gate executable is part of the candidate contract.
 //! The request lane remains independently executable until integration opens.
 //! Its candidate boundary is fixed before any production dispatcher wiring.
+//! This candidate records the request lane's current owner boundary at integration time.
 
 use routecodex_v4_cordis_bridge::ExecCtx;
 use serde_json::{json, Map, Value};
