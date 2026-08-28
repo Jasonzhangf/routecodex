@@ -3,10 +3,10 @@
   "artifact_record_id": "v4-cordis-control-candidate",
   "clean_scope": {
     "base_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
+    "generated_policy": "ignored_generated_outputs",
     "changed_paths": [
       "crates/routecodex-v4-control/**"
     ],
-    "generated_policy": "ignored_generated_outputs",
     "ignored_paths": [
       "generated/**",
       "active/**"
@@ -26,7 +26,6 @@
     "vcs": "git"
   },
   "previous_active_immutable": true,
-  "previous_active_version": "active-v2",
   "promotion_id": "v4-cordis-control-promotion-current",
   "promotion_record_hash": "sha256:6738354b76458af92fc78681c5944531771a2a8e3afcd11615e211fe65409ec0",
   "public_api_hash": "sha256:6998ad9221d05d3683428d2bb6ab681c2b6785f5a220ee5178b915dc81ca1801",
