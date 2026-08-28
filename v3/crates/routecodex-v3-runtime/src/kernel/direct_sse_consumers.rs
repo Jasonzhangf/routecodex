@@ -563,15 +563,11 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
         if self.tool_thinking_enabled && is_direct_toolreason_terminal(&rewritten) {
             self.finalize_toolreason_observation();
         }
-        if !self.retain_response_cipher {
-            routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
-                &mut rewritten,
-                false,
-            );
-        }
-        if self.strip_client_response_id {
-            crate::shared::strip_v3_response_id_from_json_body(&mut rewritten);
-        }
+        crate::direct_response_hooks::apply_v3_direct_response_projection_hooks(
+            &mut rewritten,
+            self.strip_client_response_id,
+            self.retain_response_cipher,
+        );
         if self.deepseek_console_go {
             rewritten = provider_compat_core::apply_deepseek_console_go_response_compat(rewritten);
         }
@@ -1154,7 +1150,8 @@ mod tests {
                 V3DirectSseTypedHookCatalog::new()
                     .with_toolreason(crate::hooks::apply_responses_toolreason_sse_hook),
             )
-            .with_tool_thinking(true, true);
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses);
         let mut object = SseObjectFrame::from_json(
             r#"{"type":"response.created","response":{"tools":[{"type":"function","name":"pwd","description":"Return the current working directory.\n\n工具调用协议（只适用于本轮工具调用，不适用于普通回答）：\nreason","parameters":{"type":"object","properties":{"reason":{"type":"string","description":"当前工具调用的唯一直接动机，只说动机，简短"},"native":{"type":"string"}},"required":["reason","native"]}}]}}"#,
         )
@@ -1189,7 +1186,8 @@ mod tests {
                 V3DirectSseTypedHookCatalog::new()
                     .with_toolreason(crate::hooks::apply_responses_toolreason_sse_hook),
             )
-            .with_tool_thinking(true, true);
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses);
         let mut arguments_done = SseObjectFrame::from_json(
             r#"{"type":"response.function_call_arguments.done","output_index":0,"arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"deepseek-v4-flash\"}"}"#,
         )

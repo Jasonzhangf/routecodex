@@ -468,11 +468,11 @@ struct V3OpenAiChatRelayTypedSemanticHook<'a> {
 }
 
 impl V3OpenAiChatSseSemanticHook for V3OpenAiChatRelayTypedSemanticHook<'_> {
-    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>) {
-        let _ = self
-            .observation
-            .record_typed_object_type("openai_chat", &input.protocol.object);
+    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>) -> Result<(), String> {
+        self.observation
+            .record_typed_object_type("openai_chat", &input.protocol.object)?;
         self.catalog.notify_chat(input);
+        Ok(())
     }
 
     fn rewrite(
@@ -804,11 +804,12 @@ fn enqueue_sse_client_chunks(
             catalog: compile_v3_hub_relay_response_hooks().typed_sse_catalog(),
         };
         let mut semantic = semantic;
-        apply_v3_openai_chat_sse_semantic_hook(
+        apply_v3_openai_chat_sse_semantic_hook_with_observation(
             &mut semantic,
             &transport_object,
             &protocol,
             &mut semantic_hook,
+            Some(&state.stream_observation),
         )
         .map_err(|error| error.to_string())?;
         // Usage 必须经唯一观测入口写入 stream_observation；最终由

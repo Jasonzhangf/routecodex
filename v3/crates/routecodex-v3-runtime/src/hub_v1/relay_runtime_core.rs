@@ -211,7 +211,18 @@ fn observe_v3_provider_sse(
     use futures_util::StreamExt;
     Box::pin(stream.map(move |item| {
         if let Ok(chunk) = &item {
-            let _ = observation.record_provider_raw_sse_chunk(chunk);
+            if let Err(error) = observation.record_provider_raw_sse_chunk(chunk) {
+                // This is runtime observation state, not provider health. Keep
+                // the failure on the typed side-channel while preserving the
+                // provider/client bytes and their protocol semantics.
+                if let Err(receipt_error) = observation.record_observation_error(&format!(
+                    "provider_raw_sse_observation_failed: {error}"
+                )) {
+                    eprintln!(
+                        "V3 runtime observation failure could not be recorded: {receipt_error}; original: {error}"
+                    );
+                }
+            }
         }
         item
     }))
@@ -1434,5 +1445,21 @@ mod tests {
             }
             other => panic!("post-first-frame hang must produce Transport error, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn provider_raw_sse_observation_is_preserved_on_side_channel() {
+        let observation = V3RuntimeStreamObservation::default();
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(
+            futures_util::stream::iter(vec![Ok(b"data: semantic\n\n".to_vec())]),
+        );
+        let mut observed = observe_v3_provider_sse(stream, observation.clone());
+
+        assert_eq!(observed.next().await.unwrap().unwrap(), b"data: semantic\n\n");
+        assert_eq!(
+            observation.snapshot().unwrap().provider_raw_sse,
+            "data: semantic\n\n"
+        );
+        assert_eq!(observation.snapshot().unwrap().observation_error, None);
     }
 }

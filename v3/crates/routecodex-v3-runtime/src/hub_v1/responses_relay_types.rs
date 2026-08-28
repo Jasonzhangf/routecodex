@@ -257,6 +257,10 @@ pub struct V3RuntimeStreamObservationSnapshot {
     pub timing: Option<V3RuntimeTimingSummary>,
     pub typed_object_types: Vec<String>,
     pub provider_raw_sse: String,
+    pub post_commit_error: Option<String>,
+    /// Observation failures stay on the runtime side-channel.  They must not
+    /// disappear silently and must never be mistaken for provider failure.
+    pub observation_error: Option<String>,
 }
 
 pub(crate) struct V3ResponsesRelayProviderFailure {
@@ -305,6 +309,24 @@ impl V3RuntimeStreamObservation {
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())
     }
 
+    pub(crate) fn record_post_commit_error(&self, error: &str) -> Result<(), String> {
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        snapshot.post_commit_error = Some(error.to_string());
+        Ok(())
+    }
+
+    pub(crate) fn record_observation_error(&self, error: &str) -> Result<(), String> {
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        snapshot.observation_error = Some(error.to_string());
+        Ok(())
+    }
+
     pub(crate) fn has_semantic_terminal(&self) -> Result<bool, String> {
         Ok(self.semantic_terminal()?.is_some())
     }
@@ -348,6 +370,12 @@ impl V3RuntimeStreamObservation {
         }
         if !incoming.provider_raw_sse.is_empty() {
             snapshot.provider_raw_sse = incoming.provider_raw_sse.clone();
+        }
+        if incoming.post_commit_error.is_some() {
+            snapshot.post_commit_error = incoming.post_commit_error.clone();
+        }
+        if incoming.observation_error.is_some() {
+            snapshot.observation_error = incoming.observation_error.clone();
         }
         Ok(())
     }

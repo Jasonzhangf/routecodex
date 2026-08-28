@@ -1375,17 +1375,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
                 _ => None,
             };
         if let V3ProviderAttemptBody::Json(body) = &mut response_projection.attempt_payload.body {
-            if crate::shared::v3_strip_client_response_id_enabled_for_server(
-                manifest,
-                &standardized.server_id,
-            ) {
-                crate::shared::strip_v3_response_id_from_json_body(body);
-            }
-            // 唯一密文剥离 hook（direct 响应侧）：retain=false 时删除响应中所有
-            // Codex 密文（encrypted_content rsn_/gAAAA），客户端只拿到明文 reasoning；
-            // relay 响应侧（Resp03）复用同一 hook，保证 direct/relay 策略单一实现。
-            routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+            crate::direct_response_hooks::apply_v3_direct_response_projection_hooks(
                 body,
+                crate::shared::v3_strip_client_response_id_enabled_for_server(
+                    manifest,
+                    &standardized.server_id,
+                ),
                 retain_response_cipher,
             );
             if v3_responses_direct_stopless_center_enabled_for_server(

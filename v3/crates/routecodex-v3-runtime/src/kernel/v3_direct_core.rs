@@ -1003,18 +1003,20 @@ where
                             }
                         }
                     };
-                    crate::kernel::direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream(
+                    crate::kernel::direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream_with_observation(
                         stream,
                         response_projection.compat_plan.provider_protocol,
                         handoff,
                         Some(handoff_budget),
+                        Some(target_observation.clone()),
                     )
                 } else {
-                    crate::kernel::direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream(
+                    crate::kernel::direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream_with_observation(
                         stream,
                         response_projection.compat_plan.provider_protocol,
                         |error| async move { Err(error) },
                         Some(0),
+                        Some(target_observation.clone()),
                     )
                 };
                 drop(provider_action_permit.take());

@@ -78,7 +78,7 @@ pub struct V3ResponsesSseSemanticObject {
 }
 
 pub trait V3ResponsesSseSemanticHook {
-    fn notify(&mut self, input: &V3ResponsesSseHookInput<'_>);
+    fn notify(&mut self, input: &V3ResponsesSseHookInput<'_>) -> Result<(), String>;
 
     fn rewrite(
         &mut self,
@@ -92,12 +92,32 @@ pub fn apply_v3_responses_sse_semantic_hook(
     protocol: &V3ResponsesSseProtocolMetadata,
     hook: &mut impl V3ResponsesSseSemanticHook,
 ) -> Result<(), V3ResponsesSseTreeError> {
+    apply_v3_responses_sse_semantic_hook_with_observation(
+        semantic, transport, protocol, hook, None,
+    )
+}
+
+pub(crate) fn apply_v3_responses_sse_semantic_hook_with_observation(
+    semantic: &mut V3ResponsesSseSemanticObject,
+    transport: &V3ResponsesSseTransportObject,
+    protocol: &V3ResponsesSseProtocolMetadata,
+    hook: &mut impl V3ResponsesSseSemanticHook,
+    observation: Option<&crate::hub_v1::V3RuntimeStreamObservation>,
+) -> Result<(), V3ResponsesSseTreeError> {
     let input = V3ResponsesSseHookInput {
         transport,
         protocol,
         semantic,
     };
-    hook.notify(&input);
+    if let Err(error) = hook.notify(&input) {
+        if let Some(observation) = observation {
+            observation
+                .record_observation_error(&format!("responses SSE semantic hook: {error}"))
+                .map_err(V3ResponsesSseTreeError::Projection)?;
+        } else {
+            return Err(V3ResponsesSseTreeError::Projection(error));
+        }
+    }
     hook.rewrite(semantic)
 }
 

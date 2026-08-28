@@ -13,9 +13,20 @@ fn v3_front_chunk_is_transport_keepalive(bytes: &[u8]) -> bool {
 }
 
 fn v3_front_json_body_to_sse_frame(bytes: &[u8]) -> Vec<u8> {
-    let value = serde_json::from_slice::<Value>(bytes).unwrap_or_else(|_| {
-        json!({"error": {"code": "front_json_error", "message": "invalid JSON error body"}})
-    });
+    let value = match serde_json::from_slice::<Value>(bytes) {
+        Ok(value) => value,
+        Err(error) => {
+            let projected = project_v3_post_commit_sse_source(
+                raise_v3_sse_runtime_failure(
+                    "V3ServerRespOutbound05ClientFrame",
+                    "front_error06_body_parse_failed",
+                    error.to_string(),
+                ),
+                599,
+            );
+            return v3_front_projected_error_sse_frame(projected);
+        }
+    };
     let error = value.get("error").cloned().unwrap_or(value);
     let event = json!({
         "type": "response.failed",
@@ -24,20 +35,46 @@ fn v3_front_json_body_to_sse_frame(bytes: &[u8]) -> Vec<u8> {
     format!("event: response.failed\ndata: {event}\n\n").into_bytes()
 }
 
+fn v3_front_projected_error_sse_frame(
+    projected: routecodex_v3_error::V3Error06ClientProjected,
+) -> Vec<u8> {
+    let error = projected
+        .body
+        .get("error")
+        .cloned()
+        .unwrap_or(projected.body);
+    let event = json!({
+        "type": "response.failed",
+        "response": {"status": "failed", "error": error}
+    });
+    match serde_json::to_vec(&event) {
+        Ok(bytes) => {
+            let mut frame = b"event: response.failed\ndata: ".to_vec();
+            frame.extend_from_slice(&bytes);
+            frame.extend_from_slice(b"\n\n");
+            frame
+        }
+        Err(_) => b"event: response.failed\ndata: {\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"front_error06_serialization_failed\"}},\"type\":\"response.failed\"}\n\n".to_vec(),
+    }
+}
+
+fn record_v3_front_client_disconnect() {
+    // Client disconnect is a complete Error01→Error06, health-neutral receipt.
+    // The receipt is intentionally client-suppressed after the transport closes;
+    // it must not trigger provider retry, reroute, or a synthetic client frame.
+    let receipt = project_v3_post_commit_sse_source(raise_v3_sse_client_disconnect(), 499);
+    eprintln!("V3 client disconnect Error06 client-suppressed receipt: {receipt:?}");
+}
+
 pub(crate) fn v3_front_sse_worker_panic_frame(message: &str) -> Vec<u8> {
-    let frame = build_v3_server_16_http_frame_from_v3_error_06(project_v3_post_commit_sse_source(
+    v3_front_projected_error_sse_frame(project_v3_post_commit_sse_source(
         raise_v3_sse_runtime_failure(
             "V3ServerRespOutbound05ClientFrame",
             "front_sse_worker_panicked",
             message,
         ),
         599,
-    ));
-    let V3Server16Body::Json(value) = frame.body else {
-        panic!("Front worker panic must project JSON Error06 body");
-    };
-    let bytes = serde_json::to_vec(&value).expect("typed Front worker panic Error06 projection");
-    v3_front_json_body_to_sse_frame(&bytes)
+    ))
 }
 
 pub(crate) async fn pending_endpoint_after_responses_admission(
@@ -144,26 +181,26 @@ impl V3FrontSseAcceptSkeleton {
                                 emitted_response_frame = true;
                             }
                             if tx.send(Ok(bytes.to_vec())).await.is_err() {
+                                record_v3_front_client_disconnect();
                                 return;
                             }
                         }
                         Err(error) => {
-                            let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                                project_v3_post_commit_sse_source(
-                                    raise_v3_sse_runtime_failure(
-                                        "V3ServerRespOutbound05ClientFrame",
-                                        "front_sse_response_body_failed",
-                                        error.to_string(),
-                                    ),
-                                    599,
+                            let projected = project_v3_post_commit_sse_source(
+                                raise_v3_sse_runtime_failure(
+                                    "V3ServerRespOutbound05ClientFrame",
+                                    "front_sse_response_body_failed",
+                                    error.to_string(),
                                 ),
+                                599,
                             );
-                            let V3Server16Body::Json(value) = frame.body else {
-                                panic!("Front response failure must project JSON Error06 body");
-                            };
-                            let bytes = serde_json::to_vec(&value)
-                                .expect("typed Front response Error06 projection");
-                            let _ = tx.send(Ok(v3_front_json_body_to_sse_frame(&bytes))).await;
+                            if tx
+                                .send(Ok(v3_front_projected_error_sse_frame(projected)))
+                                .await
+                                .is_err()
+                            {
+                                record_v3_front_client_disconnect();
+                            }
                             return;
                         }
                     }
@@ -175,29 +212,30 @@ impl V3FrontSseAcceptSkeleton {
                         .await
                         .is_err()
                     {
+                        record_v3_front_client_disconnect();
                         return;
                     }
                     if tx.send(Ok(b"data: [DONE]\n\n".to_vec())).await.is_err() {
+                        record_v3_front_client_disconnect();
                         return;
                     }
                 }
                 if !emitted_response_frame {
-                    let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                        project_v3_post_commit_sse_source(
-                            raise_v3_sse_runtime_failure(
-                                "V3ServerRespOutbound05ClientFrame",
-                                "front_sse_response_empty",
-                                "Front SSE response ended without a response frame",
-                            ),
-                            599,
+                    let projected = project_v3_post_commit_sse_source(
+                        raise_v3_sse_runtime_failure(
+                            "V3ServerRespOutbound05ClientFrame",
+                            "front_sse_response_empty",
+                            "Front SSE response ended without a response frame",
                         ),
+                        599,
                     );
-                    let V3Server16Body::Json(value) = frame.body else {
-                        panic!("Front empty response must project JSON Error06 body");
-                    };
-                    let bytes = serde_json::to_vec(&value)
-                        .expect("typed Front empty response Error06 projection");
-                    let _ = tx.send(Ok(v3_front_json_body_to_sse_frame(&bytes))).await;
+                    if tx
+                        .send(Ok(v3_front_projected_error_sse_frame(projected)))
+                        .await
+                        .is_err()
+                    {
+                        record_v3_front_client_disconnect();
+                    }
                 }
             };
             if let Err(payload) = AssertUnwindSafe(worker).catch_unwind().await {
@@ -206,9 +244,13 @@ impl V3FrontSseAcceptSkeleton {
                     .copied()
                     .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
                     .unwrap_or("Front SSE worker panicked");
-                let _ = panic_tx
+                if panic_tx
                     .send(Ok(v3_front_sse_worker_panic_frame(message)))
-                    .await;
+                    .await
+                    .is_err()
+                {
+                    record_v3_front_client_disconnect();
+                }
             }
         });
         let client_stream = futures_util::stream::unfold(rx, |mut rx| async move {
@@ -1882,6 +1924,14 @@ mod front_sse_contract_tests {
             v3_front_json_body_to_sse_frame(br#"{"error":{"code":"internal"}}"#),
             b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"internal\"},\"status\":\"failed\"},\"type\":\"response.failed\"}\n\n"
         );
+    }
+
+    #[test]
+    fn malformed_error06_body_enters_typed_projection_without_front_json_error() {
+        let frame = v3_front_json_body_to_sse_frame(b"not-json");
+        let text = String::from_utf8(frame).expect("SSE frame is UTF-8");
+        assert!(text.contains("front_error06_body_parse_failed"));
+        assert!(!text.contains("front_json_error"));
     }
 
     #[test]
