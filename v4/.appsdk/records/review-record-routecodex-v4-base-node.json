@@ -22,7 +22,7 @@
   "reviewed_scope_hash": "sha256:7d1e6dda7043dedd559eb5c13df6ae94d7c49165b54e4602ecbd29ad5c6c6de9",
   "reviewed_tree_hash": "266bdf4e21cb087288563e5a7399ca650dbc0d31",
   "reviewer": {
-    "adapter": "master-architecture-review",
+    "adapter": "dsh",
     "identity": "v4-cordis-master"
   },
   "verdict": "pass",
