@@ -4,7 +4,7 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope,
 };
 use routecodex_v3_route_classifier::{
-    build_v3_current_turn_route_facts, classify_route, V3CurrentTurnRouteFacts,
+    build_v3_current_turn_route_facts_from_value, classify_route, V3CurrentTurnRouteFacts,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -672,7 +672,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
     let input_tokens = estimate_v3_routing_input_tokens(body);
-    let active_turn = build_v3_current_turn_route_facts(body);
+    let active_turn = build_v3_current_turn_route_facts_from_value(body);
     let has_image_attachment = active_turn.has_current_turn_image;
     let declares_web_search_tool = request_declares_v3_web_search_tool(body, manifest);
     let route_facts = V3CurrentTurnRouteFacts {
