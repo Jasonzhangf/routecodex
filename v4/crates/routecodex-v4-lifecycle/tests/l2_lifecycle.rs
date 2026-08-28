@@ -1,5 +1,6 @@
 use routecodex_v4_lifecycle::{
-    status_managed, ManagedAction, ManagedControlPlane, ManagedInstanceRecord, V4LifecyclePaths,
+    repair_stale, status_managed, ManagedAction, ManagedControlPlane, ManagedInstanceRecord,
+    V4LifecyclePaths,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -61,5 +62,20 @@ fn existing_record_or_socket_fails_fast_without_silent_cleanup() {
     assert!(ManagedControlPlane::bind(paths.clone(), record()).is_err());
     control.clear_record().expect("clear");
     drop(control);
+    fs::remove_dir_all(&paths.state_root).expect("cleanup exact test root");
+}
+
+#[test]
+fn repair_stale_removes_dead_instance_record_and_socket() {
+    let paths = V4LifecyclePaths::for_state_root(test_root("repair"));
+    paths.prepare().expect("prepare");
+    fs::write(&paths.record_path, serde_json::to_vec(&ManagedInstanceRecord {
+        pid: 999_999_999,
+        ..record()
+    }).expect("record")).expect("write record");
+    std::os::unix::net::UnixListener::bind(&paths.control_socket).expect("socket");
+    repair_stale(&paths).expect("repair");
+    assert!(!paths.record_path.exists());
+    assert!(!paths.control_socket.exists());
     fs::remove_dir_all(&paths.state_root).expect("cleanup exact test root");
 }
