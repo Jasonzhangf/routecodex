@@ -12,7 +12,8 @@ use routecodex_v4_config::{
 use routecodex_v4_error::ErrorChain;
 use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
-    exec_managed_restart, repair_stale, request_restart, request_stop, start_managed,
+    exec_managed_restart, release_for_foreground, repair_stale, request_restart, request_stop,
+    start_managed,
     status_managed, ManagedAction, ManagedControlPlane, ManagedInstanceRecord, ManagedSpawnOptions,
     V4LifecyclePaths,
 };
@@ -212,6 +213,9 @@ fn start(intent: StartIntent) -> Result<String, String> {
     if intent.foreground {
         let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
         print_startup(&manifest);
+        let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
+        release_for_foreground(&paths, Duration::from_secs(15))
+            .map_err(|error| error.to_string())?;
         run_foreground(manifest)?;
         return Ok("state=stopped identity=rccv4 foreground=true".to_string());
     }

@@ -345,6 +345,36 @@ pub fn request_stop(paths: &V4LifecyclePaths, timeout: Duration) -> Result<(), L
     wait_until(timeout, || !paths.record_path.exists())
 }
 
+/// Release the exact V4 managed instance before a foreground takeover.
+///
+/// This is deliberately scoped to the lifecycle record's PID; it never scans
+/// or signals unrelated processes.  A responsive managed child receives the
+/// normal control-plane stop first, then the recorded process is terminated
+/// only if its declaration remains after the bounded grace period.
+pub fn release_for_foreground(
+    paths: &V4LifecyclePaths,
+    timeout: Duration,
+) -> Result<(), LifecycleError> {
+    let Some(record) = read_record(paths)? else {
+        return Ok(());
+    };
+    let _ = request_control(paths, "stop");
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if read_record(paths)?.is_none() {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    if unsafe { libc::kill(record.pid as libc::pid_t, libc::SIGTERM) } == -1 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(io_error(&paths.record_path, error));
+        }
+    }
+    wait_until(timeout, || !paths.record_path.exists())
+}
+
 pub fn request_restart(
     paths: &V4LifecyclePaths,
     expected_digest: &str,
