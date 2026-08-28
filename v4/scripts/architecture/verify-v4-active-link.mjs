@@ -46,7 +46,7 @@ const frozenModules = new Set(
 for (const moduleId of registry.frozen_modules ?? []) {
   if (!frozenModules.has(moduleId)) {
     const module = (project.modules ?? []).find((m) => m.module_id === moduleId);
-    if (!module || !['frozen', 'source_implemented'].includes(module.stage)) {
+    if (!module || !['frozen', 'source_implemented', 'controlled_verified'].includes(module.stage)) {
       failures.push(`registry: frozen_modules lists ${moduleId} but project.json stage is invalid`);
     }
   }
