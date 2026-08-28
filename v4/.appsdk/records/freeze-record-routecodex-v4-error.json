@@ -27,7 +27,7 @@
   "previous_active_version": "active-v3",
   "promotion_id": "v4-cordis-error-promotion-current",
   "promotion_record_hash": "sha256:4edc69bae9677d914f6593a2bc4e495e8814aaa624c53a6accae4e3a797af2a2",
-  "public_api_hash": "sha256:de339870034290ad3d70684a2355ff7c70a9315817744648a5d7cb0d66ed734d",
+  "public_api_hash": "sha256:ec13d529b2c91b8e57dd50e8c896fb6d1cc53909c97097b6830041ebba22592f",
   "regression_report_hash": "sha256:81309570d1d13d671d4c5cbf54d2dcc868720f09ccd0798d5fce0a5bcfb361bb",
   "regression_report_id": "v4-cordis-error-regression-current",
   "review_id": "v4-cordis-error-review-current",
