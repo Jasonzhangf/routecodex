@@ -26,8 +26,8 @@
     "review": "v4-cordis-master",
     "vcs": "git"
   },
-  "previous_active_immutable": true,
-  "previous_active_version": "active-v2",
+  "previous_active_immutable": false,
+  "previous_active_version": null,
   "promotion_id": "v4-cordis-base-node-promotion",
   "promotion_record_hash": "sha256:9f4b344abf0dd824f6a7ec5a81603e95512243f5480a6634946b61ef0133c1ae",
   "public_api_hash": "sha256:4fde764e2ba6dcd121e980143ce7d9de1eb6518cd9aee52124c668bc76e3e7ce",
