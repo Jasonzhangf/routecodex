@@ -2476,6 +2476,7 @@ features:
     - responses_inbound_restores_codex_integer_tool_schema_types
     - responses_inbound_does_not_rewrite_string_session_id_schema
     - responses_inbound_does_not_rewrite_same_named_user_tool_schema
+    - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
@@ -2569,6 +2570,7 @@ features:
   - responses_inbound_restores_codex_integer_tool_schema_types
   - responses_inbound_does_not_rewrite_string_session_id_schema
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
+  - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   allowed_paths:
   - package.json
   - v3/package.json
