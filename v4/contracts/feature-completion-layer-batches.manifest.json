@@ -317,8 +317,8 @@
       {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:d50a70df3ae19ada18e8aa5256fc4f9aebae62b452c9baf1079e9fae39034579"},
       {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:12b023e99bce8579bc11508eaf88c20953fca02fcabc82363d3b130ade2117d6"}
     ],
-    "wiring_started": true,
-    "wiring_edges": ["added:mainline:undefined:routecodex-v4-plugin-catalog->routecodex-v4-cordis-host:routecodex-v4-cordis-host::createCordisPluginFactory","surface:crates/routecodex-v4-runtime-bin/**:sha256:ea0cf409d4b60972e12d1b45b3c8e43db2ac9c923b2ee2396563343c604b6cd2","surface:docs/architecture/maps/mainline-call-map.json:sha256:d50a70df3ae19ada18e8aa5256fc4f9aebae62b452c9baf1079e9fae39034579","surface:scripts/verify.mjs:sha256:03e8560ec63150660bd82b8455b3505b831171fb340cb0e79f57d2abca6bd3ac"],
+    "wiring_started": false,
+    "wiring_edges": [],
     "resource_refs": {
       "merge_queue_state": ".appsdk/records/merge-queue-state.json",
       "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"
