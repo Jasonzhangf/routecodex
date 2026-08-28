@@ -1,1 +1,26 @@
-{"regression_report_id":"v4-cordis-control-regression-current","module_id":"routecodex-v4-control","source_commit":"e7014b7a627881bf8f606dff77bf7d134f10f283","artifact_hash":"sha256:cf200dbd7f3e1a6284477035ef57b5d6bc0596bda36c29a1704461d12dbae469","public_api_hash":"sha256:6998ad9221d05d3683428d2bb6ab681c2b6785f5a220ee5178b915dc81ca1801","scope_hash":"sha256:bc932196faa3d642c7b835f5810ed1746a36d981106be5d81ddf6dbc03d3dd70","input_hash":"sha256:bc932196faa3d642c7b835f5810ed1746a36d981106be5d81ddf6dbc03d3dd70","suite_id":"v4-control-l2-regression","command":"cargo run --quiet --release -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-control --deps routecodex-v4-base-node","test_count":18,"passed":18,"failed":0,"skipped":0,"result":"pass","producer":{"adapter":"cargo","identity":"v4-cordis-control-l2"},"test_characteristics":["positive","negative","control-payload-isolation"],"created_at":"2026-08-28T16:10:20Z"}
+{
+  "regression_report_id": "v4-cordis-control-regression-current",
+  "module_id": "routecodex-v4-control",
+  "source_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
+  "artifact_hash": "sha256:cf200dbd7f3e1a6284477035ef57b5d6bc0596bda36c29a1704461d12dbae469",
+  "public_api_hash": "sha256:6998ad9221d05d3683428d2bb6ab681c2b6785f5a220ee5178b915dc81ca180",
+  "scope_hash": "sha256:bc932196faa3d642c7b835f5810ed1746a36d981106be5d81ddf6dbc03d3dd70",
+  "input_hash": "sha256:cf200dbd7f3e1a6284477035ef57b5d6bc0596bda36c29a1704461d12dbae469",
+  "suite_id": "v4-control-l2-regression",
+  "command": {
+    "program": "cargo",
+    "working_directory": ".",
+    "args": [
+      "run", "--quiet", "--release", "-p", "routecodex-v4-build-link", "--",
+      "test-consumer", "--root", ".", "--consumer", "routecodex-v4-control", "--deps", "routecodex-v4-base-node"
+    ]
+  },
+  "test_count": 18,
+  "passed": 18,
+  "failed": 0,
+  "skipped": 0,
+  "result": "pass",
+  "producer": { "adapter": "cargo", "identity": "v4-cordis-control-l2" },
+  "test_characteristics": { "whitebox": true, "blackbox": true },
+  "created_at": "2026-08-28T16:10:20Z"
+}
