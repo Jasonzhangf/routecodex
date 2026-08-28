@@ -200,10 +200,8 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
                     "Anthropic provider event stream event is malformed: {error}"
                 ))
             })?;
-            if let Some(message) = extract_v3_provider_event_error_payload_message(&event) {
-                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                    message,
-                ));
+            if let Some(error) = extract_v3_provider_event_error(&event) {
+                return Err(error);
             }
             if let Some(error) = anthropic_cyber_refusal_error_from_payload(&event) {
                 return Err(
@@ -375,10 +373,8 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                     "OpenAI Chat provider event stream emitted data after [DONE]".to_string(),
                 ));
             }
-            if let Some(message) = extract_v3_provider_event_error_payload_message(&event) {
-                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                    message,
-                ));
+            if let Some(error) = extract_v3_provider_event_error(&event) {
+                return Err(error);
             }
             if let Some(message) = openai_chat_provider_network_error_message(&event) {
                 return Err(

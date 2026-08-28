@@ -83,28 +83,14 @@ pub(crate) fn provider_runtime_failure(
     let policy_error_message = error.to_string();
     // transport 响应头挂起由错误处理中心按「transport 阶段 + 专属类别码」判定为
     // 瞬态（health-neutral 同 provider 重试 3 次）；其余 transport 错误保持原策略。
-    let policy_error_type = match &error {
-        V3ProviderError::Transport { reason, .. } if reason == V3_RELAY_TRANSPORT_HANG_REASON => {
-            V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string()
-        }
-        V3ProviderError::ResponseBody { reason, .. } => {
-            // Provider error events are decoded in the response codec, but an
-            // embedded invalid_request_error still describes this request,
-            // not provider health. Preserve that typed provider code here so
-            // the policy owner can keep it health-neutral.
-            if reason.contains("provider event error invalid_request_error") {
-                "invalid_request_error".to_string()
-            } else {
-                "provider_response_event_codec_failure".to_string()
-            }
-        }
-        // SSE framing is transport-owned for bytes/fields, but once it is
-        // reported through the response codec lane the client-visible reason
-        // remains codec-owned and cannot be inferred from the SSE event name.
-        V3ProviderError::MalformedSse { .. } => {
-            "provider_response_event_codec_failure".to_string()
-        }
-        _ => "provider_runtime_error".to_string(),
+    let policy_error_type = if matches!(
+        &error,
+        V3ProviderError::Transport { reason, .. }
+            if reason == V3_RELAY_TRANSPORT_HANG_REASON
+    ) {
+        V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string()
+    } else {
+        "provider_runtime_error".to_string()
     };
     V3ResponsesRelayProviderFailure {
         status: if terminal_projection.is_some() {
@@ -164,11 +150,36 @@ pub(crate) fn provider_response_stream_relay_failure(
             terminal_projection: None,
             matched_policy: None,
         },
+        V3ResponsesRelayRuntimeError::ProviderJson(reason) =>
+            provider_response_codec_relay_failure(
+                reason.to_string(),
+                provider_id,
+                observability,
+            ),
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(reason) =>
+            provider_response_codec_relay_failure(reason, provider_id, observability),
         other => provider_runtime_failure(
             provider_response_stream_failure(other, request_id, provider_id),
             provider_id,
             observability,
         ),
+    }
+}
+
+fn provider_response_codec_relay_failure(
+    reason: String,
+    provider_id: &str,
+    observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesRelayProviderFailure {
+    V3ResponsesRelayProviderFailure {
+        status: 502,
+        policy_error_type: "provider_response_event_codec_failure".to_string(),
+        policy_error_message: format!("provider response event codec failed: {reason}"),
+        provider_id: provider_id.to_string(),
+        source_stage: "V3ProviderRespInbound01Raw",
+        observability,
+        terminal_projection: None,
+        matched_policy: None,
     }
 }
 
@@ -280,11 +291,29 @@ pub(crate) fn provider_response_stream_failure(
                 reason: format!("provider SSE transport failed: {reason}"),
             }
         }
+        V3ResponsesRelayRuntimeError::ProviderJson(reason) => {
+            provider_response_codec_error(reason.to_string(), request_id, provider_id)
+        }
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(reason) => {
+            provider_response_codec_error(reason, request_id, provider_id)
+        }
         other => V3ProviderError::ResponseBody {
             request_id: request_id.to_string(),
             provider_id: provider_id.to_string(),
             reason: format!("provider response event codec failed: {other}"),
         },
+    }
+}
+
+fn provider_response_codec_error(
+    reason: String,
+    request_id: &str,
+    provider_id: &str,
+) -> V3ProviderError {
+    V3ProviderError::ResponseBody {
+        request_id: request_id.to_string(),
+        provider_id: provider_id.to_string(),
+        reason: format!("provider response event codec failed: {reason}"),
     }
 }
 
@@ -462,7 +491,7 @@ mod tests {
     }
 
     #[test]
-    fn request_shape_compat_failure_projects_internal_598_without_provider_failure_status() {
+    fn request_shape_compat_failure_enters_provider_failure_policy() {
         let profile = V3ProviderCompatProfileId::Passthrough;
         let error = classify_v3_provider_compat_error(
             "request",
@@ -480,17 +509,4 @@ mod tests {
         assert_eq!(failure.policy_error_type, "provider_request_compat_error");
     }
 
-    #[test]
-    fn embedded_invalid_request_event_is_health_neutral() {
-        let failure = provider_runtime_failure(
-            V3ProviderError::ResponseBody {
-                request_id: "req-1".to_owned(),
-                provider_id: "provider-1".to_owned(),
-                reason: "provider event error invalid_request_error: prompt is too long".to_owned(),
-            },
-            "provider-1",
-            None,
-        );
-        assert_eq!(failure.policy_error_type, "invalid_request_error");
-    }
 }
