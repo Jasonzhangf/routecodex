@@ -1,0 +1,12 @@
+{
+  "reproduction_id": "v4-cordis-error-reproduction-current",
+  "issue_id": "v4-cordis-error-fresh-governance",
+  "module_id": "routecodex-v4-error",
+  "worktree_id": "v4-cordis-error-worktree-current",
+  "base_commit": "a1ac3e15cab61f3af27a4f137c733089f28d3b75",
+  "input_hashes": ["sha256:bff3769dd59162068bf94d51457863f6207fa0c19380b83b6a0d92e759871a95"],
+  "baseline_evidence_id": "v4-cordis-error-baseline-current",
+  "first_divergence": "Frozen error Active artifact retains an obsolete base-node dependency closure.",
+  "result": "reproduced",
+  "created_at": "2026-08-28T05:20:00Z"
+}
