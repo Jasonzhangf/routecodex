@@ -993,10 +993,10 @@ impl V3ProviderHealthStore {
         probe_state.probe_interval_ms = next_interval;
         probe_state.next_probe_at_ms = Some(now_ms.saturating_add(probe_state.probe_interval_ms));
         probe_state.blocked_until_ms = probe_state.next_probe_at_ms;
-        // A failed last-try probe must not permanently suppress future
-        // pre-exhaustion probes. Backoff controls scheduled probes; each
-        // later pool exhaustion gets one fresh rescue attempt.
-        probe_state.rescue_probe_attempted = false;
+        // Keep the rescue generation single-flight after a failed rescue. The
+        // scheduled probe cadence above is the recovery path; allowing every
+        // exhausted request to re-open the same failed generation creates a
+        // probe storm and keeps the session in select/exhaust churn.
         probe_state.completion.send_replace(true);
         persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
         Ok(())
