@@ -1,1 +1,18 @@
-{"evidence_id":"plane-isolation","issue_id":"V4-GATE-001","experiment_id":"v4-feature-layer-gate","kind":"gate","producer":{"adapter":"node","identity":"v4_parity_gate_plane_isolation"},"command_argv":["node","scripts/architecture/verify-v4-plane-isolation.mjs"],"source_commit":"338421d334f8f7ac5d3d81eb5b4f5cba313addcc","scope":{"feature_id":"V4-GATE-001","module_id":"routecodex-v4-governance"},"exit_status":0,"result":"pass","input_hashes":["sha256:1bdbf1af66d5b14f9fa717eee2957652e9c2f57c7324c1cb56a7e1ea3d45774c"],"scope_hash":"sha256:bb9bce00c05388c14fd4caff7ac9f3e88bc24ca17b339013d068967707815c00","phase":"development_whitebox","execution_surface":"development_whitebox","created_at":"2026-08-28T16:00:00Z","expires_at":"2026-08-30T00:00:00Z"}
+{
+  "evidence_id": "plane-isolation",
+  "issue_id": "V4-GATE-001",
+  "experiment_id": "v4-feature-layer-gate",
+  "kind": "gate",
+  "producer": {"adapter": "node", "identity": "v4_parity_gate_plane_isolation"},
+  "command_argv": ["node", "scripts/architecture/verify-v4-plane-isolation.mjs"],
+  "source_commit": "338421d334f8f7ac5d3d81eb5b4f5cba313addcc",
+  "scope": {"feature_id": "V4-GATE-001", "module_id": "routecodex-v4-governance"},
+  "exit_status": 0,
+  "result": "pass",
+  "input_hashes": ["sha256:da210f4c5eabca40c88bd7786adc6ab1e23f659c482bdfaf22f358ea9ec212ae"],
+  "scope_hash": "sha256:bb9bce00c05388c14fd4caff7ac9f3e88bc24ca17b339013d068967707815c00",
+  "phase": "development_whitebox",
+  "execution_surface": "development_whitebox",
+  "created_at": "2026-08-28T13:30:00Z",
+  "expires_at": "2026-09-04T13:30:00Z"
+}
