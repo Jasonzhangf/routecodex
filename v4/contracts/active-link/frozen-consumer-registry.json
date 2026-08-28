@@ -3,7 +3,10 @@
   "project_id": "routecodex-v4",
   "design_id": "V4-ACTIVE-LINK-001",
   "frozen_modules": [
-    "routecodex-v4-base-node"
+    "routecodex-v4-base-node",
+    "routecodex-v4-edge",
+    "routecodex-v4-control",
+    "routecodex-v4-error"
   ],
   "resolver_owner": "routecodex-v4-build-link",
   "resources": [
