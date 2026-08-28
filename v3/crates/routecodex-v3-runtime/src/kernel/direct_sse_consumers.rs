@@ -1073,6 +1073,7 @@ mod tests {
                 V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
             )
             .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
             .with_client_responses_projection(true);
         let mut object = SseObjectFrame::from_json(
             r#"{"type":"response.completed","response":{"id":"resp_1","output":[{"id":"call_1","type":"function_call","name":"exec_command","call_id":"call_1","arguments":"{\"cmd\":\"pwd\",\"reason\":\"读取工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\"}"}]}}"#,
@@ -1095,6 +1096,50 @@ mod tests {
         assert!(reasoning.contains("response.output_item.added"));
         assert!(reasoning.contains("response.reasoning_summary_text.delta"));
         assert!(reasoning.contains("调用工具 pwd：读取工作目录"));
+    }
+
+    #[test]
+    fn direct_responses_sse_strips_toolreason_from_arguments_done() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new()
+                    .with_toolreason(crate::hooks::apply_responses_toolreason_sse_hook),
+            )
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_client_responses_projection(true);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.function_call_arguments.done","arguments":"{\"cmd\":\"ping\",\"reason\":\"Run the requested ping probe\"}","output_index":0}"#,
+        )
+        .unwrap();
+        consumer.consume(&mut object).unwrap();
+        assert_eq!(
+            object.data_value().unwrap()["arguments"],
+            "{\"cmd\":\"ping\"}"
+        );
+        assert!(consumer.take_toolreason_reasoning_projection().is_none());
+    }
+
+    #[test]
+    fn direct_responses_sse_event_name_strips_toolreason_from_arguments_done() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new()
+                    .with_toolreason(crate::hooks::apply_responses_toolreason_sse_hook),
+            )
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_client_responses_projection(true);
+        let mut object = SseObjectFrame::from_event_json(
+            Some("response.function_call_arguments.done".to_owned()),
+            r#"{"arguments":"{\"cmd\":\"ping\",\"reason\":\"Run the requested ping probe\"}","output_index":0,"type":"response.function_call_arguments.done"}"#,
+        )
+        .unwrap();
+        consumer.consume(&mut object).unwrap();
+        assert_eq!(
+            object.data_value().unwrap()["arguments"],
+            "{\"cmd\":\"ping\"}"
+        );
     }
 
     #[test]

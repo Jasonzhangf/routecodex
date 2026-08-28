@@ -1521,16 +1521,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
                             policy.target.candidate.compatibility_profile.as_deref()
                                 == Some("responses:thinking-tags"),
                             hook_registry.direct_sse_typed_hooks(),
-                            manifest
-                                .features
-                                .get("tool_thinking")
-                                .copied()
-                                .unwrap_or(false),
-                            manifest
-                                .features
-                                .get("toolreason_client_projection")
-                                .copied()
-                                .unwrap_or(true),
+                            crate::hub_v1::v3_tool_thinking_enabled_for_server(
+                                manifest,
+                                &standardized.server_id,
+                            ),
+                            crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
+                                manifest,
+                                &standardized.server_id,
+                            ),
                             Some(direct_failure_session_scope.session_id().to_owned()),
                             Some(standardized.request_id.clone()),
                             Some(policy.target.candidate.model_id.clone()),
