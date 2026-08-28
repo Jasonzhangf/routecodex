@@ -1,8 +1,18 @@
 {
   "active_version": "active-v4",
-  "artifact_record_id": "v4-cordis-error-current-candidate",
+  "artifact_record_id": "v4-cordis-error-positive-current",
+  "clean_scope": {
+    "base_commit": "47927fe2405c9989c5effff83f84c55c19b1c3b1",
+    "changed_paths": [],
+    "generated_policy": "excluded_from_source_clean",
+    "ignored_paths": [
+      "target/**",
+      "generated/**"
+    ]
+  },
   "created_at": "2026-08-28T08:52:00Z",
   "freeze_id": "v4-cordis-error-freeze-current",
+  "git_clean": true,
   "issue_id": "v4-cordis-error-rebuild-current",
   "library_hash": "sha256:bff3769dd59162068bf94d51457863f6207fa0c19380b83b6a0d92e759871a95",
   "module_id": "routecodex-v4-error",
@@ -21,12 +31,5 @@
   "regression_report_hash": "sha256:81309570d1d13d671d4c5cbf54d2dcc868720f09ccd0798d5fce0a5bcfb361bb",
   "regression_report_id": "v4-cordis-error-regression-current",
   "review_id": "v4-cordis-error-review-current",
-  "source_commit_or_tag": "47927fe2405c9989c5effff83f84c55c19b1c3b1",
-  "git_clean": true,
-  "clean_scope": {
-    "base_commit": "47927fe2405c9989c5effff83f84c55c19b1c3b1",
-    "changed_paths": [],
-    "ignored_paths": ["target/**", "generated/**"],
-    "generated_policy": "excluded_from_source_clean"
-  }
+  "source_commit_or_tag": "47927fe2405c9989c5effff83f84c55c19b1c3b1"
 }
