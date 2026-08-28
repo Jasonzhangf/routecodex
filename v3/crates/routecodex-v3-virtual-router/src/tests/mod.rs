@@ -387,7 +387,7 @@ fn resolves_listener_default_and_hits_one_opaque_plan() {
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
-    assert_eq!(hit.target_id.as_deref(), Some("b"));
+    assert_eq!(hit.target_id.as_deref(), Some("a"));
     assert_eq!(hit.hit_count, 1);
     assert_eq!(hit.target_plan.len(), 2);
     assert_eq!(hit.target_plan[0].pool_id, "default");
@@ -409,7 +409,7 @@ fn matched_pool_and_default_floor_are_captured_before_one_hit() {
         .iter()
         .map(|entry| entry.target_id.as_deref())
         .collect::<Vec<_>>();
-    assert_eq!(ids, vec![Some("c"), Some("a"), Some("b")]);
+    assert_eq!(ids, vec![Some("a"), Some("c"), Some("b")]);
     assert_eq!(hit.pool_id, "tools");
     assert_eq!(hit.hit_count, 1);
 }
@@ -824,7 +824,7 @@ fn weighted_and_round_robin_are_deterministic_and_listener_scoped() {
             .unwrap()
             .target_id
             .as_deref(),
-        Some("b")
+        Some("a")
     );
 
     let mut rr = manifest(V3SelectionStrategy::RoundRobin);
@@ -909,7 +909,7 @@ fn weighted_selection_follows_smooth_weighted_round_robin_sequence() {
 }
 
 #[test]
-fn weighted_selection_never_opens_higher_numeric_priority_while_lower_tier_exists() {
+fn weighted_selection_never_opens_lower_numeric_priority_while_higher_tier_exists() {
     let router = V3VirtualRouter::default();
     let mut weighted = manifest(V3SelectionStrategy::Weighted);
     let pool = weighted
@@ -942,15 +942,9 @@ fn weighted_selection_never_opens_higher_numeric_priority_while_lower_tier_exist
     assert!(
         first_choices
             .iter()
-            .all(|target_id| target_id.starts_with("priority-1-")),
-        "priority-2 must remain closed while priority-1 exists: {first_choices:?}"
+            .all(|target_id| target_id == "priority-2-heavy"),
+        "priority-2 must remain selected while it is available: {first_choices:?}"
     );
-    assert!(first_choices
-        .iter()
-        .any(|target_id| target_id == "priority-1-a"));
-    assert!(first_choices
-        .iter()
-        .any(|target_id| target_id == "priority-1-b"));
 }
 
 #[test]

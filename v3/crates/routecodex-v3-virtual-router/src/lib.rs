@@ -821,9 +821,9 @@ fn ordered_target_indices(
     }
 }
 
-/// Returns stable target-index buckets ordered by ascending numeric priority.
+/// Returns stable target-index buckets ordered by descending numeric priority.
 /// Selection policies may reorder only inside one returned bucket; they must
-/// never move a higher numeric priority ahead of a lower one.
+/// never move a lower numeric priority ahead of a higher one.
 pub fn priority_tier_indices<T>(
     targets: &[T],
     mut priority: impl FnMut(&T) -> Option<i32>,
@@ -835,7 +835,7 @@ pub fn priority_tier_indices<T>(
             .or_default()
             .push(index);
     }
-    tiers.into_values().collect()
+    tiers.into_iter().rev().map(|(_, indices)| indices).collect()
 }
 
 /// Smooth weighted round-robin (nginx SWRR), ported from the V2 engine: each

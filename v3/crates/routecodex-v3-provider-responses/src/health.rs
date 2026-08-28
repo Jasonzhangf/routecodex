@@ -1322,10 +1322,15 @@ impl V3ProviderHealthStore {
             auth_alias: auth_alias.to_string(),
             model_id: model_id.to_string(),
             priority,
+            effective_priority: priority
+                .saturating_add(
+                    i32::try_from(score_milli)
+                        .unwrap_or(i32::MAX)
+                        .saturating_sub(1_000),
+                ),
             score_milli,
             base_weight,
-            effective_weight_milli: u64::from(base_weight.max(1))
-                * 500_u64.saturating_add(u64::from(score_milli)),
+            effective_weight_milli: u64::from(base_weight.max(1)),
             available,
             blocked_scopes: if available {
                 Vec::new()
@@ -1880,6 +1885,7 @@ impl V3ProviderSchedulingReader for V3ProviderHealthStore {
             auth_alias: auth_alias.to_string(),
             model_id: model_id.to_string(),
             priority,
+            effective_priority: priority.saturating_sub(1_000),
             score_milli: 0,
             base_weight,
             effective_weight_milli: 0,
