@@ -288,6 +288,42 @@ fn v3_7777_fixture_preserves_all_route_pools_and_targets() {
 }
 
 #[test]
+fn v3_4444_fixture_preserves_route_group_and_provider_targets() {
+    let product = compile_product_config(
+        include_str!("../../../tests/resources/config/v4-4444-product.toml"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect("compile 4444 product fixture");
+    assert_eq!(product.source, "v3-baseline:routecodex_v3_4444");
+    assert_eq!(product.route_groups.len(), 1);
+    let group = &product.route_groups[0];
+    assert_eq!(group.route_group_id, "routecodex_v3_4444");
+    assert_eq!(group.pools.len(), 9);
+    assert!(group
+        .pools
+        .iter()
+        .flat_map(|pool| pool.targets.iter())
+        .any(|target| target.provider_id == "goaichat" && target.model_id == "glm-5.3"));
+    assert!(group
+        .pools
+        .iter()
+        .flat_map(|pool| pool.targets.iter())
+        .any(|target| target.provider_id == "glm" && target.model_id == "glm-5.3-flash"));
+}
+
+#[test]
+fn v3_4444_live_runtime_binds_5520_and_product_manifest() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/resources/config/v4-4444-live-runtime.toml");
+    let manifest = compile_runtime_config_file(&path).expect("compile 4444 live authoring");
+    assert_eq!(manifest.listeners[0].address, "127.0.0.1:5520");
+    assert_eq!(manifest.providers.len(), 4);
+    assert_eq!(manifest.routes[0].id, "routecodex_v3_4444");
+    assert_eq!(manifest.product.as_ref().unwrap().route_groups[0].pools.len(), 9);
+    assert!(manifest.verify().is_ok());
+}
+
+#[test]
 fn live_authoring_consumes_product_config_path_into_manifest() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/resources/config/v4-live-product-runtime.toml");

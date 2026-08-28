@@ -1,0 +1,46 @@
+version = 4
+product_config_path = "v4-4444-product.toml"
+
+[runtime]
+id = "rccv4"
+
+[[listeners]]
+id = "primary"
+address = "127.0.0.1:5520"
+
+[[providers]]
+provider_id = "cc-sol"
+config_path = "provider/cc-sol/config.v2.toml"
+protocol = "responses"
+wire_model = "gpt-5.6-sol"
+priority = 1
+entry_models = ["gpt-5.6-sol"]
+
+[[providers]]
+provider_id = "glm"
+config_path = "provider/glm/config.v2.toml"
+protocol = "anthropic"
+wire_model = "glm-5.3-flash"
+priority = 2
+entry_models = ["glm-5.3-flash"]
+
+[[providers]]
+provider_id = "minimax_anthropic"
+config_path = "provider/minimax_anthropic/config.v2.toml"
+protocol = "anthropic"
+wire_model = "MiniMax-M3"
+priority = 3
+entry_models = ["MiniMax-M3"]
+
+[[providers]]
+provider_id = "goaichat"
+config_path = "provider/goaichat/config.v2.toml"
+protocol = "anthropic"
+wire_model = "minimax-m3"
+priority = 4
+entry_models = ["minimax-m3", "glm-5.3"]
+
+[[routes]]
+id = "routecodex_v3_4444"
+models = ["gpt-5.6-sol", "glm-5.3-flash", "MiniMax-M3", "minimax-m3", "glm-5.3"]
+targets = ["cc-sol", "glm", "minimax_anthropic", "goaichat"]
