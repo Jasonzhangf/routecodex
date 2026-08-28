@@ -714,11 +714,54 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
 .request-table th { position: sticky; }
 .request-table td.col-pool, .request-table td.col-route { font-family: var(--mono); font-size: 12px; }
 .request-table td.col-time-last { font-variant-numeric: tabular-nums; }
-.request-table .providercompact { font-variant-numeric: tabular-nums; font-weight: 600; max-width: 240px; }
-.request-table .providercompact.compact { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.request-table .providercompact.is-detail {
-  white-space: normal;
-  background: var(--accent-soft);
-  border-radius: 6px;
-  padding: 4px 8px;
+.request-table .providercompact { position: relative; padding: 4px 8px; max-width: 320px; }
+.request-table .providercompact.compact { white-space: nowrap; }
+.request-table .providercompact-primary {
+  font-family: var(--mono);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
+.request-table .providercompact-primary .providercompact-model { color: var(--text); font-weight: 600; }
+.request-table .providercompact-primary .providercompact-key { font-weight: 500; }
+.request-table .providercompact-detail {
+  display: none;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text);
+  white-space: normal;
+  word-break: break-all;
+}
+.request-table .providercompact-detail dt {
+  display: inline-block;
+  min-width: 84px;
+  color: var(--text-dim);
+  text-transform: lowercase;
+  letter-spacing: 0.2px;
+}
+.request-table .providercompact-detail dd {
+  display: inline;
+  margin: 0 8px 0 0;
+}
+.request-table .providercompact-detail dd::after { content: "\A"; white-space: pre; }
+.request-table .providercompact.is-detail .providercompact-detail { display: block; }
+.request-table .providercompact.is-detail,
+.request-table .providercompact:focus {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 0;
+  background: var(--panel);
+  border-radius: 6px;
+  z-index: 5;
+  position: relative;
+}
+.request-table .providercompact:focus { outline-color: var(--accent); }

@@ -334,26 +334,39 @@
     // provider/auth_alias/provider_id/wire_model on hover or focus.
     function compactProviderCell(row) {
       const meta = (row && row.meta) || {};
-      const model = meta.model ?? "\u2014";
-      const wire = meta.wire_model ?? "\u2014";
-      const provider = meta.provider ?? "\u2014";
-      const providerId = meta.provider_id ?? "\u2014";
-      const authAlias = meta.auth_alias ?? "\u2014";
-      const allEmpty = [model, wire, provider, providerId, authAlias].every((v) => v === "\u2014");
-      const primary = model !== "\u2014" ? model : wire !== "\u2014" ? wire : provider !== "\u2014" ? provider : "\u2014";
-      const detail = [
+      const model = meta.model ?? "—";
+      const wire = meta.wire_model ?? "—";
+      const provider = meta.provider ?? "—";
+      const providerId = meta.provider_id ?? "—";
+      const authAlias = meta.auth_alias ?? "—";
+      const allEmpty = [model, wire, provider, providerId, authAlias].every((v) => v === "—");
+      const cell = el("td", "providercompact compact");
+      if (allEmpty) {
+        cell.textContent = "—";
+        return cell;
+      }
+      const primary = el("div", "providercompact-primary mono");
+      primary.append(
+        el("span", "providercompact-model", model),
+        el("span", "providercompact-sep muted", " · "),
+        el("span", "providercompact-key muted", authAlias === "—" ? `key: —` : `key: ${authAlias}`)
+      );
+      cell.appendChild(primary);
+      const details = el("dl", "providercompact-detail");
+      for (const [label, value] of [
         ["provider", provider],
         ["key", authAlias],
         ["provider id", providerId],
         ["wire model", wire],
-      ]
-        .filter(([, v]) => v !== "\u2014" && v !== primary)
-        .map(([label, v]) => `${label}: ${v}`)
-        .join(" \u00b7 ");
-      const cell = el("td", "providercompact compact");
-      cell.textContent = allEmpty ? "\u2014" : primary;
-      if (detail) cell.title = detail;
+      ]) {
+        details.append(el("dt", null, label), el("dd", null, value));
+      }
+      cell.appendChild(details);
       cell.tabIndex = 0;
+      cell.setAttribute(
+        "aria-label",
+        `provider ${provider}, key ${authAlias}, model ${model}, wire ${wire}`
+      );
       cell.addEventListener("focus", () => cell.classList.add("is-detail"));
       cell.addEventListener("blur", () => cell.classList.remove("is-detail"));
       cell.addEventListener("mouseenter", () => cell.classList.add("is-detail"));
@@ -403,17 +416,27 @@
         const handle = el("span", "col-resizer");
         handle.setAttribute("aria-hidden", "true");
         th.appendChild(handle);
+        // Stop propagation so dragging the handle never triggers the header
+        // sort click handler that lives on the parent <th>. preventDefault
+        // also kills text selection and the native drag-image that some
+        // browsers attach to the span.
         handle.addEventListener("pointerdown", (event) => {
           event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
           const startX = event.clientX;
           const startWidth = col.getBoundingClientRect().width || 40;
+          let moved = false;
           const onMove = (ev) => {
+            moved = true;
             const next = Math.max(40, Math.round(startWidth + (ev.clientX - startX)));
             col.style.width = `${next}px`;
+            ev.preventDefault();
           };
           const onUp = () => {
             window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", onUp);
+            if (!moved) return;
             const updated = { ...(state.tableWidths[tab] || {}) };
             const finalWidth = Math.round(col.getBoundingClientRect().width || startWidth);
             updated[cls] = finalWidth;
@@ -422,6 +445,10 @@
           };
           window.addEventListener("pointermove", onMove);
           window.addEventListener("pointerup", onUp);
+        });
+        handle.addEventListener("click", (event) => {
+          // A bare click on the handle is never a sort intent.
+          event.stopPropagation();
         });
       });
     }
@@ -788,7 +815,11 @@
           th.classList.add("sorted");
           th.appendChild(el("span", "sort-indicator", dir));
         }
-        th.addEventListener("click", () => {
+        th.addEventListener("click", (event) => {
+          // The resizer handle sits inside <th>; clicks on it are already
+          // stopped from bubbling, but guard again in case any other
+          // child element (sort indicator, future icon) is added later.
+          if (event.target instanceof Element && event.target.closest(".col-resizer")) return;
           const fieldEl = document.getElementById("sort-field");
           const orderEl = document.getElementById("sort-order");
           if (fieldEl.value === col.key) {
