@@ -16,10 +16,17 @@
   "previous_active_immutable": true,
   "previous_active_version": "active-v3",
   "promotion_id": "v4-cordis-error-promotion-current",
-  "promotion_record_hash": "sha256:bc796e7d8a532ca85f1a3c45b93f7e09400819b146d6bca723b21bb2681dbced",
+  "promotion_record_hash": "sha256:4edc69bae9677d914f6593a2bc4e495e8814aaa624c53a6accae4e3a797af2a2",
   "public_api_hash": "sha256:ec13d529b2c91b8e57dd50e8c896fb6d1cc53909c97097b6830041ebba22592f",
-  "regression_report_hash": "sha256:d7b33373e8770b4c5b9af03c86d8e8c554bc9bb83d74ce818254c2614b1f6910",
+  "regression_report_hash": "sha256:81309570d1d13d671d4c5cbf54d2dcc868720f09ccd0798d5fce0a5bcfb361bb",
   "regression_report_id": "v4-cordis-error-regression-current",
   "review_id": "v4-cordis-error-review-current",
-  "source_commit_or_tag": "47927fe2405c9989c5effff83f84c55c19b1c3b1"
+  "source_commit_or_tag": "47927fe2405c9989c5effff83f84c55c19b1c3b1",
+  "git_clean": true,
+  "clean_scope": {
+    "base_commit": "47927fe2405c9989c5effff83f84c55c19b1c3b1",
+    "changed_paths": [],
+    "ignored_paths": ["target/**", "generated/**"],
+    "generated_policy": "excluded_from_source_clean"
+  }
 }
