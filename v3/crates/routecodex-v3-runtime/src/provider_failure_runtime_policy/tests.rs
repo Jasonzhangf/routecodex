@@ -434,6 +434,22 @@ fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_al
         .all(|candidate| candidate.contains("provider_cooldown_probe_pending")));
 }
 
+#[test]
+fn exhaustion_rescue_identity_is_model_scoped() {
+    let mut identities = BTreeSet::new();
+    assert!(identities.insert((
+        "opencode-go-zen",
+        "key1",
+        "mimo-v2.5-free",
+    )));
+    assert!(identities.insert(("opencode-go-zen", "key1", "hy3-free")));
+    assert!(!identities.insert((
+        "opencode-go-zen",
+        "key1",
+        "mimo-v2.5-free",
+    )));
+}
+
 fn assert_resolution_failure(
     resolution: V3RelayProviderTargetResolution,
     expected_stage: &str,

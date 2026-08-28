@@ -13,7 +13,11 @@ impl V3ProviderFailureRuntimeHealth {
         let mut identities = BTreeSet::new();
         let mut probes = Vec::new();
         for candidate in &expanded.candidates {
-            let identity = format!("{}:{}", candidate.provider_id, candidate.auth_alias);
+            let identity = (
+                &candidate.provider_id,
+                &candidate.auth_alias,
+                &candidate.model_id,
+            );
             if !identities.insert(identity) {
                 continue;
             }
