@@ -219,7 +219,11 @@ export function validateFeatureLayerAdmission(input, context, failures, options 
       }
     }
   }
-  for (const forbiddenGate of [GATE_IDS.admission, GATE_IDS.buildGuard]) {
+  // The definition gate is the validator currently executing this admission
+  // check. Running it as a child would recurse forever; its own definition is
+  // already validated above, while the executable positive contract is bound
+  // by the dedicated self-test gate.
+  for (const forbiddenGate of [GATE_IDS.definition, GATE_IDS.admission, GATE_IDS.buildGuard]) {
     if (gateIds.has(forbiddenGate)) {
       addFailure(failures, 'GATE_SELF_CYCLE', `admission cannot directly execute ${forbiddenGate}`);
       gateIds.delete(forbiddenGate);
