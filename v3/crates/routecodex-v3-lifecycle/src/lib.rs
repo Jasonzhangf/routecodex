@@ -495,7 +495,8 @@ impl V3ManagedLifecycle {
                 status.state,
                 V3ManagedRunState::Starting | V3ManagedRunState::Running
             ) {
-                return Ok(());
+                self.stop(executable_path.as_ref(), Duration::from_secs(15))
+                    .await?;
             }
         }
         {
