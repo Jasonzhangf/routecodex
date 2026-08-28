@@ -369,7 +369,18 @@ impl V3WebuiObservability {
             V3ObsEventType::Completed => {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
                 row.finished_epoch_ms = Some(now);
-                row.result = Some("success".to_string());
+                row.result = Some(
+                    if observability
+                        .usage
+                        .as_ref()
+                        .is_some_and(v3_runtime_usage_is_zero_issue)
+                    {
+                        "issue"
+                    } else {
+                        "success"
+                    }
+                    .to_string(),
+                );
                 if let Some(usage) = observability.usage.as_ref() {
                     row.usage = Some(V3ObsUsageSummary {
                         input_tokens: usage.input_tokens,
@@ -421,6 +432,12 @@ impl V3WebuiObservability {
         routecodex_v3_config::v3_webui_observability_append_row(path, &row)
             .map_err(|error| format!("write observability store failed: {error}"))
     }
+}
+
+fn v3_runtime_usage_is_zero_issue(usage: &crate::V3RuntimeUsageSummary) -> bool {
+    usage.input_tokens == Some(0)
+        && usage.output_tokens == Some(0)
+        && usage.total_tokens == Some(0)
 }
 
 #[cfg(test)]
@@ -524,6 +541,34 @@ mod tests {
         assert_eq!(row.result.as_deref(), Some("success"));
         assert!(row.duration_ms.is_some());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn completed_zero_usage_is_marked_as_issue() {
+        let observability = V3WebuiObservability::new();
+        let key = build_v3_obs_request_key(5555, "r-zero-usage");
+        let runtime = crate::V3RuntimeObservability {
+            usage: Some(crate::V3RuntimeUsageSummary {
+                input_tokens: Some(0),
+                output_tokens: Some(0),
+                total_tokens: Some(0),
+                cached_tokens: None,
+            }),
+            ..Default::default()
+        };
+        record_observed(
+            &observability,
+            V3ObsEventType::Completed,
+            &key,
+            scope(5555),
+            meta_with_full("r-zero-usage"),
+            &runtime,
+        )
+        .unwrap();
+        assert_eq!(
+            observability.rows().unwrap()[&key].result.as_deref(),
+            Some("issue")
+        );
     }
 
     #[test]

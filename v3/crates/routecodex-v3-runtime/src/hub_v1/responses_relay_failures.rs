@@ -83,14 +83,28 @@ pub(crate) fn provider_runtime_failure(
     let policy_error_message = error.to_string();
     // transport 响应头挂起由错误处理中心按「transport 阶段 + 专属类别码」判定为
     // 瞬态（health-neutral 同 provider 重试 3 次）；其余 transport 错误保持原策略。
-    let policy_error_type = if matches!(
-        &error,
-        V3ProviderError::Transport { reason, .. }
-            if reason == V3_RELAY_TRANSPORT_HANG_REASON
-    ) {
-        V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string()
-    } else {
-        "provider_runtime_error".to_string()
+    let policy_error_type = match &error {
+        V3ProviderError::Transport { reason, .. } if reason == V3_RELAY_TRANSPORT_HANG_REASON => {
+            V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string()
+        }
+        V3ProviderError::ResponseBody { reason, .. } => {
+            // Provider error events are decoded in the response codec, but an
+            // embedded invalid_request_error still describes this request,
+            // not provider health. Preserve that typed provider code here so
+            // the policy owner can keep it health-neutral.
+            if reason.contains("provider event error invalid_request_error") {
+                "invalid_request_error".to_string()
+            } else {
+                "provider_response_event_codec_failure".to_string()
+            }
+        }
+        // SSE framing is transport-owned for bytes/fields, but once it is
+        // reported through the response codec lane the client-visible reason
+        // remains codec-owned and cannot be inferred from the SSE event name.
+        V3ProviderError::MalformedSse { .. } => {
+            "provider_response_event_codec_failure".to_string()
+        }
+        _ => "provider_runtime_error".to_string(),
     };
     V3ResponsesRelayProviderFailure {
         status: if terminal_projection.is_some() {
@@ -464,5 +478,19 @@ mod tests {
         assert_eq!(failure.status, 598);
         assert!(failure.terminal_projection.is_some());
         assert_eq!(failure.policy_error_type, "provider_request_compat_error");
+    }
+
+    #[test]
+    fn embedded_invalid_request_event_is_health_neutral() {
+        let failure = provider_runtime_failure(
+            V3ProviderError::ResponseBody {
+                request_id: "req-1".to_owned(),
+                provider_id: "provider-1".to_owned(),
+                reason: "provider event error invalid_request_error: prompt is too long".to_owned(),
+            },
+            "provider-1",
+            None,
+        );
+        assert_eq!(failure.policy_error_type, "invalid_request_error");
     }
 }

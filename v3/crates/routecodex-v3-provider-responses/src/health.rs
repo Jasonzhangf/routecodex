@@ -454,6 +454,7 @@ impl V3ProviderHealthStore {
                 reason: reason.map(str::to_string),
             });
         }
+        let uses_configured_policy = policy_override.is_none();
         let policy = policy_override.unwrap_or_else(|| {
             state
                 .failure_policies
@@ -521,9 +522,15 @@ impl V3ProviderHealthStore {
                 .map(|(_, failure)| failure.failure_count)
                 .sum();
             let adaptive_interval_ms = record_adaptive_failure(&mut state, &auth_key);
+            let cooldown_interval_ms = if uses_configured_policy {
+                policy.cooldown_ms.max(1)
+            } else {
+                adaptive_interval_ms
+            };
             let cooldown_until_ms = (failure_count >= policy.failure_threshold)
                 .then(|| {
-                    (!policy.until_restart).then(|| now_ms.saturating_add(adaptive_interval_ms))
+                    (!policy.until_restart)
+                        .then(|| now_ms.saturating_add(cooldown_interval_ms))
                 })
                 .flatten();
             let record_state = if failure_count >= policy.failure_threshold {
@@ -611,7 +618,7 @@ impl V3ProviderHealthStore {
         // 独立计数，不能互相污染。
         if failure_count >= policy.failure_threshold {
             cooldown_until_ms =
-                (!policy.until_restart).then(|| now_ms.saturating_add(probe_backoff_ms(0)));
+                (!policy.until_restart).then(|| now_ms.saturating_add(policy.cooldown_ms.max(1)));
             record_state = "cooldown".to_string();
             let cooldown = V3ProviderCooldown {
                 reason: record_reason
@@ -713,6 +720,7 @@ impl V3ProviderHealthStore {
         model_id: Option<&str>,
         _now_ms: u64,
     ) -> Result<(), V3ProviderHealthError> {
+        let provider_runtime_identity = provider_key_label(provider_id, auth_alias, model_id);
         let key =
             provider_failure_session_key(failure_session_scope, provider_id, auth_alias, model_id);
         let mut state = self
@@ -720,6 +728,12 @@ impl V3ProviderHealthStore {
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
         state.cooldowns.remove(&key);
+        // A real success in any session is recovery evidence for this exact
+        // provider:key:model. Clear sibling session cooldowns, but retain
+        // adaptive history and consecutive failure counters for diagnostics.
+        state.cooldowns.retain(|session_key, _| {
+            session_key.provider_runtime_identity != provider_runtime_identity
+        });
         let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         record_adaptive_success(&mut state, &auth_key, _now_ms);
         // A real successful request in any session is an authoritative
@@ -2369,25 +2383,22 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
     }
 
     #[test]
-    #[ignore = "retired provider-global cooldown contract"]
-    fn success_in_one_session_does_not_clear_sibling_session_cooldown() {
+    fn success_in_one_session_clears_sibling_session_cooldown_for_exact_key_model() {
         let store = V3ProviderHealthStore::default();
-        for now_ms in 100..103 {
-            store
-                .record_provider_failure_in_session(
-                    &session("session-a"),
-                    "provider-a",
-                    Some("key-a"),
-                    Some("gpt-5.5"),
-                    Some("controlled failure"),
-                    now_ms,
-                )
-                .unwrap();
-        }
+        store
+            .record_provider_transient_bypass_in_session(
+                &session("session-a"),
+                "provider-a",
+                Some("key-a"),
+                Some("gpt-5.5"),
+                Some("controlled transient failure"),
+                100,
+            )
+            .unwrap();
         assert!(
             !store
                 .availability_for_session(
-                    &session("session-b"),
+                    &session("session-a"),
                     "provider-a",
                     Some("key-a"),
                     Some("gpt-5.5"),
@@ -2395,7 +2406,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                 )
                 .available
         );
-        // session-b 成功只影响 session-b；session-a 状态保持独立。
+        // session-b 的真实成功恢复同一 provider:key:model 的 session 冷却。
         store
             .record_provider_success_in_session(
                 &session("session-b"),
@@ -2406,7 +2417,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
             )
             .unwrap();
         assert!(
-            !store
+            store
                 .availability_for_session(
                     &session("session-a"),
                     "provider-a",
@@ -2415,10 +2426,10 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                     105,
                 )
                 .available,
-            "provider-level cooldown must not be cleared by a sibling success"
+            "sibling session success must recover the exact provider key/model"
         );
         assert!(
-            !store
+            store
                 .availability_for_session(
                     &session("session-b"),
                     "provider-a",
@@ -2427,23 +2438,8 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                     105,
                 )
                 .available,
-            "session-b success must clear only session-b state"
+            "the successful session must remain available"
         );
-        // probe 到期 → 通过 → provider 级冷却清除，全部 session 恢复。
-        assert!(store
-            .provider_cooldown_probe_keys_due(103 + 900_000 + 15 * 60_000 + 1)
-            .unwrap()
-            .contains(&(
-                "provider-a".to_string(),
-                Some("key-a".to_string()),
-                Some("gpt-5.5".to_string())
-            )));
-        assert!(store
-            .try_acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
-            .unwrap());
-        store
-            .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("gpt-5.5"))
-            .unwrap();
         assert!(
             store
                 .availability_for_session(
@@ -2454,7 +2450,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                     106,
                 )
                 .available,
-            "probe success must revive provider for all sessions"
+            "a different model must not be changed by this recovery"
         );
     }
 
