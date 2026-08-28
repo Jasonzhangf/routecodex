@@ -1,1 +1,30 @@
-{"review_id":"v4-cordis-plugin-contract-review-current","review_kind":"architecture","issue_id":"v4-cordis-plugin-contract-rebuild-current","promotion_id":"v4-cordis-plugin-contract-promotion-current","fix_candidate_id":"v4-cordis-plugin-contract-candidate-current","pre_review_validation_id":"v4-cordis-plugin-contract-prereview-current","reviewer":{"adapter":"agy","identity":"v4-cordis-plugin-contract-governance-20260828T110700Z"},"verdict":"pass","evidence_ids":["v4-cordis-plugin-contract-candidate-current","v4-cordis-plugin-contract-positive-current","v4-cordis-plugin-contract-negative-current"],"reviewed_commit":"a5030cd4eddca91dcb01f5de48d341f61c19c18f","reviewed_tree_hash":"62d748974502109bf5f8e7e83072eb1838c1a604","reviewed_diff_hash":"sha256:14108d16759cae30a2d18bec04d8be1b6eace4410ca97a8f206482e3162fddd7","reviewed_artifact_hash":"sha256:6901e722c33cc0afb5775bc9d86b70ee4b3f5a34084b3bdc95099da0e6ed7c19","reviewed_scope_hash":"sha256:cd166129584496da42ca704be0fa7c190c22981b54ee936acf4b1194d2b42a51","resource_map_hash":"sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e","function_map_hash":"sha256:69f16dfe5d056634f6164cd325dbdbdf134588890b69f101c0d9045e6a01d776","mainline_call_map_hash":"sha256:c36e4f9d5cff527d7f98b339772a53c87f420db58bb2215b6b68210e01124673","verification_map_hash":"sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230","ai_confidence":1,"confidence_rationale":"AGY controller pass with zero blocking findings on current v4-cordis tree.","created_at":"2026-08-28T11:09:00Z"}
+{
+  "ai_confidence": 1,
+  "confidence_rationale": "AGY controller pass with zero blocking findings on current v4-cordis tree.",
+  "created_at": "2026-08-28T11:09:00Z",
+  "evidence_ids": [
+    "v4-cordis-plugin-contract-candidate-current",
+    "v4-cordis-plugin-contract-positive-current",
+    "v4-cordis-plugin-contract-negative-current"
+  ],
+  "fix_candidate_id": "v4-cordis-plugin-contract-candidate-current",
+  "function_map_hash": "sha256:69f16dfe5d056634f6164cd325dbdbdf134588890b69f101c0d9045e6a01d776",
+  "issue_id": "v4-cordis-plugin-contract-rebuild-current",
+  "mainline_call_map_hash": "sha256:c36e4f9d5cff527d7f98b339772a53c87f420db58bb2215b6b68210e01124673",
+  "pre_review_validation_id": "v4-cordis-plugin-contract-prereview-current",
+  "promotion_id": "v4-cordis-plugin-contract-promotion-current",
+  "resource_map_hash": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
+  "review_id": "v4-cordis-plugin-contract-review-current",
+  "review_kind": "architecture",
+  "reviewed_artifact_hash": "sha256:6901e722c33cc0afb5775bc9d86b70ee4b3f5a34084b3bdc95099da0e6ed7c19",
+  "reviewed_commit": "a5030cd4eddca91dcb01f5de48d341f61c19c18f",
+  "reviewed_diff_hash": "sha256:14108d16759cae30a2d18bec04d8be1b6eace4410ca97a8f206482e3162fddd7",
+  "reviewed_scope_hash": "sha256:cd166129584496da42ca704be0fa7c190c22981b54ee936acf4b1194d2b42a51",
+  "reviewed_tree_hash": "62d748974502109bf5f8e7e83072eb1838c1a604",
+  "reviewer": {
+    "adapter": "agy",
+    "identity": "v4-cordis-plugin-contract-governance-20260828T110700Z"
+  },
+  "verdict": "pass",
+  "verification_map_hash": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230"
+}
