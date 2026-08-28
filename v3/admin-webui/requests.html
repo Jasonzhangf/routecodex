@@ -44,7 +44,7 @@
       <label>Status<select id="status-filter"><option value="all">all</option><option value="active">active</option><option value="retrying">retrying</option><option value="success">success</option><option value="error">error</option><option value="cancelled">cancelled</option></select></label>
       <label>Port<select id="port-filter"><option value="all">all ports</option></select></label>
       <label>Provider<input id="provider-filter" type="search" placeholder="provider"></label>
-      <label>Model<input id="model-filter" type="search" placeholder="model"></label>
+      <label>Model<select id="model-filter"><option value="all">all models</option></select></label>
       <label>Route<input id="route-filter" type="search" placeholder="route"></label>
       <label>Protocol<select id="protocol-filter"><option value="all">all</option></select></label>
       <label>Mode<select id="mode-filter"><option value="all">all</option><option value="direct">direct</option><option value="relay">relay</option></select></label>
@@ -471,8 +471,8 @@
         if (port !== "all") params.set("port", port);
         const provider = document.getElementById("provider-filter").value.trim();
         if (provider) params.set("provider", provider);
-        const model = document.getElementById("model-filter").value.trim();
-        if (model) params.set("model", model);
+        const model = document.getElementById("model-filter").value;
+        if (model !== "all") params.set("model", model);
         const route = document.getElementById("route-filter").value.trim();
         if (route) params.set("route", route);
         const protocol = document.getElementById("protocol-filter").value;
@@ -609,11 +609,12 @@
       }));
       portSelect.value = [...portSelect.options].some((option) => option.value === selected) ? selected : "all";
       populateFacetSelect("protocol-filter", state.facets.response_types || {});
+      populateFacetSelect("model-filter", state.facets.models || {}, "all models");
     }
-    function populateFacetSelect(id, facet) {
+    function populateFacetSelect(id, facet, allLabel = "all") {
       const select = document.getElementById(id);
       const selected = select.value;
-      const all = el("option", null, "all"); all.value = "all";
+      const all = el("option", null, allLabel); all.value = "all";
       select.replaceChildren(all, ...Object.entries(facet).sort(([,a],[,b])=>b-a).map(([value]) => {
         const option = el("option", null, String(value)); option.value = String(value); return option;
       }));
