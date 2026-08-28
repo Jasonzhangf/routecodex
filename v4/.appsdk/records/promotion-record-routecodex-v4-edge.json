@@ -23,7 +23,7 @@
   "module_id": "routecodex-v4-edge",
   "new_active_version": "active-v4",
   "playground_cleanup_record_id": "v4-cordis-edge-cleanup-current",
-  "previous_active_version": "active-v3",
+  "previous_active_version": null,
   "promotion_id": "v4-cordis-edge-promotion",
   "public_api_hash": "sha256:e843fc703d66f47cadb8d39f000653f50bb42a587bf3c488e42349ba28bd671b",
   "reproduction_record_id": "v4-cordis-edge-reproduction-current",

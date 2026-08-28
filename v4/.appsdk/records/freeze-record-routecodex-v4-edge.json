@@ -26,8 +26,8 @@
     "review": "agy-review",
     "vcs": "git"
   },
-  "previous_active_immutable": true,
-  "previous_active_version": "active-v3",
+  "previous_active_immutable": false,
+  "previous_active_version": null,
   "promotion_id": "v4-cordis-edge-promotion",
   "promotion_record_hash": "sha256:c49bae4a329cc75ccf4c008beaabf7fd4c3d22accba1826e07953a1ad416f999",
   "public_api_hash": "sha256:e843fc703d66f47cadb8d39f000653f50bb42a587bf3c488e42349ba28bd671b",
