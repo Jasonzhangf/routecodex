@@ -5827,3 +5827,13 @@ Tags: #v3 #restart #keepalive #InvalidHTTPResponse #front-closeout #request-cycl
 - WebUI pages now poll the persisted records API instead of requiring manual Reload: Requests 5s, Dashboard/Providers 10s, Routes remains manual.
 - Shared helper `startAutoRefresh(loadFn, intervalMs)` in `v3/admin-webui/app.embedded.txt`; skips hidden tabs and overlapping fetches.
 - Committed `7a335e2c8`, installed 0.90.4633 sha256=c159949e, restart 7777/4444/8777 200, camo browser smoke passed.
+
+### 2026-08-26 V4 Cordis execution correction
+- Trigger: repeated turns only re-read the same goal/prompt and reported `blocked` without auditing the current design plan, deriving gaps, dispatching parallel lanes, or advancing the branch.
+- Future rule: for a long-running V4 goal, every continuation must perform one evidence-backed action toward the next plan gate; if blocked, inspect current worktrees/claims and either dispatch/merge/fix or record a genuinely new external blocker. Never emit unchanged blocked status as progress.
+- Current architecture: `v4-cordis` is the sole refactor tree; local/relay continuation is retired, direct provider-owned Responses continuation remains.
+Tags: #v4 #cordis #workflow-correction #evidence-first
+# 2026-08-27 provider health window / restart runtime correction
+- Health score is process-local and uses only the latest 100 calls; startup no longer restores cooldown/probe state from `provider-cooldowns.json`.
+- Provider SSE/transport failures enter the shared recoverable health path (`-5`, 3 failures cooldown); success is `+1`, unrecoverable is `-20`.
+- Live evidence before installation showed the reported 502 was not an SSE parser fault: a 275,714-token request exceeded most candidate context windows, then the only selected `mimo-v2.5-free` candidate returned provider 429 three times. The pre-fix binary was still serving until global install and aggregate restart.

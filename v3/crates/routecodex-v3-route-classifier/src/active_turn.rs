@@ -1,6 +1,6 @@
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::{RouteToolCallClassification, classify_tool_call};
+use crate::{classify_tool_call, RouteToolCallClassification};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct V3CurrentTurnSignals {

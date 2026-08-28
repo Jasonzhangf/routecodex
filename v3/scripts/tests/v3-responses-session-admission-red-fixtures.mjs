@@ -11,14 +11,17 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const repo = process.cwd();
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const verifier = resolve(
   repo,
-  "scripts/architecture/verify-v3-responses-session-admission.mjs",
+  "v3/scripts/architecture/verify-v3-responses-session-admission.mjs",
 );
 const copied = [
   "package.json",
+  "v3/package.json",
   ".github/workflows/test.yml",
   "v3/crates/routecodex-v3-server/src/lib.rs",
   "v3/crates/routecodex-v3-server/src/frame_builders.rs",
@@ -108,7 +111,7 @@ const cases = [
     name: "keepalive edge hides its typed config read",
     path: "docs/architecture/v3-mainline-call-map.yml",
     mutate: (source) =>
-      source.replace(
+      source.replaceAll(
         "side_channel_reads: [v3.config.http_sse_keepalive_interval]",
         "side_channel_reads: []",
       ),
@@ -166,27 +169,27 @@ const cases = [
   },
   {
     name: "behavior gate omits the same-scope wait-then-200 blackbox",
-    path: "package.json",
+    path: "v3/package.json",
     mutate: (source) =>
       source.replace(
-        " && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-server --test multi_listener_server responses_same_listener_same_session_waits_for_release_then_returns_ok -- --exact --nocapture",
+        " && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_same_listener_same_session_waits_for_release_then_returns_ok -- --exact --nocapture",
         "",
       ),
     diagnostic: /must execute the same-scope wait-then-200 blackbox/u,
   },
   {
     name: "behavior gate omits the different-scope concurrency blackbox",
-    path: "package.json",
+    path: "v3/package.json",
     mutate: (source) =>
       source.replace(
-        " && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-server --test multi_listener_server responses_same_listener_different_session_remains_concurrent -- --exact --nocapture",
+        " && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_same_listener_different_session_remains_concurrent -- --exact --nocapture",
         "",
       ),
     diagnostic: /must execute the different-scope concurrency blackbox/u,
   },
   {
     name: "behavior gate omits the client-drop HTTP blackbox",
-    path: "package.json",
+    path: "v3/package.json",
     mutate: (source) =>
       source.replace(
         " && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_client_drop_releases_same_session_before_provider_eof -- --exact --nocapture",

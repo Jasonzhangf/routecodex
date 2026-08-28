@@ -12,6 +12,27 @@ use serde_json::{json, Value};
 use std::sync::Mutex;
 use std::time::Duration;
 
+fn ensure_gemini_relay_test_state_dir() {
+    static INITIALIZE: std::sync::Once = std::sync::Once::new();
+    INITIALIZE.call_once(|| {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock must follow the Unix epoch")
+            .as_nanos();
+        let state_dir = std::env::temp_dir().join(format!(
+            "routecodex-v3-gemini-relay-integration-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&state_dir)
+            .expect("Gemini Relay tests must own an isolated provider state directory");
+        std::env::set_var("ROUTECODEX_V3_STATE_DIR", &state_dir);
+        std::env::set_var(
+            "ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE",
+            state_dir.join("provider-cooldowns.json"),
+        );
+    });
+}
+
 #[path = "../../../tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
@@ -272,7 +293,7 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
         provider_ids: Mutex::new(Vec::new()),
     };
     let output = execute_v3_gemini_relay_runtime(
-        &manifest_with_two_providers_for_scope(server_id),
+        &manifest_with_two_providers_for_scope(server_id, false),
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -721,7 +742,7 @@ async fn malformed_non_terminal_and_post_terminal_sse_fail_explicitly() {
         (
             "gemini_sse_malformed",
             vec![b"data: not-json\n\n".to_vec()],
-            "expected",
+            "provider_response_sse_event_invalid",
             "malformed SSE JSON must fail before client success",
         ),
         (
@@ -730,7 +751,7 @@ async fn malformed_non_terminal_and_post_terminal_sse_fail_explicitly() {
 
 "#
             .to_vec()],
-            "ended without terminal finishReason",
+            "provider_error",
             "SSE stream end without terminal finishReason must fail",
         ),
         (
@@ -741,7 +762,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
 
 "#
             .to_vec()],
-            "after terminal finishReason",
+            "provider_error",
             "SSE frame after terminal finishReason must fail",
         ),
         (
@@ -750,7 +771,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
 
 "#
             .to_vec()],
-            "finishReason must be null or a non-empty string",
+            "provider_response_sse_event_invalid",
             "non-string Gemini finishReason must fail",
         ),
     ];
@@ -771,7 +792,8 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
 async fn uncommitted_sse_failure_enters_error_chain_and_provider_cooldown() {
     let server_id = "gemini_gate_failure";
     let manifest = manifest_for_action_gate_scope(server_id);
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let cases = [
         (
             "malformed",
@@ -909,7 +931,8 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
     use futures_util::StreamExt;
     let server_id = "gemini_gate_success";
     let manifest = manifest_for_action_gate_scope(server_id);
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let failing = StaticSseTransport {
         chunks: Mutex::new(Some(vec![b"data: {malformed-json}\n\n".to_vec()])),
     };
@@ -1037,13 +1060,15 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
     use futures_util::StreamExt;
     let server_id = "gemini_active_recovery";
     const FAILURE_SESSION_ID: &str = "gemini-active-recovery-session";
-    let manifest = manifest_with_two_providers_for_scope(server_id);
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let manifest = manifest_with_two_providers_for_scope(server_id, true);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     // The action gate is process-shared, while this second handle keeps the
     // competing request's availability snapshot independent. That lets the
     // test exercise the same Error05 lane instead of skipping the cooled
     // primary before an action can be admitted.
-    let competing_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let competing_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let (terminal_sender, terminal_receiver) = tokio::sync::mpsc::channel(2);
     terminal_sender
         .send(Ok(
@@ -1166,7 +1191,8 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
 async fn sse_client_disconnect_is_health_neutral_and_never_enters_action_wait() {
     let server_id = "gemini_client_disconnect";
     let manifest = manifest_for_action_gate_scope(server_id);
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let output = execute_v3_gemini_relay_runtime_with_provider_health(
         &manifest,
         V3GeminiRelayRuntimeInput {
@@ -1282,11 +1308,9 @@ async fn response_side_channel_is_rejected_for_json_and_sse_before_client_succes
         V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON error body"),
     };
     assert!(
-        json_client_response.to_string().contains("metadata_center"),
-        "provider response side-channel rejection must be visible in terminal error body: {json_client_response}"
-    );
-    assert!(
-        !json_client_response.to_string().contains("hidden"),
+        json_client_response.to_string().contains("provider_error")
+            && !json_client_response.to_string().contains("metadata_center")
+            && !json_client_response.to_string().contains("hidden"),
         "side-channel-contaminated provider response must not be projected as client success"
     );
 
@@ -1299,11 +1323,9 @@ async fn response_side_channel_is_rejected_for_json_and_sse_before_client_succes
     assert_eq!(error_chain.len(), 6);
     assert_eq!(node_trace.last(), Some(&"V3Error06ClientProjected"));
     assert!(
-        sse_client_response.to_string().contains("metadata_center"),
-        "SSE side-channel leak must be rejected before client success, got {sse_client_response}"
-    );
-    assert!(
-        !sse_client_response.to_string().contains("hidden"),
+        sse_client_response.to_string().contains("provider_error")
+            && !sse_client_response.to_string().contains("metadata_center")
+            && !sse_client_response.to_string().contains("hidden"),
         "SSE side-channel payload must not be projected as a client success"
     );
 }
@@ -1461,6 +1483,7 @@ fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
 fn manifest_for_action_gate_scope(
     scope: &str,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    ensure_gemini_relay_test_state_dir();
     let source = format!(
         r#"
 version = 3
@@ -1503,10 +1526,13 @@ targets = [{{ kind = "provider_model", provider = "{scope}", model = "gemini-wir
 
 fn manifest_with_two_providers_for_scope(
     scope: &str,
+    reselect_before_same_candidate_retry: bool,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    ensure_gemini_relay_test_state_dir();
     let source = format!(
         r#"
 version = 3
+{error_section}
 
 {hub_v1_declaration}
 
@@ -1557,6 +1583,11 @@ targets = [
 "#,
         hub_v1_declaration = hub_v1_test_declaration(),
         server_execution = hub_v1_server_execution(scope),
+        error_section = if reselect_before_same_candidate_retry {
+            "[error]\nprovider_error_default_path = [\n  { step = \"wait_retry\", retry_mode = \"reselect_before_client_projection\", max_attempts = 1, backoff_ms = 0 },\n  { step = \"cooldown\", scope = \"provider_model\", duration_ms = 900000 },\n  { step = \"project\", status = 503, reason_code = \"provider_failure\", message_mode = \"code_only\" }\n]"
+        } else {
+            ""
+        },
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
@@ -1564,6 +1595,7 @@ targets = [
 fn manifest_with_provider_type(
     provider_type: &str,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    ensure_gemini_relay_test_state_dir();
     let source = format!(
         r#"
 version = 3

@@ -109,7 +109,10 @@ try {
     copyFileSync(resolve(v3Root, name), resolve(workspace, 'v3', name));
   }
   symlinkSync(resolve(workspace, 'v3', 'crates'), resolve(workspace, 'crates'), 'dir');
-  for (const name of ['Cargo.toml', 'Cargo.lock', 'package.json', 'package-lock.json']) {
+  for (const name of ['Cargo.toml', 'Cargo.lock']) {
+    copyFileSync(resolve(v3Root, name), resolve(workspace, name));
+  }
+  for (const name of ['package.json', 'package-lock.json']) {
     copyFileSync(resolve(v3Root, name), resolve(workspace, name));
   }
   symlinkSync(resolve(v3Root, 'node_modules'), resolve(workspace, 'node_modules'), 'dir');

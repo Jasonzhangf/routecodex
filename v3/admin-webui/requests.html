@@ -106,6 +106,8 @@
       if (model === "—") return provider;
       return `${provider} · ${model}`;
     }
+
+// X
   </script>
   <script src="/app.embedded.txt"></script>
   <script>
@@ -324,9 +326,214 @@
       return `${provider} · ${model}`;
     }
 
+    // Compact provider cell: show the alias model by default; reveal
+    // provider/auth_alias/provider_id/wire_model on hover or focus.
+    function compactProviderCell(row) {
+      const meta = row && row.meta || {};
+      const model = meta.model ?? "—";
+      const wire = meta.wire_model ?? "—";
+      const provider = meta.provider ?? "—";
+      const providerId = meta.provider_id ?? "—";
+      const authAlias = meta.auth_alias ?? "—";
+      const allEmpty = [model, wire, provider, providerId, authAlias].every((v) => v === "—");
+      const primary = model !== "—" ? model : wire !== "—" ? wire : provider !== "—" ? provider : "—";
+      const detail = [
+        ["provider", provider],
+        ["key", authAlias],
+        ["provider id", providerId],
+        ["wire model", wire],
+      ]
+        .filter(([, v]) => v !== "—" && v !== primary)
+        .map(([label, v]) => `${label}: ${v}`)
+        .join(" · ");
+      const cell = el("td", "providercompact compact");
+      cell.textContent = allEmpty ? "—" : primary;
+      if (detail) cell.title = detail;
+      cell.tabIndex = 0;
+      cell.addEventListener("focus", () => cell.classList.add("is-detail"));
+      cell.addEventListener("blur", () => cell.classList.remove("is-detail"));
+      cell.addEventListener("mouseenter", () => cell.classList.add("is-detail"));
+      cell.addEventListener("mouseleave", () => cell.classList.remove("is-detail"));
+      return cell;
+    }
+
+    // Per-tab Excel-style column resizing with localStorage persistence so
+    // each tab keeps its own widths across reloads.
+    const TABLE_WIDTH_PREFIX = "v3-admin-webui-requests-table";
+    function loadTableWidths(tab) {
+      try {
+        const raw = window.localStorage.getItem(`${TABLE_WIDTH_PREFIX}-${tab}`);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : null;
+      } catch (_error) {
+        return null;
+      }
+    }
+    function saveTableWidths(tab, widths) {
+      try {
+        window.localStorage.setItem(`${TABLE_WIDTH_PREFIX}-${tab}`, JSON.stringify(widths));
+      } catch (_error) {
+        /* storage unavailable; layout still works for the session. */
+      }
+    }
+    function applyTableWidths(table, widths) {
+      if (!widths || !table) return;
+      const colgroup = table.querySelector("colgroup");
+      if (!colgroup) return;
+      [...colgroup.children].forEach((col) => {
+        const cls = [...col.classList].find((token) => token.startsWith("col-"));
+        if (cls && typeof widths[cls] === "number" && widths[cls] >= 40) {
+          col.style.width = `${widths[cls]}px`;
+        }
+      });
+    }
+    function attachColumnResizers(table, tab) {
+      const colgroup = table.querySelector("colgroup");
+      if (!colgroup || table.dataset.resizable === "attached") return;
+      table.dataset.resizable = "attached";
+      const headRow = table.querySelector("thead tr");
+      if (!headRow) return;
+      const columns = [...colgroup.children];
+      [...headRow.children].forEach((th, index) => {
+        const col = columns[index];
+        if (!col) return;
+        const cls = [...col.classList].find((token) => token.startsWith("col-"));
+        if (!cls) return;
+        if (th.querySelector(".col-resizer")) return;
+        const handle = el("span", "col-resizer");
+        handle.setAttribute("aria-hidden", "true");
+        th.appendChild(handle);
+        handle.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          const startX = event.clientX;
+          const startWidth = col.getBoundingClientRect().width || 40;
+          const onMove = (ev) => {
+            const next = Math.max(40, Math.round(startWidth + (ev.clientX - startX)));
+            col.style.width = `${next}px`;
+          };
+          const onUp = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            const updated = { ...(state.tableWidths[tab] || {}) };
+            const finalWidth = Math.round(col.getBoundingClientRect().width || startWidth);
+            updated[cls] = finalWidth;
+            state.tableWidths[tab] = updated;
+            saveTableWidths(tab, updated);
+          };
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp);
+        });
+      });
+    }
+
+    // Compact provider cell: surface the alias model by default and reveal
+    // provider/auth_alias/provider_id/wire_model on hover/focus; the request
+    // row popover already carries the full details, so this cell stays narrow
+    // without losing access to identity information.
+    function compactProviderCell(row) {
+      const model = metaValue(row, "model");
+      const wire = metaValue(row, "wire_model");
+      const provider = metaValue(row, "provider");
+      const providerId = metaValue(row, "provider_id");
+      const authAlias = metaValue(row, "auth_alias");
+      const allEmpty = [model, wire, provider, providerId, authAlias].every((value) => value === "—");
+      const primary = model !== "—" ? model : wire !== "—" ? wire : provider !== "—" ? provider : "—";
+      const detail = [
+        ["provider", provider],
+        ["key", authAlias],
+        ["provider id", providerId],
+        ["wire model", wire],
+      ]
+        .filter(([, value]) => value !== "—" && value !== primary)
+        .map(([label, value]) => `${label}: ${value}`)
+        .join(" · ");
+      const cell = el("td", "providercompact, compact");
+      cell.textContent = primary;
+      cell.title = detail;
+      cell.tabIndex = 0;
+      cell.addEventListener("focus", () => cell.classList.add("is-detail"));
+      cell.addEventListener("blur", () => cell.classList.remove("is-detail"));
+      cell.addEventListener("mouseenter", () => cell.classList.add("is-detail"));
+      cell.addEventListener("mouseleave", () => cell.classList.remove("is-detail"));
+      if (allEmpty) cell.textContent = "—";
+      return cell;
+    }
+
+    // Persist user-dragged column widths per tab so the layout survives reloads.
+    const TABLE_WIDTH_PREFIX = "v3-admin-webui-requests-table";
+    function loadTableWidths(tab) {
+      try {
+        const raw = window.localStorage.getItem(`${TABLE_WIDTH_PREFIX}-${tab}`);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : null;
+      } catch (_error) {
+        return null;
+      }
+    }
+    function saveTableWidths(tab, widths) {
+      try {
+        window.localStorage.setItem(`${TABLE_WIDTH_PREFIX}-${tab}`, JSON.stringify(widths));
+      } catch (_error) {
+        /* storage may be unavailable; layout still works for this session. */
+      }
+    }
+    function applyTableWidths(table, widths) {
+      if (!widths || !table) return;
+      const colgroup = table.querySelector("colgroup");
+      if (!colgroup) return;
+      [...colgroup.children].forEach((col) => {
+        const cls = [...col.classList].find((token) => token.startsWith("col-"));
+        if (cls && typeof widths[cls] === "number" && widths[cls] >= 40) {
+          col.style.width = `${widths[cls]}px`;
+        }
+      });
+    }
+    function attachColumnResizers(table, tab) {
+      const colgroup = table.querySelector("colgroup");
+      if (!colgroup || table.dataset.resizable === "attached") return;
+      table.dataset.resizable = "attached";
+      const headRow = table.querySelector("thead tr");
+      if (!headRow) return;
+      const columns = [...colgroup.children];
+      [...headRow.children].forEach((th, index) => {
+        const col = columns[index];
+        if (!col) return;
+        const cls = [...col.classList].find((token) => token.startsWith("col-"));
+        if (!cls) return;
+        if (!th.querySelector(".col-resizer")) {
+          const handle = el("span", "col-resizer");
+          handle.setAttribute("aria-hidden", "true");
+          th.appendChild(handle);
+          handle.addEventListener("pointerdown", (event) => {
+            event.preventDefault();
+            const startX = event.clientX;
+            const startWidth = col.getBoundingClientRect().width || 40;
+            const onMove = (ev) => {
+              const next = Math.max(40, Math.round(startWidth + (ev.clientX - startX)));
+              col.style.width = `${next}px`;
+            };
+            const onUp = () => {
+              window.removeEventListener("pointermove", onMove);
+              window.removeEventListener("pointerup", onUp);
+              const updated = { ...(state.tableWidths[tab] || {}) };
+              const finalWidth = Math.round(col.getBoundingClientRect().width || startWidth);
+              updated[cls] = finalWidth;
+              state.tableWidths[tab] = updated;
+              saveTableWidths(tab, updated);
+            };
+            window.addEventListener("pointermove", onMove);
+            window.addEventListener("pointerup", onUp);
+          });
+        }
+      });
+    }
+
     async function loadRecords() {
       if (state.loading) return;
       state.loading = true;
+      // placeholder
       try {
         const params = new URLSearchParams();
         params.set("page", String(state.page));
@@ -961,3 +1168,96 @@
   </script>
 </body>
 </html>
+    }
+
+    function compactProviderCell(row) {
+      const meta = (row && row.meta) || {};
+      const model = meta.model ?? "—";
+      const wire = meta.wire_model ?? "—";
+      const provider = meta.provider ?? "—";
+      const providerId = meta.provider_id ?? "—";
+      const authAlias = meta.auth_alias ?? "—";
+      const allEmpty = [model, wire, provider, providerId, authAlias].every((v) => v === "—");
+      const primary = model !== "—" ? model : wire !== "—" ? wire : provider !== "—" ? provider : "—";
+      const detail = [
+        ["provider", provider],
+        ["key", authAlias],
+        ["provider id", providerId],
+        ["wire model", wire],
+      ]
+        .filter(([, v]) => v !== "—" && v !== primary)
+        .map(([label, v]) => `${label}: ${v}`)
+        .join(" · ");
+      const cell = el("td", "providercompact compact");
+      cell.textContent = allEmpty ? "—" : primary;
+      if (detail) cell.title = detail;
+      cell.tabIndex = 0;
+      cell.addEventListener("focus", () => cell.classList.add("is-detail"));
+      cell.addEventListener("blur", () => cell.classList.remove("is-detail"));
+      cell.addEventListener("mouseenter", () => cell.classList.add("is-detail"));
+      cell.addEventListener("mouseleave", () => cell.classList.remove("is-detail"));
+      return cell;
+    }
+
+    const TABLE_WIDTH_PREFIX = "v3-admin-webui-requests-table";
+    function loadTableWidths(tab) {
+      try {
+        const raw = window.localStorage.getItem(`${TABLE_WIDTH_PREFIX}-${tab}`);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : null;
+      } catch (_error) { return null; }
+    }
+    function saveTableWidths(tab, widths) {
+      try { window.localStorage.setItem(`${TABLE_WIDTH_PREFIX}-${tab}`, JSON.stringify(widths)); }
+      catch (_error) { /* storage unavailable */ }
+    }
+    function applyTableWidths(table, widths) {
+      if (!widths || !table) return;
+      const colgroup = table.querySelector("colgroup");
+      if (!colgroup) return;
+      [...colgroup.children].forEach((col) => {
+        const cls = [...col.classList].find((token) => token.startsWith("col-"));
+        if (cls && typeof widths[cls] === "number" && widths[cls] >= 40) {
+          col.style.width = `${widths[cls]}px`;
+        }
+      });
+    }
+    function attachColumnResizers(table, tab) {
+      const colgroup = table.querySelector("colgroup");
+      if (!colgroup || table.dataset.resizable === "attached") return;
+      table.dataset.resizable = "attached";
+      const headRow = table.querySelector("thead tr");
+      if (!headRow) return;
+      const columns = [...colgroup.children];
+      [...headRow.children].forEach((th, index) => {
+        const col = columns[index];
+        if (!col) return;
+        const cls = [...col.classList].find((token) => token.startsWith("col-"));
+        if (!cls) return;
+        if (th.querySelector(".col-resizer")) return;
+        const handle = el("span", "col-resizer");
+        handle.setAttribute("aria-hidden", "true");
+        th.appendChild(handle);
+        handle.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          const startX = event.clientX;
+          const startWidth = col.getBoundingClientRect().width || 40;
+          const onMove = (ev) => {
+            const next = Math.max(40, Math.round(startWidth + (ev.clientX - startX)));
+            col.style.width = `${next}px`;
+          };
+          const onUp = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            const updated = { ...(state.tableWidths[tab] || {}) };
+            const finalWidth = Math.round(col.getBoundingClientRect().width || startWidth);
+            updated[cls] = finalWidth;
+            state.tableWidths[tab] = updated;
+            saveTableWidths(tab, updated);
+          };
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp);
+        });
+      });
+    }

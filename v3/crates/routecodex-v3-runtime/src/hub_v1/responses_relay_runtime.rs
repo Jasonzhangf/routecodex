@@ -413,7 +413,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
     transport: &T,
     retry_policy: V3ResponsesRelayRetryPolicy,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(manifest);
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,

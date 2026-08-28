@@ -13,17 +13,27 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: V3ProviderHealthStore::from_manifest
     callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
-    status: source_controlled
+    status: anchored
     owner_feature_id: v3.provider_global_cooldown_persistence
+    resource_flow:
+      consumes: [v3.config.published_manifest]
+      produces: [v3.provider.global_cooldown_persistence]
+      side_channel_reads: [v3.config.published_manifest]
+      side_channel_writes: []
   - step_id: v3-provider-global-cooldown-02
     from_node: V3ProviderHealthStore
-    to_node: V3ProviderHealthStore
+    to_node: V3ProviderCooldownCoordinator
     caller_symbol: V3ProviderHealthStore::from_manifest
     caller_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     callee_symbol: V3ProviderCooldownCoordinator::load
     callee_file: v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
-    status: source_controlled
+    status: anchored
     owner_feature_id: v3.provider_global_cooldown_persistence
+    resource_flow:
+      consumes: [v3.provider.global_cooldown_persistence]
+      produces: [v3.provider.global_cooldown_persistence]
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: v3-provider-global-cooldown-03
     from_node: V3ServerStartup01ListenerSetPreflight
     to_node: V3ProviderHealthStore
@@ -31,8 +41,13 @@ chains:
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_key_health_probes
     callee_file: v3/crates/routecodex-v3-server/src/lib.rs
-    status: source_controlled
+    status: anchored
     owner_feature_id: v3.provider_global_cooldown_persistence
+    resource_flow:
+      consumes: [v3.provider.cooldown_probe_state, v3.provider.global_cooldown_persistence]
+      produces: [v3.provider.cooldown_probe_state, v3.provider.global_cooldown_persistence]
+      side_channel_reads: [v3.provider.cooldown_probe_state]
+      side_channel_writes: [v3.provider.global_cooldown_persistence]
 - chain_id: v3.provider_key_health_model_granularity
   owner_feature_id: v3.provider_key_health_model_granularity
   summary: Runtime passes the exact provider, auth alias, and model identity to the Provider-owned key health store; Target reads only the resulting per-model scheduling projection.
@@ -44,7 +59,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: build_v3_provider_failure_action_from_v3_error_02
     callee_file: v3/crates/routecodex-v3-error/src/subscription.rs
-    status: source_controlled
+    status: anchored
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes: [v3.error.classified]
@@ -58,7 +73,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: V3ProviderHealthStore::record_provider_failure_action
     callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
-    status: source_controlled
+    status: anchored
     owner_feature_id: v3.provider_key_health_model_granularity
     resource_flow:
       consumes: [v3.provider.failure_action]
@@ -72,7 +87,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-target/src/lib.rs
     callee_symbol: V3ProviderSchedulingReader::scheduling_projection
     callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
-    status: source_controlled
+    status: anchored
     owner_feature_id: v3.virtual_router_target_interpreter
     resource_flow:
       consumes: [v3.provider.scheduling_projection]
@@ -112,7 +127,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
     callee_symbol: apply_v3_direct_request_key_hook
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_request_key_hooks.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.direct.request_key_hooks
     resource_flow:
       consumes: [v3.direct.request_key_view]
@@ -126,7 +141,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
     callee_symbol: apply_v3_direct_request_key_hook_with_catalog
     callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.direct.request_key_hooks
     resource_flow:
       consumes: [v3.direct.request_key_view]
@@ -140,7 +155,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
     callee_symbol: apply_v3_direct_request_key_hook
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_request_key_hooks.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.direct.request_key_hooks
     resource_flow:
       consumes: [v3.direct.request_key_view]
@@ -154,7 +169,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
     callee_symbol: V3ChatDirectCodec::run_request_projection
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.direct.request_key_hooks
     resource_flow:
       consumes: [v3.direct.request_key_view]
@@ -1723,8 +1738,10 @@ chains:
     resource_flow:
       consumes:
       - v3.hub.response_semantic
+      - v3.sse.anthropic.semantic_tree
       produces:
       - v3.hub.response_semantic
+      - v3.sse.anthropic.hook_effect
       side_channel_reads:
       - v3.hub.execution_plan
       side_channel_writes: []
@@ -4257,7 +4274,7 @@ chains:
   - step_id: v3-sse-server-frame-04
     from_node: V3HubRespOutbound05ClientSemantic
     to_node: V3ServerRespOutbound06ClientFrame
-    caller_symbol: wrap_v3_relay_sse_closeout_stream
+    caller_symbol: execute_v3_responses_relay_request
     caller_file: v3/crates/routecodex-v3-server/src/executors.rs
     callee_symbol: Body::from_stream
     callee_file: v3/crates/routecodex-v3-server/src/executors.rs
@@ -5952,8 +5969,8 @@ chains:
   - step_id: v3-runtime-timing-11
     from_node: V3RuntimeTimingExternalComplete
     to_node: V3RuntimeTimingTerminal
-    caller_symbol: wrap_direct_sse_provider_outcome_stream
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    caller_symbol: wrap_direct_sse_provider_event_json_observation_stream
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
     callee_symbol: finish_runtime
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
     status: anchored
@@ -5970,8 +5987,8 @@ chains:
   - step_id: v3-runtime-timing-12
     from_node: V3RuntimeTimingTerminal
     to_node: V3RuntimeTimingStreamObservation
-    caller_symbol: wrap_direct_sse_provider_outcome_stream
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    caller_symbol: wrap_direct_sse_provider_event_json_observation_stream_with_compat
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
     callee_symbol: record_timing
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
     status: anchored
@@ -6028,7 +6045,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.responses_session_admission
   owner_feature_id: v3.responses_session_inflight_admission
-  summary: The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, rejects overlap through Error01-06 before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.
+  summary: The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, waits on overlap before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.
   manifest: docs/architecture/manifests/v3.responses_session_admission.mainline.yml
   entry_contract:
     node: V3Server03HttpRequestRaw
@@ -6039,29 +6056,18 @@ chains:
     to_node: V3Server03ResponsesSessionAdmissionBlock
     caller_symbol: admit_v3_responses_session_after_json_parse
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: V3ResponsesSessionAdmissionGate::try_admit
+    callee_symbol: V3ResponsesSessionAdmissionGate::admit
     callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
     status: anchored
     owner_feature_id: v3.responses_session_inflight_admission
+    semantic_contract:
+      - The caller awaits the listener-local predicate after canonical JSON parsing and before Runtime or provider transport.
+      - A matching explicit session or conversation remains inside this edge until the exact active permit drops; no client error is projected.
     resource_flow:
       consumes: [v3.server.validated_http_input]
       produces: [v3.server.responses_session_admission]
       side_channel_reads: []
       side_channel_writes: [v3.server.responses_session_admission]
-  - step_id: v3-responses-admission-error-02
-    from_node: V3Server03ResponsesSessionAdmissionBlock
-    to_node: V3Error01SourceRaised
-    caller_symbol: admit_v3_responses_session_after_json_parse
-    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: project_v3_http_boundary_error
-    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
-    status: anchored
-    owner_feature_id: v3.responses_session_inflight_admission
-    resource_flow:
-      consumes: [v3.server.responses_session_admission]
-      produces: [v3.error.chain]
-      side_channel_reads: []
-      side_channel_writes: [v3.error.chain]
   - step_id: v3-responses-admission-release-03
     from_node: V3Server03ResponsesSessionAdmissionBlock
     to_node: V3ServerRespOutbound06ClientFrame
@@ -6254,7 +6260,7 @@ chains:
     - step_id: v3-provider-action-gate-08
       from_node: V3Error05RecoveryWitness
       to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -6274,7 +6280,7 @@ chains:
     - step_id: v3-provider-action-gate-09
       from_node: V3ExecutionRetryOrReselect
       to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_exact_selected_provider_action
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -6374,7 +6380,7 @@ chains:
     - step_id: v3-provider-action-gate-14
       from_node: V3Error01SourceRaised
       to_node: V3Error05ExecutionDecision
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: run_v3_direct_provider_failure_policy
       callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
@@ -6434,7 +6440,7 @@ chains:
     - step_id: v3-provider-action-gate-19
       from_node: V3ProviderActionGateAdmission
       to_node: V3ProviderActionPermitInFlight
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: V3ProviderActionAdmission::take_permit
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6534,7 +6540,7 @@ chains:
     - step_id: v3-provider-action-gate-24
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: V3ProviderActionPermit::drop
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6634,8 +6640,8 @@ chains:
     - step_id: v3-provider-action-gate-29
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: V3DirectSseProviderOutcome::record_failure
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+      caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: V3ProviderActionPermit::drop
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
       status: anchored
@@ -6714,10 +6720,10 @@ chains:
     - step_id: v3-provider-action-gate-33
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionSuccessObserved
-      caller_symbol: wrap_direct_sse_provider_outcome_stream
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
-      callee_symbol: V3DirectSseProviderOutcome::record_success
-      callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+      caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+      callee_symbol: record_v3_direct_provider_success
+      callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -6734,8 +6740,8 @@ chains:
     - step_id: v3-provider-action-gate-34
       from_node: V3ProviderActionSuccessObserved
       to_node: V3ProviderActionSuccessRecorded
-      caller_symbol: V3DirectSseProviderOutcome::record_success
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      caller_symbol: record_v3_direct_provider_success
+      caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
@@ -6754,10 +6760,10 @@ chains:
     - step_id: v3-provider-action-gate-35
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionFailureObserved
-      caller_symbol: wrap_direct_sse_provider_outcome_stream
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
-      callee_symbol: V3DirectSseProviderOutcome::record_failure
-      callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+      caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+      callee_symbol: run_v3_direct_provider_failure_policy
+      callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -6774,8 +6780,8 @@ chains:
     - step_id: v3-provider-action-gate-36
       from_node: V3ProviderActionPermitAbandoned
       to_node: V3ProviderActionFailureRecorded
-      caller_symbol: V3DirectSseProviderOutcome::record_failure
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+      caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
@@ -6856,7 +6862,7 @@ chains:
       to_node: V3ProviderActionFailureRecorded
       caller_symbol: V3OpenAiChatSseProviderOutcome::record_failure
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -6936,7 +6942,7 @@ chains:
       to_node: V3ProviderActionFailureRecorded
       caller_symbol: V3GeminiSseProviderOutcome::record_failure
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -7014,10 +7020,10 @@ chains:
     - step_id: v3-provider-action-gate-48
       from_node: V3ProviderRespInbound01Raw
       to_node: V3ProviderResponsesEventCodec
-      caller_symbol: wrap_direct_sse_provider_outcome_stream
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
-      callee_symbol: V3DirectSseProviderOutcome::observe_chunk
-      callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      caller_symbol: record_direct_sse_provider_event_json_chunk
+      caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+      callee_symbol: classify_v3_provider_sse_json_data
+      callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -7034,10 +7040,10 @@ chains:
     - step_id: v3-provider-action-gate-49
       from_node: V3ProviderResponsesEventCodec
       to_node: V3ProviderResponsesTerminalOrFailureObserved
-      caller_symbol: V3DirectSseProviderOutcome::observe_chunk
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
-      callee_symbol: V3DirectSseProviderOutcome::observe_frame
-      callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      caller_symbol: record_direct_sse_provider_event_json_chunk
+      caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+      callee_symbol: process_sse_object_frame
+      callee_file: v3/crates/routecodex-v3-runtime/src/sse_object_pipeline.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -7074,7 +7080,7 @@ chains:
     - step_id: v3-provider-action-gate-51
       from_node: V3ProviderResponsesEventCodec
       to_node: V3ProviderResponsesTerminalOrFailureObserved
-      caller_symbol: observe_v3_runtime_responses_sse_semantic_frame_typed
+      caller_symbol: apply_v3_typed_responses_event
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
       callee_symbol: V3ResponsesSseReducerState::apply_event
       callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
@@ -7110,8 +7116,8 @@ chains:
       status: anchored
       owner_feature_id: v3.build_test_artifact_budget
       resource_flow:
-        consumes: [v3.build.dependency_cache]
-        produces: [v3.build.test_artifact_store]
+        consumes: [v3.build.dependency_cache, v3.build.node_dependency_lock, v3.build.cargo_dependency_lock, v3.build.rust_toolchain_contract, v3.build.version_truth, v3.build.architecture_admission]
+        produces: [v3.build.test_artifact_store, v3.build.ordinary_cargo_target]
         side_channel_reads: []
         side_channel_writes: []
     - step_id: v3-build-test-budget-02
@@ -7124,8 +7130,8 @@ chains:
       status: anchored
       owner_feature_id: v3.build_test_artifact_budget
       resource_flow:
-        consumes: [v3.build.test_artifact_store]
-        produces: []
+        consumes: [v3.build.test_artifact_store, v3.build.ordinary_cargo_target]
+        produces: [v3.build.pack_staging, v3.build.release_artifacts]
         side_channel_reads: []
         side_channel_writes: []
     - step_id: v3-build-test-budget-03
@@ -7138,8 +7144,8 @@ chains:
       status: anchored
       owner_feature_id: v3.build_test_artifact_budget
       resource_flow:
-        consumes: [v3.build.dependency_cache]
-        produces: []
+        consumes: [v3.build.dependency_cache, v3.build.ordinary_cargo_target]
+        produces: [v3.build.assembled_binary, v3.build.install_target]
         side_channel_reads: []
         side_channel_writes: []
 - chain_id: v3.route_classifier.facts_classification
@@ -7411,7 +7417,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
     callee_symbol: anthropic_tool_use_as_responses_call
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
-    status: design
+    status: binding_pending
     behavior_gap: current Anthropic bridge preserves the governed input for Resp03; remaining gap is a canonical client-response snapshot and raw duplicate-key negative evidence
     owner_feature_id: v3.tool_thinking_hook_skeleton
     resource_flow:
@@ -7452,7 +7458,7 @@ chains:
   - step_id: v3-tool-thinking-resp03-sse
     from_node: V3ProviderResp14Raw
     to_node: V3DirectResp14ProviderProjectionPrepared
-    caller_symbol: apply_toolreason_to_sse_frame
+    caller_symbol: apply_toolreason_to_sse_chunk_buffered
     caller_file: v3/crates/routecodex-v3-runtime/src/shared.rs
     callee_symbol: map_v3_toolreason_stream_event_at_resp03
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
@@ -7524,7 +7530,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
     callee_symbol: V3RouteHistoryWindow::facts
     callee_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
-    status: source_controlled
+    status: anchored
     owner_feature_id: v3.route_policy_condition_evaluation
     resource_flow:
       consumes: [v3.route.current_turn_facts]
@@ -7538,7 +7544,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
     callee_symbol: V3RoutePolicyAction
     callee_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
-    status: source_controlled
+    status: anchored
     owner_feature_id: v3.route_policy_condition_evaluation
     resource_flow:
       consumes: [v3.route.policy_observations]
@@ -7552,7 +7558,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3VirtualRouter::resolve_route_pool_plan
     callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
-    status: source_controlled
+    status: anchored
     owner_feature_id: v3.route_policy_condition_evaluation
     resource_flow:
       consumes: [v3.route.policy_action]
@@ -7566,7 +7572,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
     callee_symbol: V3VirtualRouter::resolve_route_pool_plan
     callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
-    status: source_controlled
+    status: anchored
     owner_feature_id: v3.route_policy_condition_evaluation
     resource_flow:
       consumes: [v3.route.policy_action]
@@ -7577,10 +7583,10 @@ chains:
     from_node: V3Router05RequestClassified
     to_node: V3RouteHistoryWindow
     caller_symbol: V3RoutePolicyRuntimeState::commit_request
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    caller_file: v3/crates/routecodex-v3-runtime/src/route_policy.rs
     callee_symbol: V3RouteHistoryWindow::record_turn
     callee_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
-    status: source_controlled
+    status: anchored
     owner_feature_id: v3.route_policy_condition_evaluation
     resource_flow:
       consumes: [v3.route.current_turn_facts]
@@ -7711,8 +7717,8 @@ chains:
     resource_flow:
       consumes: [v3.error.source]
       produces: [v3.error.classified]
-    side_channel_reads: [v3.error.source]
-    side_channel_writes: [v3.error.classified]
+      side_channel_reads: [v3.error.source]
+      side_channel_writes: [v3.error.classified]
 
 - chain_id: v3.responses_chat_sse_typed_tree
   owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
@@ -7725,7 +7731,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
     callee_symbol: V3ResponsesJsonDocument::from_json
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.responses.json_document]
@@ -7739,7 +7745,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
     callee_symbol: V3ResponsesSseProtocolMetadata::from_event
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.transport_decoded_frame]
@@ -7753,7 +7759,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
     callee_symbol: classify_v3_responses_sse_output_item
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.responses.protocol_metadata]
@@ -7768,7 +7774,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
     callee_symbol: rewrite_v3_responses_sse_content
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
-    status: design
+    status: binding_pending
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.responses.semantic_tree]
@@ -7782,7 +7788,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
     callee_symbol: V3RelaySseHookCatalog::rewrite_responses
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.relay.typed_hook_catalog, v3.sse.responses.semantic_tree]
@@ -7801,7 +7807,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
     callee_symbol: classify_v3_openai_chat_sse_chunk
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.transport_decoded_frame]
@@ -7815,7 +7821,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
     callee_symbol: rewrite_v3_openai_chat_sse_content
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
-    status: design
+    status: binding_pending
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.chat.semantic_tree]
@@ -7829,7 +7835,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
     callee_symbol: V3OpenAiChatJsonDocument::from_json
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.chat.json_document]
@@ -7843,7 +7849,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
     callee_symbol: V3RelaySseHookCatalog::rewrite_chat
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.relay.typed_hook_catalog, v3.sse.chat.semantic_tree]
@@ -7862,7 +7868,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
     callee_symbol: SseTransportErrorExport::from
     callee_file: v3/crates/routecodex-v3-sse/src/lib.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.transport_error_export]
@@ -7875,8 +7881,8 @@ chains:
     caller_symbol: V3DirectSseContentConsumer::consume
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
     callee_symbol: process_sse_object_frame
-    callee_file: v3/crates/routecodex-v3-sse/src/lib.rs
-    status: active
+    callee_file: v3/crates/routecodex-v3-runtime/src/sse_object_pipeline.rs
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.object_pipeline, v3.direct_response.compat_plan]
@@ -7885,12 +7891,12 @@ chains:
       side_channel_writes: []
   - step_id: v3-direct-typed-projection-01
     from_node: V3DirectResp14ProviderProjectionPrepared
-    to_node: V3DirectResp14ProviderProjectionPrepared
+    to_node: V3DirectResp14TypedProtocolData
     caller_symbol: V3DirectSseContentConsumer::consume
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
     callee_symbol: project_direct_typed_protocol_data
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.object_pipeline]
@@ -7904,7 +7910,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
     callee_symbol: V3DirectSseTypedHookCatalog::with_responses
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.direct.typed_hook_catalog, v3.sse.responses.semantic_tree]
@@ -7927,7 +7933,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
     callee_symbol: V3FrontRequestLeaseKey
     callee_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
-    status: design
+    status: binding_pending
     owner_feature_id: v3.runtime_restart_handoff_skeleton
     resource_flow:
       consumes: [v3.front.request_lease]
@@ -7941,12 +7947,12 @@ chains:
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
     callee_symbol: V3ServerRequestActivityGate::wait_for_quiescence
     callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
-    status: source_controlled_runtime_pending_live_replay
+    status: binding_pending
     owner_feature_id: v3.runtime_restart_handoff_skeleton
     resource_flow:
       consumes: [v3.front.request_activity_gate, v3.front.deadline_budget, v3.front.client_closeout_frame]
-      produces: [v3.error.chain]
-      side_channel_reads: [v3.front.request_activity_gate, v3.front.client_closeout_frame]
+      produces: [v3.error.chain, v3.front.client_frame_sequence]
+      side_channel_reads: [v3.front.request_activity_gate, v3.front.client_closeout_frame, v3.front.client_frame_sequence]
       side_channel_writes: []
 
 - chain_id: v3.direct_sse_accept_skeleton
@@ -7991,12 +7997,12 @@ chains:
       side_channel_writes: []
   - step_id: v3-direct-typed-hook-catalog-02
     from_node: V3DirectResp14ProviderProjectionPrepared
-    to_node: V3DirectResp14ProviderProjectionPrepared
+    to_node: V3DirectResp14TypedHookCatalog
     caller_symbol: execute_v3_responses_direct_runtime_kernel
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3HookRegistry::direct_sse_typed_hooks
     callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
-    status: active
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.direct.typed_hook_catalog]
@@ -8055,7 +8061,7 @@ chains:
     edge_kind: runtime_attempt_buffer
     owner_feature_id: v3.responses_direct_full_attempt_commit
     resource_flow:
-      consumes: [v3.provider.response.raw, v3.sse.direct.full_attempt_buffer]
+      consumes: [v3.response.provider_raw, v3.sse.direct.full_attempt_buffer]
       produces: [v3.sse.direct.full_attempt_buffer]
       side_channel_reads: []
       side_channel_writes: []

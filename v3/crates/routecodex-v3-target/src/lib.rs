@@ -336,7 +336,6 @@ impl V3TargetInterpreter {
             {
                 unavailable.push(reason);
                 near_limit = true;
-            } else {
             }
             let route_tier_index = Self::route_tier_index(&expanded.route, candidate);
             let effective_priority = (route_tier_index as i32)
@@ -930,13 +929,10 @@ fn merge_candidate_route_provenance(
 }
 
 fn candidate_satisfies_required_capabilities(candidate: &V3TargetCandidate) -> bool {
-    candidate.required_capabilities.iter().all(|required| {
-        candidate_has_required_capability(
-            &candidate.model_capabilities,
-            candidate.provider_type.as_str(),
-            required,
-        )
-    })
+    candidate
+        .required_capabilities
+        .iter()
+        .all(|required| candidate_has_required_capability(&candidate.model_capabilities, required))
 }
 
 fn legacy_selection_sample(expanded: &V3Target09CandidateSetExpanded) -> u64 {
@@ -1001,16 +997,11 @@ fn scaled_context_input_tokens(candidate: &V3TargetCandidate, request_input_toke
         .min(u128::from(u64::MAX)) as u64
 }
 
-fn candidate_has_required_capability(
-    capabilities: &[String],
-    provider_type: &str,
-    required: &str,
-) -> bool {
+fn candidate_has_required_capability(capabilities: &[String], required: &str) -> bool {
     let has = |wanted: &str| capabilities.iter().any(|capability| capability == wanted);
     match required {
         "search" | "web_search" => has("web_search"),
         "multimodal" | "vision" => has("multimodal") || has("vision"),
-        "structured_output" => matches!(provider_type, "responses" | "openai_chat"),
         _ => true,
     }
 }

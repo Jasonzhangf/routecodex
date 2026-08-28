@@ -2476,6 +2476,7 @@ features:
     - responses_inbound_restores_codex_integer_tool_schema_types
     - responses_inbound_does_not_rewrite_string_session_id_schema
     - responses_inbound_does_not_rewrite_same_named_user_tool_schema
+    - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
@@ -2569,6 +2570,7 @@ features:
   - responses_inbound_restores_codex_integer_tool_schema_types
   - responses_inbound_does_not_rewrite_string_session_id_schema
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
+  - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   allowed_paths:
   - package.json
   - v3/package.json
@@ -4055,30 +4057,24 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
-  - v3/crates/routecodex-v3-error/src/lib.rs
   resource_bindings:
   - v3.server.validated_http_input
   - v3.server.responses_session_admission
-  - v3.error.chain
   mainline_bindings:
   - v3-responses-admission-01
-  - v3-responses-admission-error-02
   - v3-responses-admission-release-03
   entry_symbols:
   - read_json_payload
   - admit_v3_responses_session_after_json_parse
   - pending_endpoint_after_responses_admission
   - responses_control_scope_headers
-  - V3ResponsesSessionAdmissionGate::try_admit
+  - V3ResponsesSessionAdmissionGate::admit
   - hold_response_body_admission_permit
   - <V3ResponsesSessionAdmissionPermit as Drop>::drop
-  - project_v3_http_boundary_error
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
-  - v3/crates/routecodex-v3-error/src/lib.rs
-  - v3/crates/routecodex-v3-error/tests/error_chain_contract.rs
   - docs/architecture/manifests/v3.responses_session_admission.mainline.yml
   - docs/architecture/wiki/v3-responses-session-admission.md
   - scripts/architecture/verify-v3-responses-session-admission.mjs
@@ -4095,6 +4091,12 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib session_admission
     -- --nocapture
   - git diff --check
+  semantic_contract:
+  - Same listener and explicit session or conversation contention waits inside the
+    listener-local gate until the exact response-body permit releases.
+  - Contention never enters Error01-06 and never projects request_in_flight or HTTP
+    409 to the client.
+  - Different scopes and different listener gate instances remain concurrent.
   runtime_status: source_pending_live_replay
 - feature_id: v3.sse_http_keepalive_boundary
   owner_crate: routecodex-v3-server

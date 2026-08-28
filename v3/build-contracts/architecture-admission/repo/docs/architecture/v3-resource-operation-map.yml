@@ -1673,14 +1673,16 @@ resources:
   - resource_id: v3.server.responses_session_admission
     resource_kind: listener_scoped_concurrency_gate
     lifecycle: v3.responses_session_admission
+    owner_feature_id: v3.responses_session_inflight_admission
     owner_crate: routecodex-v3-server
     owner_node: V3Server03ResponsesSessionAdmissionBlock
     identity: [serverId, endpoint, explicitSessionId, explicitConversationId, permitToken]
-    allowed_writers: [V3ResponsesSessionAdmissionGate::try_admit, <V3ResponsesSessionAdmissionPermit as Drop>::drop]
+    allowed_writers: [V3ResponsesSessionAdmissionGate::admit, <V3ResponsesSessionAdmissionPermit as Drop>::drop]
     allowed_readers: [admit_v3_responses_session_after_json_parse, pending_endpoint, hold_response_body_admission_permit]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, provider_action_gate]
     may_enter_provider_body: false
     may_enter_client_body: false
+    contention_policy: wait_on_listener_local_predicate_without_client_error_projection
     release_point: V3ServerRespOutbound06ClientFrameBodyEofErrorOrDrop
     binding_status: anchored
 
@@ -1981,9 +1983,10 @@ resources:
       row_limit_bytes: internal_observability_max_record_bytes
       terminal_row_immutable: true
       reader_folds_by_request_key: true
+      raw_lifecycle_preserved: true
       control_state_in_payload: forbidden
     allowed_writers: [record_v3_observability_event, record_v3_webui_error_projection]
-    allowed_readers: [v3_webui_observability_read_rows, records]
+    allowed_readers: [v3_webui_observability_read_rows, v3_webui_observability_read_raw_rows, records]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -2003,10 +2006,11 @@ resources:
       schema_version: 1
       append_only: true
       reader_folds_by_request_key: true
+      raw_lifecycle_preserved: true
       record_limit_bytes: internal_observability_max_record_bytes
       control_state_in_payload: forbidden
     allowed_writers: [v3_webui_observability_append_row]
-    allowed_readers: [v3_webui_observability_read_rows]
+    allowed_readers: [v3_webui_observability_read_rows, v3_webui_observability_read_raw_rows]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -2109,7 +2113,7 @@ resources:
     allowed_writers: [V3DirectRequestKeyHookCatalog, V3DirectRequestKeyHook::rewrite, apply_v3_direct_request_key_edits]
     allowed_readers: [responses_direct_request_projection_hook, chat_direct_request_projection_hook]
     forbidden_writers: [MetadataCenter, routing, retry, health, continuation, response.client_payload]
-    may_enter_provider_body: true
+    may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: source_controlled
@@ -2170,7 +2174,7 @@ resources:
     allowed_readers: [responses_provider_event_codec, V3ResponsesSseHookInput]
     forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, request.normal_payload, response.client_payload]
     may_enter_provider_body: false
-    may_enter_client_body: true
+    may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: design
 
@@ -2187,7 +2191,7 @@ resources:
     allowed_readers: [v3_request_wants_sse, pending_endpoint_after_responses_admission, execute_responses_direct_server_outcome, v3_io_sse_body, V3DirectSseAccept02RuntimeWorker]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, provider.wire_payload, response.raw_provider_sse]
     may_enter_provider_body: false
-    may_enter_client_body: true
+    may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: source_controlled
 
@@ -2247,7 +2251,7 @@ resources:
     allowed_readers: [openai_chat_codec, V3OpenAiChatSseHookInput]
     forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, request.normal_payload]
     may_enter_provider_body: false
-    may_enter_client_body: true
+    may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: design
 
@@ -2263,7 +2267,7 @@ resources:
     allowed_readers: [responses_provider_event_codec, provider_stream_materialization, openai_chat_relay_runtime]
     forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, request.normal_payload, provider.wire_payload]
     may_enter_provider_body: false
-    may_enter_client_body: true
+    may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: source_controlled
 
@@ -2279,7 +2283,7 @@ resources:
     allowed_readers: [V3DirectSseContentConsumer::consume, project_direct_typed_protocol_data]
     forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, request.normal_payload, provider.wire_payload]
     may_enter_provider_body: false
-    may_enter_client_body: true
+    may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: source_controlled
 
@@ -2309,7 +2313,7 @@ resources:
     allowed_readers: [V3AnthropicSseHookInput, provider_stream_materialization]
     forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, request.normal_payload]
     may_enter_provider_body: false
-    may_enter_client_body: true
+    may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: design
 

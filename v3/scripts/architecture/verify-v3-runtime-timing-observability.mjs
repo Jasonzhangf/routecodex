@@ -339,7 +339,7 @@ requireMatch(
 );
 requireMatch(
   directRuntimeHelpers,
-  /commit_direct_sse_attempt_after_terminal[\s\S]*V3ProviderAttemptSseStream[\s\S]*V3ClientSseStream/,
+  /pub\(crate\) fn commit_direct_sse_attempt_after_terminal\(\s*stream: V3ProviderAttemptSseStream,\s*\)\s*-> V3ClientSseStream/,
   "Direct SSE Runtime must hand off a typed provider attempt to the client broker without full-stream draining",
 );
 requireMatch(
@@ -434,7 +434,7 @@ requireMatch(
 );
 requireMatch(
   providerSseJsonCodec,
-  /fn responses_event_name_recovers_missing_json_type_before_precommit\(\)[\s\S]*classify_v3_provider_sse_json_data/,
+  /fn responses_event_name_does_not_supply_missing_json_type_before_precommit\(\)[\s\S]*classify_v3_provider_sse_json_data/,
   "Direct SSE normalization regression must bind transport event metadata before typed JSON classification",
 );
 forbidMatch(
@@ -538,7 +538,7 @@ for (const [source, label] of [
   );
   if (
     directTimingPublication?.caller_symbol !==
-      "wrap_direct_sse_provider_outcome_stream" ||
+      "wrap_direct_sse_provider_event_json_observation_stream_with_compat" ||
     directTimingPublication?.callee_symbol !== "record_timing" ||
     directTimingPublication?.callee_file !==
       "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs"

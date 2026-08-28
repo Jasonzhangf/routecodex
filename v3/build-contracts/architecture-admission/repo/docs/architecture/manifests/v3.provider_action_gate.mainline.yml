@@ -116,7 +116,7 @@ edges:
     to: V3ProviderActionGateAdmission
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -125,7 +125,7 @@ edges:
     to: V3ProviderActionGateAdmission
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_exact_selected_provider_action
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -170,7 +170,7 @@ edges:
     to: V3Error05ExecutionDecision
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: run_v3_direct_provider_failure_policy
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
@@ -197,7 +197,7 @@ edges:
     to: V3ProviderActionPermitInFlight
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3ProviderActionAdmission::take_permit
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -242,7 +242,7 @@ edges:
     to: V3ProviderActionPermitAbandonRequested
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3ProviderActionPermit::drop
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -287,8 +287,8 @@ edges:
     to: V3ProviderActionPermitAbandonRequested
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3DirectSseProviderOutcome::record_failure
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3ProviderActionPermit::drop
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
   - step_id: v3-provider-action-gate-30
@@ -323,17 +323,17 @@ edges:
     to: V3ProviderActionSuccessObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: wrap_direct_sse_provider_outcome_stream
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
-    callee_symbol: V3DirectSseProviderOutcome::record_success
-    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: record_v3_direct_provider_success
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - step_id: v3-provider-action-gate-34
     from: V3ProviderActionSuccessObserved
     to: V3ProviderActionSuccessRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3DirectSseProviderOutcome::record_success
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    caller_symbol: record_v3_direct_provider_success
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-35
@@ -341,17 +341,17 @@ edges:
     to: V3ProviderActionFailureObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: wrap_direct_sse_provider_outcome_stream
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
-    callee_symbol: V3DirectSseProviderOutcome::record_failure
-    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: run_v3_direct_provider_failure_policy
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - step_id: v3-provider-action-gate-36
     from: V3ProviderActionPermitAbandoned
     to: V3ProviderActionFailureRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3DirectSseProviderOutcome::record_failure
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-37
@@ -388,7 +388,7 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: V3OpenAiChatSseProviderOutcome::record_failure
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-41
     from: V3ProviderActionPermitInFlight
@@ -424,7 +424,7 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: V3GeminiSseProviderOutcome::record_failure
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-45
     from: V3ProviderActionPermitInFlight
@@ -458,19 +458,19 @@ edges:
     to: V3ProviderResponsesEventCodec
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: wrap_direct_sse_provider_outcome_stream
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
-    callee_symbol: V3DirectSseProviderOutcome::observe_chunk
-    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    caller_symbol: record_direct_sse_provider_event_json_chunk
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+    callee_symbol: classify_v3_provider_sse_json_data
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
   - step_id: v3-provider-action-gate-49
     from: V3ProviderResponsesEventCodec
     to: V3ProviderResponsesTerminalOrFailureObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3DirectSseProviderOutcome::observe_chunk
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
-    callee_symbol: V3DirectSseProviderOutcome::observe_frame
-    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    caller_symbol: record_direct_sse_provider_event_json_chunk
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+    callee_symbol: process_sse_object_frame
+    callee_file: v3/crates/routecodex-v3-runtime/src/sse_object_pipeline.rs
   - step_id: v3-provider-action-gate-50
     from: V3ProviderRespInbound01Raw
     to: V3ProviderResponsesEventCodec
@@ -478,17 +478,17 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: build_v3_hub_resp_inbound_02_from_responses_provider_stream_events
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
-    callee_symbol: observe_v3_runtime_responses_sse_transport_chunk
+    callee_symbol: observe_v3_runtime_responses_sse_transport_chunk_typed
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
   - step_id: v3-provider-action-gate-51
     from: V3ProviderResponsesEventCodec
     to: V3ProviderResponsesTerminalOrFailureObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: observe_v3_runtime_responses_sse_semantic_frame
+    caller_symbol: apply_v3_typed_responses_event
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
-    callee_symbol: apply_v3_runtime_responses_semantic_event
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+    callee_symbol: V3ResponsesSseReducerState::apply_event
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
 resources:
   - v3.error.execution_decision
   - v3.error.provider_action_gate

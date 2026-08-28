@@ -43,7 +43,8 @@ async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
     transport: &T,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     ensure_openai_chat_relay_test_state_dir();
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
     execute_v3_openai_chat_relay_runtime_with_provider_health(
         manifest,
         input,
@@ -293,7 +294,8 @@ impl ResponsesTransport for ClientDisconnectTransport {
 #[tokio::test]
 async fn client_disconnect_is_typed_terminal_and_does_not_mutate_health_or_action_gate() {
     let manifest = manifest();
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     for index in 0..3 {
         let started = Instant::now();
         let output = execute_v3_openai_chat_relay_runtime_with_provider_health(
@@ -397,7 +399,7 @@ async fn post_first_frame_provider_failure_hands_off_without_client_error_event(
         provider_ids: std::sync::Arc::new(Mutex::new(Vec::new())),
     };
     let output = execute_v3_openai_chat_relay_runtime(
-        &manifest_with_two_providers_for_scope(server_id),
+        &manifest_with_two_providers_for_scope(server_id, false),
         V3OpenAiChatRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -505,7 +507,7 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
     };
     let started = Instant::now();
     let output = execute_v3_openai_chat_relay_runtime(
-        &manifest_with_two_providers_for_scope(server_id),
+        &manifest_with_two_providers_for_scope(server_id, false),
         V3OpenAiChatRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -1228,7 +1230,8 @@ async fn sse_done_before_terminal_fails_and_terminal_without_done_succeeds() {
 async fn failed_sse_attempt_projects_only_error06_after_pool_exhaustion() {
     let server_id = "openai_chat_failed_attempt_error06";
     let manifest = manifest_with_identity(server_id);
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let failing = StaticSseTransport {
         chunks: Mutex::new(Some(vec![
             br#"data: {"id":"partial","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}
@@ -1285,8 +1288,10 @@ async fn terminal_sse_attempt_commits_after_eof_and_releases_a_fresh_request() {
     let server_id = "openai_chat_terminal_commit";
     const FAILURE_SESSION_ID: &str = "openai-chat-terminal-commit-session";
     let manifest = manifest_with_identity(server_id);
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let success_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let success_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let failing = StaticSseTransport {
         chunks: Mutex::new(Some(vec![b"data: {malformed-json}\n\n".to_vec()])),
     };
@@ -1420,9 +1425,11 @@ async fn active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds() {
     use futures_util::StreamExt;
     let server_id = "openai_chat_active_recovery";
     const FAILURE_SESSION_ID: &str = "openai-chat-active-recovery-session";
-    let manifest = manifest_with_two_providers_for_scope(server_id);
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let waiting_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let manifest = manifest_with_two_providers_for_scope(server_id, true);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let waiting_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let (terminal_sender, terminal_receiver) = tokio::sync::mpsc::channel(2);
     let (secondary_started_sender, secondary_started_receiver) = tokio::sync::oneshot::channel();
     terminal_sender
@@ -1810,12 +1817,14 @@ targets = [{{ kind = "provider_model", provider = "{identity}", model = "chat-wi
 
 fn manifest_with_two_providers_for_scope(
     scope: &str,
+    reselect_before_same_candidate_retry: bool,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
     ensure_openai_chat_relay_test_state_dir();
     let primary = format!("{scope}_primary");
     let secondary = format!("{scope}_secondary");
     let source = r#"
 version = 3
+__ERROR_SECTION__
 [servers.__SCOPE__]
 bind = "127.0.0.1"
 port = 1
@@ -1857,7 +1866,15 @@ targets = [
 "#
     .replace("__SCOPE__", scope)
     .replace("__PRIMARY__", &primary)
-    .replace("__SECONDARY__", &secondary);
+    .replace("__SECONDARY__", &secondary)
+    .replace(
+        "__ERROR_SECTION__",
+        if reselect_before_same_candidate_retry {
+            "[error]\nprovider_error_default_path = [\n  { step = \"wait_retry\", retry_mode = \"reselect_before_client_projection\", max_attempts = 1, backoff_ms = 0 },\n  { step = \"cooldown\", scope = \"provider_model\", duration_ms = 900000 },\n  { step = \"project\", status = 503, reason_code = \"provider_failure\", message_mode = \"code_only\" }\n]"
+        } else {
+            ""
+        },
+    );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
@@ -2053,7 +2070,8 @@ async fn openai_chat_anthropic_sse_complete_stream_emits_client_done_without_pro
     // sentinel，且缺失 [DONE] 不记录 provider-health 失败。
     use futures_util::StreamExt;
     let manifest = manifest_with_anthropic_multimodal("complete_stream");
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let transport = AnthropicSseTransport {
         captured_url: Mutex::new(None),
         chunks: Mutex::new(Some(vec![br#"event: message_start

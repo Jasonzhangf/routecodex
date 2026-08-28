@@ -36132,3 +36132,8 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
   - routes.html intentionally left manual (editor page).
 - Verified: build/install 0.90.4633 sha256=c159949e, restart 7777/4444/8777 all 200, camo headless rendered /requests.html with no JS errors and confirmed startAutoRefresh wiring in served page.
 - Commit `7a335e2c8`, pushed to main.
+## 2026-08-28 V4 Cordis master progress
+
+- `v4-cordis` 主树已合入 feature-layer candidate drift 根因修复：治理闭包路径统一剥离 `v4/` 前缀，fixture 不再在候选提交后重复改写 gate 输入；`--self-test` 5/5、`--red-self-test` 22/22。
+- 当前真实阻塞仍是 `routecodex-v4-error` Active artifact 与当前 evidence hash 不一致；必须由当前 HEAD 重建完整 AppSDK record graph 后才能 gen-index/admission。
+- 运行时 continuation 定向测试仍绿，但源码仍保留 ScopeRegistry/direct continuation control 面；需继续确认并完成本地 continuation 物理退役边界。

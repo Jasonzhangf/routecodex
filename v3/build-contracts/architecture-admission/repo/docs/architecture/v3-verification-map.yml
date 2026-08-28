@@ -1181,7 +1181,7 @@ features:
   - Router cannot import Provider availability and Target cannot mutate Provider health
   - P5 Runtime stops before Provider send and only full selected-target exhaustion enters Error01-Error06
   - Request image/media facts survive trailing tool/function outputs and are carried to Target as multimodal/vision requirements
-  - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools, tool_search, and web_search surfaces become routing capabilities before pool matching
+  - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools and tool_search calls become routing facts, while web_search requires strict current-turn keyword intent or an explicit model call and never activates from a declaration alone
   - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding/longcontext/remote_continuation/local_materialization
       never hard-reject a candidate
   - After genuine web_search/search and multimodal/vision capability validation, Target10 preserves configured candidate order among candidates within their declared context window; a candidate whose max_context_tokens is below request_input_tokens is marked context_window_exceeded and skipped before availability/transport. Explicit direct pins and the default-pool floor remain last-resort eligible with the typed overflow reason, while provider health and request-local provider-failure exclusion remain explicit switch inputs
@@ -2778,10 +2778,14 @@ features:
   - docs/architecture/wiki/v3-responses-session-admission.md
   - docs/architecture/manifests/v3.responses_session_admission.mainline.yml
   required_unit:
-  - Same listener plus same explicit session or conversation rejects the second request with Error01-06 HTTP 409 request_in_flight.
+  - Same listener plus same explicit session or conversation blocks the second request
+    inside the admission owner until the exact active permit releases, then admits it
+    without a client-visible overlap error.
   - Different session on one listener and the same session on different listeners remain concurrently admissible.
   - Missing explicit scope does not invent a cross-request key.
   - Response EOF, stream error, and client body drop release only the exact permit.
+  - Permit release wakes every predicate waiter so a waiter for an unrelated active
+    scope cannot strand the waiter whose scope became available.
   required_gates:
   - npm run verify:v3-responses-session-admission
   - npm run test:v3-responses-session-admission
@@ -3426,9 +3430,9 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
   - Every accepted lifecycle event appends one typed row to the per-listener JSONL store.
-  - Reader folds lifecycle rows by request_key and returns only the latest row.
+  - Folded reader returns the latest lifecycle row per request_key; raw reader preserves every lifecycle row so failed provider attempts stay visible.
   - Each listener writes its own isolated request-records file and never leaks another listener's port.
-  - Error terminal rows preserve the raw numeric provider status and error category.
+  - Error terminal rows and provider-attempt rows preserve the raw numeric provider status and error category.
   - Terminal rows are immutable; a later Started/Completed/Failed cannot reopen or rewrite a terminal result.
   - Per-record JSONL writes are bounded by the internal observability max record bytes setting.
   required_negative:

@@ -672,19 +672,6 @@ fn build_v3_router_request_facts_for_entry_with_control(
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
     let input_tokens = estimate_v3_routing_input_tokens(body);
-    if entry_protocol == "responses"
-        && body
-            .get("text")
-            .and_then(Value::as_object)
-            .and_then(|text| text.get("format"))
-            .and_then(Value::as_object)
-            .is_some_and(|format| {
-                format.get("type").and_then(Value::as_str) == Some("json_schema")
-                    && format.get("name").is_some()
-            })
-    {
-        capabilities.insert("structured_output".to_string());
-    }
     let active_turn = build_v3_current_turn_route_facts(body);
     let has_image_attachment = active_turn.has_current_turn_image;
     let declares_web_search_tool = request_declares_v3_web_search_tool(body, manifest);
@@ -1170,13 +1157,11 @@ mod tests {
             facts.route_classification.route_name, "web_search",
             "declared tools are not current-turn web-search evidence"
         );
-        assert!(
-            !facts
-                .route_classification
-                .required_capabilities
-                .iter()
-                .any(|capability| capability == "web_search")
-        );
+        assert!(!facts
+            .route_classification
+            .required_capabilities
+            .iter()
+            .any(|capability| capability == "web_search"));
     }
 
     #[test]
@@ -1512,53 +1497,6 @@ mod tests {
         assert!(facts.capabilities.contains("tools"));
         assert!(!facts.capabilities.contains("coding"));
         assert!(!facts.capabilities.contains("search"));
-    }
-
-    #[test]
-    fn v3_routing_facts_mark_named_responses_json_schema_as_structured_output() {
-        let request = json!({
-            "model": "gpt-5.5",
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "codex_output_schema",
-                    "schema": {"type": "object"},
-                    "strict": true
-                }
-            },
-            "input": [{"role": "user", "content": "return json"}]
-        });
-
-        let facts = build_v3_router_request_facts_for_entry(
-            &request,
-            "responses",
-            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
-        );
-
-        assert!(facts.capabilities.contains("structured_output"));
-    }
-
-    #[test]
-    fn v3_routing_facts_do_not_mark_unnamed_json_schema_as_structured_output() {
-        let request = json!({
-            "model": "gpt-5.5",
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "schema": {"type": "object"},
-                    "strict": true
-                }
-            },
-            "input": [{"role": "user", "content": "return json"}]
-        });
-
-        let facts = build_v3_router_request_facts_for_entry(
-            &request,
-            "responses",
-            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
-        );
-
-        assert!(!facts.capabilities.contains("structured_output"));
     }
 
     #[test]

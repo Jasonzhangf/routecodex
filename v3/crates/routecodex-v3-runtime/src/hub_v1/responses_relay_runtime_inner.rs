@@ -282,6 +282,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             observability_accumulator
                 .attempts()
                 .saturating_add(provider_send_attempts)
+                .saturating_add(provider_failure_events.len())
                 .saturating_add(1),
         );
         selected_observability.provider_failure_events = provider_failure_events.clone();
@@ -333,7 +334,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 ));
             }
         };
-        provider_send_attempts = provider_send_attempts.saturating_add(1);
         trace.push("V3HubReqTarget06Resolved");
         trace.push("V3HubReqOutbound07ProviderSemantic");
         trace.push("ProviderReqCompat06ProviderCompat");
@@ -403,6 +403,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         handle_error_before_resp03!(runtime_timing
             .start_external()
             .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
+        provider_send_attempts = provider_send_attempts.saturating_add(1);
         let transport_result = match tokio::time::timeout(
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
             transport.send(transport_request),

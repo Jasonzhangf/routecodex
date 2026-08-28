@@ -1,6 +1,6 @@
 use super::*;
 use crate::hub_v1::{
-    classify_v3_provider_sse_json_data, normalize_v3_provider_sse_json_data_for_event_name,
+    classify_v3_provider_sse_json_data, collect_v3_provider_sse_json_data,
     V3ProviderResponsesJsonFrameOutcome,
 };
 use crate::kernel::direct_sse_consumers::{
@@ -318,15 +318,7 @@ where
         let mut terminal = false;
         for frame in frames {
             let fields = frame.frame().fields();
-            let data = normalize_v3_provider_sse_json_data_for_event_name(protocol, fields)
-                .map_err(|message| {
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::ProviderFailure,
-                        "V3ProviderResp14Raw",
-                        "provider_response_sse_event_invalid",
-                        message,
-                    )
-                })?;
+            let data = collect_v3_provider_sse_json_data(fields);
             if data.trim() == "[DONE]" {
                 if protocol == V3HubProviderWireProtocol::OpenAiChat {
                     if !terminal {
@@ -615,6 +607,23 @@ mod direct_sse_timing_tests {
     }
 
     #[tokio::test]
+    async fn direct_sse_event_only_frame_cannot_supply_provider_json_type() {
+        let source = Box::pin(stream::iter(vec![Ok(
+            b"event: response.completed\ndata: {\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}}\n\n"
+                .to_vec(),
+        )])) as V3ClientSseStream;
+        let observed = wrap_direct_sse_provider_handoff_stream(
+            source,
+            V3HubProviderWireProtocol::Responses,
+            |error| async move { Err(error) },
+            Some(0),
+        );
+        let mut observed = observed;
+        let result = observed.next().await.expect("event-only frame must be observed");
+        assert!(result.is_err(), "event: must not fabricate provider JSON type");
+    }
+
+    #[tokio::test]
     async fn openai_chat_direct_sse_rejects_done_before_finish_reason() {
         let source = Box::pin(stream::iter([
             Ok(b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\ndata: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n".to_vec()),
@@ -657,6 +666,29 @@ mod direct_sse_timing_tests {
         assert!(String::from_utf8(frames[0].as_ref().unwrap().clone())
             .unwrap()
             .contains("finish_reason"));
+    }
+
+    #[test]
+    fn direct_responses_done_event_does_not_bypass_provider_codec_terminal_contract() {
+        let observation = V3RuntimeStreamObservation::default();
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let mut consumer = V3DirectSseContentConsumer {
+            provider_protocol: Some(crate::hub_v1::V3HubProviderWireProtocol::Responses),
+            ..Default::default()
+        };
+        let (_, terminal) = record_direct_sse_provider_event_json_chunk(
+            br#"data: {"type":"response.done","response":{"status":"completed"}}
+
+"#,
+            &mut decoder,
+            &observation,
+            false,
+            false,
+            &mut consumer,
+        )
+        .expect("provider codec should classify response.done without transport failure");
+
+        assert!(!terminal, "response.done must not bypass the codec terminal contract");
     }
 
     #[tokio::test]
@@ -747,15 +779,18 @@ fn record_direct_sse_provider_event_json_chunk(
         if is_v3_provider_sse_keepalive_text(&data) {
             continue;
         }
-        if serde_json::from_str::<Value>(&data)
-            .ok()
-            .and_then(|event| event.get("type").and_then(Value::as_str).map(str::to_owned))
-            .is_some_and(|event_type| {
-                matches!(event_type.as_str(), "response.completed" | "response.done")
-            })
-        {
-            terminal_observed = true;
-        }
+        let provider_protocol = content_consumer
+            .provider_protocol
+            .ok_or_else(|| provider_sse_failure_source("provider protocol is missing"))?;
+        let outcome = classify_v3_provider_sse_json_data(provider_protocol, &data)
+            .map_err(provider_sse_failure_source)?;
+        terminal_observed |= matches!(
+            outcome,
+            Some(
+                V3ProviderResponsesJsonFrameOutcome::Terminal
+                    | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput
+            )
+        );
         record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
         let original =
             build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame).into_bytes();
