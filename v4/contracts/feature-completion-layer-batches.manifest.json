@@ -304,18 +304,18 @@
     "owner": "v4.feature_completion.integration",
     "admission_command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
     "enforcement_binding_status": "bound",
-    "guard_commit": "f3617a7a0deb9d6bedc8f85c58050499e886646a",
+    "guard_commit": "06a77cd93cbcecafc5239898877f2a7509245375",
     "guarded_surfaces": [
       {"path":"Cargo.toml","scope_hash":"sha256:5ce83c9e3837823b19aa44dfdc28948a0123973fcb5e853e385f42aff3add62e"},
       {"path":"scripts/build.mjs","scope_hash":"sha256:ec1a7a511a514e5334a418bca25f47a554051134429aa1eeff5421f229d63f75"},
-      {"path":"scripts/verify.mjs","scope_hash":"sha256:a30d109629e8ff411db4beef8a6e312826c412d24696923f3b296f03e912e804"},
+      {"path":"scripts/verify.mjs","scope_hash":"sha256:03e8560ec63150660bd82b8455b3505b831171fb340cb0e79f57d2abca6bd3ac"},
       {"path":"scripts/verify-ci.mjs","scope_hash":"sha256:eb651c0850179ca96482f0f3a6b4b7084be7102e2be64d6e8d93726a40cf2b4c"},
       {"path":"scripts/install-rccv4.mjs","scope_hash":"sha256:f449b083e44fe025134eb48f84fefd964b7445e793ec8cad318c386ca003254e"},
       {"path":"scripts/compile-real-runtime-manifest.mjs","scope_hash":"sha256:a4756498aafa9d3c6726f1be982bbea76bec5daa5ddc4631c49666ba0e9902de"},
       {"path":"contracts/real-runtime-admission.manifest.json","scope_hash":"sha256:1dd63ba0bd84acbae162663b534bfe1c7d5f5315e66d5310822090a5121e863c"},
       {"path":"contracts/active-link/frozen-consumer-registry.json","scope_hash":"sha256:70df9fa89217c6bd7241788294cf3ded9a6922ea6bdd908e20468cda4d96f375"},
-      {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:19a38f374876225682de890790957a2416b42343c72d4803774868871b6732d8"},
-      {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:7be75f404fbd1f510c6497f0bef8ab0b0292307a148478650903d1a81f5b577d"}
+      {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:d50a70df3ae19ada18e8aa5256fc4f9aebae62b452c9baf1079e9fae39034579"},
+      {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:12b023e99bce8579bc11508eaf88c20953fca02fcabc82363d3b130ade2117d6"}
     ],
     "wiring_started": true,
     "wiring_edges": ["added:mainline:undefined:routecodex-v4-plugin-catalog->routecodex-v4-cordis-host:routecodex-v4-cordis-host::createCordisPluginFactory","surface:crates/routecodex-v4-runtime-bin/**:sha256:ea0cf409d4b60972e12d1b45b3c8e43db2ac9c923b2ee2396563343c604b6cd2","surface:docs/architecture/maps/mainline-call-map.json:sha256:d50a70df3ae19ada18e8aa5256fc4f9aebae62b452c9baf1079e9fae39034579","surface:scripts/verify.mjs:sha256:03e8560ec63150660bd82b8455b3505b831171fb340cb0e79f57d2abca6bd3ac"],
