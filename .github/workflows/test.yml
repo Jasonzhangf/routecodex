@@ -64,10 +64,10 @@ jobs:
         run: npm run verify:v3-debug-payload-budget
       - name: V3 debug payload budget red fixtures
         run: npm run test:v3-debug-payload-budget-red-fixtures
-      - name: V3 console request count visibility
-        run: npm run verify:v3-console-request-count-visibility
+      - name: V3 canonical verification stack
+        run: npm --prefix v3 run verify:ci
       - name: V3 console request count red fixtures
-        run: npm run test:v3-console-request-count-visibility-red-fixtures
+        run: npm --prefix v3 run test:v3-console-request-count-visibility-red-fixtures
       - name: V2 and V3 route-classifier semantic gate
         run: npm run test:route-classifier-semantics
       - name: Servertool Rust-only gate
