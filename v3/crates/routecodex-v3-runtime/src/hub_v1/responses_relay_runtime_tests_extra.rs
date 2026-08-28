@@ -6,6 +6,48 @@ use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
+fn zero_input_usage_uses_request_tiktoken_estimate() {
+    let request = json!({
+        "model": "gpt-5.5",
+        "input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]
+    });
+    let mut response = json!({
+        "status": "requires_action",
+        "usage": {"input_tokens": 0, "output_tokens": 3, "total_tokens": 3}
+    });
+    repair_v3_runtime_input_usage_from_request(&mut response, &request);
+    assert_eq!(response["usage"]["input_tokens"], 2);
+    assert_eq!(response["usage"]["total_tokens"], 5);
+}
+
+#[test]
+fn nonzero_provider_input_usage_is_preserved() {
+    let request = json!({
+        "model": "gpt-5.5",
+        "input": [{"type":"message","role":"user","content":"hello"}]
+    });
+    let mut response = json!({
+        "status": "completed",
+        "usage": {"input_tokens": 345678, "output_tokens": 3, "total_tokens": 345681}
+    });
+    repair_v3_runtime_input_usage_from_request(&mut response, &request);
+    assert_eq!(response["usage"]["input_tokens"], 345678);
+    assert_eq!(response["usage"]["total_tokens"], 345681);
+}
+
+#[test]
+fn missing_usage_gets_request_tiktoken_input_estimate() {
+    let request = json!({
+        "model": "gpt-5.5",
+        "input": [{"type":"message","role":"user","content":"hello"}]
+    });
+    let mut response = json!({"status": "completed"});
+    repair_v3_runtime_input_usage_from_request(&mut response, &request);
+    assert_eq!(response["usage"]["input_tokens"], 2);
+    assert!(response["usage"].get("total_tokens").is_none());
+}
+
+#[test]
 fn explicit_target_exhaustion_projection_is_compact() {
     let output =
             project_v3_responses_relay_runtime_failure(V3ResponsesRelayRuntimeError::Target(
