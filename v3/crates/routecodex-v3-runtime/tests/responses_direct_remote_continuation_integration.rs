@@ -1746,6 +1746,8 @@ async fn direct_provider_event_json_observation_records_usage_and_completed_term
             output_tokens: Some(3),
             total_tokens: Some(20),
             cached_tokens: Some(5),
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
         })
     );
     assert_eq!(state.len().unwrap(), 0);
