@@ -41,6 +41,7 @@ const GOVERNANCE_CLOSURE_PREFIXES = [
   'crates/routecodex-v4-standard-plugins/src/lib.rs',
   'crates/routecodex-v4-standard-plugins/src/response_inbound.rs',
   'crates/routecodex-v4-standard-plugins/src/response_outbound.rs',
+  'scripts/tests/v4-feature-layer-batches-red-fixtures.mjs',
 ];
 
 function isGovernanceClosurePath(relativePath) {
