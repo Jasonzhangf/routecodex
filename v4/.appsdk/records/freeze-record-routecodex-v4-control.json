@@ -16,7 +16,7 @@
   "freeze_id": "v4-cordis-control-freeze-current",
   "git_clean": true,
   "issue_id": "v4-cordis-control-fresh-governance",
-  "library_hash": "sha256:cf200dbd7f3e1a6284477035ef57b5d6bc0596bda36c29a1704461d12dbae469",
+  "library_hash": "sha256:e280965a718eeaaee59725a1703dd58b16a875b616e6b0e8c65bf5b2b4a28676",
   "module_id": "routecodex-v4-control",
   "owners": {
     "api_extractor": "appsdk",
@@ -29,7 +29,7 @@
   "previous_active_version": "active-v2",
   "promotion_id": "v4-cordis-control-promotion-current",
   "promotion_record_hash": "sha256:ff1e1429f80688c366b1f313fa391dad281e85c73f69b759d309bddadddb6163",
-  "public_api_hash": "sha256:6998ad9221d05d3683428d2bb6ab681c2b6785f5a220ee5178b915dc81ca1801",
+  "public_api_hash": "sha256:43364e0f503e8721caebb31df47192e5dcf8e2501b4616203cf91f3f2f6b9902",
   "regression_report_hash": "sha256:ebbbd3a101283663c662521b64b48b3f3bbf088b43544885efc8ad3ca278a098",
   "regression_report_id": "v4-cordis-control-regression-current",
   "review_id": "v4-cordis-control-architecture-review-current",
