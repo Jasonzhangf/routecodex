@@ -1462,9 +1462,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     }
                     let stream_console_finalizer =
                         emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
-                    let frame = project_v3_responses_direct_stream_error_frame_if_requested(
-                        frame, true,
-                    );
+                    let frame =
+                        project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
                     return responses_direct_output_response_with_console(
                         frame,
                         stream_console_finalizer,
@@ -1806,90 +1805,9 @@ pub(crate) fn merge_v3_relay_handoff_provider_failure_events_into_direct_frame(
     observability.provider_failure_events = merged;
 }
 
-pub(crate) fn allocate_v3_console_request_id(
-    state: &Arc<V3ListenerState>,
-    endpoint: &str,
-    payload: Option<&Value>,
-) -> Result<String, Box<Response<Body>>> {
-    allocate_v3_console_request_identity(state, endpoint, payload)
-        .map(|identity| identity.request_id)
-}
-
-pub(crate) fn allocate_v3_console_request_identity(
-    state: &Arc<V3ListenerState>,
-    endpoint: &str,
-    payload: Option<&Value>,
-) -> Result<V3AllocatedRequestIdentity, Box<Response<Body>>> {
-    next_v3_console_request_identity(state, endpoint, payload).map_err(|message| {
-        let output = project_v3_debug_failure(
-            "V3RequestIdCounter01Allocated",
-            V3DebugError::MalformedFixture(message),
-        );
-        emit_v3_error_console_line_for_state(
-            state,
-            endpoint,
-            "request-id-unavailable",
-            output.status,
-            &output.error_chain,
-            Some(&output.body),
-            None,
-        );
-        Box::new(foundation_output_response(output))
-    })
-}
-
-pub(crate) fn next_v3_console_request_identity(
-    state: &V3ListenerState,
-    endpoint: &str,
-    payload: Option<&Value>,
-) -> Result<V3AllocatedRequestIdentity, String> {
-    let entry = format_v3_request_id_entry(endpoint);
-    let provider = "router";
-    let model = format_v3_request_id_token(
-        payload
-            .and_then(|value| value.get("model"))
-            .and_then(Value::as_str)
-            .unwrap_or("unknown"),
-    );
-    state
-        .request_counter
-        .lock()
-        .map_err(|_| "V3 request id counter lock is poisoned".to_string())?
-        .next_request_identity(&entry, provider, &model)
-}
-
-pub(crate) fn format_v3_request_id_entry(endpoint: &str) -> String {
-    let raw = endpoint.to_ascii_lowercase();
-    if raw.contains("/v1/responses") {
-        "openai-responses".to_string()
-    } else if raw.contains("/v1/messages") || raw.contains("/anthropic") {
-        "anthropic-messages".to_string()
-    } else {
-        "openai-chat".to_string()
-    }
-}
-
-pub(crate) fn format_v3_request_id_token(value: &str) -> String {
-    let mut token: String = value
-        .trim()
-        .chars()
-        .filter(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '-')
-        })
-        .collect();
-    if token
-        .chars()
-        .next()
-        .is_some_and(|character| !character.is_ascii_alphabetic())
-    {
-        token.remove(0);
-    }
-    if token.is_empty() {
-        "unknown".to_string()
-    } else {
-        token
-    }
-}
+#[path = "request_identity.rs"]
+mod request_identity;
+pub(crate) use request_identity::*;
 
 #[cfg(test)]
 mod front_sse_contract_tests {

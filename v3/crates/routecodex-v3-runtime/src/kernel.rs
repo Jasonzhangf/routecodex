@@ -66,38 +66,12 @@ mod v3_direct_protocol_codec;
 pub use v3_direct_protocol_codec::{
     V3ChatDirectCodec, V3DirectProtocolCodec, V3ResponsesDirectCodec,
 };
-const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
-
-/// 挂起判定的固定 reason：只有响应头等待超时构造的 Transport 错误才进入
-/// health-neutral 瞬态重试；其余 transport 错误（连接失败等）保持原策略。
-const V3_DIRECT_TRANSPORT_HANG_REASON: &str = "provider response header timed out (suspected hang)";
-
-fn responses_direct_transport_response_timeout(
-    manifest: &V3Config05ManifestPublished,
-    provider_id: &str,
-) -> std::time::Duration {
-    crate::hub_v1::v3_relay_transport_response_timeout(manifest, provider_id)
-}
-
-static DEFAULT_RESPONSES_TRANSPORT: OnceLock<ReqwestResponsesTransport> = OnceLock::new();
-pub fn default_responses_transport() -> &'static ReqwestResponsesTransport {
-    DEFAULT_RESPONSES_TRANSPORT.get_or_init(ReqwestResponsesTransport::default)
-}
-
-pub fn default_provider_transport_handoff_checkpoints(
-) -> Vec<routecodex_v3_provider_responses::V3ProviderTransportCheckpoint> {
-    default_responses_transport()
-        .transport_handoff_broker()
-        .checkpoints()
-}
-
-pub fn restore_default_provider_transport_handoff_checkpoints(
-    checkpoints: &[routecodex_v3_provider_responses::V3ProviderTransportCheckpoint],
-) -> Result<usize, String> {
-    default_responses_transport()
-        .transport_handoff_broker()
-        .restore_detached(checkpoints)
-}
+#[path = "kernel/default_transport.rs"]
+mod default_transport;
+pub use default_transport::{
+    default_provider_transport_handoff_checkpoints, default_responses_transport,
+    restore_default_provider_transport_handoff_checkpoints,
+};
 include!("kernel/direct_kernel_entrypoints.rs");
 include!("kernel/direct_state.rs");
 async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport + ?Sized>(
@@ -132,7 +106,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
     let manifest_for_sse_handoff = manifest.clone();
     let state_for_sse_handoff = state.clone();
     let hook_registry_for_sse_handoff = hook_registry;
-    let transport_for_sse_handoff = (handoff_budget > 0).then(|| transport.handoff_handle()).flatten();
+    let transport_for_sse_handoff = (handoff_budget > 0)
+        .then(|| transport.handoff_handle())
+        .flatten();
     let accumulator = state
         .observability_accumulator
         .clone()
@@ -1008,7 +984,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
             );
         }
         let provider_raw = match tokio::time::timeout(
-            responses_direct_transport_response_timeout(
+            default_transport::responses_direct_transport_response_timeout(
                 manifest,
                 &policy.target.candidate.provider_id,
             ),
@@ -1022,7 +998,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
             Err(V3ProviderError::Transport {
                 request_id: standardized.request_id.clone(),
                 provider_id: policy.target.candidate.provider_id.clone(),
-                reason: V3_DIRECT_TRANSPORT_HANG_REASON.to_string(),
+                reason: default_transport::V3_DIRECT_TRANSPORT_HANG_REASON.to_string(),
             })
         }) {
             Ok(raw) => raw,
@@ -1037,7 +1013,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
                 let hang = matches!(
                     &error,
                     V3ProviderError::Transport { reason, .. }
-                        if reason == V3_DIRECT_TRANSPORT_HANG_REASON
+                        if reason == default_transport::V3_DIRECT_TRANSPORT_HANG_REASON
                 );
                 let source =
                     build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);

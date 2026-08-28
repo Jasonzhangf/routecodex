@@ -517,7 +517,9 @@ where
                         // handing it off here rewrites a completed response into a switch/error.
                         if let Some(observation) = &state.post_commit_observation {
                             let detail = format!("{}: {}", error.code, error.message);
-                            if let Err(receipt_error) = observation.record_post_commit_error(&detail) {
+                            if let Err(receipt_error) =
+                                observation.record_post_commit_error(&detail)
+                            {
                                 eprintln!(
                                     "V3 post-commit error receipt failed: {receipt_error}; original: {detail}"
                                 );
