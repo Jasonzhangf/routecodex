@@ -1,5 +1,5 @@
 {
-  "active_version": "active-v5",
+  "active_version": "active-v4",
   "artifact_record_id": "v4-cordis-edge-positive-current",
   "clean_scope": {
     "base_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
