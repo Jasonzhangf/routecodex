@@ -28,7 +28,7 @@
   "previous_active_immutable": true,
   "previous_active_version": "active-v3",
   "promotion_id": "v4-cordis-control-promotion-current",
-  "promotion_record_hash": "sha256:ff1e1429f80688c366b1f313fa391dad281e85c73f69b759d309bddadddb6163",
+  "promotion_record_hash": "sha256:8e55f6152fbf2eef3a62968fe67644649555e723eafdc70696b7f530692c32ce",
   "public_api_hash": "sha256:6998ad9221d05d3683428d2bb6ab681c2b6785f5a220ee5178b915dc81ca1801",
   "regression_report_hash": "sha256:ebbbd3a101283663c662521b64b48b3f3bbf088b43544885efc8ad3ca278a098",
   "regression_report_id": "v4-cordis-control-regression-current",
