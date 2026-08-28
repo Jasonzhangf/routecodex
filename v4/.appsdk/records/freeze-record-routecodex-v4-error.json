@@ -1,1 +1,25 @@
-{"active_version":"active-v4","artifact_record_id":"v4-cordis-error-current-candidate","created_at":"2026-08-28T08:52:00Z","freeze_id":"v4-cordis-error-freeze-current","issue_id":"v4-cordis-error-rebuild-current","library_hash":"sha256:bff3769dd59162068bf94d51457863f6207fa0c19380b83b6a0d92e759871a95","module_id":"routecodex-v4-error","owners":{"api_extractor":"appsdk-0.1.5","artifact_registry":"appsdk-active","compiler":"appsdk-0.1.5","review":"v4-cordis-master","vcs":"git"},"previous_active_immutable":true,"previous_active_version":"active-v3","promotion_id":"v4-cordis-error-promotion-current","promotion_record_hash":"sha256:pending","public_api_hash":"sha256:ec13d529b2c91b8e57dd50e8c896fb6d1cc53909c97097b6830041ebba22592f","regression_report_hash":"sha256:pending","regression_report_id":"v4-cordis-error-regression-current","review_id":"v4-cordis-error-review-current","source_commit_or_tag":"d75eecf3833c083c6fe749c60b43f057bf8e8148"}
+{
+  "active_version": "active-v4",
+  "artifact_record_id": "v4-cordis-error-current-candidate",
+  "created_at": "2026-08-28T08:52:00Z",
+  "freeze_id": "v4-cordis-error-freeze-current",
+  "issue_id": "v4-cordis-error-rebuild-current",
+  "library_hash": "sha256:bff3769dd59162068bf94d51457863f6207fa0c19380b83b6a0d92e759871a95",
+  "module_id": "routecodex-v4-error",
+  "owners": {
+    "api_extractor": "appsdk-0.1.5",
+    "artifact_registry": "appsdk-active",
+    "compiler": "appsdk-0.1.5",
+    "review": "v4-cordis-master",
+    "vcs": "git"
+  },
+  "previous_active_immutable": true,
+  "previous_active_version": "active-v3",
+  "promotion_id": "v4-cordis-error-promotion-current",
+  "promotion_record_hash": "sha256:bc796e7d8a532ca85f1a3c45b93f7e09400819b146d6bca723b21bb2681dbced",
+  "public_api_hash": "sha256:ec13d529b2c91b8e57dd50e8c896fb6d1cc53909c97097b6830041ebba22592f",
+  "regression_report_hash": "sha256:d7b33373e8770b4c5b9af03c86d8e8c554bc9bb83d74ce818254c2614b1f6910",
+  "regression_report_id": "v4-cordis-error-regression-current",
+  "review_id": "v4-cordis-error-review-current",
+  "source_commit_or_tag": "d75eecf3833c083c6fe749c60b43f057bf8e8148"
+}
