@@ -507,7 +507,7 @@ fn project_responses_entries(value: &Value) -> Vec<ResponsesTurnEntry> {
     project_responses_entries_from_array(&items)
 }
 
-fn project_responses_entries_from_array(items: &[Value]) -> Vec<ResponsesTurnEntry> {
+pub fn project_responses_entries_from_array(items: &[Value]) -> Vec<ResponsesTurnEntry> {
     items.iter().map(project_responses_entry).collect()
 }
 
@@ -537,7 +537,8 @@ fn responses_role_for_value(value: &Value) -> ResponsesTurnRole {
         return match role.trim().to_ascii_lowercase().as_str() {
             "user" => ResponsesTurnRole::User,
             "assistant" => ResponsesTurnRole::Assistant,
-            "tool" | "system" => ResponsesTurnRole::System,
+            "tool" => ResponsesTurnRole::Tool,
+            "system" => ResponsesTurnRole::System,
             _ => ResponsesTurnRole::Other,
         };
     }

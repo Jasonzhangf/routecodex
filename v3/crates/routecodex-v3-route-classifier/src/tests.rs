@@ -606,19 +606,112 @@ fn live_responses_history_image_attachment_drives_multimodal_route_via_typed_car
     );
 }
 
-// Typed boundary lock: the typed builder must not accept raw request payload.
-// The signature `fn build_v3_current_turn_route_facts(&V3CurrentTurnEntries)`
-// means a caller cannot smuggle `&serde_json::Value` past the typed carrier.
+
+// Negative regression: historical input_image must NOT drive the multimodal
+// route when the current-turn message carries only text. Mirrors the
+// 4444 Responses shape `route_reason=multimodal:metadata-attachment` BUT
+// without any current-turn image, so the typed carrier must report
+// `has_current_turn_image=false` and classify_route must avoid the
+// multimodal / vision path entirely.
 #[test]
-fn typed_builder_signature_rejects_raw_value() {
-    use serde_json::Value;
-    fn assert_take_typed(_: &V3CurrentTurnEntries) {}
-    // Construct a typed empty entry and prove the signature accepts it.
-    assert_take_typed(&V3CurrentTurnEntries::Empty);
-    // A compile-time check that the raw `&Value` cannot be passed into the
-    // typed signature lives in the build/test gates; this runtime test
-    // documents the intent and the fact that callers must now use the
-    // `*_from_value` shim.
-    let raw: &Value = &serde_json::json!({});
-    let _ = raw; // existence proves raw path is still reachable through the shim
+fn live_responses_history_image_no_current_image_does_not_route_multimodal() {
+    use serde_json::json;
+    let request = json!({
+        "model": "gpt-5.6-sol",
+        "input": [
+            {"type":"input_image","file_id":"hist-1"},
+            {"type":"input_text","text":"summary of past chart"},
+            {"type":"message","role":"user","content":[
+                {"type":"input_text","text":"describe the recent changes"}
+            ]}
+        ]
+    });
+    let entries = project_v3_current_turn_entries_from_value(&request);
+    let signals = build_v3_current_turn_route_facts(&entries);
+    assert!(
+        !signals.has_current_turn_image,
+        "history image must not leak into current-turn multimodal signal; signals={:?}",
+        signals
+    );
+    let route = classify_route(&RouteClassifierInput {
+        latest_message_from_user: signals.latest_message_from_user,
+        has_image_attachment: signals.has_current_turn_image,
+        has_current_turn_tool_output: signals.has_current_turn_tool_output,
+        ..Default::default()
+    });
+    assert_ne!(route.route_name, "multimodal",
+        "text-only current turn must not pick multimodal; route={:?}", route);
+    assert!(
+        !route.reasoning.contains("multimodal:metadata-attachment"),
+        "negative case must not log multimodal:metadata-attachment; route={:?}",
+        route
+    );
+}
+
+// Positive projection: Responses tool-side entries must classify as Tool
+// (and the typed carrier must distinguish them from the rare explicit
+// role=system entry). Both `role=tool` and the typed kind=ToolOutput entry
+// shape (no role field, only `type=function_call_output`) must project to
+// ResponsesTurnRole::Tool; only an explicit `role=system` (or
+// role-bearing system message) is allowed to land in System.
+#[test]
+fn responses_role_for_value_distinguishes_tool_and_function_call_output_from_system() {
+    use serde_json::json;
+    let tool_payload = json!({"role": "tool", "content": [{"type": "text", "text": "ok"}]});
+    let tool_output_payload = json!({
+        "type": "function_call_output",
+        "call_id": "call-1",
+        "output": "ok"
+    });
+    let system_payload = json!({"role": "system", "content": "stay terse"});
+    let assistant_payload = json!({"role": "assistant", "content": "hi"});
+    let user_payload = json!({"role": "user", "content": "hi"});
+
+    let tool_entries = project_responses_entries_from_array(&[tool_payload.clone()]);
+    assert_eq!(tool_entries.len(), 1);
+    assert_eq!(tool_entries[0].role, ResponsesTurnRole::Tool);
+    // role=tool with a content[] of text parts is mapped to kind=Other because
+    // typed Responses entries require an explicit typed kind; the role
+    // projection itself is the contract under test here.
+    assert_ne!(tool_entries[0].kind, ResponsesTurnKind::ToolOutput);
+
+    let tool_output_entries = project_responses_entries_from_array(&[tool_output_payload.clone()]);
+    assert_eq!(tool_output_entries.len(), 1);
+    assert_eq!(tool_output_entries[0].role, ResponsesTurnRole::Tool);
+    assert_eq!(tool_output_entries[0].kind, ResponsesTurnKind::ToolOutput);
+
+    let system_entries = project_responses_entries_from_array(&[system_payload.clone()]);
+    assert_eq!(system_entries[0].role, ResponsesTurnRole::System);
+
+    // Negative check: assistant / user roles stay out of System.
+    let assistant_entries = project_responses_entries_from_array(&[assistant_payload]);
+    assert_ne!(assistant_entries[0].role, ResponsesTurnRole::System);
+    let user_entries = project_responses_entries_from_array(&[user_payload]);
+    assert_ne!(user_entries[0].role, ResponsesTurnRole::System);
+
+    // End-to-end: a multi-entry Responses thread that mixes role=tool and
+    // role=function_call_output yields a current-turn segment whose
+    // tool-output accounting lights up, but the role distribution must
+    // keep System empty.
+    let thread = json!({
+        "model": "gpt-5.6-sol",
+        "input": [
+            {"role":"user","content":"run the build"},
+            {"role":"assistant","tool_calls":[{
+                "type":"function","function":{"name":"exec_command","arguments":"{}"}
+            }]},
+            {"role":"tool","content":"build ok"},
+            {"type":"function_call_output","call_id":"c1","output":"done"}
+        ]
+    });
+    let entries = project_v3_current_turn_entries_from_value(&thread);
+    if let V3CurrentTurnEntries::Responses(es) = entries {
+        let system_count = es.iter().filter(|e| e.role == ResponsesTurnRole::System).count();
+        assert_eq!(system_count, 0,
+            "role=tool / tool_output must not project as System; got entries={:?}", es);
+        let tool_count = es.iter().filter(|e| e.role == ResponsesTurnRole::Tool).count();
+        assert!(tool_count >= 1, "tool side should map to Tool role; entries={:?}", es);
+    } else {
+        panic!("expected Responses typed entries for fixture thread");
+    }
 }
