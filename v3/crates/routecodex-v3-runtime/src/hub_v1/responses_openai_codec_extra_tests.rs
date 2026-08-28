@@ -354,3 +354,34 @@ fn responses_tool_result_status_rejects_unregistered_value_before_chat_canonical
 
     assert!(error.contains("function_call_output.status"), "{error}");
 }
+
+#[test]
+fn responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext() {
+    // Regression for /v1/responses HTTP 400 'unsupported Responses input item type
+    // for OpenAI Chat provider encoding: agent_message' on samples whose
+    // agent_message content carries a Fernet encrypted_content part alongside
+    // visible input_text.  The arm must drop encrypted_content parts before
+    // calling build_v3_openai_chat_content_from_responses_content so the
+    // content builder never sees them.
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "glm-5.3-flash",
+        "input": [
+            {"type": "agent_message", "author": "/root", "recipient": "/worker",
+             "content": [
+                 {"type": "input_text", "text": "Message Type: MESSAGE\nPayload:\n"},
+                 {"type": "encrypted_content",
+                  "encrypted_content": "rsn_FERNET_CIPHERTEXT_PAYLOAD"}
+             ]}
+        ]
+    }))
+    .expect("agent_message with encrypted_content part must project as Chat user");
+
+    let msgs = request["messages"].as_array().expect("messages");
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs[0]["role"], json!("user"));
+    let content = msgs[0]["content"].to_string();
+    assert!(content.contains("Message Type: MESSAGE"),
+            "input_text part must be preserved: {content}");
+    assert!(!content.contains("rsn_FERNET_CIPHERTEXT_PAYLOAD"),
+            "Fernet ciphertext must be discarded before provider wire: {content}");
+}

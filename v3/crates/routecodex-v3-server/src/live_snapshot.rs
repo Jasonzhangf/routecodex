@@ -91,7 +91,7 @@ impl V3LiveSnapSseRecorderCore {
             )?;
         }
         if let Some(observation) = self.provider_observation.as_ref() {
-            if let Ok(snapshot) = observation.snapshot() {
+            let snapshot = observation.snapshot()?;
                 if !snapshot.provider_raw_sse.is_empty() {
                     let provider_payload = self.state.debug.project_payload_verbatim(json!({
                         "object": "routecodex.v3.provider_response_snapshot",
@@ -108,7 +108,6 @@ impl V3LiveSnapSseRecorderCore {
                         &provider_payload,
                     )?;
                 }
-            }
         }
         Ok(())
     }
@@ -796,6 +795,10 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
                             (output.status >= 400).then_some(output.status),
                         );
                     }
+                } else if let Err(error) = stream_observation.snapshot() {
+                    eprintln!(
+                        "V3 provider response snapshot observation failed; preserving client response: {error}"
+                    );
                 }
             }
         }

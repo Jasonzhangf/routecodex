@@ -468,11 +468,11 @@ struct V3OpenAiChatRelayTypedSemanticHook<'a> {
 }
 
 impl V3OpenAiChatSseSemanticHook for V3OpenAiChatRelayTypedSemanticHook<'_> {
-    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>) {
-        let _ = self
-            .observation
-            .record_typed_object_type("openai_chat", &input.protocol.object);
+    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>) -> Result<(), String> {
+        self.observation
+            .record_typed_object_type("openai_chat", &input.protocol.object)?;
         self.catalog.notify_chat(input);
+        Ok(())
     }
 
     fn rewrite(
@@ -804,11 +804,12 @@ fn enqueue_sse_client_chunks(
             catalog: compile_v3_hub_relay_response_hooks().typed_sse_catalog(),
         };
         let mut semantic = semantic;
-        apply_v3_openai_chat_sse_semantic_hook(
+        apply_v3_openai_chat_sse_semantic_hook_with_observation(
             &mut semantic,
             &transport_object,
             &protocol,
             &mut semantic_hook,
+            Some(&state.stream_observation),
         )
         .map_err(|error| error.to_string())?;
         // Usage 必须经唯一观测入口写入 stream_observation；最终由
@@ -1278,50 +1279,9 @@ fn openai_chat_provider_http_failure(
     }
 }
 
-fn provider_failure_output(
-    failure: V3RelayProviderFailure,
-    mut trace: Vec<&'static str>,
-) -> V3OpenAiChatRelayRuntimeOutput {
-    let projected = failure
-        .terminal_projection
-        .expect("terminal OpenAI Chat provider failure must carry typed Error06 projection");
-    let error_class = projected.error_class;
-    let error_detail = projected.error_detail.clone();
-    trace.push("V3Error06ClientProjected");
-    V3OpenAiChatRelayRuntimeOutput {
-        status: projected.status,
-        client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
-        node_trace: trace,
-        error_chain: Some(projected.chain.to_vec()),
-        error_class: Some(error_class),
-        error_detail: Some(error_detail),
-        observability: None,
-        stream_observation: None,
-        provider_snapshots: None,
-    }
-}
-
-fn error_output(
-    source: routecodex_v3_error::V3Error01SourceRaised,
-    status: u16,
-    provider_id: &str,
-    mut trace: Vec<&'static str>,
-) -> V3OpenAiChatRelayRuntimeOutput {
-    let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
-    let error_class = projected.error_class;
-    let error_detail = projected.error_detail.clone();
-    V3OpenAiChatRelayRuntimeOutput {
-        status: projected.status,
-        client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
-        node_trace: trace,
-        error_chain: Some(projected.chain.to_vec()),
-        error_class: Some(error_class),
-        error_detail: Some(error_detail),
-        observability: None,
-        stream_observation: None,
-        provider_snapshots: None,
-    }
-}
+#[path = "openai_chat_relay_failure_output.rs"]
+mod openai_chat_relay_failure_output;
+use openai_chat_relay_failure_output::{error_output, provider_failure_output};
 
 /// OpenAI Chat relay 协议 codec：协议差异的唯一收敛面（骨架驱动）。
 pub struct V3OpenAiChatRelayCodec;

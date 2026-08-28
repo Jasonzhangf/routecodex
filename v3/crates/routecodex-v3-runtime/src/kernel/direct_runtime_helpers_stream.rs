@@ -249,20 +249,39 @@ pub(crate) fn bridge_direct_sse_handoff_observation(
     source_observation: V3RuntimeStreamObservation,
     target_observation: V3RuntimeStreamObservation,
 ) -> V3ClientSseStream {
+    fn sync_observation_snapshot(
+        source: &V3RuntimeStreamObservation,
+        target: &V3RuntimeStreamObservation,
+    ) {
+        match source.snapshot() {
+            Ok(snapshot) => {
+                if let Err(error) = target.merge_snapshot(&snapshot) {
+                    if let Err(receipt_error) = target.record_observation_error(&error) {
+                        eprintln!(
+                            "V3 observation merge receipt failed: {receipt_error}; original: {error}"
+                        );
+                    }
+                }
+            }
+            Err(error) => {
+                if let Err(receipt_error) = target.record_observation_error(&error) {
+                    eprintln!(
+                        "V3 observation snapshot receipt failed: {receipt_error}; original: {error}"
+                    );
+                }
+            }
+        }
+    }
     Box::pin(stream::unfold(
         (stream, source_observation, target_observation),
         |(mut stream, source_observation, target_observation)| async move {
             match stream.next().await {
                 Some(item) => {
-                    if let Ok(snapshot) = source_observation.snapshot() {
-                        let _ = target_observation.merge_snapshot(&snapshot);
-                    }
+                    sync_observation_snapshot(&source_observation, &target_observation);
                     Some((item, (stream, source_observation, target_observation)))
                 }
                 None => {
-                    if let Ok(snapshot) = source_observation.snapshot() {
-                        let _ = target_observation.merge_snapshot(&snapshot);
-                    }
+                    sync_observation_snapshot(&source_observation, &target_observation);
                     None
                 }
             }
@@ -280,11 +299,32 @@ where
     F: Fn(V3Error01SourceRaised) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<Option<V3ClientSseStream>, V3Error01SourceRaised>> + Send + 'static,
 {
+    wrap_direct_sse_provider_handoff_stream_with_observation(
+        source,
+        provider_protocol,
+        handoff,
+        handoff_budget,
+        None,
+    )
+}
+
+pub(crate) fn wrap_direct_sse_provider_handoff_stream_with_observation<F, Fut>(
+    source: V3ClientSseStream,
+    provider_protocol: V3HubProviderWireProtocol,
+    handoff: F,
+    handoff_budget: Option<usize>,
+    post_commit_observation: Option<V3RuntimeStreamObservation>,
+) -> V3ClientSseStream
+where
+    F: Fn(V3Error01SourceRaised) -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = Result<Option<V3ClientSseStream>, V3Error01SourceRaised>> + Send + 'static,
+{
     struct StreamState<F> {
         source: V3ClientSseStream,
         provider_protocol: V3HubProviderWireProtocol,
         handoff: F,
         handoff_budget: Option<usize>,
+        post_commit_observation: Option<V3RuntimeStreamObservation>,
         decoder: SseIncrementalDecoder,
         attempt: V3DirectSseAttemptBuffer,
         client_released: bool,
@@ -399,6 +439,7 @@ where
             provider_protocol,
             handoff,
             handoff_budget,
+            post_commit_observation,
             decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
             attempt: V3DirectSseAttemptBuffer::new(),
             client_released: false,
@@ -466,7 +507,16 @@ where
                         // The protocol terminal already crossed the client commit boundary.
                         // A late transport error is closeout noise, not a new provider attempt;
                         // handing it off here rewrites a completed response into a switch/error.
-                        let _ = error;
+                        if let Some(observation) = &state.post_commit_observation {
+                            let detail = format!("{}: {}", error.code, error.message);
+                            if let Err(receipt_error) =
+                                observation.record_post_commit_error(&detail)
+                            {
+                                eprintln!(
+                                    "V3 post-commit error receipt failed: {receipt_error}; original: {detail}"
+                                );
+                            }
+                        }
                         state.done = true;
                         return None;
                     }
@@ -718,6 +768,33 @@ mod direct_sse_timing_tests {
             .is_err(),
             "partial provider bytes must remain buffered before protocol terminal"
         );
+    }
+
+    #[tokio::test]
+    async fn direct_sse_records_late_transport_error_after_terminal() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".to_vec()),
+            Err(build_v3_error_01_source_raised(
+                V3ErrorSourceKind::ProviderFailure,
+                "test",
+                "late_transport_error",
+                "late provider read failed",
+            )),
+        ]));
+        let mut client = wrap_direct_sse_provider_handoff_stream_with_observation(
+            Box::pin(provider),
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            |_| async { Ok(None) },
+            Some(0),
+            Some(observation.clone()),
+        );
+        while client.next().await.is_some() {}
+        let snapshot = observation.snapshot().expect("observation snapshot");
+        assert!(snapshot
+            .post_commit_error
+            .as_deref()
+            .is_some_and(|error| error.contains("late_transport_error")));
     }
 
     #[tokio::test]

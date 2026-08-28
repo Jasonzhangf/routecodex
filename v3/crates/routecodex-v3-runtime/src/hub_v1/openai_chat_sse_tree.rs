@@ -302,7 +302,7 @@ impl V3OpenAiChatSseReducerState {
 }
 
 pub trait V3OpenAiChatSseSemanticHook {
-    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>);
+    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>) -> Result<(), String>;
 
     fn rewrite(
         &mut self,
@@ -316,12 +316,32 @@ pub fn apply_v3_openai_chat_sse_semantic_hook(
     protocol: &V3OpenAiChatSseProtocolMetadata,
     hook: &mut impl V3OpenAiChatSseSemanticHook,
 ) -> Result<(), V3OpenAiChatSseTreeError> {
+    apply_v3_openai_chat_sse_semantic_hook_with_observation(
+        semantic, transport, protocol, hook, None,
+    )
+}
+
+pub(crate) fn apply_v3_openai_chat_sse_semantic_hook_with_observation(
+    semantic: &mut V3OpenAiChatSseSemanticObject,
+    transport: &V3OpenAiChatSseTransportObject,
+    protocol: &V3OpenAiChatSseProtocolMetadata,
+    hook: &mut impl V3OpenAiChatSseSemanticHook,
+    observation: Option<&crate::hub_v1::V3RuntimeStreamObservation>,
+) -> Result<(), V3OpenAiChatSseTreeError> {
     let input = V3OpenAiChatSseHookInput {
         transport,
         protocol,
         semantic,
     };
-    hook.notify(&input);
+    if let Err(error) = hook.notify(&input) {
+        if let Some(observation) = observation {
+            observation
+                .record_observation_error(&format!("OpenAI Chat SSE semantic hook: {error}"))
+                .map_err(V3OpenAiChatSseTreeError::Projection)?;
+        } else {
+            return Err(V3OpenAiChatSseTreeError::Projection(error));
+        }
+    }
     hook.rewrite(semantic)
 }
 

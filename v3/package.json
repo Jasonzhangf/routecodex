@@ -1,6 +1,6 @@
 {
   "name": "routecodex-v3",
-  "version": "0.90.4671",
+  "version": "0.90.4674",
   "private": true,
   "description": "RouteCodex V3 independent build domain",
   "type": "module",
@@ -71,8 +71,8 @@
     "test:v3-responses-session-admission": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract http_sse_keepalive_config_ -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --lib http_sse_keepalive_environment_compiler_ -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib session_admission -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib responses_sse -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_same_listener_same_session_waits_for_release_then_returns_ok -- --exact --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_same_listener_different_session_remains_concurrent -- --exact --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_client_drop_releases_same_session_before_provider_eof -- --exact --nocapture",
     "verify:v3-runtime-timing-observability": "node scripts/architecture/verify-v3-runtime-timing-observability.mjs",
     "test:v3-runtime-timing-observability-red-fixtures": "node scripts/tests/v3-runtime-timing-observability-red-fixtures.mjs",
-    "verify:v3-console-request-count-visibility": "node scripts/architecture/verify-v3-console-request-count-visibility.mjs",
-    "test:v3-console-request-count-visibility-red-fixtures": "node scripts/tests/v3-console-request-count-visibility-red-fixtures.mjs",
+    "verify:v3-console-request-count-visibility": "ROUTECODEX_V3_SOURCE_ROOT=.. node scripts/architecture/verify-v3-console-request-count-visibility.mjs",
+    "test:v3-console-request-count-visibility-red-fixtures": "ROUTECODEX_V3_SOURCE_ROOT=.. node scripts/tests/v3-console-request-count-visibility-red-fixtures.mjs",
     "verify:v3-debug-payload-budget": "node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-debug-payload-budget.mjs && npm run test:v3-debug-contract",
     "test:v3-debug-payload-budget-red-fixtures": "node scripts/tests/v3-debug-payload-budget-red-fixtures.mjs",
     "test:v3-debug-contract": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-debug --test debug_runtime_contract -- --nocapture",

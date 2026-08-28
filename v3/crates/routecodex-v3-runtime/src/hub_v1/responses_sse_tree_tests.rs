@@ -6,8 +6,9 @@ struct RewriteResponsesHook {
 }
 
 impl V3ResponsesSseSemanticHook for RewriteResponsesHook {
-    fn notify(&mut self, input: &V3ResponsesSseHookInput<'_>) {
+    fn notify(&mut self, input: &V3ResponsesSseHookInput<'_>) -> Result<(), String> {
         self.notified = input.protocol.event_type == "response.output_item.done";
+        Ok(())
     }
 
     fn rewrite(

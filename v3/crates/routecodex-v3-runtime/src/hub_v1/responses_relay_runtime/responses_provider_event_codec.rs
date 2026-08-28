@@ -7,13 +7,13 @@ struct V3ResponsesRelayTypedSemanticHook<'a> {
 }
 
 impl V3ResponsesSseSemanticHook for V3ResponsesRelayTypedSemanticHook<'_> {
-    fn notify(&mut self, input: &V3ResponsesSseHookInput<'_>) {
+    fn notify(&mut self, input: &V3ResponsesSseHookInput<'_>) -> Result<(), String> {
         // Type notification is an observation-side effect only. It never
         // enters the normalized response or provider/client payload.
-        let _ = self
-            .observation
-            .record_typed_object_type("responses", &input.protocol.event_type);
+        self.observation
+            .record_typed_object_type("responses", &input.protocol.event_type)?;
         self.catalog.notify_responses(input);
+        Ok(())
     }
 
     fn rewrite(
@@ -135,7 +135,13 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
     })?;
     let mut semantic = semantic;
     let protocol = semantic.protocol.clone();
-    apply_v3_responses_sse_semantic_hook(&mut semantic, &transport_object, &protocol, hook)
+    apply_v3_responses_sse_semantic_hook_with_observation(
+        &mut semantic,
+        &transport_object,
+        &protocol,
+        hook,
+        Some(observation),
+    )
         .map_err(|error| {
             V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
         })?;
@@ -376,10 +382,11 @@ mod tests {
     }
 
     impl V3ResponsesSseSemanticHook for RewriteRelayMessageHook<'_> {
-        fn notify(&mut self, input: &V3ResponsesSseHookInput<'_>) {
+        fn notify(&mut self, input: &V3ResponsesSseHookInput<'_>) -> Result<(), String> {
             self.observation
                 .record_typed_object_type("responses", &input.protocol.event_type)
-                .expect("typed notification must remain observation-side only");
+                .map_err(|error| error.to_string())?;
+            Ok(())
         }
 
         fn rewrite(

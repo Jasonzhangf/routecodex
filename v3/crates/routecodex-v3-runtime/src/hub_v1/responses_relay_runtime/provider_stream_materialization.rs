@@ -286,11 +286,11 @@ struct V3OpenAiChatMaterializationHook<'a> {
 }
 
 impl V3OpenAiChatSseSemanticHook for V3OpenAiChatMaterializationHook<'_> {
-    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>) {
-        let _ = self
-            .observation
-            .record_typed_object_type("openai_chat", &input.protocol.object);
+    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>) -> Result<(), String> {
+        self.observation
+            .record_typed_object_type("openai_chat", &input.protocol.object)?;
         self.catalog.notify_chat(input);
+        Ok(())
     }
 
     fn rewrite(
@@ -407,7 +407,13 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
             let mut semantic = classify_v3_openai_chat_sse_chunk(&event).map_err(|error| {
                 V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
             })?;
-            apply_v3_openai_chat_sse_semantic_hook(&mut semantic, &transport, &protocol, hook)
+            apply_v3_openai_chat_sse_semantic_hook_with_observation(
+                &mut semantic,
+                &transport,
+                &protocol,
+                hook,
+                Some(observation),
+            )
                 .map_err(|error| {
                     V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
                 })?;
@@ -494,8 +500,9 @@ mod tests {
     }
 
     impl V3OpenAiChatSseSemanticHook for RewriteChatMaterializationHook {
-        fn notify(&mut self, _input: &V3OpenAiChatSseHookInput<'_>) {
+        fn notify(&mut self, _input: &V3OpenAiChatSseHookInput<'_>) -> Result<(), String> {
             self.notifications += 1;
+            Ok(())
         }
 
         fn rewrite(

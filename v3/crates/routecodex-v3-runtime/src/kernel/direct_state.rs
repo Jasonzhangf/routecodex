@@ -2,6 +2,8 @@ use crate::hub_v1::{
     V3ServerToolCenter, V3ServerToolCenterKey, V3ServerToolInstanceState, V3ServerToolName,
 };
 
+const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ResponsesDirectContinuationScope {
     key: V3RemoteContinuationScopeKey,
@@ -137,7 +139,9 @@ impl V3ResponsesDirectStoplessControlState {
             .map_err(|error| error.to_string())
     }
 
-    fn web_search_center_key(scope: &V3ResponsesDirectStoplessControlScope) -> V3ServerToolCenterKey {
+    fn web_search_center_key(
+        scope: &V3ResponsesDirectStoplessControlScope,
+    ) -> V3ServerToolCenterKey {
         let key = &scope.key;
         V3ServerToolCenterKey {
             tool_name: V3ServerToolName::WebSearch,
@@ -209,9 +213,7 @@ impl V3ResponsesDirectStoplessControlState {
     }
 
     pub fn is_empty(&self) -> Result<bool, String> {
-        self.center
-            .is_empty()
-            .map_err(|error| error.to_string())
+        self.center.is_empty().map_err(|error| error.to_string())
     }
 }
 
@@ -236,9 +238,11 @@ impl V3ResponsesDirectContinuationState {
     ) -> Result<bool, crate::remote_continuation::V3RemoteContinuationError> {
         self.store
             .lock()
-            .map_err(|error| crate::remote_continuation::V3RemoteContinuationError::Codec {
-                message: error.to_string(),
-            })
+            .map_err(
+                |error| crate::remote_continuation::V3RemoteContinuationError::Codec {
+                    message: error.to_string(),
+                },
+            )
             .and_then(
                 |store| match store.load_for_req03(response_id, &scope.key, now_epoch_ms) {
                     Ok(_) => Ok(true),
