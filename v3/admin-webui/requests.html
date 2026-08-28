@@ -66,6 +66,10 @@
         <button class="tab-btn" data-tab="attempts" type="button">Attempts <span class="tab-count" id="tab-count-attempts">—</span></button>
         <button class="tab-btn" data-tab="errors" type="button">Errors <span class="tab-count" id="tab-count-errors">—</span></button>
       </nav>
+      <nav class="entries-sub-tab-bar" id="entries-sub-tab-bar" data-visible="all" hidden>
+        <button class="sub-tab-btn active" data-sub-tab="pool" type="button">Pool</button>
+        <button class="sub-tab-btn" data-sub-tab="reason" type="button">Reason</button>
+      </nav>
       <div class="panel table-panel" id="requests-panel"><div class="loading">loading…</div></div>
     </div>
   </main>
@@ -266,6 +270,8 @@
       attemptsPage: 1,
       errorStatuses: 0,
       tab: "entries",
+      entriesGroup: "pool",
+      tableWidths: { entries: null, attempts: null, errors: null },
       stats: {},
       timeseries: [],
       facets: { ports: {}, providers: {}, models: {}, routes: {}, sessions: {}, response_types: {}, error_status_codes: {} },
@@ -322,6 +328,102 @@
       if (provider === "—") return model;
       if (model === "—") return provider;
       return `${provider} · ${model}`;
+    }
+
+    // Compact provider cell: show the alias model by default; reveal
+    // provider/auth_alias/provider_id/wire_model on hover or focus.
+    function compactProviderCell(row) {
+      const meta = (row && row.meta) || {};
+      const model = meta.model ?? "\u2014";
+      const wire = meta.wire_model ?? "\u2014";
+      const provider = meta.provider ?? "\u2014";
+      const providerId = meta.provider_id ?? "\u2014";
+      const authAlias = meta.auth_alias ?? "\u2014";
+      const allEmpty = [model, wire, provider, providerId, authAlias].every((v) => v === "\u2014");
+      const primary = model !== "\u2014" ? model : wire !== "\u2014" ? wire : provider !== "\u2014" ? provider : "\u2014";
+      const detail = [
+        ["provider", provider],
+        ["key", authAlias],
+        ["provider id", providerId],
+        ["wire model", wire],
+      ]
+        .filter(([, v]) => v !== "\u2014" && v !== primary)
+        .map(([label, v]) => `${label}: ${v}`)
+        .join(" \u00b7 ");
+      const cell = el("td", "providercompact compact");
+      cell.textContent = allEmpty ? "\u2014" : primary;
+      if (detail) cell.title = detail;
+      cell.tabIndex = 0;
+      cell.addEventListener("focus", () => cell.classList.add("is-detail"));
+      cell.addEventListener("blur", () => cell.classList.remove("is-detail"));
+      cell.addEventListener("mouseenter", () => cell.classList.add("is-detail"));
+      cell.addEventListener("mouseleave", () => cell.classList.remove("is-detail"));
+      return cell;
+    }
+
+    // Per-tab Excel-style column resizing with localStorage persistence so
+    // each tab keeps its own widths across reloads.
+    const TABLE_WIDTH_PREFIX = "v3-admin-webui-requests-table";
+    function loadTableWidths(tab) {
+      try {
+        const raw = window.localStorage.getItem(`${TABLE_WIDTH_PREFIX}-${tab}`);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : null;
+      } catch (_error) { return null; }
+    }
+    function saveTableWidths(tab, widths) {
+      try { window.localStorage.setItem(`${TABLE_WIDTH_PREFIX}-${tab}`, JSON.stringify(widths)); }
+      catch (_error) { /* storage unavailable */ }
+    }
+    function applyTableWidths(table, widths) {
+      if (!widths || !table) return;
+      const colgroup = table.querySelector("colgroup");
+      if (!colgroup) return;
+      [...colgroup.children].forEach((col) => {
+        const cls = [...col.classList].find((token) => token.startsWith("col-"));
+        if (cls && typeof widths[cls] === "number" && widths[cls] >= 40) {
+          col.style.width = `${widths[cls]}px`;
+        }
+      });
+    }
+    function attachColumnResizers(table, tab) {
+      const colgroup = table.querySelector("colgroup");
+      if (!colgroup || table.dataset.resizable === "attached") return;
+      table.dataset.resizable = "attached";
+      const headRow = table.querySelector("thead tr");
+      if (!headRow) return;
+      const columns = [...colgroup.children];
+      [...headRow.children].forEach((th, index) => {
+        const col = columns[index];
+        if (!col) return;
+        const cls = [...col.classList].find((token) => token.startsWith("col-"));
+        if (!cls) return;
+        if (th.querySelector(".col-resizer")) return;
+        const handle = el("span", "col-resizer");
+        handle.setAttribute("aria-hidden", "true");
+        th.appendChild(handle);
+        handle.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          const startX = event.clientX;
+          const startWidth = col.getBoundingClientRect().width || 40;
+          const onMove = (ev) => {
+            const next = Math.max(40, Math.round(startWidth + (ev.clientX - startX)));
+            col.style.width = `${next}px`;
+          };
+          const onUp = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            const updated = { ...(state.tableWidths[tab] || {}) };
+            const finalWidth = Math.round(col.getBoundingClientRect().width || startWidth);
+            updated[cls] = finalWidth;
+            state.tableWidths[tab] = updated;
+            saveTableWidths(tab, updated);
+          };
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp);
+        });
+      });
     }
 
     async function loadRecords() {
@@ -551,13 +653,17 @@
       tr.appendChild(statusCell);
       tr.appendChild(el("td", "col-port", portText));
       tr.appendChild(el("td", null, endpointLabel(metaValue(row, "endpoint"))));
-      tr.appendChild(el("td", "muted", metaValue(row, "route_reason")));
-      tr.appendChild(el("td", null, providerModelCell(row)));
-      tr.appendChild(el("td", "mono", timeText(row.started_epoch_ms)));
-      tr.appendChild(el("td", "mono", timeText(status === "active" || status === "retrying" ? row.updated_epoch_ms : row.finished_epoch_ms)));
+      if ((state.entriesGroup || "pool") === "reason") {
+        tr.appendChild(el("td", "muted col-route", metaValue(row, "route_reason")));
+      } else {
+        tr.appendChild(el("td", "muted col-pool", metaValue(row, "pool")));
+      }
+      tr.appendChild(compactProviderCell(row));
       tr.appendChild(el("td", "num", `${row.timing_internal_ms != null ? fmtMs(row.timing_internal_ms) : "—"} / ${row.timing_external_ms != null ? fmtMs(row.timing_external_ms) : "—"}`));
       tr.appendChild(el("td", "mono", usageText(usage)));
       tr.appendChild(el("td", "col-finish", compactFinishReason(row)));
+      tr.appendChild(el("td", "mono col-time col-time-last", timeText(row.started_epoch_ms)));
+      tr.appendChild(el("td", "mono col-time col-time-last", timeText(status === "active" || status === "retrying" ? row.updated_epoch_ms : row.finished_epoch_ms)));
       return tr;
     }
 
@@ -593,15 +699,43 @@
     function renderRequests() {
       const panel = document.getElementById("requests-panel");
       const tab = state.tab || "entries";
+      const subBar = document.getElementById("entries-sub-tab-bar");
+      if (subBar) subBar.hidden = tab !== "entries";
       if (tab === "attempts") {
         renderAttemptsPanel(panel);
+        wireTableResizers(panel, "attempts");
         return;
       }
       if (tab === "errors") {
         renderErrorsPanel(panel);
+        wireTableResizers(panel, "errors");
         return;
       }
       renderEntriesPanel(panel);
+      wireTableResizers(panel, "entries");
+      syncEntriesSubTabs();
+    }
+
+    // Persist per-tab column widths once each table is rendered. The resize
+    // handle in attachColumnResizers records widths; this helper only
+    // applies whatever is stored on disk so the layout matches the user
+    // choice across reloads.
+    function wireTableResizers(panel, tab) {
+      const table = panel ? panel.querySelector("table.request-table") : null;
+      if (!table) return;
+      const widths = state.tableWidths[tab] || loadTableWidths(tab);
+      if (widths) state.tableWidths[tab] = widths;
+      applyTableWidths(table, widths);
+      attachColumnResizers(table, tab);
+    }
+
+    function syncEntriesSubTabs() {
+      const bar = document.getElementById("entries-sub-tab-bar");
+      if (!bar) return;
+      const active = (state.entriesGroup || "pool") === "reason" ? "reason" : "pool";
+      bar.querySelectorAll(".sub-tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.subTab === active);
+      });
     }
 
     function renderEntriesPanel(panel) {
@@ -627,17 +761,20 @@
       }
       const table = el("table", "request-table");
       const head = el("tr");
+      const group = state.entriesGroup === "reason" ? "reason" : "pool";
       const columns = [
         { key: "result", label: "Status", colClass: "col-status" },
         { key: "scope.port", label: "Port", colClass: "col-port" },
         { key: "meta.endpoint", label: "Endpoint", colClass: "col-endpoint" },
-        { key: "meta.route_reason", label: "Route reason", colClass: "col-route" },
-        { key: "meta.provider", label: "Provider · Model", colClass: "col-provider" },
-        { key: "started_epoch_ms", label: "Sent", colClass: "col-time" },
-        { key: "finished_epoch_ms", label: "Responded", colClass: "col-time" },
+        group === "reason"
+          ? { key: "meta.route_reason", label: "Reason", colClass: "col-route" }
+          : { key: "meta.pool", label: "Pool", colClass: "col-pool" },
+        { key: "meta.provider", label: "Model", colClass: "col-provider" },
         { key: "timing_internal_ms", label: "Internal / External", colClass: "col-intext" },
         { key: "usage_total_tokens", label: "Usage · Hit", colClass: "col-usage" },
         { key: "meta.finish_reason", label: "Finish", colClass: "col-finish" },
+        { key: "started_epoch_ms", label: "Sent", colClass: "col-time col-time-last" },
+        { key: "finished_epoch_ms", label: "Responded", colClass: "col-time col-time-last" },
       ];
       const colgroup = el("colgroup");
       columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
@@ -688,12 +825,13 @@
         { key: "status", label: "Status", colClass: "col-status" },
         { key: "scope.port", label: "Port", colClass: "col-port" },
         { key: "meta.endpoint", label: "Endpoint", colClass: "col-endpoint" },
-        { key: "meta.route_reason", label: "Route reason", colClass: "col-route" },
-        { key: "meta.provider", label: "Provider · Model", colClass: "col-provider" },
-        { key: "updated_epoch_ms", label: "When", colClass: "col-time" },
+        { key: "meta.pool", label: "Pool", colClass: "col-pool" },
+        { key: "meta.route_reason", label: "Reason", colClass: "col-route" },
+        { key: "meta.provider", label: "Model", colClass: "col-provider" },
         { key: "duration_ms", label: "Duration", colClass: "col-intext" },
         { key: "error", label: "Error", colClass: "col-usage" },
         { key: "switches", label: "Next", colClass: "col-finish" },
+        { key: "updated_epoch_ms", label: "When", colClass: "col-time col-time-last" },
       ];
       const colgroup = el("colgroup");
       columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
@@ -729,12 +867,13 @@
       tr.appendChild(statusCell);
       tr.appendChild(el("td", "col-port", portText));
       tr.appendChild(el("td", null, endpointLabel(metaValue(row, "endpoint"))));
-      tr.appendChild(el("td", "muted", metaValue(row, "route_reason")));
-      tr.appendChild(el("td", null, providerModelCell(row)));
-      tr.appendChild(el("td", "mono", timeText(row.updated_epoch_ms)));
+      tr.appendChild(el("td", "muted col-pool", metaValue(row, "pool")));
+      tr.appendChild(el("td", "muted col-route", metaValue(row, "route_reason")));
+      tr.appendChild(compactProviderCell(row));
       tr.appendChild(el("td", "num", row.duration_ms != null ? fmtMs(row.duration_ms) : "—"));
       tr.appendChild(el("td", "mono", detail));
       tr.appendChild(el("td", "col-finish", row.switches > 0 ? `switched` : "terminal"));
+      tr.appendChild(el("td", "mono col-time col-time-last", timeText(row.updated_epoch_ms)));
       return tr;
     }
 
@@ -900,6 +1039,14 @@
         state.tab = btn.dataset.tab;
         if (state.tab === "attempts" && !state.attemptRecords.length) loadAttempts().then(renderAll);
         else renderAll();
+      });
+    });
+    document.querySelectorAll("#entries-sub-tab-bar .sub-tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const next = btn.dataset.subTab === "reason" ? "reason" : "pool";
+        if (state.entriesGroup === next) return;
+        state.entriesGroup = next;
+        renderAll();
       });
     });
     ["chart-range","chart-metric"].forEach((id) => {
