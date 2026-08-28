@@ -33,7 +33,7 @@
   "result": "pass",
   "scope_hash": "sha256:30ef63cd3f0c43027927565d2a5d7f15afc84d0611f5acdbe65ee27aff902f27",
   "skipped": 0,
-  "source_commit": "f719cd8b7aa1584d173c2c2d5dd83cacc8e18fb8",
+  "source_commit": "47927fe2405c9989c5effff83f84c55c19b1c3b1",
   "suite_id": "v4-error-l2-regression",
   "test_characteristics": {
     "blackbox": true,

@@ -12,32 +12,28 @@ use routecodex_v4_config::{
 use routecodex_v4_error::ErrorChain;
 use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
-    exec_managed_restart, repair_stale, request_restart, request_stop, start_managed,
-    status_managed,
-    ManagedAction, ManagedControlPlane, ManagedInstanceRecord, ManagedSpawnOptions,
+    exec_managed_restart, repair_stale, request_restart, request_stop,
+    status_managed, ManagedAction, ManagedControlPlane, ManagedInstanceRecord, ManagedSpawnOptions,
     V4LifecyclePaths,
 };
-use routecodex_v4_standard_plugins::diagnostic;
-use routecodex_v4_standard_plugins::chat_to_responses::project_chat_request_to_responses;
 use routecodex_v4_provider::{
-    build_protocol_wire, load_profile, send_responses,
-    send_responses_streaming, write_provider_profile,
-    normalize_provider_response, normalize_provider_sse_frame, send_anthropic_messages,
-    send_anthropic_messages_streaming, send_openai_chat, send_openai_chat_streaming,
-    validate_auth_alias, ProviderInitAuth, ProviderInitOptions, ProviderResponseStream,
+    build_protocol_wire, load_profile, normalize_provider_response, normalize_provider_sse_frame,
+    send_anthropic_messages, send_anthropic_messages_streaming, send_openai_chat,
+    send_openai_chat_streaming, send_responses, send_responses_streaming, validate_auth_alias,
+    write_provider_profile, ProviderInitAuth, ProviderInitOptions, ProviderResponseStream,
     V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
-    apply_product_error_policy, select_product_target_with_unavailable,
-    select_target,
+    apply_product_error_policy, select_product_target_with_unavailable, select_target,
 };
 use routecodex_v4_runtime::{
-    parse_responses_provider_payload,
-    project_runtime_fault, project_runtime_fault_with_policy,
+    parse_responses_provider_payload, project_runtime_fault, project_runtime_fault_with_policy,
     ResponsesProviderPayload, RuntimeFault, SkeletonRuntime,
 };
 use routecodex_v4_server::{HttpHandler, HttpRequest, HttpResponse, ResponseStream, V4HttpServer};
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
+use routecodex_v4_standard_plugins::chat_to_responses::project_chat_request_to_responses;
+use routecodex_v4_standard_plugins::diagnostic;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -210,19 +206,13 @@ fn compile_for_lifecycle(
 }
 
 fn start(intent: StartIntent) -> Result<String, String> {
-    let (config, _, paths) = compile_for_lifecycle(intent.config)?;
-    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    let options = spawn_options(&intent.snapshot);
-    let record = start_managed(
-        &paths,
-        &executable,
-        &config,
-        &paths.manifest_path,
-        &options,
-        Duration::from_secs(15),
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(format_status("started", &record))
+    let config = config_path(ConfigPathIntent {
+        config: intent.config,
+    })?;
+    let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
+    print_startup(&manifest);
+    run_foreground(manifest)?;
+    Ok("state=stopped identity=rccv4 foreground=true".to_string())
 }
 
 fn status(intent: ConfigPathIntent) -> Result<String, String> {
@@ -278,8 +268,25 @@ fn server_start(intent: ServerStartIntent) -> Result<String, String> {
         config: intent.config,
     })?;
     let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
+    print_startup(&manifest);
     run_foreground(manifest)?;
     Ok("state=stopped identity=rccv4 foreground=true".to_string())
+}
+
+fn print_startup(manifest: &RuntimeConfigManifest) {
+    let listeners = manifest
+        .listeners
+        .iter()
+        .map(|listener| listener.address.clone())
+        .collect::<Vec<_>>();
+    let binary = std::env::current_exe()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    let (headline, debug) =
+        diagnostic::format_startup(&manifest.runtime_identity, VERSION, &binary, &listeners);
+    println!("{headline}");
+    println!("{debug}");
+    let _ = std::io::stdout().flush();
 }
 
 fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
@@ -315,12 +322,8 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     let binary = std::env::current_exe()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
-    let (headline, debug) = diagnostic::format_startup(
-        &manifest.runtime_identity,
-        VERSION,
-        &binary,
-        &listeners,
-    );
+    let (headline, debug) =
+        diagnostic::format_startup(&manifest.runtime_identity, VERSION, &binary, &listeners);
     println!("{headline}");
     println!("{debug}");
     let _ = std::io::stdout().flush();
@@ -433,7 +436,6 @@ impl PipelineHandler {
             availability: Arc::new(Mutex::new(V4Availability01SessionScoped::new())),
         })
     }
-
 }
 
 impl HttpHandler for PipelineHandler {
@@ -457,17 +459,15 @@ impl HttpHandler for PipelineHandler {
                 "direct",
             )
             .unwrap_or_else(|response| response),
-            ("POST", "/v1/chat/completions") => {
-                handle_responses(
-                    &self.manifest,
-                    &self.runtime,
-                    &self.availability,
-                    &request,
-                    "chat",
-                    "relay",
-                )
-                .unwrap_or_else(|response| response)
-            }
+            ("POST", "/v1/chat/completions") => handle_responses(
+                &self.manifest,
+                &self.runtime,
+                &self.availability,
+                &request,
+                "chat",
+                "relay",
+            )
+            .unwrap_or_else(|response| response),
             _ => project_fault(
                 &request,
                 RuntimeFault::new("route_not_found", "route not found"),
@@ -564,7 +564,10 @@ fn handle_responses(
         let group = product.route_groups.first().ok_or_else(|| {
             project_fault(
                 request,
-                RuntimeFault::new("product_route_group_missing", "product manifest has no route group"),
+                RuntimeFault::new(
+                    "product_route_group_missing",
+                    "product manifest has no route group",
+                ),
                 500,
             )
         })?;
@@ -592,16 +595,16 @@ fn handle_responses(
         Vec::new()
     };
     let mut target = if let Some(product) = &manifest.product {
-        let route_group = product
-            .route_groups
-            .first()
-            .ok_or_else(|| {
-                project_fault(
-                    request,
-                    RuntimeFault::new("product_route_group_missing", "product manifest has no route group"),
-                    500,
-                )
-            })?;
+        let route_group = product.route_groups.first().ok_or_else(|| {
+            project_fault(
+                request,
+                RuntimeFault::new(
+                    "product_route_group_missing",
+                    "product manifest has no route group",
+                ),
+                500,
+            )
+        })?;
         select_product_target_with_unavailable(
             product,
             &route_group.route_group_id,
@@ -609,7 +612,10 @@ fn handle_responses(
             entry_protocol,
             &[],
             0,
-            &unavailable_provider_ids.iter().map(String::as_str).collect::<Vec<_>>(),
+            &unavailable_provider_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
         )
     } else {
         select_target(&manifest.providers, &manifest.routes, model)
@@ -633,7 +639,9 @@ fn handle_responses(
     let _ = std::io::stdout().flush();
     let continuation_owner = if entry_protocol == "responses" {
         load_profile(&target.config_path)
-            .map_err(|error| project_fault(request, RuntimeFault::new(&error.code, error.message), 500))?
+            .map_err(|error| {
+                project_fault(request, RuntimeFault::new(&error.code, error.message), 500)
+            })?
             .responses_continuation
     } else {
         continuation_owner.to_string()
@@ -661,13 +669,23 @@ fn handle_responses(
         .map_err(|fault| project_fault(request, fault, 409))?;
     let provider_body = match entry_protocol {
         "responses" => body.clone(),
-        "chat" => project_chat_request_to_responses(&body)
-            .map_err(|message| project_fault(request, RuntimeFault::new("client_protocol_invalid", message), 400))?,
-        _ => return Err(project_fault(
-            request,
-            RuntimeFault::new("client_protocol_unsupported", format!("unsupported client request protocol {entry_protocol}")),
-            400,
-        )),
+        "chat" => project_chat_request_to_responses(&body).map_err(|message| {
+            project_fault(
+                request,
+                RuntimeFault::new("client_protocol_invalid", message),
+                400,
+            )
+        })?,
+        _ => {
+            return Err(project_fault(
+                request,
+                RuntimeFault::new(
+                    "client_protocol_unsupported",
+                    format!("unsupported client request protocol {entry_protocol}"),
+                ),
+                400,
+            ))
+        }
     };
     if entry_protocol == "responses"
         && continuation_owner == "relay"
@@ -696,27 +714,26 @@ fn handle_responses(
         )
     })?;
     if stream_mode {
-        let mut stream = send_target_streaming(&target, &wire_body)
-        .map_err(|error| {
-                project_fault(
-                    request,
-                    RuntimeFault::new(error.code.as_str(), error.message)
-                        .with_status(error.status.unwrap_or(502)),
-                    error.status.unwrap_or(502),
-                )
-            })?;
+        let mut stream = send_target_streaming(&target, &wire_body).map_err(|error| {
+            project_fault(
+                request,
+                RuntimeFault::new(error.code.as_str(), error.message)
+                    .with_status(error.status.unwrap_or(502)),
+                error.status.unwrap_or(502),
+            )
+        })?;
         if stream.status() >= 400 {
             if let Some(product) = manifest.product.as_ref() {
-                if let Some(policy) = apply_product_error_policy(
-                    product,
-                    &target.provider_id,
-                    stream.status(),
-                    "",
-                ) {
+                if let Some(policy) =
+                    apply_product_error_policy(product, &target.provider_id, stream.status(), "")
+                {
                     record_provider_failure(
                         availability,
                         request,
-                        product.route_groups.first().map(|group| group.route_group_id.as_str()),
+                        product
+                            .route_groups
+                            .first()
+                            .map(|group| group.route_group_id.as_str()),
                         session_scope,
                         &target.provider_id,
                         policy.cooldown,
@@ -749,16 +766,18 @@ fn handle_responses(
                                     )
                                 })?;
                                 target = candidate;
-                                stream = send_target_streaming(&target, &retry_body).map_err(|error| {
-                                    project_provider_fault(
-                                        request,
-                                        RuntimeFault::new(&error.code, error.message),
-                                        error.status.unwrap_or(502),
-                                        manifest.product.as_ref(),
-                                        &target.provider_id,
-                                        "",
-                                    )
-                                })?;
+                                stream = send_target_streaming(&target, &retry_body).map_err(
+                                    |error| {
+                                        project_provider_fault(
+                                            request,
+                                            RuntimeFault::new(&error.code, error.message),
+                                            error.status.unwrap_or(502),
+                                            manifest.product.as_ref(),
+                                            &target.provider_id,
+                                            "",
+                                        )
+                                    },
+                                )?;
                             }
                         }
                     }
@@ -797,7 +816,11 @@ fn handle_responses(
                 502,
             ));
         }
-        let client_status = if (200..300).contains(&status) { 200 } else { status };
+        let client_status = if (200..300).contains(&status) {
+            200
+        } else {
+            status
+        };
         println!(
             "{}",
             diagnostic::format_response(
@@ -846,62 +869,65 @@ fn handle_responses(
     let mut reselected = false;
     if let Some(product) = manifest.product.as_ref() {
         if let Some(policy) = matched_policy.as_ref() {
-                record_provider_failure(
-                    availability,
-                    request,
-                    product.route_groups.first().map(|group| group.route_group_id.as_str()),
-                    session_scope,
-                    &target.provider_id,
-                    policy.cooldown,
-                    policy.failure_threshold,
-                )?;
-                if policy.retry {
-                    if let Some(group) = product.route_groups.first() {
-                        let mut excluded = unavailable_provider_ids.clone();
-                        excluded.push(target.provider_id.clone());
-                        if let Ok(candidate) = select_product_target_with_unavailable(
-                            product,
-                            &group.route_group_id,
-                            model,
-                            entry_protocol,
-                            &[],
-                            0,
-                            &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
-                        ) {
-                            let retry_body = build_protocol_wire(
-                                &candidate.protocol,
-                                &provider_body,
-                                &candidate.wire_model,
-                                false,
+            record_provider_failure(
+                availability,
+                request,
+                product
+                    .route_groups
+                    .first()
+                    .map(|group| group.route_group_id.as_str()),
+                session_scope,
+                &target.provider_id,
+                policy.cooldown,
+                policy.failure_threshold,
+            )?;
+            if policy.retry {
+                if let Some(group) = product.route_groups.first() {
+                    let mut excluded = unavailable_provider_ids.clone();
+                    excluded.push(target.provider_id.clone());
+                    if let Ok(candidate) = select_product_target_with_unavailable(
+                        product,
+                        &group.route_group_id,
+                        model,
+                        entry_protocol,
+                        &[],
+                        0,
+                        &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
+                    ) {
+                        let retry_body = build_protocol_wire(
+                            &candidate.protocol,
+                            &provider_body,
+                            &candidate.wire_model,
+                            false,
+                        )
+                        .map_err(|error| {
+                            project_fault(
+                                request,
+                                RuntimeFault::new(&error.code, error.message),
+                                error.status.unwrap_or(400),
                             )
-                            .map_err(|error| {
-                                project_fault(
-                                    request,
-                                    RuntimeFault::new(&error.code, error.message),
-                                    error.status.unwrap_or(400),
-                                )
-                            })?;
-                            target = candidate;
-                            reselected = true;
-                            raw = send_target_nonstream(&target, &retry_body).map_err(|error| {
-                                project_provider_fault(
-                                    request,
-                                    RuntimeFault::new(&error.code, error.message),
-                                    error.status.unwrap_or(502),
-                                    manifest.product.as_ref(),
-                                    &target.provider_id,
-                                    "",
-                                )
-                            })?;
-                            matched_policy = apply_product_error_policy(
-                                product,
+                        })?;
+                        target = candidate;
+                        reselected = true;
+                        raw = send_target_nonstream(&target, &retry_body).map_err(|error| {
+                            project_provider_fault(
+                                request,
+                                RuntimeFault::new(&error.code, error.message),
+                                error.status.unwrap_or(502),
+                                manifest.product.as_ref(),
                                 &target.provider_id,
-                                raw.status,
-                                &String::from_utf8_lossy(&raw.body),
-                            );
-                        }
+                                "",
+                            )
+                        })?;
+                        matched_policy = apply_product_error_policy(
+                            product,
+                            &target.provider_id,
+                            raw.status,
+                            &String::from_utf8_lossy(&raw.body),
+                        );
                     }
                 }
+            }
         }
     }
     if raw.status >= 400 || (matched_policy.is_some() && !reselected) {
@@ -919,38 +945,43 @@ fn handle_responses(
         ));
     }
     if let Some(product) = manifest.product.as_ref() {
-        let _ = availability.lock().map_err(|_| {
-            project_fault(
-                request,
-                RuntimeFault::new("availability_lock", "provider availability lock poisoned"),
-                500,
-            )
-        })?.mark_success(
-            &request.port.to_string(),
-            product
-                .route_groups
-                .first()
-                .map(|group| group.route_group_id.as_str())
-                .unwrap_or("default"),
-            session_scope,
-            &target.provider_id,
-        );
+        let _ = availability
+            .lock()
+            .map_err(|_| {
+                project_fault(
+                    request,
+                    RuntimeFault::new("availability_lock", "provider availability lock poisoned"),
+                    500,
+                )
+            })?
+            .mark_success(
+                &request.port.to_string(),
+                product
+                    .route_groups
+                    .first()
+                    .map(|group| group.route_group_id.as_str())
+                    .unwrap_or("default"),
+                session_scope,
+                &target.provider_id,
+            );
     }
     let normalized_body = if raw.content_type.to_ascii_lowercase().contains("json") {
-        let provider_value: serde_json::Value = serde_json::from_slice(&raw.body).map_err(|error| {
-            project_fault(
-                request,
-                RuntimeFault::new("provider_json_parse", error.to_string()),
-                502,
-            )
-        })?;
-        let normalized = normalize_provider_response(&target.protocol, &provider_value).map_err(|error| {
-            project_fault(
-                request,
-                RuntimeFault::new(&error.code, error.message),
-                error.status.unwrap_or(502),
-            )
-        })?;
+        let provider_value: serde_json::Value =
+            serde_json::from_slice(&raw.body).map_err(|error| {
+                project_fault(
+                    request,
+                    RuntimeFault::new("provider_json_parse", error.to_string()),
+                    502,
+                )
+            })?;
+        let normalized =
+            normalize_provider_response(&target.protocol, &provider_value).map_err(|error| {
+                project_fault(
+                    request,
+                    RuntimeFault::new(&error.code, error.message),
+                    error.status.unwrap_or(502),
+                )
+            })?;
         serde_json::to_vec(&normalized).map_err(|error| {
             project_fault(
                 request,
@@ -966,18 +997,22 @@ fn handle_responses(
     } else {
         "application/json"
     };
-    match parse_responses_provider_payload(raw.status, normalized_content_type, &normalized_body, false)
-        .map_err(|fault| {
-            project_provider_fault(
-                request,
-                fault,
-                if raw.status == 0 { 502 } else { raw.status },
-                manifest.product.as_ref(),
-                &target.provider_id,
-                String::from_utf8_lossy(&raw.body).as_ref(),
-            )
-        })?
-    {
+    match parse_responses_provider_payload(
+        raw.status,
+        normalized_content_type,
+        &normalized_body,
+        false,
+    )
+    .map_err(|fault| {
+        project_provider_fault(
+            request,
+            fault,
+            if raw.status == 0 { 502 } else { raw.status },
+            manifest.product.as_ref(),
+            &target.provider_id,
+            String::from_utf8_lossy(&raw.body).as_ref(),
+        )
+    })? {
         ResponsesProviderPayload::Json(value) => {
             let provider_raw = serde_json::to_string(&value).map_err(|error| {
                 project_fault(
@@ -1025,7 +1060,11 @@ fn handle_responses(
                     502,
                 )
             })?;
-            let client_status = if (200..300).contains(&raw.status) { 200 } else { raw.status };
+            let client_status = if (200..300).contains(&raw.status) {
+                200
+            } else {
+                raw.status
+            };
             println!(
                 "{}",
                 diagnostic::format_response(
@@ -1062,7 +1101,6 @@ impl ProviderSseSource for ProviderResponseStream {
     fn wait(&mut self) -> Result<(), String> {
         ProviderResponseStream::wait(self).map_err(|error| error.to_string())
     }
-
 }
 
 struct ResponsesSseStream<S = ProviderResponseStream> {
@@ -1131,9 +1169,8 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
         let normalized_frame = if self.provider_protocol == "responses" {
             frame.to_vec()
         } else {
-            normalize_provider_sse_frame(&self.provider_protocol, frame).map_err(|error| {
-                RuntimeFault::new(&error.code, error.message)
-            })?
+            normalize_provider_sse_frame(&self.provider_protocol, frame)
+                .map_err(|error| RuntimeFault::new(&error.code, error.message))?
         };
         let owner = if terminal {
             self.continuation_owner.as_str()
@@ -1267,7 +1304,8 @@ fn project_provider_fault(
     let Some(product) = product else {
         return project_fault(request, fault, status);
     };
-    let Some(policy) = apply_product_error_policy(product, provider_id, status, response_body) else {
+    let Some(policy) = apply_product_error_policy(product, provider_id, status, response_body)
+    else {
         return project_fault(request, fault, status);
     };
     let action = if policy.retry {
@@ -1313,8 +1351,10 @@ fn project_provider_fault(
 fn send_target_nonstream(
     target: &routecodex_v4_router::SelectedTarget,
     wire_body: &serde_json::Value,
-) -> Result<routecodex_v4_provider::ProviderRawResponse, routecodex_v4_provider::ProviderTransportError>
-{
+) -> Result<
+    routecodex_v4_provider::ProviderRawResponse,
+    routecodex_v4_provider::ProviderTransportError,
+> {
     validate_auth_alias(&target.config_path, target.auth_alias.as_deref())?;
     match target.protocol.as_str() {
         "responses" => send_responses(&target.config_path, &target.wire_model, wire_body, false),
@@ -1401,8 +1441,8 @@ fn json_response(status: u16, value: serde_json::Value) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::VecDeque;
     use routecodex_v4_config::compile_runtime_config;
+    use std::collections::VecDeque;
 
     fn test_manifest() -> RuntimeConfigManifest {
         compile_runtime_config(
@@ -1437,7 +1477,16 @@ targets = ["mock"]
     #[test]
     fn production_pipeline_uses_the_single_runtime_execution_owner() {
         let mut handler = PipelineHandler::new(test_manifest()).expect("handler initializes");
-        assert!(handler.runtime.lock().expect("runtime lock").plan().chains.len() >= 2);
+        assert!(
+            handler
+                .runtime
+                .lock()
+                .expect("runtime lock")
+                .plan()
+                .chains
+                .len()
+                >= 2
+        );
         let response = handler.handle(HttpRequest {
             method: "POST".to_string(),
             path: "/unknown".to_string(),
@@ -1447,7 +1496,10 @@ targets = ["mock"]
             server_id: "test".to_string(),
             port: u16::from_ne_bytes([0, 1]),
         });
-        assert_eq!(response.status, 404, "request node must run before route projection");
+        assert_eq!(
+            response.status, 404,
+            "request node must run before route projection"
+        );
     }
 
     struct MockSseSource {
@@ -1471,7 +1523,6 @@ targets = ["mock"]
         fn wait(&mut self) -> Result<(), String> {
             self.wait_result.clone()
         }
-
     }
 
     fn runtime() -> Arc<Mutex<SkeletonRuntime>> {
@@ -1489,12 +1540,7 @@ targets = ["mock"]
         entry_protocol: &str,
         continuation_owner: &str,
     ) -> ResponsesSseStream<MockSseSource> {
-        stream_for_with_runtime(
-            runtime(),
-            chunks,
-            entry_protocol,
-            continuation_owner,
-        )
+        stream_for_with_runtime(runtime(), chunks, entry_protocol, continuation_owner)
     }
 
     fn stream_for_with_runtime(
@@ -1586,7 +1632,9 @@ targets = ["mock"]
         let frame = b"event: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"abc\"}}\r\n\r\n";
         let mut stream = stream(vec![Ok(frame.to_vec())]);
         let mut chunk = Vec::new();
-        assert!(stream.next_chunk(&mut chunk).expect("CRLF frame must project"));
+        assert!(stream
+            .next_chunk(&mut chunk)
+            .expect("CRLF frame must project"));
         let text = String::from_utf8(chunk).expect("projected frame must be UTF-8");
         assert!(text.contains("event: response.completed"));
         assert!(!text.contains("event: error"));
