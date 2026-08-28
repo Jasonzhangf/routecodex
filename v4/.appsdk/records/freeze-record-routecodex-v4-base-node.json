@@ -1,5 +1,5 @@
 {
-  "active_version": "active-v4",
+  "active_version": "active-v3",
   "artifact_record_id": "v4-cordis-base-node-current-candidate",
   "clean_scope": {
     "base_commit": "8f906514a9a454add8dabc129b24d0852d43a724",
@@ -27,12 +27,12 @@
     "vcs": "git"
   },
   "previous_active_immutable": true,
-  "previous_active_version": "active-v3",
+  "previous_active_version": "active-v2",
   "promotion_id": "v4-cordis-base-node-promotion",
   "promotion_record_hash": "sha256:9f4b344abf0dd824f6a7ec5a81603e95512243f5480a6634946b61ef0133c1ae",
   "public_api_hash": "sha256:4fde764e2ba6dcd121e980143ce7d9de1eb6518cd9aee52124c668bc76e3e7ce",
   "regression_report_hash": "sha256:d30bf19f1fb77d805529c684e7e716639e71bbb62e9f5cc62493a2fb1faf501f",
   "regression_report_id": "v4-cordis-base-node-regression",
   "review_id": "v4-cordis-base-node-review",
-  "source_commit_or_tag": "884bdd8ec71d241b718a79778ca63b2b27aa3707"
+  "source_commit_or_tag": "dad0742a457276d1ed8e9da2fe1f3c35b0bc4889"
 }
