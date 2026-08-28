@@ -1,0 +1,30 @@
+{
+  "review_id": "v4-cordis-control-architecture-review-current",
+  "review_kind": "architecture",
+  "issue_id": "v4-cordis-control-fresh-governance",
+  "promotion_id": "v4-cordis-control-promotion-current",
+  "fix_candidate_id": "v4-cordis-control-candidate-current",
+  "pre_review_validation_id": "v4-cordis-control-pre-review-current",
+  "reviewer": {"adapter":"dsh","identity":"dsh/rcc/gpt-5.5"},
+  "verdict": "pass",
+  "evidence_ids": ["v4-cordis-control-candidate", "v4-cordis-control-positive", "v4-cordis-control-negative"],
+  "reviewed_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
+  "reviewed_tree_hash": "36be15c494a0decd221f05ca3db4f084434e4684",
+  "reviewed_diff_hash": "sha256:ae794d63fa2ec0f4aeeec7ae8f7bd9b16d98c015d6f7aaddb3fefb08804a1474",
+  "reviewed_artifact_hash": "sha256:cf200dbd7f3e1a6284477035ef57b5d6bc0596bda36c29a1704461d12dbae469",
+  "reviewed_scope_hash": "sha256:bc932196faa3d642c7b835f5810ed1746a36d981106be5d81ddf6dbc03d3dd70",
+  "resource_map_hash": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
+  "function_map_hash": "sha256:69f16dfe5d056634f6164cd325dbdbdf134588890b69f101c0d9045e6a01d776",
+  "mainline_call_map_hash": "sha256:c36e4f9d5cff527d7f98b339772a53c87f420db58bb2215b6b68210e01124673",
+  "verification_map_hash": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230",
+  "ai_confidence": 1,
+  "confidence_rationale": "DSH architecture review passed after control record graph and control/data isolation evidence were inspected.",
+  "v4_product_map_root": "docs/architecture/maps",
+  "v4_product_map_hashes": {
+    "resource_map": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
+    "function_map": "sha256:69f16dfe5d056634f6164cd325dbdbdf134588890b69f101c0d9045e6a01d776",
+    "mainline_call_map": "sha256:c36e4f9d5cff527d7f98b339772a53c87f420db58bb2215b6b68210e01124673",
+    "verification_map": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230"
+  },
+  "created_at": "2026-08-28T16:09:00Z"
+}
