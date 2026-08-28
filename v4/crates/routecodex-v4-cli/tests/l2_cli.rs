@@ -8,10 +8,10 @@ fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
 
 #[test]
 fn no_args_maps_to_start_intent() {
-    assert!(matches!(
-        parse(&["rccv4"]).expect("parse").command_or_start(),
-        V4CommandIntent::Start(_)
-    ));
+    match parse(&["rccv4"]).expect("parse").command_or_start() {
+        V4CommandIntent::Start(intent) => assert!(intent.foreground),
+        other => panic!("unexpected command: {other:?}"),
+    }
 }
 
 #[test]
