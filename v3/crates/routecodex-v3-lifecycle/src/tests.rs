@@ -848,6 +848,21 @@ fn default_snapshot_authorization_does_not_enable_sample_persistence() {
 }
 
 #[test]
+fn configured_codex_samples_authorization_survives_managed_declaration() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let mut raw = fs::read_to_string(&config).unwrap();
+    raw.push_str("\n[debug]\ncodex_samples = true\n");
+    fs::write(&config, raw).unwrap();
+
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+    let (_, manifest) = lifecycle.declaration(&executable).unwrap();
+    assert!(manifest.debug.codex_samples);
+}
+
+#[test]
 fn instance_residual_pids_are_discovered_even_when_ports_are_no_longer_listened() {
     // 复现用户场景：`routecodex start` 抢占后，旧 run-managed-child 已释放端口
     // 但进程残留并保持 tty 前台进程组，导致 Ctrl+C 信号发到错误进程。

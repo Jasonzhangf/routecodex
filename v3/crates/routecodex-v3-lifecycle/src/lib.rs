@@ -366,15 +366,8 @@ impl V3ManagedLifecycle {
     }
 
     fn apply_snapshot_authorization_to_manifest(&self, manifest: &mut V3Config05ManifestPublished) {
-        // Codex samples are a lifecycle opt-in. Configured debug snapshots remain
-        // available for diagnostics, but sample persistence requires an explicit
-        // lifecycle snapshot flag.
-        if !self.force_snapshots
-            && !self.force_snapshot_direct
-            && self.force_snapshot_stages.is_none()
-        {
-            manifest.debug.codex_samples = false;
-        }
+        // Preserve explicit config authorization; absent authorization already
+        // compiles to false. Explicit lifecycle flags may still opt in below.
         if self.force_snapshots {
             manifest.debug.codex_samples = true;
             manifest.debug.snapshots = true;
