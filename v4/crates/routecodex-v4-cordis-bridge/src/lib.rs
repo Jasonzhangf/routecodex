@@ -159,7 +159,7 @@ impl CordisMountCandidate {
 }
 
 /// Build a deterministic mount candidate without mutating Cordis or the
-/// ActiveExecutionEpoch.  Publication is owned by the lifecycle/container
+/// ExecutionEpochBundle. Publication is owned by the lifecycle/container
 /// lane after this candidate is independently verified.
 pub fn mount_candidate(
     node_id: &str,

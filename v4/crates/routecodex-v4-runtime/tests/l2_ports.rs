@@ -1,5 +1,5 @@
 use routecodex_v4_node_container::{
-    ActiveEpochStore, ActiveExecutionEpoch, ExecutionEpochIdentity, NodeContainer, PlanBindings,
+    ActiveEpochStore, ExecutionEpochBundle, ExecutionEpochIdentity, NodeContainer, PlanBindings,
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
 use routecodex_v4_runtime::{execution_binding, request_port::RequestPortLease, response_error_port};
@@ -34,7 +34,7 @@ fn store() -> ActiveEpochStore {
     container.context_created().unwrap();
     container.plugins_mounted().unwrap();
     container.publish().unwrap();
-    ActiveEpochStore::new(ActiveExecutionEpoch::new(
+    ActiveEpochStore::new(ExecutionEpochBundle::new(
         container,
         ExecutionEpochIdentity { plan_epoch: 7, manifest_hash: "manifest-7".into(), execution_identity: "exec-7".into() },
     ).unwrap())

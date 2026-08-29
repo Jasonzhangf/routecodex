@@ -1,6 +1,6 @@
 use routecodex_v4_node_container::{
-    ActiveEpochStore, ActiveExecutionEpoch, EpochError, ExecutionEpochIdentity,
-    ExecutionEpochState, NodeContainer, PlanBindings,
+    ActiveEpochStore, ExecutionEpochBundle, ExecutionEpochIdentity, ExecutionEpochState, EpochError,
+    NodeContainer, PlanBindings,
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
 
@@ -34,8 +34,8 @@ fn accepting_container(node_id: &str) -> NodeContainer {
     container
 }
 
-fn epoch(node_id: &str, plan_epoch: u64) -> ActiveExecutionEpoch {
-    ActiveExecutionEpoch::new(
+fn epoch(node_id: &str, plan_epoch: u64) -> ExecutionEpochBundle {
+    ExecutionEpochBundle::new(
         accepting_container(node_id),
         ExecutionEpochIdentity {
             plan_epoch,
@@ -86,7 +86,7 @@ fn retired_epoch_rejects_new_admission_after_publish() {
 #[test]
 fn candidate_identity_failure_cannot_replace_active_epoch() {
     let store = ActiveEpochStore::new(epoch("active", 3));
-    let result = ActiveExecutionEpoch::new(
+    let result = ExecutionEpochBundle::new(
         accepting_container("candidate"),
         ExecutionEpochIdentity {
             plan_epoch: 4,
@@ -105,8 +105,8 @@ fn rebuild_keeps_execution_identity_stable() {
         manifest_hash: "manifest-stable".into(),
         execution_identity: "execution-stable".into(),
     };
-    let first = ActiveExecutionEpoch::new(accepting_container("first"), identity.clone()).unwrap();
-    let rebuilt = ActiveExecutionEpoch::new(accepting_container("rebuilt"), identity).unwrap();
+    let first = ExecutionEpochBundle::new(accepting_container("first"), identity.clone()).unwrap();
+    let rebuilt = ExecutionEpochBundle::new(accepting_container("rebuilt"), identity).unwrap();
     assert_eq!(first.snapshot().plan_epoch, rebuilt.snapshot().plan_epoch);
     assert_eq!(
         first.snapshot().manifest_hash,

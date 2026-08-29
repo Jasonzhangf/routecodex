@@ -2140,7 +2140,7 @@ resources:
   owner_symbols:
   - ExecutionEpochIdentity
   - ExecutionEpochSnapshot
-  - ActiveExecutionEpoch
+  - ExecutionEpochBundle
   - EpochLease
   - ActiveEpochStore
   identity:

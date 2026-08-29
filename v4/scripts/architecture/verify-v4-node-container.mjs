@@ -20,8 +20,16 @@ const required = [
   'pub fn in_flight',
   'NodeExecutionGuard',
   'InFlightExecutions',
+  'pub struct ExecutionEpochBundle',
+  'ExecutionEpochBundle::new',
 ];
-const forbidden = ['struct Context', 'struct Fiber', 'struct Effect', 'serde_json::Value'];
+const forbidden = [
+  'struct Context',
+  'struct Fiber',
+  'struct Effect',
+  'serde_json::Value',
+  'ActiveExecutionEpoch',
+];
 
 function validate(source, binding, tests) {
   const failures = required.filter((token) => !source.includes(token));

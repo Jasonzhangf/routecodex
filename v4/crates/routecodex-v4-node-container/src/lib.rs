@@ -360,19 +360,19 @@ struct EpochInner {
 /// One immutable execution epoch. Admission pins this object with a lease;
 /// publication only changes the store pointer, never the epoch identity.
 #[derive(Clone)]
-pub struct ActiveExecutionEpoch {
+pub struct ExecutionEpochBundle {
     inner: Arc<EpochInner>,
 }
 
-impl std::fmt::Debug for ActiveExecutionEpoch {
+impl std::fmt::Debug for ExecutionEpochBundle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ActiveExecutionEpoch")
+        f.debug_struct("ExecutionEpochBundle")
             .field("snapshot", &self.snapshot())
             .finish()
     }
 }
 
-impl ActiveExecutionEpoch {
+impl ExecutionEpochBundle {
     pub fn new(
         container: NodeContainer,
         identity: ExecutionEpochIdentity,
@@ -498,7 +498,7 @@ impl ActiveExecutionEpoch {
 }
 
 pub struct EpochLease {
-    epoch: ActiveExecutionEpoch,
+    epoch: ExecutionEpochBundle,
     released: bool,
 }
 
@@ -580,7 +580,7 @@ impl Drop for EpochLease {
 /// Atomic active-pointer owner. Candidate publication retires the old epoch;
 /// only lease release can make the old physical container disposable.
 pub struct ActiveEpochStore {
-    active: RwLock<Option<ActiveExecutionEpoch>>,
+    active: RwLock<Option<ExecutionEpochBundle>>,
     transactions: Mutex<HashMap<String, EpochTransactionRecord>>,
 }
 
@@ -640,7 +640,7 @@ impl ActiveEpochStore {
         }
     }
 
-    pub fn new(active: ActiveExecutionEpoch) -> Self {
+    pub fn new(active: ExecutionEpochBundle) -> Self {
         Self {
             active: RwLock::new(Some(active)),
             transactions: Mutex::new(HashMap::new()),
@@ -652,7 +652,7 @@ impl ActiveEpochStore {
             .read()
             .expect("active epoch lock poisoned")
             .as_ref()
-            .map(ActiveExecutionEpoch::snapshot)
+            .map(ExecutionEpochBundle::snapshot)
     }
 
     pub fn admit(&self) -> Result<EpochLease, EpochError> {
@@ -677,7 +677,7 @@ impl ActiveEpochStore {
 
     pub fn publish(
         &self,
-        candidate: ActiveExecutionEpoch,
+        candidate: ExecutionEpochBundle,
     ) -> Result<ExecutionEpochSnapshot, EpochError> {
         let mut active = self.active.write().expect("active epoch lock poisoned");
         if candidate.snapshot().state != ExecutionEpochState::Active {
@@ -1006,8 +1006,8 @@ mod tests {
         container
     }
 
-    fn epoch(node_id: &str, plan_epoch: u64) -> ActiveExecutionEpoch {
-        ActiveExecutionEpoch::new(
+    fn epoch(node_id: &str, plan_epoch: u64) -> ExecutionEpochBundle {
+        ExecutionEpochBundle::new(
             accepting_container(node_id),
             ExecutionEpochIdentity {
                 plan_epoch,
@@ -1049,7 +1049,7 @@ mod tests {
     #[test]
     fn candidate_rejection_does_not_mutate_active_pointer() {
         let store = ActiveEpochStore::new(epoch("active", 3));
-        let rejected = ActiveExecutionEpoch::new(
+        let rejected = ExecutionEpochBundle::new(
             accepting_container("candidate"),
             ExecutionEpochIdentity {
                 plan_epoch: 4,
@@ -1068,9 +1068,8 @@ mod tests {
             manifest_hash: "manifest-stable".into(),
             execution_identity: "execution-stable".into(),
         };
-        let first =
-            ActiveExecutionEpoch::new(accepting_container("first"), identity.clone()).unwrap();
-        let rebuilt = ActiveExecutionEpoch::new(accepting_container("rebuilt"), identity).unwrap();
+        let first = ExecutionEpochBundle::new(accepting_container("first"), identity.clone()).unwrap();
+        let rebuilt = ExecutionEpochBundle::new(accepting_container("rebuilt"), identity).unwrap();
         assert_eq!(first.snapshot().plan_epoch, rebuilt.snapshot().plan_epoch);
         assert_eq!(
             first.snapshot().manifest_hash,
