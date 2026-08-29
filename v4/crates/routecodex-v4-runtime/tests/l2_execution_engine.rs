@@ -1,6 +1,5 @@
 use routecodex_v4_runtime::{ExecutionEngine, NodeExecutionFrame, NodeOutcome};
-use routecodex_v4_plugin_contract::{NativePlugin, PluginConfig, PluginContext, PluginFailure, PluginIdentity, PluginOutcome};
-use std::sync::Arc;
+use routecodex_v4_cordis_bridge::HandleRegistry;
 
 #[test]
 fn engine_preserves_adjacent_output_and_terminal_boundary() {
@@ -56,43 +55,50 @@ fn branch_follows_only_a_declared_edge_and_failure_stops() {
     assert!(matches!(failure_engine.execute("first", NodeExecutionFrame::new(serde_json::json!({}), serde_json::json!({})), test_lease()).unwrap(), NodeOutcome::Failure { .. }));
 }
 
-struct TerminalPlugin {
-    identity: PluginIdentity,
-    outcome: Result<PluginOutcome, PluginFailure>,
-}
-
-impl NativePlugin for TerminalPlugin {
-    fn identity(&self) -> &PluginIdentity { &self.identity }
-    fn execute(&self, _context: &PluginContext, _config: &PluginConfig) -> Result<PluginOutcome, PluginFailure> { self.outcome.clone() }
-}
-
 #[test]
-fn native_plugin_outcome_and_failure_are_projected_without_payload_control() {
-    let identity = PluginIdentity::try_new("test.plugin", "1", "sha256:test").unwrap();
-    let terminal = routecodex_v4_runtime::ExecutionNode::native(
-        "native-terminal",
-        Arc::new(TerminalPlugin { identity: identity.clone(), outcome: Ok(PluginOutcome::Terminal) }),
-        PluginContext::new("native-terminal", "scope"),
-        PluginConfig::empty(),
-    );
-    let outcome = ExecutionEngine::new(vec![terminal]).execute(
+fn pinned_bridge_abi_preserves_typed_data_and_control() {
+    let plan = routecodex_v4_plugin_plan::NodePluginPlan {
+        node_id: "bridge-node".into(),
+        position: 1,
+        role_id: "test".into(),
+        chain: "request".into(),
+        entries: vec![],
+        selection_groups: vec![],
+        hash: String::new(),
+    };
+    let hash = plan.plan_hash();
+    let mut container = routecodex_v4_node_container::NodeContainer::declare(
+        "bridge-node",
+        routecodex_v4_plugin_plan::NodePluginPlan { hash: hash.clone(), ..plan },
+        routecodex_v4_node_container::PlanBindings {
+            graph_hash: hash.clone(),
+            manifest_hash: hash.clone(),
+            loaded_plan_hash: hash,
+        },
+    ).unwrap();
+    container.context_created().unwrap();
+    container.plugins_mounted().unwrap();
+    container.publish().unwrap();
+    let epoch = routecodex_v4_node_container::ExecutionEpochBundle::new(
+        container,
+        routecodex_v4_node_container::ExecutionEpochIdentity {
+            plan_epoch: 1,
+            manifest_hash: "manifest".into(),
+            execution_identity: "bridge-node".into(),
+        },
+    ).unwrap();
+    let lease = routecodex_v4_node_container::ActiveEpochStore::new(epoch).admit().unwrap();
+    struct EmptyRegistry;
+    impl HandleRegistry for EmptyRegistry {
+        fn get(&self, _plugin_id: &str) -> Option<&dyn routecodex_v4_cordis_bridge::PluginHandle> { None }
+    }
+    let outcome = ExecutionEngine::execute_pinned_node(
         "entry",
         NodeExecutionFrame::new(serde_json::json!({"answer": 1}), serde_json::json!({"route": "typed"})),
-        test_lease(),
+        lease,
+        &EmptyRegistry,
     ).unwrap();
-    assert_eq!(outcome, NodeOutcome::Terminal { response: serde_json::json!({"answer": 1}) });
-
-    let failure = routecodex_v4_runtime::ExecutionNode::native(
-        "native-failure",
-        Arc::new(TerminalPlugin { identity, outcome: Err(PluginFailure::Execution("boom".into())) }),
-        PluginContext::new("native-failure", "scope"),
-        PluginConfig::empty(),
-    );
-    assert!(matches!(ExecutionEngine::new(vec![failure]).execute(
-        "entry",
-        NodeExecutionFrame::new(serde_json::json!({}), serde_json::json!({"internal": true})),
-        test_lease(),
-    ).unwrap(), NodeOutcome::Failure { .. }));
+    assert_eq!(outcome, NodeOutcome::Continue { data: serde_json::json!({"answer": 1}), control: serde_json::json!({"route": "typed"}) });
 }
 
 #[test]

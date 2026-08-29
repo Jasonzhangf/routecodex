@@ -7,8 +7,7 @@
 //! edge, and `Terminal`/`Failure` close the request explicitly.
 
 use crate::RuntimeFault;
-use routecodex_v4_plugin_contract::{NativePlugin, PluginConfig, PluginContext, PluginFailure, PluginOutcome};
-use routecodex_v4_cordis_bridge::HandleRegistry;
+use routecodex_v4_cordis_bridge::{HandleRegistry, NodeExecutionInput};
 use routecodex_v4_node_container::{EpochLease, ExecutionEpochState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -142,38 +141,6 @@ impl ExecutionNode {
         &self.node_id
     }
 
-    /// Adapt the frozen NativePlugin ABI to the engine's typed outcome.  ABI
-    /// failures remain failure outcomes; they are never converted to success.
-    pub fn native(
-        node_id: impl Into<String>,
-        plugin: Arc<dyn NativePlugin>,
-        context: PluginContext,
-        config: PluginConfig,
-    ) -> Self {
-        Self::new(node_id, move |frame| {
-            match plugin.execute(&context, &config) {
-                Ok(PluginOutcome::Continue) => NodeOutcome::Continue {
-                    data: frame.data,
-                    control: frame.control,
-                },
-                Ok(PluginOutcome::Terminal) => NodeOutcome::Terminal { response: frame.data },
-                Err(failure) => NodeOutcome::Failure {
-                    error: native_failure_value(failure),
-                },
-            }
-        })
-    }
-}
-
-fn native_failure_value(failure: PluginFailure) -> Value {
-    match failure {
-        PluginFailure::InvalidContext(message) => {
-            serde_json::json!({"kind": "invalid_context", "message": message})
-        }
-        PluginFailure::Execution(message) => {
-            serde_json::json!({"kind": "execution", "message": message})
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,7 +216,7 @@ impl ExecutionEngine {
     pub fn execute(
         &self,
         entrypoint: &str,
-        mut frame: NodeExecutionFrame,
+        frame: NodeExecutionFrame,
         lease: EpochLease,
     ) -> Result<NodeOutcome, ExecutionError> {
         let snapshot = lease.snapshot();
@@ -338,7 +305,7 @@ impl ExecutionEngine {
         frame.validate()?;
         let output = lease
             .execute(
-                routecodex_v4_cordis_bridge::NodeExecutionInput {
+                NodeExecutionInput {
                     data: frame.data,
                     control: frame.control,
                 },
