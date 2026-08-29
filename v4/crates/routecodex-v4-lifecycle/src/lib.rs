@@ -4,7 +4,7 @@
 //! Stop and restart never scan ports or processes and never touch V3 state.
 
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{IsTerminal, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -323,20 +323,10 @@ pub fn start_managed(
         .arg(config_path)
         .current_dir("/")
         .stdin(Stdio::null())
-        .stdout(if std::io::stdout().is_terminal() {
-            // V3's top-level managed start keeps the child attached to the
-            // invoking shell. V4 previously redirected both streams to a
-            // file, so no live startup/request console was visible.
-            Stdio::inherit()
-        } else {
-            Stdio::from(open_log(paths)?)
-        })
-        .stderr(if std::io::stderr().is_terminal() {
-            Stdio::inherit()
-        } else {
-            let log = open_log(paths)?;
-            Stdio::from(log)
-        });
+        // Keep managed output attached to the invoking shell so request and
+        // response diagnostics remain observable in every supported terminal.
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
     append_spawn_options(&mut command, options);
     let mut child = command
         .spawn()
@@ -568,14 +558,6 @@ fn wait_until(timeout: Duration, condition: impl Fn() -> bool) -> Result<(), Lif
 
 fn create_dir(path: &Path) -> Result<(), LifecycleError> {
     fs::create_dir_all(path).map_err(|error| io_error(path, error))
-}
-
-fn open_log(paths: &V4LifecyclePaths) -> Result<File, LifecycleError> {
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&paths.log_path)
-        .map_err(|error| io_error(&paths.log_path, error))
 }
 
 fn io_error(path: &Path, error: impl std::fmt::Display) -> LifecycleError {
