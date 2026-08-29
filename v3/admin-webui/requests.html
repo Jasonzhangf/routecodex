@@ -43,8 +43,9 @@
     <div class="toolbar">
       <label>Status<select id="status-filter"><option value="all">all</option><option value="active">active</option><option value="retrying">retrying</option><option value="success">success</option><option value="error">error</option><option value="cancelled">cancelled</option></select></label>
       <label>Port<select id="port-filter"><option value="all">all ports</option></select></label>
-      <label>Provider<input id="provider-filter" type="search" placeholder="provider"></label>
+      <label>Provider<select id="provider-filter"><option value="all">all providers</option></select></label>
       <label>Model<select id="model-filter"><option value="all">all models</option></select></label>
+      <label>Endpoint<select id="endpoint-filter"><option value="all">all endpoints</option></select></label>
       <label>Route<input id="route-filter" type="search" placeholder="route"></label>
       <label>Protocol<select id="protocol-filter"><option value="all">all</option></select></label>
       <label>Mode<select id="mode-filter"><option value="all">all</option><option value="direct">direct</option><option value="relay">relay</option></select></label>
@@ -265,7 +266,7 @@
       entriesGroup: "pool",
       stats: {},
       timeseries: [],
-      facets: { ports: {}, providers: {}, models: {}, routes: {}, sessions: {}, response_types: {}, error_status_codes: {} },
+      facets: { ports: {}, providers: {}, models: {}, routes: {}, endpoints: {}, sessions: {}, response_types: {}, error_status_codes: {} },
       errorStatusCode: null,
       selected: null,
       tableWidths: { entries: null, attempts: null, errors: null },
@@ -469,10 +470,12 @@
         }
         const port = document.getElementById("port-filter").value;
         if (port !== "all") params.set("port", port);
-        const provider = document.getElementById("provider-filter").value.trim();
-        if (provider) params.set("provider", provider);
+        const provider = document.getElementById("provider-filter").value;
+        if (provider !== "all") params.set("provider", provider);
         const model = document.getElementById("model-filter").value;
         if (model !== "all") params.set("model", model);
+        const endpoint = document.getElementById("endpoint-filter").value;
+        if (endpoint !== "all") params.set("endpoint", endpoint);
         const route = document.getElementById("route-filter").value.trim();
         if (route) params.set("route", route);
         const protocol = document.getElementById("protocol-filter").value;
@@ -609,7 +612,9 @@
       }));
       portSelect.value = [...portSelect.options].some((option) => option.value === selected) ? selected : "all";
       populateFacetSelect("protocol-filter", state.facets.response_types || {});
+      populateFacetSelect("provider-filter", state.facets.providers || {}, "all providers");
       populateFacetSelect("model-filter", state.facets.models || {}, "all models");
+      populateFacetSelect("endpoint-filter", state.facets.endpoints || {}, "all endpoints");
     }
     function populateFacetSelect(id, facet, allLabel = "all") {
       const select = document.getElementById(id);
@@ -1093,7 +1098,7 @@
     ["chart-range","chart-metric"].forEach((id) => {
       document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });
     });
-    ["status-filter","port-filter","provider-filter","model-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
+    ["status-filter","port-filter","provider-filter","model-filter","endpoint-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
       const input = document.getElementById(id);
       let timer = null;
       input.addEventListener("input", () => {
