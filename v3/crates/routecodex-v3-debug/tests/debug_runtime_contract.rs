@@ -328,6 +328,19 @@ fn file_sink_writes_verbatim_json_and_sink_open_failure_is_explicit() {
 }
 
 #[test]
+fn node_events_are_log_only_while_human_lines_remain_console_owned() {
+    let source = include_str!("../src/lib.rs");
+    assert!(
+        !source.contains("println!(\"{line}\")"),
+        "node-event sink must not print raw debug JSON to console"
+    );
+    assert!(
+        source.contains("append_human_console_line"),
+        "human console output must retain its explicit owner"
+    );
+}
+
+#[test]
 fn file_sink_creates_parent_dirs_and_appends_human_console_lines() {
     let path =
         std::env::temp_dir().join(format!("routecodex-v3-debug-parent-{}", std::process::id()));
