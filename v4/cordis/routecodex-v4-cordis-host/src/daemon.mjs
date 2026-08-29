@@ -48,10 +48,17 @@ async function writeState(statePath, snapshot) {
 }
 
 async function readState(statePath) {
+  const contents = await fs.readFile(statePath, 'utf8').then(
+    (value) => value,
+    (error) => {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
+    },
+  );
+  if (contents === null) return undefined;
   try {
-    return validateSnapshot(JSON.parse(await fs.readFile(statePath, 'utf8')));
+    return validateSnapshot(JSON.parse(contents));
   } catch (error) {
-    if (error?.code === 'ENOENT') return undefined;
     if (error instanceof CordisHostDaemonError) throw error;
     throw new CordisHostDaemonError('state_invalid', `daemon state is invalid: ${error.message}`);
   }
@@ -80,12 +87,15 @@ export async function startCordisHostDaemon({
     throw new CordisHostDaemonError('protocol_error', 'capabilities must be non-empty strings');
   }
   await fs.mkdir(stateDirectory, { recursive: true });
-  try {
-    await fs.stat(socketPath);
+  const socketExists = await fs.stat(socketPath).then(
+    () => true,
+    (error) => {
+      if (error?.code === 'ENOENT') return false;
+      throw error;
+    },
+  );
+  if (socketExists) {
     throw new CordisHostDaemonError('already_running', `daemon socket already exists: ${socketPath}`);
-  } catch (error) {
-    if (error instanceof CordisHostDaemonError) throw error;
-    if (error.code !== 'ENOENT') throw error;
   }
 
   const statePath = path.join(stateDirectory, 'daemon.json');
