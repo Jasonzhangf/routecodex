@@ -259,16 +259,6 @@ targets = [
   { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 1, weight = 1 },
 ]
 
-[route_groups.responses_v3_7777.pools.anthropic_entry]
-selection = { strategy = "priority" }
-match = { precedence = 100, entry_protocol = "anthropic" }
-targets = [
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 2, weight = 1 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 3, weight = 1 },
-  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 4, weight = 1 },
-  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 5, weight = 1 },
-]
-
 # === 7777: Ox Alpha is explicit-model only while broad SSE compatibility is unstable ===
 [route_groups.responses_v3_7777.pools.ox_alpha_direct]
 selection = { strategy = "priority" }

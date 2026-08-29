@@ -241,7 +241,6 @@ current_5555_profile_audit:
     - minimax_anthropic
     - minimax_openai
   route_pools:
-    anthropic_entry: [glmrelay_anthropic.key1.glm-5.2, minimax_anthropic.key1.MiniMax-M3]
     default: [minimax_anthropic.key1.MiniMax-M3, minimax_openai.key1.MiniMax-M3]
     coding: [minimax_openai.key1.MiniMax-M3, minimax_anthropic.key1.MiniMax-M3, glmrelay_openai.key1.glm-5.2, glmrelay_openai.key1.deepseek-v4-pro]
     longcontext: [glmrelay_openai.key1.glm-5.2, minimax_openai.key1.MiniMax-M3, minimax_anthropic.key1.MiniMax-M3, glmrelay_openai.key1.deepseek-v4-pro]
