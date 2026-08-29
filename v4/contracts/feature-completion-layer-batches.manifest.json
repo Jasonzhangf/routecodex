@@ -304,7 +304,7 @@
     "owner": "v4.feature_completion.integration",
     "admission_command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
     "enforcement_binding_status": "bound",
-    "guard_commit": "dad06c406308ad26ecaba783294d039c7a1d8245",
+    "guard_commit": "e59bceaf44d226f9cad805020dfe941ac7955411",
     "guarded_surfaces": [
       {"path":"Cargo.toml","scope_hash":"sha256:5ce83c9e3837823b19aa44dfdc28948a0123973fcb5e853e385f42aff3add62e"},
       {"path":"scripts/build.mjs","scope_hash":"sha256:05aeafe77409e087d83bb02dfa4a4f154d68d2377a3857bff8b35d0bfd26976b"},
@@ -317,8 +317,14 @@
       {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:629b906d28b2f618b274ca98720bcd12442f1559a43b3bf9defcd6d164662433"},
       {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:af7e9c6f8da6f69da39fe831698c5aec799ba12414fa459f80cc18498c22a236"}
     ],
-    "wiring_started": false,
-    "wiring_edges": [],
+    "wiring_started": true,
+    "wiring_edges": [
+      "added:mainline:undefined:routecodex-v4-runtime-bin::handle_responses->routecodex-v4-runtime::SkeletonRuntime::execute_request_json_scoped:routecodex-v4-runtime::request_chat_process",
+      "added:mainline:undefined:routecodex-v4-runtime::ExecutionReport::provider_wire_value->routecodex-v4-runtime-bin::send_target_nonstream|send_target_streaming:routecodex-v4-runtime-bin::handle_responses",
+      "removed:mainline:undefined:routecodex-v4-runtime-bin::handle_responses->routecodex-v4-runtime::SkeletonRuntime::execute_request_json_scoped:routecodex-v4-runtime",
+      "removed:mainline:undefined:routecodex-v4-runtime::ExecutionReport::provider_wire_value->routecodex-v4-runtime-bin::send_target_nonstream|send_target_streaming:routecodex-v4-runtime-bin",
+      "surface:docs/architecture/maps/mainline-call-map.json:sha256:90f7be19e42308204748e9cdfbae0e4f2c6da67bde5be7dead3c0b229b32efca"
+    ],
     "resource_refs": {
       "merge_queue_state": ".appsdk/records/merge-queue-state.json",
       "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"
