@@ -202,7 +202,7 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
                     .as_ref()
                     .map(project_v3_runtime_observability_debug),
                 finalized_response: None,
-                provider_observation: None,
+                provider_observation: frame.stream_observation.clone(),
                 capture_client_response: true,
                 source: "live_server_direct_response_stream",
                 raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),

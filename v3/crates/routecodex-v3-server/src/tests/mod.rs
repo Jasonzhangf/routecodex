@@ -538,6 +538,18 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
         true,
     );
     let chunk = b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec();
+    let provider_observation = test_runtime_stream_observation_from_provider_event_json(json!({
+        "type": "response.output_text.delta",
+        "delta": "provider"
+    }));
+    provider_observation
+        .merge_snapshot(&routecodex_v3_runtime::V3RuntimeStreamObservationSnapshot {
+            provider_raw_sse:
+                "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\"}\n\n"
+                    .to_string(),
+            ..Default::default()
+        })
+        .unwrap();
     let frame = V3Server16HttpFrame {
         status: 200,
         content_type: "text/event-stream".to_string(),
@@ -548,7 +560,7 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
         error_body: None,
         node_trace: vec!["V3Server16HttpFrame"],
         observability: None,
-        stream_observation: None,
+        stream_observation: Some(provider_observation),
     };
     let recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
         Arc::clone(&state),
@@ -581,6 +593,13 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
     assert!(terminal["rawSse"]
         .as_str()
         .is_some_and(|value| value.contains("message_stop")));
+    let provider_response_path =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/terminal-only/provider-response.json");
+    let provider_response: Value =
+        serde_json::from_str(&fs::read_to_string(provider_response_path).unwrap()).unwrap();
+    assert!(provider_response["rawSse"]
+        .as_str()
+        .is_some_and(|value| value.contains("response.output_text.delta")));
 
     fs::remove_dir_all(root).unwrap();
 }
