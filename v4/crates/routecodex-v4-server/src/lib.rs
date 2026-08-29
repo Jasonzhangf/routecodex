@@ -17,6 +17,8 @@ use std::net::{TcpListener, TcpStream};
 use std::pin::Pin;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+const REQUEST_RECORD_SCHEMA_VERSION: u64 = 1;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener as TokioTcpListener, TcpStream as TokioTcpStream};
 use tokio_util::sync::CancellationToken;
@@ -93,6 +95,66 @@ impl HttpResponse {
 
 pub trait HttpHandler {
     fn handle(&mut self, request: HttpRequest) -> HttpResponse;
+}
+
+/// V3-compatible per-listener JSONL request record projection.
+/// Records are diagnostic side-channel data; request/response payloads never
+/// flow through this store.
+pub fn persist_request_record(request: &HttpRequest, status: u16) -> Result<(), String> {
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| "HOME is required for request record persistence".to_string())?;
+    let path = home
+        .join(".rcc/logs")
+        .join(format!("server-v4-{}.request-records.jsonl", request.port));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis() as u64;
+    let result = if (200..400).contains(&status) { "success" } else { "error" };
+    let row = serde_json::json!({
+        "request_key": format!("{}:{}", request.port, request.request_id),
+        "event_type": if result == "success" { "request.completed" } else { "request.failed" },
+        "started_epoch_ms": now,
+        "updated_epoch_ms": now,
+        "finished_epoch_ms": now,
+        "duration_ms": 0,
+        "meta": {
+            "request_id": request.request_id,
+            "endpoint": request.path,
+            "response_status": if result == "success" { "completed" } else { "error" },
+            "provider_status": status,
+            "finish_reason": if result == "success" { "stop" } else { "error" }
+        },
+        "scope": { "port": request.port, "session": request.server_id },
+        "result": result,
+        "attempts": 1,
+        "failed_attempts": if result == "success" { 0 } else { 1 },
+        "switches": 0,
+        "usage": null,
+        "timing_internal_ms": null,
+        "timing_external_ms": null,
+        "servertool": false,
+        "stopless": false,
+        "raw_artifact_ref": null
+    });
+    let envelope = serde_json::json!({
+        "schema_version": REQUEST_RECORD_SCHEMA_VERSION,
+        "row": row
+    });
+    let mut line = serde_json::to_vec(&envelope).map_err(|error| error.to_string())?;
+    line.push(b'\n');
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|error| error.to_string())?;
+    file.write_all(&line).map_err(|error| error.to_string())?;
+    file.flush().map_err(|error| error.to_string())
 }
 
 pub trait AsyncHttpHandler: Send + Sync + 'static {
@@ -461,8 +523,10 @@ fn serve_connection<H: HttpHandler>(
         port,
         ..request
     };
-    let response = handler.handle(request);
-    write_response(&mut stream, response)
+    let response = handler.handle(request.clone());
+    let status = response.status;
+    write_response(&mut stream, response)?;
+    persist_request_record(&request, status).map_err(ConnectionError::Request)
 }
 
 fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, ConnectionError> {
