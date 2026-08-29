@@ -241,7 +241,7 @@ fn v3_7777_fixture_preserves_all_route_pools_and_targets() {
         ]
     );
     assert_eq!(product.route_groups.len(), 1);
-    assert_eq!(product.route_groups[0].pools.len(), 10);
+    assert_eq!(product.route_groups[0].pools.len(), 9);
     assert_eq!(
         product.route_groups[0]
             .pools
@@ -249,7 +249,6 @@ fn v3_7777_fixture_preserves_all_route_pools_and_targets() {
             .map(|pool| pool.pool_id.as_str())
             .collect::<Vec<_>>(),
         vec![
-            "anthropic_entry",
             "coding",
             "default",
             "longcontext",
@@ -266,9 +265,9 @@ fn v3_7777_fixture_preserves_all_route_pools_and_targets() {
         .iter()
         .map(|pool| pool.targets.len())
         .sum();
-    assert_eq!(target_count, 43);
-    assert_eq!(product.route_groups[0].pools[0].pool_id, "anthropic_entry");
-    assert_eq!(product.route_groups[0].pools[0].precedence, Some(100));
+    assert_eq!(target_count, 39);
+    assert_eq!(product.route_groups[0].pools[0].pool_id, "coding");
+    assert_eq!(product.route_groups[0].pools[0].precedence, Some(3));
     let longcontext = product.route_groups[0]
         .pools
         .iter()

@@ -337,26 +337,6 @@ impl V3VirtualRouter {
                 }
             }
         }
-        // An entry-specific pool defines the protocol's replacement domain.
-        // Resolve it before generic capability pools so a route signal such as
-        // `tools` cannot move an Anthropic request onto a Responses pool.
-        if let Some(pool) = select_best_matching_pool(
-            &classified.routing_group_id,
-            &group.pools,
-            &classified.facts,
-            None,
-            |pool_id, rule| {
-                rule.entry_protocol.as_deref() == Some(classified.facts.entry_protocol.as_str())
-                    && !pool_has_route_signal(pool_id, rule)
-            },
-        )? {
-            append_route_pool_tier(
-                &classified.routing_group_id,
-                pool,
-                &mut selected_pool_ids,
-                &mut tiers,
-            )?;
-        }
         // candidates（请求意图）驱动能力池：web_search 优先级最高（gpt 这类
         // 原生 hosted web search），multimodal 次之——候选迭代 web_search 先于
         // multimodal；无显式池时构建隐式能力池（RoundRobin 轮询）。
