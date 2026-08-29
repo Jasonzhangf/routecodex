@@ -742,31 +742,30 @@ fn handle_responses(
                 if let Some(policy) =
                     apply_product_error_policy(product, &target.provider_id, stream.status(), "")
                 {
+                    let route_group = route_group_for_request(product, request).map_err(|error| {
+                        project_fault(request, error, 500)
+                    })?;
                     record_provider_failure(
                         availability,
                         request,
-                        product
-                            .route_groups
-                            .first()
-                            .map(|group| group.route_group_id.as_str()),
+                        Some(route_group.route_group_id.as_str()),
                         session_scope,
                         &target.provider_id,
                         policy.cooldown,
                         policy.failure_threshold,
                     )?;
                     if policy.retry {
-                        if let Some(group) = product.route_groups.first() {
-                            let mut excluded = unavailable_provider_ids.clone();
-                            excluded.push(target.provider_id.clone());
-                            if let Ok(candidate) = select_product_target_excluding(
-                                product,
-                                &group.route_group_id,
-                                model,
-                                entry_protocol,
-                                &[],
-                                0,
-                                &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
-                            ) {
+                        let mut excluded = unavailable_provider_ids.clone();
+                        excluded.push(target.provider_id.clone());
+                        if let Ok(candidate) = select_product_target_excluding(
+                            product,
+                            &route_group.route_group_id,
+                            model,
+                            entry_protocol,
+                            &[],
+                            0,
+                            &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
+                        ) {
                                 let retry_body = build_retry_wire(
                                     &candidate.protocol,
                                     &wire_body,
@@ -793,7 +792,6 @@ fn handle_responses(
                                         )
                                     },
                                 )?;
-                            }
                         }
                     }
                 }
@@ -884,31 +882,30 @@ fn handle_responses(
     let mut reselected = false;
     if let Some(product) = manifest.product.as_ref() {
         if let Some(policy) = matched_policy.as_ref() {
+            let route_group = route_group_for_request(product, request).map_err(|error| {
+                project_fault(request, error, 500)
+            })?;
             record_provider_failure(
                 availability,
                 request,
-                product
-                    .route_groups
-                    .first()
-                    .map(|group| group.route_group_id.as_str()),
+                Some(route_group.route_group_id.as_str()),
                 session_scope,
                 &target.provider_id,
                 policy.cooldown,
                 policy.failure_threshold,
             )?;
             if policy.retry {
-                if let Some(group) = product.route_groups.first() {
-                    let mut excluded = unavailable_provider_ids.clone();
-                    excluded.push(target.provider_id.clone());
-                    if let Ok(candidate) = select_product_target_excluding(
-                        product,
-                        &group.route_group_id,
-                        model,
-                        entry_protocol,
-                        &[],
-                        0,
-                        &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
-                    ) {
+                let mut excluded = unavailable_provider_ids.clone();
+                excluded.push(target.provider_id.clone());
+                if let Ok(candidate) = select_product_target_excluding(
+                    product,
+                    &route_group.route_group_id,
+                    model,
+                    entry_protocol,
+                    &[],
+                    0,
+                    &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
+                ) {
                         let retry_body = build_retry_wire(
                             &candidate.protocol,
                             &wire_body,
@@ -940,7 +937,6 @@ fn handle_responses(
                             raw.status,
                             &String::from_utf8_lossy(&raw.body),
                         );
-                    }
                 }
             }
         }
