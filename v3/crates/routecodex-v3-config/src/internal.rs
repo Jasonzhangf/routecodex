@@ -20,6 +20,7 @@ pub const INTERNAL_CONFIG_TOML: &str = include_str!("internal.toml");
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InternalConfig {
+    user_config_base_toml: String,
     #[serde(default)]
     model_families: BTreeMap<String, ModelFamily>,
     #[serde(default)]
@@ -32,6 +33,40 @@ struct InternalConfig {
     error_handling: ErrorHandling,
     #[serde(default)]
     observability: Observability,
+}
+
+pub fn v3_internal_user_config_authoring() -> crate::V3Config02AuthoringParsed {
+    static AUTHORING: LazyLock<crate::V3Config02AuthoringParsed> = LazyLock::new(|| {
+        let authoring = crate::parse_v3_config_02_authoring(&INTERNAL_CONFIG.user_config_base_toml)
+            .expect("internal.toml user_config_base_toml must be valid V3 Config02 authoring");
+        assert_eq!(authoring.version, 3);
+        assert!(
+            authoring.providers.is_empty(),
+            "internal user-config base must not contain provider truth"
+        );
+        assert!(
+            authoring.forwarders.is_empty(),
+            "internal user-config base must not contain provider forwarders"
+        );
+        for server in authoring.servers.values() {
+            let group = authoring
+                .route_groups
+                .get(&server.routing_group)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "internal user-config server references missing route group {}",
+                        server.routing_group
+                    )
+                });
+            assert!(
+                group.pools.contains_key("default"),
+                "internal user-config route group {} must contain default pool",
+                server.routing_group
+            );
+        }
+        authoring
+    });
+    AUTHORING.clone()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

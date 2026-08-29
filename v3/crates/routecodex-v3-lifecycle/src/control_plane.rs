@@ -42,7 +42,7 @@ pub(crate) async fn restart_managed_runtime_in_place(
     let declaration = &restart_plan.declaration;
     write_status(
         instance_dir,
-        &declaration.instance_id,
+        &restart_plan.control_instance_id,
         V3ManagedRunState::Starting,
         Some("exec restart accepted".to_string()),
     )?;
@@ -55,7 +55,9 @@ pub(crate) async fn restart_managed_runtime_in_place(
         &instance_dir.join(PROVIDER_HANDOFF_FILE),
         &provider_checkpoints,
     )?;
-    write_json_atomic(&instance_dir.join("instance.json"), declaration)?;
+    if restart_plan.control_instance_id == declaration.instance_id {
+        write_json_atomic(&instance_dir.join("instance.json"), declaration)?;
+    }
     let _ = fs::remove_file(instance_dir.join("control.json"));
     let _ = fs::remove_file(socket_path);
     let mut command = Command::new(&restart_plan.executable_path);
@@ -81,7 +83,7 @@ pub(crate) async fn restart_managed_runtime_in_place(
     let error = command.exec();
     let _ = write_status(
         instance_dir,
-        &declaration.instance_id,
+        &restart_plan.control_instance_id,
         V3ManagedRunState::Failed,
         Some(format!("exec restart failed: {error}")),
     );
@@ -128,14 +130,18 @@ pub(crate) async fn send_control_with_ports(
 
 pub(crate) async fn send_restart_control(
     instance_dir: &Path,
-    declaration: &V3ManagedInstanceDeclaration,
+    control_declaration: &V3ManagedInstanceDeclaration,
+    target_declaration: &V3ManagedInstanceDeclaration,
     snapshots: bool,
     snapshot_direct: bool,
     snapshot_stages: Option<String>,
     sse_dump: bool,
 ) -> Result<ControlResponse, V3LifecycleError> {
     let published: V3ManagedInstanceDeclaration = read_json(&instance_dir.join("instance.json"))?;
-    let needs_restart_plan = published.executable_path != declaration.executable_path
+    let target_change =
+        !same_instance_declaration_except_executable_path(&published, target_declaration);
+    let needs_restart_plan = published.executable_path != target_declaration.executable_path
+        || target_change
         || snapshots
         || snapshot_direct
         || snapshot_stages
@@ -148,9 +154,10 @@ pub(crate) async fn send_restart_control(
             &instance_dir.join(RESTART_PLAN_FILE),
             &V3ManagedRestartPlanRecord {
                 schema_version: SCHEMA_VERSION,
-                instance_id: declaration.instance_id.clone(),
+                instance_id: control_declaration.instance_id.clone(),
                 start_nonce: control.start_nonce.clone(),
-                executable_path: declaration.executable_path.clone(),
+                executable_path: target_declaration.executable_path.clone(),
+                target_declaration: target_change.then(|| target_declaration.clone()),
                 snapshots,
                 snapshot_direct,
                 snapshot_stages,
@@ -162,11 +169,19 @@ pub(crate) async fn send_restart_control(
     }
     tokio::time::timeout(
         CONTROL_TIMEOUT,
-        send_control_without_timeout(instance_dir, declaration, ControlOperation::Restart, None),
+        send_control_without_timeout(
+            instance_dir,
+            control_declaration,
+            ControlOperation::Restart,
+            None,
+        ),
     )
     .await
     .map_err(|_| {
-        V3LifecycleError::Timeout(format!("control challenge {}", declaration.instance_id))
+        V3LifecycleError::Timeout(format!(
+            "control challenge {}",
+            control_declaration.instance_id
+        ))
     })?
 }
 

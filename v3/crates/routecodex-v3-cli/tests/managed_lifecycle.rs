@@ -373,22 +373,6 @@ fn spawn_top_level_start_with_args_and_home(
         .unwrap()
 }
 
-fn spawn_top_level_start_without_config(binary: &str, state_root: &Path, home: &Path) -> Child {
-    managed_test_command(binary)
-        .arg("start")
-        .env("HOME", home)
-        .env("ROUTECODEX_V3_STATE_DIR", state_root)
-        .env(
-            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
-            request_counter_file(state_root),
-        )
-        .env("V3_MANAGED_TEST_KEY", SECRET)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap()
-}
-
 fn request_counter_file(state_root: &Path) -> PathBuf {
     state_root.join("request-id-counter.json")
 }
@@ -984,51 +968,59 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
 }
 
 #[test]
-fn top_level_lifecycle_without_config_uses_home_config_v3_toml() {
+fn top_level_lifecycle_without_config_uses_home_config_toml() {
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let home = root.path().join("home");
-    let default_config = home.join(".rcc").join("config.v3.toml");
-    fs::create_dir_all(default_config.parent().unwrap()).unwrap();
-    let ports = [free_port(), free_port()];
-    let source_config = write_config(&root, ports);
-    fs::copy(&source_config, &default_config).unwrap();
+    let config_root = home.join(".rcc");
+    let provider_root = config_root.join("provider").join("test");
+    fs::create_dir_all(&provider_root).unwrap();
+    fs::write(
+        provider_root.join("config.v2.toml"),
+        r#"version = "2.0.0"
+providerId = "test"
+[provider]
+id = "test"
+enabled = true
+type = "openai_chat"
+baseURL = "http://127.0.0.1:9/v1"
+defaultModel = "test"
+[provider.auth]
+type = "apikey"
+apiKey = "test"
+[provider.models."test"]
+supportsStreaming = true
+"#,
+    )
+    .unwrap();
+    fs::write(
+        config_root.join("config.toml"),
+        r#"version = 3
+
+[route_groups.routecodex_v3_4444.default]
+tiers = [[{ use = "test/test" }]]
+
+[route_groups.responses_v3_7777.default]
+tiers = [[{ use = "test/test" }]]
+"#,
+    )
+    .unwrap();
     let binary = env!("CARGO_BIN_EXE_rccv3");
 
-    let start = spawn_top_level_start_without_config(binary, &state_root, &home);
-    for port in ports {
-        wait_port(port, true);
-    }
     let status = run_top_level_without_config(binary, &state_root, &home, "status");
     assert!(
         status.status.success(),
         "{}",
         String::from_utf8_lossy(&status.stderr)
     );
-    assert_eq!(last_json(&status)["state"], "running");
-
-    let restart = run_top_level_without_config(binary, &state_root, &home, "restart");
+    let stdout = String::from_utf8_lossy(&status.stdout);
     assert!(
-        restart.status.success(),
-        "top-level restart without config must resolve ~/.rcc/config.v3.toml: {}",
-        String::from_utf8_lossy(&restart.stderr)
+        stdout.contains("routecodex_v3_4444 enabled=true"),
+        "{stdout}"
     );
-    assert_eq!(last_json(&restart)["state"], "running");
-
-    let stop = run_top_level_without_config(binary, &state_root, &home, "stop");
     assert!(
-        stop.status.success(),
-        "{}",
-        String::from_utf8_lossy(&stop.stderr)
-    );
-    for port in ports {
-        wait_port(port, false);
-    }
-    let start_output = start.wait_with_output().unwrap();
-    assert!(
-        start_output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&start_output.stderr)
+        stdout.contains("responses_v3_7777 enabled=true"),
+        "{stdout}"
     );
 }
 

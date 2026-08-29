@@ -1,6 +1,8 @@
 #![cfg_attr(test, allow(unused_variables, clippy::zombie_processes))]
 
-use routecodex_v3_config::{V3AdminWebuiManifest, V3Config05ManifestPublished, V3ConfigStore};
+use routecodex_v3_config::{
+    load_v3_config_snapshot_from_path, V3AdminWebuiManifest, V3Config05ManifestPublished,
+};
 use routecodex_v3_server::{spawn_v3_server_aggregate_with_admin, V3ServerAggregateHandle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -172,6 +174,8 @@ struct V3ManagedRestartPlanRecord {
     instance_id: String,
     start_nonce: String,
     executable_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_declaration: Option<V3ManagedInstanceDeclaration>,
     snapshots: bool,
     #[serde(default, skip_serializing_if = "bool_is_false")]
     snapshot_direct: bool,
@@ -186,6 +190,7 @@ fn bool_is_false(value: &bool) -> bool {
 
 #[derive(Debug, Clone)]
 struct ControlRestartPlan {
+    control_instance_id: String,
     declaration: V3ManagedInstanceDeclaration,
     executable_path: PathBuf,
     snapshots: bool,
@@ -293,8 +298,7 @@ impl V3ManagedLifecycle {
         &self,
         executable_path: impl AsRef<Path>,
     ) -> Result<(V3ManagedInstanceDeclaration, V3Config05ManifestPublished), V3LifecycleError> {
-        let snapshot =
-            V3ConfigStore::new(&self.config_path).load_snapshot_with_source_identity()?;
+        let snapshot = load_v3_config_snapshot_from_path(&self.config_path)?;
         let config_path = snapshot.canonical_path;
         let admin_webui = snapshot.admin_webui;
         let executable_path = fs::canonicalize(executable_path)?;
@@ -671,7 +675,7 @@ impl V3ManagedLifecycle {
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
         let _lock = acquire_operation_lock(&instance_dir, "restart")?;
-        let (control_instance_dir, mut control_declaration, _previous_owner_lock) =
+        let (control_instance_dir, control_declaration, _previous_owner_lock) =
             if instance_has_control_truth(&instance_dir) {
                 (instance_dir.clone(), declaration.clone(), None)
             } else {
@@ -690,7 +694,6 @@ impl V3ManagedLifecycle {
                     Some(previous_owner_lock),
                 )
             };
-        control_declaration.executable_path = declaration.executable_path.clone();
         observe(V3ManagedLifecycleObservation::RestartTargetResolved {
             instance_id: declaration.instance_id.clone(),
             control_instance_id: control_declaration.instance_id.clone(),
@@ -700,6 +703,7 @@ impl V3ManagedLifecycle {
         let response = match send_restart_control(
             &control_instance_dir,
             &control_declaration,
+            &declaration,
             self.force_snapshots,
             self.force_snapshot_direct,
             self.force_snapshot_stages.clone(),
@@ -1189,11 +1193,19 @@ fn control_restart_plan(
     let executable_path = fs::canonicalize(executable_path).map_err(|error| {
         format!("restart executable path is not a readable executable: {error}")
     })?;
-    let mut declaration = current.clone();
+    let mut declaration = record
+        .as_ref()
+        .and_then(|record| record.target_declaration.clone())
+        .unwrap_or_else(|| current.clone());
     declaration.executable_path = executable_path.display().to_string();
-    if !same_instance_declaration_except_executable_path(current, &declaration) {
+    let valid_declaration = if declaration.instance_id == current.instance_id {
+        same_instance_declaration_except_executable_path(current, &declaration)
+    } else {
+        previous_owner_matches_restart_declaration(current, &declaration)
+    };
+    if !valid_declaration {
         return Err(
-            "restart executable request changed fields outside executable provenance".to_string(),
+            "restart target declaration does not match the current managed owner".to_string(),
         );
     }
     let snapshot_stages = record
@@ -1205,6 +1217,7 @@ fn control_restart_plan(
     let snapshot_direct = record.as_ref().is_some_and(|record| record.snapshot_direct);
     let sse_dump = record.as_ref().is_some_and(|record| record.sse_dump);
     Ok(Some(ControlRestartPlan {
+        control_instance_id: current.instance_id.clone(),
         declaration,
         executable_path,
         snapshots: snapshots || snapshot_stages.is_some(),

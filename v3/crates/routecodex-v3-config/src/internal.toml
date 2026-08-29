@@ -7,6 +7,174 @@
 #   配置校验面（validate）只消费本文件的判定结果，禁止内联具体模型名。
 # - 修改本文件即修改 RouteCodex 内部行为（属发布级变更）。
 
+# 用户 config.toml 之外的产品拓扑与策略。它先解析为既有
+# V3Config02AuthoringParsed；用户路由选择只替换 pool targets，随后仍进入唯一
+# Config03-05 编译链。这里禁止 provider/auth/model 真相。
+user_config_base_toml = '''
+version = 3
+
+[pipelines.hub_v1]
+skeleton = "hub_v1"
+
+[features]
+tool_thinking = false
+toolreason_client_projection = false
+responses_direct_stopless_center = false
+responses_direct = true
+debug_events = true
+strip_client_response_id = true
+responses_continuation_disabled = true
+
+[error]
+provider_error_default_path = [
+  { step = "wait_retry", retry_mode = "retry_same", max_attempts = 3, backoff_ms = 0 },
+  { step = "cooldown", scope = "provider_model", duration_ms = 900000, provider_global_failure = false },
+  { step = "project", status = 503, reason_code = "provider_failure", message_mode = "code_only" },
+]
+
+[[error.provider_error_action_policy]]
+policy_id = "account_http_401_two_errors"
+match = { http_status = 401 }
+path = [
+  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 2, backoff_ms = 1000 },
+  { step = "cooldown", scope = "auth_key", duration_ms = 3600000 },
+  { step = "project", status = 502, reason_code = "provider_account_http_401", message_mode = "code_only" },
+]
+
+[[error.provider_error_action_policy]]
+policy_id = "account_http_403_two_errors"
+match = { http_status = 403 }
+path = [
+  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 2, backoff_ms = 1000 },
+  { step = "cooldown", scope = "auth_key", duration_ms = 3600000 },
+  { step = "project", status = 502, reason_code = "provider_account_http_403", message_mode = "code_only" },
+]
+
+[[error.provider_error_action_policy]]
+policy_id = "glmrelay_openai_cpu_overloaded_200"
+scope = { provider_id = "glmrelay_openai" }
+match = { http_status = 200, content_contains_any = ["system cpu overloaded"] }
+path = [
+  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 2, backoff_ms = 1000 },
+  { step = "project", status = 502, reason_code = "provider_system_cpu_overloaded", public_code = "upstream_overloaded", message_mode = "code_only" },
+]
+
+[[error.provider_error_action_policy]]
+policy_id = "glmrelay_openai_invalid_field_type_200"
+scope = { provider_id = "glmrelay_openai" }
+match = { http_status = 200, content_contains_any = ["Type invalid, should be set"] }
+path = [
+  { step = "project", status = 400, reason_code = "provider_invalid_field_type", public_code = "provider_invalid_field_type", message_mode = "code_only" },
+]
+
+[route_groups.routecodex_v3_4444]
+compact_route_object = "compact-default"
+route_policies = [
+  { id = "compact-purpose", precedence = 10, condition = { kind = "current_compaction" }, action = { select_route_pool = "compact" } },
+]
+
+[route_groups.routecodex_v3_4444.pools.default]
+targets = []
+
+[route_groups.routecodex_v3_4444.pools.compact]
+route_object = "compact-default"
+match = { precedence = 10, entry_protocol = "responses" }
+targets = []
+
+[route_groups.routecodex_v3_4444.pools.multimodal]
+match = { precedence = 0, required_capabilities = ["multimodal"] }
+targets = []
+
+[route_groups.routecodex_v3_4444.pools.web_search]
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = []
+
+[route_groups.routecodex_v3_4444.pools.search]
+match = { precedence = 21, entry_protocol = "responses" }
+targets = []
+
+[route_groups.routecodex_v3_4444.pools.thinking]
+match = { precedence = 2, entry_protocol = "responses" }
+targets = []
+
+[route_groups.routecodex_v3_4444.pools.coding]
+match = { precedence = 3, entry_protocol = "responses" }
+targets = []
+
+[route_groups.routecodex_v3_4444.pools.tools]
+match = { precedence = 30, required_capabilities = ["tools"] }
+targets = []
+
+[route_groups.routecodex_v3_4444.pools.longcontext]
+match = { precedence = 1, min_input_tokens = 180000 }
+targets = []
+
+[route_groups.responses_v3_7777.pools.thinking]
+match = { precedence = 2, required_capabilities = ["thinking"] }
+targets = []
+
+[route_groups.responses_v3_7777.pools.coding]
+match = { precedence = 3, required_capabilities = ["coding"] }
+targets = []
+
+[route_groups.responses_v3_7777.pools.search]
+match = { precedence = 21, required_capabilities = ["web_search"] }
+targets = []
+
+[route_groups.responses_v3_7777.pools.tools]
+match = { precedence = 30, required_capabilities = ["tools"] }
+targets = []
+
+[route_groups.responses_v3_7777.pools.multimodal]
+match = { precedence = 0, required_capabilities = ["multimodal"] }
+targets = []
+
+[route_groups.responses_v3_7777.pools.longcontext]
+match = { precedence = 1, min_input_tokens = 180000 }
+targets = []
+
+[route_groups.responses_v3_7777.pools.default]
+targets = []
+
+[debug]
+log_console = true
+log_file = "logs/server-v3-7777.log"
+snapshots = true
+dry_run = true
+retention = { raw_requests = 16, raw_responses = 16, events = 256 }
+
+[servers.routecodex_v3_4444]
+bind = "0.0.0.0"
+port = 4444
+routing_group = "routecodex_v3_4444"
+expose_models = ["gpt-5.5"]
+features = { tool_thinking = true, toolreason_client_projection = true }
+
+[servers.routecodex_v3_4444.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[servers.responses_v3_7777]
+bind = "0.0.0.0"
+port = 7777
+routing_group = "responses_v3_7777"
+expose_models = ["gpt-5.5"]
+features = { tool_thinking = false, toolreason_client_projection = false }
+
+[servers.responses_v3_7777.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[admin_webui]
+enabled = true
+bind = "127.0.0.1"
+port = 8777
+'''
+
 # 模型家族判定表：key 是家族名（内部标识），消费方只调用具名判定函数，
 # 不感知家族名与匹配规则。
 [model_families]

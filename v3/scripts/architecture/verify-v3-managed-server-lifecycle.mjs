@@ -35,7 +35,7 @@ const configTests = read('v3/crates/routecodex-v3-config/tests/config_v3_contrac
 const cliFoundationTests = read('v3/crates/routecodex-v3-cli/tests/foundation_cli.rs');
 const cliManagedTests = read('v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs');
 const workspace = read('v3/Cargo.toml');
-const packageJson = read('package.json');
+const packageJson = `${read('package.json')}\n${read('v3/package.json')}`;
 const resourceMap = read('docs/architecture/v3-resource-operation-map.yml');
 const functionMap = read('docs/architecture/v3-function-map.yml');
 const mainline = read('docs/architecture/v3-mainline-call-map.yml');
@@ -51,6 +51,9 @@ for (const symbol of [
   'release_listener_set_for_start', 'signal_explicit_listener_pids', 'fn explicit_listener_pids_for_ports(',
   'spawn_v3_server_aggregate', 'handle.shutdown().await', 'serde(deny_unknown_fields)',
   'V3ManagedRestartPlanRecord', 'RESTART_PLAN_FILE', 'control_restart_plan',
+  'target_declaration: Option<V3ManagedInstanceDeclaration>',
+  'restart_plan_projects_a_validated_config_path_change_and_rejects_listener_drift',
+  'restart_matches_live_previous_owner_when_config_path_changes_for_the_same_listener_set',
   'fn control_release_ports(', 'fn release_foreign_managed_listener_ports_for_start(',
   'fn guard_explicit_listener_pids_are_scoped_to_target_ports(', 'fn occupied_listener_ports(',
   'fn listening_ports_for_pid(',
@@ -70,7 +73,9 @@ for (const symbol of [
 ]) requireText(lifecycle, symbol, 'lifecycle source');
 if ((lifecycle.match(/#\[serde\(deny_unknown_fields\)\]/g) || []).length < 8)
   throw new Error('lifecycle state/control schemas must all deny unknown fields');
-requireText(lifecycle, 'load_snapshot_with_source_identity', 'lifecycle source');
+requireText(lifecycle, 'let snapshot = load_v3_config_snapshot_from_path(&self.config_path)?;', 'lifecycle Config-owned snapshot loader');
+if (lifecycle.includes('V3ConfigStore'))
+  throw new Error('lifecycle must not re-read authoring config through V3ConfigStore');
 requireText(lifecycle, 'release_listener_set_for_start(&self.state_root, &instance_dir, &declaration).await?;', 'lifecycle start takeover call');
 requireCount(lifecycle, 'release_listener_set_for_start(&self.state_root, &instance_dir, &declaration).await?;', 2, 'lifecycle start takeover calls');
 requireText(configStore, 'pub struct V3ConfigLoadedSnapshot', 'config store source identity owner');
@@ -80,7 +85,7 @@ requireText(configLib, 'V3ConfigLoadedSnapshot', 'config lib export');
 requireText(configTests, 'config_source_identity_is_stable_sensitive_and_secret_free', 'config source identity test');
 requireText(cliManagedTests, 'managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes', 'managed CLI persistence test');
 requireText(cliManagedTests, 'top_level_start_status_restart_stop_match_legacy_cli_shape', 'managed CLI top-level lifecycle compatibility test');
-requireText(cliManagedTests, 'top_level_lifecycle_without_config_uses_home_config_v3_toml', 'managed CLI default config test');
+requireText(cliManagedTests, 'top_level_lifecycle_without_config_uses_home_config_toml', 'managed CLI default config test');
 requireText(cliManagedTests, 'top_level_start_snap_forces_debug_snapshots', 'managed CLI snap override test');
 requireText(cliManagedTests, 'start_force_kills_explicit_listener_pid_after_graceful_timeout', 'managed CLI explicit PID takeover test');
 requireText(cliManagedTests, 'config log_console=false', 'managed CLI foreground console test');
