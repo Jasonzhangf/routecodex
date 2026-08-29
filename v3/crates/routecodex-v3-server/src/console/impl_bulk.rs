@@ -101,10 +101,9 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
             let content = format_v3_console_timed_content(
                 "[provider-recovered]",
                 &format!(
-                    "req={} provider={} reason=cooldown_expired nextProbeAtMs={}",
-                    context.request_identity.request_id,
+                    "{} next probe at {}",
                     format_v3_console_provider_target(observability),
-                    next_probe_at_ms
+                    format_v3_console_probe_time(next_probe_at_ms)
                 ),
             );
             let human_prefix = format_v3_console_human_prefix_for_observability(
@@ -123,6 +122,23 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
             eprintln!("{line}");
         }
     }
+}
+
+fn format_v3_console_probe_time(epoch_ms: u64) -> String {
+    let seconds = (epoch_ms / 1000) as libc::time_t;
+    let millis = epoch_ms % 1000;
+    let timestamp = format_v3_tm(seconds, false)
+        .expect("V3 cooldown observation probe deadline must be formatable");
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        timestamp.year,
+        timestamp.month,
+        timestamp.day,
+        timestamp.hour,
+        timestamp.minute,
+        timestamp.second,
+        millis
+    )
 }
 
 pub(crate) fn build_v3_route_selection_event_sink(

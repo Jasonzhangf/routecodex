@@ -2113,9 +2113,20 @@ fn cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_line
         1,
         "cooldown recovery must be logged once when the provider is selected again: {log}"
     );
+    let recovery_line = log
+        .lines()
+        .find(|line| line.contains("[provider-recovered]"))
+        .expect("cooldown recovery line must be present");
     assert!(
-        log.contains("nextProbeAtMs=900000"),
-        "cooldown recovery must expose the next probe deadline: {log}"
+        recovery_line.contains("first[key].gpt-5.5 next probe at ")
+            && recovery_line.contains("1970-01-01T00:15:00.000Z"),
+        "cooldown recovery must expose only the formatted provider and probe time: {recovery_line}"
+    );
+    assert!(
+        !recovery_line.contains("req=")
+            && !recovery_line.contains("reason=cooldown_expired")
+            && !recovery_line.contains("nextProbeAtMs="),
+        "cooldown recovery must not expose diagnostic labels: {recovery_line}"
     );
     assert!(
         !log.contains("provider-filtered") && !log.contains("provider-unavailable"),
