@@ -2382,11 +2382,24 @@ pub(crate) fn record_v3_toolreason_observation_at_resp03(
         stage: "resp03_json".to_string(),
         session_id: session_id.map(str::to_string),
         request_id: request_id.map(str::to_string),
-        tool,
+        tool: tool.clone(),
         reason: fields.as_ref().map(|value| value.reason.clone()),
         confidence: fields.as_ref().and_then(|value| value.goal_alignment_confidence),
         model_id: fields.as_ref().and_then(|value| value.model_id.clone()),
-    })
+    })?;
+    let mut emitted = false;
+    emit_v3_toolreason_observation_at_resp03_with_expected_model(
+        &tool,
+        Some(&raw),
+        "resp03_json",
+        &mut emitted,
+        V3ToolreasonObservationContext {
+            session_id,
+            request_id,
+        },
+        expected_model_id,
+    );
+    Ok(())
 }
 
 fn first_v3_tool_thinking_object_at_resp03(value: &Value) -> Option<(String, String)> {

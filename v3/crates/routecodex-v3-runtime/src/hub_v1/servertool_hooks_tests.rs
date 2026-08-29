@@ -36,6 +36,35 @@ fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
 }
 
 #[test]
+fn req04_tool_thinking_keeps_apply_patch_raw_and_outside_reason_contract() {
+    let mut payload = json!({
+        "tools": [{
+            "type":"custom",
+            "name":"apply_patch",
+            "description":"Apply one raw patch string",
+            "format":{"type":"grammar","syntax":"lark","definition":"start: patch"}
+        }, {
+            "type":"function",
+            "name":"pwd",
+            "description":"Show the current directory",
+            "parameters":{"type":"object","properties":{}}
+        }]
+    });
+
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject");
+
+    let apply_patch = &payload["tools"][0];
+    assert_eq!(apply_patch["type"], "custom");
+    assert_eq!(apply_patch["name"], "apply_patch");
+    assert!(!apply_patch.to_string().contains("\"reason\""));
+    assert!(!apply_patch.to_string().contains("工具调用协议（只适用于本轮工具调用"));
+
+    let pwd = &payload["tools"][1];
+    assert!(pwd.to_string().contains("工具调用协议（只适用于本轮工具调用"));
+}
+
+#[test]
 fn responses_tool_output_continuation_is_not_a_new_tool_thinking_user_turn() {
     let payload = json!({
         "previous_response_id": "resp_previous",
@@ -375,7 +404,7 @@ fn req04_tool_thinking_custom_tool_compiles_provider_wrapper() {
     let mut payload = json!({
         "tools": [{
             "type": "custom",
-            "name": "apply_patch",
+            "name": "custom_text_tool",
             "description": "raw patch",
             "format": {"type":"text"}
         }]
@@ -383,7 +412,7 @@ fn req04_tool_thinking_custom_tool_compiles_provider_wrapper() {
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("custom tool guidance must inject");
     assert_eq!(payload["tools"][0]["type"], "function");
-    assert_eq!(payload["tools"][0]["function"]["name"], "apply_patch");
+    assert_eq!(payload["tools"][0]["function"]["name"], "custom_text_tool");
     let parameters = &payload["tools"][0]["function"]["parameters"];
     assert_eq!(parameters["properties"]["input"]["type"], "string");
     assert_eq!(parameters["properties"]["reason"]["type"], "string");
