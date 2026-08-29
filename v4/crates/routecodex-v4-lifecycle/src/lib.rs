@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{IsTerminal, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
@@ -298,7 +297,11 @@ pub fn start_managed(
     if paths.record_path.exists() {
         match status_managed(paths)? {
             ManagedStatus { state, record: Some(record) } if state == "running" => {
-                return request_restart(paths, &record.manifest_digest, timeout);
+                let restarted = request_restart(paths, &record.manifest_digest, timeout)?;
+                if std::io::stdout().is_terminal() {
+                    wait_for_attached_instance(paths)?;
+                }
+                return Ok(restarted);
             }
             ManagedStatus { state, record: Some(_) } if state == "stale" => {
                 repair_stale(paths)?;
@@ -334,18 +337,24 @@ pub fn start_managed(
             Stdio::from(log)
         });
     append_spawn_options(&mut command, options);
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
     let mut child = command
         .spawn()
         .map_err(|error| io_error(executable, error))?;
-    wait_child_ready(paths, &mut child, timeout)
+    let record = wait_child_ready(paths, &mut child, timeout)?;
+    if std::io::stdout().is_terminal() {
+        wait_for_attached_instance(paths)?;
+    }
+    Ok(record)
+}
+
+fn wait_for_attached_instance(paths: &V4LifecyclePaths) -> Result<(), LifecycleError> {
+    loop {
+        match status_managed(paths) {
+            Ok(status) if status.state == "running" => thread::sleep(Duration::from_millis(100)),
+            Ok(_) => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 pub fn request_stop(paths: &V4LifecyclePaths, timeout: Duration) -> Result<(), LifecycleError> {
