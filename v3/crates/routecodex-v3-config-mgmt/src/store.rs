@@ -2,7 +2,10 @@
 // Config Core 的落盘编排：读取 authoring、编译校验、原子替换、备份与修订记录。
 // 原子写复用 routecodex-v3-config 的 V3ConfigStore（tmp + rename）；
 // 本模块只追加备份与 revision 管理，不重复实现配置语义。
-use routecodex_v3_config::{V3Config02AuthoringParsed, V3Config05ManifestPublished, V3ConfigStore};
+use routecodex_v3_config::{
+    generate_v3_user_config_02_routing, V3Config02AuthoringParsed, V3Config05ManifestPublished,
+    V3ConfigStore, V3UserConfig02RoutingSelectionParsed, V3UserConfigStore,
+};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -164,7 +167,59 @@ impl ConfigMgmtStore {
 
     /// 读取当前 authoring（含 provider 目录解析）。
     pub fn read_authoring(&self) -> Result<V3Config02AuthoringParsed, V3ConfigMgmtError> {
+        if is_user_config_path(&self.config_path) {
+            return Ok(V3UserConfigStore::new(&self.config_path).read_authoring()?);
+        }
         Ok(V3ConfigStore::new(&self.config_path).read_authoring()?)
+    }
+
+    pub fn read_user_routing(
+        &self,
+    ) -> Result<V3UserConfig02RoutingSelectionParsed, V3ConfigMgmtError> {
+        require_user_config_path(&self.config_path)?;
+        Ok(V3UserConfigStore::new(&self.config_path).read_routing_selection()?)
+    }
+
+    pub fn validate_user_routing(
+        &self,
+        selection: V3UserConfig02RoutingSelectionParsed,
+    ) -> Result<V3Config05ManifestPublished, V3ConfigMgmtError> {
+        require_user_config_path(&self.config_path)?;
+        Ok(V3UserConfigStore::new(&self.config_path).validate_routing_selection(selection)?)
+    }
+
+    pub fn commit_user_routing_with_backup(
+        &self,
+        selection: &V3UserConfig02RoutingSelectionParsed,
+        action: &str,
+        reason: &str,
+    ) -> Result<CommitOutcome, V3ConfigMgmtError> {
+        self.validate_user_routing(selection.clone())?;
+        let serialized = generate_v3_user_config_02_routing(selection)?;
+        let source_sha256 = match std::fs::read(&self.config_path) {
+            Ok(raw) => format!("{:x}", Sha256::digest(raw)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => "absent".to_string(),
+            Err(error) => return Err(V3ConfigMgmtError::Io(error.to_string())),
+        };
+        let backup = if self.config_path.exists() {
+            Some(backup_file(&self.config_path, reason)?)
+        } else {
+            None
+        };
+        let temp_path = self
+            .config_path
+            .with_extension(format!("toml.tmp-{}", std::process::id()));
+        std::fs::write(&temp_path, serialized)?;
+        std::fs::rename(&temp_path, &self.config_path)?;
+        let revision = self.revision_store.append(
+            action,
+            "config.toml",
+            reason,
+            backup.as_deref(),
+            &source_sha256,
+            "committed",
+        )?;
+        Ok(CommitOutcome { backup, revision })
     }
 
     /// 编译校验（authoring -> manifest），失败显式返回，不做任何落盘。
@@ -217,5 +272,20 @@ impl ConfigMgmtStore {
             "committed",
         )?;
         Ok(CommitOutcome { backup, revision })
+    }
+}
+
+fn is_user_config_path(path: &Path) -> bool {
+    path.file_name().and_then(|name| name.to_str()) == Some("config.toml")
+}
+
+fn require_user_config_path(path: &Path) -> Result<(), V3ConfigMgmtError> {
+    if is_user_config_path(path) {
+        Ok(())
+    } else {
+        Err(V3ConfigMgmtError::Config(format!(
+            "user routing store requires config.toml, got {}",
+            path.display()
+        )))
     }
 }

@@ -1146,8 +1146,7 @@ contextTokenEstimateScaleBps = 17000
             "V2→V3 end-to-end: timeout=900_000 must land in request_timeout_ms (was silently dropped)"
         );
         assert_eq!(
-            authoring.models["model"].context_token_estimate_scale_bps,
-            17_000,
+            authoring.models["model"].context_token_estimate_scale_bps, 17_000,
             "V2→V3 end-to-end: provider model context scale must not be dropped"
         );
         std::fs::remove_dir_all(&tmp).ok();

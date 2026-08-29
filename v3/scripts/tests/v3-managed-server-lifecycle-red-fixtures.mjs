@@ -23,6 +23,7 @@ const files = [
   'v3/crates/routecodex-v3-config/src/lib.rs',
   'v3/crates/routecodex-v3-config/tests/config_v3_contract.rs',
   'v3/Cargo.toml',
+  'v3/package.json',
   'package.json',
   'docs/architecture/v3-resource-operation-map.yml',
   'docs/architecture/v3-function-map.yml',
@@ -34,8 +35,13 @@ const files = [
 
 const mutations = [
   ['remove lifecycle owner', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'pub struct V3ManagedLifecycle', 'pub struct RemovedLifecycle'],
+  ['remove Config-owned snapshot loader', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'let snapshot = load_v3_config_snapshot_from_path(&self.config_path)?;', 'let snapshot = removed_v3_config_snapshot_loader(&self.config_path)?;'],
+  ['restore direct legacy-store reread', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'load_v3_config_snapshot_from_path, V3AdminWebuiManifest', 'V3ConfigStore, V3AdminWebuiManifest'],
   ['inject broad kill', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'fn epoch_ms()', 'fn forbidden() { let _ = Command::new("pkill"); }\nfn epoch_ms()'],
   ['remove strict schema', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', '#[serde(deny_unknown_fields)]', '#[serde(default)]'],
+  ['remove typed restart target declaration', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'target_declaration: Option<V3ManagedInstanceDeclaration>', 'removed_restart_target: Option<V3ManagedInstanceDeclaration>'],
+  ['remove config path restart projection test', 'v3/crates/routecodex-v3-lifecycle/src/tests.rs', 'fn restart_plan_projects_a_validated_config_path_change_and_rejects_listener_drift()', 'fn removed_restart_plan_config_path_projection_test()'],
+  ['remove config path previous-owner match test', 'v3/crates/routecodex-v3-lifecycle/src/tests.rs', 'fn restart_matches_live_previous_owner_when_config_path_changes_for_the_same_listener_set()', 'fn removed_restart_config_path_previous_owner_test()'],
   ['remove non-terminal reaping guard', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'non_terminal_runtime_state_is_never_reaped_after_control_probe_failure', 'removed_non_terminal_runtime_state_guard'],
   ['remove stale running release rollover positive guard', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'stale_running_state_allows_release_snapshot_executable_rollover_when_control_is_gone', 'removed_stale_running_release_rollover_guard'],
   ['remove stale running port availability guard', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'fn listener_address_is_available(', 'fn removed_listener_address_is_available('],
@@ -80,7 +86,7 @@ const mutations = [
   ['remove compact error number assertion', 'v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs', 'plain_start_stderr.contains("error=V3E")', 'plain_start_stderr.contains("errorNode=V3Error06ClientProjected")'],
   ['remove compact error chain denial', 'v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs', '!plain_start_stderr.contains("errorChain=")', 'plain_start_stderr.contains("errorChain=")'],
   ['remove no raw debug json assertion', 'v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs', '\\"node_id\\":\\"V3ServerStartup01ListenerSetPreflight\\"', 'debug-json-allowed'],
-  ['remove no-config default blackbox', 'v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs', 'fn top_level_lifecycle_without_config_uses_home_config_v3_toml()', 'fn removed_default_config_blackbox()'],
+  ['remove no-config default blackbox', 'v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs', 'fn top_level_lifecycle_without_config_uses_home_config_toml()', 'fn removed_default_config_blackbox()'],
   ['remove snap override blackbox', 'v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs', 'fn top_level_start_snap_forces_debug_snapshots()', 'fn removed_snap_override_blackbox()'],
   ['remove start help snap contract', 'v3/crates/routecodex-v3-cli/tests/foundation_cli.rs', 'fn top_level_start_help_exposes_snap_and_optional_config()', 'fn removed_top_level_start_help_contract()'],
   ['remove foreground start dispatch', 'v3/crates/routecodex-v3-cli/src/main.rs', 'Command::Start {\n            config,\n            snap,\n            snapall,\n            snap_stages,\n            debug,\n            sse_dump,\n        }', 'Command::Start { config: _, snap: _, snapall: _, snap_stages: _, debug: _, sse_dump: _ }'],
@@ -119,7 +125,7 @@ for (const [name, target, before, after] of mutations) {
     }
     fs.writeFileSync(destination, source);
   }
-  const result = spawnSync(process.execPath, [path.join(repo, 'scripts/architecture/verify-v3-managed-server-lifecycle.mjs')], {
+  const result = spawnSync(process.execPath, [path.join(repo, 'v3/scripts/architecture/verify-v3-managed-server-lifecycle.mjs')], {
     cwd: repo,
     env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
     encoding: 'utf8',

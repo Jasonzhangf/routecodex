@@ -527,6 +527,62 @@ chains:
       side_channel_reads:
       - v3.lifecycle.control_channel
       side_channel_writes: []
+- chain_id: v3.user_config.compile
+  owner_feature_id: v3.simplified_user_config
+  summary: Parallel minimal config.toml parsing and deterministic projection into the existing V3Config02 authoring node; exact filename selection remains Config-owned, reuses the unique Config03-05 compiler, and hands the published Manifest plus source identity to lifecycle without parser retry or runtime-side authoring reads.
+  edges:
+  - step_id: v3-user-cfg-01
+    from_node: V3UserConfig01FileSource
+    to_node: V3UserConfig02RoutingSelectionParsed
+    caller_symbol: V3UserConfigStore::read_routing_selection
+    caller_file: v3/crates/routecodex-v3-config/src/user_config.rs
+    callee_symbol: parse_v3_user_config_02_routing
+    callee_file: v3/crates/routecodex-v3-config/src/user_config.rs
+    owner_feature_id: v3.simplified_user_config
+    resource_flow:
+      consumes:
+      - v3.user_config.file_source
+      produces:
+      - v3.user_config.routing_selection_parsed
+      side_channel_reads: []
+      side_channel_writes: []
+    status: active
+  - step_id: v3-user-cfg-02
+    from_node: V3UserConfig02RoutingSelectionParsed
+    to_node: V3Config02AuthoringParsed
+    caller_symbol: V3UserConfigStore::read_authoring
+    caller_file: v3/crates/routecodex-v3-config/src/user_config.rs
+    callee_symbol: project_v3_user_config_03_authoring
+    callee_file: v3/crates/routecodex-v3-config/src/user_config.rs
+    owner_feature_id: v3.simplified_user_config
+    semantic_input: Strict user route-group pool tiers plus the typed internal authoring base and provider-directory identity catalogue.
+    semantic_output: Existing V3Config02 authoring with only route target choices replaced by deterministic priority tiers.
+    resource_flow:
+      consumes:
+      - v3.user_config.routing_selection_parsed
+      produces:
+      - v3.config.authoring_parsed
+      side_channel_reads: []
+      side_channel_writes: []
+    status: active
+  - step_id: v3-user-cfg-03
+    from_node: V3Config05ManifestPublished
+    to_node: V3Lifecycle01ValidatedConfig
+    caller_symbol: V3ManagedLifecycle::declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: load_v3_config_snapshot_from_path
+    callee_file: v3/crates/routecodex-v3-config/src/store.rs
+    owner_feature_id: v3.simplified_user_config
+    semantic_input: Exact config path selected by basename plus the Config-owned compiled snapshot.
+    semantic_output: Published Manifest and source identity consumed by lifecycle declaration without re-parsing authoring outside Config.
+    resource_flow:
+      consumes:
+      - v3.config.published_manifest
+      - v3.config.source_identity
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+    status: active
 - chain_id: v3.config.compile
   owner_feature_id: v3.config_interpreter_contract
   summary: Unique config.v3 read/parse/validate/registry/publish chain; provider secretFile

@@ -80,8 +80,28 @@ pub(crate) fn previous_owner_matches_restart_declaration(
     expected: &V3ManagedInstanceDeclaration,
 ) -> bool {
     published.instance_id != expected.instance_id
-        && published.config_path == expected.config_path
-        && listener_sets_overlap(&published.listeners, &expected.listeners)
+        && ((published.config_path == expected.config_path
+            && listener_sets_overlap(&published.listeners, &expected.listeners))
+            || listener_sets_exactly_match(&published.listeners, &expected.listeners))
+}
+
+fn listener_sets_exactly_match(
+    left: &[V3ManagedListenerDeclaration],
+    right: &[V3ManagedListenerDeclaration],
+) -> bool {
+    let declarations = |listeners: &[V3ManagedListenerDeclaration]| {
+        listeners
+            .iter()
+            .map(|listener| {
+                (
+                    listener.server_id.clone(),
+                    listener.bind.clone(),
+                    listener.port,
+                )
+            })
+            .collect::<BTreeSet<_>>()
+    };
+    declarations(left) == declarations(right)
 }
 
 pub(crate) fn previous_owner_has_live_control_truth(

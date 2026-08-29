@@ -24,7 +24,10 @@ result. Request/response Runtime remains the only business lifecycle.
 config path and digest, executable identity, and complete listener set. `pid.cache` is transient and
 binds PID to a random start nonce. `control.json` exposes only the Unix control socket path and nonce
 handle. `restart.plan.json` is an owner-only transient control-side file for in-place exec options
-(new executable path, snapshots, snapshot stages) and is bound to the current start nonce; it is not
+(new executable path, optional typed target declaration, snapshots, snapshot stages) and is bound to
+the current start nonce. A target declaration is accepted only when it preserves the complete listener
+set; partial overlap or listener drift fails before exec. The optional field is omitted for a same-config
+release upgrade so a previous-release managed child can still read the plan. It is not
 client/provider payload and is deleted when no override is needed or when the re-entered child
 publishes its fresh control nonce. `status.json` records
 starting/running/stopping/stopped/failed without provider/client data.

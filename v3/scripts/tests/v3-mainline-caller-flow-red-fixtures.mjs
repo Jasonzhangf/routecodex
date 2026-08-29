@@ -19,7 +19,7 @@ function runExpectFail(name, mutate, expectedText) {
   fs.writeFileSync(outPath, '<stale>\n', 'utf8');
   const script = `
     import fs from 'node:fs';
-    import { auditV3CallerFlow, renderV3MainlineCallerFlowMarkdown } from ${JSON.stringify(path.join(root, 'scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
+    import { auditV3CallerFlow, renderV3MainlineCallerFlowMarkdown } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
     const root = ${JSON.stringify(root)};
     const mapPath = ${JSON.stringify(path.relative(root, mapPath))};
     const parsed = (await import('yaml')).default.parse(fs.readFileSync(${JSON.stringify(mapPath)}, 'utf8'));
@@ -97,7 +97,7 @@ runExpectFail('missing-caller-symbol', (copy) => {
 
 {
   const script = `
-    import { auditV3CallerFlowSourceText } from ${JSON.stringify(path.join(root, 'scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
+    import { auditV3CallerFlowSourceText } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
     const audit = auditV3CallerFlowSourceText('V3RegisteredHook { input_node: "V3ProviderResp14Raw", output_node: "V3Resp15ClientPayload" }', 'fixture/hooks.rs');
     if (!audit.forbiddenRegisteredHooks.length) process.exit(0);
     console.error('forbidden source registered direct response edge');
@@ -119,7 +119,7 @@ runExpectFail('missing-caller-symbol', (copy) => {
 
 {
   const script = `
-    import { auditV3CallerFlowSourceText } from ${JSON.stringify(path.join(root, 'scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
+    import { auditV3CallerFlowSourceText } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
     const audit = auditV3CallerFlowSourceText('fn resolve_v3_responses_effective_execution_mode() {}', 'fixture/server.rs');
     if (!audit.forbiddenProtocolDecisionHelpers.length) process.exit(0);
     console.error('forbidden source protocol preplanning helper');
@@ -141,7 +141,7 @@ runExpectFail('missing-caller-symbol', (copy) => {
 
 {
   const script = `
-    import { auditV3ArchitectureLocks, chainFingerprint } from ${JSON.stringify(path.join(root, 'scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
+    import { auditV3ArchitectureLocks, chainFingerprint } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
     const parsed = ${JSON.stringify(parsed)};
     const lockedChain = parsed.chains[0];
     const locks = {
@@ -178,7 +178,7 @@ runExpectFail('missing-caller-symbol', (copy) => {
 
 {
   const script = `
-    import { auditV3ArchitectureLocks } from ${JSON.stringify(path.join(root, 'scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
+    import { auditV3ArchitectureLocks } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
     const parsed = ${JSON.stringify(parsed)};
     const locks = {
       schema_version: 1,
@@ -212,7 +212,7 @@ runExpectFail('missing-caller-symbol', (copy) => {
 
 {
   const script = `
-    import { auditV3ReviewSurfaceHtmlText } from ${JSON.stringify(path.join(root, 'scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
+    import { auditV3ReviewSurfaceHtmlText } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
     const html = '<html><h2>Request skeleton / 请求主骨架</h2><div>V3HubReqInbound01ClientRaw V3HubReqChatProcess04Governed ProviderReqCompat06ProviderCompat V3ProviderReqOutbound08WirePayload v3.hub_pipeline.v1.request</div><h2>Response skeleton / 响应主骨架</h2><div>V3ProviderRespInbound01Raw ProviderRespCompat02ProviderCompat V3HubRespChatProcess03Governed V3HubRespContinuation04Committed v3.hub_pipeline.v1.response</div></html>';
     const audit = auditV3ReviewSurfaceHtmlText(html, 'fixture.html');
     if (!audit.failures.some((failure) => failure.includes('Error resources'))) process.exit(0);
@@ -236,7 +236,7 @@ ${result.stderr}`;
 
 {
   const script = `
-    import { auditV3ReviewSurfaceHtmlText } from ${JSON.stringify(path.join(root, 'scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
+    import { auditV3ReviewSurfaceHtmlText } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
     const html = '<html><h2>Request skeleton / 请求主骨架</h2><div>V3HubReqInbound01ClientRaw V3HubReqChatProcess04Governed V3ProviderReqOutbound08WirePayload v3.hub_pipeline.v1.request</div><h2>Response skeleton / 响应主骨架</h2><div>V3ProviderRespInbound01Raw ProviderRespCompat02ProviderCompat V3HubRespChatProcess03Governed V3HubRespContinuation04Committed v3.hub_pipeline.v1.response</div><h2>Error resources / 错误处理资源</h2><div>V3Error01SourceRaised V3Error06ClientProjected v3.provider.health_state v3.error.client_projection</div></html>';
     const audit = auditV3ReviewSurfaceHtmlText(html, 'fixture.html');
     if (!audit.failures.some((failure) => failure.includes('provider request compat'))) process.exit(0);
@@ -261,7 +261,7 @@ ${result.stderr}`;
 
 {
   const script = `
-    import { auditV3ReviewSurfaceHtmlText } from ${JSON.stringify(path.join(root, 'scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
+    import { auditV3ReviewSurfaceHtmlText } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
     const html = '<html><h2>Request skeleton / 请求主骨架</h2><div>V3HubReqInbound01ClientRaw V3HubReqChatProcess04Governed ProviderReqCompat06ProviderCompat V3Router05RequestClassified V3Target10ConcreteProviderSelected V3ProviderReqOutbound08WirePayload v3.hub_pipeline.v1.request</div><h2>Response skeleton / 响应主骨架</h2><div>V3ProviderRespInbound01Raw ProviderRespCompat02ProviderCompat V3HubRespChatProcess03Governed V3HubRespContinuation04Committed v3.hub_pipeline.v1.response</div><h2>Error resources / 错误处理资源</h2><div>V3Error01SourceRaised V3Error06ClientProjected v3.provider.health_state v3.error.client_projection</div></html>';
     const audit = auditV3ReviewSurfaceHtmlText(html, 'fixture.html');
     if (!audit.failures.some((failure) => failure.includes('typed-test-only'))) process.exit(0);

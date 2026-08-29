@@ -3,6 +3,7 @@ mod entry_protocol_validation;
 mod provider_directory;
 mod store;
 mod types;
+mod user_config;
 mod v2_compat;
 mod v3_webui_observability_io;
 pub use v2_compat::{
@@ -18,10 +19,15 @@ mod validate_debug_tests;
 mod validate_relations;
 
 pub use store::{
-    default_v3_config_path, v3_webui_observability_store_path, V3ConfigLoadedSnapshot,
-    V3ConfigStore, V3ConfigWritePlan,
+    default_v3_config_path, load_v3_config_snapshot_from_path, v3_webui_observability_store_path,
+    V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan,
 };
 pub use types::*;
+pub use user_config::{
+    generate_v3_user_config_02_routing, parse_v3_user_config_02_routing,
+    project_v3_user_config_03_authoring, V3UserConfig01FileSource,
+    V3UserConfig02RoutingSelectionParsed, V3UserConfigStore, V3UserRouteMember, V3UserRoutePool,
+};
 pub use v3_webui_observability_io::{
     v3_webui_observability_append_row, v3_webui_observability_read_raw_rows,
     v3_webui_observability_read_rows, V3WebuiObservabilityStoreError,

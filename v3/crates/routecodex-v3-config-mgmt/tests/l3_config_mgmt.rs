@@ -349,3 +349,55 @@ fn revision_store_roundtrip_and_monotonic_seq() {
     assert_eq!(listed[1].action, "a2");
     assert_eq!(listed[1].source_sha256, "hash2");
 }
+
+#[test]
+fn user_route_view_commit_preserves_ordered_tiers_and_minimal_file() {
+    let home = temp_home();
+    let provider_dir = home.join("provider").join("p1");
+    fs::create_dir_all(&provider_dir).expect("provider dir");
+    fs::write(
+        provider_dir.join("config.v2.toml"),
+        r#"version = "2.0.0"
+providerId = "p1"
+[provider]
+id = "p1"
+enabled = true
+type = "openai_chat"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "m1"
+[provider.auth]
+type = "apikey"
+apiKey = "test"
+[provider.models."m1"]
+supportsStreaming = true
+"#,
+    )
+    .expect("provider file");
+    let path = home.join("config.toml");
+    fs::write(
+        &path,
+        r#"version = 3
+[route_groups.routecodex_v3_4444.default]
+tiers = [[{ use = "p1/m1" }]]
+[route_groups.responses_v3_7777.default]
+tiers = [[{ use = "p1/m1" }]]
+"#,
+    )
+    .expect("user config");
+
+    let store = ConfigMgmtStore::new(&path);
+    let mut selection = store.read_user_routing().expect("read user routing");
+    let mut groups = routecodex_v3_config_mgmt::user_route_groups_from_selection(&selection);
+    groups[0].pools[0].tiers[0].members[0].weight = Some(7);
+    routecodex_v3_config_mgmt::apply_user_route_group_view(&mut selection, &groups[0])
+        .expect("apply user route view");
+    store
+        .commit_user_routing_with_backup(&selection, "route.update", "test")
+        .expect("commit user routing");
+
+    let saved = fs::read_to_string(&path).expect("saved user config");
+    assert!(saved.contains("weight = 7"));
+    assert!(!saved.contains("servers"));
+    assert!(!saved.contains("priority"));
+    assert_eq!(store.read_user_routing().unwrap(), selection);
+}

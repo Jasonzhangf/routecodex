@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use routecodex_v3_config::{
-    default_v3_config_path, resolve_routecodex_package_version_from_executable,
-    V3Config05ManifestPublished, V3ConfigStore,
+    default_v3_config_path, load_v3_config_snapshot_from_path,
+    resolve_routecodex_package_version_from_executable, V3Config05ManifestPublished,
 };
 use routecodex_v3_lifecycle::{
     V3ManagedLifecycle, V3ManagedLifecycleObservation, V3ManagedListenerDeclaration,
@@ -81,17 +81,7 @@ enum Command {
         #[arg(long)]
         provider: Option<String>,
         #[arg(long)]
-        base_url: Option<String>,
-        #[arg(long)]
         model: Option<String>,
-        #[arg(long)]
-        api_key: Option<String>,
-        #[arg(long)]
-        env: Option<String>,
-        #[arg(long)]
-        token_file: Option<String>,
-        #[arg(long)]
-        port: Option<u16>,
     },
     #[command(hide = true)]
     Server {
@@ -219,24 +209,14 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             config,
             force,
             provider,
-            base_url,
             model,
-            api_key,
-            env,
-            token_file,
-            port,
         } => {
-            let config_path = resolve_config_path(config)?;
+            let config_path = resolve_user_config_path(config)?;
             init::run_init(&init::InitOptions {
                 config_path,
                 force,
                 provider,
-                base_url,
                 model,
-                api_key,
-                env,
-                token_file,
-                port,
             })?;
         }
         Command::Servertool {
@@ -496,7 +476,20 @@ fn resolve_config_path(config: Option<String>) -> Result<PathBuf, Box<dyn std::e
     let home = std::env::var_os("HOME").ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            "HOME is required to resolve config.v3.toml",
+            "HOME is required to resolve config.toml",
+        )
+    })?;
+    Ok(default_v3_config_path(home))
+}
+
+fn resolve_user_config_path(config: Option<String>) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Some(config) = config {
+        return Ok(PathBuf::from(config));
+    }
+    let home = std::env::var_os("HOME").ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "HOME is required to resolve config.toml",
         )
     })?;
     Ok(default_v3_config_path(home))
@@ -505,7 +498,7 @@ fn resolve_config_path(config: Option<String>) -> Result<PathBuf, Box<dyn std::e
 fn load_manifest(
     config: impl Into<PathBuf>,
 ) -> Result<V3Config05ManifestPublished, Box<dyn std::error::Error>> {
-    Ok(V3ConfigStore::new(config).load_snapshot()?)
+    Ok(load_v3_config_snapshot_from_path(config)?.manifest)
 }
 
 struct V3CliSnapshotFlags {

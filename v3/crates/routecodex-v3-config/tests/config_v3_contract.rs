@@ -1182,10 +1182,10 @@ fn config_source_identity_is_stable_sensitive_and_secret_free() {
 }
 
 #[test]
-fn default_path_is_config_v3_toml() {
+fn default_path_is_config_toml() {
     assert_eq!(
         default_v3_config_path("/tmp/home"),
-        std::path::PathBuf::from("/tmp/home/.rcc/config.v3.toml")
+        std::path::PathBuf::from("/tmp/home/.rcc/config.toml")
     );
 }
 

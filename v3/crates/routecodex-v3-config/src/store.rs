@@ -54,16 +54,7 @@ impl V3ConfigStore {
         let parsed = parse_authoring_for_store(&source.path, &source.raw_toml)?;
         let source_sha256 =
             source_closure_sha256(&canonical_path, &source.raw_toml, &parsed.provider_sources);
-        let validated = validate_v3_config_03_schema_from_v3_config_02(parsed.authoring)?;
-        let registry = build_v3_config_04_resource_registry_from_v3_config_03(validated)?;
-        let admin_webui = registry.admin_webui.clone();
-        let manifest = publish_v3_config_05_manifest_from_v3_config_04(registry)?;
-        Ok(V3ConfigLoadedSnapshot {
-            canonical_path,
-            source_sha256,
-            manifest,
-            admin_webui,
-        })
+        build_v3_config_loaded_snapshot(canonical_path, source_sha256, parsed.authoring)
     }
 
     pub fn plan_write(
@@ -95,6 +86,33 @@ impl V3ConfigStore {
     }
 }
 
+pub fn load_v3_config_snapshot_from_path(
+    path: impl Into<PathBuf>,
+) -> Result<V3ConfigLoadedSnapshot, V3ConfigError> {
+    let path = path.into();
+    if path.file_name().and_then(|name| name.to_str()) == Some("config.toml") {
+        return crate::V3UserConfigStore::new(path).load_snapshot_with_source_identity();
+    }
+    V3ConfigStore::new(path).load_snapshot_with_source_identity()
+}
+
+pub(crate) fn build_v3_config_loaded_snapshot(
+    canonical_path: PathBuf,
+    source_sha256: String,
+    authoring: V3Config02AuthoringParsed,
+) -> Result<V3ConfigLoadedSnapshot, V3ConfigError> {
+    let validated = validate_v3_config_03_schema_from_v3_config_02(authoring)?;
+    let registry = build_v3_config_04_resource_registry_from_v3_config_03(validated)?;
+    let admin_webui = registry.admin_webui.clone();
+    let manifest = publish_v3_config_05_manifest_from_v3_config_04(registry)?;
+    Ok(V3ConfigLoadedSnapshot {
+        canonical_path,
+        source_sha256,
+        manifest,
+        admin_webui,
+    })
+}
+
 fn parse_authoring_for_store(
     path: &Path,
     raw_toml: &str,
@@ -106,7 +124,7 @@ fn parse_authoring_for_store(
     crate::provider_directory::resolve_v3_provider_directory_from_authoring(path, authoring)
 }
 
-fn source_closure_sha256(
+pub(crate) fn source_closure_sha256(
     root_path: &Path,
     root_toml: &str,
     provider_sources: &[crate::provider_directory::V3ProviderDirectorySource],
@@ -130,7 +148,7 @@ fn source_closure_sha256(
 }
 
 pub fn default_v3_config_path(home: impl AsRef<Path>) -> PathBuf {
-    home.as_ref().join(".rcc").join("config.v3.toml")
+    home.as_ref().join(".rcc").join("config.toml")
 }
 
 /// Canonical per-listener request-records store. Server and Admin must derive

@@ -12,6 +12,30 @@ canonical_docs:
   - docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md
   - docs/design/v3-existing-hub-provider-path-audit.md
 resources:
+  - resource_id: v3.user_config.file_source
+    resource_kind: config_authoring
+    lifecycle: v3.user_config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3UserConfig01FileSource
+    identity: [configPath]
+    allowed_writers: [V3UserConfigStore, V3UserConfigStore::load_snapshot_with_source_identity]
+    allowed_readers: [parse_v3_user_config_02_routing, load_v3_config_snapshot_from_path]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: active_explicit_runtime_loader_verified_pre_live
+  - resource_id: v3.user_config.routing_selection_parsed
+    resource_kind: config_authoring
+    lifecycle: v3.user_config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3UserConfig02RoutingSelectionParsed
+    identity: [configPath, configVersion, routeGroupIds]
+    allowed_writers: [parse_v3_user_config_02_routing]
+    allowed_readers: [project_v3_user_config_03_authoring]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: active_explicit_runtime_loader_verified_pre_live
   - resource_id: v3.config.file_source
     resource_kind: config_authoring
     lifecycle: v3.config.compile
@@ -30,7 +54,7 @@ resources:
     owner_crate: routecodex-v3-config
     owner_node: V3ConfigLoadedSnapshot
     identity: [canonicalConfigPath, sourceSha256]
-    allowed_writers: [V3ConfigStore::load_snapshot_with_source_identity]
+    allowed_writers: [V3ConfigStore::load_snapshot_with_source_identity, V3UserConfigStore::load_snapshot_with_source_identity]
     allowed_readers: [V3ManagedLifecycle::declaration]
     forbidden_writers: [routecodex-v3-lifecycle, routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses]
     may_enter_provider_body: false
@@ -42,7 +66,7 @@ resources:
     owner_crate: routecodex-v3-config
     owner_node: V3Config02AuthoringParsed
     identity: [configPath, configVersion]
-    allowed_writers: [parse_v3_config_02_authoring]
+    allowed_writers: [parse_v3_config_02_authoring, project_v3_user_config_03_authoring]
     allowed_readers: [V3Config03SchemaValidated, V3ConfigStore]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
     may_enter_provider_body: false
@@ -1200,13 +1224,13 @@ resources:
     lifecycle: v3.server.managed_lifecycle
     owner_crate: routecodex-v3-lifecycle
     owner_node: V3Lifecycle06LiveControlled
-    identity: [instanceId, startNonce, executablePath, snapshots, snapshotStages]
+    identity: [controlInstanceId, startNonce, executablePath, targetDeclaration, snapshots, snapshotStages]
     allowed_writers: [send_restart_control]
     allowed_readers: [control_restart_plan]
     forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: anchored
+    binding_status: anchored_config_path_transfer_verified_pre_live
 
   - resource_id: v3.openai_chat.client_sse_stream
     resource_kind: client_transport_projection
