@@ -18,14 +18,14 @@ use routecodex_v4_lifecycle::{
     V4LifecyclePaths,
 };
 use routecodex_v4_provider::{
-    build_protocol_wire, load_profile, normalize_provider_response, normalize_provider_sse_frame,
+    build_retry_wire, load_profile, normalize_provider_response, normalize_provider_sse_frame,
     send_anthropic_messages, send_anthropic_messages_streaming, send_openai_chat,
     send_openai_chat_streaming, send_responses, send_responses_streaming, validate_auth_alias,
     write_provider_profile, ProviderInitAuth, ProviderInitOptions, ProviderResponseStream,
     V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
-    apply_product_error_policy, select_product_target_with_unavailable, select_target,
+    apply_product_error_policy, select_product_target_excluding, select_target,
 };
 use routecodex_v4_runtime::{
     parse_responses_provider_payload, project_runtime_fault, project_runtime_fault_with_policy,
@@ -33,7 +33,6 @@ use routecodex_v4_runtime::{
 };
 use routecodex_v4_server::{HttpHandler, HttpRequest, HttpResponse, ResponseStream, V4HttpServer};
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
-use routecodex_v4_standard_plugins::chat_to_responses::project_chat_request_to_responses;
 use routecodex_v4_standard_plugins::diagnostic;
 use std::io::Write;
 use std::path::PathBuf;
@@ -636,7 +635,7 @@ fn handle_responses(
                 500,
             )
         })?;
-        select_product_target_with_unavailable(
+        select_product_target_excluding(
             product,
             &route_group.route_group_id,
             model,
@@ -687,7 +686,7 @@ fn handle_responses(
     } else {
         continuation_owner.to_string()
     };
-    runtime
+    let request_report = runtime
         .lock()
         .map_err(|_| {
             project_fault(
@@ -696,38 +695,18 @@ fn handle_responses(
                 500,
             )
         })?
-        .execute_request_scoped_with_owner(
-            &format!(
-                "{entry_protocol}:{}",
-                String::from_utf8_lossy(&request.body)
-            ),
+        .execute_request_json_scoped(
+            &String::from_utf8_lossy(&request.body),
+            entry_protocol,
+            &target.wire_model,
+            stream_mode,
             &format!("{}:request", request.request_id),
             request.port,
             session_scope,
             conversation_scope,
             Some(&continuation_owner),
         )
-        .map_err(|fault| project_fault(request, fault, 409))?;
-    let provider_body = match entry_protocol {
-        "responses" => body.clone(),
-        "chat" => project_chat_request_to_responses(&body).map_err(|message| {
-            project_fault(
-                request,
-                RuntimeFault::new("client_protocol_invalid", message),
-                400,
-            )
-        })?,
-        _ => {
-            return Err(project_fault(
-                request,
-                RuntimeFault::new(
-                    "client_protocol_unsupported",
-                    format!("unsupported client request protocol {entry_protocol}"),
-                ),
-                400,
-            ))
-        }
-    };
+        .map_err(|fault| project_fault(request, fault, 598))?;
     if entry_protocol == "responses"
         && continuation_owner == "relay"
         && body.get("previous_response_id").is_some()
@@ -741,18 +720,8 @@ fn handle_responses(
             400,
         ));
     }
-    let wire_body = build_protocol_wire(
-        &target.protocol,
-        &provider_body,
-        &target.wire_model,
-        stream_mode,
-    )
-    .map_err(|error| {
-        project_fault(
-            request,
-            RuntimeFault::new(&error.code, error.message),
-            error.status.unwrap_or(400),
-        )
+    let wire_body = request_report.provider_wire_value.ok_or_else(|| {
+        project_fault(request, RuntimeFault::new("request_wire_missing", "request chain produced no provider wire"), 598)
     })?;
     if stream_mode {
         let mut stream = send_target_streaming(&target, &wire_body).map_err(|error| {
@@ -784,7 +753,7 @@ fn handle_responses(
                         if let Some(group) = product.route_groups.first() {
                             let mut excluded = unavailable_provider_ids.clone();
                             excluded.push(target.provider_id.clone());
-                            if let Ok(candidate) = select_product_target_with_unavailable(
+                            if let Ok(candidate) = select_product_target_excluding(
                                 product,
                                 &group.route_group_id,
                                 model,
@@ -793,9 +762,9 @@ fn handle_responses(
                                 0,
                                 &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
                             ) {
-                                let retry_body = build_protocol_wire(
+                                let retry_body = build_retry_wire(
                                     &candidate.protocol,
-                                    &provider_body,
+                                    &wire_body,
                                     &candidate.wire_model,
                                     true,
                                 )
@@ -926,7 +895,7 @@ fn handle_responses(
                 if let Some(group) = product.route_groups.first() {
                     let mut excluded = unavailable_provider_ids.clone();
                     excluded.push(target.provider_id.clone());
-                    if let Ok(candidate) = select_product_target_with_unavailable(
+                    if let Ok(candidate) = select_product_target_excluding(
                         product,
                         &group.route_group_id,
                         model,
@@ -935,9 +904,9 @@ fn handle_responses(
                         0,
                         &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
                     ) {
-                        let retry_body = build_protocol_wire(
+                        let retry_body = build_retry_wire(
                             &candidate.protocol,
-                            &provider_body,
+                            &wire_body,
                             &candidate.wire_model,
                             false,
                         )
@@ -1717,7 +1686,7 @@ targets = ["mock"]
                 "name": "lookup", "description": "lookup", "parameters": {"type": "object"}
             }}]
         });
-        let projected = project_chat_request_to_responses(&body)
+        let projected = routecodex_v4_runtime::project_chat_request_to_responses(&body)
             .expect("chat request must project to Responses input");
         assert_eq!(projected["input"], body["messages"]);
         assert_eq!(projected["tools"][0]["name"], "lookup");

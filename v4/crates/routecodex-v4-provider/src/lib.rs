@@ -770,6 +770,15 @@ pub fn build_protocol_wire(
     }
 }
 
+pub fn build_retry_wire(
+    provider_protocol: &str,
+    semantic_body: &Value,
+    wire_model: &str,
+    stream: bool,
+) -> Result<Value, ProviderTransportError> {
+    build_protocol_wire(provider_protocol, semantic_body, wire_model, stream)
+}
+
 pub fn send_responses(
     profile_path: &str,
     model: &str,

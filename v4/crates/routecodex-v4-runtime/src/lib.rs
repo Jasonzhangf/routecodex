@@ -1003,7 +1003,9 @@ impl RuntimeOperator for ProtocolParse {
             .raw_entry
             .as_deref()
             .ok_or_else(|| RuntimeFault::new("protocol_parse", "raw entry missing"))?;
-        let protocol = if raw.starts_with("chat:") {
+        let protocol = if raw.starts_with('{') {
+            ctx.information.protocol.as_deref().unwrap_or("responses")
+        } else if raw.starts_with("chat:") {
             "chat"
         } else if raw.starts_with("responses:") {
             "responses"
@@ -1033,7 +1035,11 @@ impl RuntimeOperator for Normalize {
             .protocol
             .as_deref()
             .ok_or_else(|| RuntimeFault::new("normalize", "protocol not parsed"))?;
-        ctx.data.normalized_request = Some(format!("normalized:{protocol}:{}", ctx.request_id()));
+        ctx.data.normalized_request = Some(if let Some(raw) = ctx.data.raw_entry.as_deref() {
+            if raw.starts_with('{') { raw.to_string() } else { format!("normalized:{protocol}:{}", ctx.request_id()) }
+        } else {
+            format!("normalized:{protocol}:{}", ctx.request_id())
+        });
         Ok(())
     }
 }
@@ -1242,7 +1248,11 @@ impl RuntimeOperator for SemanticProjection {
             RuntimeFault::new("semantic_projection", "normalized request missing")
         })?;
         let model = ctx.information.model.as_deref().unwrap_or("unselected");
-        ctx.data.provider_semantic = Some(format!("semantic:{model}:{normalized}"));
+        ctx.data.provider_semantic = Some(if normalized.starts_with('{') {
+            normalized.to_string()
+        } else {
+            format!("semantic:{model}:{normalized}")
+        });
         Ok(())
     }
 }
@@ -1265,7 +1275,11 @@ impl RuntimeOperator for WireBuild {
             .provider_semantic
             .as_deref()
             .ok_or_else(|| RuntimeFault::new("wire_build", "provider semantic missing"))?;
-        ctx.data.provider_wire = Some(format!("wire:{semantic}"));
+        ctx.data.provider_wire = Some(if semantic.starts_with('{') {
+            semantic.to_string()
+        } else {
+            format!("wire:{semantic}")
+        });
         assert_no_control_leak(ctx)
     }
 }
@@ -1991,6 +2005,9 @@ pub struct ExecutionReport {
     pub binding: ExecutionBinding,
     pub scope: Scope,
     pub provider_wire: Option<String>,
+    /// Parsed provider wire owned by the request chain. Consumers must not
+    /// reconstruct protocol payloads from the original client body.
+    pub provider_wire_value: Option<Value>,
     pub client_frame: Option<String>,
     pub continuation_scope: Option<String>,
     pub continuation_owner: Option<String>,
@@ -2173,6 +2190,49 @@ impl SkeletonRuntime {
             |ctx| {
                 ctx.data.raw_entry = Some(raw_entry.to_string());
                 ctx.information.model = Some("unselected".to_string());
+                if let Some(owner) = continuation_owner {
+                    ctx.control.continuation_owner = Some(owner.to_string());
+                }
+            },
+        );
+        self.release(request_id);
+        result
+    }
+
+    /// Production request entry: execute the complete request chain and return
+    /// its provider wire output. The runtime-bin must consume this value;
+    /// rebuilding the provider body in the binary is a P0 bypass.
+    pub fn execute_request_json_scoped(
+        &self,
+        body: &str,
+        protocol: &str,
+        wire_model: &str,
+        stream: bool,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        continuation_owner: Option<&str>,
+    ) -> Result<ExecutionReport, RuntimeFault> {
+        let mut value: Value = serde_json::from_str(body)
+            .map_err(|error| RuntimeFault::new("request_json_invalid", error.to_string()))?;
+        if protocol == "chat" {
+            value = project_chat_request_to_responses(&value)?;
+        }
+        let object = value.as_object_mut().ok_or_else(|| {
+            RuntimeFault::new("request_json_invalid", "request body must be an object")
+        })?;
+        object.insert("model".to_string(), Value::String(wire_model.to_string()));
+        object.insert("stream".to_string(), Value::Bool(stream));
+        let raw = serde_json::to_string(&value)
+            .map_err(|error| RuntimeFault::new("request_json_encode", error.to_string()))?;
+        self.claim(request_id)?;
+        let result = self.execute_path(
+            "request", request_id, port, session_scope, conversation_scope,
+            |ctx| {
+                ctx.data.raw_entry = Some(raw);
+                ctx.information.protocol = Some(protocol.to_string());
+                ctx.information.model = Some(wire_model.to_string());
                 if let Some(owner) = continuation_owner {
                     ctx.control.continuation_owner = Some(owner.to_string());
                 }
@@ -2429,6 +2489,14 @@ impl SkeletonRuntime {
             binding: ctx.binding().clone(),
             scope: ctx.scope().clone(),
             provider_wire: ctx.data.provider_wire.clone(),
+            provider_wire_value: ctx
+                .data
+                .provider_wire
+                .as_deref()
+                .filter(|wire| wire.trim_start().starts_with('{'))
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(|error| RuntimeFault::new("provider_wire_decode", error.to_string()))?,
             client_frame: ctx.data.client_frame.clone(),
             continuation_scope: ctx.control.continuation_scope.clone(),
             continuation_owner: ctx.control.continuation_owner.clone(),

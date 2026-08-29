@@ -153,6 +153,28 @@ pub fn select_product_target_with_unavailable(
     product_target_to_selected(provider, model, target)
 }
 
+/// Production callers use this owner-scoped name for retry selection.  The
+/// unavailable set remains a typed routing input; no request payload is read.
+pub fn select_product_target_excluding(
+    product: &RuntimeProductConfig,
+    route_group_id: &str,
+    requested_model: &str,
+    entry_protocol: &str,
+    required_capabilities: &[&str],
+    input_tokens: u64,
+    unavailable_provider_ids: &[&str],
+) -> Result<SelectedTarget, TargetSelectionError> {
+    select_product_target_with_unavailable(
+        product,
+        route_group_id,
+        requested_model,
+        entry_protocol,
+        required_capabilities,
+        input_tokens,
+        unavailable_provider_ids,
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProductErrorDecision {
     pub policy_id: String,
