@@ -27,10 +27,10 @@
     "identity": "dsh/rcc/gpt-5.5"
   },
   "v4_product_map_hashes": {
-    "function_map_hash": "sha256:48249a023243234d56002aa55430f531444b0c5a3440dd8c84491d2d33e40410",
-    "mainline_call_map_hash": "sha256:1e6fa787f9b2fa00a4f780f11d8725465ff5b7390fbeca54e9de5477bd5dd287",
+    "function_map_hash": "sha256:fe4ce4d5a83f510bb7d8a1692e82177a0c6369716a7e09cb2be6e91a0ae93049",
+    "mainline_call_map_hash": "sha256:6cda9361f91ed0b9d5c5850fad4cdc90a204ede157ced2f22d386849c043a66f",
     "resource_map_hash": "sha256:8ec2f6ad0b8bd9c3f414ef3bfed571bf90efaf9b052b08ba31916921207cbb19",
-    "verification_map_hash": "sha256:3bba52855b6c65b412f69408d379b88d8e9f5ab76f1aff2acdaafbfe542ce4b9"
+    "verification_map_hash": "sha256:0a7342b68b6d5dcc406b7b47f451297a19d7c1ac5689c805b00d6a4551bde297"
   },
   "v4_product_map_root": "docs/architecture/maps",
   "verdict": "pass",
