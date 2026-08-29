@@ -601,6 +601,58 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
         .as_str()
         .is_some_and(|value| value.contains("response.output_text.delta")));
 
+    let live_recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
+        Arc::clone(&state),
+        "responses".to_string(),
+        "/v1/responses".to_string(),
+        "live-sse".to_string(),
+        &frame,
+    );
+    live_recorder.persist_initial().unwrap();
+    let live_response_path =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse/response.json");
+    let live_stream: V3ClientSseStream = Box::pin(futures_util::stream::iter(vec![
+        Ok::<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>(chunk.clone()),
+    ]));
+    let mut live_stream = live_recorder.wrap_live(live_stream);
+    assert!(live_stream.next().await.is_some());
+    assert!(live_stream.next().await.is_none());
+    let live_provider_response_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/live-sse/provider-response.json",
+    );
+    let live_provider_response: Value =
+        serde_json::from_str(&fs::read_to_string(live_provider_response_path).unwrap()).unwrap();
+    assert!(live_provider_response["rawSse"]
+        .as_str()
+        .is_some_and(|value| value.contains("response.output_text.delta")));
+    let live_response: Value =
+        serde_json::from_str(&fs::read_to_string(live_response_path).unwrap()).unwrap();
+    assert!(live_response["rawSse"]
+        .as_str()
+        .is_some_and(|value| value.contains("message_stop")));
+
+    let failed_recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
+        Arc::clone(&state),
+        "responses".to_string(),
+        "/v1/responses".to_string(),
+        "live-sse-failure".to_string(),
+        &frame,
+    );
+    failed_recorder.persist_initial().unwrap();
+    let failed_response_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/live-sse-failure/response.json",
+    );
+    fs::remove_file(&failed_response_path).unwrap();
+    fs::create_dir(&failed_response_path).unwrap();
+    let failed_stream: V3ClientSseStream = Box::pin(futures_util::stream::empty());
+    let mut failed_stream = failed_recorder.wrap_live(failed_stream);
+    let failure = failed_stream
+        .next()
+        .await
+        .expect("capture failure must become a stream error")
+        .expect_err("terminal persistence failure must not be swallowed");
+    assert_eq!(failure.code, "codex_sample_persistence_failed");
+
     fs::remove_dir_all(root).unwrap();
 }
 
