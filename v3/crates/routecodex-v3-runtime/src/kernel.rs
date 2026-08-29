@@ -477,6 +477,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
     let mut initial_selected_target = initial_selected_target;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
     let mut send_attempts = 0usize;
+    let mut provider_request_snapshot = None;
     let mut pending_provider_action_recovery = None;
     let mut continuation_provider_action_lookup = previous_response_id.is_some();
     let allowed_modes = direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
@@ -974,6 +975,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
             }
         };
         trace.push("V3Transport13ResponsesHttpRequest");
+        provider_request_snapshot = Some(transport_request.provider_request_projection());
 
         send_attempts = send_attempts.saturating_add(1);
         if let Err(error) = runtime_timing.start_external() {
@@ -1786,7 +1788,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
             observability: Some(observability),
             stream_observation: response_projection.stream_observation.clone(),
             client_payload,
-            provider_request_snapshot: None,
+            provider_request_snapshot,
             provider_response_snapshot: None,
             node_trace: trace,
             error_chain: None,
