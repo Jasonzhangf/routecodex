@@ -465,16 +465,12 @@ impl V3ProviderHealthStore {
         if policy.cooldown_scope == V3ProviderFailureCooldownScope::AuthKey {
             let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
             let scope_label = format!("auth_key:{provider_id}:{}", auth_alias.unwrap_or("-"));
-            if let Some((_, cooldown)) = state
-                .auth_key_cooldowns
-                .iter()
-                .find(|(key, cooldown)| {
-                    key.provider_id == provider_id
-                        && key.auth_alias.as_deref() == auth_alias
-                        && key.model_id.as_deref() == model_id
-                        && cooldown.until_ms.is_none_or(|until| until > now_ms)
-                })
-            {
+            if let Some((_, cooldown)) = state.auth_key_cooldowns.iter().find(|(key, cooldown)| {
+                key.provider_id == provider_id
+                    && key.auth_alias.as_deref() == auth_alias
+                    && key.model_id.as_deref() == model_id
+                    && cooldown.until_ms.is_none_or(|until| until > now_ms)
+            }) {
                 let failure_count = state
                     .auth_key_consecutive_failures
                     .iter()
@@ -529,8 +525,7 @@ impl V3ProviderHealthStore {
             };
             let cooldown_until_ms = (failure_count >= policy.failure_threshold)
                 .then(|| {
-                    (!policy.until_restart)
-                        .then(|| now_ms.saturating_add(cooldown_interval_ms))
+                    (!policy.until_restart).then(|| now_ms.saturating_add(cooldown_interval_ms))
                 })
                 .flatten();
             let record_state = if failure_count >= policy.failure_threshold {
@@ -1322,12 +1317,10 @@ impl V3ProviderHealthStore {
             auth_alias: auth_alias.to_string(),
             model_id: model_id.to_string(),
             priority,
-            effective_priority: priority
-                .saturating_add(
-                    i32::try_from(score_milli)
-                        .unwrap_or(i32::MAX)
-                        .saturating_sub(1_000),
-                ),
+            effective_priority: priority.saturating_add(crate::key_health::cap_health_adjustment(
+                priority,
+                score_milli,
+            )),
             score_milli,
             base_weight,
             effective_weight_milli: u64::from(base_weight.max(1)),
@@ -1421,7 +1414,7 @@ impl V3ProviderHealthStore {
                 && key.auth_alias.as_deref() == auth_alias
                 && key.model_id.as_deref() == model_id
                 && cooldown.until_ms.is_none_or(|until| until > now_ms))
-                .then_some(cooldown)
+            .then_some(cooldown)
         }) {
             projection.available = false;
             projection.blocked_scopes.push(match cooldown.until_ms {
@@ -1453,16 +1446,20 @@ impl V3ProviderHealthStore {
         }
         // provider 级冷却探针（跨 session 共享）：冷却期/待探期/探针执行中，
         // 该 provider 对全部 session 的常规选择不可用，恢复唯一路径是后台
-        let cooldown_probe_pending = state.provider_cooldown_probes.iter().any(|(probe_key, probe_state)| {
-            probe_key.provider_id == provider_id
-                && probe_key.auth_alias.as_deref() == auth_alias
-                && probe_key.model_id.as_deref() == model_id
-                && (probe_state.probe_in_flight
-                    || probe_state.next_probe_at_ms.is_some()
-                    || probe_state
-                        .blocked_until_ms
-                        .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms))
-        });
+        let cooldown_probe_pending =
+            state
+                .provider_cooldown_probes
+                .iter()
+                .any(|(probe_key, probe_state)| {
+                    probe_key.provider_id == provider_id
+                        && probe_key.auth_alias.as_deref() == auth_alias
+                        && probe_key.model_id.as_deref() == model_id
+                        && (probe_state.probe_in_flight
+                            || probe_state.next_probe_at_ms.is_some()
+                            || probe_state
+                                .blocked_until_ms
+                                .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms))
+                });
         if cooldown_probe_pending {
             projection.available = false;
             projection
@@ -1885,7 +1882,8 @@ impl V3ProviderSchedulingReader for V3ProviderHealthStore {
             auth_alias: auth_alias.to_string(),
             model_id: model_id.to_string(),
             priority,
-            effective_priority: priority.saturating_sub(1_000),
+            effective_priority: priority
+                .saturating_add(crate::key_health::cap_health_adjustment(priority, 0)),
             score_milli: 0,
             base_weight,
             effective_weight_milli: 0,
@@ -2606,24 +2604,28 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                 100,
             )
             .unwrap();
-        assert!(!store
-            .availability_for_session(
-                &session("session-a"),
-                "provider-a",
-                Some("key-a"),
-                Some("model-a"),
-                100,
-            )
-            .available);
-        assert!(store
-            .availability_for_session(
-                &session("session-a"),
-                "provider-a",
-                Some("key-a"),
-                Some("model-b"),
-                100,
-            )
-            .available);
+        assert!(
+            !store
+                .availability_for_session(
+                    &session("session-a"),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("model-a"),
+                    100,
+                )
+                .available
+        );
+        assert!(
+            store
+                .availability_for_session(
+                    &session("session-a"),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("model-b"),
+                    100,
+                )
+                .available
+        );
     }
 
     #[test]

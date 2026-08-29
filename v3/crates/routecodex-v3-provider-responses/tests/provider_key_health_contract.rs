@@ -194,7 +194,10 @@ fn health_adjusted_priority_favors_healthier_key_without_changing_weight() {
     let lower_priority =
         V3ProviderSchedulingProjection::new("provider-c", "key-c", "model-c", 2, 1000, 100);
 
-    assert_eq!(healthy.effective_weight_milli, degraded.effective_weight_milli);
+    assert_eq!(
+        healthy.effective_weight_milli,
+        degraded.effective_weight_milli
+    );
     assert_eq!(healthy.priority, degraded.priority);
     assert!(healthy.effective_priority > degraded.effective_priority);
     assert!(lower_priority.priority > healthy.priority);
@@ -203,11 +206,21 @@ fn health_adjusted_priority_favors_healthier_key_without_changing_weight() {
 
 #[test]
 fn health_adjusts_priority_around_the_configured_baseline() {
-    let healthy = V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 10, 1_020, 1);
-    let degraded = V3ProviderSchedulingProjection::new("provider-b", "key-b", "model-b", 10, 900, 1);
+    let healthy =
+        V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 10, 1_020, 1);
+    let degraded =
+        V3ProviderSchedulingProjection::new("provider-b", "key-b", "model-b", 10, 900, 1);
 
-    assert_eq!(healthy.effective_priority, 30);
+    assert_eq!(healthy.effective_priority, 15);
     assert_eq!(degraded.effective_priority, -90);
+}
+
+#[test]
+fn positive_health_uplift_is_capped_at_half_of_configured_priority() {
+    let projection =
+        V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 10, 5_000, 1);
+
+    assert_eq!(projection.effective_priority, 15);
 }
 
 #[test]
