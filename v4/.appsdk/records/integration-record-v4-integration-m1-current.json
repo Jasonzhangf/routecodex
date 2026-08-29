@@ -3,9 +3,9 @@
   "conflict_status": "clean",
   "created_at": "2026-08-27T01:30:00Z",
   "impact_status": "revalidated",
-  "integration_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
+  "integration_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
   "integration_id": "v4-integration-m1-current",
-  "integration_tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b",
+  "integration_tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3",
   "issue_id": "V4-RUNTIME-002",
   "main_base_commit": "9ddf2178c516e7e7b96142c73ed93baf2718badb",
   "milestone_id": "M1",
@@ -16,260 +16,260 @@
       "gate_id": "v4_current_tree_baseline_replay",
       "producer": "cargo:v4_current_tree_baseline_replay",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_feature_layer_batches_boundary",
       "producer": "node:v4_feature_layer_batches_boundary",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_feature_layer_batches_red",
       "producer": "node:v4_feature_layer_batches_red",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_feature_layer_batches_self_test",
       "producer": "node:v4_feature_layer_batches_self_test",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_node_container_epoch_boundary",
       "producer": "cargo:v4_node_container_epoch_boundary",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_node_container_epoch_closure_audit",
       "producer": "cargo:v4_node_container_epoch_closure_audit",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_node_container_epoch_plane",
       "producer": "cargo:v4_node_container_epoch_plane",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_node_container_epoch_positive",
       "producer": "cargo:v4_node_container_epoch_positive",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_node_container_epoch_red",
       "producer": "cargo:v4_node_container_epoch_red",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_parity_ledger_boundary",
       "producer": "node:v4_parity_ledger_boundary",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_parity_ledger_plane",
       "producer": "node:v4_parity_ledger_plane",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_parity_ledger_positive",
       "producer": "node:v4_parity_ledger_positive",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_parity_ledger_red",
       "producer": "node:v4_parity_ledger_red",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_plugin_request_boundary",
       "producer": "node:v4_plugin_request_boundary",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_plugin_request_plane",
       "producer": "node:v4_plugin_request_plane",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_plugin_request_positive",
       "producer": "cargo:v4_plugin_request_positive",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_plugin_request_red",
       "producer": "cargo:v4_plugin_request_red",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_plugin_response_boundary",
       "producer": "node:v4_plugin_response_boundary",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_plugin_response_plane",
       "producer": "node:v4_plugin_response_plane",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_plugin_response_positive",
       "producer": "cargo:v4_plugin_response_positive",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_plugin_response_red",
       "producer": "cargo:v4_plugin_response_red",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_003_plan_bundle_boundary",
       "producer": "cargo:v4_runtime_003_plan_bundle_boundary",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_003_plan_bundle_plane",
       "producer": "cargo:v4_runtime_003_plan_bundle_plane",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_003_plan_bundle_positive",
       "producer": "cargo:v4_runtime_003_plan_bundle_positive",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_003_plan_bundle_red",
       "producer": "cargo:v4_runtime_003_plan_bundle_red",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_004_mount_boundary",
       "producer": "cargo:v4_runtime_004_mount_boundary",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_004_mount_plane",
       "producer": "cargo:v4_runtime_004_mount_plane",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_004_mount_positive",
       "producer": "cargo:v4_runtime_004_mount_positive",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_004_mount_red",
       "producer": "cargo:v4_runtime_004_mount_red",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_005_request_port_boundary",
       "producer": "cargo:v4_runtime_005_request_port_boundary",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_005_request_port_plane",
       "producer": "cargo:v4_runtime_005_request_port_plane",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_005_request_port_positive",
       "producer": "cargo:v4_runtime_005_request_port_positive",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_005_request_port_red",
       "producer": "cargo:v4_runtime_005_request_port_red",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_006_response_error_boundary",
       "producer": "cargo:v4_runtime_006_response_error_boundary",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_006_response_error_plane",
       "producer": "cargo:v4_runtime_006_response_error_plane",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_006_response_error_positive",
       "producer": "cargo:v4_runtime_006_response_error_positive",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     },
     {
       "gate_id": "v4_runtime_006_response_error_red",
       "producer": "cargo:v4_runtime_006_response_error_red",
       "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
+      "source_commit": "956a566abfed10f0ed3d49e6ff1892e4a0a252a4",
+      "tree_hash": "5586084ef1bb18cc209cc2e87836c894b71b44d3"
     }
   ],
   "resolution_mode": "none",
