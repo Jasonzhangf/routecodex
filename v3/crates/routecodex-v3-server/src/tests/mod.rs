@@ -215,7 +215,8 @@ fn test_v3_listener_state_with_debug(
             manifest.debug.codex_samples,
             routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
             routecodex_v3_config::internal::v3_error_samples_only()
-                && !manifest.debug.full_codex_sampling,
+                && !manifest.debug.full_codex_sampling
+                && !manifest.debug.codex_samples,
         )),
         responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
         responses_direct_stopless_control: Arc::new(
@@ -667,7 +668,7 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
         5555,
         true,
         true,
-        Some("provider-request,provider-response".to_string()),
+        None,
         false,
     );
     let media = format!("data:image/png;base64,{}", "A".repeat(16_384));

@@ -356,7 +356,8 @@ pub async fn spawn_v3_server_aggregate_with_admin(
         manifest.debug.codex_samples,
         routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
         routecodex_v3_config::internal::v3_error_samples_only()
-            && !manifest.debug.full_codex_sampling,
+            && !manifest.debug.full_codex_sampling
+            && !manifest.debug.codex_samples,
     ));
     for server in &preflight.listeners {
         codex_sample_store
