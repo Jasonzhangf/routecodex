@@ -1334,6 +1334,18 @@
         "docs/architecture/v4-control-event-sse-audit.md"
       ],
       "required_for": ["v4.control.event_domains:source_green"]
+    },
+    {
+      "gate_id": "v4_plugin_model_hook_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-standard-plugins",
+      "feature_ids": ["V4-PLUGIN-MODEL-HOOK"],
+      "command": "cargo test -p routecodex-v4-standard-plugins --offline model_hooks::tests::hook_ids_are_stable",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-standard-plugins", "--offline", "model_hooks::tests::hook_ids_are_stable"],
+      "producer": {"adapter": "cargo", "identity": "v4_plugin_model_hook_red"},
+      "evidence_role": "negative",
+      "input_paths": ["crates/routecodex-v4-standard-plugins/src/model_hooks.rs"],
+      "required_for": ["V4-PLUGIN-MODEL-HOOK:source_green"]
     }
   ]
 }

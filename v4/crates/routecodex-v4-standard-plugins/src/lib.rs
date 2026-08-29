@@ -45,6 +45,7 @@ pub mod request_governance;
 pub mod provider_semantic;
 pub mod responses_wire_build;
 pub mod routing;
+pub mod model_hooks;
 
 pub const STANDARD_LIBRARY_VERSION: &str = "0.1.0";
 pub const STANDARD_LIBRARY_OWNER: &str = "routecodex-v4-standard-plugins";
@@ -667,6 +668,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
     plugins.extend(response_inbound::protocol_decode_descriptors());
     plugins.extend(response_outbound::response_outbound_descriptors());
     plugins.extend(request_plugins::descriptors());
+    plugins.extend(model_hooks::descriptors());
     plugins
 }
 
@@ -1090,6 +1092,9 @@ impl StandardHandleRegistry {
         for (id, execute_fn) in request_plugins::handles() {
             handles.insert(id, MockHandle { execute_fn });
         }
+        for (id, execute_fn) in model_hooks::handles() {
+            handles.insert(id, MockHandle { execute_fn });
+        }
         Self { handles }
     }
 
@@ -1190,6 +1195,8 @@ mod tests {
             "v4.std.request.governance",
             "v4.std.request.provider_semantic",
             "v4.std.request.responses_wire_build",
+            "v4.std.hook.direct_model_passthrough",
+            "v4.std.hook.relay_model_projection",
         ];
         actual.sort_unstable();
         expected.sort_unstable();

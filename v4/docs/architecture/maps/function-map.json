@@ -1283,6 +1283,16 @@
       "resource_ids": ["v4.request.normal_payload", "v4.request.provider_semantic", "v4.request.provider_wire_payload"],
       "source_paths": ["crates/routecodex-v4-runtime/src/lib.rs", "crates/routecodex-v4-runtime-bin/src/main.rs"],
       "required_gates": ["v4_production_mainline_red", "v4_runtime_l2_regression", "v4_real_runtime_responses_json", "v4_real_runtime_responses_sse"]
+    },
+    {
+      "function_id": "v4.plugin.hook.model_mapping",
+      "status": "active",
+      "feature_id": "V4-PLUGIN-MODEL-HOOK",
+      "owner": "routecodex-v4-standard-plugins",
+      "entry_symbols": ["direct_model_passthrough", "relay_model_projection"],
+      "resource_ids": ["v4.request.normal_payload"],
+      "source_paths": ["crates/routecodex-v4-standard-plugins/src/model_hooks.rs"],
+      "required_gates": ["v4_standard_plugins_l2_regression", "v4_parity_gate_standard_plugins", "v4_plugin_model_hook_red"]
     }
   ]
 }

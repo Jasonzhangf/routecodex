@@ -483,8 +483,8 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 29) {
-      failures.push(`${MODULE}: expected 29 active standard descriptors, got ${activeDescriptors.length}`);
+    if (activeDescriptors.length !== 31) {
+      failures.push(`${MODULE}: expected 31 active standard descriptors, got ${activeDescriptors.length}`);
     }
     if (!activeDescriptors.some(
       (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',
