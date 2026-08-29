@@ -562,6 +562,8 @@ mod tests {
                 output_tokens: Some(0),
                 total_tokens: Some(0),
                 cached_tokens: None,
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
             }),
             ..Default::default()
         };
@@ -578,6 +580,43 @@ mod tests {
             observability.rows().unwrap()[&key].result.as_deref(),
             Some("issue")
         );
+    }
+
+    #[test]
+    fn completed_usage_projects_split_cache_fields() {
+        let observability = V3WebuiObservability::new();
+        let key = build_v3_obs_request_key(5555, "r-split-cache");
+        let runtime = crate::V3RuntimeObservability {
+            usage: Some(crate::V3RuntimeUsageSummary {
+                input_tokens: Some(1_000),
+                output_tokens: Some(20),
+                total_tokens: Some(1_020),
+                cached_tokens: None,
+                cache_read_input_tokens: Some(700),
+                cache_creation_input_tokens: Some(200),
+            }),
+            ..Default::default()
+        };
+
+        record_observed(
+            &observability,
+            V3ObsEventType::Completed,
+            &key,
+            scope(5555),
+            meta_with_full("r-split-cache"),
+            &runtime,
+        )
+        .unwrap();
+
+        let rows = observability.rows().unwrap();
+        let usage = rows
+            .get(&key)
+            .and_then(|row| row.usage.as_ref())
+            .expect("projected usage");
+        assert_eq!(usage.input_tokens, Some(1_000));
+        assert_eq!(usage.cache_read_input_tokens, Some(700));
+        assert_eq!(usage.cache_creation_input_tokens, Some(200));
+        assert_eq!(usage.cached_tokens, None);
     }
 
     #[test]

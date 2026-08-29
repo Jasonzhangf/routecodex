@@ -203,7 +203,7 @@
         ["finish reason", compactFinishReason(row)],
         ["error", compactErrorReason(row)],
         ["attempts", `${row.attempts}/${row.failed_attempts}/${row.switches}`],
-        ["tokens in/out/cache", `${fmtCompact(usage.input_tokens)}/${fmtCompact(usage.output_tokens)}/${fmtCompact(usage.cached_tokens)}`],
+        ["tokens in/out/read/created", `${fmtCompact(usage.input_tokens)}/${fmtCompact(usage.output_tokens)}/${fmtCompact(usage.cache_read_input_tokens ?? usage.cached_tokens)}/${fmtCompact(usage.cache_creation_input_tokens)}`],
         ["internal / external", `${row.timing_internal_ms != null ? fmtMs(row.timing_internal_ms) : "—"} / ${row.timing_external_ms != null ? fmtMs(row.timing_external_ms) : "—"}`],
         ["duration", fmtMs(row.duration_ms)],
       ];
@@ -284,10 +284,10 @@
       if (!usage) return "—";
       const input = Number(usage.input_tokens ?? 0);
       const output = Number(usage.output_tokens ?? 0);
-      const cached = Math.min(Number(usage.cached_tokens ?? 0), Math.max(input, Number(usage.cached_tokens ?? 0)));
-      const effective = Math.max(input, cached);
-      const hit = effective > 0 ? `${((cached / effective) * 100).toFixed(1)}%` : "—";
-      return `${fmtCompact(input)} / ${fmtCompact(output)} · ${hit}`;
+      const read = Number(usage.cache_read_input_tokens ?? usage.cached_tokens ?? 0);
+      const created = Number(usage.cache_creation_input_tokens ?? 0);
+      const hit = input > 0 ? `${((read / input) * 100).toFixed(1)}%` : "—";
+      return `${fmtCompact(input)} / ${fmtCompact(output)} · read=${fmtCompact(read)} · created=${fmtCompact(created)} · ${hit}`;
     }
 
     function timeText(value) {
@@ -342,7 +342,7 @@
       primary.append(
         el("span", "providercompact-model", model),
         el("span", "providercompact-sep muted", " · "),
-        el("span", "providercompact-key muted", authAlias === "—" ? `key: —` : `key: ${authAlias}`)
+        el("span", "providercompact-key muted", authAlias)
       );
       cell.appendChild(primary);
       const details = el("dl", "providercompact-detail");
@@ -644,7 +644,8 @@
         ["error category", row.meta?.error_category], ["error detail", row.meta?.error_detail],
         ["usage in", usage.input_tokens != null ? Number(usage.input_tokens).toLocaleString() : "—"],
         ["usage out", usage.output_tokens != null ? Number(usage.output_tokens).toLocaleString() : "—"],
-        ["usage cache", usage.cached_tokens != null ? Number(usage.cached_tokens).toLocaleString() : "—"],
+        ["usage cache read", usage.cache_read_input_tokens != null ? Number(usage.cache_read_input_tokens).toLocaleString() : (usage.cached_tokens != null ? Number(usage.cached_tokens).toLocaleString() : "—")],
+        ["usage cache creation", usage.cache_creation_input_tokens != null ? Number(usage.cache_creation_input_tokens).toLocaleString() : "—"],
         ["usage total", usage.total_tokens != null ? Number(usage.total_tokens).toLocaleString() : "—"],
         ["internal time", row.timing_internal_ms != null ? `${row.timing_internal_ms} ms` : "—"],
         ["external time", row.timing_external_ms != null ? `${row.timing_external_ms} ms` : "—"],

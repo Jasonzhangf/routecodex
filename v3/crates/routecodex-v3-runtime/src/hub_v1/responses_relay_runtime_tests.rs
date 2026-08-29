@@ -608,7 +608,9 @@ fn usage_summary_counts_cache_reads_but_not_cache_writes() {
     }))
     .expect("usage summary");
     assert_eq!(summary.input_tokens, Some(59_842));
-    assert_eq!(summary.cached_tokens, Some(41_984));
+    assert_eq!(summary.cache_read_input_tokens, Some(41_984));
+    assert_eq!(summary.cache_creation_input_tokens, Some(7));
+    assert_eq!(summary.cached_tokens, None);
 }
 
 #[test]
@@ -639,6 +641,50 @@ fn usage_summary_accepts_integer_valued_floats_and_rejects_fractions() {
         fractional.is_none(),
         "fractional usage must not be silently truncated to integer tokens"
     );
+}
+
+#[test]
+fn usage_summary_preserves_glm_anthropic_top_level_cache_fields() {
+    let summary = extract_v3_runtime_usage_summary(&json!({
+        "model": "glm-5.3",
+        "usage": {
+            "input_tokens": 1_000,
+            "output_tokens": 20,
+            "total_tokens": 1_020,
+            "cache_read_input_tokens": 700,
+            "cache_creation_input_tokens": 200
+        }
+    }))
+    .expect("GLM usage summary");
+
+    assert_eq!(summary.input_tokens, Some(1_000));
+    assert_eq!(summary.output_tokens, Some(20));
+    assert_eq!(summary.total_tokens, Some(1_020));
+    assert_eq!(summary.cache_read_input_tokens, Some(700));
+    assert_eq!(summary.cache_creation_input_tokens, Some(200));
+    assert_eq!(summary.cached_tokens, None);
+}
+
+#[test]
+fn usage_summary_preserves_minimax_anthropic_top_level_cache_fields() {
+    let summary = extract_v3_runtime_usage_summary(&json!({
+        "model": "MiniMax-M3",
+        "usage": {
+            "input_tokens": 2_000,
+            "output_tokens": 40,
+            "total_tokens": 2_040,
+            "cache_read_input_tokens": 1_400,
+            "cache_creation_input_tokens": 300
+        }
+    }))
+    .expect("MiniMax usage summary");
+
+    assert_eq!(summary.input_tokens, Some(2_000));
+    assert_eq!(summary.output_tokens, Some(40));
+    assert_eq!(summary.total_tokens, Some(2_040));
+    assert_eq!(summary.cache_read_input_tokens, Some(1_400));
+    assert_eq!(summary.cache_creation_input_tokens, Some(300));
+    assert_eq!(summary.cached_tokens, None);
 }
 
 #[test]

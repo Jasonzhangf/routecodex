@@ -5,7 +5,7 @@ pub(crate) fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSumma
     let Some(usage) = usage else {
         return "usage=unreported".to_string();
     };
-    let input_tokens = v3_console_effective_input_tokens(usage);
+    let input_tokens = usage.input_tokens;
     let input = input_tokens
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unreported".to_string());
@@ -13,10 +13,12 @@ pub(crate) fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSumma
         .output_tokens
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unreported".to_string());
-    let total = v3_console_effective_total_tokens(usage)
+    let total = usage
+        .total_tokens
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unreported".to_string());
-    let cache = match (usage.cached_tokens, input_tokens) {
+    let cache_read = usage.cache_read_input_tokens.or(usage.cached_tokens);
+    let cache = match (cache_read, input_tokens) {
         (Some(cached), Some(input)) if input > 0 => {
             format!(
                 "{cached}/{input}({:.1}%)",
@@ -34,14 +36,14 @@ pub(crate) fn format_v3_console_human_usage_summary(
 ) -> Option<String> {
     let usage = usage?;
     let mut fields = Vec::new();
-    let input_tokens = v3_console_effective_input_tokens(usage);
+    let input_tokens = usage.input_tokens;
     if let Some(input) = input_tokens {
         fields.push(format!("usage_in={input}"));
     }
     if let Some(output) = usage.output_tokens {
         fields.push(format!("usage_out={output}"));
     }
-    if let Some(cached) = usage.cached_tokens {
+    if let Some(cached) = usage.cache_read_input_tokens.or(usage.cached_tokens) {
         let cache = match input_tokens {
             Some(input) if input > 0 => {
                 format!(
@@ -53,25 +55,10 @@ pub(crate) fn format_v3_console_human_usage_summary(
         };
         fields.push(format!("usage_cache={cache}"));
     }
-    if let Some(total) = v3_console_effective_total_tokens(usage) {
+    if let Some(total) = usage.total_tokens {
         fields.push(format!("usage_total={total}"));
     }
     (!fields.is_empty()).then(|| fields.join(" "))
-}
-
-pub(crate) fn v3_console_effective_input_tokens(usage: &V3RuntimeUsageSummary) -> Option<u64> {
-    match (usage.input_tokens, usage.cached_tokens) {
-        // Anthropic reports an uncached increment plus a separate cache-read count.
-        (Some(input), Some(cached)) if cached > input => input.checked_add(cached),
-        (input, _) => input,
-    }
-}
-
-pub(crate) fn v3_console_effective_total_tokens(usage: &V3RuntimeUsageSummary) -> Option<u64> {
-    match (usage.total_tokens, usage.input_tokens, usage.cached_tokens) {
-        (Some(total), Some(input), Some(cached)) if cached > input => total.checked_add(cached),
-        (total, _, _) => total,
-    }
 }
 
 pub(crate) fn read_v3_console_response_status(value: &Value) -> Option<String> {
@@ -136,13 +123,14 @@ pub(crate) fn extract_v3_console_usage_summary(value: &Value) -> Option<V3Runtim
         total_tokens: read_v3_console_usage_u64(usage, &["total_tokens"]),
         cached_tokens: read_v3_console_usage_u64(usage, &["input_tokens_details", "cached_tokens"])
             .or_else(|| {
+                read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cached_tokens"])
+            }),
+        cache_read_input_tokens: read_v3_console_usage_u64(usage, &["cache_read_input_tokens"])
+            .or_else(|| {
                 read_v3_console_usage_u64(usage, &["input_tokens_details", "cached_read_tokens"])
             })
             .or_else(|| {
                 read_v3_console_usage_u64(usage, &["input_tokens_details", "cache_read_tokens"])
-            })
-            .or_else(|| {
-                read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cached_tokens"])
             })
             .or_else(|| {
                 read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cached_read_tokens"])

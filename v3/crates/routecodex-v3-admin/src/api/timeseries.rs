@@ -23,11 +23,7 @@ pub(crate) struct TimeseriesBucket {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_tokens: Option<u64>,
     pub total_tokens: u64,
-    /// Cache hit rate within this bucket, clamped to 0..=100. None when the
-    /// bucket has no effective input. Effective input uses raw `input_tokens`
-    /// (which already absorbs cache_read/cache_creation contributions) and
-    /// falls back to `cached_tokens` only when raw input is smaller than
-    /// cached.
+    /// Cache hit rate within this bucket. None when raw input is zero.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_hit_rate_percent: Option<f64>,
 }
@@ -476,5 +472,55 @@ mod tests {
         assert_eq!(bucket.output_tokens, 0);
         assert_eq!(bucket.cached_tokens, 0);
         assert_eq!(bucket.total_tokens, 0);
+    }
+
+    #[test]
+    fn timeseries_cache_hit_uses_read_tokens_over_raw_input() {
+        let now_ms = system_epoch_ms().unwrap();
+        let today_start = local_day_start(now_ms, 0);
+        let yesterday_start = today_start - 86_400_000;
+        let hit_usage = json!({
+            "input_tokens": 1_000,
+            "output_tokens": 20,
+            "cache_read_input_tokens": 700,
+            "cache_creation_input_tokens": 200,
+            "total_tokens": 1_020
+        });
+        let creation_only_usage = json!({
+            "input_tokens": 1_000,
+            "output_tokens": 20,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 200,
+            "total_tokens": 1_020
+        });
+        let rows = vec![
+            TimeseriesRow {
+                started_epoch_ms: today_start + 1_000,
+                usage: Some(&hit_usage),
+                result: Some("success"),
+            },
+            TimeseriesRow {
+                started_epoch_ms: yesterday_start + 1_000,
+                usage: Some(&creation_only_usage),
+                result: Some("success"),
+            },
+        ];
+
+        let buckets = build_timeseries(&rows, "all", 0).unwrap();
+        let today = buckets
+            .iter()
+            .find(|bucket| bucket.date == utc_date_for_local_day(today_start, 0))
+            .expect("today bucket");
+        assert_eq!(today.cache_read_input_tokens, Some(700));
+        assert_eq!(today.cache_creation_input_tokens, Some(200));
+        assert_eq!(today.cache_hit_rate_percent, Some(70.0));
+
+        let yesterday = buckets
+            .iter()
+            .find(|bucket| bucket.date == utc_date_for_local_day(yesterday_start, 0))
+            .expect("yesterday bucket");
+        assert_eq!(yesterday.cache_read_input_tokens, Some(0));
+        assert_eq!(yesterday.cache_creation_input_tokens, Some(200));
+        assert_eq!(yesterday.cache_hit_rate_percent, Some(0.0));
     }
 }

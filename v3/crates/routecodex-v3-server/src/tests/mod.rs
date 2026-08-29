@@ -814,6 +814,8 @@ fn test_direct_observability(
             output_tokens: Some(2),
             total_tokens: Some(12),
             cached_tokens: Some(5),
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
         }),
         timing: Some(V3RuntimeTimingSummary {
             runtime_total: std::time::Duration::from_millis(25),
@@ -891,6 +893,8 @@ fn usage_summary_prints_cache_hit_rate() {
         output_tokens: Some(822),
         total_tokens: Some(60_664),
         cached_tokens: Some(41_984),
+        cache_read_input_tokens: None,
+        cache_creation_input_tokens: None,
     };
     assert_eq!(
         format_v3_console_usage_summary(Some(&summary)),
@@ -899,20 +903,22 @@ fn usage_summary_prints_cache_hit_rate() {
 }
 
 #[test]
-fn usage_summary_adds_separately_reported_cache_reads_to_input_and_total() {
+fn usage_summary_preserves_raw_input_and_total_with_separate_cache_read() {
     let summary = V3RuntimeUsageSummary {
         input_tokens: Some(184),
         output_tokens: Some(448),
         total_tokens: Some(632),
-        cached_tokens: Some(147_840),
+        cached_tokens: None,
+        cache_read_input_tokens: Some(147_840),
+        cache_creation_input_tokens: None,
     };
     assert_eq!(
         format_v3_console_usage_summary(Some(&summary)),
-        "usage_in=148024 usage_out=448 usage_cache=147840/148024(99.9%) usage_total=148472"
+        "usage_in=184 usage_out=448 usage_cache=147840/184(80347.8%) usage_total=632"
     );
     assert_eq!(
         format_v3_console_human_usage_summary(Some(&summary)).as_deref(),
-        Some("usage_in=148024 usage_out=448 usage_cache=147840/148024(99.9%) usage_total=148472")
+        Some("usage_in=184 usage_out=448 usage_cache=147840/184(80347.8%) usage_total=632")
     );
 }
 
@@ -923,6 +929,8 @@ fn usage_summary_does_not_add_cache_already_in_input_tokens() {
         output_tokens: Some(822),
         total_tokens: Some(60_664),
         cached_tokens: Some(41_984),
+        cache_read_input_tokens: None,
+        cache_creation_input_tokens: None,
     };
     assert_eq!(
         format_v3_console_usage_summary(Some(&summary)),
@@ -937,6 +945,8 @@ fn usage_summary_preserves_no_cache_and_missing_usage_fields() {
         output_tokens: Some(3),
         total_tokens: Some(15),
         cached_tokens: None,
+        cache_read_input_tokens: None,
+        cache_creation_input_tokens: None,
     };
     assert_eq!(
         format_v3_console_usage_summary(Some(&no_cache)),
@@ -960,7 +970,9 @@ fn usage_summary_extracts_cached_read_hit_tokens() {
         }
     }))
     .expect("usage summary");
-    assert_eq!(summary.cached_tokens, Some(41_984));
+    assert_eq!(summary.cache_read_input_tokens, Some(41_984));
+    assert_eq!(summary.cache_creation_input_tokens, Some(7));
+    assert_eq!(summary.cached_tokens, None);
     assert_eq!(
         format_v3_console_usage_summary(Some(&summary)),
         "usage_in=59842 usage_out=822 usage_cache=41984/59842(70.2%) usage_total=60664"
