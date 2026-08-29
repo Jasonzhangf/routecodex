@@ -232,6 +232,43 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
         )
     }
 
+    pub(crate) fn wrap_live(&self, stream: V3ClientSseStream) -> V3ClientSseStream {
+        let recorder = self.core.clone();
+        Box::pin(futures_util::stream::unfold(
+            (stream, false),
+            move |(mut stream, done)| {
+                let recorder = recorder.clone();
+                async move {
+                    if done {
+                        return None;
+                    }
+                    match stream.next().await {
+                        Some(Ok(bytes)) => {
+                            if let Err(error) = recorder.append_chunk(&bytes) {
+                                eprintln!("[v3-sse-snapshot] client response capture failed: {error}");
+                            }
+                            Some((Ok(bytes), (stream, false)))
+                        }
+                        Some(Err(error)) => {
+                            if let Err(capture_error) =
+                                recorder.persist_current(Some(error.message.as_str()))
+                            {
+                                eprintln!("[v3-sse-snapshot] client response finalize failed: {capture_error}");
+                            }
+                            Some((Err(error), (stream, true)))
+                        }
+                        None => {
+                            if let Err(error) = recorder.persist_current(None) {
+                                eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
+                            }
+                            None
+                        }
+                    }
+                }
+            },
+        ))
+    }
+
     pub(crate) fn persist_initial(&self) -> Result<(), String> {
         self.core.persist_initial()
     }
@@ -1010,16 +1047,27 @@ pub(crate) fn capture_v3_responses_direct_response(
             "error_chain": frame.error_chain.clone(),
             "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
         }),
-        V3Server16Body::Sse(_) => json!({
-            "object": "routecodex.v3.client_response_snapshot",
-            "stage": "client-response",
-            "source": "live_server_direct_response_sse_stream",
-            "status": frame.status,
-            "bodyKind": "sse_stream",
-            "node_trace": frame.node_trace.clone(),
-            "error_chain": frame.error_chain.clone(),
-            "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
-        }),
+        V3Server16Body::Sse(_) => {
+            let body = std::mem::replace(&mut frame.body, V3Server16Body::Bytes(Vec::new()));
+            let V3Server16Body::Sse(stream) = body else {
+                unreachable!("matched live Direct SSE client body");
+            };
+            let recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
+                Arc::clone(state),
+                entry_protocol.to_string(),
+                endpoint.to_string(),
+                request_id.to_string(),
+                frame,
+            );
+            if let Err(error) = recorder.persist_initial() {
+                return Some(foundation_output_response(project_v3_debug_failure(
+                    "V3Debug03RawResponseCaptured",
+                    V3DebugError::Sink(error),
+                )));
+            }
+            frame.body = V3Server16Body::Sse(recorder.wrap_live(stream));
+            return None;
+        }
         V3Server16Body::CommittedSse(_) => {
             let body = std::mem::replace(&mut frame.body, V3Server16Body::Bytes(Vec::new()));
             let V3Server16Body::CommittedSse(stream) = body else {
