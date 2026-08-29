@@ -317,14 +317,8 @@
       {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:90f7be19e42308204748e9cdfbae0e4f2c6da67bde5be7dead3c0b229b32efca"},
       {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:af7e9c6f8da6f69da39fe831698c5aec799ba12414fa459f80cc18498c22a236"}
     ],
-    "wiring_started": true,
-    "wiring_edges": [
-      "added:mainline:undefined:routecodex-v4-runtime-bin::handle_responses->routecodex-v4-runtime::SkeletonRuntime::execute_request_json_scoped:routecodex-v4-runtime::request_chat_process",
-      "added:mainline:undefined:routecodex-v4-runtime::ExecutionReport::provider_wire_value->routecodex-v4-runtime-bin::send_target_nonstream|send_target_streaming:routecodex-v4-runtime-bin::handle_responses",
-      "removed:mainline:undefined:routecodex-v4-runtime-bin::handle_responses->routecodex-v4-runtime::SkeletonRuntime::execute_request_json_scoped:routecodex-v4-runtime",
-      "removed:mainline:undefined:routecodex-v4-runtime::ExecutionReport::provider_wire_value->routecodex-v4-runtime-bin::send_target_nonstream|send_target_streaming:routecodex-v4-runtime-bin",
-      "surface:docs/architecture/maps/mainline-call-map.json:sha256:90f7be19e42308204748e9cdfbae0e4f2c6da67bde5be7dead3c0b229b32efca"
-    ],
+    "wiring_started": false,
+    "wiring_edges": [],
     "resource_refs": {
       "merge_queue_state": ".appsdk/records/merge-queue-state.json",
       "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"
