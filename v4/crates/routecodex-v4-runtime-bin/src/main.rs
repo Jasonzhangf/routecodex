@@ -719,7 +719,6 @@ fn handle_responses(
         .execute_request_json_scoped(
             &String::from_utf8_lossy(&request.body),
             entry_protocol,
-            &target.protocol,
             &target.wire_model,
             stream_mode,
             &format!("{}:request", request.request_id),
@@ -742,9 +741,11 @@ fn handle_responses(
             400,
         ));
     }
-    let wire_body = request_report.provider_wire_value.ok_or_else(|| {
+    let semantic_body = request_report.provider_wire_value.ok_or_else(|| {
         project_fault(request, RuntimeFault::new("request_wire_missing", "request chain produced no provider wire"), 598)
     })?;
+    let wire_body = build_retry_wire(&target.protocol, &semantic_body, &target.wire_model, stream_mode)
+        .map_err(|error| project_fault(request, RuntimeFault::new(&error.code, error.message), error.status.unwrap_or(598)))?;
     if stream_mode {
         let mut stream = send_target_streaming(&target, &wire_body).map_err(|error| {
             project_fault(
