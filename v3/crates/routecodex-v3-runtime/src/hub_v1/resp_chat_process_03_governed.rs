@@ -374,6 +374,15 @@ fn v3_custom_tool_thinking_wrapper_at_resp03(
         return None;
     }
     let wrapper = serde_json::from_str::<Value>(raw_input).ok()?;
+    let wrapper = match wrapper {
+        Value::String(encoded_wrapper) => {
+            if json_object_has_duplicate_keys_at_resp03(&encoded_wrapper) {
+                return None;
+            }
+            serde_json::from_str::<Value>(&encoded_wrapper).ok()?
+        }
+        wrapper => wrapper,
+    };
     let wrapper = wrapper.as_object()?;
     let fields = parse_v3_tool_thinking_fields_from_object_at_resp03(wrapper).ok()?;
     let native_input = wrapper.get("input")?.as_str()?.to_string();
@@ -416,13 +425,7 @@ fn strip_v3_tool_thinking_fields_from_object_at_resp03(
         if object.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
             if let Some((_fields, native_input)) = v3_custom_tool_thinking_wrapper_at_resp03(object)
             {
-                if object
-                    .get("input")
-                    .and_then(Value::as_str)
-                    .is_some_and(|input| input.trim_start().starts_with('{'))
-                {
-                    object.insert("input".to_string(), Value::String(native_input));
-                }
+                object.insert("input".to_string(), Value::String(native_input));
                 object.remove("reason");
                 object.remove("goal_alignment_confidence");
                 object.remove("model_id");

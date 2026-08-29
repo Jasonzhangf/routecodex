@@ -836,6 +836,127 @@ fn resp03_custom_tool_malformed_nested_wrapper_is_left_byte_semantically_unchang
 }
 
 #[test]
+fn resp03_apply_patch_double_encoded_wrapper_restores_native_patch_bytes() {
+    let raw_patch = "*** Begin Patch\n*** Update File: src/example.txt\n-old\n+new\n*** End Patch";
+    let inner_wrapper = serde_json::to_string(&json!({
+        "input": raw_patch,
+        "reason": "更新用户指定文件",
+        "goal_alignment_confidence": 100,
+        "model_id": "x-preview-f-free"
+    }))
+    .expect("inner wrapper must serialize");
+    let double_encoded_input =
+        serde_json::to_string(&inner_wrapper).expect("double encoded wrapper must serialize");
+
+    let mut payload = json!({
+        "output":[{"type":"custom_tool_call","call_id":"call_double_encoded",
+            "name":"apply_patch","input":double_encoded_input}]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("x-preview-f-free"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-double-encoded"),
+            request_id: Some("request-double-encoded"),
+        },
+    );
+
+    // After Chat Process projects reason into a summary item, the double-encoded
+    // wrapper must be unwrapped so the tool call's input is exactly the native
+    // patch bytes, not a JSON-encoded JSON-encoded string.
+    assert_eq!(
+        payload["output"].as_array().map(|a| a.len()),
+        Some(2),
+        "reason from the nested wrapper must project into a summary item"
+    );
+    assert_eq!(
+        payload["output"][1]["input"], raw_patch,
+        "double-encoded wrapper must be normalized back to native patch bytes"
+    );
+    assert!(payload["output"][1].get("reason").is_none());
+    assert!(payload["output"][1]
+        .get("goal_alignment_confidence")
+        .is_none());
+    assert!(payload["output"][1].get("model_id").is_none());
+    assert_eq!(
+        payload["output"][0]["summary"][0]["text"],
+        "调用工具 apply_patch：更新用户指定文件"
+    );
+}
+
+#[test]
+fn resp03_apply_patch_double_encoded_duplicate_inner_key_is_not_recovered() {
+    let raw_patch = "*** Begin Patch\n*** Update File: src/example.txt\n-old\n+new\n*** End Patch";
+    let ambiguous_inner_wrapper = format!(
+        "{{\"input\":{},\"input\":{},\"reason\":\"更新用户指定文件\",\"model_id\":\"x-preview-f-free\"}}",
+        serde_json::to_string(raw_patch).expect("patch must serialize"),
+        serde_json::to_string("*** Begin Patch\n*** End Patch").expect("patch must serialize")
+    );
+    let double_encoded_input =
+        serde_json::to_string(&ambiguous_inner_wrapper).expect("wrapper must serialize");
+    let mut payload = json!({
+        "output":[{"type":"custom_tool_call","call_id":"call_double_duplicate",
+            "name":"apply_patch","input":double_encoded_input}]
+    });
+    let before = payload.clone();
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("x-preview-f-free"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-double-duplicate"),
+            request_id: Some("request-double-duplicate"),
+        },
+    );
+
+    assert_eq!(
+        payload, before,
+        "ambiguous inner wrapper must remain unchanged rather than guessing a duplicate key"
+    );
+}
+
+#[test]
+fn resp03_apply_patch_absolute_header_is_preserved_for_executor_failure() {
+    let raw_patch = "*** Begin Patch\n*** Update File: /Volumes/extension/code/zterm/remote-tab-audit.ts\n-const x = 1;\n+const x = 2;\n*** End Patch";
+    let mut payload = json!({
+        "output":[{"type":"custom_tool_call","call_id":"call_absolute_header",
+            "name":"apply_patch","input":raw_patch}]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("x-preview-f-free"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-absolute-header"),
+            request_id: Some("request-absolute-header"),
+        },
+    );
+
+    // Raw patch without wrapper does not trigger reasoning projection, so output
+    // stays at its original length; Chat Process must preserve absolute header bytes.
+    assert_eq!(
+        payload["output"].as_array().map(|a| a.len()),
+        Some(1),
+        "raw patch path must not inject reasoning summary"
+    );
+    let projected_input = payload["output"][0]["input"]
+        .as_str()
+        .expect("input must be a string after projection");
+    assert_eq!(
+        projected_input, raw_patch,
+        "absolute header must be preserved byte-for-byte"
+    );
+    assert!(projected_input.contains("/Volumes/extension/code/zterm/"));
+}
+
+#[test]
 fn direct_sse_native_reasoning_is_not_reprojected_as_toolreason() {
     let completed_frame = format!(
         "data: {}\n\n",
