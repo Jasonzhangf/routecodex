@@ -154,6 +154,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         Arc::clone(&captured_provider_request),
     );
     let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(manifest);
+    let initial_selected_target_for_failure = initial_selected_target.clone();
     let mut output = match execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
@@ -175,15 +176,13 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         Ok(output) => output,
         Err(error) => project_v3_responses_relay_runtime_failure(
             error,
-            initial_selected_target
-                .as_ref()
-                .map(|target| {
-                    super::relay_runtime_shared::build_v3_relay_observability(
-                        "responses",
-                        target,
-                        "json",
-                    )
-                }),
+            initial_selected_target_for_failure.as_ref().map(|target| {
+                super::relay_runtime_shared::build_v3_relay_observability(
+                    "responses",
+                    target,
+                    "json",
+                )
+            }),
         ),
     };
     if let Some(handoff) = output.protocol_direct_handoff.take() {
