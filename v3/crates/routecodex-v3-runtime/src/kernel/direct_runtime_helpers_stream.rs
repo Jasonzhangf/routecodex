@@ -741,6 +741,30 @@ mod direct_sse_timing_tests {
         assert!(!terminal, "response.done must not bypass the codec terminal contract");
     }
 
+    #[test]
+    fn direct_sse_observation_retains_provider_raw_bytes_for_capture() {
+        let observation = V3RuntimeStreamObservation::default();
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let mut consumer = V3DirectSseContentConsumer {
+            provider_protocol: Some(crate::hub_v1::V3HubProviderWireProtocol::Responses),
+            ..Default::default()
+        };
+        let chunk = b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"raw\"}\n\n";
+        record_direct_sse_provider_event_json_chunk(
+            chunk,
+            &mut decoder,
+            &observation,
+            false,
+            false,
+            &mut consumer,
+        )
+        .expect("provider event should be observed");
+        assert_eq!(
+            observation.snapshot().unwrap().provider_raw_sse,
+            std::str::from_utf8(chunk).unwrap()
+        );
+    }
+
     #[tokio::test]
     async fn direct_sse_broker_waits_for_provider_terminal_before_client_release() {
         let provider = Box::pin(stream::unfold(0usize, |index| async move {
@@ -842,6 +866,9 @@ fn record_direct_sse_provider_event_json_chunk(
     retain_response_cipher: bool,
     content_consumer: &mut V3DirectSseContentConsumer,
 ) -> Result<(Option<Vec<u8>>, bool), V3Error01SourceRaised> {
+    stream_observation
+        .record_provider_raw_sse_chunk(chunk)
+        .map_err(provider_sse_failure_source)?;
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
         .map_err(build_v3_sse_transport_error_source)?;
