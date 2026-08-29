@@ -213,6 +213,13 @@ pub(crate) struct V3ObsUsageSummary {
     pub output_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
     pub cached_tokens: Option<u64>,
+    /// Anthropic/MiniMax/glm-5.3 cache read (prompt-cache hit). Stored
+    /// alongside `cached_tokens` so the Admin/WebUI hit-rate denominator
+    /// does not collapse Anthropic read+creation into one number.
+    pub cache_read_input_tokens: Option<u64>,
+    /// Anthropic cache write (creation). Tracked separately and excluded
+    /// from the hit-rate denominator.
+    pub cache_creation_input_tokens: Option<u64>,
 }
 
 /// Shared per-listener projection state. The mutable map is only an
@@ -387,6 +394,8 @@ impl V3WebuiObservability {
                         output_tokens: usage.output_tokens,
                         total_tokens: usage.total_tokens,
                         cached_tokens: usage.cached_tokens,
+                        cache_read_input_tokens: usage.cache_read_input_tokens,
+                        cache_creation_input_tokens: usage.cache_creation_input_tokens,
                     });
                 }
                 row.timing_internal_ms = observability

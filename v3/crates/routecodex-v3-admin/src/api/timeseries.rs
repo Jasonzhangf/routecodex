@@ -14,6 +14,14 @@ pub(crate) struct TimeseriesBucket {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cached_tokens: u64,
+    /// Anthropic/MiniMax/glm-5.3 cache-read count for the bucket. Stored
+    /// separately so the bucket hit-rate uses only read hits, not creation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
+    /// Anthropic cache-write count for the bucket. Visible for diagnostics;
+    /// never folded into the hit-rate denominator.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u64>,
     pub total_tokens: u64,
     /// Cache hit rate within this bucket, clamped to 0..=100. None when the
     /// bucket has no effective input. Effective input uses raw `input_tokens`
@@ -32,6 +40,21 @@ pub(crate) struct TimeseriesRow<'a> {
 
 pub(crate) fn usage_is_countable(result: Option<&str>) -> bool {
     result == Some("success")
+}
+
+fn token_for(row_usage: Option<&Value>, name: &str) -> u64 {
+    row_usage
+        .and_then(|usage| usage.get(name))
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn row_cache_read(row_usage: Option<&Value>, fallback: u64) -> u64 {
+    let direct = token_for(row_usage, "cache_read_input_tokens");
+    if direct > 0 {
+        return direct;
+    }
+    fallback
 }
 
 pub(crate) fn system_epoch_ms() -> Result<u64, String> {
@@ -142,6 +165,8 @@ pub(crate) fn build_timeseries(
                 input_tokens: 0,
                 output_tokens: 0,
                 cached_tokens: 0,
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
                 total_tokens: 0,
                 cache_hit_rate_percent: None,
             });
@@ -165,6 +190,18 @@ pub(crate) fn build_timeseries(
             // Clamp bucket cached so cross-row accumulation never exceeds bucket
             // effective input (raw input tokens already include cache_read).
             bucket.cached_tokens += row_cached.min(row_effective);
+            // Anthropic/MiniMax/glm-5.3 split: cache_read hits drive the
+            // rate and the diagnostic field; cache_creation is tracked but
+            // excluded from the rate. OpenAI/Responses rows fall back to
+            // `cached_tokens` so legacy aggregation stays numerically
+            // identical to the previous shape.
+            let row_cache_read_value = row_cache_read(usage, row_cached.min(row_effective));
+            bucket.cache_read_input_tokens =
+                Some(bucket.cache_read_input_tokens.unwrap_or(0) + row_cache_read_value);
+            bucket.cache_creation_input_tokens = Some(
+                bucket.cache_creation_input_tokens.unwrap_or(0)
+                    + token("cache_creation_input_tokens"),
+            );
             bucket.total_tokens += token("total_tokens");
         }
     }
@@ -186,6 +223,8 @@ pub(crate) fn build_timeseries(
                         input_tokens: 0,
                         output_tokens: 0,
                         cached_tokens: 0,
+                        cache_read_input_tokens: None,
+                        cache_creation_input_tokens: None,
                         total_tokens: 0,
                         cache_hit_rate_percent: None,
                     });
@@ -206,6 +245,8 @@ pub(crate) fn build_timeseries(
                         input_tokens: 0,
                         output_tokens: 0,
                         cached_tokens: 0,
+                        cache_read_input_tokens: None,
+                        cache_creation_input_tokens: None,
                         total_tokens: 0,
                         cache_hit_rate_percent: None,
                     });
@@ -232,6 +273,8 @@ pub(crate) fn build_timeseries(
                         input_tokens: 0,
                         output_tokens: 0,
                         cached_tokens: 0,
+                        cache_read_input_tokens: None,
+                        cache_creation_input_tokens: None,
                         total_tokens: 0,
                         cache_hit_rate_percent: None,
                     });
@@ -244,12 +287,16 @@ pub(crate) fn build_timeseries(
         .into_iter()
         .map(|(date, mut bucket)| {
             bucket.date = date;
-            // Effective input uses max(raw_input, cached). With the per-row
-            // clamp during accumulation, bucket cached is already <= input;
-            // the rate uses raw input as denominator.
+            // Anthropic/MiniMax/glm-5.3: cache_read is the only hit
+            // contribution; cache_creation is excluded. Legacy OpenAI rows
+            // (no `cache_read_input_tokens`) keep the previous OpenAI
+            // `cached_tokens / max(input, cached)` shape.
+            let read_hits = bucket
+                .cache_read_input_tokens
+                .unwrap_or(bucket.cached_tokens);
             let effective = bucket.input_tokens.max(bucket.cached_tokens);
             bucket.cache_hit_rate_percent = if effective > 0 {
-                Some((bucket.cached_tokens as f64 / effective as f64) * 100.0)
+                Some((read_hits.min(effective) as f64 / effective as f64) * 100.0)
             } else {
                 None
             };

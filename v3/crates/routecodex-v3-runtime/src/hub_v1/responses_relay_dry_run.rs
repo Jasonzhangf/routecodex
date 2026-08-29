@@ -165,7 +165,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         false,
         None,
         None,
-        initial_selected_target,
+        initial_selected_target.clone(),
         initial_expanded,
         BTreeSet::new(),
         None,
@@ -173,7 +173,18 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
     .await
     {
         Ok(output) => output,
-        Err(error) => project_v3_responses_relay_runtime_failure(error),
+        Err(error) => project_v3_responses_relay_runtime_failure(
+            error,
+            initial_selected_target
+                .as_ref()
+                .map(|target| {
+                    super::relay_runtime_shared::build_v3_relay_observability(
+                        "responses",
+                        target,
+                        "json",
+                    )
+                }),
+        ),
     };
     if let Some(handoff) = output.protocol_direct_handoff.take() {
         return V3ResponsesRelayDryRunOutcome::DirectHandoff(handoff);
@@ -250,6 +261,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
 
 pub fn project_v3_responses_relay_runtime_failure(
     error: V3ResponsesRelayRuntimeError,
+    observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayRuntimeOutput {
     match error {
         V3ResponsesRelayRuntimeError::ModelNotFound(message) => {
@@ -297,7 +309,7 @@ pub fn project_v3_responses_relay_runtime_failure(
                 candidates_remaining: 0,
                 source_status: None,
             });
-            error_output(source, projected.status, "none", Vec::new(), None, 0)
+            error_output(source, projected.status, "none", Vec::new(), observability, 0)
         }
         V3ResponsesRelayRuntimeError::ClientInboundCanonical(message) => {
             let source = routecodex_v3_error::build_v3_error_01_source_raised(
@@ -306,7 +318,7 @@ pub fn project_v3_responses_relay_runtime_failure(
                 "invalid_responses_request",
                 message,
             );
-            error_output(source, 400, "none", Vec::new(), None, 0)
+            error_output(source, 400, "none", Vec::new(), observability, 0)
         }
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message) => {
             let source = routecodex_v3_error::build_v3_error_01_source_raised_internal(
@@ -316,7 +328,7 @@ pub fn project_v3_responses_relay_runtime_failure(
                 message,
                 routecodex_v3_error::V3InternalErrorCode::V3ProviderResp14Raw,
             );
-            error_output(source, 599, "none", Vec::new(), None, 0)
+            error_output(source, 599, "none", Vec::new(), observability, 0)
         }
         error => {
             let message = error.to_string();
@@ -326,7 +338,7 @@ pub fn project_v3_responses_relay_runtime_failure(
                 "responses_relay_runtime_error",
                 message.clone(),
             );
-            error_output(source, 500, "none", Vec::new(), None, 0)
+            error_output(source, 500, "none", Vec::new(), observability, 0)
         }
     }
 }

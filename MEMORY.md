@@ -5837,3 +5837,9 @@ Tags: #v4 #cordis #workflow-correction #evidence-first
 - Health score is process-local and uses only the latest 100 calls; startup no longer restores cooldown/probe state from `provider-cooldowns.json`.
 - Provider SSE/transport failures enter the shared recoverable health path (`-5`, 3 failures cooldown); success is `+1`, unrecoverable is `-20`.
 - Live evidence before installation showed the reported 502 was not an SSE parser fault: a 275,714-token request exceeded most candidate context windows, then the only selected `mimo-v2.5-free` candidate returned provider 429 three times. The pre-fix binary was still serving until global install and aggregate restart.
+- 2026-08-28 Collab correction: independent tasks use independent declared worktrees; do not treat a worker's existing claim as a filesystem conflict. Preserve the existing claim/task unless the Collab server explicitly requires a lifecycle transition; create the new task/worktree and coordinate ownership without releasing unrelated work.
+
+### 2026-08-28 Config authoring simplification migration lock
+- Simplified user config must use a new filename and a parallel new parser/compiler module; do not mutate the active `config.v3.toml` schema or parser in place.
+- Before wiring runtime/CLI/WebUI, compile both old and new authoring inputs into normalized manifests and prove equivalent usable output with positive, negative, and real-config differential gates.
+- Keep current config path and implementation active until the new module works independently; wire only after standalone verification, cut over only after integrated/live verification, then physically retire the old implementation. No early deletion, fallback parser, or silent dual-source precedence.

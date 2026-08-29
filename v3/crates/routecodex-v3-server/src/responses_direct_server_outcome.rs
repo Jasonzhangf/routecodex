@@ -261,7 +261,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
         };
         let mut relay_output = match relay_result {
             Ok(output) => output,
-            Err(error) => project_v3_responses_relay_runtime_failure(error),
+            Err(error) => project_v3_responses_relay_runtime_failure(error, None),
         };
         prepend_v3_protocol_plan_trace_to_responses_relay_output(
             &mut relay_output,

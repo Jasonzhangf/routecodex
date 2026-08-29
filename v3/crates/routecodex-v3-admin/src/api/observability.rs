@@ -736,6 +736,14 @@ fn row_cached_value(row: &QueryRow) -> u64 {
     usage_value(row, "cached_tokens")
 }
 
+fn row_cache_read_value(row: &QueryRow) -> u64 {
+    usage_value(row, "cache_read_input_tokens")
+}
+
+fn row_cache_creation_value(row: &QueryRow) -> u64 {
+    usage_value(row, "cache_creation_input_tokens")
+}
+
 fn row_total_value(row: &QueryRow) -> u64 {
     usage_value(row, "total_tokens")
 }
@@ -756,6 +764,19 @@ fn row_total_value(row: &QueryRow) -> u64 {
 // so the hit rate never exceeds 100%.
 fn row_effective_input(row: &QueryRow) -> u64 {
     row_input_value(row).max(row_cached_value(row))
+}
+
+/// Returns the cache-hit numerator for the Anthropic/MiniMax/glm-5.3 cache
+/// shape, which exposes `cache_read_input_tokens` independently of
+/// `cache_creation_input_tokens`. Falls back to `cached_tokens` for the
+/// OpenAI/Responses shape that pre-dates the split, so the pre-existing
+/// Admin aggregation stays numerically identical for OpenAI traffic.
+fn row_cache_hit_numerator(row: &QueryRow) -> u64 {
+    let read = row_cache_read_value(row);
+    if read > 0 {
+        return read;
+    }
+    row_cached_value(row)
 }
 
 fn configured_ports(state: &AppState) -> Result<Vec<u16>, String> {
@@ -906,6 +927,8 @@ async fn records(
         "input_tokens":0u64,
         "output_tokens":0u64,
         "cached_tokens":0u64,
+        "cache_read_input_tokens":0u64,
+        "cache_creation_input_tokens":0u64,
         "total_tokens":0u64,
         "cache_hit_rate_percent":0f64,
         "avg_duration_ms":0f64,
@@ -916,6 +939,8 @@ async fn records(
     let mut input = 0;
     let mut output = 0;
     let mut cached = 0;
+    let mut stats_cache_read = 0;
+    let mut stats_cache_creation = 0;
     let mut durations = 0u64;
     let mut with_duration = 0u64;
     let mut total_token_count = 0;
@@ -935,12 +960,20 @@ async fn records(
             let row_input = row_input_value(row);
             let row_output = row_output_value(row);
             let row_cached = row_cached_value(row);
+            let row_cache_read = row_cache_read_value(row);
+            let row_cache_creation = row_cache_creation_value(row);
             input += row_input;
             output += row_output;
             cached += row_cached;
+            stats_cache_read += row_cache_read;
+            stats_cache_creation += row_cache_creation;
             total_token_count += row_total_value(row);
             let row_effective = row_effective_input(row);
-            hit_against_effective += row_cached.min(row_effective);
+            // Anthropic/MiniMax/glm-5.3 split: cache_read is the only hit
+            // contribution; cache_creation is creation (write) and must not
+            // inflate the hit count. We still clamp to the effective input
+            // to keep legacy OpenAI rows <= 100% on accumulation.
+            hit_against_effective += row_cache_hit_numerator(row).min(row_effective);
             effective_input_total += row_effective;
             if let Some(duration) = row.duration_ms {
                 durations += duration;
@@ -1042,6 +1075,8 @@ async fn records(
     stats["input_tokens"] = json!(input);
     stats["output_tokens"] = json!(output);
     stats["cached_tokens"] = json!(cached);
+    stats["cache_read_input_tokens"] = json!(stats_cache_read);
+    stats["cache_creation_input_tokens"] = json!(stats_cache_creation);
     stats["total_tokens"] = json!(total_token_count);
     if effective_input_total > 0 {
         // Per-row cached is clamped to row_effective_input (= max(input, cached))

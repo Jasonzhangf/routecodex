@@ -189,6 +189,13 @@ pub struct V3RuntimeUsageSummary {
     pub output_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
     pub cached_tokens: Option<u64>,
+    /// Anthropic/MiniMax/glm-5.3 cache read (cached prompt hit). Distinct from
+    /// `cached_tokens`, which is the OpenAI/Responses sub-count of input and
+    /// historically collapsed Anthropic read+creation into one number.
+    pub cache_read_input_tokens: Option<u64>,
+    /// Anthropic cache write (creation). Tracked separately so admin/UI can
+    /// show it without folding it into the hit denominator.
+    pub cache_creation_input_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
