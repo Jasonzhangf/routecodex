@@ -1128,6 +1128,7 @@ struct ResponsesSseStream<S = ProviderResponseStream> {
     frame_buffer: Vec<u8>,
     terminal_seen: bool,
     close_after_pending: bool,
+    chat_role_emitted: bool,
 }
 
 impl<S: ProviderSseSource> ResponsesSseStream<S> {
@@ -1157,6 +1158,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
             frame_buffer: Vec::new(),
             terminal_seen: false,
             close_after_pending: false,
+            chat_role_emitted: false,
         }
     }
 
@@ -1176,6 +1178,16 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
 
     fn project_frame(&mut self, frame: &[u8], terminal: bool) -> Result<(), RuntimeFault> {
         self.frame_sequence += 1;
+        if self.entry_protocol == "chat"
+            && std::str::from_utf8(frame)
+                .ok()
+                .and_then(|value| value.lines().find_map(|line| line.strip_prefix("event:")))
+                .map(str::trim)
+                == Some("response.in_progress")
+            && self.chat_role_emitted
+        {
+            return Ok(());
+        }
         let normalized_frame = if self.provider_protocol == "responses" {
             frame.to_vec()
         } else {
@@ -1209,6 +1221,14 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
                 "response chain produced no client frame",
             )
         })?;
+        if self.entry_protocol == "chat" {
+            if !terminal && client_frame.contains("\"delta\":{}") {
+                return Ok(());
+            }
+            if client_frame.contains("\"role\":\"assistant\"") {
+                self.chat_role_emitted = true;
+            }
+        }
         self.pending.extend_from_slice(client_frame.as_bytes());
         Ok(())
     }
