@@ -1070,6 +1070,7 @@ pub(crate) fn capture_v3_responses_direct_provider_snapshots(
         .node_trace
         .iter()
         .any(|node| *node == "V3Transport13ResponsesHttpRequest");
+    let original_error_present = output.error_chain.is_some();
     let stages = [
         (
             "provider-request",
@@ -1087,7 +1088,7 @@ pub(crate) fn capture_v3_responses_direct_provider_snapshots(
             continue;
         }
         let Some(payload) = payload else {
-            if !provider_transport_started {
+            if original_error_present || !provider_transport_started {
                 continue;
             }
             let allowed_stream_observation = stage == "provider-response"
