@@ -362,7 +362,7 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
         }
     };
     stop.store(true, Ordering::Release);
-    join_servers(handles)?;
+    join_servers_for_shutdown(handles)?;
     control.clear_record().map_err(|error| error.to_string())?;
     drop(control);
     if action == ManagedAction::Restart {
@@ -422,6 +422,22 @@ fn join_servers(handles: Vec<thread::JoinHandle<Result<(), String>>>) -> Result<
         handle
             .join()
             .map_err(|_| "V4 listener thread panicked".to_string())??;
+    }
+    Ok(())
+}
+
+fn join_servers_for_shutdown(
+    handles: Vec<thread::JoinHandle<Result<(), String>>>,
+) -> Result<(), String> {
+    for handle in handles {
+        let result = handle
+            .join()
+            .map_err(|_| "V4 listener thread panicked".to_string())?;
+        if let Err(error) = result {
+            if error != "HTTP accept failed: Invalid argument (os error 22)" {
+                return Err(error);
+            }
+        }
     }
     Ok(())
 }
