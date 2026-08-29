@@ -872,6 +872,16 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         pre_transport_error.client_payload.body,
         V3ClientBody::Json(ref body) if body["error"]["code"] == "original_error"
     ));
+    pre_transport_error.node_trace = vec!["V3Transport13ResponsesHttpRequest"];
+    assert!(capture_v3_responses_direct_provider_snapshots(
+        &state,
+        "responses",
+        "/v1/responses",
+        "post-transport-error",
+        &mut pre_transport_error,
+    )
+    .is_none());
+    assert_eq!(pre_transport_error.client_payload.status, 598);
     fs::remove_dir_all(root).unwrap();
 }
 
