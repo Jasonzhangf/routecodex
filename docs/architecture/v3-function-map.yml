@@ -262,6 +262,75 @@ features:
     true before Config05 publication; explicit global and per-server values remain
     authoritative.
   runtime_status: owner_queryability_bound_to_existing_config_contract_source
+- feature_id: v3.simplified_user_config
+  status: default_config_toml_source_cutover
+  change_risk: high
+  owner_kind: rust_v3_config_authoring_projection
+  owner_crate: routecodex-v3-config
+  owner_files:
+  - v3/crates/routecodex-v3-config/src/user_config.rs
+  - v3/crates/routecodex-v3-config/tests/user_config_contract.rs
+  - v3/crates/routecodex-v3-config/src/internal.toml
+  - v3/crates/routecodex-v3-config/src/internal.rs
+  resource_bindings:
+  - v3.user_config.file_source
+  - v3.user_config.routing_selection_parsed
+  - v3.config.authoring_parsed
+  - v3.config.schema_validated
+  - v3.config.resource_registry
+  - v3.config.published_manifest
+  - v3.config.source_identity
+  mainline_bindings:
+  - v3-user-cfg-01
+  - v3-user-cfg-02
+  - v3-user-cfg-03
+  entry_symbols:
+  - V3UserConfig01FileSource
+  - V3UserConfig02RoutingSelectionParsed
+  - V3UserConfigStore
+  - V3UserConfigStore::load_snapshot_with_source_identity
+  - load_v3_config_snapshot_from_path
+  - parse_v3_user_config_02_routing
+  - project_v3_user_config_03_authoring
+  allowed_paths:
+  - v3/crates/routecodex-v3-config/src/user_config.rs
+  - v3/crates/routecodex-v3-config/tests/user_config_contract.rs
+  - v3/crates/routecodex-v3-config/src/internal.toml
+  - v3/crates/routecodex-v3-config/src/internal.rs
+  - v3/crates/routecodex-v3-config/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/store.rs
+  - v3/crates/routecodex-v3-cli/src/main.rs
+  - v3/crates/routecodex-v3-cli/tests/user_config_cli.rs
+  - v3/crates/routecodex-v3-lifecycle/src/lib.rs
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/repository-filesystem-module-registry.yml
+  - docs/architecture/v3-verification-map.yml
+  - docs/goals/v3-simplified-config-test-design.md
+  - scripts/architecture/verify-v3-simplified-user-config.mjs
+  - scripts/tests/v3-simplified-user-config-red-fixtures.mjs
+  forbidden_paths:
+  - v3/crates/routecodex-v3-runtime
+  - v3/crates/routecodex-v3-server/src
+  - v3/crates/routecodex-v3-provider-responses/src
+  - v3/crates/routecodex-v3-virtual-router/src
+  - v3/crates/routecodex-v3-target/src
+  - src
+  - sharedmodule
+  - request.normal_payload
+  - response.client_payload
+  - provider.wire_payload
+  required_gates:
+  - npm run verify:v3-simplified-user-config
+  - npm run test:v3-simplified-user-config-red-fixtures
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run test:v3-user-config-contract
+  - npm run test:v3-user-config-cli
+  - npm run verify:v3-managed-server-lifecycle
+  - git diff --check
+  runtime_status: default_config_toml_source_cutover_pending_installed_restart
 - feature_id: v3.foundation_p0_p2
   owner_crates:
   - routecodex-v3-config

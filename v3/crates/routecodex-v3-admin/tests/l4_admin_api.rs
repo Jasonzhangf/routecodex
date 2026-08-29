@@ -2,12 +2,7 @@
 // Admin REST API 黑盒集成测试：使用 axum 自带 test server 拉起 in-process
 // 服务，覆盖 Dashboard / Routes / Providers / Revisions / Reload 端点。
 use routecodex_v3_admin::{router, AppState, ProviderHealthEntry};
-use routecodex_v3_config::{
-    V3Config02AuthoringParsed, V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind,
-    V3SelectionPolicy, V3SelectionStrategy, V3ServerAuthoringConfig,
-};
 use routecodex_v3_config_mgmt::ConfigMgmtStore;
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -23,32 +18,6 @@ fn temp_home() -> PathBuf {
 }
 
 fn write_init_config(home: &PathBuf) -> PathBuf {
-    let mut authoring = V3Config02AuthoringParsed {
-        version: 3,
-        pipelines: Default::default(),
-        servers: BTreeMap::new(),
-        providers: BTreeMap::new(),
-        forwarders: BTreeMap::new(),
-        route_groups: BTreeMap::new(),
-        features: BTreeMap::new(),
-        debug: Default::default(),
-        error: Default::default(),
-        admin_webui: Default::default(),
-    };
-    authoring.servers.insert(
-        "test-server".to_string(),
-        V3ServerAuthoringConfig {
-            enabled: true,
-            bind: "127.0.0.1".into(),
-            port: 19999,
-            routing_group: "test-group".into(),
-            endpoints: vec!["responses".into(), "openai_chat".into(), "anthropic".into()],
-            features: BTreeMap::new(),
-            execution: None,
-            expose_models: vec![],
-        },
-    );
-    // 把被引用 provider 的 stub 文件写出，让 commit 校验通过
     let provider_dir = home.join("provider").join("p1");
     std::fs::create_dir_all(&provider_dir).expect("provider dir");
     std::fs::write(
@@ -73,37 +42,22 @@ supportsStreaming = true
 "#,
     )
     .expect("provider file");
-    let mut pool = routecodex_v3_config::V3RoutePoolAuthoringConfig {
-        selection: V3SelectionPolicy {
-            strategy: V3SelectionStrategy::Priority,
-        },
-        route_object: None,
-        match_rule: None,
-        targets: vec![V3RoutePoolTargetAuthoringConfig {
-            kind: V3RouteTargetKind::ProviderModel,
-            id: None,
-            provider: Some("p1".into()),
-            model: Some("m1".into()),
-            key: Some("key1".into()),
-            priority: Some(1),
-            weight: None,
-        }],
-        features: BTreeMap::new(),
-    };
-    let _ = &mut pool;
-    let mut groups = routecodex_v3_config::V3RouteGroupAuthoringConfig {
-        pools: BTreeMap::new(),
-        compact_route_object: None,
-        route_policies: Vec::new(),
-        features: BTreeMap::new(),
-    };
-    groups.pools.insert("default".into(), pool);
-    authoring.route_groups.insert("test-group".into(), groups);
-    let path = home.join("config.v3.toml");
-    let store = ConfigMgmtStore::new(&path);
-    store
-        .commit_with_backup(&authoring, "init", "test fixture")
-        .expect("commit init");
+    let path = home.join("config.toml");
+    std::fs::write(
+        &path,
+        r#"version = 3
+
+[route_groups.routecodex_v3_4444.default]
+tiers = [[{ use = "p1/m1" }]]
+
+[route_groups.responses_v3_7777.default]
+tiers = [[{ use = "p1/m1" }]]
+"#,
+    )
+    .expect("user config");
+    ConfigMgmtStore::new(&path)
+        .read_authoring()
+        .expect("compiled user config fixture");
     path
 }
 
@@ -132,7 +86,7 @@ async fn bind_test_server() -> (String, AppState, PathBuf) {
 
 fn observability_source_row() -> serde_json::Value {
     serde_json::json!({
-        "request_key": "19999:req-source",
+        "request_key": "4444:req-source",
         "event_type": "request.failed",
         "started_epoch_ms": 1,
         "updated_epoch_ms": 3,
@@ -145,7 +99,7 @@ fn observability_source_row() -> serde_json::Value {
             "error_category": "provider_http_429",
             "error_detail": "upstream rate limited"
         },
-        "scope": {"port": 19999},
+        "scope": {"port": 4444},
         "result": "error",
         "attempts": 2,
         "failed_attempts": 1,
@@ -157,7 +111,7 @@ fn observability_source_row() -> serde_json::Value {
 fn write_observability_store(home: &std::path::Path) {
     let store_path = home
         .join("logs")
-        .join("server-v3-19999.request-records.jsonl");
+        .join("server-v3-4444.request-records.jsonl");
     let line = serde_json::json!({
         "schema_version": 1,
         "row": observability_source_row()
@@ -169,7 +123,7 @@ fn write_observability_store(home: &std::path::Path) {
 fn write_observability_rows(home: &std::path::Path, rows: &[serde_json::Value]) {
     let store_path = home
         .join("logs")
-        .join("server-v3-19999.request-records.jsonl");
+        .join("server-v3-4444.request-records.jsonl");
     std::fs::create_dir_all(store_path.parent().unwrap()).expect("logs dir");
     let content = rows
         .iter()
@@ -194,7 +148,7 @@ fn observability_row_with_result(request_key: &str, result: Option<&str>) -> ser
         "finished_epoch_ms": 2,
         "duration_ms": 10,
         "meta": {},
-        "scope": {"port": 19999},
+        "scope": {"port": 4444},
         "result": result,
         "attempts": 1,
         "failed_attempts": 0,
@@ -234,7 +188,7 @@ fn observability_attempt_row_with_failed(
             "model": "m1",
             "route_reason": "default:first-try"
         },
-        "scope": {"port": 19999},
+        "scope": {"port": 4444},
         "result": null,
         "attempts": 0,
         "failed_attempts": failed_attempts,
@@ -272,12 +226,8 @@ async fn routes_get_returns_tree() {
         .get("groups")
         .and_then(|v| v.as_array())
         .expect("groups array");
-    assert!(!groups.is_empty(), "groups populated from authored config");
-    let ports = groups[0]
-        .get("ports")
-        .and_then(|v| v.as_array())
-        .expect("ports");
-    let pools = ports[0]
+    assert!(!groups.is_empty(), "groups populated from user config");
+    let pools = groups[0]
         .get("pools")
         .and_then(|v| v.as_array())
         .expect("pools");
@@ -290,8 +240,8 @@ async fn routes_get_returns_tree() {
         .and_then(|v| v.as_array())
         .expect("members");
     assert_eq!(
-        members[0].get("provider").and_then(|v| v.as_str()),
-        Some("p1")
+        members[0].get("use").and_then(|v| v.as_str()),
+        Some("p1/m1")
     );
 }
 
@@ -300,30 +250,11 @@ async fn routes_validate_rejects_invalid_target() {
     let (base, _state, _home) = bind_test_server().await;
     let body = serde_json::json!({
         "groups": [{
-            "group_id": "test-group",
-            "ports": [{
-                "server_id": "test-server",
-                "port": 8080,
-                "bind": "127.0.0.1",
-                "enabled": true,
-                "endpoints": ["responses"],
-                "routing_group": "test-group",
-                "pools": [{
-                    "name": "default",
-                    "selection_strategy": "priority",
-                    "match_rule": null,
-                    "tiers": [{
-                        "priority": 1,
-                        "members": [{
-                            "kind": "provider_model",
-                            "id": null,
-                            "provider": "ghost",
-                            "model": "m9",
-                            "key": null,
-                            "priority": 1,
-                            "weight": null
-                        }]
-                    }]
+            "group_id": "routecodex_v3_4444",
+            "pools": [{
+                "name": "default",
+                "tiers": [{
+                    "members": [{"use": "ghost/m9", "weight": null}]
                 }]
             }]
         }],
@@ -339,6 +270,32 @@ async fn routes_validate_rejects_invalid_target() {
     let payload: serde_json::Value = response.json().await.expect("validate json");
     assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(false));
     assert!(payload.get("error").is_some(), "error message present");
+
+    let zero_weight = serde_json::json!({
+        "groups": [{
+            "group_id": "routecodex_v3_4444",
+            "pools": [{
+                "name": "default",
+                "tiers": [{
+                    "members": [{"use": "p1/m1", "weight": 0}]
+                }]
+            }]
+        }],
+        "reason": "validate zero weight"
+    });
+    let response = http_client()
+        .post(format!("{base}/api/routes/validate"))
+        .json(&zero_weight)
+        .send()
+        .await
+        .expect("zero-weight validation response");
+    assert!(response.status().is_success());
+    let payload: serde_json::Value = response.json().await.expect("zero-weight validation json");
+    assert_eq!(
+        payload.get("ok").and_then(|value| value.as_bool()),
+        Some(false),
+        "programmatic route selection must retain parser weight invariants: {payload}"
+    );
 }
 
 #[tokio::test]
@@ -408,6 +365,19 @@ async fn revisions_and_static_assets_are_served() {
         requests_body.contains("Persistent request records"),
         "requests page rendered"
     );
+    let routes = http_client()
+        .get(format!("{base}/routes.html"))
+        .send()
+        .await
+        .expect("routes page response");
+    assert!(routes.status().is_success());
+    let routes_body = routes.text().await.expect("routes page body");
+    assert!(routes_body.contains("Choose what runs first"));
+    assert!(routes_body.contains("Tier 1 is tried first"));
+    assert_eq!(routes_body.matches("id=\"save-btn\"").count(), 1);
+    assert!(!routes_body.contains("Cooldown pool"));
+    assert!(routes_body.contains("load();"));
+    assert!(routes_body.contains("aria-live=\"polite\""));
     let css = http_client()
         .get(format!("{base}/styles.css"))
         .send()
@@ -514,7 +484,7 @@ async fn observability_records_group_terminal_errors_by_raw_status_code() {
     assert_eq!(filtered_body["total"], 1);
     assert_eq!(
         filtered_body["records"][0]["request_key"],
-        "19999:req-source"
+        "4444:req-source"
     );
 }
 
@@ -524,10 +494,10 @@ async fn observability_stats_exclude_non_success_usage_but_keep_request_counts()
     write_observability_rows(
         &home,
         &[
-            observability_row_with_result("19999:success", Some("success")),
-            observability_row_with_result("19999:error", Some("error")),
-            observability_row_with_result("19999:cancelled", Some("cancelled")),
-            observability_row_with_result("19999:active", None),
+            observability_row_with_result("4444:success", Some("success")),
+            observability_row_with_result("4444:error", Some("error")),
+            observability_row_with_result("4444:cancelled", Some("cancelled")),
+            observability_row_with_result("4444:active", None),
         ],
     );
 
@@ -557,12 +527,12 @@ async fn observability_stats_exclude_non_success_usage_but_keep_request_counts()
     assert_eq!(stats["total_tokens"], 120);
     assert_eq!(stats["cache_hit_rate_percent"], 50.0);
     assert_eq!(stats["avg_duration_ms"], 10.0);
-    assert_eq!(stats["by_port"]["19999"]["total"], 4);
-    assert_eq!(stats["by_port"]["19999"]["success"], 1);
-    assert_eq!(stats["by_port"]["19999"]["error"], 1);
-    assert_eq!(stats["by_port"]["19999"]["provider_failures"], 0);
-    assert_eq!(stats["by_port"]["19999"]["cancelled"], 1);
-    assert_eq!(stats["by_port"]["19999"]["active"], 1);
+    assert_eq!(stats["by_port"]["4444"]["total"], 4);
+    assert_eq!(stats["by_port"]["4444"]["success"], 1);
+    assert_eq!(stats["by_port"]["4444"]["error"], 1);
+    assert_eq!(stats["by_port"]["4444"]["provider_failures"], 0);
+    assert_eq!(stats["by_port"]["4444"]["cancelled"], 1);
+    assert_eq!(stats["by_port"]["4444"]["active"], 1);
 
     let timeseries = &body["timeseries"];
     assert_eq!(timeseries[0]["count"], 4);
@@ -578,10 +548,10 @@ async fn observability_keeps_provider_attempt_failures_visible_after_success() {
     write_observability_rows(
         &home,
         &[
-            observability_row_with_result("19999:recovered", Some("success")),
-            observability_attempt_row("19999:recovered", 502),
-            observability_attempt_row_with_failed("19999:recovered", 503, 2),
-            observability_attempt_row_with_failed("19999:terminal", 429, 3),
+            observability_row_with_result("4444:recovered", Some("success")),
+            observability_attempt_row("4444:recovered", 502),
+            observability_attempt_row_with_failed("4444:recovered", 503, 2),
+            observability_attempt_row_with_failed("4444:terminal", 429, 3),
         ],
     );
 
@@ -601,10 +571,10 @@ async fn observability_keeps_provider_attempt_failures_visible_after_success() {
     assert_eq!(body["stats"]["provider_failure_count"], 3);
     assert_eq!(body["stats"]["success_count"], 1);
     assert_eq!(body["stats"]["error_count"], 3);
-    assert_eq!(body["stats"]["by_port"]["19999"]["total"], 4);
-    assert_eq!(body["stats"]["by_port"]["19999"]["success"], 1);
-    assert_eq!(body["stats"]["by_port"]["19999"]["error"], 3);
-    assert_eq!(body["stats"]["by_port"]["19999"]["provider_failures"], 3);
+    assert_eq!(body["stats"]["by_port"]["4444"]["total"], 4);
+    assert_eq!(body["stats"]["by_port"]["4444"]["success"], 1);
+    assert_eq!(body["stats"]["by_port"]["4444"]["error"], 3);
+    assert_eq!(body["stats"]["by_port"]["4444"]["provider_failures"], 3);
 
     let filtered = http_client()
         .get(format!(

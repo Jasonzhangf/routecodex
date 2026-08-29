@@ -125,6 +125,44 @@ features:
   completion_rule:
     source: all unit + integration tests pass
     runtime: WebUI/CLI behave correctly against real ~/.rcc config
+- feature_id: v3.simplified_user_config
+  status: default_config_toml_source_cutover
+  change_risk: high
+  owner_kind: rust_v3_config_authoring_projection
+  owner_scope: Strict minimal config.toml parser and deterministic projection into the existing V3Config02 authoring contract.
+  owner_modules:
+  - v3/crates/routecodex-v3-config/src/user_config.rs
+  contract:
+  - docs/goals/v3-simplified-config-test-design.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - Ordered outer tiers compile to deterministic descending internal priority values (`N..1`), because current V3 Target selects the maximum numeric priority.
+  - Omitted weights in one multi-member tier compile to equal weights.
+  - Different TOML table ordering and explicit equal weights produce the same normalized authoring and Manifest output.
+  - The projected authoring enters the existing Config03, Config04, and Config05 functions without a second compiler.
+  - Exact basename config.toml selects V3UserConfigStore once in the Config owner and server status consumes its loaded snapshot.
+  - CLI lifecycle and config commands without an explicit path resolve only ~/.rcc/config.toml.
+  - Explicit config.v3.toml remains on V3ConfigStore until the retirement phase.
+  required_negative:
+  - Unknown user fields, internal fields, malformed provider/model refs, empty pools or tiers, duplicate members, invalid weights, and unknown topology fail before Manifest publication.
+  - Runtime, Server, Virtual Router, Target, Provider, and Error crates do not read config.toml or call the user parser.
+  - Parse failure never retries config.v3.toml and config.v3 failure never retries config.toml.
+  - Lifecycle does not directly choose a parser or re-read config.toml through the legacy store.
+  - No user-config value enters request, response, provider wire, protocol metadata, Error payload, or debug payload.
+  required_gates:
+  - npm run verify:v3-simplified-user-config
+  - npm run test:v3-simplified-user-config-red-fixtures
+  - npm run test:v3-user-config-contract
+  - npm run test:v3-user-config-cli
+  - npm run verify:v3-managed-server-lifecycle
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_rule:
+    source: Standalone parser/projector, exact-path CLI/lifecycle blackbox, negative, mutation, architecture, differential tests, and the default config.toml resolver pass.
+    runtime: Explicit config.toml status, dry-run, aggregate restart, health, browser and same-entry replay pass before default-path cutover; no-argument aggregate restart and the same live matrix must pass after cutover.
 - feature_id: v3.managed_server_lifecycle
   status: source_controlled_and_live_5555_release_rollover_verified
   change_risk: high
@@ -150,7 +188,8 @@ features:
   - no resolved secret in lifecycle projection
   - wrong identity, stale state, duplicate-start takeover, explicit listener PID force release, foreign managed multi-port port-scoped release, and already-stopped failures
   - terminal same-config release executable rollover succeeds while running or missing-terminal rollover fails without reaping
-  - top-level start without -c resolves ~/.rcc/config.v3.toml and --snap forces snapshots
+  - config-path restart transfers only to a typed target declaration with the exact same listener set; listener drift is rejected
+  - top-level lifecycle commands without -c resolve ~/.rcc/config.toml and --snap forces snapshots
   - foreground start forces startup and common HTTP request console even when config log_console is false
   - routecodex dev shim may enable snap/debug by default while rcc/rccv3 stable shims require explicit --snap/--debug and restart.plan.json remains previous-release compatible
   required_integration:

@@ -187,6 +187,7 @@ fn restart_control_operation_is_explicit_protocol() {
         instance_id: "v3-test".to_string(),
         start_nonce: "nonce".to_string(),
         executable_path: "/tmp/rccv3-next".to_string(),
+        target_declaration: None,
         snapshots: true,
         snapshot_direct: false,
         snapshot_stages: Some("provider-request".to_string()),
@@ -216,6 +217,7 @@ fn managed_child_reentry_removes_restart_plan_from_previous_control_identity() {
             instance_id: "v3-test".to_string(),
             start_nonce: "previous-nonce".to_string(),
             executable_path: "/tmp/rccv3-next".to_string(),
+            target_declaration: None,
             snapshots: true,
             snapshot_direct: false,
             snapshot_stages: None,
@@ -320,6 +322,101 @@ fn restart_discovers_live_previous_owner_when_config_digest_changed() {
 
     assert_eq!(owner.1.instance_id, old.instance_id);
     let _ = fs::remove_file(socket_path);
+}
+
+#[test]
+fn restart_matches_live_previous_owner_when_config_path_changes_for_the_same_listener_set() {
+    let root = TempDir::new().unwrap();
+    let old = managed_test_declaration(
+        "v3-legacy-config-owner",
+        &root.path().join("config.v3.toml"),
+        "legacy-digest",
+        "/tmp/old-rccv3",
+        45553,
+    );
+    let expected = managed_test_declaration(
+        "v3-user-config-owner",
+        &root.path().join("config.toml"),
+        "user-digest",
+        "/tmp/new-rccv3",
+        45553,
+    );
+
+    assert!(previous_owner_matches_restart_declaration(&old, &expected));
+
+    let mut different_listener_set = expected.clone();
+    different_listener_set
+        .listeners
+        .push(V3ManagedListenerDeclaration {
+            server_id: "additional".to_string(),
+            bind: "127.0.0.1".to_string(),
+            port: 45554,
+        });
+    assert!(!previous_owner_matches_restart_declaration(
+        &old,
+        &different_listener_set
+    ));
+}
+
+#[test]
+fn restart_plan_projects_a_validated_config_path_change_and_rejects_listener_drift() {
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    ensure_private_dir(&instance_dir).unwrap();
+    let executable_path = std::env::current_exe().unwrap();
+    let current = managed_test_declaration(
+        "v3-legacy-config-owner",
+        &root.path().join("config.v3.toml"),
+        "legacy-digest",
+        executable_path.to_str().unwrap(),
+        45555,
+    );
+    let target = managed_test_declaration(
+        "v3-user-config-owner",
+        &root.path().join("config.toml"),
+        "user-digest",
+        executable_path.to_str().unwrap(),
+        45555,
+    );
+    let request = ControlRequest {
+        schema_version: SCHEMA_VERSION,
+        instance_id: current.instance_id.clone(),
+        start_nonce: "nonce".to_string(),
+        operation: ControlOperation::Restart,
+        ports: None,
+    };
+    let write_plan = |target_declaration: V3ManagedInstanceDeclaration| {
+        write_json_atomic(
+            &instance_dir.join(RESTART_PLAN_FILE),
+            &V3ManagedRestartPlanRecord {
+                schema_version: SCHEMA_VERSION,
+                instance_id: current.instance_id.clone(),
+                start_nonce: "nonce".to_string(),
+                executable_path: executable_path.display().to_string(),
+                target_declaration: Some(target_declaration),
+                snapshots: false,
+                snapshot_direct: false,
+                snapshot_stages: None,
+                sse_dump: false,
+            },
+        )
+        .unwrap();
+    };
+
+    write_plan(target.clone());
+    let projected = control_restart_plan(&instance_dir, &request, &current)
+        .unwrap()
+        .unwrap();
+    assert_eq!(projected.declaration, target);
+
+    let mut listener_drift = target;
+    listener_drift.listeners.push(V3ManagedListenerDeclaration {
+        server_id: "additional".to_string(),
+        bind: "127.0.0.1".to_string(),
+        port: 45556,
+    });
+    write_plan(listener_drift);
+    assert!(control_restart_plan(&instance_dir, &request, &current).is_err());
 }
 
 #[test]
@@ -685,6 +782,7 @@ fn restart_plan_omits_false_snapshot_direct_for_previous_release_child_compat() 
         instance_id: "instance".to_string(),
         start_nonce: "nonce".to_string(),
         executable_path: "/tmp/rccv3".to_string(),
+        target_declaration: None,
         snapshots: false,
         snapshot_direct: false,
         snapshot_stages: None,
@@ -697,6 +795,10 @@ fn restart_plan_omits_false_snapshot_direct_for_previous_release_child_compat() 
         "false snapshot_direct must not be written to restart.plan.json because previous-release managed children with deny_unknown_fields reject the newly-added field"
     );
     assert!(encoded.get("console").is_none());
+    assert!(
+        encoded.get("target_declaration").is_none(),
+        "same-identity release upgrade must remain readable by the previous managed child"
+    );
 
     let decoded: V3ManagedRestartPlanRecord = serde_json::from_value(encoded).unwrap();
     assert!(!decoded.snapshot_direct);
@@ -709,6 +811,7 @@ fn restart_plan_keeps_true_snapshot_direct_for_snapall_restart() {
         instance_id: "instance".to_string(),
         start_nonce: "nonce".to_string(),
         executable_path: "/tmp/rccv3".to_string(),
+        target_declaration: None,
         snapshots: true,
         snapshot_direct: true,
         snapshot_stages: None,
