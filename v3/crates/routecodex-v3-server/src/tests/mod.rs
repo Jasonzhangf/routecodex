@@ -727,6 +727,122 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-anthropic-client-response-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        5555,
+        true,
+        true,
+        None,
+        false,
+    );
+    let output = V3AnthropicRelayRuntimeOutput {
+        status: 200,
+        client_response: json!({
+            "type": "message",
+            "content": [{"type": "text", "text": "调用工具 pwd：确认当前工作目录"}]
+        }),
+        node_trace: vec!["V3Resp03ToolReason"],
+        error_chain: None,
+        servertool_followup_required: false,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+    };
+
+    assert!(capture_v3_anthropic_relay_response(
+        &state,
+        "anthropic",
+        "/v1/messages",
+        "anthropic-client-response",
+        &output,
+    )
+    .is_none());
+
+    let response_path = root.join(
+        ".rcc/codex-samples/anthropic-messages/ports/5555/anthropic-client-response/response.json",
+    );
+    let response = fs::read_to_string(response_path).unwrap();
+    assert!(response.contains("调用工具 pwd：确认当前工作目录"));
+    assert!(response.contains("V3Resp03ToolReason"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn responses_direct_provider_snapshots_require_typed_carrier() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-direct-provider-snapshot-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        5555,
+        true,
+        true,
+        None,
+        false,
+    );
+    let mut output = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
+        client_payload: V3Resp15ClientPayload {
+            status: 200,
+            headers: BTreeMap::new(),
+            body: V3ClientBody::Json(json!({
+                "output": [{"type": "message", "content": [{
+                    "type": "output_text",
+                    "text": "调用工具 pwd：确认当前工作目录"
+                }]}]
+            })),
+        },
+        provider_request_snapshot: Some(json!({"body": {"tools": [{"name": "pwd"}]}})),
+        provider_response_snapshot: Some(json!({"body": {"output": [{"type": "function_call"}]}})),
+        node_trace: vec!["V3ProviderResp14Raw", "V3DirectResp15ClientPayload"],
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        protocol_relay_handoff: None,
+    };
+    assert!(capture_v3_responses_direct_provider_snapshots(
+        &state,
+        "responses",
+        "/v1/responses",
+        "typed-carrier",
+        &mut output,
+    )
+    .is_none());
+    let sample_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/typed-carrier");
+    assert!(sample_dir.join("provider-request.json").is_file());
+    assert!(sample_dir.join("provider-response.json").is_file());
+    assert!(output.provider_request_snapshot.is_none());
+    assert!(output.provider_response_snapshot.is_none());
+
+    let mut missing = output;
+    assert!(capture_v3_responses_direct_provider_snapshots(
+        &state,
+        "responses",
+        "/v1/responses",
+        "missing-carrier",
+        &mut missing,
+    )
+    .is_none());
+    let missing_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/missing-carrier");
+    assert!(!missing_dir.exists(), "server must not fabricate direct artifacts");
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn test_direct_console_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(

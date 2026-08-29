@@ -1653,7 +1653,7 @@ resources:
       default_policy: dev builds enable sampling by default (cfg!(debug_assertions)); release builds require explicit opt-in
       error_evidence: error paths force-write samples even when sampling is disabled
       retention_cap: at most 200 request directories per port are retained
-    allowed_readers: [capture_v3_live_raw_request, capture_v3_responses_relay_response, capture_v3_responses_direct_response, capture_v3_responses_relay_provider_snapshots, capture_v3_relay_provider_snapshots, V3DebugBoundedTextCapture::rendered_text, developer_diagnostics]
+    allowed_readers: [capture_v3_live_raw_request, capture_v3_responses_relay_response, capture_v3_responses_direct_response, capture_v3_responses_direct_provider_snapshots, capture_v3_responses_relay_provider_snapshots, capture_v3_relay_provider_snapshots, V3DebugBoundedTextCapture::rendered_text, developer_diagnostics]
     allowed_writers: [V3DebugRuntime::project_payload_verbatim, V3DebugBoundedTextCapture::append, V3CodexSampleStore::persist]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false

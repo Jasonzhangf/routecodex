@@ -375,6 +375,20 @@ chains:
       produces: [v3.debug.codex_sample_filesystem]
       side_channel_reads: [v3.debug.payload_budget]
       side_channel_writes: [v3.debug.codex_sample_filesystem]
+  - step_id: v3-codex-sample-03
+    from_node: V3ProviderResp14Raw
+    to_node: V3CodexSample06RetentionEnforced
+    caller_symbol: capture_v3_responses_direct_provider_snapshots
+    caller_file: v3/crates/routecodex-v3-server/src/live_snapshot.rs
+    callee_symbol: V3CodexSampleStore::persist
+    callee_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
+    status: anchored
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    resource_flow:
+      consumes: [v3.debug.payload_budget]
+      produces: [v3.debug.codex_sample_filesystem]
+      side_channel_reads: [v3.debug.payload_budget]
+      side_channel_writes: [v3.debug.codex_sample_filesystem]
 - chain_id: v3.server.managed_lifecycle
   owner_feature_id: v3.managed_server_lifecycle
   summary: One Rust owner validates Config, declares aggregate instance identity, locks lifecycle operations, preserves old rcc start takeover for configured listener ports through managed control, foreign managed port-scoped release, and explicit listener PID signals, runs top-level start in the foreground with real Server console, retains hidden detached-child compatibility, publishes PID/control identity, restarts through one in-place exec with a nonce-bound restart plan when executable/snapshot overrides are needed, and gracefully stops the exact instance without broad kill.

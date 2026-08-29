@@ -492,6 +492,8 @@ impl V3ResponsesDirectRuntimeCoreState {
 #[derive(Debug)]
 pub struct V3ResponsesDirectRuntimeOutput {
     pub client_payload: V3Resp15ClientPayload,
+    pub provider_request_snapshot: Option<serde_json::Value>,
+    pub provider_response_snapshot: Option<serde_json::Value>,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
     pub observability: Option<V3RuntimeObservability>,

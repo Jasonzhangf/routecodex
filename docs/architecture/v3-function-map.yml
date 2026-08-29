@@ -4563,7 +4563,9 @@ features:
   - capture_v3_live_raw_request
   - capture_v3_responses_relay_response
   - capture_v3_responses_direct_response
+  - capture_v3_responses_direct_provider_snapshots
   - capture_v3_openai_chat_relay_response
+  - capture_v3_anthropic_relay_response
   - V3LiveSnapOpenAiChatClientResponseSseRecorder
   allowed_paths:
   - v3/crates/routecodex-v3-config

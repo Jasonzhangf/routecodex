@@ -149,7 +149,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
         Some(pipeline_id.clone()),
         payload.clone(),
     );
-    let output = match responses_protocol_plan {
+    let mut output = match responses_protocol_plan {
         Some(plan) => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
                 V3ResponsesDirectRuntimeSharedState::new(
@@ -318,6 +318,20 @@ pub(super) async fn execute_responses_direct_server_outcome(
             };
         }
         return V3ResponsesDirectServerOutcome::RelayOutput(relay_output);
+    }
+    if let Some(output) = capture_v3_responses_direct_provider_snapshots(
+        state,
+        "responses",
+        &path,
+        &request_id,
+        &mut output,
+    ) {
+        return V3ResponsesDirectServerOutcome::DirectFrame(
+            project_v3_responses_direct_stream_error_frame_if_requested(
+                build_v3_server_16_http_frame_from_v3_foundation_output(output),
+                requested_stream,
+            ),
+        );
     }
     let scope = match state
         .debug

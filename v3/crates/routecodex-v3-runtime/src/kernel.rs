@@ -1786,6 +1786,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
             observability: Some(observability),
             stream_observation: response_projection.stream_observation.clone(),
             client_payload,
+            provider_request_snapshot: None,
+            provider_response_snapshot: None,
             node_trace: trace,
             error_chain: None,
             protocol_relay_handoff: None,

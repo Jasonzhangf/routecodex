@@ -1198,6 +1198,8 @@ pub(crate) fn projected_error_output_with_observability(
     V3ResponsesDirectRuntimeOutput {
         observability,
         stream_observation: None,
+        provider_request_snapshot: None,
+        provider_response_snapshot: None,
         client_payload: V3Resp15ClientPayload {
             status: projected.status,
             headers: BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),
@@ -1247,6 +1249,8 @@ pub(crate) fn relay_handoff_output(
     V3ResponsesDirectRuntimeOutput {
         observability: None,
         stream_observation: None,
+        provider_request_snapshot: None,
+        provider_response_snapshot: None,
         client_payload: V3Resp15ClientPayload {
             status: 500,
             headers: BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),

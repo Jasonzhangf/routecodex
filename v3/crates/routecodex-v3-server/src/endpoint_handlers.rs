@@ -654,18 +654,16 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         }
     }
-    if execution_mode == V3EntryProtocolExecutionMode::Relay {
-        if let Some(response) = capture_v3_live_raw_request(
-            &state,
-            &trace_scope,
-            &entry_protocol,
-            execution_mode,
-            &path,
-            &request_id,
-            &payload,
-        ) {
-            return response;
-        }
+    if let Some(response) = capture_v3_live_raw_request(
+        &state,
+        &trace_scope,
+        &entry_protocol,
+        execution_mode,
+        &path,
+        &request_id,
+        &payload,
+    ) {
+        return response;
     }
     let snapshot_session_id = if entry_protocol == "responses" {
         match start_v3_live_snapshot_session(&state, &trace_scope) {
@@ -1120,6 +1118,15 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             &path,
             &request_id,
             &mut output.provider_snapshots,
+        ) {
+            return response;
+        }
+        if let Some(response) = capture_v3_anthropic_relay_response(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &output,
         ) {
             return response;
         }

@@ -220,6 +220,8 @@ where
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
     let mut send_attempts = 0usize;
     let mut pending_provider_action_recovery = None;
+    let mut provider_request_snapshot = None;
+    let mut provider_response_snapshot = None;
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, C::server_id(&standardized));
     loop {
@@ -396,6 +398,7 @@ where
             }
         };
         trace.push("V3Transport13ResponsesHttpRequest");
+        provider_request_snapshot = Some(transport_request.provider_request_projection());
         let mut provider_action_permit: Option<
             crate::provider_action_gate::V3ProviderActionPermit,
         > = None;
@@ -591,6 +594,15 @@ where
             }
         };
         trace.push("V3ProviderResp14Raw");
+        if let Some(body) = provider_raw.json_body() {
+            provider_response_snapshot = Some(json!({
+                "status": provider_raw.status(),
+                "providerId": provider_raw.provider_id(),
+                "bodyKind": "json",
+                "body": serde_json::from_slice::<serde_json::Value>(body)
+                    .unwrap_or_else(|_| json!({"rawBody": String::from_utf8_lossy(body)})),
+            }));
+        }
         if provider_raw.status() >= 400 {
             let provider_status = provider_raw.status();
             let provider_name = provider_raw.provider_id().to_string();
@@ -1112,6 +1124,8 @@ where
         }
         return V3ResponsesDirectRuntimeOutput {
             client_payload,
+            provider_request_snapshot,
+            provider_response_snapshot,
             node_trace: trace,
             error_chain: None,
             observability: Some(observability),

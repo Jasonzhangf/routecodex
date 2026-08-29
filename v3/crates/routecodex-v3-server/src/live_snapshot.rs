@@ -2,6 +2,7 @@ use crate::*;
 use axum::body::Body;
 use axum::http::Response;
 use futures_util::StreamExt;
+use routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
@@ -712,6 +713,43 @@ pub(crate) fn capture_v3_relay_provider_snapshots(
     None
 }
 
+pub(crate) fn capture_v3_anthropic_relay_response(
+    state: &V3ListenerState,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    output: &V3AnthropicRelayRuntimeOutput,
+) -> Option<Response<Body>> {
+    if !state.debug.should_capture_snapshot_stage("client-response") {
+        return None;
+    }
+    let payload = state.debug.project_payload_verbatim(json!({
+        "object": "routecodex.v3.client_response_snapshot",
+        "stage": "client-response",
+        "source": "live_server_anthropic_relay_response",
+        "status": output.status,
+        "bodyKind": "json",
+        "rawBody": output.client_response,
+        "node_trace": output.node_trace.clone(),
+        "error_chain": output.error_chain.clone(),
+        "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
+    }));
+    if let Err(error) = persist_v3_codex_sample_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "response.json",
+        &payload,
+    ) {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3Debug03RawResponseCaptured",
+            V3DebugError::Sink(error),
+        )));
+    }
+    None
+}
+
 pub(crate) fn finalize_v3_responses_relay_server_output(
     state: &Arc<V3ListenerState>,
     trace_scope: &V3DebugTraceScope,
@@ -971,6 +1009,47 @@ pub(crate) fn capture_v3_responses_direct_response(
             "V3Debug03RawResponseCaptured",
             V3DebugError::Sink(error),
         )));
+    }
+    None
+}
+
+pub(crate) fn capture_v3_responses_direct_provider_snapshots(
+    state: &V3ListenerState,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    output: &mut V3ResponsesDirectRuntimeOutput,
+) -> Option<V3FoundationRuntimeOutput> {
+    let stages = [
+        (
+            "provider-request",
+            "provider-request.json",
+            output.provider_request_snapshot.take(),
+        ),
+        (
+            "provider-response",
+            "provider-response.json",
+            output.provider_response_snapshot.take(),
+        ),
+    ];
+    for (stage, filename, payload) in stages {
+        if !state.debug.should_capture_snapshot_stage(stage) {
+            continue;
+        }
+        let Some(payload) = payload else { continue };
+        if let Err(error) = persist_v3_codex_sample_payload(
+            state,
+            entry_protocol,
+            endpoint,
+            request_id,
+            filename,
+            &state.debug.project_payload_verbatim(payload),
+        ) {
+            return Some(project_v3_debug_failure(
+                "V3DebugProviderSnapshotCaptured",
+                V3DebugError::Sink(error),
+            ));
+        }
     }
     None
 }
