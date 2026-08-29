@@ -505,6 +505,59 @@ fn no_match_uses_default_and_only_equal_best_precedence_is_ambiguous() {
     );
 }
 
+#[test]
+fn entry_protocol_pool_wins_over_generic_route_signal_pool() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    let group = manifest.route_groups.get_mut("g").unwrap();
+    group
+        .pools
+        .get_mut("tools")
+        .unwrap()
+        .match_rule
+        .as_mut()
+        .unwrap()
+        .entry_protocol = None;
+    group.pools.insert(
+        "anthropic_entry".into(),
+        V3RoutePoolManifest {
+            id: "anthropic_entry".into(),
+            selection: V3SelectionPolicy {
+                strategy: V3SelectionStrategy::Priority,
+            },
+            route_object: None,
+            match_rule: Some(V3RoutePoolMatchManifest {
+                precedence: 9,
+                entry_protocol: Some("anthropic".into()),
+                models: Vec::new(),
+                required_capabilities: Vec::new(),
+                min_input_tokens: None,
+                max_input_tokens: None,
+            }),
+            features: BTreeMap::new(),
+            targets: vec![target("anthropic-target", 100, 1)],
+        },
+    );
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/messages",
+            V3RouterRequestFacts {
+                entry_protocol: "anthropic".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::from(["tools".into()]),
+                input_tokens: 10,
+                route_classification: test_route("tools", &["tools", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(plan.tiers[0].pool_id, "anthropic_entry");
+}
+
 fn add_match_pool(
     manifest: &mut V3Config05ManifestPublished,
     pool_id: &str,
