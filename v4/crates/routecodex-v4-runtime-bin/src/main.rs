@@ -647,10 +647,20 @@ fn handle_responses(
         select_target(&manifest.providers, &manifest.routes, model)
     }
     .map_err(|error| {
+        let status = if !unavailable_provider_ids.is_empty()
+            && matches!(error, routecodex_v4_router::TargetSelectionError::ProductPoolUnavailable(_))
+        {
+            503
+        } else {
+            404
+        };
         project_fault(
             request,
-            RuntimeFault::new("model_unavailable", error.to_string()),
-            404,
+            RuntimeFault::new(
+                if status == 503 { "provider_pool_exhausted" } else { "model_unavailable" },
+                error.to_string(),
+            ),
+            status,
         )
     })?;
     println!(
