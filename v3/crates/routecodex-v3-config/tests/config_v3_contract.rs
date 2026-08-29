@@ -328,6 +328,15 @@ fn parses_full_config_v3_without_interpreting_targets() {
 }
 
 #[test]
+fn explicit_codex_samples_authorization_survives_config_v3_parse_and_compile() {
+    let source = FULL_CONFIG.replace("[debug]\n", "[debug]\ncodex_samples = true\n");
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap())
+        .expect("explicit debug sample authorization must compile");
+
+    assert!(manifest.debug.codex_samples);
+}
+
+#[test]
 fn web_search_execution_mode_compiles_as_explicit_model_truth() {
     let source = r#"
 version = 3
