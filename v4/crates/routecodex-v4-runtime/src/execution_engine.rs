@@ -217,7 +217,7 @@ impl ExecutionEngine {
         &self,
         entrypoint: &str,
         frame: NodeExecutionFrame,
-        lease: &EpochLease,
+         lease: &EpochLease,
     ) -> Result<NodeOutcome, ExecutionError> {
         let snapshot = lease.snapshot();
         if snapshot.state == ExecutionEpochState::Disposed {

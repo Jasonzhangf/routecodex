@@ -54,8 +54,8 @@ fn branch_follows_only_a_declared_edge_and_failure_stops() {
     }), routecodex_v4_runtime::ExecutionNode::new("unreachable", |_| {
         panic!("failure must stop the path")
     })]);
-    let lease = test_lease();
-    assert!(matches!(failure_engine.execute("first", NodeExecutionFrame::new(serde_json::json!({}), serde_json::json!({})), &lease).unwrap(), NodeOutcome::Failure { .. }));
+     let lease = test_lease();
+     assert!(matches!(failure_engine.execute("first", NodeExecutionFrame::new(serde_json::json!({}), serde_json::json!({})), &lease).unwrap(), NodeOutcome::Failure { .. }));
 }
 
 #[test]
