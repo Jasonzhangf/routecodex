@@ -1116,8 +1116,12 @@ mod tests {
         )
         .unwrap();
         consumer.consume(&mut object).unwrap();
-        let arguments = object.data_value().unwrap()["response"]["output"][0]["arguments"]
-            .as_str()
+        let arguments = object.data_value().unwrap()["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "function_call")
+            .and_then(|item| item["arguments"].as_str())
             .unwrap();
         assert_eq!(arguments, "{\"cmd\":\"pwd\"}");
         assert!(object.data_value().unwrap()["response"]["output"]
