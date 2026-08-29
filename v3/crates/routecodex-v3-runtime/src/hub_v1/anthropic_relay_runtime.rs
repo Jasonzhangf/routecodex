@@ -981,7 +981,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     )
                     .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
                 );
-                let (client_response, servertool_followup_required) =
+                let (client_response, servertool_followup_required, stream_observation) =
                     match closeout_anthropic_relay_sse_response(
                         resp01,
                         &response_hook_profile,
@@ -1067,7 +1067,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     error_chain: None,
                     servertool_followup_required,
                     observability: Some(observability),
-                    stream_observation: None,
+                    stream_observation: Some(stream_observation),
                     provider_snapshots: Some(V3RelayProviderSnapshots {
                         provider_request: Some(provider_request_snapshot.clone()),
                         provider_response: Some(provider_response_snapshot),
@@ -1163,7 +1163,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     )
                     .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
                 );
-                let (client_response, servertool_followup_required) =
+                let (client_response, servertool_followup_required, stream_observation) =
                     match closeout_anthropic_relay_response(
                         resp01,
                         &response_hook_profile,
@@ -1251,7 +1251,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     error_chain: None,
                     servertool_followup_required,
                     observability: Some(observability),
-                    stream_observation: None,
+                    stream_observation: Some(stream_observation),
                     provider_snapshots: Some(V3RelayProviderSnapshots {
                         provider_request: Some(provider_request_snapshot),
                         provider_response: Some(provider_response_snapshot),
@@ -1319,7 +1319,7 @@ async fn closeout_anthropic_relay_sse_response<F>(
     local: Option<&V3AnthropicRelayLocalContinuationExecution<'_>>,
     requested_local_ids: &[String],
     project_client_response: F,
-) -> Result<(Value, bool), V3AnthropicRelayRuntimeError>
+) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
     F: FnOnce(&Value) -> Result<Value, V3AnthropicRelayRuntimeError>,
 {
@@ -1346,7 +1346,7 @@ fn closeout_anthropic_relay_response<F>(
     local: Option<&V3AnthropicRelayLocalContinuationExecution<'_>>,
     requested_local_ids: &[String],
     project_client_response: F,
-) -> Result<(Value, bool), V3AnthropicRelayRuntimeError>
+) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
     F: FnOnce(&Value) -> Result<Value, V3AnthropicRelayRuntimeError>,
 {
@@ -1372,7 +1372,7 @@ fn closeout_anthropic_relay_normalized_response<F>(
     local: Option<&V3AnthropicRelayLocalContinuationExecution<'_>>,
     requested_local_ids: &[String],
     project_client_response: F,
-) -> Result<(Value, bool), V3AnthropicRelayRuntimeError>
+) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
     F: FnOnce(&Value) -> Result<Value, V3AnthropicRelayRuntimeError>,
 {
@@ -1380,6 +1380,15 @@ where
     // 在 resp02 被 govern move 前克隆归一化 payload（含原始 tool_use——
     // Mode B hosted web_search 透传分支需要未剥离的 web_search tool_use）。
     let resp02_payload = resp02.provider_raw().payload.0.clone();
+    let stream_observation = V3RuntimeStreamObservation::default();
+    crate::hub_v1::record_v3_toolreason_observation_at_resp03(
+        &resp02_payload,
+        &stream_observation,
+        response_hook_profile.toolreason_observation_session_id(),
+        response_hook_profile.toolreason_observation_request_id(),
+        response_hook_profile.toolreason_expected_model_id(),
+    )
+    .map_err(V3AnthropicRelayRuntimeError::Target)?;
     let resp03 = hooks.govern(resp02, response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
@@ -1407,7 +1416,7 @@ where
             return Err(V3AnthropicRelayRuntimeError::WebSearchInterceptedUnprojected);
         }
         let client_payload = project_client_response(resp02_payload.as_ref())?;
-        return Ok((client_payload, servertool_followup_required));
+        return Ok((client_payload, servertool_followup_required, stream_observation));
     }
     commit_or_release_local_continuation(
         local,
@@ -1424,7 +1433,7 @@ where
     let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     trace.push("V3ServerRespOutbound06ClientFrame");
     let client_response = resp06.into_client_payload();
-    Ok((client_response, servertool_followup_required))
+    Ok((client_response, servertool_followup_required, stream_observation))
 }
 
 fn commit_or_release_local_continuation(

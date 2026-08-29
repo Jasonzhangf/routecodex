@@ -5843,3 +5843,6 @@ Tags: #v4 #cordis #workflow-correction #evidence-first
 - Simplified user config must use a new filename and a parallel new parser/compiler module; do not mutate the active `config.v3.toml` schema or parser in place.
 - Before wiring runtime/CLI/WebUI, compile both old and new authoring inputs into normalized manifests and prove equivalent usable output with positive, negative, and real-config differential gates.
 - Keep current config path and implementation active until the new module works independently; wire only after standalone verification, cut over only after integrated/live verification, then physically retire the old implementation. No early deletion, fallback parser, or silent dual-source precedence.
+
+### 2026-08-29 execution correction
+- Long-running runtime goals must continue through the next evidence gate after reporting a gap; an incomplete report is not a stopping point. For toolreason, proceed from typed observation tests to build/install/restart/online replay and console/client evidence before any completion report.

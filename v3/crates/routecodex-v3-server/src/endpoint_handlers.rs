@@ -1124,14 +1124,26 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             &console_payload,
         );
         if let Some(observability) = output.observability.as_ref() {
-            emit_v3_observability_console_lines(
-                &console_context,
-                output.status,
-                &output.node_trace,
-                observability,
-                started_at,
-                output.stream_observation.is_none(),
-            );
+            let mut console_observability = observability.clone();
+            if let Err(error) = merge_v3_runtime_stream_observation(
+                &mut console_observability,
+                output.stream_observation.as_ref(),
+            ) {
+                emit_v3_runtime_observability_contract_failure(
+                    &console_context,
+                    &console_observability,
+                    error,
+                );
+            } else {
+                emit_v3_observability_console_lines(
+                    &console_context,
+                    output.status,
+                    &output.node_trace,
+                    &console_observability,
+                    started_at,
+                    true,
+                );
+            }
         }
         return anthropic_relay_output_response(output, stream);
     }

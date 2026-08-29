@@ -2357,6 +2357,38 @@ fn observe_v3_toolreason_json_at_resp03_with_context(
     }
 }
 
+pub(crate) fn record_v3_toolreason_observation_at_resp03(
+    payload: &Value,
+    observation: &crate::hub_v1::V3RuntimeStreamObservation,
+    session_id: Option<&str>,
+    request_id: Option<&str>,
+    expected_model_id: Option<&str>,
+) -> Result<(), String> {
+    let Some((tool, raw)) = first_v3_tool_thinking_object_at_resp03(payload) else {
+        return Ok(());
+    };
+    let (status, fields) = classify_v3_toolreason_observation_at_resp03_with_expected_model(
+        Some(&raw), expected_model_id,
+    );
+    let status = match status {
+        V3ToolreasonObservationStatus::Ok => "OK",
+        V3ToolreasonObservationStatus::Missing => "MISSING",
+        V3ToolreasonObservationStatus::Invalid => "INVALID",
+        V3ToolreasonObservationStatus::Misplaced => "MISPLACED",
+    };
+    observation.record_toolreason(crate::hub_v1::V3RuntimeToolreasonObservation {
+        status: status.to_string(),
+        source: "provider_raw_tool_arguments".to_string(),
+        stage: "resp03_json".to_string(),
+        session_id: session_id.map(str::to_string),
+        request_id: request_id.map(str::to_string),
+        tool,
+        reason: fields.as_ref().map(|value| value.reason.clone()),
+        confidence: fields.as_ref().and_then(|value| value.goal_alignment_confidence),
+        model_id: fields.as_ref().and_then(|value| value.model_id.clone()),
+    })
+}
+
 fn first_v3_tool_thinking_object_at_resp03(value: &Value) -> Option<(String, String)> {
     let mut objects = Vec::new();
     collect_v3_tool_thinking_objects_at_resp03(value, &mut objects);

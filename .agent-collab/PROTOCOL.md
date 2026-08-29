@@ -67,6 +67,18 @@ The run that successfully creates the directory writes `owner.json`. If the dire
 
 File paths may appear in `allowed_paths`, but paths are not ownership identity.
 
+## Worktree Path Budget
+
+Task IDs and feature IDs remain the canonical semantic names. Physical worktree
+paths use a short, unique slug (`./playground/<short-slug>`) so the generated
+`.agent-collab/server` socket path stays below the platform `SUN_LEN` limit.
+Keep the absolute worktree path at or below 80 bytes; do not embed the full
+task ID, timestamp, host, PID, or random run suffix in the directory name.
+Record the full task ID, branch, base commit, and run ID in the task registry
+and run `actor.json` instead. A path that exceeds the budget must fail before
+registration and be replaced with a new short-path worktree; do not repair it
+by resetting, deleting, or reusing another worker's worktree.
+
 ## Run Files
 
 Each worker writes only under its own `runs/<run_id>/` directory except for claim directories it owns.
