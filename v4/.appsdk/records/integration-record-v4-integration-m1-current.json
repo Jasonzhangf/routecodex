@@ -20,13 +20,6 @@
       "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
     },
     {
-      "gate_id": "v4_feature_layer_batches",
-      "producer": "node:v4_feature_layer_batches",
-      "result": "pass",
-      "source_commit": "c1aefc88decc14c3d30c7b12ed0a3c2ed1e77839",
-      "tree_hash": "0521458f7e07f27dab64c0e7a1ffc392afc25c4b"
-    },
-    {
       "gate_id": "v4_feature_layer_batches_boundary",
       "producer": "node:v4_feature_layer_batches_boundary",
       "result": "pass",
