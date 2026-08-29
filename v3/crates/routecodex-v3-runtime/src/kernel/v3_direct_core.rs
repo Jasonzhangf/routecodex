@@ -742,10 +742,12 @@ where
                     );
                     observability.attempts = Some(total_attempts(&accumulator, send_attempts));
                     let projected = V3ErrorHandlingCenter::project_terminal(policy_result.decision);
-                    return projected_error_output_with_observability(
+                    return projected_error_output_with_observability_and_snapshots(
                         projected,
                         trace,
                         Some(observability),
+                        provider_request_snapshot,
+                        provider_response_snapshot,
                     );
                 }
             }
@@ -879,10 +881,12 @@ where
                                 Some(total_attempts(&accumulator, send_attempts));
                             let projected =
                                 V3ErrorHandlingCenter::project_terminal(policy_result.decision);
-                            return projected_error_output_with_observability(
+                            return projected_error_output_with_observability_and_snapshots(
                                 projected,
                                 trace,
                                 Some(observability),
+                                provider_request_snapshot,
+                                provider_response_snapshot,
                             );
                         }
                     }

@@ -1195,11 +1195,27 @@ pub(crate) fn projected_error_output_with_observability(
     node_trace: Vec<&'static str>,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
+    projected_error_output_with_observability_and_snapshots(
+        projected,
+        node_trace,
+        observability,
+        None,
+        None,
+    )
+}
+
+pub(crate) fn projected_error_output_with_observability_and_snapshots(
+    projected: routecodex_v3_error::V3Error06ClientProjected,
+    node_trace: Vec<&'static str>,
+    observability: Option<V3RuntimeObservability>,
+    provider_request_snapshot: Option<serde_json::Value>,
+    provider_response_snapshot: Option<serde_json::Value>,
+) -> V3ResponsesDirectRuntimeOutput {
     V3ResponsesDirectRuntimeOutput {
         observability,
         stream_observation: None,
-        provider_request_snapshot: None,
-        provider_response_snapshot: None,
+        provider_request_snapshot,
+        provider_response_snapshot,
         client_payload: V3Resp15ClientPayload {
             status: projected.status,
             headers: BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),
