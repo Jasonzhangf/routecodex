@@ -84,6 +84,7 @@ async fn json_two_turn_save_restore_order_and_terminal_release() {
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
+            toolreason_observation_session_id: None,
             request_id: "req-local-1".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -112,6 +113,7 @@ async fn json_two_turn_save_restore_order_and_terminal_release() {
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
+            toolreason_observation_session_id: None,
             request_id: "req-local-2".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -513,6 +515,7 @@ fn request(
             concat!(module_path!(), ":", line!()),
         )
         .expect("test provider failure session scope"),
+        toolreason_observation_session_id: None,
         request_id: request_id.into(),
         payload: json!({
             "model":"claude-client-alias",
