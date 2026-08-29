@@ -304,7 +304,7 @@
     "owner": "v4.feature_completion.integration",
     "admission_command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
     "enforcement_binding_status": "bound",
-    "guard_commit": "90bb23bce754c900e81891e8cd2b41a7e30a4bb0",
+    "guard_commit": "ed500d8324772035e32847623cd1e585abff9f01",
     "guarded_surfaces": [
       {"path":"Cargo.toml","scope_hash":"sha256:5ce83c9e3837823b19aa44dfdc28948a0123973fcb5e853e385f42aff3add62e"},
       {"path":"scripts/build.mjs","scope_hash":"sha256:05aeafe77409e087d83bb02dfa4a4f154d68d2377a3857bff8b35d0bfd26976b"},
@@ -318,7 +318,7 @@
       {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:8b7dbf1b0cf0f435d5cdb1e746826e50a9ec99faef2dfb0473b83d0f77ef3168"}
     ],
     "wiring_started": true,
-    "wiring_edges": ["added:mainline:undefined:routecodex-v4-runtime-bin::handle_responses->routecodex-v4-runtime::SkeletonRuntime::execute_request_json_scoped:routecodex-v4-runtime","added:mainline:undefined:routecodex-v4-runtime::ExecutionReport::provider_wire_value->routecodex-v4-runtime-bin::send_target_nonstream|send_target_streaming:routecodex-v4-runtime-bin","surface:crates/routecodex-v4-runtime-bin/**:sha256:8b7dbf1b0cf0f435d5cdb1e746826e50a9ec99faef2dfb0473b83d0f77ef3168","surface:docs/architecture/maps/mainline-call-map.json:sha256:629b906d28b2f618b274ca98720bcd12442f1559a43b3bf9defcd6d164662433"],
+    "wiring_edges": [],
     "resource_refs": {
       "merge_queue_state": ".appsdk/records/merge-queue-state.json",
       "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"
