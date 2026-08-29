@@ -295,7 +295,18 @@ pub fn start_managed(
     timeout: Duration,
 ) -> Result<ManagedInstanceRecord, LifecycleError> {
     paths.prepare()?;
-    if paths.record_path.exists() || paths.control_socket.exists() {
+    if paths.record_path.exists() {
+        match status_managed(paths)? {
+            ManagedStatus { state, record: Some(record) } if state == "running" => {
+                return request_restart(paths, &record.manifest_digest, timeout);
+            }
+            ManagedStatus { state, record: Some(_) } if state == "stale" => {
+                repair_stale(paths)?;
+            }
+            _ => return Err(LifecycleError::AlreadyManaged),
+        }
+    }
+    if paths.control_socket.exists() {
         return Err(LifecycleError::AlreadyManaged);
     }
     let mut command = Command::new(executable);
