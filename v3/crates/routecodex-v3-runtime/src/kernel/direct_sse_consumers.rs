@@ -350,26 +350,62 @@ impl V3DirectSseContentConsumer {
                     return None;
                 }
                 let output = payload.pointer("/response/output")?.as_array()?;
-                output.iter().enumerate().find_map(|(output_index, item)| {
-                    let is_projected_reasoning =
-                        item.get("type").and_then(serde_json::Value::as_str) == Some("reasoning")
-                            && item
-                                .get("id")
-                                .and_then(serde_json::Value::as_str)
-                                .is_some_and(|id| id.starts_with("rcc_reason_"));
-                    if !is_projected_reasoning {
-                        return None;
+                let mut reasoning_item: Option<(usize, String)> = None;
+                let mut native_toolreason: Option<(usize, String, String)> = None;
+                for (output_index, item) in output.iter().enumerate() {
+                    let item_type = item.get("type").and_then(serde_json::Value::as_str);
+                    let item_id = item.get("id").and_then(serde_json::Value::as_str);
+                    if item_type == Some("reasoning")
+                        && item_id.is_some_and(|id| id.starts_with("rcc_reason_"))
+                    {
+                        if let Some(text) = item
+                            .pointer("/summary/0/text")
+                            .and_then(serde_json::Value::as_str)
+                        {
+                            reasoning_item = Some((output_index, text.to_owned()));
+                            break;
+                        }
                     }
-                    let reasoning = item
-                        .pointer("/summary/0/text")
-                        .and_then(serde_json::Value::as_str)?;
-                    Some(
+                    if matches!(
+                        item_type,
+                        Some("function_call" | "tool_call" | "custom_tool_call")
+                    ) && native_toolreason.is_none()
+                    {
+                        let arguments = item.get("arguments").and_then(serde_json::Value::as_str);
+                        let item_id_owned = item_id.map(str::to_owned);
+                        if let (Some(arguments), Some(item_id)) = (arguments, item_id_owned) {
+                            if let Ok(args_value) =
+                                serde_json::from_str::<serde_json::Value>(arguments)
+                            {
+                                if let Some(reason) = args_value
+                                    .get("reason")
+                                    .and_then(serde_json::Value::as_str)
+                                    .filter(|text| !text.is_empty())
+                                {
+                                    native_toolreason = Some((output_index, item_id, reason.to_owned()));
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some((output_index, reasoning)) = reasoning_item {
+                    return Some(
                         crate::hub_v1::build_v3_toolreason_visible_text_sse_events_at_resp03(
                             &serde_json::json!({"output_index": output_index}),
-                            reasoning,
+                            &reasoning,
                         ),
-                    )
-                })
+                    );
+                }
+                let (output_index, item_id, reasoning) = native_toolreason?;
+                Some(
+                    crate::hub_v1::build_v3_toolreason_visible_text_sse_events_at_resp03(
+                        &serde_json::json!({
+                            "output_index": output_index,
+                            "item": {"id": item_id},
+                        }),
+                        &reasoning,
+                    ),
+                )
             })?;
         self.toolreason_reasoning_projected = true;
         Some(projection.into_bytes())
@@ -1080,8 +1116,12 @@ mod tests {
         )
         .unwrap();
         consumer.consume(&mut object).unwrap();
-        let arguments = object.data_value().unwrap()["response"]["output"][0]["arguments"]
-            .as_str()
+        let arguments = object.data_value().unwrap()["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "function_call")
+            .and_then(|item| item["arguments"].as_str())
             .unwrap();
         assert_eq!(arguments, "{\"cmd\":\"pwd\"}");
         assert!(object.data_value().unwrap()["response"]["output"]
@@ -1096,6 +1136,78 @@ mod tests {
         assert!(reasoning.contains("response.output_item.added"));
         assert!(reasoning.contains("response.reasoning_summary_text.delta"));
         assert!(reasoning.contains("调用工具 pwd：读取工作目录"));
+    }
+
+    #[test]
+    fn direct_responses_completed_response_projects_toolreason_as_independent_output_text() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
+            )
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_client_responses_projection(true);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.completed","response":{"id":"resp_1","output":[{"id":"call_1","type":"function_call","name":"exec_command","call_id":"call_1","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100}"}]}}"#,
+        )
+        .unwrap();
+
+        consumer.consume(&mut object).unwrap();
+
+        let projection = consumer
+            .take_toolreason_reasoning_projection()
+            .expect("Responses completed response must project toolreason visible text");
+        let projection = String::from_utf8(projection).expect("projection must be UTF-8");
+        assert!(projection.contains("event: response.reasoning_summary_text.delta"));
+        assert!(projection.contains("event: response.output_text.delta"));
+        assert!(projection.contains("\"delta\":\"调用工具 pwd：确认当前工作目录\""));
+        assert!(projection.contains("event: response.output_text.done"));
+    }
+
+    #[test]
+    fn direct_responses_stream_projects_toolreason_as_independent_output_text() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
+            )
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_client_responses_projection(true);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100}","call_id":"call_EdBmVtq5tjZ8N9xMfrlH3dxt","id":"fc_07aabdb984bc4601016a931477516887d099520672e03b7698","name":"exec_command","status":"completed","type":"function_call"}}"#,
+        )
+        .unwrap();
+
+        consumer.consume(&mut object).unwrap();
+
+        let projection = consumer
+            .take_toolreason_reasoning_projection()
+            .expect("valid toolreason must project to client SSE");
+        let projection = String::from_utf8(projection).unwrap();
+        assert!(projection.contains("event: response.reasoning_summary_text.delta"));
+        assert!(projection.contains("event: response.output_text.delta"));
+        assert!(projection.contains("\"delta\":\"调用工具 pwd：确认当前工作目录\""));
+        assert!(projection.contains("event: response.output_text.done"));
+    }
+
+    #[test]
+    fn direct_responses_stream_does_not_project_toolreason_without_reason() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
+            )
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_client_responses_projection(true);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"arguments":"{\"cmd\":\"pwd\",\"goal_alignment_confidence\":100}","call_id":"call_missing_reason","id":"fc_missing_reason","name":"exec_command","status":"completed","type":"function_call"}}"#,
+        )
+        .unwrap();
+
+        consumer.consume(&mut object).unwrap();
+
+        let projection = consumer.take_toolreason_reasoning_projection();
+        assert!(projection.is_none());
     }
 
     #[test]

@@ -3917,13 +3917,16 @@ pub(crate) fn build_v3_toolreason_visible_text_sse_events_at_resp03(
         .and_then(Value::as_str)
         .map(|id| format!("rcc_reason_{id}"))
         .unwrap_or_else(|| "rcc_reason_tool_call".to_string());
+    let visible_item_id = format!("{item_id}_text");
     let events = [
         json!({"type":"response.output_item.added","output_index":output_index.clone(),"item":{"id":item_id.clone(),"type":"reasoning","status":"in_progress","summary":[]}}),
         json!({"type":"response.reasoning_summary_part.added","output_index":output_index.clone(),"item_id":item_id.clone(),"summary_index":0,"part":{"type":"summary_text","text":""}}),
         json!({"type":"response.reasoning_summary_text.delta","output_index":output_index.clone(),"item_id":item_id.clone(),"summary_index":0,"delta":reasoning}),
         json!({"type":"response.reasoning_summary_text.done","output_index":output_index.clone(),"item_id":item_id.clone(),"summary_index":0,"text":reasoning}),
         json!({"type":"response.reasoning_summary_part.done","output_index":output_index.clone(),"item_id":item_id.clone(),"summary_index":0,"part":{"type":"summary_text","text":reasoning}}),
-        json!({"type":"response.output_item.done","output_index":output_index,"item":{"id":item_id,"type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":reasoning}]}}),
+        json!({"type":"response.output_item.done","output_index":output_index.clone(),"item":{"id":item_id,"type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":reasoning}]}}),
+        json!({"type":"response.output_text.delta","output_index":output_index.clone(),"item_id":visible_item_id.clone(),"content_index":0,"delta":reasoning}),
+        json!({"type":"response.output_text.done","output_index":output_index,"item_id":visible_item_id,"content_index":0,"text":reasoning}),
     ];
     let mut output = String::new();
     for event in events {
