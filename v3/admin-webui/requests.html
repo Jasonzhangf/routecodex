@@ -46,6 +46,7 @@
       <label>Provider<select id="provider-filter"><option value="all">all providers</option></select></label>
       <label>Model<select id="model-filter"><option value="all">all models</option></select></label>
       <label>Endpoint<select id="endpoint-filter"><option value="all">all endpoints</option></select></label>
+      <label>Route<input id="route-filter" type="search" placeholder="route"></label>
       <label>Protocol<select id="protocol-filter"><option value="all">all</option></select></label>
       <label>Mode<select id="mode-filter"><option value="all">all</option><option value="direct">direct</option><option value="relay">relay</option></select></label>
       <label>Search<input id="search-filter" type="search" placeholder="request, model, provider, route, error"></label>
@@ -475,6 +476,8 @@
         if (model !== "all") params.set("model", model);
         const endpoint = document.getElementById("endpoint-filter").value;
         if (endpoint !== "all") params.set("endpoint", endpoint);
+        const route = document.getElementById("route-filter").value.trim();
+        if (route) params.set("route", route);
         const protocol = document.getElementById("protocol-filter").value;
         if (protocol !== "all") params.set("entry_protocol", protocol);
         const mode = document.getElementById("mode-filter").value;
@@ -1095,7 +1098,7 @@
     ["chart-range","chart-metric"].forEach((id) => {
       document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });
     });
-    ["status-filter","port-filter","provider-filter","model-filter","endpoint-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
+    ["status-filter","port-filter","provider-filter","model-filter","endpoint-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
       const input = document.getElementById(id);
       let timer = null;
       input.addEventListener("input", () => {
