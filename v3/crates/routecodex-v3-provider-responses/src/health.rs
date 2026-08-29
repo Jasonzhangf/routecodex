@@ -362,42 +362,12 @@ impl V3ProviderHealthStore {
             })
         });
         if let Some(coordinator) = coordinator.as_mut() {
+            // Durable cooldowns are diagnostic history only. Restart admission
+            // starts with a clean provider health state; in-process failures
+            // repopulate this coordinator through the normal health owner.
             coordinator
-                .reset_probe_schedule_for_startup()
-                .unwrap_or_else(|error| {
-                    panic!("provider cooldown startup probe reset failed: {error}")
-                });
-        }
-        // Cooldown blocks are durable, but probe timing is process-local: after
-        // restart every persisted block is immediately eligible for one probe.
-        // Adaptive score/history is intentionally not restored.
-        for (key, _blocked_until_ms, _next_probe_at_ms) in coordinator
-            .as_ref()
-            .into_iter()
-            .flat_map(V3ProviderCooldownCoordinator::persisted_entries)
-        {
-            let probe_key = provider_cooldown_probe_key(
-                &key.provider_id,
-                key.auth_alias.as_deref(),
-                key.model_id.as_deref(),
-            );
-            state.provider_cooldown_probes.insert(
-                probe_key.clone(),
-                V3ProviderCooldownProbeState {
-                    blocked_until_ms: Some(0),
-                    next_probe_at_ms: Some(0),
-                    probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
-                    probe_failure_count: 0,
-                    observed_attempts: 0,
-                    observed_failures: 0,
-                    recovery_ewma_ms: None,
-                    cooldown_started_at_ms: 0,
-                    probe_in_flight: false,
-                    probe_model_id: probe_key.model_id.clone(),
-                    rescue_probe_attempted: false,
-                    completion: tokio::sync::watch::channel(false).0,
-                },
-            );
+                .replace_entries(Vec::new())
+                .unwrap_or_else(|error| panic!("provider cooldown startup clear failed: {error}"));
         }
         state.persistence = coordinator;
         Self {
