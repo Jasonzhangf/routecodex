@@ -955,6 +955,14 @@
       ]
     },
     {
+      "gate_id": "v4_production_mainline",
+      "status": "active",
+      "command": "node scripts/architecture/verify-v4-production-mainline-red.mjs",
+      "required_for": [
+        "routecodex-v4-runtime-bin:production_mainline"
+      ]
+    },
+    {
       "gate_id": "v4_real_runtime_admission_red",
       "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
