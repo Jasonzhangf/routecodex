@@ -245,7 +245,12 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
                     match stream.next().await {
                         Some(Ok(bytes)) => {
                             if let Err(error) = recorder.append_chunk(&bytes) {
-                                eprintln!("[v3-sse-snapshot] client response capture failed: {error}");
+                                return Some((
+                                    Err(raise_v3_debug_artifact_failure(format!(
+                                        "client response capture failed: {error}"
+                                    ))),
+                                    (stream, true),
+                                ));
                             }
                             Some((Ok(bytes), (stream, false)))
                         }
@@ -253,13 +258,23 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
                             if let Err(capture_error) =
                                 recorder.persist_current(Some(error.message.as_str()))
                             {
-                                eprintln!("[v3-sse-snapshot] client response finalize failed: {capture_error}");
+                                return Some((
+                                    Err(raise_v3_debug_artifact_failure(format!(
+                                        "client response finalize failed: {capture_error}"
+                                    ))),
+                                    (stream, true),
+                                ));
                             }
                             Some((Err(error), (stream, true)))
                         }
                         None => {
                             if let Err(error) = recorder.persist_current(None) {
-                                eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
+                                return Some((
+                                    Err(raise_v3_debug_artifact_failure(format!(
+                                        "client response finalize failed: {error}"
+                                    ))),
+                                    (stream, true),
+                                ));
                             }
                             None
                         }
