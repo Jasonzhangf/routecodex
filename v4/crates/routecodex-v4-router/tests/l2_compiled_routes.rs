@@ -64,6 +64,7 @@ fn product_config() -> RuntimeProductConfig {
                 model_id: "client-model".to_string(),
                 wire_name: "wire-model".to_string(),
                 capabilities: vec!["thinking".to_string()],
+                aliases: Vec::new(),
             }],
             auth_handles: Vec::new(),
         }],
@@ -88,6 +89,23 @@ fn product_config() -> RuntimeProductConfig {
         default_error_path: Vec::new(),
         error_policies: Vec::new(),
     }
+}
+
+#[test]
+fn product_alias_selects_wire_model_without_rewriting_target() {
+    let mut product = product_config();
+    product.providers[0].models[0].aliases = vec!["client-alias".to_string()];
+    let selected = select_product_target(
+        &product,
+        "responses",
+        "client-alias",
+        "responses",
+        &["thinking"],
+        0,
+    )
+    .expect("alias target");
+    assert_eq!(selected.provider_id, "product-provider");
+    assert_eq!(selected.wire_model, "wire-model");
 }
 
 #[test]

@@ -123,7 +123,20 @@ pub fn select_product_target_with_unavailable(
     let target = pool
         .targets
         .iter()
-        .filter(|target| target.model_id == requested_model)
+        .filter(|target| {
+            target.model_id == requested_model
+                || product
+                    .providers
+                    .iter()
+                    .find(|provider| provider.provider_id == target.provider_id)
+                    .and_then(|provider| {
+                        provider.models.iter().find(|model| {
+                            model.model_id == target.model_id
+                                && model.aliases.iter().any(|alias| alias == requested_model)
+                        })
+                    })
+                    .is_some()
+        })
         .filter(|target| !unavailable_provider_ids.iter().any(|provider| *provider == target.provider_id))
         .min_by_key(|target| target.priority)
         .ok_or_else(|| TargetSelectionError::ProductPoolUnavailable(pool.pool_id.clone()))?;

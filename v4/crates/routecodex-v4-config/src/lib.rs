@@ -928,6 +928,8 @@ pub struct RuntimeProductModel {
     pub wire_name: String,
     #[serde(default)]
     pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1392,6 +1394,9 @@ fn validate_product_config(product: &RuntimeProductConfig) -> Result<(), Runtime
             }
             if !model_ids.insert(model.model_id.as_str()) {
                 return Err(RuntimeConfigError::ProductModelDuplicate);
+            }
+            if model.aliases.iter().any(|alias| alias.trim().is_empty()) {
+                return Err(RuntimeConfigError::ProductModelInvalid);
             }
         }
         for handle in &provider.auth_handles {

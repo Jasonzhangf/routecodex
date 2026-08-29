@@ -508,7 +508,12 @@ fn models_response(manifest: &RuntimeConfigManifest) -> HttpResponse {
         product
             .providers
             .iter()
-            .flat_map(|provider| provider.models.iter().map(|model| model.model_id.as_str()))
+            .flat_map(|provider| {
+                provider.models.iter().flat_map(|model| {
+                    std::iter::once(model.model_id.as_str())
+                        .chain(model.aliases.iter().map(String::as_str))
+                })
+            })
             .collect::<Vec<_>>()
     } else {
         manifest
