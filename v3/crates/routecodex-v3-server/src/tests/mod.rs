@@ -2136,6 +2136,18 @@ fn cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_line
 }
 
 #[test]
+fn background_probe_cycle_failures_are_not_human_console_output() {
+    let source = include_str!("../lib.rs");
+
+    assert!(source.contains("run_due_global_subscription_probes"));
+    assert!(source.contains("run_due_provider_key_health_probes"));
+    assert!(!source.contains("provider persistent startup probe cycle failed"));
+    assert!(!source.contains("provider persistent startup key probe cycle failed"));
+    assert!(!source.contains("adaptive provider cooldown probe cycle failed"));
+    assert!(!source.contains("provider persistent key probe cycle failed"));
+}
+
+#[test]
 fn routed_observability_emits_exactly_one_request_block() {
     let log_file = test_v3_console_log_file("routed-console-one-request-block");
     let _ = std::fs::remove_file(&log_file);
