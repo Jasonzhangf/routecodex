@@ -137,20 +137,6 @@ pub(crate) fn extract_v3_console_usage_summary(value: &Value) -> Option<V3Runtim
             })
             .or_else(|| {
                 read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cache_read_tokens"])
-            })
-            .or_else(|| read_v3_console_usage_u64(usage, &["cache_read_input_tokens"])),
-        cache_read_input_tokens: read_v3_console_usage_u64(usage, &["cache_read_input_tokens"])
-            .or_else(|| {
-                read_v3_console_usage_u64(usage, &["input_tokens_details", "cached_read_tokens"])
-            })
-            .or_else(|| {
-                read_v3_console_usage_u64(usage, &["input_tokens_details", "cache_read_tokens"])
-            })
-            .or_else(|| {
-                read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cached_read_tokens"])
-            })
-            .or_else(|| {
-                read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cache_read_tokens"])
             }),
         cache_creation_input_tokens: read_v3_console_usage_u64(usage, &["cache_creation_input_tokens"])
             .or_else(|| {
