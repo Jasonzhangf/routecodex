@@ -188,16 +188,24 @@ export function validateIntegrationRecords({
   }
   const gateMap = new Map(input.verificationMap.gates.map((gate) => [gate.gate_id, gate]));
   const receipts = integration.required_gate_results;
-  if (!Array.isArray(receipts)
-      || !sameOrdered(sortedUnique(receipts.map((receipt) => receipt.gate_id)), expectedGateIds)
-      || receipts.length !== expectedGateIds.length
-      || receipts.some((receipt) => !exactKeys(receipt, GATE_RESULT_KEYS)
-        || receipt.result !== 'pass'
-        || receipt.source_commit !== testedCommit
-        || receipt.tree_hash !== testedTree
-        || receipt.producer !== expectedProducer(gateMap.get(receipt.gate_id)))) {
+  const receiptFailure = !Array.isArray(receipts)
+    ? 'not-an-array'
+    : receipts.length !== expectedGateIds.length
+      ? `length ${receipts.length} != ${expectedGateIds.length}`
+      : !sameOrdered(sortedUnique(receipts.map((receipt) => receipt.gate_id)), expectedGateIds)
+        ? `gate-set ${JSON.stringify(sortedUnique(receipts.map((receipt) => receipt.gate_id)))} != ${JSON.stringify(expectedGateIds)}`
+        : receipts.map((receipt) => {
+          const reasons = [];
+          if (!exactKeys(receipt, GATE_RESULT_KEYS)) reasons.push('keys');
+          if (receipt.result !== 'pass') reasons.push('result');
+          if (receipt.source_commit !== testedCommit) reasons.push('source');
+          if (receipt.tree_hash !== testedTree) reasons.push('tree');
+          if (receipt.producer !== expectedProducer(gateMap.get(receipt.gate_id))) reasons.push('producer');
+          return reasons.length > 0 ? `${receipt.gate_id}:${reasons.join(',')}` : null;
+        }).filter(Boolean).join('; ');
+  if (receiptFailure) {
     addFailure(failures, 'INTEGRATION_GATE_RECEIPTS',
-      'integration receipts must exactly bind every directly rerun gate to the tested tree');
+      `integration receipts must exactly bind every directly rerun gate to the tested tree (${receiptFailure})`);
   }
   const allowedBookkeeping = new Set([
     refs.merge_queue_state,
