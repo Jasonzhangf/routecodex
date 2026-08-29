@@ -100,6 +100,59 @@ pub fn project_chat_request_to_responses(client_body: &Value) -> Result<Value, R
     Ok(Value::Object(projected))
 }
 
+/// Project the canonical Responses semantic object onto the protocol selected
+/// after routing.  Selection must precede this conversion: the entry protocol
+/// is not a provider-wire decision.
+pub fn build_protocol_wire(
+    semantic: &Value,
+    target_protocol: &str,
+    wire_model: &str,
+    stream: bool,
+) -> Result<Value, RuntimeFault> {
+    let object = semantic.as_object().ok_or_else(|| {
+        RuntimeFault::new("provider_wire_invalid", "provider semantic must be an object")
+    })?;
+    if wire_model.trim().is_empty() {
+        return Err(RuntimeFault::new(
+            "provider_wire_model_missing",
+            "selected provider wire model is empty",
+        ));
+    }
+    let mut wire = object.clone();
+    wire.insert("model".to_string(), Value::String(wire_model.to_string()));
+    wire.insert("stream".to_string(), Value::Bool(stream));
+    match target_protocol {
+        "responses" => {}
+        "openai" | "chat" => {
+            let input = wire.remove("input").ok_or_else(|| {
+                RuntimeFault::new("provider_wire_shape", "Responses semantic input is required")
+            })?;
+            wire.insert("messages".to_string(), input);
+            if let Some(max_output_tokens) = wire.remove("max_output_tokens") {
+                wire.insert("max_tokens".to_string(), max_output_tokens);
+            }
+            wire.remove("protocol");
+        }
+        "anthropic" => {
+            let input = wire.remove("input").ok_or_else(|| {
+                RuntimeFault::new("provider_wire_shape", "Responses semantic input is required")
+            })?;
+            wire.insert("messages".to_string(), input);
+            if let Some(max_output_tokens) = wire.remove("max_output_tokens") {
+                wire.insert("max_tokens".to_string(), max_output_tokens);
+            }
+            wire.remove("protocol");
+        }
+        other => {
+            return Err(RuntimeFault::new(
+                "provider_protocol_unsupported",
+                format!("provider protocol {other} has no wire projection"),
+            ));
+        }
+    }
+    Ok(Value::Object(wire))
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResponsesProviderPayload {
     Json(Value),
@@ -2251,6 +2304,7 @@ impl SkeletonRuntime {
         &self,
         body: &str,
         protocol: &str,
+        target_protocol: &str,
         wire_model: &str,
         stream: bool,
         request_id: &str,
@@ -2272,7 +2326,7 @@ impl SkeletonRuntime {
         let raw = serde_json::to_string(&value)
             .map_err(|error| RuntimeFault::new("request_json_encode", error.to_string()))?;
         self.claim(request_id)?;
-        let result = self.execute_path(
+        let mut result = self.execute_path(
             "request", request_id, port, session_scope, conversation_scope,
             |ctx| {
                 ctx.data.raw_entry = Some(raw);
@@ -2283,6 +2337,27 @@ impl SkeletonRuntime {
                 }
             },
         );
+        if let Ok(report) = &mut result {
+            let projection = report
+                .provider_wire_value
+                .as_ref()
+                .ok_or_else(|| {
+                    RuntimeFault::new("provider_wire_missing", "request chain produced no provider wire")
+                })
+                .and_then(|semantic| {
+                    let wire = build_protocol_wire(semantic, target_protocol, wire_model, stream)?;
+                    let encoded = serde_json::to_string(&wire)
+                        .map_err(|error| RuntimeFault::new("provider_wire_encode", error.to_string()))?;
+                    Ok((encoded, wire))
+                });
+            match projection {
+                Ok((encoded, wire)) => {
+                    report.provider_wire = Some(encoded);
+                    report.provider_wire_value = Some(wire);
+                }
+                Err(error) => result = Err(error),
+            }
+        }
         self.release(request_id);
         result
     }
@@ -2994,5 +3069,52 @@ mod admission_sse_tests {
         let error = validate_responses_sse_frame(frame.as_bytes())
             .expect_err("frame without data must fail");
         assert_eq!(error.code, "provider_sse_missing_data");
+    }
+}
+
+#[cfg(test)]
+mod provider_wire_projection_tests {
+    use super::build_protocol_wire;
+    use serde_json::json;
+
+    fn semantic() -> serde_json::Value {
+        json!({
+            "input": [{"role":"user","content":"hi"}],
+            "max_output_tokens": 32,
+            "protocol": "responses"
+        })
+    }
+
+    #[test]
+    fn selected_openai_target_receives_messages_shape() {
+        let wire = build_protocol_wire(&semantic(), "openai", "gpt-wire", false).unwrap();
+        assert!(wire.get("messages").is_some());
+        assert!(wire.get("input").is_none());
+        assert_eq!(wire["max_tokens"], 32);
+        assert!(wire.get("protocol").is_none());
+    }
+
+    #[test]
+    fn selected_anthropic_target_receives_messages_and_max_tokens() {
+        let wire = build_protocol_wire(&semantic(), "anthropic", "claude-wire", true).unwrap();
+        assert!(wire.get("messages").is_some());
+        assert!(wire.get("input").is_none());
+        assert_eq!(wire["max_tokens"], 32);
+        assert_eq!(wire["stream"], true);
+    }
+
+    #[test]
+    fn selected_responses_target_preserves_responses_shape() {
+        let wire = build_protocol_wire(&semantic(), "responses", "gpt-wire", false).unwrap();
+        assert!(wire.get("input").is_some());
+        assert!(wire.get("messages").is_none());
+        assert_eq!(wire["max_output_tokens"], 32);
+    }
+
+    #[test]
+    fn unsupported_target_protocol_fails_fast() {
+        let error = build_protocol_wire(&semantic(), "gemini", "gemini-wire", false)
+            .expect_err("unregistered protocol must fail");
+        assert_eq!(error.code, "provider_protocol_unsupported");
     }
 }

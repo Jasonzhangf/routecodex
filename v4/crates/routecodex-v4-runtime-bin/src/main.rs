@@ -719,6 +719,7 @@ fn handle_responses(
         .execute_request_json_scoped(
             &String::from_utf8_lossy(&request.body),
             entry_protocol,
+            &target.protocol,
             &target.wire_model,
             stream_mode,
             &format!("{}:request", request.request_id),
