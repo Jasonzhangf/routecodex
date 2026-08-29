@@ -204,6 +204,7 @@ pub(crate) struct RecordQuery {
     port: Option<u16>,
     provider: Option<String>,
     model: Option<String>,
+    endpoint: Option<String>,
     route: Option<String>,
     entry_protocol: Option<String>,
     execution_mode: Option<String>,
@@ -347,6 +348,7 @@ impl RecordQuery {
                 }
                 "provider" => query.provider = Some(value.to_string()),
                 "model" => query.model = Some(value.to_string()),
+                "endpoint" => query.endpoint = Some(value.to_string()),
                 "route" => query.route = Some(value.to_string()),
                 "entry_protocol" => query.entry_protocol = Some(value.to_string()),
                 "execution_mode" => query.execution_mode = Some(value.to_string()),
@@ -411,6 +413,13 @@ impl RecordQuery {
             .model
             .as_deref()
             .is_some_and(|value| meta_value("model") != Some(value))
+        {
+            return false;
+        }
+        if self
+            .endpoint
+            .as_deref()
+            .is_some_and(|value| meta_value("endpoint") != Some(value))
         {
             return false;
         }
@@ -1013,6 +1022,11 @@ async fn records(
             &mut facets,
             "models",
             row.meta.get("model").and_then(Value::as_str),
+        );
+        facet_add(
+            &mut facets,
+            "endpoints",
+            row.meta.get("endpoint").and_then(Value::as_str),
         );
         facet_add(
             &mut facets,
