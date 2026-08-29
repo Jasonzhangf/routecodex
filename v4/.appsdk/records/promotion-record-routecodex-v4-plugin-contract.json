@@ -10,6 +10,7 @@
   "design_id": "v4-cordis-mainline-migration",
   "effectiveness_record_id": "v4-cordis-plugin-contract-effectiveness-current",
   "evidence_ids": [
+    "v4-cordis-plugin-contract-candidate-r3",
     "v4-cordis-plugin-contract-whitebox-r3",
     "v4-cordis-plugin-contract-negative-whitebox-r3",
     "v4-cordis-plugin-contract-blackbox-r3"
