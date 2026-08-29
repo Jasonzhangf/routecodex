@@ -14,7 +14,8 @@ use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
     exec_managed_restart, release_for_foreground, release_unmanaged_listener, repair_stale, request_restart, request_stop,
     start_managed,
-    status_managed, ManagedAction, ManagedControlPlane, ManagedInstanceRecord, ManagedSpawnOptions,
+    read_record, status_managed, LifecycleError, ManagedAction, ManagedControlPlane,
+    ManagedInstanceRecord, ManagedSpawnOptions,
     V4LifecyclePaths,
 };
 use routecodex_v4_provider::{
@@ -220,6 +221,23 @@ fn start(intent: StartIntent) -> Result<String, String> {
     }
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
     print_startup(&manifest);
+    if read_record(&paths).map_err(|error| error.to_string())?.is_some() {
+        match status_managed(&paths) {
+            Ok(status) if status.state == "running" => {
+                let record = request_restart(
+                    &paths,
+                    &manifest.manifest_digest,
+                    Duration::from_secs(15),
+                )
+                .map_err(|error| error.to_string())?;
+                return Ok(format_status("restarted", &record));
+            }
+            Ok(_) | Err(LifecycleError::StaleState) => {
+                repair_stale(&paths).map_err(|error| error.to_string())?;
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let record = start_managed(
         &paths,

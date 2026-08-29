@@ -113,6 +113,9 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(TcpStream::connect(("127.0.0.1", port)).is_ok(), "listener not ready");
+    let takeover = run(&["start", "-c", config.to_str().expect("config"), "--snap"]);
+    assert!(takeover.status.success(), "{}", String::from_utf8_lossy(&takeover.stderr));
+    assert!(String::from_utf8_lossy(&takeover.stdout).contains("state=restarted"));
     let status = run(&["status", "-c", config.to_str().expect("config")]);
     assert!(status.status.success());
     assert!(String::from_utf8_lossy(&status.stdout).contains("state=running"));
