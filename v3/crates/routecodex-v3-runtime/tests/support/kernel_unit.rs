@@ -57,6 +57,79 @@ impl ResponsesTransport for CaptureTransport {
     }
 }
 
+struct ToolreasonCaptureTransport;
+
+#[async_trait]
+impl ResponsesTransport for ToolreasonCaptureTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        assert_eq!(request.body(), &json!({"model":"gpt-test","input":"hello"}));
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id": "resp_toolreason",
+                "status": "completed",
+                "output": [{
+                    "type": "function_call",
+                    "call_id": "call_pwd",
+                    "name": "pwd",
+                    "arguments": "{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\"}"
+                }]
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn direct_response_hook_uses_server_toolreason_override_when_global_is_disabled() {
+    let mut manifest = test_manifest();
+    manifest
+        .servers
+        .get_mut("test")
+        .expect("test server")
+        .features
+        .extend([
+            ("tool_thinking".to_string(), true),
+            ("toolreason_client_projection".to_string(), true),
+        ]);
+    assert_eq!(manifest.features.get("tool_thinking"), Some(&false));
+    let raw = test_responses_raw(
+        "test",
+        "req-toolreason-override",
+        "exec-toolreason-override",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &ToolreasonCaptureTransport,
+    )
+    .await;
+    let V3ClientBody::Json(body) = output.client_payload.body else {
+        panic!("direct JSON response must remain JSON: {output:?}");
+    };
+    assert_eq!(body["output"][0]["type"], "reasoning");
+    assert_eq!(
+        body["output"][0]["summary"][0],
+        json!({"type":"summary_text","text":"调用工具 pwd：确认当前工作目录"})
+    );
+}
+
 #[tokio::test]
 async fn runtime_executes_adjacent_responses_direct_chain() {
     let manifest = test_manifest();

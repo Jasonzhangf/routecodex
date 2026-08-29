@@ -1154,16 +1154,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
         let direct_response_compat_context =
             match crate::kernel::v3_direct_protocol_codec::build_direct_response_compat_context(
                 &policy.target,
-                manifest
-                    .features
-                    .get("tool_thinking")
-                    .copied()
-                    .unwrap_or(false),
-                manifest
-                    .features
-                    .get("toolreason_client_projection")
-                    .copied()
-                    .unwrap_or(true),
+                crate::hub_v1::v3_tool_thinking_enabled_for_server(
+                    manifest,
+                    &standardized.server_id,
+                ),
+                crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
+                    manifest,
+                    &standardized.server_id,
+                ),
                 direct_failure_session_scope.session_id(),
                 standardized.tool_thinking_turn_context.clone(),
             ) {
