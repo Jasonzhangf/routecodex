@@ -13,7 +13,7 @@ config_path = "provider/cc-sol/config.v2.toml"
 [[providers.models]]
 model_id = "gpt-5.6-sol"
 wire_name = "gpt-5.6-sol"
-aliases = ["gpt-5.5", "gpt-5.6-luna"]
+aliases = ["cc-sol", "gpt-5.5", "gpt-5.6-luna"]
 capabilities = ["multimodal", "reasoning", "thinking", "tools", "web_search"]
 [[providers.auth_handles]]
 alias = "key1"
