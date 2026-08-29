@@ -45,6 +45,7 @@ pub enum LifecycleError {
 pub struct V4LifecyclePaths {
     pub state_root: PathBuf,
     pub record_path: PathBuf,
+    pub status_path: PathBuf,
     pub control_socket: PathBuf,
     pub manifest_path: PathBuf,
     pub log_path: PathBuf,
@@ -62,6 +63,7 @@ impl V4LifecyclePaths {
             .join(".rcc/state/runtime-lifecycle/v4");
         Ok(Self {
             record_path: state_root.join("instance.json"),
+            status_path: state_root.join("status.json"),
             control_socket: state_root.join("control.sock"),
             manifest_path: state_root.join("manifest.compiled.json"),
             log_path: home.join(".rcc/logs/rccv4.log"),
@@ -73,6 +75,7 @@ impl V4LifecyclePaths {
         let log_path = state_root.join("logs/rccv4.log");
         Self {
             record_path: state_root.join("instance.json"),
+            status_path: state_root.join("status.json"),
             control_socket: state_root.join("control.sock"),
             manifest_path: state_root.join("manifest.compiled.json"),
             state_root,
@@ -155,6 +158,7 @@ impl ManagedControlPlane {
             .set_nonblocking(true)
             .map_err(|error| io_error(&paths.control_socket, error))?;
         write_record_atomic(&paths, &record)?;
+        write_status_atomic(&paths, "running", Some(&record))?;
         Ok(Self {
             listener,
             paths,
@@ -204,6 +208,7 @@ impl ManagedControlPlane {
             fs::remove_file(&self.paths.record_path)
                 .map_err(|error| io_error(&self.paths.record_path, error))?;
         }
+        write_status_atomic(&self.paths, "stopped", None)?;
         Ok(())
     }
 }
@@ -538,6 +543,26 @@ fn write_record_atomic(
     bytes.push(b'\n');
     fs::write(&temporary, bytes).map_err(|error| io_error(&temporary, error))?;
     fs::rename(&temporary, &paths.record_path).map_err(|error| io_error(&paths.record_path, error))
+}
+
+fn write_status_atomic(
+    paths: &V4LifecyclePaths,
+    state: &str,
+    record: Option<&ManagedInstanceRecord>,
+) -> Result<(), LifecycleError> {
+    let body = serde_json::json!({
+        "state": state,
+        "record": record,
+    });
+    let temporary = paths
+        .state_root
+        .join(format!(".status.{}.tmp", std::process::id()));
+    let mut bytes = serde_json::to_vec_pretty(&body)
+        .map_err(|error| LifecycleError::Record(error.to_string()))?;
+    bytes.push(b'\n');
+    fs::write(&temporary, bytes).map_err(|error| io_error(&temporary, error))?;
+    fs::rename(&temporary, &paths.status_path)
+        .map_err(|error| io_error(&paths.status_path, error))
 }
 
 fn write_reply(stream: &mut UnixStream, value: &serde_json::Value) -> Result<(), LifecycleError> {
