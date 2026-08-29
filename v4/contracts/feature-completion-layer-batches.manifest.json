@@ -304,7 +304,7 @@
     "owner": "v4.feature_completion.integration",
     "admission_command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
     "enforcement_binding_status": "bound",
-    "guard_commit": "1f06454eee65c69668be9885daa29d7025871dc1",
+    "guard_commit": "b072c53861e5e438142f93f8c83329b505465cc0",
     "guarded_surfaces": [
       {"path":"Cargo.toml","scope_hash":"sha256:5ce83c9e3837823b19aa44dfdc28948a0123973fcb5e853e385f42aff3add62e"},
       {"path":"scripts/build.mjs","scope_hash":"sha256:05aeafe77409e087d83bb02dfa4a4f154d68d2377a3857bff8b35d0bfd26976b"},
@@ -314,11 +314,11 @@
       {"path":"scripts/compile-real-runtime-manifest.mjs","scope_hash":"sha256:a4756498aafa9d3c6726f1be982bbea76bec5daa5ddc4631c49666ba0e9902de"},
       {"path":"contracts/real-runtime-admission.manifest.json","scope_hash":"sha256:1dd63ba0bd84acbae162663b534bfe1c7d5f5315e66d5310822090a5121e863c"},
       {"path":"contracts/active-link/frozen-consumer-registry.json","scope_hash":"sha256:70df9fa89217c6bd7241788294cf3ded9a6922ea6bdd908e20468cda4d96f375"},
-      {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:d50a70df3ae19ada18e8aa5256fc4f9aebae62b452c9baf1079e9fae39034579"},
-      {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:737a9ce7cc1bc059dcb12dc024d954160071a4185e239819228368277ad2f85c"}
+      {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:629b906d28b2f618b274ca98720bcd12442f1559a43b3bf9defcd6d164662433"},
+      {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:8b7dbf1b0cf0f435d5cdb1e746826e50a9ec99faef2dfb0473b83d0f77ef3168"}
     ],
     "wiring_started": true,
-    "wiring_edges": ["surface:crates/routecodex-v4-runtime-bin/**:sha256:acc9bc0c3ff236503966dfbac9105a120b885f14f647e85bd6aaaca60eeb2c99"],
+    "wiring_edges": ["added:mainline:undefined:routecodex-v4-runtime-bin::handle_responses->routecodex-v4-runtime::SkeletonRuntime::execute_request_json_scoped:routecodex-v4-runtime","added:mainline:undefined:routecodex-v4-runtime::ExecutionReport::provider_wire_value->routecodex-v4-runtime-bin::send_target_nonstream|send_target_streaming:routecodex-v4-runtime-bin","surface:crates/routecodex-v4-runtime-bin/**:sha256:8b7dbf1b0cf0f435d5cdb1e746826e50a9ec99faef2dfb0473b83d0f77ef3168","surface:docs/architecture/maps/mainline-call-map.json:sha256:629b906d28b2f618b274ca98720bcd12442f1559a43b3bf9defcd6d164662433"],
     "resource_refs": {
       "merge_queue_state": ".appsdk/records/merge-queue-state.json",
       "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"
