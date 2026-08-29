@@ -1,8 +1,8 @@
 {
   "architecture_review_id": "v4-cordis-plugin-contract-review-current",
-  "artifact_hash": "sha256:6901e722c33cc0afb5775bc9d86b70ee4b3f5a34084b3bdc95099da0e6ed7c19",
-  "base_commit": "3d97d154d72d125ab90055f597983f8201aeffa5",
-  "candidate_commit": "a5030cd4eddca91dcb01f5de48d341f61c19c18f",
+  "artifact_hash": "sha256:308725f4606c2751f861efe5401f63b57fab38a8c3fb827cc6958e06a70a9ff3",
+  "base_commit": "289806c531a30d58a0c0c85939efc692704fb90f",
+  "candidate_commit": "4944a2fafe8349102a625cef502ba02b414e5db8",
   "change_reason_comment": "Bind current v4-cordis plugin contract artifact and evidence graph.",
   "change_set_id": "v4-cordis-plugin-contract-current",
   "compatibility_level": "compatible",
@@ -10,22 +10,21 @@
   "design_id": "v4-cordis-mainline-migration",
   "effectiveness_record_id": "v4-cordis-plugin-contract-effectiveness-current",
   "evidence_ids": [
-    "v4-cordis-plugin-contract-candidate-current",
-    "v4-cordis-plugin-contract-positive-current",
-    "v4-cordis-plugin-contract-negative-current",
-    "v4-cordis-plugin-contract-blackbox-current"
+    "v4-cordis-plugin-contract-whitebox-r3",
+    "v4-cordis-plugin-contract-negative-whitebox-r3",
+    "v4-cordis-plugin-contract-blackbox-r3"
   ],
   "experiment_id": "v4-cordis-plugin-contract-worktree-current",
   "fix_candidate_id": "v4-cordis-plugin-contract-candidate-current",
   "issue_id": "v4-cordis-plugin-contract-rebuild-current",
   "merge_record_id": "v4-cordis-plugin-contract-merge-current",
-  "merged_commit": "a5030cd4eddca91dcb01f5de48d341f61c19c18f",
+  "merged_commit": "4944a2fafe8349102a625cef502ba02b414e5db8",
   "module_id": "routecodex-v4-plugin-contract",
   "new_active_version": "active-v1",
   "playground_cleanup_record_id": "v4-cordis-plugin-contract-cleanup-current",
   "previous_active_version": null,
   "promotion_id": "v4-cordis-plugin-contract-promotion-current",
-  "public_api_hash": "sha256:4cdd9d5d2c8b8a041379347c3480dc994388abc12fcacfdf75350a503f09dc66",
+  "public_api_hash": "sha256:b6f455ee7fb4c7702156edf9f7fee9f127c7aacad6ff56dc4d2d7a7c4889be11",
   "reproduction_record_id": "v4-cordis-plugin-contract-reproduction-current",
   "required_gate_results": [
     {
@@ -36,7 +35,7 @@
   ],
   "review_id": "v4-cordis-plugin-contract-review-current",
   "root_cause": "Fresh current-HEAD governance graph was missing.",
-  "scope_hash": "sha256:cd166129584496da42ca704be0fa7c190c22981b54ee936acf4b1194d2b42a51",
-  "source_commit": "a5030cd4eddca91dcb01f5de48d341f61c19c18f",
+  "scope_hash": "sha256:226734beb3e1c3b24eb46f9695ae9501298458b87bb04d49199b1908c59ef24b",
+  "source_commit": "4944a2fafe8349102a625cef502ba02b414e5db8",
   "worktree_record_id": "v4-cordis-plugin-contract-worktree-current"
 }

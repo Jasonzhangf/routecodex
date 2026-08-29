@@ -15,7 +15,7 @@
   "resource_map_hash": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
   "review_id": "v4-cordis-edge-review",
   "review_kind": "architecture",
-  "reviewed_artifact_hash": "sha256:425b50dc8136d5920b21467d6efa4489f1cb10df9bc2ad87f519693b410d806c",
+  "reviewed_artifact_hash": "sha256:83728d3d7967db171cfb627301ba8e8d636eaf6015101f70e316a5234c260ea6",
   "reviewed_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
   "reviewed_diff_hash": "sha256:d49edacfdc10c92d570722db3240f6a190c8eabac77f0d476074fe2927351e8b",
   "reviewed_scope_hash": "sha256:e6bedbf34de4a84e5c2fbca3c36c077dac4514781f47cd499515594b89cb857d",

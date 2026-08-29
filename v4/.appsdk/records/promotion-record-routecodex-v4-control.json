@@ -1,6 +1,6 @@
 {
   "architecture_review_id": "v4-cordis-control-architecture-review-current",
-  "artifact_hash": "sha256:cf200dbd7f3e1a6284477035ef57b5d6bc0596bda36c29a1704461d12dbae469",
+  "artifact_hash": "sha256:e280965a718eeaaee59725a1703dd58b16a875b616e6b0e8c65bf5b2b4a28676",
   "base_artifact_hash": "sha256:e280965a718eeaaee59725a1703dd58b16a875b616e6b0e8c65bf5b2b4a28676",
   "base_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
   "candidate_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
@@ -21,11 +21,11 @@
   "merge_record_id": "v4-cordis-control-merge-current",
   "merged_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
   "module_id": "routecodex-v4-control",
-  "new_active_version": "active-v4",
+  "new_active_version": "active-v3",
   "playground_cleanup_record_id": "v4-cordis-control-cleanup-current",
   "previous_active_version": "active-v3",
   "promotion_id": "v4-cordis-control-promotion-current",
-  "public_api_hash": "sha256:6998ad9221d05d3683428d2bb6ab681c2b6785f5a220ee5178b915dc81ca1801",
+  "public_api_hash": "sha256:43364e0f503e8721caebb31df47192e5dcf8e2501b4616203cf91f3f2f6b9902",
   "reproduction_record_id": "v4-cordis-control-reproduction-current",
   "required_gate_results": [
     {
@@ -37,6 +37,6 @@
   "review_id": "v4-cordis-control-architecture-review-current",
   "root_cause": "control module lacked a fresh record graph and its active artifact was stale relative to current source hash",
   "scope_hash": "sha256:bc932196faa3d642c7b835f5810ed1746a36d981106be5d81ddf6dbc03d3dd70",
-  "source_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
+  "source_commit": "662fc8aecd9730bfd1e33ec8f992ba5ac8c216d3",
   "worktree_record_id": "v4-cordis-control-worktree-current"
 }

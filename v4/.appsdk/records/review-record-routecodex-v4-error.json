@@ -17,7 +17,7 @@
   "resource_map_hash": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
   "review_id": "v4-cordis-error-review-current",
   "review_kind": "architecture",
-  "reviewed_artifact_hash": "sha256:bff3769dd59162068bf94d51457863f6207fa0c19380b83b6a0d92e759871a95",
+  "reviewed_artifact_hash": "sha256:988609a37c6fb6d3ca9463c5e15e74471c3fec7414c634902a2009c4903461dc",
   "reviewed_commit": "47927fe2405c9989c5effff83f84c55c19b1c3b1",
   "reviewed_diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "reviewed_scope_hash": "sha256:30ef63cd3f0c43027927565d2a5d7f15afc84d0611f5acdbe65ee27aff902f27",

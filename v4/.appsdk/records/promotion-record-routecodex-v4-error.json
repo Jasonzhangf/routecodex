@@ -1,6 +1,6 @@
 {
   "architecture_review_id": "v4-cordis-error-review-current",
-  "artifact_hash": "sha256:bff3769dd59162068bf94d51457863f6207fa0c19380b83b6a0d92e759871a95",
+  "artifact_hash": "sha256:988609a37c6fb6d3ca9463c5e15e74471c3fec7414c634902a2009c4903461dc",
   "base_artifact_hash": "sha256:c26ccfc3ee6c847b1b4b2f812b72071a20df81f98fe40e60d457c41b3aed5d3f",
   "base_commit": "d75eecf3833c083c6fe749c60b43f057bf8e8148",
   "candidate_commit": "47927fe2405c9989c5effff83f84c55c19b1c3b1",
@@ -27,7 +27,7 @@
   "playground_cleanup_record_id": "v4-cordis-error-cleanup-current",
   "previous_active_version": null,
   "promotion_id": "v4-cordis-error-promotion-current",
-  "public_api_hash": "sha256:ec13d529b2c91b8e57dd50e8c896fb6d1cc53909c97097b6830041ebba22592f",
+  "public_api_hash": "sha256:de339870034290ad3d70684a2355ff7c70a9315817744648a5d7cb0d66ed734d",
   "reproduction_record_id": "v4-cordis-error-reproduction-current",
   "required_gate_results": [
     {

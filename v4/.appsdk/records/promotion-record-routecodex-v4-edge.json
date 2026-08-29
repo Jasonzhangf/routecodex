@@ -1,6 +1,6 @@
 {
   "architecture_review_id": "v4-cordis-edge-review",
-  "artifact_hash": "sha256:425b50dc8136d5920b21467d6efa4489f1cb10df9bc2ad87f519693b410d806c",
+  "artifact_hash": "sha256:83728d3d7967db171cfb627301ba8e8d636eaf6015101f70e316a5234c260ea6",
   "base_artifact_hash": "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593",
   "base_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
   "candidate_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
@@ -25,7 +25,7 @@
   "playground_cleanup_record_id": "v4-cordis-edge-cleanup-current",
   "previous_active_version": null,
   "promotion_id": "v4-cordis-edge-promotion",
-  "public_api_hash": "sha256:e843fc703d66f47cadb8d39f000653f50bb42a587bf3c488e42349ba28bd671b",
+  "public_api_hash": "sha256:14ee9e208a43bf907c1f353e1e170309e3e9e5062ea4e8bc5bb911ea82f1863a",
   "reproduction_record_id": "v4-cordis-edge-reproduction-current",
   "required_gate_results": [
     {

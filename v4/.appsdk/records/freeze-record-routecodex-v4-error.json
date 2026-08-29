@@ -14,7 +14,7 @@
   "freeze_id": "v4-cordis-error-freeze-current",
   "git_clean": true,
   "issue_id": "v4-cordis-error-rebuild-current",
-  "library_hash": "sha256:bff3769dd59162068bf94d51457863f6207fa0c19380b83b6a0d92e759871a95",
+  "library_hash": "sha256:988609a37c6fb6d3ca9463c5e15e74471c3fec7414c634902a2009c4903461dc",
   "module_id": "routecodex-v4-error",
   "owners": {
     "api_extractor": "appsdk-0.1.5",
@@ -27,7 +27,7 @@
   "previous_active_version": null,
   "promotion_id": "v4-cordis-error-promotion-current",
   "promotion_record_hash": "sha256:face3833436e2373de5dd6ebcaa8abe05a58a3457011392dcf94d998745256b8",
-  "public_api_hash": "sha256:ec13d529b2c91b8e57dd50e8c896fb6d1cc53909c97097b6830041ebba22592f",
+  "public_api_hash": "sha256:de339870034290ad3d70684a2355ff7c70a9315817744648a5d7cb0d66ed734d",
   "regression_report_hash": "sha256:81309570d1d13d671d4c5cbf54d2dcc868720f09ccd0798d5fce0a5bcfb361bb",
   "regression_report_id": "v4-cordis-error-regression-current",
   "review_id": "v4-cordis-error-review-current",
