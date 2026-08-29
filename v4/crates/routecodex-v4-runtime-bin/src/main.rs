@@ -12,7 +12,7 @@ use routecodex_v4_config::{
 use routecodex_v4_error::ErrorChain;
 use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
-    exec_managed_restart, release_for_foreground, release_unmanaged_listener, repair_stale, request_restart, request_stop,
+    exec_managed_restart, release_for_foreground, repair_stale, request_restart, request_stop,
     start_managed,
     status_managed, ManagedAction, ManagedControlPlane, ManagedInstanceRecord, ManagedSpawnOptions,
     V4LifecyclePaths,
@@ -31,15 +31,18 @@ use routecodex_v4_runtime::{
     parse_responses_provider_payload, project_runtime_fault, project_runtime_fault_with_policy,
     ResponsesProviderPayload, RuntimeFault, SkeletonRuntime,
 };
-use routecodex_v4_server::{HttpHandler, HttpRequest, HttpResponse, ResponseStream, V4HttpServer};
+use routecodex_v4_server::{AsyncHttpHandler, AsyncHttpServer, HttpHandler, HttpRequest, HttpResponse, ResponseStream};
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
 use routecodex_v4_standard_plugins::diagnostic;
 use std::io::Write;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-v4");
 const SKELETON_PLAN: &str = include_str!("../../../contracts/skeleton-plan.contract.json");
@@ -384,21 +387,12 @@ fn run_foreground(manifest: RuntimeConfigManifest) -> Result<(), String> {
     join_servers(spawn_servers(servers, manifest, stop))
 }
 
-fn bind_servers(manifest: &RuntimeConfigManifest) -> Result<Vec<V4HttpServer>, String> {
-    manifest.listeners.iter().map(|listener| {
-        match V4HttpServer::bind(&listener.address) {
-            Ok(server) => Ok(server),
-            Err(error) => {
-                release_unmanaged_listener(&listener.address, Duration::from_secs(5))
-                    .map_err(|release| release.to_string())?;
-                V4HttpServer::bind(&listener.address).map_err(|retry| retry.to_string())
-            }
-        }
-    }).collect()
+fn bind_servers(manifest: &RuntimeConfigManifest) -> Result<Vec<String>, String> {
+    Ok(manifest.listeners.iter().map(|listener| listener.address.clone()).collect())
 }
 
 fn spawn_servers(
-    servers: Vec<V4HttpServer>,
+    servers: Vec<String>,
     manifest: RuntimeConfigManifest,
     stop: Arc<AtomicBool>,
 ) -> Vec<thread::JoinHandle<Result<(), String>>> {
@@ -408,10 +402,23 @@ fn spawn_servers(
             let manifest = manifest.clone();
             let stop = Arc::clone(&stop);
             thread::spawn(move || {
-                let mut handler = PipelineHandler::new(manifest)?;
-                server
-                    .run_until_persisted(&mut handler, || stop.load(Ordering::Acquire))
-                    .map_err(|error| error.to_string())
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| error.to_string())?;
+                runtime.block_on(async move {
+                    let server = AsyncHttpServer::bind(&server).await.map_err(|error| error.to_string())?;
+                    let handler = Arc::new(PipelineHandler::new(manifest)?);
+                    let cancellation = CancellationToken::new();
+                    let watcher = cancellation.clone();
+                    tokio::spawn(async move {
+                        while !stop.load(Ordering::Acquire) {
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
+                        watcher.cancel();
+                    });
+                    server.run_until(handler, cancellation).await.map_err(|error| error.to_string())
+                })
             })
         })
         .collect()
@@ -479,8 +486,8 @@ impl PipelineHandler {
     }
 }
 
-impl HttpHandler for PipelineHandler {
-    fn handle(&mut self, request: HttpRequest) -> HttpResponse {
+impl PipelineHandler {
+    fn handle_request(&self, request: HttpRequest) -> HttpResponse {
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/health") => json_response(
                 200,
@@ -515,6 +522,22 @@ impl HttpHandler for PipelineHandler {
                 404,
             ),
         }
+    }
+}
+
+impl HttpHandler for PipelineHandler {
+    fn handle(&mut self, request: HttpRequest) -> HttpResponse {
+        self.handle_request(request)
+    }
+}
+
+impl AsyncHttpHandler for PipelineHandler {
+    fn handle_async<'a>(
+        &'a self,
+        request: HttpRequest,
+        _cancellation: CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = HttpResponse> + Send + 'a>> {
+        Box::pin(async move { self.handle_request(request) })
     }
 }
 

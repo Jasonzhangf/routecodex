@@ -171,6 +171,10 @@ pub trait AsyncHttpHandler: Send + Sync + 'static {
 pub struct AsyncHttpServer {
     listener: TokioTcpListener,
     max_request_bytes: usize,
+    server_id: String,
+    port: u16,
+    local_day: String,
+    request_ids: V4RequestIdCounter,
 }
 
 impl AsyncHttpServer {
@@ -178,9 +182,14 @@ impl AsyncHttpServer {
         let listener = TokioTcpListener::bind(listen_address)
             .await
             .map_err(HttpServerError::Bind)?;
+        let local = listener.local_addr().map_err(HttpServerError::Bind)?;
         Ok(Self {
             listener,
             max_request_bytes: MAX_BODY_BYTES,
+            server_id: listen_address.to_string(),
+            port: local.port(),
+            local_day: local_day(),
+            request_ids: V4RequestIdCounter::new(),
         })
     }
 
@@ -192,19 +201,23 @@ impl AsyncHttpServer {
     }
 
     pub async fn run_until<H: AsyncHttpHandler>(
-        self,
+        mut self,
         handler: std::sync::Arc<H>,
         stop: CancellationToken,
     ) -> Result<(), HttpServerError> {
         loop {
             let accepted = tokio::select! { _ = stop.cancelled() => return Ok(()), result = self.listener.accept() => result };
             let (stream, _) = accepted.map_err(HttpServerError::Accept)?;
+            let request_identity = self
+                .request_ids
+                .next_request_identity(&self.server_id, &self.local_day)
+                .map_err(|error| HttpServerError::RequestIdentity(error.to_string()))?;
             let handler = std::sync::Arc::clone(&handler);
             let connection_stop = stop.child_token();
             let max_request_bytes = self.max_request_bytes;
+            let port = self.port;
             tokio::spawn(async move {
-                let _ = serve_async_connection(stream, handler, connection_stop, max_request_bytes)
-                    .await;
+                let _ = serve_async_connection(stream, handler, connection_stop, max_request_bytes, request_identity, port).await;
             });
         }
     }
@@ -215,6 +228,8 @@ async fn serve_async_connection<H: AsyncHttpHandler>(
     handler: std::sync::Arc<H>,
     server_stop: CancellationToken,
     max_request_bytes: usize,
+    request_identity: RequestIdentity,
+    port: u16,
 ) -> Result<(), std::io::Error> {
     let mut request_bytes = Vec::with_capacity(4096);
     let header_end = loop {
@@ -295,9 +310,9 @@ async fn serve_async_connection<H: AsyncHttpHandler>(
         path,
         headers,
         body: request_bytes[body_start..body_start + content_length].to_vec(),
-        request_id: String::new(),
-        server_id: String::new(),
-        port: 0,
+        request_id: request_identity.request_id,
+        server_id: request_identity.server_id,
+        port,
     };
     let cancellation = server_stop.child_token();
     let response = handler.handle_async(request, cancellation.clone()).await;

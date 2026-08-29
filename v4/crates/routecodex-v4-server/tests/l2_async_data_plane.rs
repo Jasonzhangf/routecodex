@@ -18,12 +18,65 @@ impl AsyncHttpHandler for Handler {
         _cancel: CancellationToken,
     ) -> Pin<Box<dyn Future<Output = HttpResponse> + Send + 'a>> {
         Box::pin(async move {
+            if request.path == "/slow" {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
             HttpResponse::json(
                 200,
                 format!("{{\"path\":\"{}\"}}", request.path).into_bytes(),
             )
         })
     }
+}
+
+struct IdentityHandler;
+
+impl AsyncHttpHandler for IdentityHandler {
+    fn handle_async<'a>(&'a self, request: HttpRequest, _cancel: CancellationToken) -> Pin<Box<dyn Future<Output = HttpResponse> + Send + 'a>> {
+        Box::pin(async move {
+            HttpResponse::json(200, format!("{}|{}|{}", request.server_id, request.port, request.request_id).into_bytes())
+        })
+    }
+}
+
+async fn request(address: String, path: &str) -> String {
+    let mut client = TcpStream::connect(address).await.expect("connect");
+    client.write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes()).await.expect("request");
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.expect("response");
+    String::from_utf8(response).expect("UTF-8 response")
+}
+
+#[tokio::test]
+async fn async_admission_assigns_real_request_identity_scope() {
+    let server = AsyncHttpServer::bind("127.0.0.1:0").await.expect("bind");
+    let address = server.local_address().expect("address");
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(server.run_until(Arc::new(IdentityHandler), stop.clone()));
+    let response = request(address, "/identity").await;
+    let body = response.split("\r\n\r\n").nth(1).expect("body");
+    let fields: Vec<_> = body.split('|').collect();
+    assert_eq!(fields.len(), 3);
+    assert!(fields[0].starts_with("127.0.0.1:0"));
+    assert_ne!(fields[1], "0");
+    assert!(fields[2].contains("day-"));
+    stop.cancel();
+    task.await.expect("join").expect("clean stop");
+}
+
+#[tokio::test]
+async fn async_dispatch_does_not_head_of_line_block_connections() {
+    let server = AsyncHttpServer::bind("127.0.0.1:0").await.expect("bind");
+    let address = server.local_address().expect("address");
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(server.run_until(Arc::new(Handler), stop.clone()));
+    let slow = tokio::spawn(request(address.clone(), "/slow"));
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    let fast = tokio::time::timeout(std::time::Duration::from_millis(50), request(address, "/fast")).await.expect("fast request blocked");
+    assert!(fast.contains("/fast"));
+    assert!(slow.await.expect("slow join").contains("/slow"));
+    stop.cancel();
+    task.await.expect("join").expect("clean stop");
 }
 
 #[tokio::test]
