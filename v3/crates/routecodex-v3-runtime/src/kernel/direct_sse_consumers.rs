@@ -1099,6 +1099,52 @@ mod tests {
     }
 
     #[test]
+    fn direct_responses_stream_projects_toolreason_as_independent_output_text() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
+            )
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_client_responses_projection(true);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100}","call_id":"call_EdBmVtq5tjZ8N9xMfrlH3dxt","id":"fc_07aabdb984bc4601016a931477516887d099520672e03b7698","name":"exec_command","status":"completed","type":"function_call"}}"#,
+        )
+        .unwrap();
+
+        consumer.consume(&mut object).unwrap();
+
+        let projection = consumer
+            .take_toolreason_reasoning_projection()
+            .expect("valid toolreason must project to client SSE");
+        let projection = String::from_utf8(projection).unwrap();
+        assert!(projection.contains("event: response.reasoning_summary_text.delta"));
+        assert!(projection.contains("event: response.output_text.delta"));
+        assert!(projection.contains("\"delta\":\"调用工具 pwd：确认当前工作目录\""));
+        assert!(projection.contains("event: response.output_text.done"));
+    }
+
+    #[test]
+    fn direct_responses_stream_does_not_project_toolreason_without_reason() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
+            )
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_client_responses_projection(true);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"arguments":"{\"cmd\":\"pwd\",\"goal_alignment_confidence\":100}","call_id":"call_missing_reason","id":"fc_missing_reason","name":"exec_command","status":"completed","type":"function_call"}}"#,
+        )
+        .unwrap();
+
+        consumer.consume(&mut object).unwrap();
+
+        let projection = consumer.take_toolreason_reasoning_projection();
+        assert!(projection.is_none());
+    }
+
+    #[test]
     fn direct_responses_sse_strips_toolreason_from_arguments_done() {
         let mut consumer = V3DirectSseContentConsumer::default()
             .with_typed_hooks(
