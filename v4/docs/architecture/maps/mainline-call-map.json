@@ -996,6 +996,27 @@
       "status": "active"
     },
     {
+      "from": "routecodex-v4-runtime-bin::handle_responses",
+      "to": "routecodex-v4-runtime::SkeletonRuntime::execute_request_json_scoped",
+      "owner": "routecodex-v4-runtime",
+      "edge_type": "request_chain_execution",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.production_request_chain",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs,crates/routecodex-v4-runtime/src/lib.rs",
+      "symbols": ["execute_request_json_scoped", "ExecutionReport::provider_wire_value"],
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime::ExecutionReport::provider_wire_value",
+      "to": "routecodex-v4-runtime-bin::send_target_nonstream|send_target_streaming",
+      "owner": "routecodex-v4-runtime-bin",
+      "edge_type": "provider_wire_transport_consume",
+      "caller_feature_id": "v4.runtime.production_request_chain",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    },
+    {
       "from": "routecodex-v4-runtime-bin",
       "to": "routecodex-v4-router",
       "owner": "routecodex-v4-runtime-bin::handle_responses",
