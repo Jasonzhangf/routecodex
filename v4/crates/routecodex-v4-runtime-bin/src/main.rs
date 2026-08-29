@@ -410,7 +410,7 @@ fn spawn_servers(
             thread::spawn(move || {
                 let mut handler = PipelineHandler::new(manifest)?;
                 server
-                    .run_until(&mut handler, || stop.load(Ordering::Acquire))
+                    .run_until_persisted(&mut handler, || stop.load(Ordering::Acquire))
                     .map_err(|error| error.to_string())
             })
         })

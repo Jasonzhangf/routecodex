@@ -4,7 +4,7 @@
 //! Stop and restart never scan ports or processes and never touch V3 state.
 
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::io::{IsTerminal, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -58,12 +58,14 @@ impl V4LifecyclePaths {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .ok_or(LifecycleError::HomeMissing)?;
+        let state_root = home
+            .join(".rcc/state/runtime-lifecycle/v4");
         Ok(Self {
-            state_root: home.join(".rcc/v4"),
-            record_path: home.join(".rcc/v4/instance.json"),
-            control_socket: home.join(".rcc/v4/control.sock"),
-            manifest_path: home.join(".rcc/v4/manifest.compiled.json"),
+            record_path: state_root.join("instance.json"),
+            control_socket: state_root.join("control.sock"),
+            manifest_path: state_root.join("manifest.compiled.json"),
             log_path: home.join(".rcc/logs/rccv4.log"),
+            state_root,
         })
     }
 
@@ -297,12 +299,12 @@ pub fn start_managed(
     paths.prepare()?;
     if paths.record_path.exists() {
         match status_managed(paths)? {
-            ManagedStatus { state, record: Some(record) } if state == "running" => {
-                let restarted = request_restart(paths, &record.manifest_digest, timeout)?;
-                if std::io::stdout().is_terminal() {
-                    wait_for_attached_instance(paths)?;
-                }
-                return Ok(restarted);
+            ManagedStatus { state, record: Some(_) } if state == "running" => {
+                // V3 start semantics are a cold managed start: release the
+                // exact declared instance, then publish/spawn a fresh child
+                // using this invocation's stdout/stderr. In-place exec
+                // restart belongs to the explicit `restart` command.
+                release_for_foreground(paths, timeout)?;
             }
             ManagedStatus { state, record: Some(_) } if state == "stale" => {
                 repair_stale(paths)?;
@@ -323,10 +325,16 @@ pub fn start_managed(
         .arg(config_path)
         .current_dir("/")
         .stdin(Stdio::null())
-        // Keep managed output attached to the invoking shell so request and
-        // response diagnostics remain observable in every supported terminal.
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+        .stdout(if std::io::stdout().is_terminal() {
+            Stdio::inherit()
+        } else {
+            Stdio::from(open_log(paths)?)
+        })
+        .stderr(if std::io::stderr().is_terminal() {
+            Stdio::inherit()
+        } else {
+            Stdio::from(open_log(paths)?)
+        });
     append_spawn_options(&mut command, options);
     let mut child = command
         .spawn()
@@ -479,6 +487,19 @@ fn wait_child_ready(
         thread::sleep(Duration::from_millis(25));
     }
     Err(LifecycleError::StartTimeout(timeout.as_millis() as u64))
+}
+
+fn open_log(paths: &V4LifecyclePaths) -> Result<File, LifecycleError> {
+    let parent = paths
+        .log_path
+        .parent()
+        .ok_or_else(|| io_error(&paths.log_path, "log path has no parent"))?;
+    fs::create_dir_all(parent).map_err(|error| io_error(parent, error))?;
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&paths.log_path)
+        .map_err(|error| io_error(&paths.log_path, error))
 }
 
 fn request_control(

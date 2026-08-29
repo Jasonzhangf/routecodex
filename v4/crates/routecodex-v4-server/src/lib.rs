@@ -10,10 +10,12 @@
 //!   on success paths.
 
 use std::collections::BTreeMap;
+use std::fs;
 use std::future::Future;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::pin::Pin;
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener as TokioTcpListener, TcpStream as TokioTcpStream};
@@ -356,7 +358,27 @@ impl V4HttpServer {
         mut should_stop: impl FnMut() -> bool,
     ) -> Result<(), HttpServerError> {
         let local_day = local_day();
-        let mut request_ids = V4RequestIdCounter::new();
+        self.run_until_with_counter(handler, V4RequestIdCounter::new(), || should_stop(), &local_day)
+    }
+
+    pub fn run_until_persisted<H: HttpHandler>(
+        self,
+        handler: &mut H,
+        mut should_stop: impl FnMut() -> bool,
+    ) -> Result<(), HttpServerError> {
+        let local_day = local_day();
+        let request_ids = V4RequestIdCounter::from_default_state()
+            .map_err(|error| HttpServerError::RequestIdentity(error.to_string()))?;
+        self.run_until_with_counter(handler, request_ids, || should_stop(), &local_day)
+    }
+
+    fn run_until_with_counter<H: HttpHandler>(
+        self,
+        handler: &mut H,
+        mut request_ids: V4RequestIdCounter,
+        mut should_stop: impl FnMut() -> bool,
+        local_day: &str,
+    ) -> Result<(), HttpServerError> {
         while !should_stop() {
             let stream = match self.listener.accept() {
                 Ok((stream, _)) => stream,
@@ -380,7 +402,7 @@ impl V4HttpServer {
                 .set_write_timeout(Some(Duration::from_secs(30)))
                 .map_err(HttpServerError::Accept)?;
             let request_identity = request_ids
-                .next_request_identity(&self.server_id, &local_day)
+                .next_request_identity(&self.server_id, local_day)
                 .map_err(|error| HttpServerError::RequestIdentity(error.to_string()))?;
             if let Err(error) = serve_connection(stream, handler, request_identity, self.port) {
                 if !matches!(error, ConnectionError::ClientDisconnected) {
@@ -686,6 +708,7 @@ pub struct RequestIdentity {
 pub enum RequestIdentityError {
     EmptyServerId,
     SequenceOverflow,
+    Persistence(String),
 }
 
 impl std::fmt::Display for RequestIdentityError {
@@ -700,11 +723,29 @@ impl std::error::Error for RequestIdentityError {}
 #[derive(Debug, Clone, Default)]
 pub struct V4RequestIdCounter {
     counters: BTreeMap<(String, String), u64>,
+    state_file: Option<PathBuf>,
+    loaded: bool,
+    total_count: u64,
+    window_count: u64,
+    window_key: String,
 }
 
 impl V4RequestIdCounter {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn from_default_state() -> Result<Self, RequestIdentityError> {
+        let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
+            RequestIdentityError::Persistence("HOME is required for request id state".to_string())
+        })?;
+        Self::from_state_file(home.join(".rcc/state/request-id-counter.json"))
+    }
+
+    pub fn from_state_file(path: PathBuf) -> Result<Self, RequestIdentityError> {
+        let mut counter = Self { state_file: Some(path), ..Self::default() };
+        counter.load_state()?;
+        Ok(counter)
     }
 
     pub fn next_request_identity(
@@ -715,18 +756,77 @@ impl V4RequestIdCounter {
         if server_id.is_empty() {
             return Err(RequestIdentityError::EmptyServerId);
         }
+        if !self.loaded {
+            self.load_state()?;
+        }
         let key = (server_id.to_string(), local_day.to_string());
-        let next = self.counters.get(&key).copied().unwrap_or(0) + 1;
+        if self.state_file.is_some() {
+            if self.window_key != local_day {
+                self.window_key = local_day.to_string();
+                self.window_count = 0;
+            }
+            self.total_count = self
+                .total_count
+                .checked_add(1)
+                .ok_or(RequestIdentityError::SequenceOverflow)?;
+            self.window_count = self
+                .window_count
+                .checked_add(1)
+                .ok_or(RequestIdentityError::SequenceOverflow)?;
+        }
+        let next = if self.state_file.is_some() {
+            self.window_count
+        } else {
+            self.counters.get(&key).copied().unwrap_or(0) + 1
+        };
         if next == 0 {
             return Err(RequestIdentityError::SequenceOverflow);
         }
         self.counters.insert(key, next);
+        self.persist_state()?;
         Ok(RequestIdentity {
             request_id: format!("{server_id}-{local_day}-{next:08}"),
             server_id: server_id.to_string(),
             local_day: local_day.to_string(),
             sequence: next,
         })
+    }
+
+    fn load_state(&mut self) -> Result<(), RequestIdentityError> {
+        self.loaded = true;
+        let Some(path) = self.state_file.as_ref() else { return Ok(()); };
+        if !path.exists() { return Ok(()); }
+        let bytes = fs::read(path).map_err(|error| RequestIdentityError::Persistence(format!("failed to read {}: {error}", path.display())))?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| RequestIdentityError::Persistence(format!("failed to parse {}: {error}", path.display())))?;
+        if value.get("version").and_then(serde_json::Value::as_u64) != Some(1) {
+            return Err(RequestIdentityError::Persistence(format!("unsupported request id counter version in {}", path.display())));
+        }
+        if let (Some(server_id), Some(window_key), Some(count)) = (
+            value.get("serverId").and_then(serde_json::Value::as_str),
+            value.get("windowKey").and_then(serde_json::Value::as_str),
+            value.get("windowCount").and_then(serde_json::Value::as_u64),
+        ) {
+            self.counters.insert((server_id.to_string(), window_key.to_string()), count);
+            self.total_count = value.get("totalCount").and_then(serde_json::Value::as_u64).unwrap_or(count);
+            self.window_count = count;
+            self.window_key = window_key.to_string();
+        }
+        Ok(())
+    }
+
+    fn persist_state(&self) -> Result<(), RequestIdentityError> {
+        let Some(path) = self.state_file.as_ref() else { return Ok(()); };
+        let Some(((server_id, window_key), count)) = self.counters.iter().next_back() else { return Ok(()); };
+        let parent = path.parent().ok_or_else(|| RequestIdentityError::Persistence("request id state has no parent".to_string()))?;
+        fs::create_dir_all(parent).map_err(|error| RequestIdentityError::Persistence(format!("failed to create {}: {error}", parent.display())))?;
+        let updated_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs().to_string())
+            .unwrap_or_else(|_| "0".to_string());
+        let body = serde_json::json!({"version": 1, "serverId": server_id, "totalCount": self.total_count.max(*count), "windowCount": self.window_count.max(*count), "windowKey": window_key, "updatedAt": updated_at});
+        let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
+        fs::write(&tmp, serde_json::to_vec_pretty(&body).map_err(|error| RequestIdentityError::Persistence(error.to_string()))?).map_err(|error| RequestIdentityError::Persistence(format!("failed to write {}: {error}", tmp.display())))?;
+        fs::rename(&tmp, path).map_err(|error| RequestIdentityError::Persistence(format!("failed to publish {}: {error}", path.display())))
     }
 }
 

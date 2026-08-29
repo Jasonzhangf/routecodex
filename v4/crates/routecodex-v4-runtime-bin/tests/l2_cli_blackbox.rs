@@ -45,6 +45,13 @@ fn initialize(test_root: &std::path::Path, port: u16) -> std::path::PathBuf {
     config
 }
 
+fn status_pid(output: &[u8]) -> u32 {
+    let text = String::from_utf8_lossy(output);
+    text.split_whitespace()
+        .find_map(|part| part.strip_prefix("pid=").and_then(|value| value.parse().ok()))
+        .expect("managed status must include pid")
+}
+
 #[test]
 fn help_version_config_and_servertool_are_cwd_independent() {
     let test_root = root("surface");
@@ -93,8 +100,12 @@ fn help_version_config_and_servertool_are_cwd_independent() {
 fn managed_start_status_restart_stop_uses_v4_state_root() {
     let test_root = root("lifecycle");
     let state_root = std::path::PathBuf::from("/tmp").join(format!(
-        "rccv4-state-{}",
-        std::process::id()
+        "rccv4-state-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
     ));
     let port = free_port();
     let config = initialize(&test_root, port);
@@ -113,9 +124,12 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(TcpStream::connect(("127.0.0.1", port)).is_ok(), "listener not ready");
+    let first_pid = status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
     let takeover = run(&["start", "-c", config.to_str().expect("config"), "--snap"]);
     assert!(takeover.status.success(), "{}", String::from_utf8_lossy(&takeover.stderr));
     assert!(String::from_utf8_lossy(&takeover.stdout).contains("state=running"));
+    let second_pid = status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
+    assert_ne!(first_pid, second_pid, "start must cold-start a fresh managed child");
     let status = run(&["status", "-c", config.to_str().expect("config")]);
     assert!(status.status.success());
     assert!(String::from_utf8_lossy(&status.stdout).contains("state=running"));
