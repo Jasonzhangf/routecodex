@@ -4,7 +4,7 @@
 //! Stop and restart never scan ports or processes and never touch V3 state.
 
 use serde::{Deserialize, Serialize};
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{IsTerminal, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::os::unix::net::{UnixListener, UnixStream};
