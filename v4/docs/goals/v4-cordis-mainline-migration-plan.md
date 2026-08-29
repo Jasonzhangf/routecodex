@@ -169,3 +169,13 @@ AppSDK 阻塞的完成信号：当前 tree `appsdk verify --admission .` PASS，
 - 若现有 CLI 缺少所需生命周期动作，master 必须在当前 `v4-cordis` tree 内补齐正确的 owner 接线/最小实现与 red-first 验证，或通过真实源码/编译产物修复调用链；不得把阻塞转交给 B01/B02 或历史 branch。
 
 AppSDK 阻塞的完成证据必须同时包含：当前 HEAD/source-tree/API hash 绑定证明、全量 records 可解析且生命周期闭环、`appsdk verify` 与 `appsdk verify --admission` 通过、module artifact/Active artifact/index 非空且可验证、gen-index/verify-index/isolation/feature-layer admission 通过。任何一项缺失都不算恢复。
+
+## 10. 审计后 V4 观测与 WebUI 对齐（依赖 M00-M12）
+
+审计整改和生产主线闭环后，新增三个并行 lane，均保持 V4 owner/typed side-channel 边界：
+
+- `v4.observability.request_statistics`: 复用 V3 请求记录的持久化语义，迁移为 V4 Rust server/plugin projection；覆盖 started、route_selected、provider_attempt、switched、completed/failed、usage/timing，并以 requestId/port/session 隔离。先红后绿，禁止把 control fields 写入业务 payload。
+- `v4.console.terminal_output`: 对齐 V3 前台启动/请求/响应/错误打印，由独立 V4 console plugin 订阅 bounded RuntimeFact；无参数 managed start/restart 必须把观测输出接管到当前 console，禁止 handler/provider 直接散落 println。
+- `v4.webui.plugin_bundle`: 将 V3 WebUI 迁移为 V4 一个 aggregate plugin 加模块子插件（config、runtime、observability、admin），只消费 V4 manifest/API，不复制 V3 runtime；每个模块有独立 contract、function-map、mainline、red/green/live gate。
+
+三个 lane 仅在 P0/P1 审计问题、AppSDK admission、全局安装、managed restart、health 和真实请求闭环后启动；每个 lane 独立 worktree、独立 claim、精确合并 `v4-cordis`，再同步主树开启下一个依赖任务。
