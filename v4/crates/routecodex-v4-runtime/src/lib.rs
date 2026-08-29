@@ -2251,7 +2251,6 @@ impl SkeletonRuntime {
             .active_bundle()
             .ok_or_else(|| RuntimeFault::new("execution_epoch", "active ExecutionEpochBundle is unavailable"))
     }
-
     pub fn admit_request(&self, request_id: &str) -> Result<RuntimeLease, RuntimeFault> {
         let lease = self.epoch_store.admit()
             .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
