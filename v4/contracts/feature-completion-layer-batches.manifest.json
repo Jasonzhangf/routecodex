@@ -304,7 +304,7 @@
     "owner": "v4.feature_completion.integration",
     "admission_command": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
     "enforcement_binding_status": "bound",
-    "guard_commit": "e59bceaf44d226f9cad805020dfe941ac7955411",
+    "guard_commit": "e162734f84f9aa1f456a8d2c24105c7a32cafa66",
     "guarded_surfaces": [
       {"path":"Cargo.toml","scope_hash":"sha256:5ce83c9e3837823b19aa44dfdc28948a0123973fcb5e853e385f42aff3add62e"},
       {"path":"scripts/build.mjs","scope_hash":"sha256:05aeafe77409e087d83bb02dfa4a4f154d68d2377a3857bff8b35d0bfd26976b"},
@@ -314,7 +314,7 @@
       {"path":"scripts/compile-real-runtime-manifest.mjs","scope_hash":"sha256:a4756498aafa9d3c6726f1be982bbea76bec5daa5ddc4631c49666ba0e9902de"},
       {"path":"contracts/real-runtime-admission.manifest.json","scope_hash":"sha256:1dd63ba0bd84acbae162663b534bfe1c7d5f5315e66d5310822090a5121e863c"},
       {"path":"contracts/active-link/frozen-consumer-registry.json","scope_hash":"sha256:70df9fa89217c6bd7241788294cf3ded9a6922ea6bdd908e20468cda4d96f375"},
-      {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:629b906d28b2f618b274ca98720bcd12442f1559a43b3bf9defcd6d164662433"},
+      {"path":"docs/architecture/maps/mainline-call-map.json","scope_hash":"sha256:90f7be19e42308204748e9cdfbae0e4f2c6da67bde5be7dead3c0b229b32efca"},
       {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:af7e9c6f8da6f69da39fe831698c5aec799ba12414fa459f80cc18498c22a236"}
     ],
     "wiring_started": true,
