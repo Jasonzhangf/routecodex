@@ -655,6 +655,16 @@ impl ActiveEpochStore {
             .map(ExecutionEpochBundle::snapshot)
     }
 
+    /// Return the exact immutable bundle currently admitted by the store.
+    /// Consumers receive the same Arc-backed bundle; they cannot rebuild its
+    /// identity or substitute a second active configuration.
+    pub fn active_bundle(&self) -> Option<ExecutionEpochBundle> {
+        self.active
+            .read()
+            .expect("active epoch lock poisoned")
+            .clone()
+    }
+
     pub fn admit(&self) -> Result<EpochLease, EpochError> {
         let active = self
             .active

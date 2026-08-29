@@ -2228,6 +2228,15 @@ impl SkeletonRuntime {
         &self.plan
     }
 
+    /// Expose the runtime-owned immutable epoch to the binary shell. The
+    /// shell may retain this handle for identity/health projection, but it
+    /// cannot construct or select an alternate epoch.
+    pub fn execution_epoch_bundle(&self) -> Result<ExecutionEpochBundle, RuntimeFault> {
+        self.epoch_store
+            .active_bundle()
+            .ok_or_else(|| RuntimeFault::new("execution_epoch", "active ExecutionEpochBundle is unavailable"))
+    }
+
     /// Scope claim: a request id may only have one active closed loop.
     /// Cross-request reuse fails fast (Phase 7 scope isolation).
     pub fn claim(&self, request_id: &str) -> Result<(), RuntimeFault> {

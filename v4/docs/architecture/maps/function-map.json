@@ -946,6 +946,13 @@
         "CordisHostDaemonClient::querySnapshot",
         "CordisHostDaemonClient::heartbeat",
         "CordisHostDaemonClient::reconcile",
+        "CordisHostDaemonClient::sendEpochControl",
+        "CordisHostDaemonClient::prepareEpoch",
+        "CordisHostDaemonClient::commitEpoch",
+        "CordisHostDaemonClient::abortEpoch",
+        "CordisHostDaemonClient::drainEpoch",
+        "CordisHostDaemonClient::rollbackEpoch",
+        "CordisHostDaemonClient::queryActiveEpoch",
         "CordisHostDaemonError"
       ],
       "entry_paths": [
@@ -954,6 +961,7 @@
       "source_paths": [
         "cordis/routecodex-v4-cordis-host/src/daemon.mjs",
         "cordis/routecodex-v4-cordis-host/tests/daemon.test.mjs",
+        "cordis/routecodex-v4-cordis-host/tests/daemon-epoch.test.mjs",
         "cordis/routecodex-v4-cordis-host/tests/resources/daemon-child.mjs"
       ],
       "required_gates": [
@@ -1023,7 +1031,9 @@
       "entry_symbols": [
         "dispatch",
         "run_managed_child",
-        "PipelineHandler::handle"
+        "PipelineHandler::handle",
+        "PipelineHandler::new",
+        "SkeletonRuntime::execution_epoch_bundle"
       ],
       "entry_paths": [
         "crates/routecodex-v4-runtime-bin/src/main.rs"

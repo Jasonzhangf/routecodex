@@ -31,6 +31,7 @@ use routecodex_v4_runtime::{
     parse_responses_provider_payload, project_runtime_fault, project_runtime_fault_with_policy,
     ResponsesProviderPayload, RuntimeFault, SkeletonRuntime,
 };
+use routecodex_v4_node_container::ExecutionEpochBundle;
 use routecodex_v4_server::{AsyncHttpHandler, AsyncHttpServer, HttpHandler, HttpRequest, HttpResponse, ResponseStream};
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
 use routecodex_v4_standard_plugins::diagnostic;
@@ -472,15 +473,20 @@ fn format_status(state: &str, record: &ManagedInstanceRecord) -> String {
 struct PipelineHandler {
     manifest: RuntimeConfigManifest,
     runtime: Arc<Mutex<SkeletonRuntime>>,
+    execution_epoch: ExecutionEpochBundle,
     availability: Arc<Mutex<V4Availability01SessionScoped>>,
 }
 
 impl PipelineHandler {
     fn new(manifest: RuntimeConfigManifest) -> Result<Self, String> {
         let runtime = SkeletonRuntime::load(SKELETON_PLAN).map_err(|error| error.to_string())?;
+        let execution_epoch = runtime
+            .execution_epoch_bundle()
+            .map_err(|error| error.to_string())?;
         Ok(Self {
             manifest,
             runtime: Arc::new(Mutex::new(runtime)),
+            execution_epoch,
             availability: Arc::new(Mutex::new(V4Availability01SessionScoped::new())),
         })
     }
@@ -488,6 +494,10 @@ impl PipelineHandler {
 
 impl PipelineHandler {
     fn handle_request(&self, request: HttpRequest) -> HttpResponse {
+        debug_assert_eq!(
+            self.execution_epoch.snapshot().state,
+            routecodex_v4_node_container::ExecutionEpochState::Active
+        );
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/health") => json_response(
                 200,

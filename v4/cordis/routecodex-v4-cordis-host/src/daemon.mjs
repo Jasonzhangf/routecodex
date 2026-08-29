@@ -1,10 +1,17 @@
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 export const CORDIS_HOST_PROTOCOL_VERSION = 1;
-const DEFAULT_CAPABILITIES = Object.freeze(['snapshot', 'heartbeat', 'reconcile', 'shutdown']);
+const EPOCH_KINDS = new Set([
+  'PrepareEpoch', 'CommitEpoch', 'AbortEpoch', 'DrainEpoch', 'RollbackEpoch',
+  'QueryActiveEpoch',
+]);
+const DEFAULT_CAPABILITIES = Object.freeze([
+  'snapshot', 'heartbeat', 'reconcile', 'shutdown', 'epoch-control',
+]);
+const HASH_RE = /^sha256:[0-9a-f]{64}$/;
 
 export class CordisHostDaemonError extends Error {
   constructor(code, message) {
@@ -19,6 +26,74 @@ function requireString(value, name) {
     throw new CordisHostDaemonError('protocol_error', `${name} is required`);
   }
   return value;
+}
+
+function freezeBundle(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CordisHostDaemonError('invalid_epoch_bundle', 'ExecutionEpochBundle must be an object');
+  }
+  const allowed = new Set([
+    'schema_version', 'candidate_id', 'epoch_id', 'manifest_hash', 'graph_hash',
+    'plugin_artifact_set_hash', 'entrypoints', 'pipelines', 'nodes', 'policies',
+  ]);
+  const unknown = Object.keys(value).find((key) => !allowed.has(key));
+  if (unknown) throw new CordisHostDaemonError('invalid_epoch_bundle', `unknown bundle field ${unknown}`);
+  if (
+    value.schema_version !== 1
+    || typeof value.candidate_id !== 'string'
+    || typeof value.epoch_id !== 'string'
+    || !HASH_RE.test(value.manifest_hash)
+    || !HASH_RE.test(value.graph_hash)
+    || !HASH_RE.test(value.plugin_artifact_set_hash)
+    || !value.entrypoints || typeof value.entrypoints !== 'object' || Array.isArray(value.entrypoints)
+    || Object.keys(value.entrypoints).length === 0
+    || !value.pipelines || typeof value.pipelines !== 'object' || Array.isArray(value.pipelines)
+    || !Array.isArray(value.pipelines.request) || value.pipelines.request.length === 0
+    || !Array.isArray(value.pipelines.response) || value.pipelines.response.length === 0
+    || !Array.isArray(value.pipelines.error) || value.pipelines.error.length === 0
+    || !Array.isArray(value.nodes) || value.nodes.length === 0
+    || !value.policies || typeof value.policies !== 'object' || Array.isArray(value.policies)
+  ) {
+    throw new CordisHostDaemonError('invalid_epoch_bundle', 'ExecutionEpochBundle fields are invalid');
+  }
+  return deepFreeze(structuredClone(value));
+}
+
+function deepFreeze(value) {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+}
+
+function payloadDigest(payload) {
+  return `sha256:${createHash('sha256').update(JSON.stringify(payload ?? {})).digest('hex')}`;
+}
+
+function validateControl(command) {
+  if (!command || typeof command !== 'object' || Array.isArray(command)) {
+    throw new CordisHostDaemonError('protocol_error', 'epoch control command must be an object');
+  }
+  const allowed = new Set([
+    'schema_version', 'kind', 'command_id', 'generation', 'candidate_id', 'epoch_id',
+    'expected_base_hash', 'correlation_id', 'payload_hash', 'payload',
+  ]);
+  const unknown = Object.keys(command).find((key) => !allowed.has(key));
+  if (unknown) throw new CordisHostDaemonError('protocol_error', `unknown control field ${unknown}`);
+  if (
+    command.schema_version !== 1
+    || !EPOCH_KINDS.has(command.kind)
+    || typeof command.command_id !== 'string' || command.command_id.length === 0
+    || !Number.isSafeInteger(command.generation) || command.generation < 0
+    || typeof command.correlation_id !== 'string' || command.correlation_id.length === 0
+    || !HASH_RE.test(command.payload_hash)
+    || !command.payload || typeof command.payload !== 'object' || Array.isArray(command.payload)
+  ) throw new CordisHostDaemonError('protocol_error', 'epoch control command fields are invalid');
+  if (command.payload_hash !== payloadDigest(command.payload)) {
+    throw new CordisHostDaemonError('payload_hash_mismatch', 'epoch control payload hash does not verify');
+  }
+  return command;
 }
 
 function validateSnapshot(value) {
@@ -78,6 +153,7 @@ export async function startCordisHostDaemon({
   graphHash,
   version,
   capabilities = DEFAULT_CAPABILITIES,
+  initialBundle,
 }) {
   requireString(stateDirectory, 'stateDirectory');
   requireString(socketPath, 'socketPath');
@@ -100,6 +176,10 @@ export async function startCordisHostDaemon({
 
   const statePath = path.join(stateDirectory, 'daemon.json');
   const previous = await readState(statePath);
+  const epochState = {
+    active: initialBundle === undefined ? null : freezeBundle(initialBundle),
+    transactions: new Map(),
+  };
   const snapshot = {
     protocolVersion: CORDIS_HOST_PROTOCOL_VERSION,
     version,
@@ -128,6 +208,64 @@ export async function startCordisHostDaemon({
         request = JSON.parse(input.trim());
         if (!request || typeof request !== 'object' || Array.isArray(request)) {
           throw new CordisHostDaemonError('protocol_error', 'daemon request must be an object');
+        }
+        if (request.schema_version === 1 || EPOCH_KINDS.has(request.kind)) {
+          const command = validateControl(request);
+          if (command.generation !== snapshot.generation) {
+            throw new CordisHostDaemonError('generation_mismatch', 'epoch control generation mismatch');
+          }
+          const active = epochState.active;
+          const payload = command.payload;
+          let result;
+          if (command.kind === 'QueryActiveEpoch') {
+            result = { active_epoch: active, generation: snapshot.generation };
+          } else if (command.kind === 'PrepareEpoch') {
+            const candidate = freezeBundle(payload.bundle);
+            if (!active) throw new CordisHostDaemonError('active_epoch_unavailable', 'cannot prepare without an active ExecutionEpochBundle');
+            if (candidate.epoch_id === active.epoch_id || candidate.candidate_id === active.candidate_id) {
+              throw new CordisHostDaemonError('stale_epoch', 'candidate ExecutionEpochBundle is already active');
+            }
+            if (command.expected_base_hash !== active.manifest_hash) {
+              throw new CordisHostDaemonError('stale_base', 'expected base hash does not match active bundle');
+            }
+            const existing = epochState.transactions.get(command.command_id);
+            if (existing) {
+              if (JSON.stringify(existing.candidate) !== JSON.stringify(candidate)) {
+                throw new CordisHostDaemonError('idempotency_conflict', 'command id was reused with a different bundle');
+              }
+              result = existing;
+            } else {
+              result = Object.freeze({ command_id: command.command_id, state: 'Prepared', candidate });
+              epochState.transactions.set(command.command_id, result);
+            }
+          } else {
+            const transaction = epochState.transactions.get(command.command_id);
+            if (!transaction) throw new CordisHostDaemonError('unknown_transaction', `unknown epoch command ${command.command_id}`);
+            const expected = {
+              CommitEpoch: 'Prepared', AbortEpoch: 'Prepared', DrainEpoch: 'Committed', RollbackEpoch: 'Committed',
+            }[command.kind];
+            if (transaction.state !== expected) {
+              throw new CordisHostDaemonError('invalid_transaction_state', `${command.kind} requires ${expected}`);
+            }
+            if (command.kind === 'CommitEpoch') {
+              result = Object.freeze({ ...transaction, state: 'Committed', previous: active });
+              epochState.active = transaction.candidate;
+            } else if (command.kind === 'AbortEpoch') {
+              result = Object.freeze({ ...transaction, state: 'Aborted' });
+            } else if (command.kind === 'DrainEpoch') {
+              result = Object.freeze({ ...transaction, state: 'Draining' });
+            } else {
+              if (!transaction.previous) throw new CordisHostDaemonError('rollback_unavailable', 'no previous bundle is retained for rollback');
+              result = Object.freeze({ ...transaction, state: 'RolledBack' });
+              epochState.active = transaction.previous;
+            }
+            epochState.transactions.set(command.command_id, result);
+          }
+          void writeState(statePath, { ...snapshot, active_epoch: epochState.active }).then(
+            () => reply(socket, { ok: true, kind: command.kind, result }),
+            (error) => reply(socket, failure('state_write', error.message)),
+          );
+          return;
         }
         const allowed = {
           handshake: ['op', 'protocolVersion', 'graphHash'],
@@ -184,7 +322,7 @@ export async function startCordisHostDaemon({
   }).catch((error) => {
     throw new CordisHostDaemonError('socket_bind', error.message);
   });
-  await writeState(statePath, snapshot);
+  await writeState(statePath, { ...snapshot, active_epoch: epochState.active });
 
   const daemon = {
     snapshot: () => validateSnapshot(snapshot),
@@ -223,6 +361,7 @@ function request(socketPath, payload) {
 export class CordisHostDaemonClient {
   #socketPath;
   #snapshot;
+  #activeEpoch = null;
 
   constructor(socketPath, snapshot) {
     this.#socketPath = socketPath;
@@ -258,6 +397,26 @@ export class CordisHostDaemonClient {
     this.#snapshot = validateSnapshot(response.snapshot);
     return { reconciled: response.reconciled, snapshot: this.#snapshot };
   }
+
+  async sendEpochControl(command) {
+    const response = await request(this.#socketPath, validateControl(command));
+    if (response.result && Object.hasOwn(response.result, 'active_epoch')) {
+      this.#activeEpoch = response.result.active_epoch;
+    }
+    return response;
+  }
+
+  async prepareEpoch(command) { return this.sendEpochControl({ ...command, kind: 'PrepareEpoch' }); }
+
+  async commitEpoch(command) { return this.sendEpochControl({ ...command, kind: 'CommitEpoch' }); }
+
+  async abortEpoch(command) { return this.sendEpochControl({ ...command, kind: 'AbortEpoch' }); }
+
+  async drainEpoch(command) { return this.sendEpochControl({ ...command, kind: 'DrainEpoch' }); }
+
+  async rollbackEpoch(command) { return this.sendEpochControl({ ...command, kind: 'RollbackEpoch' }); }
+
+  async queryActiveEpoch(command) { return this.sendEpochControl({ ...command, kind: 'QueryActiveEpoch' }); }
 
   async close() {
     // Client connections are one-shot; close is an explicit no-op for reconnect safety.
