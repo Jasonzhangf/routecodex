@@ -295,7 +295,7 @@ fn file_sink_writes_verbatim_json_and_sink_open_failure_is_explicit() {
         1
     ));
     let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
-        log_console: false,
+        log_console: true,
         log_file: Some(path.display().to_string()),
         snapshots_enabled: false,
         snapshot_stages: None,

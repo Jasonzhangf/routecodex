@@ -590,9 +590,8 @@ impl V3DebugRuntime {
     fn write_sink(&self, event: &V3DebugEventProjection) -> V3DebugResult<()> {
         let line =
             serde_json::to_string(event).map_err(|error| V3DebugError::Sink(error.to_string()))?;
-        if self.config.log_console {
-            println!("{line}");
-        }
+        // Node events are internal debug evidence. Human-readable console
+        // output is emitted explicitly through append_human_console_line.
         if let Some(path) = self.config.log_file.as_deref() {
             let mut file = open_log_file_for_append(path)?;
             writeln!(file, "{line}").map_err(|error| V3DebugError::Sink(error.to_string()))?;
