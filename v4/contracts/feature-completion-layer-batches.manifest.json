@@ -318,7 +318,7 @@
       {"path":"crates/routecodex-v4-runtime-bin/**","scope_hash":"sha256:737a9ce7cc1bc059dcb12dc024d954160071a4185e239819228368277ad2f85c"}
     ],
     "wiring_started": true,
-    "wiring_edges": ["surface:crates/routecodex-v4-runtime-bin/**:sha256:71a9c543f877808f928c131a44794d175a55161d09854e10be58a752cce39220"],
+    "wiring_edges": ["surface:crates/routecodex-v4-runtime-bin/**:sha256:d38596c539d6c4869cc03123395ee50e5652029fb6fcb8170881983f805eceb5"],
     "resource_refs": {
       "merge_queue_state": ".appsdk/records/merge-queue-state.json",
       "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"

@@ -12,7 +12,7 @@ use routecodex_v4_config::{
 use routecodex_v4_error::ErrorChain;
 use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
-    exec_managed_restart, release_for_foreground, repair_stale, request_restart, request_stop,
+    exec_managed_restart, release_for_foreground, release_unmanaged_listener, repair_stale, request_restart, request_stop,
     start_managed,
     status_managed, ManagedAction, ManagedControlPlane, ManagedInstanceRecord, ManagedSpawnOptions,
     V4LifecyclePaths,
@@ -386,11 +386,16 @@ fn run_foreground(manifest: RuntimeConfigManifest) -> Result<(), String> {
 }
 
 fn bind_servers(manifest: &RuntimeConfigManifest) -> Result<Vec<V4HttpServer>, String> {
-    manifest
-        .listeners
-        .iter()
-        .map(|listener| V4HttpServer::bind(&listener.address).map_err(|error| error.to_string()))
-        .collect()
+    manifest.listeners.iter().map(|listener| {
+        match V4HttpServer::bind(&listener.address) {
+            Ok(server) => Ok(server),
+            Err(error) => {
+                release_unmanaged_listener(&listener.address, Duration::from_secs(5))
+                    .map_err(|release| release.to_string())?;
+                V4HttpServer::bind(&listener.address).map_err(|retry| retry.to_string())
+            }
+        }
+    }).collect()
 }
 
 fn spawn_servers(

@@ -375,6 +375,35 @@ pub fn release_for_foreground(
     wait_until(timeout, || !paths.record_path.exists())
 }
 
+/// Release an unmanaged listener only when the OS identifies one exact rccv4
+/// executable on the requested address. Ambiguous or foreign listeners fail
+/// closed; no port-wide or broad process termination is attempted.
+pub fn release_unmanaged_listener(address: &str, timeout: Duration) -> Result<(), LifecycleError> {
+    let Some(port) = address.rsplit(':').next() else { return Ok(()); };
+    let output = std::process::Command::new("/usr/sbin/lsof")
+        .args(["-nP", "-Fpct", &format!("-iTCP:{port}"), "-sTCP:LISTEN"])
+        .output()
+        .map_err(|error| io_error(Path::new(address), error))?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut pid = None;
+    let mut command = None;
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix('p') { pid = value.parse::<i32>().ok(); }
+        if let Some(value) = line.strip_prefix('c') { command = Some(value.to_string()); }
+    }
+    if pid.is_none() || command.as_deref() != Some("rccv4") { return Ok(()); }
+    let pid = pid.expect("checked above");
+    if unsafe { libc::kill(pid, libc::SIGTERM) } == -1 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) { return Err(io_error(Path::new(address), error)); }
+    }
+    wait_until(timeout, || {
+        std::process::Command::new("/usr/sbin/lsof")
+            .args(["-nP", "-Fp", &format!("-iTCP:{port}"), "-sTCP:LISTEN"])
+            .output().map(|result| result.stdout.is_empty()).unwrap_or(false)
+    })
+}
+
 pub fn request_restart(
     paths: &V4LifecyclePaths,
     expected_digest: &str,
