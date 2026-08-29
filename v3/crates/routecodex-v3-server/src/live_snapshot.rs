@@ -1066,6 +1066,10 @@ pub(crate) fn capture_v3_responses_direct_provider_snapshots(
     request_id: &str,
     output: &mut V3ResponsesDirectRuntimeOutput,
 ) -> Option<V3FoundationRuntimeOutput> {
+    let provider_transport_started = output
+        .node_trace
+        .iter()
+        .any(|node| *node == "V3Transport13ResponsesHttpRequest");
     let stages = [
         (
             "provider-request",
@@ -1083,6 +1087,9 @@ pub(crate) fn capture_v3_responses_direct_provider_snapshots(
             continue;
         }
         let Some(payload) = payload else {
+            if !provider_transport_started {
+                continue;
+            }
             let allowed_stream_observation = stage == "provider-response"
                 && output.stream_observation.is_some();
             if allowed_stream_observation {

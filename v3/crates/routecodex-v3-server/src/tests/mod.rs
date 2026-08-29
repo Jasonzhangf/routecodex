@@ -809,7 +809,11 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         },
         provider_request_snapshot: Some(json!({"body": {"tools": [{"name": "pwd"}]}})),
         provider_response_snapshot: Some(json!({"body": {"output": [{"type": "function_call"}]}})),
-        node_trace: vec!["V3ProviderResp14Raw", "V3DirectResp15ClientPayload"],
+        node_trace: vec![
+            "V3Transport13ResponsesHttpRequest",
+            "V3ProviderResp14Raw",
+            "V3DirectResp15ClientPayload",
+        ],
         error_chain: None,
         observability: None,
         stream_observation: None,
@@ -840,6 +844,34 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
     .is_some());
     let missing_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/missing-carrier");
     assert!(!missing_dir.exists(), "server must not fabricate direct artifacts");
+
+    let mut pre_transport_error = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
+        client_payload: V3Resp15ClientPayload {
+            status: 598,
+            headers: BTreeMap::new(),
+            body: V3ClientBody::Json(json!({"error": {"code": "original_error"}})),
+        },
+        provider_request_snapshot: None,
+        provider_response_snapshot: None,
+        node_trace: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        error_chain: Some(vec!["V3Error01SourceRaised", "V3Error06ClientProjected"]),
+        observability: None,
+        stream_observation: None,
+        protocol_relay_handoff: None,
+    };
+    assert!(capture_v3_responses_direct_provider_snapshots(
+        &state,
+        "responses",
+        "/v1/responses",
+        "pre-transport-error",
+        &mut pre_transport_error,
+    )
+    .is_none());
+    assert_eq!(pre_transport_error.client_payload.status, 598);
+    assert!(matches!(
+        pre_transport_error.client_payload.body,
+        V3ClientBody::Json(ref body) if body["error"]["code"] == "original_error"
+    ));
     fs::remove_dir_all(root).unwrap();
 }
 
