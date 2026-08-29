@@ -30,7 +30,7 @@ impl Cli {
     pub fn command_or_start(self) -> V4CommandIntent {
         self.command
             .unwrap_or(V4CommandIntent::Start(StartIntent {
-                foreground: true,
+                foreground: false,
                 ..StartIntent::default()
             }))
     }
@@ -110,7 +110,7 @@ pub struct SnapshotIntent {
 pub struct StartIntent {
     #[arg(short = 'c', long = "config")]
     pub config: Option<PathBuf>,
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = false)]
     pub foreground: bool,
     #[command(flatten)]
     pub snapshot: SnapshotIntent,
