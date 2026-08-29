@@ -224,6 +224,25 @@ fn positive_health_uplift_is_capped_at_half_of_configured_priority() {
 }
 
 #[test]
+fn odd_positive_priorities_use_floor_for_health_cap() {
+    let priority_one =
+        V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 1, 5_000, 1);
+    let priority_three =
+        V3ProviderSchedulingProjection::new("provider-b", "key-b", "model-b", 3, 5_000, 1);
+
+    assert_eq!(priority_one.effective_priority, 1);
+    assert_eq!(priority_three.effective_priority, 4);
+}
+
+#[test]
+fn zero_priority_rejects_positive_health_uplift() {
+    let projection =
+        V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 0, 5_000, 1);
+
+    assert_eq!(projection.effective_priority, 0);
+}
+
+#[test]
 fn score_zero_keeps_a_positive_minimum_scheduling_weight() {
     let projection = V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 1, 0, 7);
     assert_eq!(projection.effective_weight_milli, 7);

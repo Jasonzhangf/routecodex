@@ -97,12 +97,12 @@ Virtual Router 只生成 route pool、priority、base weight 和 opaque target p
 Target 在已选 route plan 内：
 
 1. 过滤 unavailable/cooldown key；
-2. 计算 `effective_priority = configured_priority + (score_milli - 1000)`，保留最高可用 bucket；
+2. 计算 `effective_priority = configured_priority + min(score_milli - 1000, floor(configured_priority * 0.5))`；正的 configured priority 的健康正向调整最高为其 50%，即 effective priority 不超过其 150%；保留最高 effective-priority bucket；
 3. 只在同一 effective priority bucket 内按配置 weight 调度；
 4. 执行 deterministic selection；
 5. provider failure 后做 target-local reselect，不重新进入 VR，不跨 immutable target plan。
 
-score 不能跨越 priority。低 priority 的高分 key 不能抢占高 priority 的可用 key。
+健康调整只由 Provider scheduling projection 计算；route-tier precedence 仍由 Target 的组合 priority 保持，健康状态不能改变 route-tier 身份或进入 payload。
 
 ## 4. Typed contracts
 
@@ -155,7 +155,7 @@ scope 由分类动作决定：
 ```rust
 pub struct V3ProviderKeyHealthState {
     pub key: V3ProviderKeyHealthKey,
-    pub score_milli: u16, // 0..1000
+    pub score_milli: u32, // 0..1500
     pub failure_streak: u32,
     pub success_streak: u32,
     pub last_failure_at_ms: Option<u64>,
@@ -173,9 +173,12 @@ pub struct V3ProviderKeyHealthState {
 ```rust
 pub struct V3ProviderSchedulingProjection {
     pub key: V3ProviderKeyHealthKey,
+    pub priority: i32,
+    pub effective_priority: i32,
     pub available: bool,
     pub blocked_scopes: Vec<String>,
     pub score_milli: u32,
+    pub base_weight: u32,
     pub effective_weight_milli: u64,
     pub score_generation: u64,
 }
@@ -273,7 +276,7 @@ baseline = 1000
 所有变化执行：
 
 ```text
-score = clamp(score + delta, 0, 1000)
+score = clamp(score + delta, 0, 1500)
 ```
 
 ### 6.3 Probe success
@@ -356,22 +359,14 @@ deterministic round-robin cursor
 ```text
 1. remove configured-disabled / cooldown / request-excluded keys
 2. choose maximum numeric effective priority bucket
-3. effective_priority = configured_priority + (score_milli - 1000)
+3. effective_priority = configured_priority + min(score_milli - 1000, floor(configured_priority * 0.5)) for positive configured priority; zero priority receives no positive uplift and negative priority keeps additive semantics
 4. within bucket:
      effective_weight = base_weight
 5. select by deterministic SWRR
 6. tie-break by stable key order/cursor
 ```
 
-即：
-
-```text
-score 1000 -> 1.5x
-score 500  -> 1.0x
-score 0    -> 0.5x
-```
-
-最低权重防止低分但尚未 cooldown 的 key 永久饿死；cooldown key 不进入权重计算。
+`score_milli` 不再乘入 weight：score 1000 保持 configured priority，score 1500 的正向调整最多为 configured priority 的 50%，score 低于 1000 则按 additive delta 降低 effective priority。`effective_weight_milli` 始终为 `max(base_weight, 1)`；cooldown key 不进入权重计算。
 
 ## 9. State machine
 
@@ -436,7 +431,7 @@ HealthNeutral
 - recoverable failure 3 cooldowns;
 - health-neutral event changes neither score nor streak;
 - success increments score and clears failure streak;
-- score clamps at 0/1000;
+- score clamps at 0/1500;
 - probe failure retains cooldown;
 - probe success clears cooldown but uses recovery floor;
 - concurrent probe acquisition is single-flight;

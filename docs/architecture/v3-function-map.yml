@@ -5314,7 +5314,7 @@ features:
   status: source_controlled_runtime_pending_live_replay
   change_risk: critical
   owner_kind: rust_v3_provider_key_health_scoring
-  owner_scope: Provider-owned key score, failure/success streak, typed recovery action application, process-local cooldown/probe recovery, and Target same-priority scheduling projection.
+  owner_scope: Provider-owned key score, failure/success streak, typed recovery action application, process-local cooldown/probe recovery, and Target same-priority scheduling projection. Effective priority uses larger numeric values first and caps positive health uplift at 150% of configured priority.
   owner_crates:
   - routecodex-v3-error
   - routecodex-v3-provider-responses

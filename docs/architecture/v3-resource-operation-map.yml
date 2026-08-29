@@ -1162,6 +1162,7 @@ resources:
     semantic_contract:
       source_state: v3.provider.key_health_state
       cross_model_same_key: isolated
+      priority_health_cap: effective_priority <= configured_priority + floor(configured_priority * 0.5) for positive configured priorities; zero priority receives no positive health uplift and negative priorities retain additive semantics
       forbidden_consumers: [request.normal_payload, response.client_payload, MetadataCenter]
     allowed_writers: [V3ProviderHealthStore::scheduling_projection]
     allowed_readers: [V3TargetInterpreter::select_available_with_health]

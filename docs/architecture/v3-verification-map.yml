@@ -18,9 +18,11 @@ features:
   - same provider and auth key share health across sessions for the same model
   - same provider and auth key remain available for a different model
   - legacy model-specific entries remain isolated during migration
+  - positive health adjustment is capped at 150% of configured priority while smaller adjustments remain unchanged
   required_negative:
   - v3 persistence without probe_model_id fails explicitly
   - duplicate v4 key health identities fail instead of silently overwriting control truth
+  - health uplift above the 150% cap and zero-priority positive uplift are rejected
   - mainline caller/callee symbols, edge owners, and resource writer/reader bindings must resolve to the registered modules
   - key health state never enters provider or client payload
   required_gates:
