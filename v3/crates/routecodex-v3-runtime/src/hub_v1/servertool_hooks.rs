@@ -28,6 +28,8 @@ pub(crate) const V3_TOOL_THINKING_GUIDANCE: &str = r#"工具调用协议（只�
 错误：`{"name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"metadata\":{\"reason\":\"确认当前工作目录\"}}"}`
 
 同一轮多个工具调用时，每个工具调用对象分别填写 `reason`。不要输出 fence、preamble、普通解释或第二份原因文本。
+
+例外：`apply_patch` 是 raw free-form 控制工具，参数必须保持一份原始 patch 文本；不要把它包装成 JSON，也不要把 `reason` 写进 patch。
 "#;
 
 pub(crate) const V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER: &str =
@@ -162,6 +164,9 @@ fn wrap_v3_custom_tools_at_req04(
                 reason: format!("custom tool at $.tools[{index}] has no non-empty name"),
             })?
             .to_string();
+        if name.eq_ignore_ascii_case("apply_patch") {
+            continue;
+        }
         let mut parameters = json!({
             "type":"object",
             "properties":{
@@ -379,7 +384,9 @@ fn inject_tool_thinking_into_tool_list_guidance(payload: &mut Value) {
             .and_then(Value::as_str)
             .or_else(|| tool.pointer("/function/name").and_then(Value::as_str));
         if tool_name.is_some_and(|name| {
-            name.eq_ignore_ascii_case("reasoningStop") || name.eq_ignore_ascii_case("noop")
+            name.eq_ignore_ascii_case("reasoningStop")
+                || name.eq_ignore_ascii_case("noop")
+                || name.eq_ignore_ascii_case("apply_patch")
         }) {
             continue;
         }
