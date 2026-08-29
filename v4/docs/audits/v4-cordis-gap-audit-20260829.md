@@ -12,7 +12,7 @@ V4 已具备可用的 Responses/Chat JSON/SSE canary，但尚未达到 Cordis �
 2. `runtime-bin/src/main.rs` 仍调用 `V4HttpServer::run_until`，listener 按连接同步执行；长 SSE 或慢 provider 会阻塞同端口后续请求。
 3. `runtime-bin` 仍直接使用 `route_groups.first()`（请求、重试和响应分支均存在），route-group 选择尚未由配置语义 owner 统一决定。
 4. 生产入口仍持有 `Arc<Mutex<SkeletonRuntime>>`；NodeContainer/Cordis bridge 的输出没有被证明为每个相邻节点的唯一输入，存在第二执行语义。
-5. `assert_no_control_leak` 当前只借用 data/control view，不检查 wire 内容；控制面隔离因此没有端到端 fail-fast 证据。
+5. `assert_no_control_leak` 原先只借用 data/control view，不检查 wire 内容；已在 `c522367ba` 修为解析 provider/client wire 并对控制字段 fail-fast。仍需在四入口在线 replay 中验证该边界。
 6. NodeContainer 的 `PlanBindings::verify` 仍要求 graph/manifest/loaded-plan 三值相等；生产侧若继续复制同一 hash，版本绑定会退化为自比较，无法证明真实 manifest、Cordis graph 和 artifact set。
 7. `ActiveExecutionEpoch`/lease 已有实现，但当前 `runtime-bin` 请求入口没有形成“admit → lease → terminal release”的可追踪主线；重启 drain 也未与请求/SSE lease 绑定。
 
