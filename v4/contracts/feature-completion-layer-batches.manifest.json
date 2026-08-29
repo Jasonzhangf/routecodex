@@ -30,8 +30,8 @@
   },
   "baseline": {
     "feature_id": "V4-CURRENT-TREE",
-    "required_commit": "dde0f292751df9d83cc9df817ba0f48057674703",
-    "resolved_commit": "dde0f292751df9d83cc9df817ba0f48057674703",
+    "required_commit": "2925976bd91b68df112e9ee1394670e83f95aff4",
+    "resolved_commit": "2925976bd91b68df112e9ee1394670e83f95aff4",
     "runtime_module_id": "routecodex-v4-runtime",
     "provenance": "current_v4_tree",
     "object_status": "reachable",
