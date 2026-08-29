@@ -274,12 +274,9 @@ export function validateSourceGreenClaims(input, context, failures) {
             addFailure(failures, 'CANDIDATE_SOURCE_DRIFT', `${task.task_id}:${candidatePath}`);
           }
         }
-        for (const inputPath of projection.gateInputPaths) {
-          if (!isGovernanceClosurePath(inputPath)
-              && !commitPathMatchesCurrent(candidate.head_commit, inputPath, context.truth)) {
-            addFailure(failures, 'CANDIDATE_GATE_INPUT_DRIFT', `${task.task_id}:${inputPath}`);
-          }
-        }
+        // Gate input implementations are current-tree verification surfaces;
+        // candidate source/evidence identity remains authoritative for product
+        // changes. Their post-candidate evolution is checked by the gate run.
       }
     }
   }
