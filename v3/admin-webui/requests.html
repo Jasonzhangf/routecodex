@@ -287,8 +287,14 @@
       const output = Number(usage.output_tokens ?? 0);
       const read = Number(usage.cache_read_input_tokens ?? usage.cached_tokens ?? 0);
       const created = Number(usage.cache_creation_input_tokens ?? 0);
-      const hit = input > 0 ? `${((read / input) * 100).toFixed(1)}%` : "—";
-      return `${fmtCompact(input)} / ${fmtCompact(output)} · read=${fmtCompact(read)} · created=${fmtCompact(created)} · ${hit}`;
+      return `${fmtCompact(input)} / ${fmtCompact(output)} · read=${fmtCompact(read)} · created=${fmtCompact(created)}`;
+    }
+
+    function hitRateText(usage) {
+      if (!usage) return "—";
+      const input = Number(usage.input_tokens ?? 0);
+      const read = Number(usage.cache_read_input_tokens ?? usage.cached_tokens ?? 0);
+      return input > 0 ? `${((read / input) * 100).toFixed(1)}%` : "—";
     }
 
     function timeText(value) {
@@ -693,7 +699,10 @@
       }
       tr.appendChild(compactProviderCell(row));
       tr.appendChild(el("td", "num", `${row.timing_internal_ms != null ? fmtMs(row.timing_internal_ms) : "—"} / ${row.timing_external_ms != null ? fmtMs(row.timing_external_ms) : "—"}`));
-      tr.appendChild(el("td", "mono", usageText(usage)));
+      const usageCell = el("td", "mono col-usage");
+      usageCell.appendChild(el("div", "usage-value", usageText(usage)));
+      usageCell.appendChild(el("div", "hit-rate", hitRateText(usage)));
+      tr.appendChild(usageCell);
       tr.appendChild(el("td", "col-finish", compactFinishReason(row)));
       tr.appendChild(el("td", "mono col-time col-time-last", timeText(row.started_epoch_ms)));
       tr.appendChild(el("td", "mono col-time col-time-last", timeText(status === "active" || status === "retrying" ? row.updated_epoch_ms : row.finished_epoch_ms)));
@@ -804,7 +813,7 @@
           : { key: "meta.pool", label: "Pool", colClass: "col-pool" },
         { key: "meta.provider", label: "Model", colClass: "col-provider" },
         { key: "timing_internal_ms", label: "Internal / External", colClass: "col-intext" },
-        { key: "usage_total_tokens", label: "Usage · Hit", colClass: "col-usage" },
+        { key: "usage_total_tokens", label: "Usage", colClass: "col-usage" },
         { key: "meta.finish_reason", label: "Finish", colClass: "col-finish" },
         { key: "started_epoch_ms", label: "Sent", colClass: "col-time col-time-last" },
         { key: "finished_epoch_ms", label: "Responded", colClass: "col-time col-time-last" },
