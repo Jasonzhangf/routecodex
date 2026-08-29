@@ -337,8 +337,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
     let sse_dump_enabled = v3_sse_dump_env_flag();
     let console_enabled = manifest.debug.log_console;
-    let mut debug_manifest = manifest.debug.clone();
-    debug_manifest.log_console = false;
+    let debug_manifest = manifest.debug.clone();
     let manifest = Arc::new(manifest);
     let preflight = build_v3_server_startup_01_listener_set_from_config_05(&manifest);
     let debug =

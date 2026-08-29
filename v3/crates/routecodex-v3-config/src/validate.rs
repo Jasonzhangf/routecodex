@@ -1607,9 +1607,9 @@ pub(crate) fn compile_debug(
         log_console: authoring.log_console,
         log_file: authoring.log_file,
         snapshots: authoring.snapshots,
-        // Live sample persistence is a lifecycle authorization, never a config
-        // compilation default.  The lifecycle layer may opt in explicitly.
-        codex_samples: false,
+        // Preserve the explicit authoring authorization; the runtime still
+        // decides which lifecycle stages may write samples.
+        codex_samples: authoring.codex_samples.unwrap_or(false),
         snapshot_stages,
         snapshot_direct: authoring.snapshot_direct.unwrap_or(true),
         dry_run: authoring.dry_run,
