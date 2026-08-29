@@ -1101,7 +1101,13 @@ impl RuntimeOperator for InputValidate {
             .raw_entry
             .as_deref()
             .ok_or_else(|| RuntimeFault::new("input_validate", "raw entry missing"))?;
-        if !(raw.starts_with("chat:") || raw.starts_with("responses:")) {
+        let protocol_bound_json = ctx
+            .information
+            .protocol
+            .as_deref()
+            .map(|protocol| matches!(protocol, "chat" | "responses") && raw.trim_start().starts_with('{'))
+            .unwrap_or(false);
+        if !(raw.starts_with("chat:") || raw.starts_with("responses:") || protocol_bound_json) {
             return Err(RuntimeFault::new(
                 "input_validate",
                 format!("invalid entry protocol {raw:?}"),
