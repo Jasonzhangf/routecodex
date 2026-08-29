@@ -2150,6 +2150,21 @@ pub struct SkeletonRuntime {
     payload_cycles: RefCell<PayloadCycleRegistry>,
 }
 
+/// Request-owned admission lease retained through provider and response
+/// stages; dropping it is the exactly-once epoch release point.
+pub struct RuntimeLease {
+    request_id: String,
+    binding: ExecutionBinding,
+    lease: routecodex_v4_node_container::EpochLease,
+}
+
+impl RuntimeLease {
+    pub fn request_id(&self) -> &str { &self.request_id }
+    pub fn binding(&self) -> &ExecutionBinding { &self.binding }
+    pub fn snapshot(&self) -> routecodex_v4_node_container::ExecutionEpochSnapshot { self.lease.snapshot() }
+    fn epoch_lease(&self) -> &routecodex_v4_node_container::EpochLease { &self.lease }
+}
+
 impl SkeletonRuntime {
     pub fn load(contract_json: &str) -> Result<Self, RuntimeFault> {
         let plan = SkeletonPlan::from_contract_json(contract_json)
@@ -2237,6 +2252,17 @@ impl SkeletonRuntime {
             .ok_or_else(|| RuntimeFault::new("execution_epoch", "active ExecutionEpochBundle is unavailable"))
     }
 
+    pub fn admit_request(&self, request_id: &str) -> Result<RuntimeLease, RuntimeFault> {
+        let lease = self.epoch_store.admit()
+            .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
+        let binding = execution_binding(&self.plan);
+        let snapshot = lease.snapshot();
+        if snapshot.plan_epoch != binding.plan_epoch || snapshot.manifest_hash != binding.manifest_hash {
+            return Err(RuntimeFault::new("execution_epoch_binding", "request lease does not match immutable execution binding"));
+        }
+        Ok(RuntimeLease { request_id: request_id.to_string(), binding, lease })
+    }
+
     /// Scope claim: a request id may only have one active closed loop.
     /// Cross-request reuse fails fast (Phase 7 scope isolation).
     pub fn claim(&self, request_id: &str) -> Result<(), RuntimeFault> {
@@ -2310,6 +2336,7 @@ impl SkeletonRuntime {
                     ctx.control.continuation_owner = Some(owner.to_string());
                 }
             },
+            None,
         );
         self.release(request_id);
         result
@@ -2330,6 +2357,30 @@ impl SkeletonRuntime {
         conversation_scope: &str,
         continuation_owner: Option<&str>,
     ) -> Result<ExecutionReport, RuntimeFault> {
+        self.execute_request_json_scoped_with_lease(
+            body, protocol, wire_model, stream, request_id, port, session_scope,
+            conversation_scope, continuation_owner, None,
+        )
+    }
+
+    pub fn execute_request_json_scoped_with_lease(
+        &self,
+        body: &str,
+        protocol: &str,
+        wire_model: &str,
+        stream: bool,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        continuation_owner: Option<&str>,
+        request_lease: Option<&RuntimeLease>,
+    ) -> Result<ExecutionReport, RuntimeFault> {
+        if let Some(lease) = request_lease {
+            if lease.request_id() != request_id {
+                return Err(RuntimeFault::new("execution_epoch_scope", "request lease id mismatch"));
+            }
+        }
         let mut value: Value = serde_json::from_str(body)
             .map_err(|error| RuntimeFault::new("request_json_invalid", error.to_string()))?;
         if protocol == "chat" {
@@ -2342,7 +2393,9 @@ impl SkeletonRuntime {
         object.insert("stream".to_string(), Value::Bool(stream));
         let raw = serde_json::to_string(&value)
             .map_err(|error| RuntimeFault::new("request_json_encode", error.to_string()))?;
-        self.claim(request_id)?;
+        if request_lease.is_none() {
+            self.claim(request_id)?;
+        }
         let result = self.execute_path(
             "request", request_id, port, session_scope, conversation_scope,
             |ctx| {
@@ -2353,8 +2406,11 @@ impl SkeletonRuntime {
                     ctx.control.continuation_owner = Some(owner.to_string());
                 }
             },
+            request_lease.map(RuntimeLease::epoch_lease),
         );
-        self.release(request_id);
+        if request_lease.is_none() {
+            self.release(request_id);
+        }
         result
     }
 
@@ -2377,7 +2433,7 @@ impl SkeletonRuntime {
             ctx.data.request_headers = Some(fixture.headers.clone());
             ctx.information.endpoint = Some(fixture.path.clone());
             ctx.information.model = Some(fixture.model.clone());
-        });
+        }, None);
         self.release(request_id);
         result
     }
@@ -2412,7 +2468,31 @@ impl SkeletonRuntime {
         entry_protocol: &str,
         continuation_owner: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
-        self.claim(request_id)?;
+        self.execute_provider_response_scoped_with_lease(
+            provider_raw, request_id, port, session_scope, conversation_scope,
+            entry_protocol, continuation_owner, None,
+        )
+    }
+
+    pub fn execute_provider_response_scoped_with_lease(
+        &self,
+        provider_raw: &str,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        entry_protocol: &str,
+        continuation_owner: &str,
+        request_lease: Option<&RuntimeLease>,
+    ) -> Result<ExecutionReport, RuntimeFault> {
+        if let Some(lease) = request_lease {
+            if lease.request_id() != request_id {
+                return Err(RuntimeFault::new("execution_epoch_scope", "request lease id mismatch"));
+            }
+        }
+        if request_lease.is_none() {
+            self.claim(request_id)?;
+        }
         let result = self.execute_path(
             "response",
             request_id,
@@ -2429,8 +2509,11 @@ impl SkeletonRuntime {
                     "direct".to_string()
                 });
             },
+            request_lease.map(RuntimeLease::epoch_lease),
         );
-        self.release(request_id);
+        if request_lease.is_none() {
+            self.release(request_id);
+        }
         result
     }
 
@@ -2482,7 +2565,7 @@ impl SkeletonRuntime {
         request_id: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.execute_path(chain_id, request_id, 0, "", "", |_| {});
+        let result = self.execute_path(chain_id, request_id, 0, "", "", |_| {}, None);
         self.release(request_id);
         result
     }
@@ -2495,6 +2578,7 @@ impl SkeletonRuntime {
         session_scope: &str,
         conversation_scope: &str,
         seed: impl FnOnce(&mut ExecutionContext),
+        provided_lease: Option<&routecodex_v4_node_container::EpochLease>,
     ) -> Result<ExecutionReport, RuntimeFault> {
         let specs = self
             .chains
@@ -2589,10 +2673,15 @@ impl SkeletonRuntime {
             .first()
             .map(|spec| spec.node_id.as_str())
             .ok_or_else(|| RuntimeFault::new("unknown_chain", format!("chain {chain_id} has no nodes")))?;
-        let lease = self
-            .epoch_store
-            .admit()
-            .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
+        let owned_lease = if provided_lease.is_none() {
+            Some(self.epoch_store.admit()
+                .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?)
+        } else {
+            None
+        };
+        let lease = provided_lease.or(owned_lease.as_ref()).ok_or_else(|| {
+            RuntimeFault::new("execution_epoch", "execution epoch lease is missing")
+        })?;
         let outcome = engine
             .execute(
                 entrypoint,

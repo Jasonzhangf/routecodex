@@ -254,6 +254,44 @@ fn responses_entry_classifies_direct_owner() {
 }
 
 #[test]
+fn one_admission_lease_survives_request_provider_response_to_terminal() {
+    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let lease = runtime.admit_request("r-lease-lifecycle").expect("admission");
+    assert_eq!(lease.snapshot().in_flight_leases, 1);
+    let request = runtime
+        .execute_request_json_scoped_with_lease(
+            r#"{"model":"m","input":[]}"#,
+            "responses",
+            "m",
+            false,
+            "r-lease-lifecycle",
+            5555,
+            "session-1",
+            "conversation-1",
+            Some("direct"),
+            Some(&lease),
+        )
+        .expect("request through admitted lease");
+    assert_eq!(request.request_id, "r-lease-lifecycle");
+    assert_eq!(lease.snapshot().in_flight_leases, 1);
+    let response = runtime
+        .execute_provider_response_scoped_with_lease(
+            r#"{"text":"ok"}"#,
+            "r-lease-lifecycle",
+            5555,
+            "session-1",
+            "conversation-1",
+            "responses",
+            "direct",
+            Some(&lease),
+        )
+        .expect("terminal response through same lease");
+    assert!(response.client_frame.is_some());
+    assert_eq!(lease.snapshot().in_flight_leases, 1);
+    drop(lease);
+}
+
+#[test]
 fn relay_operator_select_uses_typed_facts_only() {
     let relay = select_relay_operator(&ContinuationFacts::new("chat", "hub", "relay", "relay"))
         .expect("chat + relay owner selects relay operator");

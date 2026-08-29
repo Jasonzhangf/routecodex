@@ -211,13 +211,13 @@ impl ExecutionEngine {
         Ok(Self::new(nodes))
     }
 
-    /// Execute one immutable epoch lease.  The lease is consumed so every
-    /// legal exit releases exactly the admission obtained by the caller.
+    /// Execute against one immutable epoch lease. The caller owns the lease
+    /// for the complete request lifecycle and may reuse it across stages.
     pub fn execute(
         &self,
         entrypoint: &str,
         frame: NodeExecutionFrame,
-        lease: EpochLease,
+        lease: &EpochLease,
     ) -> Result<NodeOutcome, ExecutionError> {
         let snapshot = lease.snapshot();
         if snapshot.state == ExecutionEpochState::Disposed {

@@ -29,7 +29,7 @@ use routecodex_v4_router::{
 };
 use routecodex_v4_runtime::{
     parse_responses_provider_payload, project_runtime_fault, project_runtime_fault_with_policy,
-    ResponsesProviderPayload, RuntimeFault, SkeletonRuntime,
+    ResponsesProviderPayload, RuntimeFault, RuntimeLease, SkeletonRuntime,
 };
 use routecodex_v4_node_container::ExecutionEpochBundle;
 use routecodex_v4_server::{AsyncHttpHandler, AsyncHttpServer, HttpHandler, HttpRequest, HttpResponse, ResponseStream};
@@ -740,6 +740,12 @@ fn handle_responses(
     } else {
         continuation_owner.to_string()
     };
+    let request_id = request.request_id.clone();
+    let request_lease = runtime
+        .lock()
+        .map_err(|_| project_fault(request, RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"), 500))?
+        .admit_request(&request_id)
+        .map_err(|fault| project_fault(request, fault, 598))?;
     let request_report = runtime
         .lock()
         .map_err(|_| {
@@ -749,16 +755,17 @@ fn handle_responses(
                 500,
             )
         })?
-        .execute_request_json_scoped(
+        .execute_request_json_scoped_with_lease(
             &String::from_utf8_lossy(&request.body),
             entry_protocol,
             &target.wire_model,
             stream_mode,
-            &format!("{}:request", request.request_id),
+            &request_id,
             request.port,
             session_scope,
             conversation_scope,
             Some(&continuation_owner),
+            Some(&request_lease),
         )
         .map_err(|fault| project_fault(request, fault, 598))?;
     if entry_protocol == "responses"
@@ -898,6 +905,7 @@ fn handle_responses(
         let response_stream = ResponsesSseStream::new(
             stream,
             Arc::clone(runtime),
+            request_lease,
             request.request_id.clone(),
             request.port,
             entry_protocol.to_string(),
@@ -1095,14 +1103,15 @@ fn handle_responses(
                         500,
                     )
                 })?
-                .execute_provider_response_scoped(
+                .execute_provider_response_scoped_with_lease(
                     &provider_raw,
-                    &format!("{}:response", request.request_id),
+                    &request_id,
                     request.port,
                     session_scope,
                     conversation_scope,
                     entry_protocol,
                     &continuation_owner,
+                    Some(&request_lease),
                 )
                 .map_err(|fault| project_fault(request, fault, 502))?;
             let frame = report.client_frame.ok_or_else(|| {
@@ -1168,6 +1177,7 @@ impl ProviderSseSource for ProviderResponseStream {
 struct ResponsesSseStream<S = ProviderResponseStream> {
     stream: S,
     runtime: Arc<Mutex<SkeletonRuntime>>,
+    request_lease: RuntimeLease,
     request_id: String,
     port: u16,
     entry_protocol: String,
@@ -1187,6 +1197,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
     fn new(
         stream: S,
         runtime: Arc<Mutex<SkeletonRuntime>>,
+        request_lease: RuntimeLease,
         request_id: String,
         port: u16,
         entry_protocol: String,
@@ -1198,6 +1209,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
         Self {
             stream,
             runtime,
+            request_lease,
             request_id,
             port,
             entry_protocol,
@@ -1257,15 +1269,16 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
             .map_err(|_| {
                 RuntimeFault::new("response_runtime_lock", "response runtime lock poisoned")
             })?
-            .execute_provider_response_scoped(
+            .execute_provider_response_scoped_with_lease(
                 std::str::from_utf8(&normalized_frame)
                     .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?,
-                &format!("{}:sse:{}", self.request_id, self.frame_sequence),
+                &self.request_id,
                 self.port,
                 &self.session_scope,
                 &self.conversation_scope,
                 &self.entry_protocol,
                 owner,
+                Some(&self.request_lease),
             )?;
         let client_frame = report.client_frame.ok_or_else(|| {
             RuntimeFault::new(
@@ -1631,12 +1644,18 @@ targets = ["mock"]
         entry_protocol: &str,
         continuation_owner: &str,
     ) -> ResponsesSseStream<MockSseSource> {
+        let request_lease = runtime
+            .lock()
+            .expect("test runtime lock")
+            .admit_request("request-1")
+            .expect("test stream admission");
         ResponsesSseStream::new(
             MockSseSource {
                 chunks: chunks.into(),
                 wait_result: Ok(()),
             },
             runtime,
+            request_lease,
             "request-1".to_string(),
             u16::from_ne_bytes([0, 1]),
             entry_protocol.to_string(),

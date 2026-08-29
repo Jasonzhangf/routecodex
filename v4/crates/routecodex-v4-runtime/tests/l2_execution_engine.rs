@@ -18,7 +18,7 @@ fn engine_preserves_adjacent_output_and_terminal_boundary() {
     ]);
     let frame = NodeExecutionFrame::new(serde_json::json!({"value": 1}), serde_json::json!({}));
     let lease = test_lease();
-    let outcome = engine.execute("entry", frame, lease).expect("terminal outcome");
+    let outcome = engine.execute("entry", frame, &lease).expect("terminal outcome");
     assert_eq!(outcome, NodeOutcome::Terminal { response: serde_json::json!({"value": 2}) });
 }
 
@@ -26,7 +26,8 @@ fn engine_preserves_adjacent_output_and_terminal_boundary() {
 fn engine_rejects_execution_without_a_declared_path() {
     let engine = ExecutionEngine::new(Vec::new());
     let frame = NodeExecutionFrame::new(serde_json::json!({}), serde_json::json!({}));
-    let error = engine.execute("missing", frame, test_lease()).expect_err("missing entrypoint must fail");
+    let lease = test_lease();
+    let error = engine.execute("missing", frame, &lease).expect_err("missing entrypoint must fail");
     assert!(error.to_string().contains("entrypoint"));
 }
 
@@ -42,8 +43,9 @@ fn branch_follows_only_a_declared_edge_and_failure_stops() {
             response: serde_json::json!({"value": frame.data["value"]}),
         }),
     ]);
+    let lease = test_lease();
     let outcome = engine
-        .execute("first", NodeExecutionFrame::new(serde_json::json!({}), serde_json::json!({})), test_lease())
+        .execute("first", NodeExecutionFrame::new(serde_json::json!({}), serde_json::json!({})), &lease)
         .unwrap();
     assert_eq!(outcome, NodeOutcome::Terminal { response: serde_json::json!({"value": 7}) });
 
@@ -52,7 +54,8 @@ fn branch_follows_only_a_declared_edge_and_failure_stops() {
     }), routecodex_v4_runtime::ExecutionNode::new("unreachable", |_| {
         panic!("failure must stop the path")
     })]);
-    assert!(matches!(failure_engine.execute("first", NodeExecutionFrame::new(serde_json::json!({}), serde_json::json!({})), test_lease()).unwrap(), NodeOutcome::Failure { .. }));
+    let lease = test_lease();
+    assert!(matches!(failure_engine.execute("first", NodeExecutionFrame::new(serde_json::json!({}), serde_json::json!({})), &lease).unwrap(), NodeOutcome::Failure { .. }));
 }
 
 #[test]

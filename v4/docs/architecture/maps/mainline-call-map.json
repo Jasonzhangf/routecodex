@@ -997,13 +997,13 @@
     },
     {
       "from": "routecodex-v4-runtime-bin::handle_responses",
-      "to": "routecodex-v4-runtime::SkeletonRuntime::execute_request_json_scoped",
+      "to": "routecodex-v4-runtime::SkeletonRuntime::execute_request_json_scoped_with_lease",
       "owner": "routecodex-v4-runtime::request_chat_process",
       "edge_type": "request_chain_execution",
       "caller_feature_id": "v4.runtime.independent_admission",
       "callee_feature_id": "v4.runtime.production_request_chain",
       "path": "crates/routecodex-v4-runtime-bin/src/main.rs,crates/routecodex-v4-runtime/src/lib.rs",
-      "symbols": ["execute_request_json_scoped", "provider_wire_value"],
+      "symbols": ["admit_request", "execute_request_json_scoped_with_lease", "RuntimeLease", "provider_wire_value"],
       "status": "active"
     },
     {
