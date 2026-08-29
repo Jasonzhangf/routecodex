@@ -7,7 +7,7 @@ use routecodex_v4_cli::{
 use routecodex_v4_config::{
     compile_runtime_config_file, default_runtime_config_path, load_runtime_manifest,
     write_runtime_authoring, write_runtime_manifest_atomic, RuntimeConfigManifest,
-    RuntimeInitOptions,
+    RuntimeInitOptions, RuntimeProductConfig, RuntimeProductRouteGroup,
 };
 use routecodex_v4_error::ErrorChain;
 use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
@@ -536,6 +536,25 @@ fn models_response(manifest: &RuntimeConfigManifest) -> HttpResponse {
     )
 }
 
+fn route_group_for_request<'a>(
+    product: &'a RuntimeProductConfig,
+    request: &HttpRequest,
+) -> Result<&'a RuntimeProductRouteGroup, RuntimeFault> {
+    let requested = request.header("x-rccv4-route-group-id");
+    match requested {
+        Some(route_group_id) => product
+            .route_groups
+            .iter()
+            .find(|group| group.route_group_id == route_group_id)
+            .ok_or_else(|| RuntimeFault::new("product_route_group_missing", "requested route group is not configured")),
+        None if product.route_groups.len() == 1 => Ok(&product.route_groups[0]),
+        None => Err(RuntimeFault::new(
+            "product_route_group_ambiguous",
+            "route group header is required when multiple route groups are configured",
+        )),
+    }
+}
+
 fn handle_responses(
     manifest: &RuntimeConfigManifest,
     runtime: &Arc<Mutex<SkeletonRuntime>>,
@@ -591,15 +610,8 @@ fn handle_responses(
         .transpose()?
         .unwrap_or(false);
     let unavailable_provider_ids = if let Some(product) = &manifest.product {
-        let group = product.route_groups.first().ok_or_else(|| {
-            project_fault(
-                request,
-                RuntimeFault::new(
-                    "product_route_group_missing",
-                    "product manifest has no route group",
-                ),
-                500,
-            )
+        let group = route_group_for_request(product, request).map_err(|error| {
+            project_fault(request, error, 500)
         })?;
         let availability_guard = availability.lock().map_err(|_| {
             project_fault(
@@ -625,15 +637,8 @@ fn handle_responses(
         Vec::new()
     };
     let mut target = if let Some(product) = &manifest.product {
-        let route_group = product.route_groups.first().ok_or_else(|| {
-            project_fault(
-                request,
-                RuntimeFault::new(
-                    "product_route_group_missing",
-                    "product manifest has no route group",
-                ),
-                500,
-            )
+        let route_group = route_group_for_request(product, request).map_err(|error| {
+            project_fault(request, error, 500)
         })?;
         select_product_target_excluding(
             product,
