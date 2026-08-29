@@ -605,8 +605,8 @@ struct EpochTransactionRecord {
     base_epoch: u64,
     base_manifest_hash: String,
     candidate_hash: String,
-    candidate: ActiveExecutionEpoch,
-    previous: Option<ActiveExecutionEpoch>,
+    candidate: ExecutionEpochBundle,
+    previous: Option<ExecutionEpochBundle>,
     state: EpochTransactionState,
 }
 
@@ -697,7 +697,7 @@ impl ActiveEpochStore {
         transaction_id: impl Into<String>,
         base_epoch: u64,
         base_manifest_hash: &str,
-        candidate: ActiveExecutionEpoch,
+        candidate: ExecutionEpochBundle,
         candidate_hash: &str,
     ) -> Result<EpochTransactionSnapshot, EpochError> {
         let transaction_id = transaction_id.into();

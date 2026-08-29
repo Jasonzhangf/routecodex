@@ -107,7 +107,7 @@ fn lease_admission_is_pinned_and_disposed_epoch_is_rejected() {
         routecodex_v4_node_container::PlanBindings { graph_hash: hash.clone(), manifest_hash: hash.clone(), loaded_plan_hash: hash },
     ).unwrap();
     container.context_created().unwrap(); container.plugins_mounted().unwrap(); container.publish().unwrap();
-    let epoch = routecodex_v4_node_container::ActiveExecutionEpoch::new(container,
+    let epoch = routecodex_v4_node_container::ExecutionEpochBundle::new(container,
         routecodex_v4_node_container::ExecutionEpochIdentity { plan_epoch: 1, manifest_hash: "manifest".into(), execution_identity: "epoch-test".into() }).unwrap();
     let store = routecodex_v4_node_container::ActiveEpochStore::new(epoch);
     let lease = store.admit().unwrap();
@@ -143,7 +143,7 @@ fn test_lease() -> routecodex_v4_node_container::EpochLease {
     container.context_created().unwrap();
     container.plugins_mounted().unwrap();
     container.publish().unwrap();
-    let epoch = routecodex_v4_node_container::ActiveExecutionEpoch::new(
+    let epoch = routecodex_v4_node_container::ExecutionEpochBundle::new(
         container,
         routecodex_v4_node_container::ExecutionEpochIdentity {
             plan_epoch: 1,

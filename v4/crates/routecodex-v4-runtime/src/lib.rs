@@ -28,7 +28,7 @@ use routecodex_v4_error::{
 };
 use routecodex_v4_skeleton::SkeletonPlan;
 use routecodex_v4_node_container::{
-    ActiveEpochStore, ActiveExecutionEpoch, ExecutionEpochIdentity, NodeContainer, PlanBindings,
+    ActiveEpochStore, ExecutionEpochBundle, ExecutionEpochIdentity, NodeContainer, PlanBindings,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -2205,7 +2205,7 @@ impl SkeletonRuntime {
             .and_then(|_| epoch_container.plugins_mounted())
             .and_then(|_| epoch_container.publish())
             .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
-        let epoch = ActiveExecutionEpoch::new(
+        let epoch = ExecutionEpochBundle::new(
             epoch_container,
             ExecutionEpochIdentity {
                 plan_epoch: plan.plan_epoch,
