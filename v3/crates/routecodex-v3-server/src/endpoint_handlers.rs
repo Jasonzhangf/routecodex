@@ -1295,7 +1295,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         );
                         output
                     }
-                    Err(error) => project_v3_responses_relay_runtime_failure(error),
+                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
                 },
                 None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots(
                     &state.manifest,
@@ -1317,7 +1317,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 .await
                 {
                     Ok(output) => output,
-                    Err(error) => project_v3_responses_relay_runtime_failure(error),
+                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
                 },
             }
         } else {
@@ -1348,7 +1348,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         );
                         output
                     }
-                    Err(error) => project_v3_responses_relay_runtime_failure(error),
+                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
                 },
                 None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input(
                     &state.manifest,
@@ -1366,7 +1366,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 .await
                 {
                     Ok(output) => output,
-                    Err(error) => project_v3_responses_relay_runtime_failure(error),
+                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
                 },
             }
         };

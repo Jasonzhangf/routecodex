@@ -50,10 +50,13 @@ fn missing_usage_gets_request_tiktoken_input_estimate() {
 #[test]
 fn explicit_target_exhaustion_projection_is_compact() {
     let output =
-            project_v3_responses_relay_runtime_failure(V3ResponsesRelayRuntimeError::Target(
-                "selected target exhausted after [\"routecodex:key1:deepseek-v4-flash:availability(cooldown)\"]"
-                    .to_string(),
-            ));
+            project_v3_responses_relay_runtime_failure(
+                V3ResponsesRelayRuntimeError::Target(
+                    "selected target exhausted after [\"routecodex:key1:deepseek-v4-flash:availability(cooldown)\"]"
+                        .to_string(),
+                ),
+                None,
+            );
 
     assert_eq!(output.status, 503);
     let body = match &output.client_body {
@@ -84,6 +87,7 @@ fn explicit_target_exhaustion_projection_is_compact() {
 fn non_target_runtime_failure_remains_runtime_error() {
     let output = project_v3_responses_relay_runtime_failure(
         V3ResponsesRelayRuntimeError::StaticRegistry("registry unavailable".to_string()),
+        None,
     );
 
     assert_eq!(output.status, 598);
@@ -119,6 +123,7 @@ fn client_inbound_reasoning_effort_validation_failure_projects_client_400() {
             "Responses inbound canonicalization failed: Responses reasoning.effort has an invalid value"
                 .to_string(),
         ),
+        None,
     );
 
     assert_eq!(output.status, 400);
@@ -145,6 +150,7 @@ fn provider_response_projection_failure_projects_internal_599() {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             "Anthropic provider response projection failed".to_string(),
         ),
+        None,
     );
 
     assert_eq!(output.status, 599);
@@ -164,6 +170,7 @@ fn internal_web_search_canonicalization_failure_is_not_client_invalid_request() 
         V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
             "servertool followup canonicalization failed".to_string(),
         ),
+        None,
     );
 
     assert_eq!(output.status, 598);

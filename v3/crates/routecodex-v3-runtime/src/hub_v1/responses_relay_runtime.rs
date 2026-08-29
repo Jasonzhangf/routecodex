@@ -1357,3 +1357,7 @@ mod responses_relay_runtime_tests;
 #[cfg(test)]
 #[path = "responses_relay_runtime_tests_extra.rs"]
 mod responses_relay_runtime_tests_extra;
+
+#[cfg(test)]
+#[path = "responses_relay_runtime_failure_propagation_test.rs"]
+mod responses_relay_runtime_failure_propagation_test;

@@ -286,6 +286,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             return V3ResponsesDirectServerOutcome::RelayOutput(
                 project_v3_responses_relay_runtime_failure(
                     V3ResponsesRelayRuntimeError::ProviderWireEncoding(message),
+                    None,
                 ),
             );
         }
@@ -301,6 +302,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
                     V3ResponsesRelayRuntimeError::ProviderWireEncoding(format!(
                         "system time precedes Unix epoch: {error}"
                     )),
+                    None,
                 ),
             );
         }
@@ -341,7 +343,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
     };
     let mut relay_output = match output {
         Ok(output) => output,
-        Err(error) => project_v3_responses_relay_runtime_failure(error),
+        Err(error) => project_v3_responses_relay_runtime_failure(error, None),
     };
     if let Some(handoff) = relay_output.protocol_direct_handoff.take() {
         let relay_trace = merge_v3_protocol_plan_trace(
