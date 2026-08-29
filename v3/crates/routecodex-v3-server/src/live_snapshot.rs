@@ -415,7 +415,7 @@ pub(crate) fn capture_v3_openai_chat_relay_response(
     let force_error_evidence =
         v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref());
     if force_error_evidence {
-        let _ = persist_v3_error_evidence_payload(
+        if let Err(error) = persist_v3_error_evidence_payload(
             state,
             entry_protocol,
             endpoint,
@@ -425,8 +425,13 @@ pub(crate) fn capture_v3_openai_chat_relay_response(
                 .debug
                 .project_payload_verbatim(raw_request_payload.clone()),
             (output.status >= 400).then_some(output.status),
-        );
-        let _ = persist_v3_error_evidence_payload(
+        ) {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3DebugErrorEvidenceCaptured",
+                V3DebugError::Sink(error),
+            )));
+        }
+        if let Err(error) = persist_v3_error_evidence_payload(
             state,
             entry_protocol,
             endpoint,
@@ -442,7 +447,12 @@ pub(crate) fn capture_v3_openai_chat_relay_response(
                 "error_chain": output.error_chain.clone(),
             })),
             (output.status >= 400).then_some(output.status),
-        );
+        ) {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3DebugErrorEvidenceCaptured",
+                V3DebugError::Sink(error),
+            )));
+        }
     }
     let capture_client_response =
         state.debug.should_capture_snapshot_stage("client-response") || force_error_evidence;
@@ -587,7 +597,17 @@ pub(crate) fn capture_v3_responses_relay_provider_snapshots(
     {
         return None;
     }
-    let snapshots = output.provider_snapshots.as_mut()?;
+    let snapshots = match output.provider_snapshots.as_mut() {
+        Some(snapshots) => snapshots,
+        None => {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3DebugProviderSnapshotCaptured",
+                V3DebugError::MalformedFixture(
+                    "Responses relay provider snapshot carrier is missing".to_string(),
+                ),
+            )))
+        }
+    };
     let error_status = (output.status >= 400).then_some(output.status);
     if let Some(provider_request) = snapshots.provider_request.take() {
         if capture_for_evidence
@@ -694,7 +714,14 @@ pub(crate) fn capture_v3_relay_provider_snapshots(
         if !state.debug.should_capture_snapshot_stage(stage) {
             continue;
         }
-        let Some(value) = value else { continue };
+        let Some(value) = value else {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3DebugProviderSnapshotCaptured",
+                V3DebugError::MalformedFixture(format!(
+                    "Responses relay {stage} snapshot carrier is missing"
+                )),
+            )));
+        };
         let value = state.debug.project_payload_verbatim(value);
         if let Err(error) = persist_v3_codex_sample_payload(
             state,
@@ -765,7 +792,7 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
     keepalive_interval: Option<Duration>,
 ) -> Response<Body> {
     if v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref()) {
-        let _ = persist_v3_error_evidence_payload(
+        if let Err(error) = persist_v3_error_evidence_payload(
             state,
             entry_protocol,
             endpoint,
@@ -775,8 +802,13 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
                 .debug
                 .project_payload_verbatim(raw_request_payload.clone()),
             (output.status >= 400).then_some(output.status),
-        );
-        let _ = persist_v3_error_evidence_payload(
+        ) {
+            return foundation_output_response(project_v3_debug_failure(
+                "V3DebugErrorEvidenceCaptured",
+                V3DebugError::Sink(error),
+            ));
+        }
+        if let Err(error) = persist_v3_error_evidence_payload(
             state,
             entry_protocol,
             endpoint,
@@ -795,7 +827,12 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
                 "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
             })),
             (output.status >= 400).then_some(output.status),
-        );
+        ) {
+            return foundation_output_response(project_v3_debug_failure(
+                "V3DebugErrorEvidenceCaptured",
+                V3DebugError::Sink(error),
+            ));
+        }
 
         // Direct provider failures can happen before the protocol handoff to
         // relay. In that case the relay snapshot carrier is absent, but the
@@ -810,33 +847,42 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             .is_some();
         if !has_provider_response_snapshot {
             if let Some(stream_observation) = output.stream_observation.as_ref() {
-                if let Ok(snapshot) = stream_observation.snapshot() {
-                    if !snapshot.provider_raw_sse.is_empty() {
-                        let _ = persist_v3_error_evidence_payload(
-                            state,
-                            entry_protocol,
-                            endpoint,
-                            request_id,
-                            "provider-response.json",
-                            &state.debug.project_payload_verbatim(json!({
-                                "object": "routecodex.v3.provider_response_snapshots",
-                                "stage": "provider-response",
-                                "source": "direct_provider_sse_observation",
-                                "attempts": [{
-                                    "attempt": 1,
-                                    "response": {
-                                        "bodyKind": "sse",
-                                        "rawSse": snapshot.provider_raw_sse,
-                                    }
-                                }]
-                            })),
-                            (output.status >= 400).then_some(output.status),
-                        );
+                match stream_observation.snapshot() {
+                    Ok(snapshot) => {
+                        if !snapshot.provider_raw_sse.is_empty() {
+                            if let Err(error) = persist_v3_error_evidence_payload(
+                                state,
+                                entry_protocol,
+                                endpoint,
+                                request_id,
+                                "provider-response.json",
+                                &state.debug.project_payload_verbatim(json!({
+                                    "object": "routecodex.v3.provider_response_snapshots",
+                                    "stage": "provider-response",
+                                    "source": "direct_provider_sse_observation",
+                                    "attempts": [{
+                                        "attempt": 1,
+                                        "response": {
+                                            "bodyKind": "sse",
+                                            "rawSse": snapshot.provider_raw_sse,
+                                        }
+                                    }]
+                                })),
+                                (output.status >= 400).then_some(output.status),
+                            ) {
+                                return foundation_output_response(project_v3_debug_failure(
+                                    "V3DebugProviderResponseCaptured",
+                                    V3DebugError::Sink(error),
+                                ));
+                            }
+                        }
                     }
-                } else if let Err(error) = stream_observation.snapshot() {
-                    eprintln!(
-                        "V3 provider response snapshot observation failed; preserving client response: {error}"
-                    );
+                    Err(error) => {
+                        return foundation_output_response(project_v3_debug_failure(
+                            "V3DebugProviderResponseCaptured",
+                            V3DebugError::Sink(error),
+                        ));
+                    }
                 }
             }
         }
@@ -1036,7 +1082,19 @@ pub(crate) fn capture_v3_responses_direct_provider_snapshots(
         if !state.debug.should_capture_snapshot_stage(stage) {
             continue;
         }
-        let Some(payload) = payload else { continue };
+        let Some(payload) = payload else {
+            let allowed_stream_observation = stage == "provider-response"
+                && output.stream_observation.is_some();
+            if allowed_stream_observation {
+                continue;
+            }
+            return Some(project_v3_debug_failure(
+                "V3DebugProviderSnapshotCaptured",
+                V3DebugError::MalformedFixture(format!(
+                    "Responses direct {stage} snapshot carrier is missing"
+                )),
+            ));
+        };
         if let Err(error) = persist_v3_codex_sample_payload(
             state,
             entry_protocol,

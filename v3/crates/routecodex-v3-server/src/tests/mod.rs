@@ -837,7 +837,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         "missing-carrier",
         &mut missing,
     )
-    .is_none());
+    .is_some());
     let missing_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/missing-carrier");
     assert!(!missing_dir.exists(), "server must not fabricate direct artifacts");
     fs::remove_dir_all(root).unwrap();
