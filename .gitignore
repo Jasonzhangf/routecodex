@@ -119,6 +119,13 @@ sharedmodule/llmswitch-core/rust-core/note.md
 .agent-collab/current*.run_dir
 .agent-collab/.last-*
 
+# Retired Collab v2 bootstrap and live daemon/mailbox state.
+.agent-collab-v2/
+.agent-collab/current*
+.agent-collab/mailbox/
+.agent-collab/messages/
+.agent-collab/server/
+
 # Project-local skills are repository source. Tool runtime state belongs in
 # .agent-state/ or .agent-collab/, never under .agents/.
 sharedmodule/llmswitch-core/router_hotpath_napi.node
