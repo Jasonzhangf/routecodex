@@ -323,6 +323,21 @@ h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
 .request-table td.col-status,
 .request-table td.col-finish { text-align: center; }
 .request-table td.col-port { font-variant-numeric: tabular-nums; font-family: var(--mono); }
+.request-table td.col-usage { min-width: 0; }
+.request-table td.col-usage .usage-value,
+.request-table td.col-usage .hit-rate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.request-table td.col-usage .hit-rate {
+  width: 64px;
+  margin-top: 2px;
+  color: var(--text-dim);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .requests-tab-bar { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
 .requests-tab-bar .tab-btn { background: transparent; border: 1px solid transparent; border-bottom: none; color: var(--text-dim); padding: 6px 14px; min-height: 36px; border-radius: 8px 8px 0 0; cursor: pointer; font-weight: 500; }
 .requests-tab-bar .tab-btn:hover { color: var(--text); background: var(--panel); }
