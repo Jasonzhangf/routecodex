@@ -964,7 +964,46 @@ impl ExecutionContext {
 /// Plane isolation is structural: data and control are disjoint typed views.
 /// Payload field names never reconstruct or identify runtime control state.
 pub fn assert_no_control_leak(ctx: &ExecutionContext) -> Result<(), RuntimeFault> {
-    let _ = (&ctx.data, &ctx.control);
+    const CONTROL_KEYS: [&str; 11] = [
+        "continuation_scope",
+        "route_facts",
+        "route_hint",
+        "provider_selection",
+        "provider_key",
+        "health",
+        "retry",
+        "snapshot",
+        "scope",
+        "stopless",
+        "servertool",
+    ];
+    fn contains_control_key(value: &Value) -> Option<&'static str> {
+        match value {
+            Value::Object(map) => {
+                for key in CONTROL_KEYS {
+                    if map.contains_key(key) {
+                        return Some(key);
+                    }
+                }
+                map.values().find_map(contains_control_key)
+            }
+            Value::Array(values) => values.iter().find_map(contains_control_key),
+            _ => None,
+        }
+    }
+    for (lane, wire) in [
+        ("provider_wire", ctx.data.provider_wire.as_deref()),
+        ("client_frame", ctx.data.client_frame.as_deref()),
+    ] {
+        let Some(wire) = wire else { continue };
+        let Ok(value) = serde_json::from_str::<Value>(wire) else { continue };
+        if let Some(key) = contains_control_key(&value) {
+            return Err(RuntimeFault::new(
+                "control_payload_leak",
+                format!("{lane} contains control field {key}"),
+            ));
+        }
+    }
     Ok(())
 }
 

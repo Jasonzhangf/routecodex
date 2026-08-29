@@ -783,7 +783,8 @@ fn red_control_leak_into_wire_fails() {
     ctx.control.route_facts = Some("facts:typed-only".to_string());
     ctx.data.provider_wire = Some("{\"continuation_scope\":\"business-data\"}".to_string());
     ctx.data.client_frame = Some("{\"route_facts\":\"business-data\"}".to_string());
-    assert_no_control_leak(&ctx).expect("typed planes remain physically separate");
+    let error = assert_no_control_leak(&ctx).expect_err("control fields in wire must fail fast");
+    assert_eq!(error.code, "control_payload_leak");
     assert_eq!(
         ctx.control.continuation_scope.as_deref(),
         Some("scope:typed-only")
