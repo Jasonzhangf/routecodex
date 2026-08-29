@@ -30,6 +30,8 @@ pub(crate) const V3_TOOL_THINKING_GUIDANCE: &str = r#"工具调用协议（只�
 同一轮多个工具调用时，每个工具调用对象分别填写 `reason`。不要输出 fence、preamble、普通解释或第二份原因文本。
 
 例外：`apply_patch` 是 raw free-form 控制工具，参数必须保持一份原始 patch 文本；不要把它包装成 JSON，也不要把 `reason` 写进 patch。
+
+Anthropic native 通道契约：进入 Anthropic provider 必须使用原生 `tool_use` 块；不要把工具调用写成普通文本段、Markdown 代码块或通用 JSON wrapper（不要 `"action":"tool_call"` / `"type":"function_call"` 字符串 / 纯文本描述代替原生 block）。`reason` 始终放在 `tool_use.input` 顶层与 `input` 同级，禁止嵌套到 `input` 内部子字段或 metadata 容器。
 "#;
 
 pub(crate) const V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER: &str =
@@ -1921,6 +1923,9 @@ fn is_stopless_cli_call(item: &Value) -> bool {
         || item_is_exact_stopless_cli_command_call(item))
 }
 
+#[cfg(test)]
+#[path = "servertool_hooks_anthropic_native_tests.rs"]
+mod servertool_hooks_anthropic_native_tests;
 #[cfg(test)]
 #[path = "servertool_hooks_tests.rs"]
 mod servertool_hooks_tests;
