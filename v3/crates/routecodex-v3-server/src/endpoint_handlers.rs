@@ -1123,6 +1123,30 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             &request_headers,
             &console_payload,
         );
+        if let Some(observability) = output.observability.as_mut() {
+            if let Err(error) = merge_v3_runtime_stream_observation(
+                observability,
+                output.stream_observation.as_ref(),
+            ) {
+                emit_v3_runtime_observability_contract_failure(
+                    &console_context,
+                    observability,
+                    error,
+                );
+            }
+        }
+        if let Err(error) =
+            emit_v3_toolreason_console_line(&console_context, output.stream_observation.as_ref())
+        {
+            emit_v3_runtime_observability_contract_failure(
+                &console_context,
+                output
+                    .observability
+                    .as_ref()
+                    .unwrap_or(&V3RuntimeObservability::default()),
+                error,
+            );
+        }
         if let Some(observability) = output.observability.as_ref() {
             let mut console_observability = observability.clone();
             if let Err(error) = merge_v3_runtime_stream_observation(
