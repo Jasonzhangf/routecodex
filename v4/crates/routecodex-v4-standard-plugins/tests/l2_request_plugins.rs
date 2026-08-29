@@ -39,3 +39,34 @@ fn negative_request_plugins_reject_control_leakage_and_invalid_shapes() {
     assert!(execute("V4HubReqOutbound05ProviderSemantic", "request_outbound", 5, "v4.std.request.provider_semantic", json!({"input":[]})).is_err());
     assert!(execute("V4ProviderReqCompat06Compat", "request_outbound", 6, "v4.std.request.responses_wire_build", json!({"model":"m","input":[],"error_chain":{}})).is_err());
 }
+
+#[test]
+fn direct_and_relay_model_hooks_are_protocol_scoped() {
+    let direct = execute(
+        "V4HubReqChatProcess04Governed",
+        "request_chat_process",
+        4,
+        "v4.std.hook.direct_model_passthrough",
+        json!({"protocol":"responses","model":"gpt-5.6-sol","input":"hi"}),
+    )
+    .unwrap();
+    assert_eq!(direct["model"], json!("gpt-5.6-sol"));
+    assert!(execute(
+        "V4HubReqChatProcess04Governed",
+        "request_chat_process",
+        4,
+        "v4.std.hook.direct_model_passthrough",
+        json!({"protocol":"responses","model":"m","messages":[]}),
+    )
+    .is_err());
+    let relay = execute(
+        "V4HubReqChatProcess04Governed",
+        "request_chat_process",
+        4,
+        "v4.std.hook.relay_model_projection",
+        json!({"model":"m","messages":[{"role":"user","content":"hi"}]}),
+    )
+    .unwrap();
+    assert_eq!(relay["protocol"], json!("responses"));
+    assert!(relay.get("messages").is_none());
+}
