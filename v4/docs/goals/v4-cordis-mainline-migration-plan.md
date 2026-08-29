@@ -28,7 +28,7 @@
 
 ## 2. 范围与硬边界
 
-范围包括 Cordis Host daemon、generic plugin factory、typed bridge、NativePlugin ABI/resolver/catalog/config、ExecutionEpochBundle、NodeContainer、ExecutionEngine、runtime-bin 收缩、Responses request/response、async server/provider transport、SSE、Router/Error/Health/Continuation、协议 codec、tools、servertool、stopless、Admin、parity、release，以及相应 maps/wiki/manifest/red tests/CI gates。
+范围包括 Cordis Host daemon、generic plugin factory、typed bridge、bridge-owned plugin ABI/catalog/config、ExecutionEpochBundle、NodeContainer、ExecutionEngine、runtime-bin 收缩、Responses request/response、async server/provider transport、SSE、Router/Error/Health/Continuation、协议 codec、tools、servertool、stopless、Admin、parity、release，以及相应 maps/wiki/manifest/red tests/CI gates。
 
 禁止：把 Cordis 做成逐请求/逐节点/逐 SSE frame 的解释器；把 payload、protocol metadata、history 作为控制面；请求侧 cleanup、handler/SSE/outbound fallback 或 V3 fallback；恢复已移除 provider；修改用户真实配置作为代码补丁；自动 V3 cutover。
 
@@ -50,9 +50,9 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 
 落地 ADR、ExecutionEpochBundle、NativePluginCatalog、Control protocol、NodeOutcome 合同；登记当前 bypass（内部 NodeContainer、静态 registry、runtime-bin 直调、丢弃 node output、测试 binding）；建立“违规只能减少”的 gate。M00-T07 只冻结未来 live transport 的真实 provider-bound/raw evidence owner 合同，实际 async/native transport 与 live capture integration 归 M08；不得用 M00 的 server/diagnostic contract 重建或伪造 provider wire。退出：合同可解析、maps/manifest/wiki 同步、违规清单可测量且不得新增，T05 live provider admission blocker 解除，M00-T07 evidence-owner contract 完成。
 
-### M01 — NativePlugin ABI 与 resolver
+### M01 — typed plugin ABI 与 bridge resolver
 
-实现 NativePlugin、PluginContext/Config/Outcome/Failure/Identity、NativePluginResolver、薄 adapter 和 deterministic catalog exporter。退出：identity/version/hash/config unknown fail-fast，catalog hash deterministic，无业务语义复制。
+统一复用 `routecodex-v4-cordis-bridge` 的 `PluginHandle`、`ExecCtx`、`HandleRegistry` 与 `NodeExecutionInput/Output`；catalog 只负责 descriptor identity/hash，bridge 只负责计划绑定和 typed handle dispatch。退出：NodeExecutionFrame 能同时承载 data read/write、声明的 control capabilities 与 resource handles；未注册 handle、越权资源和 effect violation fail-fast；无第二套 ABI、无业务语义复制。
 
 ### M02 — Cordis generic plugin factory
 

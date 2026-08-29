@@ -11,13 +11,6 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-mod native_plugin;
-
-pub use native_plugin::{
-    NativePlugin, PluginConfig, PluginContext, PluginFailure, PluginIdentity, PluginIdentityError,
-    PluginOutcome,
-};
-
 pub const CONTRACT_VERSION: &str = "v4-node-plugin-1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

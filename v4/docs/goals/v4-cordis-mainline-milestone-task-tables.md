@@ -25,7 +25,7 @@
 | M00-T08 | `feature_id:v4.cordis_m00.dependency_reconciliation` | T01 + T03 + T04 | merged (`764351194`, main-tree merge `0f353bee8`) | `codex/v4-cordis-refactor-main` |
 | M00-T09 | `feature_id:v4.cordis_m00.empty_epoch_admission` | T01 + T02 | merged (`23220dceb`, main-tree merge `4298257666`) | `codex/v4-cordis-refactor-main` |
 
-## M01 — NativePlugin ABI
+## M01 — typed plugin ABI
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|

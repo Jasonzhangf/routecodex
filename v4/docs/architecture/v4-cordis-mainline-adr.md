@@ -30,14 +30,14 @@ Cordis 不解释每个请求、节点或 SSE frame。业务 payload 不经过 Co
 | active epoch 实际指针、admission、lease | Rust ActiveEpochStore |
 | 节点执行与相邻输出接线 | Rust ExecutionEngine |
 | HTTP、SSE、WebSocket、provider transport | Rust server/provider |
-| plugin identity 到 Rust 实现解析 | NativePluginResolver |
+| plugin identity 到 Rust 实现解析 | Cordis bridge `HandleRegistry` / `PluginHandle` |
 | route/error/health/continuation 高频请求控制 | Rust typed ControlFrame 对应唯一 service |
 | 管理命令、生命周期事实、审计投影 | Cordis bridge + Rust facts |
 
 ## 不变量
 
 1. Rust 不得自行创建生产 plugin graph、排序插件或切换 active plugin graph。
-2. Rust registry 只解析 `plugin_id@version+artifact_hash`，不拥有编排策略。
+2. Rust `HandleRegistry` 只解析编译计划中的 plugin id；identity、版本、artifact hash 和编排策略仍由 catalog/plan owner 校验。
 3. 每个请求 pin 一个 immutable epoch；发布、drain、rollback 不修改进行中的 lease。
 4. 节点输出必须是下一相邻节点输入；丢弃输出属于架构错误。
 5. control、debug、error、scope、routing、continuation 状态不得进入 normal/provider/client payload。

@@ -205,13 +205,7 @@
         "PluginKind",
         "PluginPhase",
         "ResourceRegistry",
-        "descriptor_contract_hash",
-        "NativePlugin",
-        "PluginIdentity",
-        "PluginContext",
-        "PluginConfig",
-        "PluginOutcome",
-        "PluginFailure"
+        "descriptor_contract_hash"
       ],
       "required_gates": [
         "v4_plugin_contract_l2_regression",
@@ -245,10 +239,7 @@
         "CatalogSnapshot",
         "PluginCatalog::register",
         "PluginCatalog::resolve_dependencies",
-        "PluginCatalog::snapshot",
-        "NativePluginResolver",
-        "NativePluginResolver::register",
-        "NativePluginResolver::resolve"
+        "PluginCatalog::snapshot"
       ],
       "required_gates": [
         "v4_plugin_catalog_l2_regression",

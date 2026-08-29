@@ -15,7 +15,7 @@
 ## 全局阶段审计
 
 - [ ] M00：迁移计划、ADR、epoch/catalog/control/outcome 合同；bypass ratchet；protected gate promotion；每个 milestone 独立 claim 表。
-- [ ] M01：NativePlugin ABI、resolver、config、catalog exporter。
+- [x] M01：bridge-owned typed plugin ABI；`PluginHandle`/`ExecCtx` 覆盖执行 frame、data effects、scoped control/resource access；无第二套 ABI。
 - [ ] M02：generic Cordis factory；真实 request/response Fiber mount/dispose。
 - [ ] M03：Cordis daemon、typed socket、generation、heartbeat、reconcile。
 - [ ] M04：prepare/commit/abort/drain/rollback；hash/stale/idempotency/lease。
