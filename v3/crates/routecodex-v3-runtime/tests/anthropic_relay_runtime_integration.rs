@@ -225,6 +225,17 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
         .contains(&"ProviderRespCompat02ProviderCompat"));
     assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
     assert_eq!(output.client_response["stop_reason"], "tool_use");
+    let toolreason = output
+        .stream_observation
+        .as_ref()
+        .expect("Anthropic Relay must expose Resp03 observation")
+        .snapshot()
+        .expect("toolreason observation snapshot")
+        .toolreason
+        .expect("native tool call must produce a toolreason observation");
+    assert_eq!(toolreason.status, "MISSING");
+    assert_eq!(toolreason.stage, "resp03_json");
+    assert_eq!(toolreason.request_id.as_deref(), Some("req-json"));
 }
 
 #[tokio::test]

@@ -1193,6 +1193,20 @@ pub(crate) fn merge_v3_runtime_stream_observation(
 ) -> Result<(), String> {
     if let Some(observation) = observation {
         let snapshot = observation.snapshot()?;
+        if let Some(toolreason) = snapshot.toolreason.as_ref() {
+            println!(
+                "TOOLREASON {} source={} stage={} session_id={} request_id={} tool={} confidence={} thinking={} model={}",
+                toolreason.status,
+                toolreason.source,
+                toolreason.stage,
+                toolreason.session_id.as_deref().unwrap_or("<missing>"),
+                toolreason.request_id.as_deref().unwrap_or("<missing>"),
+                toolreason.tool,
+                toolreason.confidence.map_or("<missing>".to_string(), |v| v.to_string()),
+                toolreason.reason.as_deref().unwrap_or("<missing>"),
+                toolreason.model_id.as_deref().unwrap_or("<missing>"),
+            );
+        }
         if snapshot.response_status.is_some() {
             observability.response_status = snapshot.response_status;
         }

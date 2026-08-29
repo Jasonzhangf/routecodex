@@ -4,6 +4,30 @@
 use super::*;
 
 #[test]
+fn resp03_records_typed_toolreason_observation_for_relay_missing_and_ok() {
+    let observation = V3RuntimeStreamObservation::default();
+    let missing = serde_json::json!({
+        "output": [{"type":"function_call","name":"exec","arguments":"{\"cmd\":\"pwd\"}"}]
+    });
+    record_v3_toolreason_observation_at_resp03(
+        &missing, &observation, Some("s"), Some("r"), Some("m"),
+    ).expect("missing observation");
+    let snapshot = observation.snapshot().expect("snapshot");
+    assert_eq!(snapshot.toolreason.as_ref().map(|v| v.status.as_str()), Some("MISSING"));
+    assert_eq!(snapshot.toolreason.as_ref().map(|v| v.stage.as_str()), Some("resp03_json"));
+
+    let ok = serde_json::json!({
+        "output": [{"type":"function_call","name":"exec","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认目录\"}"}]
+    });
+    record_v3_toolreason_observation_at_resp03(
+        &ok, &observation, Some("s"), Some("r2"), Some("m"),
+    ).expect("ok observation");
+    let snapshot = observation.snapshot().expect("snapshot");
+    assert_eq!(snapshot.toolreason.as_ref().map(|v| v.status.as_str()), Some("OK"));
+    assert_eq!(snapshot.toolreason.as_ref().and_then(|v| v.reason.as_deref()), Some("确认目录"));
+}
+
+#[test]
 fn resp03_json_fields_are_removed_and_projected_without_changing_openai_arguments() {
     let mut payload = json!({
         "choices":[{"message":{

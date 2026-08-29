@@ -268,6 +268,20 @@ pub struct V3RuntimeStreamObservationSnapshot {
     /// Observation failures stay on the runtime side-channel.  They must not
     /// disappear silently and must never be mistaken for provider failure.
     pub observation_error: Option<String>,
+    pub toolreason: Option<V3RuntimeToolreasonObservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3RuntimeToolreasonObservation {
+    pub status: String,
+    pub source: String,
+    pub stage: String,
+    pub session_id: Option<String>,
+    pub request_id: Option<String>,
+    pub tool: String,
+    pub reason: Option<String>,
+    pub confidence: Option<u8>,
+    pub model_id: Option<String>,
 }
 
 pub(crate) struct V3ResponsesRelayProviderFailure {
@@ -384,6 +398,21 @@ impl V3RuntimeStreamObservation {
         if incoming.observation_error.is_some() {
             snapshot.observation_error = incoming.observation_error.clone();
         }
+        if incoming.toolreason.is_some() {
+            snapshot.toolreason = incoming.toolreason.clone();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn record_toolreason(
+        &self,
+        observation: V3RuntimeToolreasonObservation,
+    ) -> Result<(), String> {
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        snapshot.toolreason = Some(observation);
         Ok(())
     }
 
