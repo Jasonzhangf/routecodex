@@ -39,7 +39,7 @@ impl ResponsesTransport for JsonTransport {
                 "status":"completed",
                 "output":[
                     {"type":"reasoning","summary":[{"type":"summary_text","text":"Need lookup"}]},
-                    {"type":"function_call","call_id":"call_json_1","name":"lookup","arguments":"{\"q\":\"alpha\"}"}
+                    {"type":"function_call","call_id":"call_json_1","name":"lookup","arguments":"{\"q\":\"alpha\",\"reason\":\"查找 alpha\",\"goal_alignment_confidence\":100,\"model_id\":\"responses-wire-model\"}"}
                 ]
             }))
             .unwrap(),
@@ -228,14 +228,13 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
     let toolreason = output
         .stream_observation
         .as_ref()
-        .expect("Anthropic Relay must expose Resp03 observation")
+        .unwrap()
         .snapshot()
-        .expect("toolreason observation snapshot")
+        .unwrap()
         .toolreason
-        .expect("native tool call must produce a toolreason observation");
-    assert_eq!(toolreason.status, "MISSING");
-    assert_eq!(toolreason.stage, "resp03_json");
-    assert_eq!(toolreason.request_id.as_deref(), Some("req-json"));
+        .unwrap();
+    assert_eq!(toolreason.status, "OK");
+    assert_eq!(toolreason.reason.as_deref(), Some("查找 alpha"));
 }
 
 #[tokio::test]
