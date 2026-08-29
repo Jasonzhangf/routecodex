@@ -538,9 +538,9 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                 },
             )
             .await;
-        if let Err(error) = startup_result {
-            eprintln!("provider persistent startup probe cycle failed: {error}");
-        }
+        // Probe health records each target result; aggregate probe errors are
+        // not human console events.
+        let _ = startup_result;
         let startup_key_manifest = Arc::clone(&probe_manifest);
         let startup_key_result = probe_health
             .run_due_provider_key_health_probes(
@@ -560,9 +560,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                 },
             )
             .await;
-        if let Err(error) = startup_key_result {
-            eprintln!("provider persistent startup key probe cycle failed: {error}");
-        }
+        let _ = startup_key_result;
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             tokio::select! {
@@ -588,9 +586,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                             probe_v3_provider_global_target(target).await
                         }
                     }).await;
-                    if let Err(error) = result {
-                        eprintln!("adaptive provider cooldown probe cycle failed: {error}");
-                    }
+                    let _ = result;
                     let key_manifest_for_probe = Arc::clone(&probe_manifest);
                     let key_result = probe_health.run_due_provider_key_health_probes(
                         now_ms,
@@ -608,9 +604,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                             }
                         },
                     ).await;
-                    if let Err(error) = key_result {
-                        eprintln!("provider persistent key probe cycle failed: {error}");
-                    }
+                    let _ = key_result;
                 }
             }
         }
