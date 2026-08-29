@@ -5,7 +5,7 @@
   "phase": "baseline_reproduction",
   "kind": "sample_replay",
   "execution_surface": "development_whitebox",
-  "source_commit": "2925976bd91b68df112e9ee1394670e83f95aff4",
+  "source_commit": "d66547a1ed071bd96284b08f495affc4bd3f7a1b",
   "scope": {"feature_id": "V4-CURRENT-TREE", "module_id": "routecodex-v4-runtime"},
   "producer": {"adapter": "cargo", "identity": "v4_current_tree_baseline_replay"},
   "command_argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--test", "l2_epoch", "--manifest-path", "Cargo.toml", "--locked"],
@@ -18,5 +18,5 @@
     "sha256:239a9cfd4c51ca7d8fc2e8725ccb18eb492b6fea356efa18cf4cba9c37927c6f",
     "sha256:b630f7e2917cca217d15c07735f51397ffc33baeb82cc9dd0c6d98053d1a8fc1"
   ],
-  "scope_hash": "sha256:ad78c76bc83471fcf8816d83f20704fd5ef332d2ad92cddb149a4d52fc5dfa19"
+  "scope_hash": "sha256:5ea7095ec4f2cc0ad3b2644bd65b801d181e7f901c3825753d4aadc34f170801"
 }
