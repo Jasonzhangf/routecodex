@@ -580,9 +580,14 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
     standardized: &V3Req04StandardizedResponses,
     manifest: &routecodex_v3_config::V3Config05ManifestPublished,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
+    let entry_protocol = if standardized.endpoint.starts_with("/v1/messages") {
+        "anthropic"
+    } else {
+        "responses"
+    };
     let mut facts = build_v3_router_request_facts_for_entry_with_control(
         &standardized.body,
-        "responses",
+        entry_protocol,
         configured_v3_longcontext_threshold_tokens(manifest, &standardized.server_id),
         false,
         standardized.request_purpose.is_compaction()
@@ -1108,6 +1113,32 @@ mod tests {
 
         assert!(normalized.body["previous_response_id"].is_null());
         assert_eq!(normalized.body["model"], "gpt-5.5");
+    }
+
+    #[test]
+    fn anthropic_messages_req04_preserves_entry_protocol_for_route_facts() {
+        let raw = build_v3_server_03_http_request_raw(
+            "server".to_string(),
+            V3ProviderFailureSessionScope::new("server", "default", "request")
+                .expect("failure scope"),
+            "request".to_string(),
+            "execution".to_string(),
+            "POST".to_string(),
+            "/v1/messages".to_string(),
+            json!({
+                "model": "claude-client-alias",
+                "messages": [{"role": "user", "content": "call pwd"}],
+                "tools": [{"name": "pwd", "description": "cwd", "input_schema": {"type": "object"}}]
+            }),
+        );
+        let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
+            .expect("Anthropic messages request must normalize");
+        let facts = super::build_v3_router_request_facts_from_v3_req_04(
+            &normalized,
+            &manifest_mode_b_websearch_for_routing_facts(),
+        );
+
+        assert_eq!(facts.entry_protocol, "anthropic");
     }
 
     #[test]
