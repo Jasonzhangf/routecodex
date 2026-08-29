@@ -1669,6 +1669,20 @@ fn console_color_identity_reads_reasonix_root_session_id() {
 }
 
 #[test]
+fn toolreason_observation_identity_matches_console_request_fallback() {
+    let identity = resolve_v3_console_log_identity_from_parts(
+        &HeaderMap::new(),
+        &serde_json::json!({}),
+        "anthropic-messages-request-42",
+    );
+
+    assert_eq!(
+        identity.session_id,
+        "rcc-session:request:anthropic-messages-request-42"
+    );
+}
+
+#[test]
 fn console_color_identity_uses_injected_project_when_session_is_absent() {
     let payload = serde_json::json!({
         "model": "deepseek-v4-flash",

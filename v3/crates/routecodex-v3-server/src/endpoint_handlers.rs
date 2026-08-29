@@ -302,6 +302,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         Err(response) => return *response,
     };
     let request_id = request_identity.request_id.clone();
+    let toolreason_observation_session_id =
+        resolve_v3_console_log_identity_from_parts(&request_headers, &payload, &request_id)
+            .session_id;
     let responses_entry_facts = (entry_protocol == "responses")
         .then(|| V3ResponsesContinuationEntryFacts::project(&payload));
     let execution_id = state.debug.next_execution_id(&state.server.id);
@@ -921,6 +924,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 server_id: state.server.id.clone(),
                 failure_session_scope: provider_failure_session_scope.clone(),
                 request_id: request_id.clone(),
+                toolreason_observation_session_id: Some(
+                    toolreason_observation_session_id.clone(),
+                ),
                 payload: payload.clone(),
             },
             client_headers,
@@ -1080,6 +1086,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 server_id: state.server.id.clone(),
                 failure_session_scope: provider_failure_session_scope.clone(),
                 request_id: request_id.clone(),
+                toolreason_observation_session_id: Some(
+                    toolreason_observation_session_id.clone(),
+                ),
                 payload: payload.clone(),
             },
             client_headers,
