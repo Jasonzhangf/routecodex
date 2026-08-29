@@ -27,6 +27,12 @@ for (const symbol of [
 if (!runtimeBin.includes('execute_provider_response_scoped')) {
   failures.push('RESPONSE_CHAIN_UNBOUND: runtime-bin does not consume response chain output');
 }
+if (!/execute_provider_response_scoped[\s\S]*?report\.client_frame/.test(productionSource)) {
+  failures.push('RESPONSE_JSON_FRAME_DISCARDED: JSON response chain output is not consumed');
+}
+if (!/execute_provider_response_scoped[\s\S]*?report\.client_frame/.test(productionSource.slice(productionSource.indexOf('struct ResponsesSseStream')))) {
+  failures.push('RESPONSE_SSE_FRAME_DISCARDED: SSE response chain output is not consumed');
+}
 
 if (failures.length > 0) {
   console.error('[V4-PRODUCTION-MAINLINE-RED] EXPECTED RED');
