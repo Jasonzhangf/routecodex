@@ -74,7 +74,12 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
                 .realtime_cooled_provider_keys
                 .lock()
                 .expect("V3 console cooled-provider mutex poisoned")
-                .insert(event.provider_key.clone());
+                .insert(
+                    event.provider_key.clone(),
+                    event
+                        .cooldown_until_ms
+                        .expect("V3 cooldown observation missing cooldown deadline"),
+                );
         }
     }
     if let Some(provider_key) = observability.provider_key.as_deref() {
@@ -82,8 +87,8 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
             .provider_failure_events
             .iter()
             .any(|event| event.provider_key == provider_key && event.health_state == "cooldown");
-        let recovered = if same_observation_is_still_cooldown {
-            false
+        let recovered_next_probe_at_ms = if same_observation_is_still_cooldown {
+            None
         } else {
             context
                 .state
@@ -92,13 +97,14 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
                 .expect("V3 console cooled-provider mutex poisoned")
                 .remove(provider_key)
         };
-        if recovered {
+        if let Some(next_probe_at_ms) = recovered_next_probe_at_ms {
             let content = format_v3_console_timed_content(
                 "[provider-recovered]",
                 &format!(
-                    "req={} provider={} reason=cooldown_expired",
+                    "req={} provider={} reason=cooldown_expired nextProbeAtMs={}",
                     context.request_identity.request_id,
-                    format_v3_console_provider_target(observability)
+                    format_v3_console_provider_target(observability),
+                    next_probe_at_ms
                 ),
             );
             let human_prefix = format_v3_console_human_prefix_for_observability(

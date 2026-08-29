@@ -226,7 +226,7 @@ fn test_v3_listener_state_with_debug(
         ),
         responses_relay_stopless_control: Arc::new(V3ResponsesRelayStoplessControlState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
-        realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
+        realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
         request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
         front_transport_broker: V3FrontTransportBroker::new(1),
@@ -2114,6 +2114,10 @@ fn cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_line
         "cooldown recovery must be logged once when the provider is selected again: {log}"
     );
     assert!(
+        log.contains("nextProbeAtMs=900000"),
+        "cooldown recovery must expose the next probe deadline: {log}"
+    );
+    assert!(
         !log.contains("provider-filtered") && !log.contains("provider-unavailable"),
         "cooldown must not emit a per-request filtered/unavailable line: {log}"
     );
@@ -3049,7 +3053,7 @@ fn error_projection_appends_human_console_failure_line() {
         ),
         responses_relay_stopless_control: Arc::new(V3ResponsesRelayStoplessControlState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
-        realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
+        realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
         request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
         front_transport_broker: V3FrontTransportBroker::new(1),
