@@ -663,7 +663,7 @@ fn handle_responses(
             request,
             RuntimeFault::new(
                 if status == 503 { "provider_pool_exhausted" } else { "model_unavailable" },
-                error.to_string(),
+                format!("{} (requested_model={})", error, model),
             ),
             status,
         )
