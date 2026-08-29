@@ -30,6 +30,7 @@ use routecodex_v4_skeleton::SkeletonPlan;
 use routecodex_v4_node_container::{
     ActiveEpochStore, ActiveExecutionEpoch, ExecutionEpochIdentity, NodeContainer, PlanBindings,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
@@ -811,7 +812,7 @@ impl PayloadCycleRegistry {
 }
 
 /// Data plane view: only business request/response semantics.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DataView {
     pub raw_entry: Option<String>,
     pub request_method: Option<String>,
@@ -826,6 +827,21 @@ pub struct DataView {
     pub client_semantic: Option<String>,
     pub client_sse_frame: Option<String>,
     pub client_frame: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ControlFrame {
+    continuation_scope: Option<String>,
+    continuation_owner: Option<String>,
+    execution_mode: Option<String>,
+    relay_operator_selected: bool,
+    governance_applied: bool,
+    execution_plan: Option<String>,
+    route_facts: Option<String>,
+    target_selection: Option<String>,
+    route_exit: Option<String>,
+    continuation_committed: bool,
+    continuation_restored: bool,
 }
 
 /// Control plane view: typed side-channel only; never projected into payload.
@@ -864,6 +880,7 @@ pub struct DiagnosticView {
 
 /// Typed carrier per request closed loop. Never global, never shared across
 /// request ids.
+#[derive(Debug, Clone)]
 pub struct ExecutionContext {
     request_id: String,
     binding: ExecutionBinding,
@@ -958,6 +975,51 @@ impl ExecutionContext {
 
     pub fn record_trace(&mut self, entry: impl Into<String>) {
         self.diagnostic.trace.push(entry.into());
+    }
+
+    /// Build the node-local compatibility view from the adjacent frame. The
+    /// frame owns all data/control crossing; this context is only a temporary
+    /// plugin ABI view and is never retained as the frame between nodes.
+    fn from_frame(&self, frame: &crate::NodeExecutionFrame) -> Result<Self, RuntimeFault> {
+        let mut context = self.clone();
+        context.data = serde_json::from_value(frame.data.clone())
+            .map_err(|error| RuntimeFault::new("execution_frame_data", error.to_string()))?;
+        let control: ControlFrame = serde_json::from_value(frame.control.clone())
+            .map_err(|error| RuntimeFault::new("execution_frame_control", error.to_string()))?;
+        context.control.continuation_scope = control.continuation_scope;
+        context.control.continuation_owner = control.continuation_owner;
+        context.control.execution_mode = control.execution_mode;
+        context.control.relay_operator_selected = control.relay_operator_selected;
+        context.control.governance_applied = control.governance_applied;
+        context.control.execution_plan = control.execution_plan;
+        context.control.route_facts = control.route_facts;
+        context.control.target_selection = control.target_selection;
+        context.control.route_exit = control.route_exit;
+        context.control.continuation_committed = control.continuation_committed;
+        context.control.continuation_restored = control.continuation_restored;
+        Ok(context)
+    }
+
+    fn into_frame(self) -> Result<crate::NodeExecutionFrame, RuntimeFault> {
+        let control = ControlFrame {
+            continuation_scope: self.control.continuation_scope,
+            continuation_owner: self.control.continuation_owner,
+            execution_mode: self.control.execution_mode,
+            relay_operator_selected: self.control.relay_operator_selected,
+            governance_applied: self.control.governance_applied,
+            execution_plan: self.control.execution_plan,
+            route_facts: self.control.route_facts,
+            target_selection: self.control.target_selection,
+            route_exit: self.control.route_exit,
+            continuation_committed: self.control.continuation_committed,
+            continuation_restored: self.control.continuation_restored,
+        };
+        Ok(crate::NodeExecutionFrame::new(
+            serde_json::to_value(self.data)
+                .map_err(|error| RuntimeFault::new("execution_frame_data", error.to_string()))?,
+            serde_json::to_value(control)
+                .map_err(|error| RuntimeFault::new("execution_frame_control", error.to_string()))?,
+        ))
     }
 }
 
@@ -2071,7 +2133,7 @@ struct NodeSpec {
 }
 
 struct RuntimeExecutionState {
-    ctx: ExecutionContext,
+    template: ExecutionContext,
     scopes: ScopeRegistry,
     payload_cycles: PayloadCycleRegistry,
 }
@@ -2437,8 +2499,10 @@ impl SkeletonRuntime {
             conversation_scope,
         );
         seed(&mut ctx);
+        let initial_frame = ctx.clone().into_frame()?;
+        ctx.data = DataView::default();
         let state = Arc::new(Mutex::new(RuntimeExecutionState {
-            ctx,
+            template: ctx,
             scopes: std::mem::take(&mut *self.scopes.borrow_mut()),
             payload_cycles: std::mem::take(&mut *self.payload_cycles.borrow_mut()),
         }));
@@ -2457,12 +2521,20 @@ impl SkeletonRuntime {
                             }
                         }
                     };
-                    let binding_before = state.ctx.binding().clone();
+                    let mut ctx = match state.template.from_frame(&frame) {
+                        Ok(ctx) => ctx,
+                        Err(fault) => {
+                            return NodeOutcome::Failure {
+                                error: serde_json::json!({"code": fault.code, "message": fault.message, "node_id": node_id}),
+                            }
+                        }
+                    };
+                    let binding_before = ctx.binding().clone();
                     let plugin_fault = {
                         let RuntimeExecutionState {
-                            ctx,
                             scopes,
                             payload_cycles,
+                            ..
                         } = &mut *state;
                         let mut registries = RuntimeRegistries {
                             scope: scopes,
@@ -2470,7 +2542,7 @@ impl SkeletonRuntime {
                         };
                         plugins
                             .iter()
-                            .find_map(|plugin_id| execute_local_plugin(plugin_id, ctx, &mut registries).err())
+                            .find_map(|plugin_id| execute_local_plugin(plugin_id, &mut ctx, &mut registries).err())
                     };
                     if let Some(fault) = plugin_fault {
                         return NodeOutcome::Failure {
@@ -2481,13 +2553,24 @@ impl SkeletonRuntime {
                             }),
                         };
                     }
-                    if state.ctx.binding() != &binding_before {
+                    if ctx.binding() != &binding_before {
                         return NodeOutcome::Failure {
                             error: serde_json::json!({"code":"binding_drift","node_id":node_id}),
                         };
                     }
-                    state.ctx.record_trace(node_id.clone());
-                    NodeOutcome::Continue { data: frame.data, control: frame.control }
+                    ctx.record_trace(node_id.clone());
+                    state.template.information = ctx.information.clone();
+                    state.template.control = ctx.control.clone();
+                    state.template.diagnostic = ctx.diagnostic.clone();
+                    match ctx.into_frame() {
+                        Ok(next_frame) => NodeOutcome::Continue {
+                            data: next_frame.data,
+                            control: next_frame.control,
+                        },
+                        Err(fault) => NodeOutcome::Failure {
+                            error: serde_json::json!({"code": fault.code, "message": fault.message, "node_id": node_id}),
+                        },
+                    }
                 })
             })
             .collect::<Vec<_>>();
@@ -2504,10 +2587,7 @@ impl SkeletonRuntime {
         let outcome = engine
             .execute(
                 entrypoint,
-                NodeExecutionFrame::new(
-                    Value::Object(Default::default()),
-                    Value::Object(Default::default()),
-                ),
+                initial_frame,
                 lease,
             )
             .map_err(|error| RuntimeFault::new("execution_engine", error.to_string()))?;
@@ -2518,7 +2598,7 @@ impl SkeletonRuntime {
             .map_err(|_| RuntimeFault::new("execution_state_lock", "execution state lock poisoned"))?;
         *self.scopes.borrow_mut() = state.scopes;
         *self.payload_cycles.borrow_mut() = state.payload_cycles;
-        if let NodeOutcome::Failure { error } = outcome {
+        if let NodeOutcome::Failure { error } = &outcome {
             let mut fault = RuntimeFault::new(
                 error.get("code").and_then(Value::as_str).unwrap_or("execution_failure"),
                 error.get("message").and_then(Value::as_str).unwrap_or("execution failed"),
@@ -2528,7 +2608,17 @@ impl SkeletonRuntime {
             }
             return Err(fault);
         }
-        let ctx = state.ctx;
+        let mut ctx = state.template;
+        let data = match outcome {
+            NodeOutcome::Continue { data, .. } => serde_json::from_value::<DataView>(data)
+                .map_err(|error| RuntimeFault::new("execution_frame_data", error.to_string()))?,
+            NodeOutcome::Terminal { .. } => DataView::default(),
+            NodeOutcome::Failure { .. } => unreachable!("failure returned above"),
+            NodeOutcome::Branch { .. } => {
+                return Err(RuntimeFault::new("execution_branch_unresolved", "execution chain ended on branch"));
+            }
+        };
+        ctx.data = data;
         Ok(ExecutionReport {
             request_id: request_id.to_string(),
             binding: ctx.binding().clone(),

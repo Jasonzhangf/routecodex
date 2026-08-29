@@ -85,6 +85,13 @@ function validateCodeBinding(runtimeSource, skeletonSource) {
   if (!/pub fn execute\(/.test(runtimeSource) || !/\.execute\(\s*entrypoint/.test(runtimeSource)) {
     problems.push('runtime: ExecutionEngine::execute is not consumed by the runtime path');
   }
+  const stateDecl = runtimeSource.match(/struct RuntimeExecutionState\s*\{([\s\S]*?)\n\}/);
+  if (stateDecl?.[1].includes('ctx:')) {
+    problems.push('runtime: RuntimeExecutionState must not own a ctx business-data carrier');
+  }
+  if (!/from_frame\(&frame\)/.test(runtimeSource) || !/next_frame\.data/.test(runtimeSource)) {
+    problems.push('runtime: adjacent node data/control must enter and leave through NodeExecutionFrame');
+  }
   for (const forbidden of ['pub struct NodePluginPlan', 'pub struct NodeContainer', 'pub static PLUGIN_REGISTRY', 'fn run_chain(']) {
     if (runtimeSource.includes(forbidden)) problems.push(`runtime: legacy execution owner remains (${forbidden})`);
   }
@@ -130,6 +137,12 @@ function runSelfTest() {
     ['legacy container reintroduced', (s) => {
       s.runtime = `${s.runtime}\npub struct NodeContainer;`;
     }, 'legacy execution owner remains'],
+    ['runtime state context reintroduced', (s) => {
+      s.runtime = s.runtime.replace('template: ExecutionContext', 'ctx: ExecutionContext');
+    }, 'RuntimeExecutionState must not own a ctx business-data carrier'],
+    ['frame handoff removed', (s) => {
+      s.runtime = s.runtime.replace('from_frame(&frame)', 'from_template(&frame)');
+    }, 'adjacent node data/control must enter and leave through NodeExecutionFrame'],
     ['skeleton plan_hash ghost', (s) => {
       s.skeleton = s.skeleton.replace('pub fn plan_hash(', 'pub fn ghost_hash(');
     }, 'plan_hash() missing'],
