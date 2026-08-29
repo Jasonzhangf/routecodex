@@ -109,6 +109,91 @@ fn resp03_completed_response_strips_and_creates_one_reasoning_item() {
 }
 
 #[test]
+fn resp03_json_toolreason_projects_one_standalone_visible_text_message() {
+    let mut payload = json!({
+        "output": [{
+            "type": "function_call",
+            "call_id": "call_visible_text",
+            "name": "pwd",
+            "arguments": "{\"reason\":\"确认当前工作目录\"}"
+        }]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    let output = payload["output"].as_array().expect("Responses output");
+    let visible = output
+        .iter()
+        .find(|item| item["type"] == "message")
+        .expect("toolreason must become a normal visible message");
+    assert_eq!(visible["role"], "assistant");
+    assert_eq!(
+        visible["content"],
+        json!([{"type":"output_text","text":"调用工具 pwd：确认当前工作目录"}])
+    );
+    assert_eq!(
+        output
+            .iter()
+            .filter(|item| item["type"] == "message")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn resp03_json_ordinary_tool_call_does_not_project_visible_text_message() {
+    let mut payload = json!({
+        "output": [{
+            "type": "function_call",
+            "call_id": "call_without_reason",
+            "name": "pwd",
+            "arguments": "{\"cmd\":\"pwd\"}"
+        }]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    assert!(
+        payload["output"]
+            .as_array()
+            .expect("Responses output")
+            .iter()
+            .all(|item| item["type"] != "message"),
+        "ordinary tool calls must not gain a synthetic visible message"
+    );
+}
+
+#[test]
+fn resp03_toolreason_visible_text_message_reaches_anthropic_text_block() {
+    let mut payload = json!({
+        "id": "resp_relay_visible_text",
+        "output": [{
+            "type": "function_call",
+            "call_id": "call_relay_visible_text",
+            "name": "pwd",
+            "arguments": "{\"reason\":\"确认当前工作目录\"}"
+        }]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    let message =
+        crate::hub_v1::anthropic_relay_runtime_codec::project_v3_responses_json_as_anthropic_message(
+            &payload,
+        )
+        .expect("canonical Responses payload must project to Anthropic");
+
+    assert_eq!(
+        message["content"]
+            .as_array()
+            .expect("Anthropic content")
+            .iter()
+            .find(|part| part["type"] == "text")
+            .and_then(|part| part["text"].as_str()),
+        Some("调用工具 pwd：确认当前工作目录")
+    );
+}
+
+#[test]
 fn resp03_completed_non_tool_failure_does_not_become_toolreason_missing() {
     let mut payload = json!({
         "type": "response.completed",
@@ -211,7 +296,13 @@ fn resp03_responses_json_projects_only_into_reasoning_summary() {
         "调用工具 rcc_probe：确认探针结果"
     );
     assert!(payload.get("reasoning_content").is_none());
-    assert_eq!(payload["output"][1]["arguments"], "{\"value\":\"x\"}");
+    let function_call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .expect("function call");
+    assert_eq!(function_call["arguments"], "{\"value\":\"x\"}");
 }
 
 #[test]
@@ -697,15 +788,18 @@ fn resp03_phase1_reason_only_projects_without_optional_diagnostics() {
         },
     );
 
-    assert_eq!(
-        payload["output"][1]["input"],
-        "*** Begin Patch\n*** End Patch"
-    );
+    let tool_call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call")
+        .expect("custom tool call");
+    assert_eq!(tool_call["input"], "*** Begin Patch\n*** End Patch");
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],
         "调用工具 apply_patch：应用用户要求的最小补丁"
     );
-    assert!(payload["output"][1].get("reason").is_none());
+    assert!(tool_call.get("reason").is_none());
     assert!(payload.get("reasoning_content").is_none());
 }
 
@@ -731,12 +825,18 @@ fn resp03_custom_tool_wrapper_strips_only_toolreason_fields_and_preserves_raw_in
         },
     );
 
-    assert_eq!(payload["output"][1]["input"], raw_patch);
-    assert!(payload["output"][1].get("reason").is_none());
-    assert!(payload["output"][1]
+    let tool_call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call")
+        .expect("custom tool call");
+    assert_eq!(tool_call["input"], raw_patch);
+    assert!(tool_call.get("reason").is_none());
+    assert!(tool_call
         .get("goal_alignment_confidence")
         .is_none());
-    assert!(payload["output"][1].get("model_id").is_none());
+    assert!(tool_call.get("model_id").is_none());
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],
         "调用工具 apply_patch：写入最小补丁验证 custom tool"
@@ -767,7 +867,13 @@ fn resp03_custom_tool_wrapper_model_mismatch_still_projects_and_preserves_raw_in
     );
 
     assert_ne!(payload, before);
-    assert_eq!(payload["output"][1]["input"], raw_patch);
+    let tool_call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call")
+        .expect("custom tool call");
+    assert_eq!(tool_call["input"], raw_patch);
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],
         "调用工具 apply_patch：写入最小补丁验证 custom tool"
@@ -800,12 +906,18 @@ fn resp03_custom_tool_nested_json_wrapper_projects_reason_and_restores_native_in
         },
     );
 
-    assert_eq!(payload["output"][1]["input"], raw_patch);
-    assert!(payload["output"][1].get("reason").is_none());
-    assert!(payload["output"][1]
+    let tool_call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call")
+        .expect("custom tool call");
+    assert_eq!(tool_call["input"], raw_patch);
+    assert!(tool_call.get("reason").is_none());
+    assert!(tool_call
         .get("goal_alignment_confidence")
         .is_none());
-    assert!(payload["output"][1].get("model_id").is_none());
+    assert!(tool_call.get("model_id").is_none());
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],
         "调用工具 apply_patch：更新用户指定文件"
@@ -869,18 +981,30 @@ fn resp03_apply_patch_double_encoded_wrapper_restores_native_patch_bytes() {
     // patch bytes, not a JSON-encoded JSON-encoded string.
     assert_eq!(
         payload["output"].as_array().map(|a| a.len()),
-        Some(2),
+        Some(3),
         "reason from the nested wrapper must project into a summary item"
     );
     assert_eq!(
-        payload["output"][1]["input"], raw_patch,
+        payload["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "custom_tool_call")
+            .expect("custom tool call")["input"],
+        raw_patch,
         "double-encoded wrapper must be normalized back to native patch bytes"
     );
-    assert!(payload["output"][1].get("reason").is_none());
-    assert!(payload["output"][1]
+    let tool_call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call")
+        .expect("custom tool call");
+    assert!(tool_call.get("reason").is_none());
+    assert!(tool_call
         .get("goal_alignment_confidence")
         .is_none());
-    assert!(payload["output"][1].get("model_id").is_none());
+    assert!(tool_call.get("model_id").is_none());
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],
         "调用工具 apply_patch：更新用户指定文件"

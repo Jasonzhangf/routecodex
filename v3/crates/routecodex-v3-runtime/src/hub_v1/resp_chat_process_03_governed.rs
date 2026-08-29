@@ -2132,6 +2132,7 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
                         }),
                     );
                 }
+                append_v3_toolreason_visible_text_item_at_resp03(output, &reasoning);
             }
         }
     }
@@ -3842,6 +3843,37 @@ fn append_v3_toolreason_reasoning_item_at_resp03(
             "type": "reasoning",
             "status": "completed",
             "summary": [{"type": "summary_text", "text": reasoning}]
+        }),
+    );
+}
+
+fn append_v3_toolreason_visible_text_item_at_resp03(output: &mut Vec<Value>, reasoning: &str) {
+    if output.iter().any(|item| {
+        item.get("type").and_then(Value::as_str) == Some("message")
+            && item.get("role").and_then(Value::as_str) == Some("assistant")
+            && item
+                .pointer("/content/0/type")
+                .and_then(Value::as_str)
+                == Some("output_text")
+            && item.pointer("/content/0/text").and_then(Value::as_str) == Some(reasoning)
+    }) {
+        return;
+    }
+    let insert_at = output
+        .iter()
+        .position(|item| {
+            matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("function_call" | "tool_call" | "custom_tool_call")
+            )
+        })
+        .unwrap_or(output.len());
+    output.insert(
+        insert_at,
+        json!({
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": reasoning}]
         }),
     );
 }
