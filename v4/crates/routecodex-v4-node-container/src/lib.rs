@@ -273,7 +273,10 @@ pub struct ExecutionEpochIdentity {
 
 impl ExecutionEpochIdentity {
     pub fn validate(&self) -> Result<(), EpochError> {
-        if self.manifest_hash.is_empty() || self.execution_identity.is_empty() {
+        if self.plan_epoch == 0
+            || self.manifest_hash.is_empty()
+            || self.execution_identity.is_empty()
+        {
             return Err(EpochError::InvalidIdentity);
         }
         Ok(())
@@ -1077,6 +1080,19 @@ mod tests {
         );
         assert!(matches!(rejected, Err(EpochError::InvalidIdentity)));
         assert_eq!(store.active_snapshot().unwrap().plan_epoch, 3);
+    }
+
+    #[test]
+    fn zero_plan_epoch_is_not_an_executable_epoch_identity() {
+        let rejected = ExecutionEpochBundle::new(
+            accepting_container("candidate-zero"),
+            ExecutionEpochIdentity {
+                plan_epoch: 0,
+                manifest_hash: "manifest-zero".into(),
+                execution_identity: "execution-zero".into(),
+            },
+        );
+        assert!(matches!(rejected, Err(EpochError::InvalidIdentity)));
     }
 
     #[test]
