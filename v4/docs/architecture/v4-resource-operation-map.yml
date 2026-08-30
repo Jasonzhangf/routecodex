@@ -101,7 +101,7 @@ resources:
   - v4_parity_gate_direct_relay_sse
   resource_kind: transport_frame
   lifecycle: v4.transport.sse
-  owner_crate: routecodex-v4-server
+  owner_crate: routecodex-v4-standard-plugins
   owner_node: V4TransportSsePlugin
   owner_symbols:
   - SseTransportPlugin

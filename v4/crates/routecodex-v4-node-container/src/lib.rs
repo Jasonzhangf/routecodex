@@ -16,6 +16,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+pub mod direct_relay;
+
 pub const ZERO_BASE_MANIFEST_HASH: &str =
     "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 

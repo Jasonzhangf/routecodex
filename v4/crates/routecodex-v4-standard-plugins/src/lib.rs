@@ -44,6 +44,7 @@ pub mod chat_to_responses;
 pub mod request_governance;
 pub mod provider_semantic;
 pub mod responses_wire_build;
+pub mod sse_transport;
 pub mod routing;
 pub mod model_hooks;
 

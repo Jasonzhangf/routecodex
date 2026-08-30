@@ -171,6 +171,34 @@ function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, 
     failures.push('hook infers protocol from payload');
   }
 
+  for (const symbol of [
+    'pub struct SseTransportFrame',
+    'pub struct SseIngressPlugin',
+    'pub struct SseEgressPlugin',
+  ]) {
+    if (!(sources.sseTransport ?? '').includes(symbol)) {
+      failures.push(`SSE transport plugin missing ${symbol}`);
+    }
+  }
+  if (/serde_json|serde::|\bValue\b/.test(sources.sseTransport ?? '')) {
+    failures.push('SSE transport plugin reads semantic payload');
+  }
+  for (const symbol of [
+    'pub struct DirectRelayInformation',
+    'pub trait DirectRequestHook',
+    'pub trait DirectResponseHook',
+    'pub struct DirectRelayContainer',
+    'pub fn execute_request(',
+    'pub fn execute_response(',
+  ]) {
+    if (!(sources.directRelay ?? '').includes(symbol)) {
+      failures.push(`DirectRelay container missing ${symbol}`);
+    }
+  }
+  if (!(sources.directRelay ?? '').includes('pub type SharedPayload = Arc<Value>')) {
+    failures.push('DirectRelay container does not use shared payload ownership');
+  }
+
   const directContract = plan.direct_protocol_contract ?? {};
   if (directContract.same_protocol !== true || directContract.mismatch !== 'fail_fast') {
     failures.push('Direct same-protocol fail-fast contract missing');
@@ -241,7 +269,25 @@ function fixture() {
       { gate_id: 'v4_direct_relay_sse' },
       { gate_id: 'v4_direct_relay_sse_red' },
     ] },
-    sources: { runtime: '', 'runtime-bin': '', modelHooks: '' },
+    sources: {
+      runtime: '',
+      'runtime-bin': '',
+      modelHooks: '',
+      sseTransport: [
+        'pub struct SseTransportFrame',
+        'pub struct SseIngressPlugin',
+        'pub struct SseEgressPlugin',
+      ].join('\n'),
+      directRelay: [
+        'pub type SharedPayload = Arc<Value>',
+        'pub struct DirectRelayInformation',
+        'pub trait DirectRequestHook',
+        'pub trait DirectResponseHook',
+        'pub struct DirectRelayContainer',
+        'pub fn execute_request(',
+        'pub fn execute_response(',
+      ].join('\n'),
+    },
   };
 }
 
@@ -258,6 +304,8 @@ function redSelfTest() {
     ['hook protocol payload inference', (data) => { data.sources.modelHooks = 'value.get("protocol")'; }, 'infers protocol'],
     ['Direct protocol fallback', (data) => { data.plan.direct_protocol_contract.mismatch = 'relay'; }, 'same-protocol'],
     ['client/provider coupling', (data) => { data.plan.protocol_information_contract.client_provider_independent = false; }, 'typed protocol independence'],
+    ['SSE semantic parser', (data) => { data.sources.sseTransport += '\nuse serde_json::Value;'; }, 'reads semantic payload'],
+    ['Direct shared payload removed', (data) => { data.sources.directRelay = data.sources.directRelay.replace('pub type SharedPayload = Arc<Value>', 'pub type SharedPayload = Value'); }, 'shared payload ownership'],
   ];
   for (const [name, mutate, expected] of cases) {
     const data = structuredClone(fixture());
@@ -283,6 +331,8 @@ if (process.argv.includes('--red-self-test')) {
       runtime: readText('crates/routecodex-v4-runtime/src/lib.rs'),
       'runtime-bin': readText('crates/routecodex-v4-runtime-bin/src/main.rs'),
       modelHooks: readText('crates/routecodex-v4-standard-plugins/src/model_hooks.rs'),
+      sseTransport: readText('crates/routecodex-v4-standard-plugins/src/sse_transport.rs'),
+      directRelay: readText('crates/routecodex-v4-node-container/src/direct_relay.rs'),
     },
   );
   if (failures.length > 0) {
