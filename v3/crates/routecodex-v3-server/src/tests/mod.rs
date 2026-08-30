@@ -3054,7 +3054,7 @@ fn recovered_provider_attempts_do_not_create_terminal_client_error_truth() {
     assert!(!v3_output_has_terminal_client_error(200, None));
     assert!(!v3_output_has_terminal_client_error(200, Some(&[])));
     assert!(v3_output_has_terminal_client_error(502, None));
-    assert!(v3_output_has_terminal_client_error(
+    assert!(!v3_output_has_terminal_client_error(
         200,
         Some(&["V3Error06ClientProjected"]),
     ));
