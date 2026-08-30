@@ -16,6 +16,10 @@ use routecodex_v4_lifecycle::{
     start_managed, status_managed, ManagedAction, ManagedControlPlane, ManagedInstanceRecord,
     ManagedSpawnOptions, V4LifecyclePaths,
 };
+use routecodex_v4_node_container::direct_relay::{
+    DirectRelayContainer, DirectRelayError, DirectRelayInformation, DirectRequestHook,
+    DirectResponseHook, ProtocolId, SharedPayload,
+};
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
     build_retry_wire,
@@ -490,6 +494,33 @@ struct PipelineHandler {
     runtime: Arc<Mutex<SkeletonRuntime>>,
     execution_epoch: ExecutionEpochSnapshot,
     availability: Arc<Mutex<V4Availability01SessionScoped>>,
+    direct_relay: Arc<DirectRelayContainer>,
+}
+
+struct DirectRequestPassthrough;
+
+impl DirectRequestHook for DirectRequestPassthrough {
+    fn apply(&self, payload: SharedPayload) -> Result<SharedPayload, DirectRelayError> {
+        if !payload.is_object() {
+            return Err(DirectRelayError::RequestHook(
+                "direct request payload must be an object".to_string(),
+            ));
+        }
+        Ok(payload)
+    }
+}
+
+struct DirectResponsePassthrough;
+
+impl DirectResponseHook for DirectResponsePassthrough {
+    fn apply(&self, payload: SharedPayload) -> Result<SharedPayload, DirectRelayError> {
+        if !payload.is_object() {
+            return Err(DirectRelayError::ResponseHook(
+                "direct response payload must be an object".to_string(),
+            ));
+        }
+        Ok(payload)
+    }
 }
 
 impl PipelineHandler {
@@ -524,6 +555,10 @@ impl PipelineHandler {
             runtime: Arc::new(Mutex::new(runtime)),
             execution_epoch,
             availability: Arc::new(Mutex::new(V4Availability01SessionScoped::new())),
+            direct_relay: Arc::new(DirectRelayContainer::new(
+                vec![Arc::new(DirectRequestPassthrough)],
+                vec![Arc::new(DirectResponsePassthrough)],
+            )),
         })
     }
 }
@@ -548,6 +583,7 @@ impl PipelineHandler {
                 &self.manifest,
                 &self.runtime,
                 &self.availability,
+                &self.direct_relay,
                 &request,
                 "responses",
                 "direct",
@@ -557,6 +593,7 @@ impl PipelineHandler {
                 &self.manifest,
                 &self.runtime,
                 &self.availability,
+                &self.direct_relay,
                 &request,
                 "chat",
                 "relay",
@@ -649,6 +686,7 @@ fn handle_responses(
     manifest: &RuntimeConfigManifest,
     runtime: &Arc<Mutex<SkeletonRuntime>>,
     availability: &Arc<Mutex<V4Availability01SessionScoped>>,
+    direct_relay: &Arc<DirectRelayContainer>,
     request: &HttpRequest,
     entry_protocol: &str,
     continuation_owner: &str,
@@ -660,6 +698,32 @@ fn handle_responses(
             400,
         )
     })?;
+    let direct_information = if entry_protocol == "responses" {
+        Some(
+            DirectRelayInformation::direct(
+                ProtocolId::new("openai-responses").map_err(|error| {
+                    project_fault(request, RuntimeFault::new("direct_relay_protocol", format!("{error:?}")), 598)
+                })?,
+                ProtocolId::new("openai-responses").map_err(|error| {
+                    project_fault(request, RuntimeFault::new("direct_relay_protocol", format!("{error:?}")), 598)
+                })?,
+            )
+            .map_err(|error| {
+                project_fault(request, RuntimeFault::new("direct_relay_protocol", format!("{error:?}")), 598)
+            })?,
+        )
+    } else {
+        None
+    };
+    let body = if let Some(information) = direct_information.as_ref() {
+        let shared = Arc::new(body);
+        direct_relay
+            .execute_request(information, shared)
+            .map_err(|error| project_fault(request, RuntimeFault::new("direct_relay_request", format!("{error:?}")), 598))
+            .map(|value| (*value).clone())?
+    } else {
+        body
+    };
     if entry_protocol != "responses" && body.get("previous_response_id").is_some() {
         return Err(project_fault(
             request,
@@ -980,6 +1044,7 @@ fn handle_responses(
             target.protocol.clone(),
             session_scope.to_string(),
             conversation_scope.to_string(),
+            Arc::clone(direct_relay),
         );
         return Ok(HttpResponse::streaming(
             client_status,
@@ -1161,6 +1226,20 @@ fn handle_responses(
                     502,
                 )
             })?;
+            let projected = if let Some(information) = direct_information.as_ref() {
+                direct_relay
+                    .execute_response(information, Arc::new(projected))
+                    .map_err(|error| {
+                        project_fault(
+                            request,
+                            RuntimeFault::new("direct_relay_response", format!("{error:?}")),
+                            599,
+                        )
+                    })
+                    .map(|value| (*value).clone())?
+            } else {
+                projected
+            };
             let client_status = if (200..300).contains(&raw.status) {
                 200
             } else {
@@ -1215,6 +1294,7 @@ struct ResponsesSseStream<S = ProviderResponseStream> {
     provider_protocol: String,
     session_scope: String,
     conversation_scope: String,
+    direct_relay: Arc<DirectRelayContainer>,
     frame_sequence: u64,
     pending: Vec<u8>,
     ingress: SseIngressPlugin,
@@ -1236,6 +1316,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
         provider_protocol: String,
         session_scope: String,
         conversation_scope: String,
+        direct_relay: Arc<DirectRelayContainer>,
     ) -> Self {
         Self {
             stream,
@@ -1248,6 +1329,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
             provider_protocol,
             session_scope,
             conversation_scope,
+            direct_relay,
             frame_sequence: 0,
             pending: Vec::new(),
             ingress: SseIngressPlugin::new(
@@ -1335,6 +1417,21 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
         })?;
         let client_semantic: serde_json::Value = serde_json::from_str(&client_frame)
             .map_err(|error| RuntimeFault::new("client_sse_semantic", error.to_string()))?;
+        let client_semantic = if self.entry_protocol == "responses" {
+            let information = DirectRelayInformation::direct(
+                ProtocolId::new("openai-responses")
+                    .map_err(|error| RuntimeFault::new("direct_relay_protocol", format!("{error:?}")))?,
+                ProtocolId::new("openai-responses")
+                    .map_err(|error| RuntimeFault::new("direct_relay_protocol", format!("{error:?}")))?,
+            )
+            .map_err(|error| RuntimeFault::new("direct_relay_protocol", format!("{error:?}")))?;
+            self.direct_relay
+                .execute_response(&information, Arc::new(client_semantic))
+                .map_err(|error| RuntimeFault::new("direct_relay_response", format!("{error:?}")))
+                .map(|value| (*value).clone())?
+        } else {
+            client_semantic
+        };
         let encoded = routecodex_v4_standard_plugins::response_outbound::encode_client_sse_frame(
             &self.entry_protocol,
             &client_semantic,
@@ -1645,6 +1742,28 @@ targets = ["mock"]
         );
     }
 
+    #[test]
+    fn direct_responses_admission_owns_relay_container_and_shared_payload() {
+        let information = DirectRelayInformation::direct(
+            ProtocolId::new("openai-responses").expect("client protocol"),
+            ProtocolId::new("openai-responses").expect("provider protocol"),
+        )
+        .expect("same protocol direct lane");
+        let container = DirectRelayContainer::new(
+            vec![Arc::new(DirectRequestPassthrough)],
+            vec![Arc::new(DirectResponsePassthrough)],
+        );
+        let payload = Arc::new(serde_json::json!({"model":"gpt-5.5"}));
+        let provider = container
+            .execute_request(&information, Arc::clone(&payload))
+            .expect("direct request relay");
+        assert!(Arc::ptr_eq(&payload, &provider));
+        let client = container
+            .execute_response(&information, Arc::clone(&provider))
+            .expect("direct response relay");
+        assert!(Arc::ptr_eq(&provider, &client));
+    }
+
     struct MockSseSource {
         chunks: VecDeque<Result<Vec<u8>, String>>,
         wait_result: Result<(), String>,
@@ -1711,6 +1830,10 @@ targets = ["mock"]
             "responses".to_string(),
             "session-1".to_string(),
             "conversation-1".to_string(),
+            Arc::new(DirectRelayContainer::new(
+                vec![Arc::new(DirectRequestPassthrough)],
+                vec![Arc::new(DirectResponsePassthrough)],
+            )),
         )
     }
 
