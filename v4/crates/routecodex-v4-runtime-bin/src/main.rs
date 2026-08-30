@@ -1267,16 +1267,16 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
     }
 
     fn queue_error(&mut self, message: impl Into<String>) {
-        let payload = serde_json::json!({
-            "type": "error",
-            "error": {"message": message.into()}
-        });
-        self.pending.extend_from_slice(b"event: error\n");
-        self.pending.extend_from_slice(b"data: ");
-        self.pending.extend_from_slice(
-            &serde_json::to_vec(&payload).expect("stream error projection is serializable"),
-        );
-        self.pending.extend_from_slice(b"\n\n");
+        let encoded = routecodex_v4_standard_plugins::response_outbound::encode_client_error_sse_frame(
+            &self.entry_protocol,
+            &message.into(),
+        )
+        .expect("client SSE error projection must be serializable");
+        let frame = routecodex_v4_standard_plugins::sse_transport::SseTransportFrame::from_complete_bytes(encoded)
+            .expect("client SSE error projection must produce a complete frame");
+        self.egress
+            .enqueue(frame, std::time::Instant::now())
+            .expect("client SSE error frame must fit transport queue");
         self.close_after_pending = true;
     }
 

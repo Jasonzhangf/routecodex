@@ -146,6 +146,20 @@ pub fn encode_client_sse_frame(
     Ok(frame)
 }
 
+/// Project a terminal runtime error into the client protocol before handing
+/// the bytes to the opaque SSE transport plugin.  This keeps SSE framing out
+/// of runtime orchestration while preserving an explicit error event.
+pub fn encode_client_error_sse_frame(
+    entry_protocol: &str,
+    message: &str,
+) -> Result<Vec<u8>, String> {
+    let semantic = json!({
+        "type": "error",
+        "error": {"message": message}
+    });
+    encode_client_sse_frame(entry_protocol, &semantic, true)
+}
+
 fn project_responses_event_to_chat(value: &Value) -> Value {
     let event_type = value.get("type").and_then(Value::as_str).unwrap_or_default();
     let response = value.get("response").unwrap_or(value);
