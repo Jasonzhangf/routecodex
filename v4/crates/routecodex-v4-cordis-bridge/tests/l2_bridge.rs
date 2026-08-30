@@ -291,7 +291,11 @@ impl HandleRegistry for MapRegistry {
 }
 
 fn input(data: Value, control: Value) -> NodeExecutionInput {
-    NodeExecutionInput { data, control }
+    NodeExecutionInput {
+        data,
+        control,
+        information: json!({}),
+    }
 }
 
 #[test]
@@ -299,6 +303,7 @@ fn positive_execution_input_accepts_typed_data_and_control() {
     let decoded: NodeExecutionInput = serde_json::from_value(json!({
         "data": {"steps": []},
         "control": {},
+        "information": {},
     }))
     .expect("typed execution input decodes");
     assert_eq!(decoded.data, json!({"steps": []}));
@@ -310,6 +315,7 @@ fn negative_execution_input_rejects_undeclared_fields() {
     let error = serde_json::from_value::<NodeExecutionInput>(json!({
         "data": {},
         "control": {},
+        "information": {},
         "extra": true,
     }))
     .unwrap_err();

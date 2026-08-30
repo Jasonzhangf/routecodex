@@ -6,8 +6,7 @@
 //! runtime, scans plugins, or chooses plugin order.
 
 use routecodex_v4_cordis_bridge::{
-    execute_plan, execute_plan_with_information, BridgeError, HandleRegistry, NodeExecutionInput,
-    NodeExecutionOutput,
+    execute_plan, BridgeError, HandleRegistry, NodeExecutionInput, NodeExecutionOutput,
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
 use serde::Deserialize;
@@ -439,16 +438,6 @@ impl NodeContainer {
             return Err(NodeContainerError::PlanHashMismatch);
         }
         self.execute(input, registry)
-    }
-
-    pub fn execute_with_information(
-        &self,
-        input: NodeExecutionInput,
-        information: Value,
-        registry: &dyn HandleRegistry,
-    ) -> Result<NodeExecutionOutput, NodeContainerError> {
-        let _guard = self.enter_execution()?;
-        execute_plan_with_information(&self.plan, input, information, registry).map_err(Into::into)
     }
 
     pub fn drain(&mut self) -> Result<(), NodeContainerError> {
@@ -894,35 +883,6 @@ impl EpochLease {
             .ok_or_else(|| EpochError::UnknownNode(node_id.to_string()))?;
         node.container
             .execute(input, registry)
-            .map_err(EpochError::Container)
-    }
-
-    pub fn execute_with_information(
-        &self,
-        node_id: &str,
-        input: NodeExecutionInput,
-        information: Value,
-        registry: &dyn HandleRegistry,
-    ) -> Result<NodeExecutionOutput, EpochError> {
-        if self.snapshot().state == ExecutionEpochState::Disposed {
-            return Err(EpochError::Container(NodeContainerError::InvalidState {
-                state: NodeContainerState::Disposed,
-                operation: "execute",
-            }));
-        }
-        let nodes = self
-            .epoch
-            .inner
-            .nodes
-            .lock()
-            .expect("epoch nodes lock poisoned");
-        let nodes = nodes.as_ref().ok_or(EpochError::LeaseUnavailable)?;
-        let node = nodes
-            .iter()
-            .find(|node| node.node_id() == node_id)
-            .ok_or_else(|| EpochError::UnknownNode(node_id.to_string()))?;
-        node.container
-            .execute_with_information(input, information, registry)
             .map_err(EpochError::Container)
     }
 
