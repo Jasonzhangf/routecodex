@@ -487,7 +487,7 @@
       "build": {
         "args": [
           "-c",
-          "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-config --deps routecodex-v4-base-node,routecodex-v4-edge --out generated/modules/routecodex-v4-config/lib/libroutecodex_v4_config.rlib"
+          "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-config --deps routecodex-v4-base-node,routecodex-v4-edge --source-deps routecodex-v4-skeleton,routecodex-v4-standard-plugins --out generated/modules/routecodex-v4-config/lib/libroutecodex_v4_config.rlib"
         ],
         "program": "sh",
         "working_directory": "."
@@ -528,7 +528,9 @@
             "--consumer",
             "routecodex-v4-config",
             "--deps",
-            "routecodex-v4-base-node,routecodex-v4-edge"
+            "routecodex-v4-base-node,routecodex-v4-edge",
+            "--source-deps",
+            "routecodex-v4-skeleton,routecodex-v4-standard-plugins"
           ],
           "program": "cargo",
           "working_directory": "."
