@@ -150,6 +150,7 @@ resources:
   - V4DirectReq02RelayContainer
   - V4DirectResp02RelayContainer
   - V4HubReqInbound02Normalized
+  - V4HubReqOutbound06ProviderSemantic
   - V4HubRespOutbound05ClientSemantic
   forbidden_writers:
   - V4TransportSsePlugin
@@ -169,8 +170,10 @@ resources:
   allowed_readers:
   - V4DirectReq02RelayContainer
   - V4DirectResp02RelayContainer
+  - V4HubReqOutbound06ProviderSemantic
   - V4ProviderReqCompat07ProviderCompat
   - V4ProviderRespCompat02ProviderCompat
+  - V4HubRespOutbound05ClientSemantic
   forbidden_writers:
   - V4TransportSsePlugin
   binding_status: design
@@ -507,7 +510,7 @@ resources:
   resource_kind: control_contract
   lifecycle: v4.router.mainline
   owner_crate: routecodex-v4-runtime
-  owner_node: V4Router05RequestClassified
+  owner_node: V4HubReqExecution04Planned
   owner_symbols:
   - ExecutionPlan
   identity:
@@ -521,9 +524,9 @@ resources:
     payload_patch: forbidden
     capability_mismatch_projection: forbidden
   allowed_writers:
-  - V4Router05RequestClassified
+  - V4HubReqExecution04Planned
   allowed_readers:
-  - V4Router06SelectionPlan
+  - V4HubReqTarget05Resolved
   forbidden_writers:
   - V4HubReqChatProcess04Governed
   - V4ProviderReqCompat06Compat
@@ -539,7 +542,7 @@ resources:
   resource_kind: control_contract
   lifecycle: v4.router.mainline
   owner_crate: routecodex-v4-runtime
-  owner_node: V4Router06SelectionPlan
+  owner_node: V4HubReqTarget05Resolved
   owner_symbols:
   - ExecutionPlan
   identity:
@@ -553,7 +556,7 @@ resources:
     health_mutation: forbidden
     provider_specific_branch: forbidden
   allowed_writers:
-  - V4Router06SelectionPlan
+  - V4HubReqTarget05Resolved
   - V4Target07OpaqueTarget
   allowed_readers:
   - V4HubReqOutbound06ProviderSemantic

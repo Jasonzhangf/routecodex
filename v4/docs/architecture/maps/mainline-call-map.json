@@ -1099,7 +1099,7 @@
       "caller_feature_id": "V4-DIRECT-RELAY-SSE",
       "callee_feature_id": "V4-DIRECT-RELAY-SSE",
       "resource_id": "v4.information.execution_lane",
-      "path": "crates/routecodex-v4-runtime/src/lib.rs,crates/routecodex-v4-node-container/src/lib.rs",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs,crates/routecodex-v4-node-container/src/direct_relay.rs",
       "status": "binding_pending"
     },
     {
@@ -1109,8 +1109,8 @@
       "edge_type": "direct_request_hook_execution",
       "caller_feature_id": "V4-DIRECT-RELAY-SSE",
       "callee_feature_id": "V4-DIRECT-RELAY-SSE",
-      "resource_id": "v4.request.normal_payload",
-      "path": "crates/routecodex-v4-node-container/src/lib.rs,crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
+      "resource_id": "v4.direct.request.client_payload",
+      "path": "crates/routecodex-v4-node-container/src/direct_relay.rs,crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
       "status": "binding_pending"
     },
     {
@@ -1120,12 +1120,12 @@
       "edge_type": "direct_response_hook_execution",
       "caller_feature_id": "V4-DIRECT-RELAY-SSE",
       "callee_feature_id": "V4-DIRECT-RELAY-SSE",
-      "resource_id": "v4.response.normal_payload",
-      "path": "crates/routecodex-v4-node-container/src/lib.rs,crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
+      "resource_id": "v4.direct.response.provider_raw",
+      "path": "crates/routecodex-v4-node-container/src/direct_relay.rs,crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
       "status": "binding_pending"
     },
     {
-      "from": "V4HubReqChatProcess03Governed",
+      "from": "V4HubReqOutbound06ProviderSemantic",
       "to": "v4.hook.relay.request",
       "owner": "v4.hook.relay.request_response",
       "edge_type": "relay_request_adjacent_projection",
@@ -1136,14 +1136,14 @@
       "status": "binding_pending"
     },
     {
-      "from": "V4HubRespChatProcess04Governed",
+      "from": "V4HubRespOutbound05ClientSemantic",
       "to": "v4.hook.relay.response",
       "owner": "v4.hook.relay.request_response",
       "edge_type": "relay_response_adjacent_projection",
       "caller_feature_id": "V4-DIRECT-RELAY-SSE",
       "callee_feature_id": "V4-DIRECT-RELAY-SSE",
       "resource_id": "v4.response.normal_payload",
-      "path": "crates/routecodex-v4-standard-plugins/src/response_outbound.rs",
+      "path": "crates/routecodex-v4-standard-plugins/src/model_hooks.rs,crates/routecodex-v4-standard-plugins/src/response_outbound.rs",
       "status": "binding_pending"
     },
     {

@@ -39,10 +39,10 @@ fn compile_authoring(
 #[test]
 fn positive_different_nodes_compile_distinct_deterministic_plans() {
     let chat_process = compile_standard_plan(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         "request_chat_process",
         "request",
-        4,
+        3,
         &[
             "v4.std.chat_process.request_governance",
             "v4.std.diagnostic.debug_observe",
@@ -53,10 +53,10 @@ fn positive_different_nodes_compile_distinct_deterministic_plans() {
     .expect("chat-process plan compiles");
 
     let outbound = compile_standard_plan(
-        "V4ProviderReqCompat06Compat",
+        "V4ProviderReqCompat07ProviderCompat",
         "request_outbound",
         "request",
-        6,
+        7,
         &["v4.std.provider.wire_build"],
     )
     .expect("outbound plan compiles");
@@ -80,19 +80,19 @@ fn positive_same_semantics_different_authoring_order_same_hash() {
         "v4.std.diagnostic.timing",
     ];
     let first = compile_standard_plan(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         "request_chat_process",
         "request",
-        4,
+        3,
         &ids,
     )
     .expect("plan a compiles");
     let reversed: Vec<&str> = ids.iter().copied().rev().collect();
     let second = compile_standard_plan(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         "request_chat_process",
         "request",
-        4,
+        3,
         &reversed,
     )
     .expect("plan b compiles");
@@ -123,10 +123,10 @@ fn positive_every_category_has_registered_plugins() {
 #[test]
 fn positive_response_chat_process_plan_compiles() {
     let response = compile_standard_plan(
-        "V4HubRespChatProcess03Governed",
+        "V4HubRespChatProcess04Governed",
         "response_chat_process",
         "response",
-        3,
+        4,
         &["v4.std.chat_process.response_governance"],
     )
     .expect("response chat-process plan compiles");
@@ -149,10 +149,10 @@ fn negative_selection_group_multi_active_rejected() {
     alt.descriptor.plugin_id = "v4.std.provider.wire_build_alt".to_string();
     authoring.push(alt);
     let error = compile_authoring(
-        "V4ProviderReqCompat06Compat",
+        "V4ProviderReqCompat07ProviderCompat",
         "request_outbound",
         "request",
-        6,
+        7,
         &authoring,
     )
     .expect_err("two active selection variants must fail");
@@ -170,10 +170,10 @@ fn negative_order_tie_without_relation_rejected() {
     authoring[0].descriptor.phase = PluginPhase::Observation;
     authoring[0].descriptor.order = 900;
     let error = compile_authoring(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         "request_chat_process",
         "request",
-        4,
+        3,
         &authoring,
     )
     .expect_err("tie must fail");
@@ -186,10 +186,10 @@ fn negative_unauthorized_write_rejected() {
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.writes = vec!["v4.response.client_wire_payload".to_string()];
     let error = compile_authoring(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         "request_chat_process",
         "request",
-        4,
+        3,
         &authoring,
     )
     .expect_err("unauthorized write must fail");
@@ -202,10 +202,10 @@ fn negative_missing_before_target_rejected() {
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.before = vec!["v4.std.ghost.plugin".to_string()];
     let error = compile_authoring(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         "request_chat_process",
         "request",
-        4,
+        3,
         &authoring,
     )
     .expect_err("missing before target must fail");
@@ -234,10 +234,10 @@ fn negative_active_node_role_mismatch_rejected() {
     let authoring = standard_authoring(&["v4.std.provider.wire_build"])
         .expect("standard authoring succeeds for known id");
     let error = compile_authoring(
-        "V4ProviderReqCompat06Compat",
+        "V4ProviderReqCompat07ProviderCompat",
         "request_chat_process",
         "request",
-        6,
+        7,
         &authoring,
     )
     .expect_err("active node role mismatch must fail");
@@ -249,10 +249,10 @@ fn negative_active_node_position_mismatch_rejected() {
     let authoring = standard_authoring(&["v4.std.provider.wire_build"])
         .expect("standard authoring succeeds for known id");
     let error = compile_authoring(
-        "V4ProviderReqCompat06Compat",
+        "V4ProviderReqCompat07ProviderCompat",
         "request_outbound",
         "request",
-        7,
+        6,
         &authoring,
     )
     .expect_err("active node position mismatch must fail");
@@ -265,10 +265,10 @@ fn negative_active_node_position_mismatch_rejected() {
 #[test]
 fn negative_unknown_plugin_id_returns_typed_plan_error() {
     let error = compile_standard_plan(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         "request_chat_process",
         "request",
-        4,
+        3,
         &["v4.std.ghost.plugin"],
     )
     .expect_err("unknown standard plugin id must surface as typed plan error");
@@ -281,10 +281,10 @@ fn negative_non_adjacent_provider_semantic_reversal_rejected() {
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.writes = vec!["v4.request.normal_payload".to_string()];
     let error = compile_authoring(
-        "V4ProviderReqCompat06Compat",
+        "V4ProviderReqCompat07ProviderCompat",
         "request_outbound",
         "request",
-        6,
+        7,
         &authoring,
     )
     .expect_err("provider semantic must not reverse into normal payload");

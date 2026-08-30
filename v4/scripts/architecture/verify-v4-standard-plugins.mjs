@@ -100,23 +100,21 @@ const REQUIRED_SOURCE = [
 ];
 
 const NODE_PERMISSIONS = new Map([
-  ['V4DirectReq01ClientProtocol', {
-    reads: ['v4.direct.request.client_payload'], writes: [],
-  }],
   ['V4DirectReq02RelayContainer', {
-    reads: ['v4.direct.request.client_payload'], writes: ['v4.direct.request.provider_wire'],
-  }],
-  ['V4DirectReq03ProviderWire', {
-    reads: ['v4.direct.request.provider_wire'], writes: [],
-  }],
-  ['V4DirectResp01ProviderRaw', {
-    reads: ['v4.direct.response.provider_raw'], writes: [],
+    reads: [
+      'v4.direct.request.client_payload',
+      'v4.information.client_protocol',
+      'v4.information.provider_protocol',
+    ],
+    writes: ['v4.direct.request.provider_wire'],
   }],
   ['V4DirectResp02RelayContainer', {
-    reads: ['v4.direct.response.provider_raw'], writes: ['v4.direct.response.client_payload'],
-  }],
-  ['V4DirectResp03ClientProtocol', {
-    reads: ['v4.direct.response.client_payload'], writes: [],
+    reads: [
+      'v4.direct.response.provider_raw',
+      'v4.information.client_protocol',
+      'v4.information.provider_protocol',
+    ],
+    writes: ['v4.direct.response.client_payload'],
   }],
   ['V4HubReqInbound02Normalized', {
     reads: ['v4.request.normal_payload'], writes: [],
@@ -132,10 +130,20 @@ const NODE_PERMISSIONS = new Map([
     writes: ['v4.response.normal_payload', 'v4.control.metadata_center'],
   }],
   ['V4HubRespOutbound05ClientSemantic', {
-    reads: ['v4.response.normal_payload'], writes: ['v4.response.client_wire_payload'],
+    reads: [
+      'v4.response.normal_payload',
+      'v4.information.client_protocol',
+      'v4.information.provider_protocol',
+    ],
+    writes: ['v4.response.client_wire_payload'],
   }],
   ['V4HubReqOutbound06ProviderSemantic', {
-    reads: ['v4.request.normal_payload'], writes: ['v4.request.provider_semantic'],
+    reads: [
+      'v4.request.normal_payload',
+      'v4.information.client_protocol',
+      'v4.information.provider_protocol',
+    ],
+    writes: ['v4.request.provider_semantic'],
   }],
   ['V4ProviderReqCompat07ProviderCompat', {
     reads: ['v4.request.provider_semantic'], writes: ['v4.request.provider_wire_payload'],
@@ -163,10 +171,10 @@ const NODE_PERMISSIONS = new Map([
   ['V4Error06ClientProjected', {
     reads: ['v4.control.error_chain'], writes: ['v4.control.error_chain'],
   }],
-  ['V4Router05RequestClassified', {
+  ['V4HubReqExecution04Planned', {
     reads: [], writes: ['v4.control.route_facts'],
   }],
-  ['V4Router06SelectionPlan', {
+  ['V4HubReqTarget05Resolved', {
     reads: ['v4.control.route_facts'], writes: ['v4.control.target_selection'],
   }],
 ]);
@@ -227,12 +235,19 @@ function activeNodeAnchors(nodeGraph) {
     anchors.set(node.node_id, node);
   }
   for (const key of [
+    'v4_direct_request_chain',
+    'v4_direct_response_chain',
     'v4_hub_request_chain',
     'v4_hub_response_chain',
     'v4_config_chain',
     'v4_error_chain',
   ]) {
     for (const node of nodeGraph[key]?.nodes ?? []) {
+      anchors.set(node.node_id, { ...(anchors.get(node.node_id) ?? {}), ...node });
+    }
+  }
+  for (const chain of nodeGraph.chains ?? []) {
+    for (const node of chain.nodes ?? []) {
       anchors.set(node.node_id, { ...(anchors.get(node.node_id) ?? {}), ...node });
     }
   }
@@ -498,8 +513,8 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 31) {
-      failures.push(`${MODULE}: expected 31 active standard descriptors, got ${activeDescriptors.length}`);
+    if (activeDescriptors.length !== 29) {
+      failures.push(`${MODULE}: expected 29 active standard descriptors, got ${activeDescriptors.length}`);
     }
     if (!activeDescriptors.some(
       (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',
@@ -679,20 +694,20 @@ function runSelfTest() {
     }],
     ['retired node selector reintroduced', (state) => {
       state.source = source.replace(
+        '"V4ProviderReqCompat07ProviderCompat",\n        "request_outbound",',
         '"V4ProviderReqCompat06Compat",\n        "request_outbound",',
-        '"V4ProviderReqOutbound06WirePayload",\n        "request_outbound",',
       );
     }],
     ['active node role mismatch reintroduced', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat06Compat",\n        "request_outbound",',
-        '"V4ProviderReqCompat06Compat",\n        "request_chat_process",',
+        '"V4ProviderReqCompat07ProviderCompat",\n        "request_outbound",',
+        '"V4ProviderReqCompat07ProviderCompat",\n        "request_chat_process",',
       );
     }],
     ['active node position mismatch reintroduced', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat06Compat",\n        "request_outbound",\n        Some(6),',
-        '"V4ProviderReqCompat06Compat",\n        "request_outbound",\n        Some(7),',
+        '"V4ProviderReqCompat07ProviderCompat",\n        "request_outbound",\n        Some(7),',
+        '"V4ProviderReqCompat07ProviderCompat",\n        "request_outbound",\n        Some(6),',
       );
     }],
     ['provider semantic reversal reintroduced', (state) => {
@@ -703,8 +718,8 @@ function runSelfTest() {
     }],
     ['node permission broadened', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat06Compat" => vec!["v4.request.provider_wire_payload".to_string()],',
-        '"V4ProviderReqCompat06Compat" => vec![\n'
+        '"V4ProviderReqCompat07ProviderCompat" => vec!["v4.request.provider_wire_payload".to_string()],',
+        '"V4ProviderReqCompat07ProviderCompat" => vec![\n'
           + '            "v4.request.provider_wire_payload".to_string(),\n'
           + '            "v4.request.normal_payload".to_string(),\n'
           + '        ],',

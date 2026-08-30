@@ -1,6 +1,6 @@
 # V4 Direct / Relay / SSE 架构整改计划
 
-状态：`red_contract_in_progress`
+状态：`hooks_green_runtime_migration_pending`
 
 目标：把当前合并的 request/response lane 拆成 Direct 与 Relay 独立执行链；把 Direct 两端中继落实为独立 NodeContainer 节点；把 SSE 落实为独立 transport plugin；所有 payload 修改只由 registered Direct/Relay hook 或相邻 protocol codec 完成。
 
@@ -29,11 +29,11 @@ Relay response:
               -> RelayClientHook -> ClientCodec -> ClientSemantic
 
 SSE:
-  ProviderBytes -> SseIngressPlugin -> decoded frames
-  finalized client frames -> SseEgressPlugin -> ClientBytes
+  ProviderBytes -> SseIngressPlugin -> ordered opaque transport frames
+  finalized opaque client frames -> SseEgressPlugin -> ClientBytes
 ```
 
-`DirectRelayRequestNode` 与 `DirectRelayResponseNode` 是同一 Direct relay container feature 的方向化 entrypoint，保持全局 pipeline 类型锁要求；它们不能复用 Relay Chat Process 节点，也不能绕过 NodeContainer/EpochLease。SSE ingress/egress 是独立 plugin identity，effect 固定为 `transport`，不得声明 normal payload write。
+`V4DirectReq02RelayContainer` 与 `V4DirectResp02RelayContainer` 是同一 Direct relay container feature 的方向化 entrypoint，作为 client/provider Direct 连接之间唯一独立 NodeContainer 节点；它们不能复用 Relay Chat Process 节点，也不能绕过 NodeContainer/EpochLease。SSE ingress/egress 是独立 plugin identity，effect 固定为 `transport`，不得解析协议事件、判断业务 terminal truth 或声明 normal payload write。
 
 ## 首批红测
 

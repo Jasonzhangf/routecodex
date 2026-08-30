@@ -1,7 +1,7 @@
 //! V4 response inbound plugin: provider raw/semantic -> parsed response.
 //!
 //! This module owns the `protocol_decode` descriptor and typed handle for
-//! `V4HubRespInbound02Parsed`. It only consumes the adjacent
+//! `V4HubRespInbound03Normalized`. It only consumes the adjacent
 //! `v4.response.provider_raw` resource and writes the adjacent
 //! `v4.response.normal_payload` resource. It never performs response
 //! governance, tool harvest, continuation save/release or provider/client
@@ -71,9 +71,9 @@ pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
     vec![plugin(
         PLUGIN_ID,
         PluginCategory::Protocol,
-        "V4HubRespInbound02Parsed",
+        "V4HubRespInbound03Normalized",
         "response_inbound",
-        Some(2),
+        Some(3),
         PluginKind::Operator,
         PluginEffect::Semantic,
         PluginPhase::Semantic,
@@ -90,36 +90,8 @@ pub(crate) fn protocol_decode_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String>
         .ok_or_else(|| "protocol_decode requires an object provider response".to_string())?;
     reject_control_fields(raw)?;
 
-    let request_id = raw
-        .get("requestId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "protocol_decode requires string requestId".to_string())?;
-    let provider_id = raw
-        .get("providerId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "protocol_decode requires string providerId".to_string())?;
-    let status_code = raw
-        .get("statusCode")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| "protocol_decode requires numeric statusCode".to_string())?;
-    if status_code < 200 || status_code >= 300 {
-        return Err(format!(
-            "protocol_decode rejects non-success provider status {status_code}"
-        ));
-    }
-
-    let provider_data = raw
-        .get("data")
-        .ok_or_else(|| "protocol_decode requires provider data object".to_string())?;
-    let provider_data_object = provider_data
-        .as_object()
-        .ok_or_else(|| "protocol_decode requires provider data object".to_string())?;
-
-    let mut parsed = provider_data_object.clone();
-    parsed.insert("requestId".to_string(), json!(request_id));
-    parsed.insert("providerId".to_string(), json!(provider_id));
-    parsed.insert("statusCode".to_string(), json!(status_code));
-    parsed.insert("output".to_string(), normalize_output(provider_data)?);
+    let mut parsed = raw.clone();
+    parsed.insert("output".to_string(), normalize_output(data)?);
     ctx.write_data(Value::Object(parsed))
         .map_err(|error| error.to_string())
 }

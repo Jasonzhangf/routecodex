@@ -294,8 +294,8 @@
         "protocol_decode",
         "response_governance",
         "tool_harvest",
-        "client_semantic_projection",
-        "sse_frame_boundary",
+        "direct_response_passthrough",
+        "relay_response_projection",
         "frame_build"
       ],
       "required_gates": [
@@ -1323,20 +1323,20 @@
     },
     {
       "function_id": "v4.hook.direct.request_response",
-      "status": "design",
+      "status": "integration_pending",
       "feature_id": "V4-DIRECT-RELAY-SSE",
       "owner": "routecodex-v4-standard-plugins",
-      "entry_symbols": [],
-      "resource_ids": ["v4.request.normal_payload", "v4.response.normal_payload", "v4.information.execution_lane", "v4.information.client_protocol", "v4.information.provider_protocol"],
+      "entry_symbols": ["direct_model_passthrough", "direct_response_passthrough"],
+      "resource_ids": ["v4.direct.request.client_payload", "v4.direct.request.provider_wire", "v4.direct.response.provider_raw", "v4.direct.response.client_payload", "v4.information.execution_lane", "v4.information.client_protocol", "v4.information.provider_protocol"],
       "source_paths": ["crates/routecodex-v4-standard-plugins/src/model_hooks.rs"],
       "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red", "v4_parity_gate_standard_plugins"]
     },
     {
       "function_id": "v4.hook.relay.request_response",
-      "status": "design",
+      "status": "integration_pending",
       "feature_id": "V4-DIRECT-RELAY-SSE",
       "owner": "routecodex-v4-standard-plugins",
-      "entry_symbols": [],
+      "entry_symbols": ["relay_model_projection", "relay_response_projection", "project_responses_to_chat"],
       "resource_ids": ["v4.request.normal_payload", "v4.response.normal_payload", "v4.information.execution_lane", "v4.information.client_protocol", "v4.information.provider_protocol"],
       "source_paths": ["crates/routecodex-v4-standard-plugins/src/model_hooks.rs", "crates/routecodex-v4-standard-plugins/src/response_outbound.rs"],
       "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red", "v4_parity_gate_standard_plugins"]
