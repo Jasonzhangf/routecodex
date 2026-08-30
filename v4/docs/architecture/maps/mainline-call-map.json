@@ -1100,7 +1100,7 @@
       "callee_feature_id": "V4-DIRECT-RELAY-SSE",
       "resource_id": "v4.information.execution_lane",
       "path": "crates/routecodex-v4-runtime/src/lib.rs,crates/routecodex-v4-node-container/src/direct_relay.rs",
-      "status": "binding_pending"
+      "status": "verified"
     },
     {
       "from": "V4DirectReq02RelayContainer",
@@ -1111,7 +1111,7 @@
       "callee_feature_id": "V4-DIRECT-RELAY-SSE",
       "resource_id": "v4.direct.request.client_payload",
       "path": "crates/routecodex-v4-node-container/src/direct_relay.rs,crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
-      "status": "binding_pending"
+      "status": "verified"
     },
     {
       "from": "V4DirectResp02RelayContainer",
@@ -1122,7 +1122,7 @@
       "callee_feature_id": "V4-DIRECT-RELAY-SSE",
       "resource_id": "v4.direct.response.provider_raw",
       "path": "crates/routecodex-v4-node-container/src/direct_relay.rs,crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
-      "status": "binding_pending"
+      "status": "verified"
     },
     {
       "from": "V4HubReqOutbound06ProviderSemantic",
@@ -1154,8 +1154,8 @@
       "caller_feature_id": "V4-DIRECT-RELAY-SSE",
       "callee_feature_id": "V4-DIRECT-RELAY-SSE",
       "resource_id": "v4.transport.sse_frames",
-      "path": "crates/routecodex-v4-provider/src/lib.rs,crates/routecodex-v4-server/src/lib.rs",
-      "status": "binding_pending"
+      "path": "crates/routecodex-v4-standard-plugins/src/sse_transport.rs,crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "verified"
     }
   ]
 }

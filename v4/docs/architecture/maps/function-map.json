@@ -1303,7 +1303,7 @@
     },
     {
       "function_id": "v4.transport.sse_plugin",
-      "status": "integration_pending",
+      "status": "active",
       "feature_id": "V4-DIRECT-RELAY-SSE",
       "owner": "routecodex-v4-standard-plugins::sse_transport",
       "entry_symbols": ["SseIngressPlugin::push_chunk", "SseIngressPlugin::finish", "SseEgressPlugin::enqueue", "SseEgressPlugin::pop", "SseEgressPlugin::keepalive_frame", "SseEgressPlugin::drain_closeout"],
@@ -1313,7 +1313,7 @@
     },
     {
       "function_id": "v4.direct.relay_container",
-      "status": "integration_pending",
+      "status": "active",
       "feature_id": "V4-DIRECT-RELAY-SSE",
       "owner": "routecodex-v4-node-container",
       "entry_symbols": ["DirectRelayInformation::direct", "DirectRelayContainer::execute_request", "DirectRelayContainer::execute_response"],
@@ -1323,7 +1323,7 @@
     },
     {
       "function_id": "v4.hook.direct.request_response",
-      "status": "integration_pending",
+      "status": "active",
       "feature_id": "V4-DIRECT-RELAY-SSE",
       "owner": "routecodex-v4-standard-plugins",
       "entry_symbols": ["direct_model_passthrough", "direct_response_passthrough"],
