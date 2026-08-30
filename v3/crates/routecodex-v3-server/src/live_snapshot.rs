@@ -10,7 +10,7 @@ pub(crate) fn v3_output_has_terminal_client_error(
     status: u16,
     error_chain: Option<&[&'static str]>,
 ) -> bool {
-    status >= 400 || error_chain.is_some_and(|chain| !chain.is_empty())
+    status >= 400
 }
 
 #[derive(Clone)]
