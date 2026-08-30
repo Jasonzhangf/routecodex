@@ -172,7 +172,14 @@ pub fn materialize_execution_epoch_bundle(
     if candidate.nodes.is_empty() {
         return Err(MaterializationError::InvalidIdentity("nodes".to_string()));
     }
-    for chain in ["request", "response", "error"] {
+    const PRODUCTION_CHAINS: [&str; 5] = [
+        "direct_request",
+        "direct_response",
+        "relay_request",
+        "relay_response",
+        "error",
+    ];
+    for chain in PRODUCTION_CHAINS {
         let expected = candidate
             .pipelines
             .get(chain)
@@ -184,7 +191,9 @@ pub fn materialize_execution_epoch_bundle(
             return Err(MaterializationError::PipelineMismatch(chain.to_string()));
         }
     }
-    if candidate.pipelines.len() != 3 || candidate.entrypoints.len() != 3 {
+    if candidate.pipelines.len() != PRODUCTION_CHAINS.len()
+        || candidate.entrypoints.len() != PRODUCTION_CHAINS.len()
+    {
         return Err(MaterializationError::PipelineMismatch(
             "unknown".to_string(),
         ));
