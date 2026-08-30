@@ -36142,5 +36142,5 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 
 - 根因：health score 与 configured priority 直接相加会把瞬态失败的高意愿 target 永久降出最高 priority bucket；双 probe runner 又竞争同一 cooldown map，且 success 分裂恢复 score/cooldown，旧 delta 可在下一次成功后重新污染 score。
 - 修复：configured priority 保持静态；Provider Health 是唯一状态 owner；Runtime 只有一个 generation-guarded probe owner；scheduled/rescue probe 共用 typed permit 和原子 success/failure transition；probe 与 business cooldown 使用独立 deadline；503 改为三次计数恢复；2xx probe 必须通过 provider 协议终态。
-- 证据：provider/error/target/runtime/server 定向与回归测试、resource/function/mainline/module gates、canonical build/install 通过；全局安装 `0.90.4739`，聚合 restart 后 7777/4444 health 200。安装入口真实 Responses 请求完成，并自然观测到 429 进入 typed Error 链。AGY review `v3-health-scheduler-failback-20260830` PASS，零 findings。
+- 证据：provider/error/target/runtime/server 定向与回归测试、resource/function/mainline 及 scoped owner gates、canonical build/install 通过；全局安装 `0.90.4739`，聚合 restart 后 7777/4444 health 200。安装入口真实 Responses 请求完成，并自然观测到 429 进入 typed Error 链。AGY review `v3-health-scheduler-failback-20260830` PASS，零 findings。全量 module-boundary gate 仍被三个未修改文件中的既有 fallback 文案阻断。
 - 在线缺口：当前 cooldown pool 为空，真实 429 分散在不同 auth key；未通过修改 live config/health 或故意压测制造同一 generation 三次失败，因此 scheduled probe 后 failback 未做生产态故障注入重放。
