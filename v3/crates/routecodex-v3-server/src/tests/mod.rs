@@ -953,6 +953,30 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
     )
     .is_none());
     assert_eq!(pre_transport_error.client_payload.status, 598);
+
+    let mut streaming_missing_carrier = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
+        client_payload: V3Resp15ClientPayload {
+            status: 200,
+            headers: BTreeMap::new(),
+            body: V3ClientBody::Json(json!({"output": []})),
+        },
+        provider_request_snapshot: None,
+        provider_response_snapshot: None,
+        node_trace: vec!["V3Transport13ResponsesHttpRequest"],
+        error_chain: None,
+        observability: None,
+        stream_observation: Some(V3RuntimeStreamObservation::default()),
+        protocol_relay_handoff: None,
+    };
+    assert!(capture_v3_responses_direct_provider_snapshots(
+        &state,
+        "responses",
+        "/v1/responses",
+        "streaming-missing-carrier",
+        &mut streaming_missing_carrier,
+    )
+    .is_none());
+    assert_eq!(streaming_missing_carrier.client_payload.status, 200);
     fs::remove_dir_all(root).unwrap();
 }
 
