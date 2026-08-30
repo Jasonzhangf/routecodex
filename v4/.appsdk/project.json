@@ -724,7 +724,7 @@
         "suite_id": "v4-plugin-plan-l2-regression"
       },
       "source_owner": "routecodex-v4-plugin-plan",
-      "stage": "source_implemented"
+      "stage": "controlled_verified"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-plugin-catalog/**",
@@ -782,7 +782,7 @@
         "suite_id": "v4-plugin-catalog-l2-regression"
       },
       "source_owner": "routecodex-v4-plugin-catalog",
-      "stage": "source_implemented"
+      "stage": "controlled_verified"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-cordis-bridge/**",
