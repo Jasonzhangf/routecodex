@@ -5846,3 +5846,18 @@ Tags: #v4 #cordis #workflow-correction #evidence-first
 
 ### 2026-08-29 execution correction
 - Long-running runtime goals must continue through the next evidence gate after reporting a gap; an incomplete report is not a stopping point. For toolreason, proceed from typed observation tests to build/install/restart/online replay and console/client evidence before any completion report.
+
+### 2026-08-29 V3 toolreason cross-protocol verification contract
+- 4444 is the only live verification listener for this task; 7777 must not be opened, tested, or used as evidence. `/v1/responses` uses CC; `/v1/messages` uses `minimax_anthropic / MiniMax-M3`. A request routed to another provider is a routing/config failure, not Anthropic evidence.
+- Req04 guidance is intentionally strict for compatible tool-call shape, while `model_id` and `goal_alignment_confidence` remain optional response fields. `apply_patch` is an exception with a raw patch-text contract: it must stay a raw custom tool and must not be wrapped into an `input + reason` function schema. The regression was proven by a red test and fixed in `97ac8081c`.
+- Direct toolreason interception and client projection belong to the response hook and must not be implemented by changing generic SSE. Relay toolreason harvest/strip and projection belong to `Resp03` in Rust Chat Process. The chain must be evidenced in order: provider-bound request → raw/provider response → Resp01 → Resp03 → reasoning/thinking → client frame, with a `TOOLREASON` console line for every round.
+- `curl`/provider A-B-C is method and boundary evidence only; it cannot substitute for same-entry pipeline replay. Completion requires the installed matching artifact, aggregate `routecodex restart`, 4444 health, and five fresh online replays per target path with per-request console/client evidence. Missing logs or `toolmissing` are failure evidence, not a successful projection.
+Tags: #v3 #toolreason #req04 #resp03 #direct-hook #relay-chat-process #4444 #evidence-first #apply-patch-regression
+
+- 2026-08-29: The active architecture maps still describe an older tool-thinking completion boundary (7777 Responses and 10000 Anthropic, 10 consecutive turns), while the current Jason-supplied task contract is 4444-only with five replays and explicit Responses=CC / Anthropic Messages=MiniMax mapping. Treat the task contract as the current verification scope, and report the map drift; do not silently claim the older map boundary is satisfied or access 7777/10000.
+Tags: #v3 #toolreason #verification-map-drift #4444-only #no-scope-expansion
+
+### 2026-08-29 协作 wake 降噪
+- `TMUX_STATUS` 与 heartbeat 是 wake-only 探测，不是任务；无 active task 时不得以 ACK/状态问候代替工作。
+- Master 每次收到 wake 只在自然断点核对 task/inbox；有未完成任务就直接推进下一证据门，不对 worker 做重复问候。
+Tags: #collab #master #wake-only #no-ack-noise
