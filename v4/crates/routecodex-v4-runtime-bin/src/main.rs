@@ -18,7 +18,7 @@ use routecodex_v4_lifecycle::{
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
-    build_retry_wire, load_profile,
+    build_retry_wire,
     send_anthropic_messages, send_anthropic_messages_streaming, send_openai_chat,
     send_openai_chat_streaming, send_responses, send_responses_streaming, validate_auth_alias,
     write_provider_profile, ProviderInitAuth, ProviderInitOptions, ProviderResponseStream,
@@ -777,11 +777,10 @@ fn handle_responses(
     );
     let _ = std::io::stdout().flush();
     let continuation_owner = if entry_protocol == "responses" {
-        load_profile(&target.config_path)
-            .map_err(|error| {
-                project_fault(request, RuntimeFault::new(&error.code, error.message), 500)
-            })?
-            .responses_continuation
+        // V4 retains only provider-owned Direct Responses continuation.
+        // Local/relay continuation is retired and must never be inferred from
+        // provider profile configuration.
+        "direct".to_string()
     } else {
         continuation_owner.to_string()
     };
