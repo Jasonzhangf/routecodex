@@ -1,5 +1,5 @@
-use crate::{ExecutionBinding, RuntimeFault};
 use super::request_port::RequestPortLease;
+use crate::{ExecutionBinding, RuntimeFault};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponsePortReceipt {

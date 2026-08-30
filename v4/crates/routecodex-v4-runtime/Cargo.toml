@@ -17,6 +17,7 @@ routecodex-v4-node-container = { path = "../routecodex-v4-node-container" }
 routecodex-v4-plugin-plan = { path = "../routecodex-v4-plugin-plan" }
 routecodex-v4-plugin-contract = { path = "../routecodex-v4-plugin-contract" }
 routecodex-v4-skeleton = { path = "../routecodex-v4-skeleton" }
+routecodex-v4-standard-plugins = { path = "../routecodex-v4-standard-plugins" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

@@ -18,18 +18,15 @@
 //! - control fields never enter provider/client wire.
 
 use routecodex_v4_base_node::Scope;
-use routecodex_v4_control::{ControlSignal, ControlSignalKind, MetadataCenter};
-use routecodex_v4_cordis_bridge::{
-    ScopeContinuationOwner, ScopeEntryProtocol, ScopeSessionCommand, ScopeSessionOperation,
-};
+use routecodex_v4_control::MetadataCenter;
+use routecodex_v4_cordis_bridge::{ScopeSessionCommand, ScopeSessionOperation};
 use routecodex_v4_error::{
     ClientProjection, DecisionAction, ErrorCenter, ErrorChain, ErrorChainError, ExecutionDecision,
     RetryPolicy,
 };
+use routecodex_v4_node_container::{ActiveEpochStore, ExecutionEpochBundle};
 use routecodex_v4_skeleton::SkeletonPlan;
-use routecodex_v4_node_container::{
-    ActiveEpochStore, ExecutionEpochBundle, ExecutionEpochIdentity, NodeContainer, PlanBindings,
-};
+use routecodex_v4_standard_plugins::StandardHandleRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -37,7 +34,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
-use std::sync::{Arc, Mutex};
 
 mod control_resources;
 mod execution_engine;
@@ -46,59 +42,17 @@ pub mod request_port;
 pub mod response_error_port;
 
 pub use control_resources::*;
-pub use execution_engine::{ExecutionEngine, ExecutionError, ExecutionNode, NodeExecutionFrame, NodeOutcome};
+pub use execution_engine::{ExecutionEngine, ExecutionError, NodeExecutionFrame, NodeOutcome};
 // Single source of truth: `PluginKind` is owned by routecodex-v4-plugin-contract
 // (v4/contracts/node-plugin.contract.json kinds). The runtime never defines a
 // second plugin-kind taxonomy; it only re-exports the contract type.
 pub use routecodex_v4_plugin_contract::PluginKind;
-
-fn sha256_control_digest(value: &str) -> String {
-    format!("sha256:{:x}", Sha256::digest(value.as_bytes()))
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponsesWireRequest {
     pub body: Vec<u8>,
     pub model: String,
     pub stream: bool,
-}
-
-/// Adjacent relay request projection owned by the Rust Hub runtime. Unknown
-/// client data fields are preserved; only protocol-defined Chat fields are
-/// renamed or structurally converted for a Responses upstream.
-pub fn project_chat_request_to_responses(client_body: &Value) -> Result<Value, RuntimeFault> {
-    let object = client_body.as_object().ok_or_else(|| {
-        RuntimeFault::new("chat_request_invalid", "Chat request must be an object")
-    })?;
-    let messages = object
-        .get("messages")
-        .and_then(Value::as_array)
-        .ok_or_else(|| RuntimeFault::new("chat_request_invalid", "messages must be an array"))?;
-    let mut projected = object.clone();
-    projected.remove("messages");
-    projected.insert("input".to_string(), Value::Array(messages.clone()));
-    if let Some(max_tokens) = object.get("max_tokens") {
-        projected.remove("max_tokens");
-        projected.insert("max_output_tokens".to_string(), max_tokens.clone());
-    }
-    if let Some(tools) = object.get("tools").and_then(Value::as_array) {
-        let tools = tools
-            .iter()
-            .map(|tool| {
-                let function = tool.get("function").ok_or_else(|| {
-                    RuntimeFault::new("chat_request_invalid", "function tool body is required")
-                })?;
-                Ok(serde_json::json!({
-                    "type": "function",
-                    "name": function.get("name").cloned().unwrap_or(Value::Null),
-                    "description": function.get("description").cloned().unwrap_or(Value::Null),
-                    "parameters": function.get("parameters").cloned().unwrap_or_else(|| serde_json::json!({}))
-                }))
-            })
-            .collect::<Result<Vec<_>, RuntimeFault>>()?;
-        projected.insert("tools".to_string(), Value::Array(tools));
-    }
-    Ok(Value::Object(projected))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -369,7 +323,10 @@ pub fn select_relay_operator(facts: &ContinuationFacts) -> Result<RelayOperator,
     if facts.entry_protocol == "responses" && facts.continuation_owner == "direct" {
         Ok(RelayOperator::Direct)
     } else if facts.continuation_owner == "relay"
-        && matches!(facts.entry_protocol.as_str(), "chat" | "messages" | "anthropic" | "gemini")
+        && matches!(
+            facts.entry_protocol.as_str(),
+            "chat" | "messages" | "anthropic" | "gemini"
+        )
     {
         Ok(RelayOperator::Relay)
     } else {
@@ -865,8 +822,9 @@ pub struct ControlView {
 
 /// Information plane view: protocol facts that may legitimately shape
 /// projection (entry protocol, endpoint, model).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InformationView {
+    #[serde(rename = "entry_protocol")]
     pub protocol: Option<String>,
     pub endpoint: Option<String>,
     pub model: Option<String>,
@@ -977,13 +935,27 @@ impl ExecutionContext {
         self.diagnostic.trace.push(entry.into());
     }
 
-    /// Build the node-local compatibility view from the adjacent frame. The
-    /// frame owns all data/control crossing; this context is only a temporary
-    /// plugin ABI view and is never retained as the frame between nodes.
-    fn from_frame(&self, frame: &crate::NodeExecutionFrame) -> Result<Self, RuntimeFault> {
+    /// Project the adjacent business payload back into the legacy report
+    /// surface. Request/response data remains the exact payload object; scope
+    /// and lifecycle facts stay in the typed control frame.
+    fn from_frame(
+        &self,
+        chain_id: &str,
+        frame: &crate::NodeExecutionFrame,
+    ) -> Result<Self, RuntimeFault> {
         let mut context = self.clone();
-        context.data = serde_json::from_value(frame.data.clone())
+        let encoded = serde_json::to_string(&frame.data)
             .map_err(|error| RuntimeFault::new("execution_frame_data", error.to_string()))?;
+        match chain_id {
+            "request" => context.data.provider_wire = Some(encoded),
+            "response" => context.data.client_frame = Some(encoded),
+            other => {
+                return Err(RuntimeFault::new(
+                    "execution_chain_external_owner",
+                    format!("chain {other} is not owned by SkeletonRuntime"),
+                ));
+            }
+        }
         let control: ControlFrame = serde_json::from_value(frame.control.clone())
             .map_err(|error| RuntimeFault::new("execution_frame_control", error.to_string()))?;
         context.control.continuation_scope = control.continuation_scope;
@@ -997,10 +969,15 @@ impl ExecutionContext {
         context.control.route_exit = control.route_exit;
         context.control.continuation_committed = control.continuation_committed;
         context.control.continuation_restored = control.continuation_restored;
+        context.information = serde_json::from_value(frame.information.clone())
+            .map_err(|error| RuntimeFault::new("execution_frame_information", error.to_string()))?;
+        context.diagnostic.trace.extend(frame.events.iter().map(|event| {
+            format!("{}:{}:{}", event.plugin_id, event.kind, event.message)
+        }));
         Ok(context)
     }
 
-    fn into_frame(self) -> Result<crate::NodeExecutionFrame, RuntimeFault> {
+    fn into_frame(self, chain_id: &str) -> Result<crate::NodeExecutionFrame, RuntimeFault> {
         let control = ControlFrame {
             continuation_scope: self.control.continuation_scope,
             continuation_owner: self.control.continuation_owner,
@@ -1014,11 +991,34 @@ impl ExecutionContext {
             continuation_committed: self.control.continuation_committed,
             continuation_restored: self.control.continuation_restored,
         };
-        Ok(crate::NodeExecutionFrame::new(
-            serde_json::to_value(self.data)
-                .map_err(|error| RuntimeFault::new("execution_frame_data", error.to_string()))?,
+        let raw_payload = match chain_id {
+            "request" => self.data.raw_entry.as_deref(),
+            "response" => self.data.provider_raw.as_deref(),
+            other => {
+                return Err(RuntimeFault::new(
+                    "execution_chain_external_owner",
+                    format!("chain {other} is not owned by SkeletonRuntime"),
+                ));
+            }
+        }
+        .ok_or_else(|| RuntimeFault::new("execution_frame_data", "business payload is missing"))?;
+        let data = serde_json::from_str(raw_payload).map_err(|error| {
+            RuntimeFault::new(
+                if chain_id == "response" {
+                    "raw_parse"
+                } else {
+                    "execution_frame_data"
+                },
+                error.to_string(),
+            )
+        })?;
+        Ok(crate::NodeExecutionFrame::with_information(
+            data,
             serde_json::to_value(control)
                 .map_err(|error| RuntimeFault::new("execution_frame_control", error.to_string()))?,
+            serde_json::to_value(self.information).map_err(|error| {
+                RuntimeFault::new("execution_frame_information", error.to_string())
+            })?,
         ))
     }
 }
@@ -1058,7 +1058,9 @@ pub fn assert_no_control_leak(ctx: &ExecutionContext) -> Result<(), RuntimeFault
         ("client_frame", ctx.data.client_frame.as_deref()),
     ] {
         let Some(wire) = wire else { continue };
-        let Ok(value) = serde_json::from_str::<Value>(wire) else { continue };
+        let Ok(value) = serde_json::from_str::<Value>(wire) else {
+            continue;
+        };
         if let Some(key) = contains_control_key(&value) {
             return Err(RuntimeFault::new(
                 "control_payload_leak",
@@ -1137,7 +1139,11 @@ impl RuntimeOperator for Normalize {
             .as_deref()
             .ok_or_else(|| RuntimeFault::new("normalize", "protocol not parsed"))?;
         ctx.data.normalized_request = Some(if let Some(raw) = ctx.data.raw_entry.as_deref() {
-            if raw.starts_with('{') { raw.to_string() } else { format!("normalized:{protocol}:{}", ctx.request_id()) }
+            if raw.starts_with('{') {
+                raw.to_string()
+            } else {
+                format!("normalized:{protocol}:{}", ctx.request_id())
+            }
         } else {
             format!("normalized:{protocol}:{}", ctx.request_id())
         });
@@ -1167,7 +1173,9 @@ impl RuntimeOperator for InputValidate {
             .information
             .protocol
             .as_deref()
-            .map(|protocol| matches!(protocol, "chat" | "responses") && raw.trim_start().starts_with('{'))
+            .map(|protocol| {
+                matches!(protocol, "chat" | "responses") && raw.trim_start().starts_with('{')
+            })
             .unwrap_or(false);
         if !(raw.starts_with("chat:") || raw.starts_with("responses:") || protocol_bound_json) {
             return Err(RuntimeFault::new(
@@ -1180,110 +1188,6 @@ impl RuntimeOperator for InputValidate {
                 "input_validate",
                 "normalized request missing",
             ));
-        }
-        Ok(())
-    }
-}
-
-struct ContinuationClassify;
-impl RuntimeOperator for ContinuationClassify {
-    fn plugin_id(&self) -> &'static str {
-        "continuation_classify"
-    }
-    fn kind(&self) -> PluginKind {
-        PluginKind::Control
-    }
-    fn execute(
-        &self,
-        ctx: &mut ExecutionContext,
-        _registries: &mut RuntimeRegistries<'_>,
-    ) -> Result<(), RuntimeFault> {
-        // Classification only: lock typed facts (entry protocol, provider wire
-        // protocol, continuation owner, execution mode). Never restores
-        // history or rebuilds context here (immutable interval contract).
-        let protocol = ctx.information.protocol.as_deref().unwrap_or("unknown");
-        let owner_hint = ctx.control.continuation_owner.clone();
-        let owner = owner_hint.as_deref().unwrap_or(match protocol {
-            "responses" => "direct",
-            "chat" | "messages" | "anthropic" | "gemini" => "relay",
-            _ => "none",
-        });
-        let execution_mode = match owner {
-            "relay" => "relay",
-            "direct" => "direct",
-            _ => "none",
-        };
-        ctx.control.continuation_owner = Some(owner.to_string());
-        ctx.control.execution_mode = Some(execution_mode.to_string());
-        let facts = ContinuationFacts::new(protocol, "hub", owner, execution_mode);
-        if select_relay_operator(&facts)? == RelayOperator::Relay {
-            ctx.control.relay_operator_selected = true;
-        }
-        ctx.control.continuation_scope = Some(format!(
-            "scope:{protocol}:{owner}:port-{}:session-{}:conversation-{}",
-            ctx.port(),
-            ctx.session_scope(),
-            ctx.conversation_scope()
-        ));
-        Ok(())
-    }
-}
-
-struct ContinuationRestore;
-impl RuntimeOperator for ContinuationRestore {
-    fn plugin_id(&self) -> &'static str {
-        "continuation_restore"
-    }
-    fn kind(&self) -> PluginKind {
-        PluginKind::Control
-    }
-    fn execute(
-        &self,
-        ctx: &mut ExecutionContext,
-        registries: &mut RuntimeRegistries<'_>,
-    ) -> Result<(), RuntimeFault> {
-        // Restore is the request-side endpoint of the immutable interval:
-        // resp_chatprocess save -> (no semantic transformation) ->
-        // req_chatprocess restore. Three keys are required and full input is
-        // mandatory; missing owner or missing binding is not a fallback.
-        let owner = ctx.control.continuation_owner.as_deref().unwrap_or("none");
-        let protocol = ctx.information.protocol.as_deref().unwrap_or("unknown");
-        if owner == "none" {
-            return Ok(());
-        }
-        let key = ContinuationKey::new(
-            protocol,
-            owner,
-            ctx.port(),
-            ctx.session_scope(),
-            ctx.conversation_scope(),
-        );
-        let full_input = ctx.data.normalized_request.as_deref().ok_or_else(|| {
-            RuntimeFault::new(
-                "full_input_missing",
-                "continuation restore requires full input",
-            )
-        })?;
-        let full_input_hash = sha256_control_digest(full_input);
-        if registries.scope.is_bound(&key) {
-            registries
-                .scope
-                .restore(&key, ctx.request_id(), Some(&full_input_hash))
-                .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))?;
-            ctx.control.continuation_restored = true;
-        } else if registries.scope.session_trio_bound(
-            ctx.port(),
-            ctx.session_scope(),
-            ctx.conversation_scope(),
-        ) {
-            // A continuation exists for this session trio but the requested
-            // three keys do not match: fail fast with the exact isolation
-            // error instead of silently starting a fresh turn.
-            registries
-                .scope
-                .restore(&key, ctx.request_id(), Some(&full_input_hash))
-                .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))?;
-            ctx.control.continuation_restored = true;
         }
         Ok(())
     }
@@ -1592,383 +1496,6 @@ impl RuntimeOperator for ToolHarvest {
     }
 }
 
-struct ContinuationCommit;
-impl RuntimeOperator for ContinuationCommit {
-    fn plugin_id(&self) -> &'static str {
-        "continuation_commit"
-    }
-    fn kind(&self) -> PluginKind {
-        PluginKind::Control
-    }
-    fn execute(
-        &self,
-        ctx: &mut ExecutionContext,
-        registries: &mut RuntimeRegistries<'_>,
-    ) -> Result<(), RuntimeFault> {
-        // Continuation truth saved at chat process exit (unique save point);
-        // the interval between this commit and the next request restore is
-        // immutable. A response without a continuation owner (e.g. a plain
-        // mock frame) commits the checkpoint with no binding: nothing to save.
-        ctx.control.continuation_committed = true;
-        let Some(owner) = ctx.control.continuation_owner.as_deref() else {
-            return Ok(());
-        };
-        if owner == "none" {
-            return Ok(());
-        }
-        // Relay/local continuation is intentionally not implemented. Relay
-        // requests may still use the normal protocol projection path, but
-        // they never create a local save/restore binding. Only a direct
-        // provider-owned Responses continuation may be persisted here.
-        if owner == "relay" {
-            return Ok(());
-        }
-        let protocol = ctx.information.protocol.as_deref().unwrap_or("unknown");
-        let entry_protocol = match protocol {
-            "responses" => ScopeEntryProtocol::Responses,
-            "chat" | "openai_chat" => ScopeEntryProtocol::Chat,
-            other => {
-                return Err(RuntimeFault::new(
-                    "continuation_commit",
-                    format!("unsupported continuation entry protocol {other}"),
-                ))
-            }
-        };
-        let continuation_owner = match owner {
-            "direct" => ScopeContinuationOwner::Direct,
-            "relay" => ScopeContinuationOwner::Relay,
-            other => {
-                return Err(RuntimeFault::new(
-                    "continuation_commit",
-                    format!("unsupported continuation owner {other}"),
-                ))
-            }
-        };
-        let key = ContinuationKey::new(
-            protocol,
-            owner,
-            ctx.port(),
-            ctx.session_scope(),
-            ctx.conversation_scope(),
-        );
-        let payload_hash = ctx
-            .data
-            .parsed_response
-            .as_deref()
-            .map(sha256_control_digest)
-            .ok_or_else(|| RuntimeFault::new("continuation_commit", "response payload missing"))?;
-        let control_key = format!("continuation.commit:{}", ctx.request_id());
-        ctx.control
-            .metadata
-            .register(ControlSignal::new(
-                ControlSignalKind::Continuation,
-                &control_key,
-                &payload_hash,
-                ctx.scope().clone(),
-                Some(&payload_hash),
-            ))
-            .map_err(|error| RuntimeFault::new("continuation_metadata", format!("{error:?}")))?;
-        ctx.control
-            .metadata
-            .consume(&control_key)
-            .map_err(|error| RuntimeFault::new("continuation_metadata", format!("{error:?}")))?;
-        if registries.scope.is_restored(&key) {
-            let release = ScopeSessionCommand {
-                entry_protocol,
-                continuation_owner,
-                pipeline_id: ctx.binding().plan_hash.clone(),
-                port: ctx.port(),
-                session_scope: ctx.session_scope().to_string(),
-                conversation_scope: ctx.conversation_scope().to_string(),
-                request_id: ctx.request_id().to_string(),
-                full_input_hash: payload_hash.clone(),
-                operation: ScopeSessionOperation::Release,
-                sequence: 1,
-            };
-            let control = serde_json::json!({"scope_command": release});
-            release_scope_via_bridge(&control, registries.scope)
-                .map_err(|error| RuntimeFault::new("continuation_release", error.to_string()))?;
-        }
-        let bind = ScopeSessionCommand {
-            entry_protocol,
-            continuation_owner,
-            pipeline_id: ctx.binding().plan_hash.clone(),
-            port: ctx.port(),
-            session_scope: ctx.session_scope().to_string(),
-            conversation_scope: ctx.conversation_scope().to_string(),
-            request_id: ctx.request_id().to_string(),
-            full_input_hash: payload_hash,
-            operation: ScopeSessionOperation::Bind,
-            sequence: 2,
-        };
-        let control = serde_json::json!({"scope_command": bind});
-        bind_scope_via_bridge(&control, registries.scope)
-            .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))?;
-        ctx.control
-            .metadata
-            .release(&control_key)
-            .map_err(|error| RuntimeFault::new("continuation_metadata", format!("{error:?}")))?;
-        Ok(())
-    }
-}
-
-struct ClientSemanticProjection;
-
-fn responses_text(value: &Value) -> String {
-    value
-        .get("output")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
-        .filter_map(|item| item.get("content").and_then(Value::as_array))
-        .flatten()
-        .filter(|part| part.get("type").and_then(Value::as_str) == Some("output_text"))
-        .filter_map(|part| part.get("text").and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join("")
-}
-
-fn responses_tool_calls(value: &Value) -> Vec<Value> {
-    value
-        .get("output")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
-        .map(|item| {
-            serde_json::json!({
-                "id": item.get("call_id").or_else(|| item.get("id")).cloned().unwrap_or(Value::Null),
-                "type": "function",
-                "function": {
-                    "name": item.get("name").cloned().unwrap_or(Value::Null),
-                    "arguments": item.get("arguments").cloned().unwrap_or_else(|| Value::String(String::new()))
-                }
-            })
-        })
-        .collect()
-}
-
-fn project_responses_usage_to_chat(value: &Value) -> Value {
-    let Some(usage) = value.get("usage").and_then(Value::as_object) else {
-        return Value::Null;
-    };
-    let mut projected = serde_json::Map::new();
-    for (source, target) in [
-        ("input_tokens", "prompt_tokens"),
-        ("output_tokens", "completion_tokens"),
-        ("total_tokens", "total_tokens"),
-        ("input_tokens_details", "prompt_tokens_details"),
-        ("output_tokens_details", "completion_tokens_details"),
-    ] {
-        if let Some(field) = usage.get(source) {
-            projected.insert(target.to_string(), field.clone());
-        }
-    }
-    Value::Object(projected)
-}
-
-fn project_responses_json_to_chat(value: &Value) -> Value {
-    let tool_calls = responses_tool_calls(value);
-    let text = responses_text(value);
-    let mut message = serde_json::json!({
-        "role": "assistant",
-        "content": if text.is_empty() { Value::Null } else { Value::String(text) }
-    });
-    if !tool_calls.is_empty() {
-        message
-            .as_object_mut()
-            .expect("chat message is an object")
-            .insert("tool_calls".to_string(), Value::Array(tool_calls.clone()));
-    }
-    let usage = project_responses_usage_to_chat(value);
-    serde_json::json!({
-        "id": value.get("id").cloned().unwrap_or_else(|| Value::String(String::new())),
-        "object": "chat.completion",
-        "created": value.get("created_at").cloned().unwrap_or_else(|| Value::Number(0.into())),
-        "model": value.get("model").cloned().unwrap_or_else(|| Value::String(String::new())),
-        "choices": [{
-            "index": 0,
-            "message": message,
-            "finish_reason": if tool_calls.is_empty() { "stop" } else { "tool_calls" }
-        }],
-        "usage": usage
-    })
-}
-
-fn project_responses_event_to_chat(value: &Value) -> Value {
-    let event_type = value
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let response = value.get("response").unwrap_or(value);
-    let mut delta = serde_json::Map::new();
-    let mut finish_reason = Value::Null;
-    match event_type {
-        "response.created" | "response.in_progress" => {
-            delta.insert("role".to_string(), Value::String("assistant".to_string()));
-            delta.insert("content".to_string(), Value::String(String::new()));
-        }
-        "response.output_text.delta" => {
-            delta.insert(
-                "content".to_string(),
-                value
-                    .get("delta")
-                    .cloned()
-                    .unwrap_or_else(|| Value::String(String::new())),
-            );
-        }
-        "response.output_item.added"
-            if value
-                .get("item")
-                .and_then(|item| item.get("type"))
-                .and_then(Value::as_str)
-                == Some("function_call") =>
-        {
-            let item = &value["item"];
-            delta.insert(
-                "tool_calls".to_string(),
-                Value::Array(vec![serde_json::json!({
-                    "index": value.get("output_index").cloned().unwrap_or_else(|| Value::Number(0.into())),
-                    "id": item.get("call_id").or_else(|| item.get("id")).cloned().unwrap_or(Value::Null),
-                    "type": "function",
-                    "function": {
-                        "name": item.get("name").cloned().unwrap_or(Value::Null),
-                        "arguments": item.get("arguments").cloned().unwrap_or_else(|| Value::String(String::new()))
-                    }
-                })]),
-            );
-        }
-        "response.function_call_arguments.delta" => {
-            delta.insert(
-                "tool_calls".to_string(),
-                Value::Array(vec![serde_json::json!({
-                    "index": value.get("output_index").cloned().unwrap_or_else(|| Value::Number(0.into())),
-                    "function": {
-                        "arguments": value.get("delta").cloned().unwrap_or_else(|| Value::String(String::new()))
-                    }
-                })]),
-            );
-        }
-        "response.completed" => {
-            finish_reason = Value::String(
-                if responses_tool_calls(response).is_empty() {
-                    "stop"
-                } else {
-                    "tool_calls"
-                }
-                .to_string(),
-            )
-        }
-        _ => {}
-    }
-    serde_json::json!({
-        "id": response.get("id").cloned().unwrap_or_else(|| Value::String(String::new())),
-        "object": "chat.completion.chunk",
-        "created": response.get("created_at").cloned().unwrap_or_else(|| Value::Number(0.into())),
-        "model": response.get("model").cloned().unwrap_or_else(|| Value::String(String::new())),
-        "choices": [{"index": 0, "delta": Value::Object(delta), "finish_reason": finish_reason}]
-    })
-}
-
-impl RuntimeOperator for ClientSemanticProjection {
-    fn plugin_id(&self) -> &'static str {
-        "client_semantic_projection"
-    }
-    fn kind(&self) -> PluginKind {
-        PluginKind::Operator
-    }
-    fn execute(
-        &self,
-        ctx: &mut ExecutionContext,
-        _registries: &mut RuntimeRegistries<'_>,
-    ) -> Result<(), RuntimeFault> {
-        let parsed = ctx.data.parsed_response.as_deref().ok_or_else(|| {
-            RuntimeFault::new("client_semantic_projection", "parsed response missing")
-        })?;
-        let protocol = ctx.information.protocol.as_deref().unwrap_or("responses");
-        let semantic = match protocol {
-            "responses" => parsed.to_string(),
-            "chat" | "openai_chat" => {
-                let value: Value = serde_json::from_str(parsed).map_err(|error| {
-                    RuntimeFault::new("client_semantic_projection", error.to_string())
-                })?;
-                let projected = if value.get("type").is_some() {
-                    project_responses_event_to_chat(&value)
-                } else {
-                    project_responses_json_to_chat(&value)
-                };
-                serde_json::to_string(&projected).map_err(|error| {
-                    RuntimeFault::new("client_semantic_projection", error.to_string())
-                })?
-            }
-            other => {
-                return Err(RuntimeFault::new(
-                    "client_protocol_unsupported",
-                    format!("unsupported client response protocol {other}"),
-                ))
-            }
-        };
-        ctx.data.client_semantic = Some(semantic);
-        Ok(())
-    }
-}
-
-struct SseFrame;
-impl RuntimeOperator for SseFrame {
-    fn plugin_id(&self) -> &'static str {
-        "sse_frame"
-    }
-    fn kind(&self) -> PluginKind {
-        PluginKind::Operator
-    }
-    fn execute(
-        &self,
-        ctx: &mut ExecutionContext,
-        _registries: &mut RuntimeRegistries<'_>,
-    ) -> Result<(), RuntimeFault> {
-        let semantic =
-            ctx.data.client_semantic.as_deref().ok_or_else(|| {
-                RuntimeFault::new("sse_frame", "client semantic response missing")
-            })?;
-        let provider_raw = ctx
-            .data
-            .provider_raw
-            .as_deref()
-            .ok_or_else(|| RuntimeFault::new("sse_frame", "provider raw missing"))?;
-        let is_sse = provider_raw
-            .lines()
-            .any(|line| line.strip_suffix('\r').unwrap_or(line).starts_with("data:"));
-        if !is_sse {
-            ctx.data.client_sse_frame = Some(semantic.to_string());
-            return Ok(());
-        }
-        let protocol = ctx.information.protocol.as_deref().unwrap_or("responses");
-        let mut frame = String::new();
-        if protocol == "responses" {
-            if let Some(event) = provider_raw.lines().find_map(|line| {
-                line.strip_suffix('\r')
-                    .unwrap_or(line)
-                    .strip_prefix("event:")
-                    .map(str::trim)
-                    .filter(|event| !event.is_empty())
-            }) {
-                frame.push_str("event: ");
-                frame.push_str(event);
-                frame.push('\n');
-            }
-        }
-        frame.push_str("data: ");
-        frame.push_str(semantic);
-        frame.push_str("\n\n");
-        if protocol == "chat" && ctx.control.continuation_owner.as_deref() == Some("relay") {
-            frame.push_str("data: [DONE]\n\n");
-        }
-        ctx.data.client_sse_frame = Some(frame);
-        Ok(())
-    }
-}
-
 struct FrameBuild;
 impl RuntimeOperator for FrameBuild {
     fn plugin_id(&self) -> &'static str {
@@ -1989,118 +1516,6 @@ impl RuntimeOperator for FrameBuild {
             .ok_or_else(|| RuntimeFault::new("frame_build", "client SSE frame missing"))?;
         ctx.data.client_frame = Some(semantic.to_string());
         assert_no_control_leak(ctx)
-    }
-}
-
-const EXTERNAL_CHAIN_PLUGINS: &[(&str, &str)] = &[
-    ("error_source_capture", "routecodex-v4-error"),
-    ("error_classify", "routecodex-v4-error"),
-    ("error_policy_apply", "routecodex-v4-error"),
-    ("execution_decision", "routecodex-v4-error"),
-    ("client_projection", "routecodex-v4-error"),
-    ("config_parse", "routecodex-v4-config"),
-    ("config_validate", "routecodex-v4-config"),
-    ("registry_build", "routecodex-v4-config"),
-    ("manifest_publish", "routecodex-v4-config"),
-];
-
-fn is_local_plugin(plugin_id: &str) -> bool {
-    matches!(
-        plugin_id,
-        "protocol_parse"
-            | "normalize"
-            | "input_validate"
-            | "continuation_classify"
-            | "continuation_restore"
-            | "governance"
-            | "execution_plan"
-            | "semantic_projection"
-            | "wire_build"
-            | "output_validate"
-            | "frame_parse"
-            | "json_parse"
-            | "protocol_decode"
-            | "response_governance"
-            | "tool_harvest"
-            | "continuation_commit"
-            | "client_semantic_projection"
-            | "sse_frame"
-            | "frame_build"
-    )
-}
-
-/// Validate the canonical skeleton path before handing it to the execution
-/// engine.  This is validation only; it does not materialize a second plan or
-/// container and preserves the source order supplied by Cordis.
-pub fn validate_execution_plan(plan: &SkeletonPlan) -> Result<(), RuntimeFault> {
-    for chain in &plan.chains {
-        let mut previous_position = None;
-        for slot in &chain.nodes {
-            if let Some(previous) = previous_position {
-                if slot.position != previous + 1 {
-                    return Err(RuntimeFault::new(
-                        "non_adjacent_chain",
-                        format!("chain {} positions are not consecutive", chain.chain_id),
-                    ));
-                }
-            }
-            previous_position = Some(slot.position);
-            for binding in &slot.plugins {
-                if !is_local_plugin(&binding.plugin_id)
-                    && !EXTERNAL_CHAIN_PLUGINS
-                        .iter()
-                        .any(|(plugin_id, _)| *plugin_id == binding.plugin_id)
-                {
-                    return Err(RuntimeFault::new(
-                        "unknown_plugin",
-                        format!("plugin {} is not registered", binding.plugin_id),
-                    ));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn execute_local_plugin(
-    plugin_id: &str,
-    ctx: &mut ExecutionContext,
-    registries: &mut RuntimeRegistries<'_>,
-) -> Result<(), RuntimeFault> {
-    macro_rules! dispatch {
-        ($ty:ident) => {{
-            let plugin = $ty;
-            plugin.execute(ctx, registries)
-        }};
-    }
-    match plugin_id {
-        "protocol_parse" => dispatch!(ProtocolParse),
-        "normalize" => dispatch!(Normalize),
-        "input_validate" => dispatch!(InputValidate),
-        "continuation_classify" => dispatch!(ContinuationClassify),
-        "continuation_restore" => dispatch!(ContinuationRestore),
-        "governance" => dispatch!(Governance),
-        "execution_plan" => dispatch!(ExecutionPlan),
-        "semantic_projection" => dispatch!(SemanticProjection),
-        "wire_build" => dispatch!(WireBuild),
-        "output_validate" => dispatch!(OutputValidate),
-        "frame_parse" => dispatch!(FrameParse),
-        "json_parse" => dispatch!(JsonParse),
-        "protocol_decode" => dispatch!(ProtocolDecode),
-        "response_governance" => dispatch!(ResponseGovernance),
-        "tool_harvest" => dispatch!(ToolHarvest),
-        "continuation_commit" => dispatch!(ContinuationCommit),
-        "client_semantic_projection" => dispatch!(ClientSemanticProjection),
-        "sse_frame" => dispatch!(SseFrame),
-        "frame_build" => dispatch!(FrameBuild),
-        plugin_id => Err(RuntimeFault::new(
-            "external_owner_violation",
-            EXTERNAL_CHAIN_PLUGINS
-                .iter()
-                .find(|(id, _)| *id == plugin_id)
-                .map(|(_, owner)| format!("plugin {plugin_id} must execute in {owner}"))
-                .unwrap_or_else(|| format!("unknown plugin {plugin_id}")),
-        )),
     }
 }
 
@@ -2126,25 +1541,13 @@ pub struct ExecutionReport {
     pub trace: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
-struct NodeSpec {
-    node_id: String,
-    plugins: Vec<String>,
-}
-
-struct RuntimeExecutionState {
-    template: ExecutionContext,
-    scopes: ScopeRegistry,
-    payload_cycles: PayloadCycleRegistry,
-}
-
 /// Skeleton runtime: loads the hash-locked immutable plan and delegates every
 /// node path to the single `ExecutionEngine`.  Protocol, continuation and
 /// resource stores remain here; graph execution does not.
 pub struct SkeletonRuntime {
     plan: SkeletonPlan,
-    chains: HashMap<String, Vec<NodeSpec>>,
     epoch_store: ActiveEpochStore,
+    handle_registry: StandardHandleRegistry,
     active_requests: RefCell<HashSet<String>>,
     scopes: RefCell<ScopeRegistry>,
     payload_cycles: RefCell<PayloadCycleRegistry>,
@@ -2159,80 +1562,28 @@ pub struct RuntimeLease {
 }
 
 impl RuntimeLease {
-    pub fn request_id(&self) -> &str { &self.request_id }
-    pub fn binding(&self) -> &ExecutionBinding { &self.binding }
-    pub fn snapshot(&self) -> routecodex_v4_node_container::ExecutionEpochSnapshot { self.lease.snapshot() }
-    fn epoch_lease(&self) -> &routecodex_v4_node_container::EpochLease { &self.lease }
+    pub fn request_id(&self) -> &str {
+        &self.request_id
+    }
+    pub fn binding(&self) -> &ExecutionBinding {
+        &self.binding
+    }
+    pub fn snapshot(&self) -> routecodex_v4_node_container::ExecutionEpochSnapshot {
+        self.lease.snapshot()
+    }
+    fn epoch_lease(&self) -> &routecodex_v4_node_container::EpochLease {
+        &self.lease
+    }
 }
 
 impl SkeletonRuntime {
     pub fn load(contract_json: &str) -> Result<Self, RuntimeFault> {
         let plan = SkeletonPlan::from_contract_json(contract_json)
             .map_err(|error| RuntimeFault::new("plan_invalid", error.to_string()))?;
-        validate_execution_plan(&plan)?;
-        let mut chains = HashMap::new();
-        for chain in &plan.chains {
-            let mut specs = Vec::with_capacity(chain.nodes.len());
-            let mut previous_position = None;
-            for slot in &chain.nodes {
-                if let Some(previous) = previous_position {
-                    debug_assert_eq!(slot.position, previous + 1);
-                }
-                previous_position = Some(slot.position);
-                for binding in &slot.plugins {
-                }
-                specs.push(NodeSpec {
-                    node_id: slot.node_id.clone(),
-                    plugins: slot
-                        .plugins
-                        .iter()
-                        .map(|binding| binding.plugin_id.clone())
-                        .collect(),
-                });
-            }
-            chains.insert(chain.chain_id.clone(), specs);
-        }
-        let epoch_plan = routecodex_v4_plugin_plan::NodePluginPlan {
-            node_id: "v4-runtime-execution".to_string(),
-            position: 1,
-            role_id: "execution_engine".to_string(),
-            chain: "runtime".to_string(),
-            entries: Vec::new(),
-            selection_groups: Vec::new(),
-            hash: String::new(),
-        };
-        let epoch_hash = epoch_plan.plan_hash();
-        let mut epoch_container = NodeContainer::declare(
-            "v4-runtime-execution",
-            routecodex_v4_plugin_plan::NodePluginPlan {
-                hash: epoch_hash.clone(),
-                ..epoch_plan
-            },
-            PlanBindings {
-                graph_hash: epoch_hash.clone(),
-                manifest_hash: epoch_hash.clone(),
-                loaded_plan_hash: epoch_hash,
-            },
-        )
-        .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
-        epoch_container
-            .context_created()
-            .and_then(|_| epoch_container.plugins_mounted())
-            .and_then(|_| epoch_container.publish())
-            .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
-        let epoch = ExecutionEpochBundle::new(
-            epoch_container,
-            ExecutionEpochIdentity {
-                plan_epoch: plan.plan_epoch,
-                manifest_hash: plan.manifest_hash.clone(),
-                execution_identity: "v4-runtime-execution".to_string(),
-            },
-        )
-        .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
         Ok(Self {
             plan,
-            chains,
-            epoch_store: ActiveEpochStore::new(epoch),
+            epoch_store: ActiveEpochStore::empty(),
+            handle_registry: StandardHandleRegistry::new(),
             active_requests: RefCell::new(HashSet::new()),
             scopes: RefCell::new(ScopeRegistry::new()),
             payload_cycles: RefCell::new(PayloadCycleRegistry::new()),
@@ -2243,23 +1594,80 @@ impl SkeletonRuntime {
         &self.plan
     }
 
-    /// Expose the runtime-owned immutable epoch to the binary shell. The
-    /// shell may retain this handle for identity/health projection, but it
-    /// cannot construct or select an alternate epoch.
-    pub fn execution_epoch_bundle(&self) -> Result<ExecutionEpochBundle, RuntimeFault> {
+    pub fn prepare_execution_epoch(
+        &self,
+        transaction_id: &str,
+        base_epoch: u64,
+        base_manifest_hash: &str,
+        candidate: ExecutionEpochBundle,
+        candidate_hash: &str,
+    ) -> Result<routecodex_v4_node_container::EpochTransactionSnapshot, RuntimeFault> {
         self.epoch_store
-            .active_bundle()
-            .ok_or_else(|| RuntimeFault::new("execution_epoch", "active ExecutionEpochBundle is unavailable"))
+            .prepare(
+                transaction_id,
+                base_epoch,
+                base_manifest_hash,
+                candidate,
+                candidate_hash,
+            )
+            .map_err(|error| RuntimeFault::new("execution_epoch_prepare", error.to_string()))
     }
+
+    /// Verify and materialize the exact compiled Cordis candidate before
+    /// opening the Rust active-pointer transaction. Runtime never compiles,
+    /// sorts, or repairs the graph; malformed identity and unknown handles
+    /// fail before `ActiveEpochStore::prepare` can mutate transaction state.
+    pub fn prepare_compiled_execution_epoch(
+        &self,
+        transaction_id: &str,
+        base_epoch: u64,
+        base_manifest_hash: &str,
+        candidate: &Value,
+        expected_graph_hash: &str,
+        expected_manifest_hash: &str,
+    ) -> Result<routecodex_v4_node_container::EpochTransactionSnapshot, RuntimeFault> {
+        let bundle = routecodex_v4_node_container::materialize_execution_epoch_bundle(
+            candidate,
+            expected_graph_hash,
+            expected_manifest_hash,
+            &self.handle_registry,
+        )
+        .map_err(|error| RuntimeFault::new("execution_epoch_materialize", error.to_string()))?;
+        self.prepare_execution_epoch(
+            transaction_id,
+            base_epoch,
+            base_manifest_hash,
+            bundle,
+            expected_manifest_hash,
+        )
+    }
+
+    pub fn commit_execution_epoch(
+        &self,
+        transaction_id: &str,
+    ) -> Result<routecodex_v4_node_container::EpochTransactionSnapshot, RuntimeFault> {
+        self.epoch_store
+            .commit(transaction_id)
+            .map_err(|error| RuntimeFault::new("execution_epoch_commit", error.to_string()))
+    }
+
     pub fn admit_request(&self, request_id: &str) -> Result<RuntimeLease, RuntimeFault> {
-        let lease = self.epoch_store.admit()
+        let lease = self
+            .epoch_store
+            .admit()
             .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
-        let binding = execution_binding(&self.plan);
         let snapshot = lease.snapshot();
-        if snapshot.plan_epoch != binding.plan_epoch || snapshot.manifest_hash != binding.manifest_hash {
-            return Err(RuntimeFault::new("execution_epoch_binding", "request lease does not match immutable execution binding"));
-        }
-        Ok(RuntimeLease { request_id: request_id.to_string(), binding, lease })
+        let binding = ExecutionBinding {
+            skeleton_version: self.plan.skeleton_version.clone(),
+            manifest_hash: snapshot.manifest_hash,
+            plan_epoch: snapshot.plan_epoch,
+            plan_hash: snapshot.execution_identity,
+        };
+        Ok(RuntimeLease {
+            request_id: request_id.to_string(),
+            binding,
+            lease,
+        })
     }
 
     /// Scope claim: a request id may only have one active closed loop.
@@ -2357,8 +1765,16 @@ impl SkeletonRuntime {
         continuation_owner: Option<&str>,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.execute_request_json_scoped_with_lease(
-            body, protocol, wire_model, stream, request_id, port, session_scope,
-            conversation_scope, continuation_owner, None,
+            body,
+            protocol,
+            wire_model,
+            stream,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            continuation_owner,
+            None,
         )
     }
 
@@ -2377,14 +1793,14 @@ impl SkeletonRuntime {
     ) -> Result<ExecutionReport, RuntimeFault> {
         if let Some(lease) = request_lease {
             if lease.request_id() != request_id {
-                return Err(RuntimeFault::new("execution_epoch_scope", "request lease id mismatch"));
+                return Err(RuntimeFault::new(
+                    "execution_epoch_scope",
+                    "request lease id mismatch",
+                ));
             }
         }
         let mut value: Value = serde_json::from_str(body)
             .map_err(|error| RuntimeFault::new("request_json_invalid", error.to_string()))?;
-        if protocol == "chat" {
-            value = project_chat_request_to_responses(&value)?;
-        }
         let object = value.as_object_mut().ok_or_else(|| {
             RuntimeFault::new("request_json_invalid", "request body must be an object")
         })?;
@@ -2396,7 +1812,11 @@ impl SkeletonRuntime {
             self.claim(request_id)?;
         }
         let result = self.execute_path(
-            "request", request_id, port, session_scope, conversation_scope,
+            "request",
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
             |ctx| {
                 ctx.data.raw_entry = Some(raw);
                 ctx.information.protocol = Some(protocol.to_string());
@@ -2425,14 +1845,22 @@ impl SkeletonRuntime {
         conversation_scope: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.execute_path("request", request_id, port, session_scope, conversation_scope, |ctx| {
-            ctx.data.raw_entry = Some(fixture.body.clone());
-            ctx.data.request_method = Some(fixture.method.clone());
-            ctx.data.request_path = Some(fixture.path.clone());
-            ctx.data.request_headers = Some(fixture.headers.clone());
-            ctx.information.endpoint = Some(fixture.path.clone());
-            ctx.information.model = Some(fixture.model.clone());
-        }, None);
+        let result = self.execute_path(
+            "request",
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            |ctx| {
+                ctx.data.raw_entry = Some(fixture.body.clone());
+                ctx.data.request_method = Some(fixture.method.clone());
+                ctx.data.request_path = Some(fixture.path.clone());
+                ctx.data.request_headers = Some(fixture.headers.clone());
+                ctx.information.endpoint = Some(fixture.path.clone());
+                ctx.information.model = Some(fixture.model.clone());
+            },
+            None,
+        );
         self.release(request_id);
         result
     }
@@ -2468,8 +1896,14 @@ impl SkeletonRuntime {
         continuation_owner: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.execute_provider_response_scoped_with_lease(
-            provider_raw, request_id, port, session_scope, conversation_scope,
-            entry_protocol, continuation_owner, None,
+            provider_raw,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            entry_protocol,
+            continuation_owner,
+            None,
         )
     }
 
@@ -2486,7 +1920,10 @@ impl SkeletonRuntime {
     ) -> Result<ExecutionReport, RuntimeFault> {
         if let Some(lease) = request_lease {
             if lease.request_id() != request_id {
-                return Err(RuntimeFault::new("execution_epoch_scope", "request lease id mismatch"));
+                return Err(RuntimeFault::new(
+                    "execution_epoch_scope",
+                    "request lease id mismatch",
+                ));
             }
         }
         if request_lease.is_none() {
@@ -2579,143 +2016,81 @@ impl SkeletonRuntime {
         seed: impl FnOnce(&mut ExecutionContext),
         provided_lease: Option<&routecodex_v4_node_container::EpochLease>,
     ) -> Result<ExecutionReport, RuntimeFault> {
-        let specs = self
-            .chains
-            .get(chain_id)
-            .ok_or_else(|| RuntimeFault::new("unknown_chain", format!("chain {chain_id} missing")))?;
-        let mut ctx = ExecutionContext::with_scope(
-            request_id,
-            execution_binding(&self.plan),
-            port,
-            session_scope,
-            conversation_scope,
-        );
-        seed(&mut ctx);
-        let initial_frame = ctx.clone().into_frame()?;
-        ctx.data = DataView::default();
-        let state = Arc::new(Mutex::new(RuntimeExecutionState {
-            template: ctx,
-            scopes: std::mem::take(&mut *self.scopes.borrow_mut()),
-            payload_cycles: std::mem::take(&mut *self.payload_cycles.borrow_mut()),
-        }));
-        let nodes = specs
-            .iter()
-            .map(|spec| {
-                let state = Arc::clone(&state);
-                let node_id = spec.node_id.clone();
-                let plugins = spec.plugins.clone();
-                ExecutionNode::new(node_id.clone(), move |frame| {
-                    let mut state = match state.lock() {
-                        Ok(state) => state,
-                        Err(_) => {
-                            return NodeOutcome::Failure {
-                                error: serde_json::json!({"code":"execution_state_lock"}),
-                            }
-                        }
-                    };
-                    let mut ctx = match state.template.from_frame(&frame) {
-                        Ok(ctx) => ctx,
-                        Err(fault) => {
-                            return NodeOutcome::Failure {
-                                error: serde_json::json!({"code": fault.code, "message": fault.message, "node_id": node_id}),
-                            }
-                        }
-                    };
-                    let binding_before = ctx.binding().clone();
-                    let plugin_fault = {
-                        let RuntimeExecutionState {
-                            scopes,
-                            payload_cycles,
-                            ..
-                        } = &mut *state;
-                        let mut registries = RuntimeRegistries {
-                            scope: scopes,
-                            payload_cycle: payload_cycles,
-                        };
-                        plugins
-                            .iter()
-                            .find_map(|plugin_id| execute_local_plugin(plugin_id, &mut ctx, &mut registries).err())
-                    };
-                    if let Some(fault) = plugin_fault {
-                        return NodeOutcome::Failure {
-                            error: serde_json::json!({
-                                "code": fault.code,
-                                "message": fault.message,
-                                "node_id": node_id,
-                            }),
-                        };
-                    }
-                    if ctx.binding() != &binding_before {
-                        return NodeOutcome::Failure {
-                            error: serde_json::json!({"code":"binding_drift","node_id":node_id}),
-                        };
-                    }
-                    ctx.record_trace(node_id.clone());
-                    state.template.information = ctx.information.clone();
-                    state.template.control = ctx.control.clone();
-                    state.template.diagnostic = ctx.diagnostic.clone();
-                    match ctx.into_frame() {
-                        Ok(next_frame) => NodeOutcome::Continue {
-                            data: next_frame.data,
-                            control: next_frame.control,
-                        },
-                        Err(fault) => NodeOutcome::Failure {
-                            error: serde_json::json!({"code": fault.code, "message": fault.message, "node_id": node_id}),
-                        },
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
-        let engine = ExecutionEngine::try_new(nodes)
-            .map_err(|error| RuntimeFault::new("execution_engine", error.to_string()))?;
-        let entrypoint = specs
-            .first()
-            .map(|spec| spec.node_id.as_str())
-            .ok_or_else(|| RuntimeFault::new("unknown_chain", format!("chain {chain_id} has no nodes")))?;
         let owned_lease = if provided_lease.is_none() {
-            Some(self.epoch_store.admit()
-                .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?)
+            Some(
+                self.epoch_store
+                    .admit()
+                    .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?,
+            )
         } else {
             None
         };
         let lease = provided_lease.or(owned_lease.as_ref()).ok_or_else(|| {
             RuntimeFault::new("execution_epoch", "execution epoch lease is missing")
         })?;
-        let outcome = engine
-            .execute(
-                entrypoint,
-                initial_frame,
-                lease,
-            )
-            .map_err(|error| RuntimeFault::new("execution_engine", error.to_string()))?;
-        drop(engine);
-        let state = Arc::try_unwrap(state)
-            .map_err(|_| RuntimeFault::new("execution_state_shared", "execution state remained shared"))?
-            .into_inner()
-            .map_err(|_| RuntimeFault::new("execution_state_lock", "execution state lock poisoned"))?;
-        *self.scopes.borrow_mut() = state.scopes;
-        *self.payload_cycles.borrow_mut() = state.payload_cycles;
+        let snapshot = lease.snapshot();
+        let binding = ExecutionBinding {
+            skeleton_version: self.plan.skeleton_version.clone(),
+            manifest_hash: snapshot.manifest_hash,
+            plan_epoch: snapshot.plan_epoch,
+            plan_hash: snapshot.execution_identity,
+        };
+        let mut ctx = ExecutionContext::with_scope(
+            request_id,
+            binding,
+            port,
+            session_scope,
+            conversation_scope,
+        );
+        seed(&mut ctx);
+        let initial_frame = ctx.clone().into_frame(chain_id)?;
+        let outcome = ExecutionEngine::execute_pinned_node(
+            chain_id,
+            initial_frame,
+            lease,
+            &self.handle_registry,
+        )
+        .map_err(|error| RuntimeFault::new("execution_engine", error.to_string()))?;
         if let NodeOutcome::Failure { error } = &outcome {
             let mut fault = RuntimeFault::new(
-                error.get("code").and_then(Value::as_str).unwrap_or("execution_failure"),
-                error.get("message").and_then(Value::as_str).unwrap_or("execution failed"),
+                error
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .unwrap_or("execution_failure"),
+                error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("execution failed"),
             );
             if let Some(node_id) = error.get("node_id").and_then(Value::as_str) {
                 fault = fault.with_node(node_id);
             }
             return Err(fault);
         }
-        let mut ctx = state.template;
-        let data = match outcome {
-            NodeOutcome::Continue { data, .. } => serde_json::from_value::<DataView>(data)
-                .map_err(|error| RuntimeFault::new("execution_frame_data", error.to_string()))?,
-            NodeOutcome::Terminal { .. } => DataView::default(),
+        ctx = match outcome {
+            NodeOutcome::Continue {
+                data,
+                control,
+                information,
+                events,
+            } => {
+                ctx.from_frame(
+                    chain_id,
+                    &NodeExecutionFrame::with_side_channels(data, control, information, events),
+                )?
+            }
+            NodeOutcome::Terminal { .. } => {
+                ctx.data = DataView::default();
+                ctx
+            }
             NodeOutcome::Failure { .. } => unreachable!("failure returned above"),
             NodeOutcome::Branch { .. } => {
-                return Err(RuntimeFault::new("execution_branch_unresolved", "execution chain ended on branch"));
+                return Err(RuntimeFault::new(
+                    "execution_branch_unresolved",
+                    "execution chain ended on branch",
+                ));
             }
         };
-        ctx.data = data;
         Ok(ExecutionReport {
             request_id: request_id.to_string(),
             binding: ctx.binding().clone(),
@@ -2893,7 +2268,9 @@ pub const MOCK_TRANSPORT_FAULT_CODES: &[&str] = &[
 /// True when the supplied fault code is one of the mock transport slice's
 /// recognised codes.
 pub fn is_known_mock_transport_fault_code(code: &str) -> bool {
-    MOCK_TRANSPORT_FAULT_CODES.iter().any(|known| *known == code)
+    MOCK_TRANSPORT_FAULT_CODES
+        .iter()
+        .any(|known| *known == code)
 }
 
 /// Typed projection of a mock transport slice fault. The slice surfaces
@@ -3007,15 +2384,25 @@ pub fn execute_mock_transport_slice(
             ),
         ));
     }
-    let expected_body_prefix = match entry_protocol {
-        "chat" => "chat:",
-        _ => "responses:",
+    let fixture_body: Value = serde_json::from_str(&fixture.body).map_err(|error| {
+        RuntimeFault::new(
+            "keyless_fixture_invalid",
+            format!("fixture body must be protocol JSON: {error}"),
+        )
+    })?;
+    let required_field = if entry_protocol == "chat" {
+        "messages"
+    } else {
+        "input"
     };
-    if !fixture.body.starts_with(expected_body_prefix) {
+    if !fixture_body
+        .get(required_field)
+        .is_some_and(Value::is_array)
+    {
         return Err(RuntimeFault::new(
             "keyless_fixture_invalid",
             format!(
-                "fixture body does not match entry_protocol {entry_protocol} (expected body prefix {expected_body_prefix})"
+                "fixture body does not match entry_protocol {entry_protocol} (expected {required_field} array)"
             ),
         ));
     }
