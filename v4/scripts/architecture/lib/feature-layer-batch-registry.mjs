@@ -74,7 +74,7 @@ export const GATE_INPUT_SETS = {
 const GATE_MATRIX_HASHES = {
   architecture: 'sha256:54794c07189ae8f00c26a376e433b171db3ea9c335a7a5346bc398c0b3cda358',
   red: 'sha256:465a132dff4f7a183b943b9630fea127909c79b2fb9cfc14bc39a579a2b49d6c',
-  packageScripts: 'sha256:aac1322f60bbd1cfae912f2454009bf1ed7b06d0dd3c76632c79886fc33f1e18',
+  packageScripts: 'sha256:36b7f79182f3f55d2ce5efc885880ffe3daa9f25334a2117d4e305d814a96762',
 };
 const PREFLIGHT_PREFIXES = new Map([
   ['build', ['buildSource', 'sha256:fb028d2b084eeb78e4afc9d45c954af15536ecc47379660a4a6dc5ccd42461b5', 'BUILD_PREFLIGHT_BINDING']],
