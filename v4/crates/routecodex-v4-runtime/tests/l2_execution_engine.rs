@@ -1,4 +1,5 @@
 use routecodex_v4_runtime::{ExecutionEngine, NodeExecutionFrame, NodeOutcome};
+use routecodex_v4_cordis_bridge::HandleRegistry;
 
 #[test]
 fn engine_preserves_adjacent_output_and_terminal_boundary() {
