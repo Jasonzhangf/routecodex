@@ -1013,6 +1013,7 @@ dependencies = [
  "routecodex-v4-plugin-contract",
  "routecodex-v4-plugin-plan",
  "routecodex-v4-skeleton",
+ "routecodex-v4-standard-plugins",
  "serde",
  "serde_json",
  "sha2",
