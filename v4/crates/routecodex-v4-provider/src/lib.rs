@@ -837,10 +837,29 @@ pub fn send_responses(
         message: error.to_string(),
         status: Some(status),
     })?;
+    let body = if status < 400
+        && content_type
+            .to_ascii_lowercase()
+            .contains("application/json")
+    {
+        let value: Value = serde_json::from_slice(&body).map_err(|error| ProviderTransportError {
+            code: "provider_json_parse".into(),
+            message: error.to_string(),
+            status: Some(status),
+        })?;
+        serde_json::to_vec(&normalize_provider_response("responses", &value)?)
+            .map_err(|error| ProviderTransportError {
+                code: "provider_json_encode".into(),
+                message: error.to_string(),
+                status: Some(status),
+            })?
+    } else {
+        body.to_vec()
+    };
     Ok(ProviderRawResponse {
         status,
         content_type,
-        body: body.to_vec(),
+        body,
     })
 }
 
