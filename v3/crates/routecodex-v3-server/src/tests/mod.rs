@@ -3061,6 +3061,83 @@ fn recovered_provider_attempts_do_not_create_terminal_client_error_truth() {
 }
 
 #[test]
+fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-recovered-provider-snapshot-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        4444,
+        false,
+        false,
+        None,
+        false,
+    );
+    let provider_failure = routecodex_v3_runtime::V3RuntimeProviderFailureObservation {
+        provider_key: "provider.key.model".to_string(),
+        provider_id: "provider".to_string(),
+        model_id: "model".to_string(),
+        message: "synthetic provider attempt failure".to_string(),
+        ..Default::default()
+    };
+    let mut recovered = V3ResponsesRelayRuntimeOutput {
+        status: 200,
+        client_body: V3ResponsesRelayClientBody::Json(json!({"status": "completed"})),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: Some(V3RuntimeObservability {
+            provider_failure_events: vec![provider_failure],
+            ..Default::default()
+        }),
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+    assert!(
+        capture_v3_responses_relay_provider_snapshots(
+            &state,
+            "responses",
+            "/v1/responses",
+            "recovered-provider-attempt",
+            &mut recovered,
+        )
+        .is_none(),
+        "a recovered HTTP 200 must not fabricate a missing-carrier failure"
+    );
+
+    let mut terminal_failure = V3ResponsesRelayRuntimeOutput {
+        status: 502,
+        client_body: V3ResponsesRelayClientBody::Json(json!({})),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+    assert!(
+        capture_v3_responses_relay_provider_snapshots(
+            &state,
+            "responses",
+            "/v1/responses",
+            "terminal-provider-attempt",
+            &mut terminal_failure,
+        )
+        .is_some(),
+        "a terminal HTTP error must retain explicit missing-carrier evidence failure"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn error_observability_does_not_emit_green_completed_line() {
     let mut observability = V3RuntimeObservability {
         response_status: Some("error".to_string()),
