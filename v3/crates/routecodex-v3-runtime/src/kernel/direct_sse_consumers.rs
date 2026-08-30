@@ -1159,9 +1159,12 @@ mod tests {
             .expect("Responses completed response must project toolreason visible text");
         let projection = String::from_utf8(projection).expect("projection must be UTF-8");
         assert!(projection.contains("event: response.reasoning_summary_text.delta"));
+        assert!(projection.contains("event: response.output_item.added"));
+        assert!(projection.contains("\"type\":\"message\""));
         assert!(projection.contains("event: response.output_text.delta"));
         assert!(projection.contains("\"delta\":\"调用工具 pwd：确认当前工作目录\""));
         assert!(projection.contains("event: response.output_text.done"));
+        assert!(projection.contains("event: response.output_item.done"));
     }
 
     #[test]
@@ -1185,9 +1188,12 @@ mod tests {
             .expect("valid toolreason must project to client SSE");
         let projection = String::from_utf8(projection).unwrap();
         assert!(projection.contains("event: response.reasoning_summary_text.delta"));
+        assert!(projection.contains("event: response.output_item.added"));
+        assert!(projection.contains("\"type\":\"message\""));
         assert!(projection.contains("event: response.output_text.delta"));
         assert!(projection.contains("\"delta\":\"调用工具 pwd：确认当前工作目录\""));
         assert!(projection.contains("event: response.output_text.done"));
+        assert!(projection.contains("event: response.output_item.done"));
     }
 
     #[test]

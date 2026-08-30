@@ -1,3 +1,4 @@
+use futures_util::stream;
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
@@ -32,6 +33,11 @@ impl ResponsesTransport for V3ProviderRequestDryRunNoNetworkTransport {
         if let Ok(mut captured) = self.captured_provider_request.lock() {
             *captured = Some(request.provider_request_projection());
         }
+        if let Some(response) =
+            captured_provider_response_for_dry_run(&request, &self.response_payload)
+        {
+            return response;
+        }
         let response_payload =
             provider_request_dry_run_response_payload_for_request(&request, &self.response_payload);
         Ok(V3ProviderResp14Raw::from_json(
@@ -51,6 +57,89 @@ impl ResponsesTransport for V3ProviderRequestDryRunNoNetworkTransport {
             })?,
         ))
     }
+}
+
+pub(crate) fn is_captured_provider_response_for_dry_run(payload: &Value) -> bool {
+    payload.get("object").and_then(Value::as_str)
+        == Some("routecodex.v3.provider_response_snapshot")
+        && payload.get("stage").and_then(Value::as_str) == Some("provider-response")
+}
+
+pub(crate) fn captured_provider_response_for_dry_run(
+    request: &V3Transport13ResponsesHttpRequest,
+    payload: &Value,
+) -> Option<Result<V3ProviderResp14Raw, V3ProviderError>> {
+    if !is_captured_provider_response_for_dry_run(payload) {
+        return None;
+    }
+    let status = payload
+        .get("status")
+        .and_then(Value::as_u64)
+        .and_then(|status| u16::try_from(status).ok())
+        .unwrap_or(200);
+    let response = match payload.get("bodyKind").and_then(Value::as_str) {
+        Some("sse") => payload
+            .get("rawSse")
+            .and_then(Value::as_str)
+            .filter(|raw_sse| !raw_sse.is_empty())
+            .ok_or_else(|| V3ProviderError::ResponseBody {
+                request_id: request.request_id().to_string(),
+                provider_id: request.provider_id().to_string(),
+                reason: "captured provider SSE response requires non-empty rawSse".to_string(),
+            })
+            .map(|raw_sse| {
+                V3ProviderResp14Raw::from_sse(
+                    request.request_id().to_string(),
+                    request.provider_id().to_string(),
+                    status,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"text/event-stream".to_vec(),
+                    }],
+                    Box::pin(stream::iter(vec![Ok(raw_sse.as_bytes().to_vec())])),
+                )
+            }),
+        Some("json") => payload
+            .get("body")
+            .ok_or_else(|| V3ProviderError::ResponseBody {
+                request_id: request.request_id().to_string(),
+                provider_id: request.provider_id().to_string(),
+                reason: "captured provider JSON response requires body".to_string(),
+            })
+            .and_then(|body| {
+                serde_json::to_vec(body)
+                    .map_err(|error| V3ProviderError::ResponseBody {
+                        request_id: request.request_id().to_string(),
+                        provider_id: request.provider_id().to_string(),
+                        reason: error.to_string(),
+                    })
+                    .map(|body| {
+                        V3ProviderResp14Raw::from_json(
+                            request.request_id(),
+                            request.provider_id(),
+                            status,
+                            vec![V3ProviderResponseHeader {
+                                name: "content-type".to_string(),
+                                value: b"application/json".to_vec(),
+                            }],
+                            body,
+                        )
+                    })
+            }),
+        Some(body_kind) => Err(V3ProviderError::ResponseBody {
+            request_id: request.request_id().to_string(),
+            provider_id: request.provider_id().to_string(),
+            reason: format!(
+                "captured provider response bodyKind must be sse or json, got {body_kind}"
+            ),
+        }),
+        None => Err(V3ProviderError::ResponseBody {
+            request_id: request.request_id().to_string(),
+            provider_id: request.provider_id().to_string(),
+            reason: "captured provider response requires bodyKind".to_string(),
+        }),
+    };
+    Some(response)
 }
 
 fn provider_request_dry_run_response_payload_for_request(

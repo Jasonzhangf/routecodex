@@ -310,6 +310,11 @@ impl ResponsesTransport for V3DryRunNoNetworkTransport {
         if let Ok(mut captured) = self.captured_provider_request.lock() {
             *captured = Some(request.provider_request_projection());
         }
+        if let Some(response) =
+            crate::hub_v1::captured_provider_response_for_dry_run(&request, &self.response_payload)
+        {
+            return response;
+        }
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
             request.provider_id(),
@@ -327,6 +332,56 @@ impl ResponsesTransport for V3DryRunNoNetworkTransport {
             })?,
         ))
     }
+}
+
+async fn collect_v3_response_dry_run_client_payload(
+    payload: &mut V3Resp15ClientPayload,
+) -> Result<Value, String> {
+    let body = std::mem::replace(&mut payload.body, V3ClientBody::Bytes(Vec::new()));
+    let body = match body {
+        V3ClientBody::Json(body) => json!({"bodyKind": "json", "body": body}),
+        V3ClientBody::Bytes(body) => json!({
+            "bodyKind": "bytes",
+            "rawBody": String::from_utf8_lossy(&body)
+        }),
+        V3ClientBody::Sse(mut stream) => {
+            let mut raw_sse = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                raw_sse.extend_from_slice(&chunk.map_err(|error| error.message)?);
+            }
+            json!({
+                "bodyKind": "sse",
+                "rawSse": String::from_utf8(raw_sse)
+                    .map_err(|error| format!("projected client SSE is not UTF-8: {error}"))?
+            })
+        }
+        V3ClientBody::CommittedSse(mut stream) => {
+            let mut raw_sse = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                raw_sse.extend_from_slice(&chunk);
+            }
+            json!({
+                "bodyKind": "sse",
+                "rawSse": String::from_utf8(raw_sse)
+                    .map_err(|error| format!("projected client SSE is not UTF-8: {error}"))?
+            })
+        }
+    };
+    let mut projection = json!({
+        "object": "routecodex.v3.client_response_snapshot",
+        "stage": "client-response",
+        "status": payload.status,
+        "headers": payload.headers,
+    });
+    projection
+        .as_object_mut()
+        .expect("client response projection must be an object")
+        .extend(
+            body.as_object()
+                .expect("client response body projection must be an object")
+                .clone(),
+        );
+    Ok(projection)
 }
 
 pub async fn execute_v3_responses_direct_dry_run_runtime(
@@ -353,6 +408,8 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
     debug: &V3DebugRuntime,
     initial_plan: Option<&V3ResponsesProtocolExecutionPlan>,
 ) -> crate::V3FoundationRuntimeOutput {
+    let response_replay =
+        crate::hub_v1::is_captured_provider_response_for_dry_run(&fixture.response_payload);
     if let Err(error) = debug.register_dry_run_fixture(fixture.clone()) {
         return crate::project_v3_debug_failure("V3DryRunFixtureRegistered", error);
     }
@@ -434,6 +491,23 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
             .node_trace
             .insert(index + 1, "V3DryRunNoNetworkTerminalEffect");
     }
+    let client_response = if response_replay {
+        match collect_v3_response_dry_run_client_payload(&mut output.client_payload).await {
+            Ok(client_response) => {
+                output.node_trace.push("V3DryRunResponseReplayCaptured");
+                Some(client_response)
+            }
+            Err(error) => {
+                let _ = debug.release_snapshot_session(&scope, &session_id);
+                return crate::project_v3_debug_failure(
+                    "V3DryRunResponseReplayCaptured",
+                    V3DebugError::MalformedFixture(error),
+                );
+            }
+        }
+    } else {
+        None
+    };
     output.node_trace.push("V3Server16HttpFrame");
     for node_id in ["V3DryRunNoNetworkTerminalEffect", "V3Server16HttpFrame"] {
         if let Err(error) = debug.record_node_event(
@@ -486,24 +560,33 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         .and_then(|captured| captured.clone())
         .map(|request| debug.project_verbatim(request))
         .unwrap_or_else(|| json!(null));
-    let dry_run_status = if provider_request.is_null() {
+    let dry_run_status = if response_replay {
+        output.client_payload.status
+    } else if provider_request.is_null() {
         output.client_payload.status
     } else {
         200
+    };
+    let kind = if response_replay {
+        "provider_response"
+    } else {
+        "provider_request"
     };
     crate::V3FoundationRuntimeOutput {
         status: dry_run_status,
         body: json!({
             "object": "routecodex.pipeline_dry_run",
-            "kind": "provider_request",
+            "kind": kind,
             "dryRun": true,
             "evidence": {
                 "stoppedBeforeProviderSend": true,
                 "providerNetworkSend": false,
                 "stoppedBeforeNetworkSend": true,
-                "providerRequestCaptured": !provider_request.is_null()
+                "providerRequestCaptured": !provider_request.is_null(),
+                "providerResponseConsumed": response_replay
             },
             "providerRequest": provider_request,
+            "clientResponse": client_response,
             "dry_run": {
                 "fixture_id": fixture.fixture_id,
                 "server_id": fixture.server_id,

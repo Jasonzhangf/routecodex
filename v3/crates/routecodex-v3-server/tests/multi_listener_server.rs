@@ -4780,6 +4780,318 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
 }
 
 #[tokio::test]
+async fn debug_response_dry_run_replays_captured_sse_through_direct_resp03_without_network() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_TEST_KEY", "response-dry-run-key");
+    let mut response_manifest = manifest(free_port(), free_port());
+    for server in response_manifest.servers.values_mut() {
+        server.features.extend([
+            ("tool_thinking".to_string(), true),
+            ("toolreason_client_projection".to_string(), true),
+        ]);
+    }
+    let handle = spawn_v3_server_aggregate(response_manifest).await.unwrap();
+    let listener = &handle.listeners[0];
+    let client = reqwest::Client::new();
+    let raw_sse = concat!(
+        "event: response.created\n",
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_replay\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+        "event: response.output_item.added\n",
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"fc_replay\",\"type\":\"function_call\",\"name\":\"probe\",\"call_id\":\"call_replay\",\"arguments\":\"\"}}\n\n",
+        "event: response.function_call_arguments.done\n",
+        "data: {\"type\":\"response.function_call_arguments.done\",\"output_index\":0,\"item_id\":\"fc_replay\",\"arguments\":\"{\\\"cmd\\\":\\\"pwd\\\",\\\"reason\\\":\\\"确认当前工作目录\\\"}\"}\n\n",
+        "event: response.output_item.done\n",
+        "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"fc_replay\",\"type\":\"function_call\",\"name\":\"probe\",\"call_id\":\"call_replay\",\"status\":\"completed\",\"arguments\":\"{\\\"cmd\\\":\\\"pwd\\\",\\\"reason\\\":\\\"确认当前工作目录\\\"}\"}}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_replay\",\"status\":\"completed\",\"output\":[{\"id\":\"fc_replay\",\"type\":\"function_call\",\"name\":\"probe\",\"call_id\":\"call_replay\",\"status\":\"completed\",\"arguments\":\"{\\\"cmd\\\":\\\"pwd\\\",\\\"reason\\\":\\\"确认当前工作目录\\\"}\"}]}}\n\n",
+    );
+    let response = client
+        .post(format!(
+            "http://{}/_routecodex/debug/dry-run",
+            listener.addr
+        ))
+        .json(&serde_json::json!({
+            "fixture_id": "captured-provider-response-sse",
+            "method": "POST",
+            "path": "/v1/responses",
+            "request_payload": {
+                "model": "test",
+                "input": "inspect the workspace",
+                "stream": true,
+                "tools": [{
+                    "type": "function",
+                    "name": "probe",
+                    "description": "Inspect the workspace",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"cmd": {"type": "string"}},
+                        "required": ["cmd"]
+                    }
+                }]
+            },
+            "response_payload": {
+                "object": "routecodex.v3.provider_response_snapshot",
+                "stage": "provider-response",
+                "bodyKind": "sse",
+                "rawSse": raw_sse
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body: Value = response.json().await.unwrap();
+    handle.shutdown().await;
+    std::env::remove_var("V3_TEST_KEY");
+
+    assert_eq!(status, 200, "response dry-run failed: {body}");
+    assert_eq!(body["kind"], "provider_response");
+    assert_eq!(body["evidence"]["providerNetworkSend"], false);
+    assert_eq!(body["evidence"]["providerResponseConsumed"], true);
+    let projected = body["clientResponse"]["rawSse"]
+        .as_str()
+        .expect("response dry-run must materialize client SSE");
+    assert!(projected.contains("调用工具 probe：确认当前工作目录"));
+    let projected_events = projected
+        .split("\n\n")
+        .filter_map(|frame| {
+            frame
+                .lines()
+                .find_map(|line| line.strip_prefix("data: "))
+                .and_then(|data| serde_json::from_str::<Value>(data).ok())
+        })
+        .collect::<Vec<_>>();
+    let message_added_index = projected_events
+        .iter()
+        .position(|event| {
+            event.get("type").and_then(Value::as_str) == Some("response.output_item.added")
+                && event.pointer("/item/type").and_then(Value::as_str) == Some("message")
+        })
+        .expect("visible toolreason text must open an assistant message item");
+    let visible_item_id = projected_events[message_added_index]
+        .pointer("/item/id")
+        .and_then(Value::as_str)
+        .expect("visible assistant message must have an item id");
+    let text_delta_index = projected_events
+        .iter()
+        .position(|event| {
+            event.get("type").and_then(Value::as_str) == Some("response.output_text.delta")
+                && event.get("item_id").and_then(Value::as_str) == Some(visible_item_id)
+        })
+        .expect("visible toolreason text must stream within the assistant message item");
+    let message_done_index = projected_events
+        .iter()
+        .position(|event| {
+            event.get("type").and_then(Value::as_str) == Some("response.output_item.done")
+                && event.pointer("/item/type").and_then(Value::as_str) == Some("message")
+                && event.pointer("/item/id").and_then(Value::as_str) == Some(visible_item_id)
+        })
+        .expect("visible toolreason text must close the assistant message item");
+    let completed_index = projected_events
+        .iter()
+        .position(|event| {
+            event.get("type").and_then(Value::as_str) == Some("response.completed")
+        })
+        .expect("provider terminal response must remain projected");
+    assert!(message_added_index < text_delta_index);
+    assert!(text_delta_index < message_done_index);
+    assert!(message_done_index < completed_index);
+    assert!(!projected.contains("\\\"reason\\\":\\\"确认当前工作目录\\\""));
+}
+
+#[tokio::test]
+async fn debug_response_dry_run_preserves_missing_reason_and_rejects_malformed_envelope() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_TEST_KEY", "response-dry-run-negative-key");
+    let mut response_manifest = manifest(free_port(), free_port());
+    for server in response_manifest.servers.values_mut() {
+        server.features.extend([
+            ("tool_thinking".to_string(), true),
+            ("toolreason_client_projection".to_string(), true),
+        ]);
+    }
+    let handle = spawn_v3_server_aggregate(response_manifest).await.unwrap();
+    let listener = &handle.listeners[0];
+    let client = reqwest::Client::new();
+    let request_payload = serde_json::json!({
+        "model": "test",
+        "input": "inspect the workspace",
+        "stream": true,
+        "tools": [{
+            "type": "function",
+            "name": "probe",
+            "description": "Inspect the workspace",
+            "parameters": {
+                "type": "object",
+                "properties": {"cmd": {"type": "string"}},
+                "required": ["cmd"]
+            }
+        }]
+    });
+    let raw_sse = concat!(
+        "event: response.created\n",
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_missing\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+        "event: response.output_item.done\n",
+        "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"fc_missing\",\"type\":\"function_call\",\"name\":\"probe\",\"call_id\":\"call_missing\",\"status\":\"completed\",\"arguments\":\"{\\\"cmd\\\":\\\"pwd\\\"}\"}}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_missing\",\"status\":\"completed\",\"output\":[{\"id\":\"fc_missing\",\"type\":\"function_call\",\"name\":\"probe\",\"call_id\":\"call_missing\",\"status\":\"completed\",\"arguments\":\"{\\\"cmd\\\":\\\"pwd\\\"}\"}]}}\n\n",
+    );
+    let missing_reason = client
+        .post(format!(
+            "http://{}/_routecodex/debug/dry-run",
+            listener.addr
+        ))
+        .json(&serde_json::json!({
+            "fixture_id": "captured-provider-response-missing-reason",
+            "method": "POST",
+            "path": "/v1/responses",
+            "request_payload": request_payload,
+            "response_payload": {
+                "object": "routecodex.v3.provider_response_snapshot",
+                "stage": "provider-response",
+                "bodyKind": "sse",
+                "rawSse": raw_sse
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing_reason.status(), 200);
+    let missing_reason_body: Value = missing_reason.json().await.unwrap();
+    let missing_reason_projection = missing_reason_body["clientResponse"]["rawSse"]
+        .as_str()
+        .expect("missing-reason response dry-run must materialize client SSE");
+    assert!(missing_reason_projection.contains("fc_missing"));
+    assert!(!missing_reason_projection.contains("rcc_reason_"));
+    assert!(!missing_reason_projection.contains("TOOLREASON"));
+
+    let malformed = client
+        .post(format!(
+            "http://{}/_routecodex/debug/dry-run",
+            listener.addr
+        ))
+        .json(&serde_json::json!({
+            "fixture_id": "captured-provider-response-malformed",
+            "method": "POST",
+            "path": "/v1/responses",
+            "request_payload": {"model": "test", "input": "inspect", "stream": true},
+            "response_payload": {
+                "object": "routecodex.v3.provider_response_snapshot",
+                "stage": "provider-response",
+                "bodyKind": "text",
+                "rawBody": "not a registered response body"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    let malformed_status = malformed.status();
+    let malformed_body: Value = malformed.json().await.unwrap();
+    handle.shutdown().await;
+    std::env::remove_var("V3_TEST_KEY");
+
+    assert!(
+        malformed_status.is_server_error(),
+        "malformed captured response must fail explicitly: {malformed_body}"
+    );
+    assert_eq!(
+        malformed_body["clientResponse"]["body"]["error"]["code"],
+        "provider_response_body_error",
+        "malformed response must remain on the typed provider-response error chain: {malformed_body}"
+    );
+}
+
+#[tokio::test]
+async fn debug_response_dry_run_replays_anthropic_provider_json_through_relay_resp03() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "anthropic-response-dry-run-key");
+    let mut response_manifest =
+        responses_direct_binding_anthropic_provider_manifest(free_port(), free_port());
+    for server in response_manifest.servers.values_mut() {
+        server.features.extend([
+            ("tool_thinking".to_string(), true),
+            ("toolreason_client_projection".to_string(), true),
+        ]);
+    }
+    let handle = spawn_v3_server_aggregate(response_manifest).await.unwrap();
+    let listener = &handle.listeners[0];
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!(
+            "http://{}/_routecodex/debug/dry-run",
+            listener.addr
+        ))
+        .json(&serde_json::json!({
+            "fixture_id": "captured-anthropic-provider-response-json",
+            "method": "POST",
+            "path": "/v1/messages",
+            "request_payload": {
+                "model": "client-test",
+                "max_tokens": 256,
+                "messages": [{"role": "user", "content": "inspect the workspace"}],
+                "tools": [{
+                    "name": "probe",
+                    "description": "Inspect the workspace",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"cmd": {"type": "string"}},
+                        "required": ["cmd"]
+                    }
+                }]
+            },
+            "response_payload": {
+                "object": "routecodex.v3.provider_response_snapshot",
+                "stage": "provider-response",
+                "bodyKind": "json",
+                "body": {
+                    "id": "msg_provider_replay",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "wire-protocol",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "toolu_replay",
+                        "name": "probe",
+                        "input": {"cmd": "pwd", "reason": "确认当前工作目录"}
+                    }],
+                    "stop_reason": "tool_use",
+                    "stop_sequence": null,
+                    "usage": {"input_tokens": 1, "output_tokens": 1}
+                }
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body: Value = response.json().await.unwrap();
+    handle.shutdown().await;
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+
+    assert_eq!(status, 200, "Anthropic response dry-run failed: {body}");
+    assert_eq!(body["kind"], "provider_response");
+    assert_eq!(body["evidence"]["providerNetworkSend"], false);
+    assert_eq!(body["evidence"]["providerResponseConsumed"], true);
+    assert!(body["providerRequest"].is_object());
+    assert_eq!(
+        body["providerRequest"]["body"]["tools"][0]["input_schema"]["required"],
+        json!(["cmd", "reason"])
+    );
+    let content = body["clientResponse"]["content"]
+        .as_array()
+        .expect("Anthropic client response content");
+    assert!(content.iter().any(|part| {
+        part.get("type").and_then(Value::as_str) == Some("text")
+            && part.get("text").and_then(Value::as_str) == Some("调用工具 probe：确认当前工作目录")
+    }));
+    let tool_use = content
+        .iter()
+        .find(|part| part.get("type").and_then(Value::as_str) == Some("tool_use"))
+        .expect("Anthropic tool_use must remain projected");
+    assert_eq!(tool_use["input"], json!({"cmd": "pwd"}));
+}
+
+#[tokio::test]
 async fn malformed_and_disabled_dry_run_enter_six_node_error_chain_without_panic() {
     let _test_guard = TEST_LOCK.lock().await;
     let client = reqwest::Client::new();

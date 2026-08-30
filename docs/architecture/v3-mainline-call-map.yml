@@ -2684,6 +2684,74 @@ chains:
       side_channel_writes:
       - v3.provider.failure_session_scope
     status: anchored
+  - step_id: v3-de-19
+    from_node: V3DryRunFixture
+    to_node: V3ProviderResp14Raw
+    caller_symbol: V3DryRunNoNetworkTransport::send
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+    callee_symbol: V3ProviderResp14Raw::from_sse
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/raw_response.rs
+    owner_feature_id: v3.debug_error_foundation
+    resource_flow:
+      consumes:
+      - v3.debug.dry_run_fixture
+      produces:
+      - v3.response.provider_raw
+      side_channel_reads:
+      - v3.debug.dry_run_fixture
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-de-20
+    from_node: V3Resp15ClientPayload
+    to_node: V3DryRunResponseReplayCaptured
+    caller_symbol: execute_v3_responses_direct_dry_run_runtime
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+    callee_symbol: collect_v3_response_dry_run_client_payload
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+    owner_feature_id: v3.debug_error_foundation
+    resource_flow:
+      consumes:
+      - v3.response.client_payload
+      produces:
+      - v3.debug.response_dry_run_execution
+      side_channel_reads: []
+      side_channel_writes:
+      - v3.debug.response_dry_run_execution
+    status: anchored
+  - step_id: v3-de-21
+    from_node: V3DryRunFixture
+    to_node: V3ProviderResp14Raw
+    caller_symbol: V3ProviderRequestDryRunNoNetworkTransport::send
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs
+    callee_symbol: captured_provider_response_for_dry_run
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs
+    owner_feature_id: v3.debug_error_foundation
+    resource_flow:
+      consumes:
+      - v3.debug.dry_run_fixture
+      produces:
+      - v3.response.provider_raw
+      side_channel_reads:
+      - v3.debug.dry_run_fixture
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-de-22
+    from_node: V3AnthropicRelayRuntimeOutput
+    to_node: V3DryRunResponseReplayCaptured
+    caller_symbol: execute_v3_anthropic_relay_response_dry_run_runtime
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+    callee_symbol: V3AnthropicRelayRuntimeOutput::client_response
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+    owner_feature_id: v3.debug_error_foundation
+    resource_flow:
+      consumes:
+      - v3.response.client_payload
+      produces:
+      - v3.debug.response_dry_run_execution
+      side_channel_reads: []
+      side_channel_writes:
+      - v3.debug.response_dry_run_execution
+    status: anchored
 - chain_id: v3.responses_continuation.remote_contract_store
   owner_feature_id: v3.remote_continuation_contract_store
   summary: H4 source-only direct-owner remote locator commit/load contract. It stores locator and pin control facts only and is not wired into Hub v1.

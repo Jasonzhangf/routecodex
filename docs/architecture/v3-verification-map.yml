@@ -1160,6 +1160,9 @@ features:
   - routecodex-v3-error six adjacent builders, taxonomy, action scope, target exhaustion, client projection
   - routecodex-v3-provider-responses server/routing-group/session/provider-runtime scoped failure health state and read-only availability
   - routecodex-v3-runtime foundation pending and dry-run kernels
+  - Responses response dry-run consumes captured provider JSON or SSE through the registered Direct response hook and materializes the resulting client payload without provider network access
+  - Responses response dry-run rejects malformed captured provider-response envelopes and does not fabricate toolreason projection when reason is absent
+  - Anthropic Relay response dry-run consumes captured provider JSON or SSE through RespInbound and Resp03, then materializes the Anthropic client projection without provider network access
   - routecodex-v3-runtime provider failure policy constants keep V3 direct and relay retry budgets aligned
   required_contract:
   - Debug/Error/Health remain side-channel resources and cannot enter provider/client success payloads
@@ -1176,6 +1179,8 @@ features:
   - Server pending endpoint emits Debug events and full six-node Error projection
   - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
   - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
+  - Debug response dry-run replays captured provider-response SSE through RespInbound and Resp03, exposes the client projection as a diagnostic artifact, and strips reason only when a valid toolreason was harvested
+  - Debug response dry-run dispatches /v1/responses to Direct and /v1/messages to Anthropic Relay without adding response semantics to the Server handler
   - Provider health scoped action tests prove cross-provider/key/model isolation
   - Direct shared-health blackbox proves three cross-request failures cool the first provider before network send
   - Direct dry-run blackbox proves provider-request dry-run does not clear shared provider cooldown

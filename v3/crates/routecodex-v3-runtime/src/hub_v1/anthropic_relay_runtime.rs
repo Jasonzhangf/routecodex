@@ -411,6 +411,92 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
     }
 }
 
+pub async fn execute_v3_anthropic_relay_response_dry_run_runtime(
+    manifest: &V3Config05ManifestPublished,
+    fixture_id: String,
+    input: V3AnthropicRelayRuntimeInput,
+    response_payload: Value,
+) -> crate::V3FoundationRuntimeOutput {
+    let captured_provider_request = Arc::new(Mutex::new(None));
+    let transport = V3ProviderRequestDryRunNoNetworkTransport::new(
+        response_payload,
+        Arc::clone(&captured_provider_request),
+    );
+    let mut output = match execute_v3_anthropic_relay_runtime_inner(
+        manifest,
+        input,
+        &transport,
+        Vec::new(),
+        None,
+        V3HubRelayResponseHookProfile::empty(),
+        V3ProviderFailureRuntimeHealth::from_manifest(manifest),
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        false,
+    )
+    .await
+    {
+        Ok(output) => output,
+        Err(error) => project_v3_anthropic_relay_runtime_failure(error),
+    };
+    if let Some(index) = output
+        .node_trace
+        .iter()
+        .position(|node| *node == "V3ProviderReqOutbound09TransportRequest")
+    {
+        output
+            .node_trace
+            .insert(index + 1, "V3DryRunNoNetworkTerminalEffect");
+    }
+    output.node_trace.push("V3DryRunResponseReplayCaptured");
+    output.node_trace.push("V3Server16HttpFrame");
+    let provider_request = captured_provider_request
+        .lock()
+        .ok()
+        .and_then(|captured| captured.clone())
+        .unwrap_or(Value::Null);
+    let client_response = output.client_response.clone();
+    crate::V3FoundationRuntimeOutput {
+        status: output.status,
+        body: json!({
+            "object": "routecodex.pipeline_dry_run",
+            "kind": "provider_response",
+            "dryRun": true,
+            "evidence": {
+                "stoppedBeforeProviderSend": true,
+                "providerNetworkSend": false,
+                "stoppedBeforeNetworkSend": true,
+                "providerRequestCaptured": !provider_request.is_null(),
+                "providerResponseConsumed": true
+            },
+            "providerRequest": provider_request,
+            "clientResponse": client_response,
+            "dry_run": {
+                "fixture_id": fixture_id,
+                "server_id": "anthropic_relay",
+                "method": "POST",
+                "path": "/v1/messages",
+                "terminal_effect": "no_network_send",
+                "provider_pipeline_executed": true,
+                "provider_network_send": false,
+                "stopped_before_network_send": true,
+                "stopped_before_provider_send": true,
+                "provider_request": provider_request,
+                "node_ids": output.node_trace,
+                "snapshots": [],
+                "response_payload": client_response
+            }
+        }),
+        debug_node: "V3DryRunResponseReplayCaptured",
+        error_node: output
+            .error_chain
+            .as_ref()
+            .map_or("none", |_| "V3Error06ClientProjected"),
+        error_chain: output.error_chain.unwrap_or_default(),
+        node_trace: output.node_trace,
+        stopped_before_provider_send: true,
+    }
+}
+
 pub async fn execute_v3_anthropic_relay_runtime<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3AnthropicRelayRuntimeInput,

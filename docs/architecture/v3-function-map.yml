@@ -422,11 +422,15 @@ features:
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-runtime/src/foundation.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
   - v3/crates/routecodex-v3-runtime/src/provider_error_policy_matching.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/frame_builders.rs
   resource_bindings:
   - v3.request.protocol_fields
   - v3.debug.trace_context
@@ -434,6 +438,7 @@ features:
   - v3.debug.event_ledger
   - v3.debug.dry_run_fixture
   - v3.debug.dry_run_execution
+  - v3.debug.response_dry_run_execution
   - v3.debug.snapshot_session
   - v3.error.source
   - v3.error.internal_identity
@@ -466,9 +471,17 @@ features:
   - v3-de-16
   - v3-de-17
   - v3-de-18
+  - v3-de-19
+  - v3-de-20
+  - v3-de-21
+  - v3-de-22
   entry_symbols:
   - execute_v3_foundation_pending_runtime
   - execute_v3_responses_direct_dry_run_runtime
+  - execute_v3_anthropic_relay_response_dry_run_runtime
+  - V3DryRunNoNetworkTransport::send
+  - captured_provider_response_for_dry_run
+  - collect_v3_response_dry_run_client_payload
   - V3DebugRuntime::start_trace
   - V3DebugRuntime::capture_raw_request
   - V3DebugRuntime::record_node_event

@@ -107,19 +107,49 @@ pub(crate) async fn debug_dry_run(
             V3DebugError::MalformedFixture("response_payload is required".to_string()),
         ));
     };
-    let output = execute_v3_responses_direct_dry_run_runtime(
-        V3DryRunFixture {
+    let output = if path == "/v1/messages" {
+        let dry_run_request_id = format!("dry-run-{fixture_id}");
+        let failure_session_scope = match V3ProviderFailureSessionScope::new(
+            &state.server.id,
+            &state.server.routing_group,
+            &dry_run_request_id,
+        ) {
+            Ok(scope) => scope,
+            Err(error) => {
+                return foundation_output_response(project_v3_debug_failure(
+                    "V3DryRunFixtureRegistered",
+                    V3DebugError::MalformedFixture(error.to_string()),
+                ));
+            }
+        };
+        execute_v3_anthropic_relay_response_dry_run_runtime(
+            &state.manifest,
             fixture_id,
-            server_id: state.server.id.clone(),
-            method,
-            path,
-            request_payload,
+            V3AnthropicRelayRuntimeInput {
+                server_id: state.server.id.clone(),
+                failure_session_scope,
+                request_id: dry_run_request_id,
+                toolreason_observation_session_id: Some("dry-run".to_string()),
+                payload: request_payload,
+            },
             response_payload,
-        },
-        &state.manifest,
-        &state.debug,
-    )
-    .await;
+        )
+        .await
+    } else {
+        execute_v3_responses_direct_dry_run_runtime(
+            V3DryRunFixture {
+                fixture_id,
+                server_id: state.server.id.clone(),
+                method,
+                path,
+                request_payload,
+                response_payload,
+            },
+            &state.manifest,
+            &state.debug,
+        )
+        .await
+    };
     foundation_output_response(output)
 }
 
