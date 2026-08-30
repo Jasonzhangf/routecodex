@@ -18,7 +18,8 @@ features:
   - V3ProviderHealthStore::complete_probe_success
   - V3ProviderHealthStore::complete_probe_failure
   - V3ProviderHealthStore::scheduling_projection
-  - V3ProviderHealthStore::provider_key_health_probe_keys
+  - V3ProviderHealthStore::provider_cooldown_probe_keys
+  - V3ProviderHealthStore::acquire_provider_cooldown_probe
   allowed_paths:
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
@@ -496,12 +497,12 @@ features:
   - V3ProviderHealthStore::availability
   - V3ProviderHealthStore::availability_for_session
   - V3ProviderHealthStore::record_provider_failure_in_session_with_policy
-  - V3ProviderHealthStore::try_acquire_provider_cooldown_probe
-  - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at
-  - V3ProviderHealthStore::complete_provider_cooldown_probe_failure
+  - V3ProviderHealthStore::acquire_provider_cooldown_probe
+  - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
+  - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
   - V3ProviderHealthStore::record_provider_key_success
   - V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
-  - V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+  - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
   - configured_retry_budget_for_failure
   - configured_health_policy_for_failure
   - provider_error_policy_matches_failure
@@ -4928,9 +4929,11 @@ features:
   - V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
   - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
   - V3ProviderHealthStore::record_provider_key_success
-  - V3ProviderHealthStore::try_acquire_provider_cooldown_probe
+  - V3ProviderHealthStore::acquire_provider_cooldown_probe
+  - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
+  - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
   - V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
-  - V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+  - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
   - probe_v3_provider_global_target
   - spawn_v3_server_aggregate
   allowed_paths:
@@ -5316,7 +5319,7 @@ features:
   status: source_controlled_runtime_pending_live_replay
   change_risk: critical
   owner_kind: rust_v3_provider_key_health_scoring
-  owner_scope: Provider-owned key score, failure/success streak, typed recovery action application, process-local cooldown/probe recovery, and Target same-priority scheduling projection. Effective priority uses larger numeric values first and caps positive health uplift at 150% of configured priority.
+  owner_scope: Provider-owned key score, failure/success streak, typed recovery action application, process-local cooldown/probe recovery, and Target scheduling projection. Effective priority always equals configured priority; health only controls availability and diagnostics.
   owner_crates:
   - routecodex-v3-error
   - routecodex-v3-provider-responses
@@ -5339,14 +5342,14 @@ features:
   - V3ProviderHealthStore::complete_probe_success
   - V3ProviderHealthStore::complete_probe_failure
   - V3ProviderHealthStore::complete_probe_success_at_generation
-  - V3ProviderHealthStore::provider_key_health_probe_keys
-  - V3ProviderHealthStore::acquire_provider_key_health_probe
+  - V3ProviderHealthStore::provider_cooldown_probe_keys
+  - V3ProviderHealthStore::acquire_provider_cooldown_probe
   - V3ProviderHealthStore::scheduling_projection
   - V3ProviderSchedulingReader
   - V3TargetInterpreter::select_available_with_health
   - V3TargetInterpreter::route_tier_index
   - V3ProviderFailureRuntimeHealth::record_provider_key_failure_action
-  - V3ProviderFailureRuntimeHealth::run_due_provider_key_health_probes
+  - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
   - V3ProviderHealthStore::configured_failure_policy
   allowed_paths:
   - v3/crates/routecodex-v3-error/src/lib.rs

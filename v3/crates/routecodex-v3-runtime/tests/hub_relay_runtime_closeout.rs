@@ -2408,8 +2408,9 @@ fn provider_key_three_failures_cool_for_fifteen_minutes_and_probe_recovers() {
         "cooled provider must be probe-due after cooldown expiry"
     );
     assert!(store
-        .try_acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
-        .unwrap());
+        .acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
+        .unwrap()
+        .is_some());
     store
         .complete_provider_cooldown_probe_success("limited", Some("key1"), Some("gpt-5.5"))
         .unwrap();

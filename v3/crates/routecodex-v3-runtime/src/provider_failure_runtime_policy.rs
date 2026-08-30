@@ -15,13 +15,12 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_global_probe_request, ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderAvailabilityProjection,
-    V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureAction,
-    V3ProviderFailureCooldownScope, V3ProviderFailurePolicy, V3ProviderFailureRecord,
-    V3ProviderGlobalSubscriptionDecision, V3ProviderGlobalSubscriptionPolicy,
-    V3ProviderHealthStore, V3ProviderRecoveryKind, V3ProviderSchedulingProjection,
-    V3ProviderSchedulingReader, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
+    V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
+    V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
+    V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
+    V3ProviderGlobalSubscriptionPolicy, V3ProviderHealthStore, V3ProviderRecoveryKind,
+    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
+    V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
 use routecodex_v3_target::{
     V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
@@ -417,9 +416,10 @@ impl V3ProviderFailureRuntimeHealth {
         }
     }
 
-    pub async fn run_due_global_subscription_probes<F, Fut>(
+    pub async fn run_due_provider_health_probes<F, Fut>(
         &self,
         now_ms: u64,
+        startup: bool,
         probe: F,
     ) -> Result<(), String>
     where
@@ -430,100 +430,31 @@ impl V3ProviderFailureRuntimeHealth {
         let mut permits = Vec::new();
         for (provider_id, auth_alias, model_id) in self
             .store
-            .provider_cooldown_probe_keys_due(now_ms)
+            .provider_cooldown_probe_keys(now_ms, startup)
             .map_err(|error| error.to_string())?
         {
-            if self
+            if let Some(permit) = self
                 .store
-                .try_acquire_provider_cooldown_probe(
+                .acquire_provider_cooldown_probe(
                     &provider_id,
                     auth_alias.as_deref(),
                     model_id.as_deref(),
                 )
                 .map_err(|error| error.to_string())?
             {
-                permits.push((provider_id, auth_alias, model_id));
+                permits.push(permit);
             }
-        }
-        let probe_results = join_all(permits.into_iter().map(
-            |(provider_id, auth_alias, model_id)| {
-                let probe = probe.clone();
-                async move {
-                    let result =
-                        (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
-                    (provider_id, auth_alias, model_id, result)
-                }
-            },
-        ))
-        .await;
-        for (provider_id, auth_alias, model_id, result) in probe_results {
-            match result {
-                Ok(()) => self
-                    .store
-                    .complete_provider_cooldown_probe_success_at(
-                        &provider_id,
-                        auth_alias.as_deref(),
-                        model_id.as_deref(),
-                        now_ms,
-                    )
-                    .map_err(|error| error.to_string())?,
-                Err(error) => {
-                    self.store
-                        .complete_provider_cooldown_probe_failure(
-                            &provider_id,
-                            auth_alias.as_deref(),
-                            model_id.as_deref(),
-                            now_ms,
-                        )
-                        .map_err(|error| error.to_string())?;
-                    probe_errors.push(format!(
-                        "adaptive provider cooldown probe failed for {provider_id}: {error}"
-                    ));
-                }
-            }
-        }
-        if probe_errors.is_empty() {
-            Ok(())
-        } else {
-            Err(probe_errors.join("; "))
-        }
-    }
-
-    pub async fn run_due_provider_key_health_probes<F, Fut>(
-        &self,
-        now_ms: u64,
-        startup: bool,
-        probe: F,
-    ) -> Result<(), String>
-    where
-        F: Fn(String, String, String) -> Fut + Clone,
-        Fut: Future<Output = Result<(), String>>,
-    {
-        let candidates = self.store.provider_key_health_probe_keys(now_ms, startup)?;
-        let mut probe_errors = Vec::new();
-        let mut permits = Vec::new();
-        for (provider_id, auth_alias, model_id) in candidates {
-            let Some(permit) = self.store.acquire_provider_key_health_probe(
-                &provider_id,
-                &auth_alias,
-                &model_id,
-            )?
-            else {
-                continue;
-            };
-            permits.push(permit);
         }
         let probe_results = join_all(permits.into_iter().map(|permit| {
             let probe = probe.clone();
-            let expected_generation = permit.expected_generation();
             let provider_id = permit.provider_id().to_string();
-            let auth_alias = permit.auth_alias().to_string();
-            let model_id = permit.model_id().to_string();
+            let auth_alias = permit.auth_alias().map(str::to_string);
+            let model_id = permit.model_id().map(str::to_string);
+            let expected_generation = permit.expected_generation();
             async move {
                 let result =
                     (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
                 (
-                    permit,
                     provider_id,
                     auth_alias,
                     model_id,
@@ -533,30 +464,30 @@ impl V3ProviderFailureRuntimeHealth {
             }
         }))
         .await;
-        for (permit, provider_id, auth_alias, model_id, expected_generation, result) in
-            probe_results
-        {
+        for (provider_id, auth_alias, model_id, expected_generation, result) in probe_results {
             match result {
                 Ok(()) => self
                     .store
-                    .complete_provider_key_probe_success_at_generation(
-                        permit.provider_id(),
-                        permit.auth_alias(),
-                        permit.model_id(),
+                    .complete_provider_cooldown_probe_success_at_generation(
+                        &provider_id,
+                        auth_alias.as_deref(),
+                        model_id.as_deref(),
                         now_ms,
                         Some(expected_generation),
                     )
-                    .map(|_| ())?,
+                    .map_err(|error| error.to_string())?,
                 Err(error) => {
-                    self.store.complete_provider_key_probe_failure(
-                        permit.provider_id(),
-                        permit.auth_alias(),
-                        permit.model_id(),
-                        now_ms,
-                    )?;
+                    self.store
+                        .complete_provider_cooldown_probe_failure_at_generation(
+                            &provider_id,
+                            auth_alias.as_deref(),
+                            model_id.as_deref(),
+                            now_ms,
+                            Some(expected_generation),
+                        )
+                        .map_err(|error| error.to_string())?;
                     probe_errors.push(format!(
-                        "persistent provider key probe failed for {}:{}:{}: {error}",
-                        provider_id, auth_alias, model_id
+                        "adaptive provider cooldown probe failed for {provider_id}: {error}"
                     ));
                 }
             }
@@ -1079,12 +1010,11 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         // context-window or wire-shape limits), not an account-health signal.
         // Keep it health-neutral so all keys do not enter cooldown for the
         // same request-shaped failure.
-        || status == 400
-        ;
-        // SSE/transport failures are provider-health events as well. The
-        // failure action builder classifies them as recoverable, so they enter
-        // the shared rolling score/cooldown path instead of a synthetic local
-        // record.
+        || status == 400;
+    // SSE/transport failures are provider-health events as well. The
+    // failure action builder classifies them as recoverable, so they enter
+    // the shared rolling score/cooldown path instead of a synthetic local
+    // record.
     let health_record = if is_request_local_compat_failure {
         V3ProviderFailureRecord {
             scope_label: candidate_key.clone(),

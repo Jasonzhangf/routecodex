@@ -104,9 +104,10 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     store
         .record_provider_cooldown_failure("p", Some("k"), Some("m"), "timeout", 1_000, 1)
         .unwrap();
-    store
-        .try_acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
-        .unwrap();
+    assert!(store
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .is_some());
     store
         .complete_provider_cooldown_probe_failure("p", Some("k"), Some("m"), 2_000)
         .unwrap();

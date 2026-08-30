@@ -25,7 +25,7 @@ pub use health::{
     V3ProviderGlobalSubscriptionPolicy, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
 };
 pub use key_health::{
-    V3ProviderKeyHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
+    V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
     V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
 };
 pub use probe::build_v3_provider_global_probe_request;

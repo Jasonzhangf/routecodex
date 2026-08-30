@@ -6,8 +6,7 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_global_probe_request, ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
-    V3ProviderGlobalSubscriptionPolicy, V3ResponsesProviderTarget,
+    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ResponsesProviderTarget,
 };
 
 pub fn build_v3_provider_global_probe_target(
@@ -107,6 +106,7 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
     target: V3ResponsesProviderTarget,
 ) -> Result<(), String> {
     let provider_id = target.provider_id.clone();
+    let provider_type = target.provider_type.clone();
     let request = build_v3_provider_global_probe_request(
         target,
         format!("provider-global-probe-{provider_id}"),
@@ -121,5 +121,149 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
             response.status()
         ));
     }
+    let json = response
+        .json_body()
+        .ok_or_else(|| format!("provider global probe returned non-JSON body for {provider_id}"))?;
+    validate_v3_provider_probe_json(&provider_id, &provider_type, json)?;
     Ok(())
+}
+
+fn validate_v3_provider_probe_json(
+    provider_id: &str,
+    provider_type: &str,
+    json: &[u8],
+) -> Result<(), String> {
+    let value = serde_json::from_slice::<serde_json::Value>(json).map_err(|error| {
+        format!("provider global probe returned invalid JSON for {provider_id}: {error}")
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        format!("provider global probe returned non-object JSON for {provider_id}")
+    })?;
+    if object.contains_key("error") {
+        return Err(format!(
+            "provider global probe returned 2xx with embedded error payload for {provider_id}"
+        ));
+    }
+    let completed = match provider_type {
+        "responses" => {
+            object.get("status").and_then(serde_json::Value::as_str) == Some("completed")
+        }
+        "openai_chat" => object
+            .get("choices")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|choices| {
+                choices.first().is_some_and(|choice| {
+                    choice
+                        .get("finish_reason")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|reason| !reason.is_empty())
+                })
+            }),
+        "anthropic" => {
+            object.get("type").and_then(serde_json::Value::as_str) == Some("message")
+                && object
+                    .get("stop_reason")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|reason| !reason.is_empty())
+        }
+        "gemini" => object
+            .get("candidates")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|candidates| {
+                candidates.first().is_some_and(|candidate| {
+                    candidate
+                        .get("finishReason")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|reason| !reason.is_empty())
+                })
+            }),
+        other => return Err(format!("unsupported provider probe protocol {other}")),
+    };
+    completed.then_some(()).ok_or_else(|| {
+        format!(
+            "provider global probe returned no successful terminal payload for {provider_id} ({provider_type})"
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_v3_provider_probe_json;
+
+    #[test]
+    fn http_200_error_payload_is_probe_failure() {
+        let error = validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"error":{"code":"invalid_api_key"}}"#,
+        )
+        .expect_err("embedded provider error must fail the probe");
+        assert!(error.contains("embedded error payload"));
+    }
+
+    #[test]
+    fn malformed_or_failed_json_is_probe_failure() {
+        assert!(validate_v3_provider_probe_json("provider-a", "responses", b"not-json").is_err());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"failed"}"#,
+        )
+        .is_err());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"completed"}"#,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn each_provider_protocol_requires_its_terminal_success_shape() {
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "openai_chat",
+            br#"{"choices":[{"finish_reason":"stop"}]}"#,
+        )
+        .is_ok());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "openai_chat",
+            br#"{"choices":[{}]}"#,
+        )
+        .is_err());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "openai_chat",
+            br#"{"choices":[{"finish_reason":""}]}"#,
+        )
+        .is_err());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "anthropic",
+            br#"{"type":"message","stop_reason":"max_tokens"}"#,
+        )
+        .is_ok());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "gemini",
+            br#"{"candidates":[{"finishReason":"MAX_TOKENS"}]}"#,
+        )
+        .is_ok());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "anthropic",
+            br#"{"type":"message","stop_reason":""}"#,
+        )
+        .is_err());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "gemini",
+            br#"{"candidates":[{"finishReason":""}]}"#,
+        )
+        .is_err());
+        assert!(validate_v3_provider_probe_json("provider-a", "openai_chat", br#"{}"#).is_err());
+        assert!(validate_v3_provider_probe_json("provider-a", "anthropic", br#"{}"#).is_err());
+        assert!(validate_v3_provider_probe_json("provider-a", "gemini", br#"{}"#).is_err());
+    }
 }

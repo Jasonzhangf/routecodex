@@ -5846,3 +5846,9 @@ Tags: #v4 #cordis #workflow-correction #evidence-first
 
 ### 2026-08-29 execution correction
 - Long-running runtime goals must continue through the next evidence gate after reporting a gap; an incomplete report is not a stopping point. For toolreason, proceed from typed observation tests to build/install/restart/online replay and console/client evidence before any completion report.
+
+### 2026-08-30 V3 provider health failback contract
+- Configured priority is operator intent and must never be numerically adjusted by adaptive health score. Health only controls provider/auth/model availability; once a generation-guarded semantic probe succeeds, the target immediately regains its configured priority.
+- Provider Health owns score, streak, rolling deltas, cooldown, probe backoff, generation, and atomic probe completion. Runtime owns one scheduled/rescue probe orchestration path; Server only schedules it; Target consumes read-only availability and configured priority. A stale permit may release its waiter but must not mutate a newer health epoch.
+- Probe success starts a clean health epoch: score 1000, empty delta window, reset streak/backoff, cooldown removed, generation advanced. Business cooldown and `next_probe_at` are independent; 503 is a three-count recoverable error; HTTP 2xx is insufficient without a valid protocol terminal.
+- Installed `0.90.4739` passed build/install/aggregate restart and live Responses smoke on 7777; AGY review `v3-health-scheduler-failback-20260830` passed with no findings. Production fault-injection replay remains intentionally absent because no cooldown entry existed and mutating live config/health or driving repeated provider failures was not authorized.
