@@ -151,6 +151,7 @@ pub struct CordisMountCandidate {
 impl CordisMountCandidate {
     pub fn verify(&self) -> bool {
         self.plan.verify()
+            && self.node_id == self.plan.node_id
             && !self.cordis_graph_hash.is_empty()
             && self.cordis_graph_hash == self.manifest_hash
             && self.manifest_hash == self.loaded_plan_hash
@@ -775,6 +776,30 @@ mod tests {
         let mut drifted = plan.clone();
         drifted.node_id = "V4HubRespChatProcess03Governed".to_string();
         assert!(!drifted.verify());
+    }
+
+    #[test]
+    fn mount_candidate_rejects_candidate_node_identity_drift() {
+        let mut plan = NodePluginPlan {
+            node_id: "V4HubReqChatProcess04Governed".to_string(),
+            position: 4,
+            role_id: "request_chat_process".to_string(),
+            chain: "request".to_string(),
+            entries: vec![],
+            selection_groups: vec![],
+            hash: String::new(),
+        };
+        plan.hash = plan.plan_hash();
+        let mut candidate = mount_candidate(
+            &plan.node_id,
+            plan.clone(),
+            &plan.hash,
+            &plan.hash,
+            &plan.hash,
+        )
+        .expect("matching mount identity must compile");
+        candidate.node_id = "V4HubRespChatProcess03Governed".to_string();
+        assert!(!candidate.verify());
     }
 
     #[test]
