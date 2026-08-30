@@ -9,13 +9,217 @@ use routecodex_v4_cordis_bridge::{
     execute_plan, BridgeError, HandleRegistry, NodeExecutionInput, NodeExecutionOutput,
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
+use serde::Deserialize;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 pub const ZERO_BASE_MANIFEST_HASH: &str =
     "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MaterializationError {
+    Parse(String),
+    InvalidIdentity(String),
+    GraphHashMismatch,
+    ManifestHashMismatch,
+    PlanHashMismatch(String),
+    PipelineMismatch(String),
+    UnknownHandle(String),
+    Container(NodeContainerError),
+    Epoch(EpochError),
+}
+
+impl std::fmt::Display for MaterializationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Parse(message) => write!(
+                formatter,
+                "compiled epoch candidate parse failed: {message}"
+            ),
+            Self::InvalidIdentity(field) => {
+                write!(formatter, "compiled epoch candidate has invalid {field}")
+            }
+            Self::GraphHashMismatch => write!(
+                formatter,
+                "Cordis graph hash does not match the expected graph"
+            ),
+            Self::ManifestHashMismatch => write!(
+                formatter,
+                "compiled manifest hash does not match the expected manifest"
+            ),
+            Self::PlanHashMismatch(node_id) => {
+                write!(formatter, "compiled plan hash mismatch for node {node_id}")
+            }
+            Self::PipelineMismatch(chain) => write!(
+                formatter,
+                "compiled pipeline order mismatch for chain {chain}"
+            ),
+            Self::UnknownHandle(plugin_id) => write!(
+                formatter,
+                "compiled epoch references unknown plugin handle {plugin_id}"
+            ),
+            Self::Container(error) => {
+                write!(formatter, "compiled node materialization failed: {error}")
+            }
+            Self::Epoch(error) => {
+                write!(formatter, "compiled epoch materialization failed: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for MaterializationError {}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompiledExecutionEpochCandidate {
+    schema_version: u32,
+    candidate_id: String,
+    epoch_id: String,
+    plan_epoch: u64,
+    manifest_hash: String,
+    graph_hash: String,
+    plugin_artifact_set_hash: String,
+    entrypoints: HashMap<String, String>,
+    pipelines: HashMap<String, Vec<String>>,
+    nodes: Vec<CompiledExecutionNode>,
+    policies: Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompiledExecutionNode {
+    node_id: String,
+    plan_hash: String,
+    input_resource: String,
+    output_resource: String,
+    allowed_edges: HashMap<String, String>,
+    plan: NodePluginPlan,
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 71
+        && value.starts_with("sha256:")
+        && value[7..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+/// Materialize one exact Cordis-compiled candidate. This is the sole bridge
+/// from the serialized production graph into immutable Rust containers. It
+/// validates external graph/manifest identity, preserves the supplied node
+/// order, resolves every typed handle before publication, and never compiles
+/// or sorts authoring input.
+pub fn materialize_execution_epoch_bundle(
+    value: &Value,
+    expected_graph_hash: &str,
+    expected_manifest_hash: &str,
+    registry: &dyn HandleRegistry,
+) -> Result<ExecutionEpochBundle, MaterializationError> {
+    let candidate: CompiledExecutionEpochCandidate = serde_json::from_value(value.clone())
+        .map_err(|error| MaterializationError::Parse(error.to_string()))?;
+    if candidate.schema_version != 1
+        || candidate.candidate_id.trim().is_empty()
+        || candidate.epoch_id.trim().is_empty()
+        || candidate.plan_epoch == 0
+        || !is_sha256(&candidate.plugin_artifact_set_hash)
+        || !candidate.policies.is_object()
+    {
+        return Err(MaterializationError::InvalidIdentity(
+            "bundle identity".to_string(),
+        ));
+    }
+    if candidate.graph_hash != expected_graph_hash || !is_sha256(&candidate.graph_hash) {
+        return Err(MaterializationError::GraphHashMismatch);
+    }
+    if candidate.manifest_hash != expected_manifest_hash || !is_sha256(&candidate.manifest_hash) {
+        return Err(MaterializationError::ManifestHashMismatch);
+    }
+    let mut node_ids = HashSet::new();
+    let mut actual_pipelines = HashMap::<String, Vec<String>>::new();
+    for node in &candidate.nodes {
+        if node.node_id.trim().is_empty()
+            || node.input_resource.trim().is_empty()
+            || node.output_resource.trim().is_empty()
+            || !node_ids.insert(node.node_id.clone())
+        {
+            return Err(MaterializationError::InvalidIdentity(
+                "node identity".to_string(),
+            ));
+        }
+        if node.node_id != node.plan.node_id
+            || node.plan_hash != node.plan.hash
+            || !node.plan.verify()
+        {
+            return Err(MaterializationError::PlanHashMismatch(node.node_id.clone()));
+        }
+        for entry in &node.plan.entries {
+            if !registry.contains(&entry.plugin_id) {
+                return Err(MaterializationError::UnknownHandle(entry.plugin_id.clone()));
+            }
+        }
+        actual_pipelines
+            .entry(node.plan.chain.clone())
+            .or_default()
+            .push(node.node_id.clone());
+    }
+    if candidate.nodes.is_empty() {
+        return Err(MaterializationError::InvalidIdentity("nodes".to_string()));
+    }
+    for chain in ["request", "response", "error"] {
+        let expected = candidate
+            .pipelines
+            .get(chain)
+            .ok_or_else(|| MaterializationError::PipelineMismatch(chain.to_string()))?;
+        let actual = actual_pipelines
+            .get(chain)
+            .ok_or_else(|| MaterializationError::PipelineMismatch(chain.to_string()))?;
+        if expected != actual || candidate.entrypoints.get(chain) != expected.first() {
+            return Err(MaterializationError::PipelineMismatch(chain.to_string()));
+        }
+    }
+    if candidate.pipelines.len() != 3 || candidate.entrypoints.len() != 3 {
+        return Err(MaterializationError::PipelineMismatch(
+            "unknown".to_string(),
+        ));
+    }
+    let mut nodes = Vec::with_capacity(candidate.nodes.len());
+    for node in candidate.nodes {
+        let plan_hash = node.plan.hash.clone();
+        let mut container = NodeContainer::declare(
+            node.node_id,
+            node.plan,
+            PlanBindings {
+                graph_hash: plan_hash.clone(),
+                manifest_hash: plan_hash.clone(),
+                loaded_plan_hash: plan_hash,
+            },
+        )
+        .map_err(MaterializationError::Container)?;
+        container
+            .context_created()
+            .map_err(MaterializationError::Container)?;
+        container
+            .plugins_mounted()
+            .map_err(MaterializationError::Container)?;
+        container
+            .publish()
+            .map_err(MaterializationError::Container)?;
+        nodes.push(ExecutionEpochNode::new(container, node.allowed_edges));
+    }
+    ExecutionEpochBundle::from_ordered_nodes(
+        nodes,
+        ExecutionEpochIdentity {
+            plan_epoch: candidate.plan_epoch,
+            manifest_hash: candidate.manifest_hash,
+            execution_identity: candidate.epoch_id,
+        },
+    )
+    .map_err(MaterializationError::Epoch)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeContainerState {

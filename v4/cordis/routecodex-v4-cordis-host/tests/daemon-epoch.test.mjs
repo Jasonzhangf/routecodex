@@ -13,6 +13,25 @@ import {
 
 const hash = (value) => `sha256:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;
 const ZERO_BASE_HASH = 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
+const node = (candidateId, epochId, nodeId, chain) => {
+  const planHash = hash({ candidateId, epochId, nodeId, chain });
+  return {
+    node_id: nodeId,
+    plan_hash: planHash,
+    input_resource: `${chain}.in`,
+    output_resource: `${chain}.out`,
+    allowed_edges: {},
+    plan: {
+      node_id: nodeId,
+      position: 1,
+      role_id: `${chain}_role`,
+      chain,
+      entries: [],
+      selection_groups: [],
+      hash: planHash,
+    },
+  };
+};
 const bundle = (candidateId, epochId, planEpoch = Number(epochId.split('-').at(-1))) => ({
   schema_version: 1,
   candidate_id: candidateId,
@@ -21,16 +40,13 @@ const bundle = (candidateId, epochId, planEpoch = Number(epochId.split('-').at(-
   manifest_hash: hash({ candidateId, epochId, kind: 'manifest' }),
   graph_hash: hash({ candidateId, epochId, kind: 'graph' }),
   plugin_artifact_set_hash: hash({ candidateId, epochId, kind: 'plugins' }),
-  entrypoints: { request: 'V4HubReqInbound02Standardized' },
+  entrypoints: { request: 'req', response: 'resp', error: 'err' },
   pipelines: { request: ['req'], response: ['resp'], error: ['err'] },
-  nodes: [{
-    node_id: 'node-1',
-    plan_hash: hash({ candidateId, epochId, kind: 'plan' }),
-    input_resource: 'input',
-    output_resource: 'output',
-    allowed_edges: [],
-    plugins: [],
-  }],
+  nodes: [
+    node(candidateId, epochId, 'req', 'request'),
+    node(candidateId, epochId, 'resp', 'response'),
+    node(candidateId, epochId, 'err', 'error'),
+  ],
   policies: {},
 });
 const command = (kind, commandId, payload, extra = {}) => ({

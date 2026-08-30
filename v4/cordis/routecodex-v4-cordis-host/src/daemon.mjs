@@ -58,7 +58,62 @@ function freezeBundle(value) {
   ) {
     throw new CordisHostDaemonError('invalid_epoch_bundle', 'ExecutionEpochBundle fields are invalid');
   }
+  const nodeIds = new Set();
+  const actualPipelines = { request: [], response: [], error: [] };
+  for (const node of value.nodes) {
+    validateCompiledNode(node);
+    if (nodeIds.has(node.node_id)) {
+      throw new CordisHostDaemonError('invalid_epoch_bundle', `duplicate node ${node.node_id}`);
+    }
+    nodeIds.add(node.node_id);
+    actualPipelines[node.plan.chain].push(node.node_id);
+  }
+  for (const chain of ['request', 'response', 'error']) {
+    if (
+      JSON.stringify(value.pipelines[chain]) !== JSON.stringify(actualPipelines[chain])
+      || value.entrypoints[chain] !== value.pipelines[chain][0]
+    ) {
+      throw new CordisHostDaemonError('invalid_epoch_bundle', `pipeline order mismatch for ${chain}`);
+    }
+  }
+  for (const node of value.nodes) {
+    for (const target of Object.values(node.allowed_edges)) {
+      if (!nodeIds.has(target)) {
+        throw new CordisHostDaemonError('invalid_epoch_bundle', `unknown edge target ${target}`);
+      }
+    }
+  }
   return deepFreeze(structuredClone(value));
+}
+
+function validateCompiledNode(node) {
+  const allowed = new Set([
+    'node_id', 'plan_hash', 'input_resource', 'output_resource', 'allowed_edges', 'plan',
+  ]);
+  if (!node || typeof node !== 'object' || Array.isArray(node)) {
+    throw new CordisHostDaemonError('invalid_epoch_bundle', 'compiled node must be an object');
+  }
+  const unknown = Object.keys(node).find((key) => !allowed.has(key));
+  const plan = node.plan;
+  if (
+    unknown
+    || typeof node.node_id !== 'string' || node.node_id.length === 0
+    || !HASH_RE.test(node.plan_hash)
+    || typeof node.input_resource !== 'string' || node.input_resource.length === 0
+    || typeof node.output_resource !== 'string' || node.output_resource.length === 0
+    || !node.allowed_edges || typeof node.allowed_edges !== 'object' || Array.isArray(node.allowed_edges)
+    || Object.values(node.allowed_edges).some((target) => typeof target !== 'string' || target.length === 0)
+    || !plan || typeof plan !== 'object' || Array.isArray(plan)
+    || plan.node_id !== node.node_id
+    || plan.hash !== node.plan_hash
+    || !Number.isSafeInteger(plan.position) || plan.position < 1
+    || typeof plan.role_id !== 'string' || plan.role_id.length === 0
+    || !['request', 'response', 'error'].includes(plan.chain)
+    || !Array.isArray(plan.entries)
+    || !Array.isArray(plan.selection_groups)
+  ) {
+    throw new CordisHostDaemonError('invalid_epoch_bundle', 'compiled node fields are invalid');
+  }
 }
 
 function deepFreeze(value) {

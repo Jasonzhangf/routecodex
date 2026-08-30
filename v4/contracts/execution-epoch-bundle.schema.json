@@ -18,5 +18,59 @@
     "nodes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/node"}},
     "policies": {"type": "object", "additionalProperties": {"type": "object"}}
   },
-  "$defs": {"node": {"type": "object", "additionalProperties": false, "required": ["node_id", "plan_hash", "input_resource", "output_resource", "allowed_edges", "plugins"], "properties": {"node_id": {"type": "string", "minLength": 1}, "plan_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "input_resource": {"type": "string", "minLength": 1}, "output_resource": {"type": "string", "minLength": 1}, "allowed_edges": {"type": "array", "items": {"type": "string"}}, "plugins": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["plugin_id", "version", "artifact_hash", "config_hash"], "properties": {"plugin_id": {"type": "string", "minLength": 1}, "version": {"type": "string", "minLength": 1}, "artifact_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "config_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}}}}}}
+  "$defs": {
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "plan_hash", "input_resource", "output_resource", "allowed_edges", "plan"],
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1},
+        "plan_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "input_resource": {"type": "string", "minLength": 1},
+        "output_resource": {"type": "string", "minLength": 1},
+        "allowed_edges": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+        "plan": {"$ref": "#/$defs/plan"}
+      }
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "position", "role_id", "chain", "entries", "selection_groups", "hash"],
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1},
+        "position": {"type": "integer", "minimum": 1},
+        "role_id": {"type": "string", "minLength": 1},
+        "chain": {"enum": ["request", "response", "error"]},
+        "entries": {"type": "array", "items": {"$ref": "#/$defs/entry"}},
+        "selection_groups": {"type": "array", "items": {"$ref": "#/$defs/selection_group"}},
+        "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plugin_id", "version", "kind", "effect", "phase", "order", "reads", "writes"],
+      "properties": {
+        "plugin_id": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["admission", "control", "operator", "validator", "hook", "debug", "snapshot", "observer"]},
+        "effect": {"enum": ["read_only", "control_only", "semantic", "diagnostic_only"]},
+        "phase": {"enum": ["admission", "control", "semantic", "validation", "projection", "observation"]},
+        "order": {"type": "integer", "minimum": 0},
+        "selection_group": {"type": ["string", "null"]},
+        "reads": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "writes": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "selection_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group_id", "active_plugin", "variants"],
+      "properties": {
+        "group_id": {"type": "string", "minLength": 1},
+        "active_plugin": {"type": "string", "minLength": 1},
+        "variants": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
 }
