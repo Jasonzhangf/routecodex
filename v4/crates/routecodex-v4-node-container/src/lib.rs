@@ -14,6 +14,9 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+pub const ZERO_BASE_MANIFEST_HASH: &str =
+    "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeContainerState {
     Declared,
@@ -63,7 +66,10 @@ impl std::fmt::Display for NodeContainerError {
             Self::PlanHashMismatch => write!(f, "node plugin plan hash mismatch"),
             Self::BindingMismatch => write!(f, "Cordis graph/manifest/loaded plan hashes differ"),
             Self::NodeIdentityMismatch => {
-                write!(f, "node container identity differs from the compiled plugin plan")
+                write!(
+                    f,
+                    "node container identity differs from the compiled plugin plan"
+                )
             }
             Self::InFlightExecutions(count) => {
                 write!(
@@ -309,6 +315,18 @@ pub enum EpochError {
     NotRetired,
     InFlightLeases(usize),
     EmptyTransactionId,
+    EmptyNodeSet,
+    DuplicateNode(String),
+    InvalidNodeOrder {
+        chain: String,
+        node_id: String,
+    },
+    UnknownChain(String),
+    UnknownNode(String),
+    UndeclaredEdge {
+        node_id: String,
+        edge_id: String,
+    },
     StaleBase {
         expected_epoch: u64,
         actual_epoch: u64,
@@ -341,6 +359,12 @@ impl std::fmt::Display for EpochError {
             Self::NotRetired => write!(f, "execution epoch must be retired before disposal"),
             Self::InFlightLeases(count) => write!(f, "cannot dispose execution epoch with {count} lease(s)"),
             Self::EmptyTransactionId => write!(f, "execution epoch transaction id is required"),
+            Self::EmptyNodeSet => write!(f, "execution epoch requires at least one compiled node"),
+            Self::DuplicateNode(node_id) => write!(f, "execution epoch contains duplicate node {node_id}"),
+            Self::InvalidNodeOrder { chain, node_id } => write!(f, "execution epoch node {node_id} is out of compiled order for chain {chain}"),
+            Self::UnknownChain(chain) => write!(f, "execution epoch chain {chain} is unavailable"),
+            Self::UnknownNode(node_id) => write!(f, "execution epoch node {node_id} is unavailable"),
+            Self::UndeclaredEdge { node_id, edge_id } => write!(f, "execution epoch node {node_id} has no declared edge {edge_id}"),
             Self::StaleBase { expected_epoch, actual_epoch } => write!(f, "execution epoch transaction base is stale: expected {expected_epoch}, active {actual_epoch}"),
             Self::HashMismatch { expected, actual } => write!(f, "execution epoch candidate hash mismatch: expected {expected}, actual {actual}"),
             Self::IdempotencyConflict { transaction_id } => write!(f, "execution epoch transaction id {transaction_id} was reused with different input"),
@@ -361,11 +385,40 @@ impl From<NodeContainerError> for EpochError {
 
 struct EpochInner {
     identity: ExecutionEpochIdentity,
-    container: Mutex<Option<NodeContainer>>,
+    nodes: Mutex<Option<Vec<ExecutionEpochNode>>>,
     state: Mutex<ExecutionEpochState>,
     leases: AtomicUsize,
     failures: AtomicU64,
     rollback_hold: std::sync::atomic::AtomicBool,
+}
+
+/// One Cordis-compiled node in exact bundle order. Runtime consumers may
+/// execute the container or follow declared edges, but cannot reorder nodes.
+#[derive(Debug)]
+pub struct ExecutionEpochNode {
+    container: NodeContainer,
+    allowed_edges: HashMap<String, String>,
+}
+
+impl ExecutionEpochNode {
+    pub fn new(container: NodeContainer, allowed_edges: HashMap<String, String>) -> Self {
+        Self {
+            container,
+            allowed_edges,
+        }
+    }
+
+    pub fn node_id(&self) -> &str {
+        self.container.node_id()
+    }
+
+    pub fn chain(&self) -> &str {
+        &self.container.plan().chain
+    }
+
+    pub fn position(&self) -> u32 {
+        self.container.plan().position
+    }
 }
 
 /// One immutable execution epoch. Admission pins this object with a lease;
@@ -388,14 +441,70 @@ impl ExecutionEpochBundle {
         container: NodeContainer,
         identity: ExecutionEpochIdentity,
     ) -> Result<Self, EpochError> {
+        Self::from_ordered_nodes(
+            vec![ExecutionEpochNode::new(container, HashMap::new())],
+            identity,
+        )
+    }
+
+    pub fn from_ordered_nodes(
+        nodes: Vec<ExecutionEpochNode>,
+        identity: ExecutionEpochIdentity,
+    ) -> Result<Self, EpochError> {
         identity.validate()?;
-        if container.state() != NodeContainerState::Accepting {
+        if nodes.is_empty() {
+            return Err(EpochError::EmptyNodeSet);
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut last_chain = None::<String>;
+        let mut closed_chains = std::collections::HashSet::new();
+        let mut previous_position = 0;
+        for node in &nodes {
+            if node.container.state() != NodeContainerState::Accepting {
+                return Err(EpochError::CandidateNotAccepting);
+            }
+            if !seen.insert(node.node_id().to_string()) {
+                return Err(EpochError::DuplicateNode(node.node_id().to_string()));
+            }
+            if last_chain.as_deref() != Some(node.chain()) {
+                if let Some(chain) = last_chain.replace(node.chain().to_string()) {
+                    closed_chains.insert(chain);
+                }
+                if closed_chains.contains(node.chain()) {
+                    return Err(EpochError::InvalidNodeOrder {
+                        chain: node.chain().to_string(),
+                        node_id: node.node_id().to_string(),
+                    });
+                }
+                previous_position = 0;
+            }
+            if node.position() <= previous_position {
+                return Err(EpochError::InvalidNodeOrder {
+                    chain: node.chain().to_string(),
+                    node_id: node.node_id().to_string(),
+                });
+            }
+            previous_position = node.position();
+        }
+        for node in &nodes {
+            if let Some(target) = node
+                .allowed_edges
+                .values()
+                .find(|target| !seen.contains(*target))
+            {
+                return Err(EpochError::UnknownNode(target.clone()));
+            }
+        }
+        if nodes
+            .iter()
+            .any(|node| node.container.state() != NodeContainerState::Accepting)
+        {
             return Err(EpochError::CandidateNotAccepting);
         }
         Ok(Self {
             inner: Arc::new(EpochInner {
                 identity,
-                container: Mutex::new(Some(container)),
+                nodes: Mutex::new(Some(nodes)),
                 state: Mutex::new(ExecutionEpochState::Active),
                 leases: AtomicUsize::new(0),
                 failures: AtomicU64::new(0),
@@ -492,16 +601,14 @@ impl ExecutionEpochBundle {
         if leases != 0 {
             return Ok(());
         }
-        let mut container = self
-            .inner
-            .container
-            .lock()
-            .expect("epoch container lock poisoned");
-        if let Some(container) = container.as_mut() {
-            container.drain()?;
-            container.dispose()?;
+        let mut nodes = self.inner.nodes.lock().expect("epoch nodes lock poisoned");
+        if let Some(nodes) = nodes.as_mut() {
+            for node in nodes {
+                node.container.drain()?;
+                node.container.dispose()?;
+            }
         }
-        *container = None;
+        *nodes = None;
         *self.inner.state.lock().expect("epoch state lock poisoned") =
             ExecutionEpochState::Disposed;
         Ok(())
@@ -532,41 +639,110 @@ impl EpochLease {
     /// or container while the request is in flight.
     pub fn execute(
         &self,
+        node_id: &str,
         input: NodeExecutionInput,
         registry: &dyn HandleRegistry,
-    ) -> Result<NodeExecutionOutput, NodeContainerError> {
+    ) -> Result<NodeExecutionOutput, EpochError> {
         if self.snapshot().state == ExecutionEpochState::Disposed {
-            return Err(NodeContainerError::InvalidState {
+            return Err(EpochError::Container(NodeContainerError::InvalidState {
                 state: NodeContainerState::Disposed,
                 operation: "execute",
-            });
+            }));
         }
-        let container = self
+        let nodes = self
             .epoch
             .inner
-            .container
+            .nodes
             .lock()
-            .expect("epoch container lock poisoned");
-        let container = container.as_ref().ok_or(NodeContainerError::InvalidState {
-            state: NodeContainerState::Disposed,
-            operation: "execute",
-        })?;
-        container.execute(input, registry)
+            .expect("epoch nodes lock poisoned");
+        let nodes =
+            nodes
+                .as_ref()
+                .ok_or(EpochError::Container(NodeContainerError::InvalidState {
+                    state: NodeContainerState::Disposed,
+                    operation: "execute",
+                }))?;
+        let node = nodes
+            .iter()
+            .find(|node| node.node_id() == node_id)
+            .ok_or_else(|| EpochError::UnknownNode(node_id.to_string()))?;
+        node.container
+            .execute(input, registry)
+            .map_err(EpochError::Container)
     }
 
-    pub fn plan_hash(&self) -> Result<String, NodeContainerError> {
-        let container = self
+    pub fn plan_hash(&self, node_id: &str) -> Result<String, EpochError> {
+        let nodes = self
             .epoch
             .inner
-            .container
+            .nodes
             .lock()
-            .expect("epoch container lock poisoned");
-        container
-            .as_ref()
-            .map(|container| container.plan().hash.clone())
-            .ok_or(NodeContainerError::InvalidState {
-                state: NodeContainerState::Disposed,
-                operation: "read_plan_hash",
+            .expect("epoch nodes lock poisoned");
+        let nodes =
+            nodes
+                .as_ref()
+                .ok_or(EpochError::Container(NodeContainerError::InvalidState {
+                    state: NodeContainerState::Disposed,
+                    operation: "read_plan_hash",
+                }))?;
+        nodes
+            .iter()
+            .find(|node| node.node_id() == node_id)
+            .map(|node| node.container.plan().hash.clone())
+            .ok_or_else(|| EpochError::UnknownNode(node_id.to_string()))
+    }
+
+    pub fn entrypoint(&self, chain: &str) -> Result<String, EpochError> {
+        let nodes = self
+            .epoch
+            .inner
+            .nodes
+            .lock()
+            .expect("epoch nodes lock poisoned");
+        let nodes = nodes.as_ref().ok_or(EpochError::LeaseUnavailable)?;
+        nodes
+            .iter()
+            .find(|node| node.chain() == chain)
+            .map(|node| node.node_id().to_string())
+            .ok_or_else(|| EpochError::UnknownChain(chain.to_string()))
+    }
+
+    pub fn next_node(&self, chain: &str, node_id: &str) -> Result<Option<String>, EpochError> {
+        let nodes = self
+            .epoch
+            .inner
+            .nodes
+            .lock()
+            .expect("epoch nodes lock poisoned");
+        let nodes = nodes.as_ref().ok_or(EpochError::LeaseUnavailable)?;
+        let index = nodes
+            .iter()
+            .position(|node| node.node_id() == node_id && node.chain() == chain)
+            .ok_or_else(|| EpochError::UnknownNode(node_id.to_string()))?;
+        Ok(nodes
+            .get(index + 1)
+            .filter(|next| next.chain() == chain)
+            .map(|next| next.node_id().to_string()))
+    }
+
+    pub fn branch_target(&self, node_id: &str, edge_id: &str) -> Result<String, EpochError> {
+        let nodes = self
+            .epoch
+            .inner
+            .nodes
+            .lock()
+            .expect("epoch nodes lock poisoned");
+        let nodes = nodes.as_ref().ok_or(EpochError::LeaseUnavailable)?;
+        let node = nodes
+            .iter()
+            .find(|node| node.node_id() == node_id)
+            .ok_or_else(|| EpochError::UnknownNode(node_id.to_string()))?;
+        node.allowed_edges
+            .get(edge_id)
+            .cloned()
+            .ok_or_else(|| EpochError::UndeclaredEdge {
+                node_id: node_id.to_string(),
+                edge_id: edge_id.to_string(),
             })
     }
 
@@ -736,16 +912,24 @@ impl ActiveEpochStore {
             .active
             .read()
             .expect("active epoch lock poisoned")
-            .clone()
-            .ok_or(EpochError::LeaseUnavailable)?;
-        let active_snapshot = active.snapshot();
-        if active_snapshot.plan_epoch != base_epoch
-            || active_snapshot.manifest_hash != base_manifest_hash
-        {
-            return Err(EpochError::StaleBase {
-                expected_epoch: base_epoch,
-                actual_epoch: active_snapshot.plan_epoch,
-            });
+            .clone();
+        match active.as_ref().map(ExecutionEpochBundle::snapshot) {
+            Some(active_snapshot)
+                if active_snapshot.plan_epoch == base_epoch
+                    && active_snapshot.manifest_hash == base_manifest_hash => {}
+            Some(active_snapshot) => {
+                return Err(EpochError::StaleBase {
+                    expected_epoch: base_epoch,
+                    actual_epoch: active_snapshot.plan_epoch,
+                });
+            }
+            None if base_epoch == 0 && base_manifest_hash == ZERO_BASE_MANIFEST_HASH => {}
+            None => {
+                return Err(EpochError::StaleBase {
+                    expected_epoch: base_epoch,
+                    actual_epoch: 0,
+                });
+            }
         }
         let mut transactions = self
             .transactions
@@ -796,15 +980,24 @@ impl ActiveEpochStore {
             });
         }
         let mut active = self.active.write().expect("active epoch lock poisoned");
-        let current = active.as_ref().ok_or(EpochError::LeaseUnavailable)?;
-        let current_snapshot = current.snapshot();
-        if current_snapshot.plan_epoch != record.base_epoch
-            || current_snapshot.manifest_hash != record.base_manifest_hash
-        {
-            return Err(EpochError::StaleBase {
-                expected_epoch: record.base_epoch,
-                actual_epoch: current_snapshot.plan_epoch,
-            });
+        match active.as_ref().map(ExecutionEpochBundle::snapshot) {
+            Some(current_snapshot)
+                if current_snapshot.plan_epoch == record.base_epoch
+                    && current_snapshot.manifest_hash == record.base_manifest_hash => {}
+            Some(current_snapshot) => {
+                return Err(EpochError::StaleBase {
+                    expected_epoch: record.base_epoch,
+                    actual_epoch: current_snapshot.plan_epoch,
+                });
+            }
+            None if record.base_epoch == 0
+                && record.base_manifest_hash == ZERO_BASE_MANIFEST_HASH => {}
+            None => {
+                return Err(EpochError::StaleBase {
+                    expected_epoch: record.base_epoch,
+                    actual_epoch: 0,
+                });
+            }
         }
         let previous = active.replace(record.candidate.clone());
         if let Some(previous) = previous.as_ref() {
@@ -1089,7 +1282,8 @@ mod tests {
             manifest_hash: "manifest-stable".into(),
             execution_identity: "execution-stable".into(),
         };
-        let first = ExecutionEpochBundle::new(accepting_container("first"), identity.clone()).unwrap();
+        let first =
+            ExecutionEpochBundle::new(accepting_container("first"), identity.clone()).unwrap();
         let rebuilt = ExecutionEpochBundle::new(accepting_container("rebuilt"), identity).unwrap();
         assert_eq!(first.snapshot().plan_epoch, rebuilt.snapshot().plan_epoch);
         assert_eq!(

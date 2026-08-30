@@ -4,11 +4,12 @@
   "title": "V4 ExecutionEpochBundle",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "candidate_id", "epoch_id", "manifest_hash", "graph_hash", "plugin_artifact_set_hash", "entrypoints", "pipelines", "nodes", "policies"],
+  "required": ["schema_version", "candidate_id", "epoch_id", "plan_epoch", "manifest_hash", "graph_hash", "plugin_artifact_set_hash", "entrypoints", "pipelines", "nodes", "policies"],
   "properties": {
     "schema_version": {"const": 1},
     "candidate_id": {"type": "string", "minLength": 1},
     "epoch_id": {"type": "string", "minLength": 1},
+    "plan_epoch": {"type": "integer", "minimum": 1},
     "manifest_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "graph_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "plugin_artifact_set_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},

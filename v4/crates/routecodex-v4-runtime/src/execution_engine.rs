@@ -305,6 +305,7 @@ impl ExecutionEngine {
         frame.validate()?;
         let output = lease
             .execute(
+                entrypoint,
                 NodeExecutionInput {
                     data: frame.data,
                     control: frame.control,
