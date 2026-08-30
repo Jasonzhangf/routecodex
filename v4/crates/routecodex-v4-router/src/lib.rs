@@ -156,6 +156,21 @@ pub fn select_product_target_with_unavailable(
                 .iter()
                 .any(|provider| *provider == target.provider_id)
         })
+        .filter(|target| {
+            let provider_protocol = product
+                .providers
+                .iter()
+                .find(|provider| provider.provider_id == target.provider_id)
+                .map(|provider| provider.protocol.as_str());
+            match (entry_protocol, provider_protocol) {
+                // Direct Responses preserves the protocol; only a Responses
+                // provider can satisfy this lane without a semantic bypass.
+                ("responses" | "openai-responses", Some("responses" | "openai-responses")) => true,
+                // Relay currently has one registered projection: Chat -> Responses.
+                ("chat" | "openai-chat", Some("responses" | "openai-responses")) => true,
+                _ => false,
+            }
+        })
         .min_by_key(|target| target.priority)
         .ok_or_else(|| TargetSelectionError::ProductPoolUnavailable(pool.pool_id.clone()))?;
     let provider = product

@@ -41,7 +41,9 @@ pub(crate) fn direct_model_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), Stri
     let client_protocol = information_string(ctx, "v4.information.client_protocol")?;
     let provider_protocol = information_string(ctx, "v4.information.provider_protocol")?;
     if client_protocol != provider_protocol {
-        return Err("Direct protocol mismatch".to_string());
+        return Err(format!(
+            "Direct protocol mismatch: client={client_protocol} provider={provider_protocol}"
+        ));
     }
     ctx.write_data(Value::Object(value))
         .map_err(|error| error.to_string())
@@ -73,7 +75,9 @@ pub(crate) fn direct_response_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), S
     let client_protocol = information_string(ctx, "v4.information.client_protocol")?;
     let provider_protocol = information_string(ctx, "v4.information.provider_protocol")?;
     if client_protocol != provider_protocol {
-        return Err("Direct protocol mismatch".to_string());
+        return Err(format!(
+            "Direct protocol mismatch: client={client_protocol} provider={provider_protocol}"
+        ));
     }
     ctx.write_data(Value::Object(value))
         .map_err(|error| error.to_string())

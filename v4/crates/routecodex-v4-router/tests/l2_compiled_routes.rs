@@ -123,6 +123,39 @@ fn product_route_pool_selects_provider_wire_model() {
 }
 
 #[test]
+fn protocol_incompatible_priority_target_is_rejected_before_selection() {
+    let mut product = product_config();
+    product.providers.push(RuntimeProductProvider {
+        provider_id: "anthropic-provider".to_string(),
+        protocol: "anthropic".to_string(),
+        config_path: "/tmp/anthropic.toml".to_string(),
+        models: vec![RuntimeProductModel {
+            model_id: "client-model".to_string(),
+            wire_name: "wire-model".to_string(),
+            capabilities: vec!["thinking".to_string()],
+            aliases: Vec::new(),
+        }],
+        auth_handles: Vec::new(),
+    });
+    product.route_groups[0].pools[0].targets.insert(0, RuntimeProductTarget {
+        provider_id: "anthropic-provider".to_string(),
+        model_id: "client-model".to_string(),
+        priority: 0,
+        weight: None,
+    });
+    let selected = select_product_target(
+        &product,
+        "responses",
+        "client-model",
+        "responses",
+        &["thinking"],
+        0,
+    )
+    .expect("compatible responses target selected");
+    assert_eq!(selected.provider_id, "product-provider");
+}
+
+#[test]
 fn v3_product_default_pool_selects_target_matching_requested_model() {
     let product = compile_product_config(
         include_str!("../../../tests/resources/config/v3-responses-7777-product.toml"),
