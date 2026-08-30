@@ -1,8 +1,7 @@
 use routecodex_v4_config::{
-    compile_product_config,
-    RuntimeProductConfig, RuntimeProductModel, RuntimeProductPool, RuntimeProductProvider,
-    RuntimeProductErrorPolicy, RuntimeProductPolicyAction, RuntimeProductRouteGroup,
-    RuntimeProductTarget, RuntimeProviderCandidate, RuntimeRoute,
+    compile_product_config, RuntimeProductConfig, RuntimeProductErrorPolicy, RuntimeProductModel,
+    RuntimeProductPolicyAction, RuntimeProductPool, RuntimeProductProvider,
+    RuntimeProductRouteGroup, RuntimeProductTarget, RuntimeProviderCandidate, RuntimeRoute,
 };
 use routecodex_v4_router::{
     apply_product_error_policy, select_product_target, select_product_target_with_unavailable,
@@ -130,8 +129,15 @@ fn v3_product_default_pool_selects_target_matching_requested_model() {
         Some(std::path::Path::new("/tmp/v4")),
     )
     .expect("compile product fixture");
-    let selected = select_product_target(&product, "responses_v3_7777", "deepseek-v4-flash", "responses", &[], 0)
-        .expect("select matching default target");
+    let selected = select_product_target(
+        &product,
+        "responses_v3_7777",
+        "deepseek-v4-flash",
+        "responses",
+        &[],
+        0,
+    )
+    .expect("select matching default target");
     assert_eq!(selected.provider_id, "opencode-go");
     assert_eq!(selected.wire_model, "deepseek-v4-flash");
 }
@@ -147,7 +153,10 @@ fn unavailable_provider_is_excluded_before_reselect() {
         0,
         &["product-provider"],
     );
-    assert!(matches!(selected, Err(TargetSelectionError::ProductPoolUnavailable(_))));
+    assert!(matches!(
+        selected,
+        Err(TargetSelectionError::ProductPoolUnavailable(_))
+    ));
 }
 
 #[test]
@@ -222,7 +231,10 @@ fn product_error_policy_produces_typed_retry_cooldown_projection_facts() {
     assert!(decision.retry);
     assert!(decision.cooldown);
     assert_eq!(decision.project_status, Some(502));
-    assert_eq!(decision.reason_code.as_deref(), Some("provider_account_http_401"));
+    assert_eq!(
+        decision.reason_code.as_deref(),
+        Some("provider_account_http_401")
+    );
     assert!(apply_product_error_policy(&product, "product-provider", 200, "completed").is_none());
     assert!(apply_product_error_policy(&product, "other", 500, "failed").is_none());
 }

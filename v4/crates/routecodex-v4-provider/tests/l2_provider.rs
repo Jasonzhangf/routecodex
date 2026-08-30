@@ -1,12 +1,11 @@
 //! routecodex-v4-provider L2 regression: session-scoped availability.
 
 use routecodex_v4_provider::{
-    build_anthropic_messages_wire, build_openai_chat_wire, build_protocol_wire,
-    load_profile, normalize_provider_response,
-    normalize_provider_sse_frame, send_openai_chat, validate_auth_alias, verify_profile_auth,
-    AvailabilityRecord, AvailabilityState, ProviderBoundRawEvidenceBindingError,
-    ProviderBoundRawEvidenceOwnerContract, V4Availability01SessionScoped,
-    PROVIDER_BOUND_RAW_EVIDENCE_OWNER,
+    build_anthropic_messages_wire, build_openai_chat_wire, build_protocol_wire, load_profile,
+    normalize_provider_response, normalize_provider_sse_frame, send_openai_chat,
+    validate_auth_alias, verify_profile_auth, AvailabilityRecord, AvailabilityState,
+    ProviderBoundRawEvidenceBindingError, ProviderBoundRawEvidenceOwnerContract,
+    V4Availability01SessionScoped, PROVIDER_BOUND_RAW_EVIDENCE_OWNER,
 };
 use serde_json::json;
 use std::fs;
@@ -149,7 +148,10 @@ fn secret_file_without_secret_key_fails_fast() {
 
 #[test]
 fn responses_continuation_owner_is_compiled_and_invalid_values_fail_fast() {
-    let root = std::env::temp_dir().join(format!("rccv4-provider-continuation-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!(
+        "rccv4-provider-continuation-{}",
+        std::process::id()
+    ));
     fs::create_dir_all(&root).expect("temp root");
     let relay_path = root.join("relay.toml");
     fs::write(
@@ -236,15 +238,18 @@ fn protocol_dispatch_projects_normalized_input_to_selected_wire_shape() {
     let openai = build_protocol_wire("openai", &input, "gpt-wire", false).expect("openai wire");
     assert!(openai.get("input").is_none());
     assert_eq!(openai["messages"][0]["content"], "hello");
-    let anthropic = build_protocol_wire("anthropic", &input, "claude-wire", false)
-        .expect("anthropic wire");
+    let anthropic =
+        build_protocol_wire("anthropic", &input, "claude-wire", false).expect("anthropic wire");
     assert_eq!(anthropic["max_tokens"], 64);
     assert!(build_protocol_wire("unknown", &input, "wire", false).is_err());
 }
 
 #[test]
 fn protocol_transport_rejects_profile_protocol_mismatch_before_network() {
-    let path = std::env::temp_dir().join(format!("rccv4-provider-protocol-{}.toml", std::process::id()));
+    let path = std::env::temp_dir().join(format!(
+        "rccv4-provider-protocol-{}.toml",
+        std::process::id()
+    ));
     fs::write(
         &path,
         "providerId = \"real\"\n[provider]\nbaseURL = \"https://example.invalid/v1\"\ndefaultModel = \"wire\"\ntype = \"anthropic\"\n[provider.auth]\nenv = \"RCCV4_TEST_KEY\"\n",
@@ -331,5 +336,7 @@ fn provider_sse_normalizers_project_text_and_terminal_events() {
         b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hi\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
     )
     .expect("anthropic sse normalized");
-    assert!(String::from_utf8(anthropic).expect("utf8").contains("response.completed"));
+    assert!(String::from_utf8(anthropic)
+        .expect("utf8")
+        .contains("response.completed"));
 }

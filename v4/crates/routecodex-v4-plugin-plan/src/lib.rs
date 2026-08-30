@@ -83,9 +83,7 @@ impl NodePluginPlanBundle {
             .iter()
             .map(|plan| (plan.node_id.clone(), plan.hash.clone()))
             .zip(self.artifact_hashes.iter().cloned())
-            .map(|((node_id, plan_hash), artifact_hash)| {
-                (node_id, plan_hash, artifact_hash)
-            })
+            .map(|((node_id, plan_hash), artifact_hash)| (node_id, plan_hash, artifact_hash))
             .collect::<Vec<_>>();
         body.sort();
         let encoded = serde_json::to_vec(&body).expect("bundle identity is serializable");
@@ -737,7 +735,12 @@ fn validate_bound_node_selector(
     let anchor = active_node_anchor(selector_node_id)?.ok_or_else(|| PlanError::UnknownNode {
         node_id: selector_node_id.to_string(),
     })?;
-    if anchor.chain != chain {
+    let contract_chain = match chain {
+        "direct_request" | "relay_request" => "request",
+        "direct_response" | "relay_response" => "response",
+        other => other,
+    };
+    if anchor.chain != contract_chain {
         return Err(PlanError::NodeChainMismatch {
             node_id: selector_node_id.to_string(),
             chain: chain.to_string(),
@@ -1447,28 +1450,48 @@ mod tests {
             plugin.descriptor.node_selector.role_id = role_id.to_string();
             plugin.descriptor.node_selector.position = position;
             ActiveNodePlanInput {
-            node_id: node_id.to_string(),
-            role_id: role_id.to_string(),
-            chain: chain.to_string(),
-            position,
-            authoring: vec![plugin],
-            allowed_reads: allowed_reads(),
-            allowed_writes: allowed_writes(),
-            container_services: vec![],
+                node_id: node_id.to_string(),
+                role_id: role_id.to_string(),
+                chain: chain.to_string(),
+                position,
+                authoring: vec![plugin],
+                allowed_reads: allowed_reads(),
+                allowed_writes: allowed_writes(),
+                container_services: vec![],
             }
         };
         let first = compile_active_node_plan_bundle(
             vec![
-                make_input("V4HubReqChatProcess04Governed", "request_chat_process", "request", 4),
-                make_input("V4HubRespChatProcess03Governed", "response_chat_process", "response", 3),
+                make_input(
+                    "V4HubReqChatProcess04Governed",
+                    "request_chat_process",
+                    "request",
+                    4,
+                ),
+                make_input(
+                    "V4HubRespChatProcess03Governed",
+                    "response_chat_process",
+                    "response",
+                    3,
+                ),
             ],
             &registry(),
         )
         .expect("first bundle compiles");
         let second = compile_active_node_plan_bundle(
             vec![
-                make_input("V4HubRespChatProcess03Governed", "response_chat_process", "response", 3),
-                make_input("V4HubReqChatProcess04Governed", "request_chat_process", "request", 4),
+                make_input(
+                    "V4HubRespChatProcess03Governed",
+                    "response_chat_process",
+                    "response",
+                    3,
+                ),
+                make_input(
+                    "V4HubReqChatProcess04Governed",
+                    "request_chat_process",
+                    "request",
+                    4,
+                ),
             ],
             &registry(),
         )

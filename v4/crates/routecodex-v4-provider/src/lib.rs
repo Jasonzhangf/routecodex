@@ -469,7 +469,8 @@ impl ProviderResponseStream {
             self.buffer.drain(..count);
             return Ok(count);
         }
-        self.response.read(chunk)
+        self.response
+            .read(chunk)
             .map_err(|error| ProviderTransportError {
                 code: "provider_stream_read".to_string(),
                 message: error.to_string(),
@@ -787,7 +788,16 @@ pub fn send_responses(
 ) -> Result<ProviderRawResponse, ProviderTransportError> {
     let profile = load_profile(profile_path)?;
     let wire_model = resolve_model(&profile, model)?;
-    if profile.protocol != "responses" { return Err(ProviderTransportError { code: "provider_protocol_unsupported".into(), message: format!("provider protocol {} cannot serve Responses", profile.protocol), status: None }); }
+    if profile.protocol != "responses" {
+        return Err(ProviderTransportError {
+            code: "provider_protocol_unsupported".into(),
+            message: format!(
+                "provider protocol {} cannot serve Responses",
+                profile.protocol
+            ),
+            status: None,
+        });
+    }
     let mut body = input.clone();
     let object = body.as_object_mut().ok_or_else(|| ProviderTransportError {
         code: "provider_request_invalid".to_string(),
@@ -796,15 +806,49 @@ pub fn send_responses(
     })?;
     object.insert("model".to_string(), Value::String(wire_model));
     object.insert("stream".to_string(), Value::Bool(stream));
-    let payload = serde_json::to_vec(&body).map_err(|error| ProviderTransportError { code: "provider_request_encode".into(), message: error.to_string(), status: None })?;
-    let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(300)).build().map_err(|error| ProviderTransportError { code: "provider_client_build".into(), message: error.to_string(), status: None })?;
+    let payload = serde_json::to_vec(&body).map_err(|error| ProviderTransportError {
+        code: "provider_request_encode".into(),
+        message: error.to_string(),
+        status: None,
+    })?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_client_build".into(),
+            message: error.to_string(),
+            status: None,
+        })?;
     let key = materialize_auth(&profile.auth)?;
     let endpoint = format!("{}/responses", profile.base_url.trim_end_matches('/'));
-    let response = client.post(endpoint).bearer_auth(key).header(reqwest::header::CONTENT_TYPE, "application/json").body(payload).send().map_err(|error| ProviderTransportError { code: "provider_transport_send".into(), message: error.to_string(), status: None })?;
+    let response = client
+        .post(endpoint)
+        .bearer_auth(key)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(payload)
+        .send()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_transport_send".into(),
+            message: error.to_string(),
+            status: None,
+        })?;
     let status = response.status().as_u16();
-    let content_type = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
-    let body = response.bytes().map_err(|error| ProviderTransportError { code: "provider_response_read".into(), message: error.to_string(), status: Some(status) })?;
-    Ok(ProviderRawResponse { status, content_type, body: body.to_vec() })
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let body = response.bytes().map_err(|error| ProviderTransportError {
+        code: "provider_response_read".into(),
+        message: error.to_string(),
+        status: Some(status),
+    })?;
+    Ok(ProviderRawResponse {
+        status,
+        content_type,
+        body: body.to_vec(),
+    })
 }
 
 pub fn send_responses_streaming(
@@ -839,11 +883,39 @@ pub fn send_responses_streaming(
     })?;
     let key = materialize_auth(&profile.auth)?;
     let endpoint = format!("{}/responses", profile.base_url.trim_end_matches('/'));
-    let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(300)).build().map_err(|error| ProviderTransportError { code: "provider_client_build".into(), message: error.to_string(), status: None })?;
-    let response = client.post(endpoint).bearer_auth(key).header(reqwest::header::CONTENT_TYPE, "application/json").body(payload).send().map_err(|error| ProviderTransportError { code: "provider_transport_send".into(), message: error.to_string(), status: None })?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_client_build".into(),
+            message: error.to_string(),
+            status: None,
+        })?;
+    let response = client
+        .post(endpoint)
+        .bearer_auth(key)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(payload)
+        .send()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_transport_send".into(),
+            message: error.to_string(),
+            status: None,
+        })?;
     let status = response.status().as_u16();
-    let content_type = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
-    Ok(ProviderResponseStream { response, buffer: Vec::new(), status, content_type, protocol: "responses".to_string() })
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    Ok(ProviderResponseStream {
+        response,
+        buffer: Vec::new(),
+        status,
+        content_type,
+        protocol: "responses".to_string(),
+    })
 }
 
 fn send_wire_request(
@@ -869,22 +941,54 @@ fn send_wire_request(
         status: None,
     })?;
     let key = materialize_auth(&profile.auth)?;
-    let endpoint = format!("{}/{}", profile.base_url.trim_end_matches('/'), endpoint_suffix);
+    let endpoint = format!(
+        "{}/{}",
+        profile.base_url.trim_end_matches('/'),
+        endpoint_suffix
+    );
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(300))
         .build()
-        .map_err(|error| ProviderTransportError { code: "provider_client_build".into(), message: error.to_string(), status: None })?;
-    let mut request = client.post(endpoint).header(reqwest::header::CONTENT_TYPE, "application/json");
+        .map_err(|error| ProviderTransportError {
+            code: "provider_client_build".into(),
+            message: error.to_string(),
+            status: None,
+        })?;
+    let mut request = client
+        .post(endpoint)
+        .header(reqwest::header::CONTENT_TYPE, "application/json");
     request = if protocol == "anthropic" {
-        request.header("x-api-key", key).header("anthropic-version", "2023-06-01")
+        request
+            .header("x-api-key", key)
+            .header("anthropic-version", "2023-06-01")
     } else {
         request.bearer_auth(key)
     };
-    let response = request.body(payload).send().map_err(|error| ProviderTransportError { code: "provider_transport_send".into(), message: error.to_string(), status: None })?;
+    let response = request
+        .body(payload)
+        .send()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_transport_send".into(),
+            message: error.to_string(),
+            status: None,
+        })?;
     let status = response.status().as_u16();
-    let content_type = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or_default().to_string();
-    let body = response.bytes().map_err(|error| ProviderTransportError { code: "provider_response_read".into(), message: error.to_string(), status: Some(status) })?;
-    Ok(ProviderRawResponse { status, content_type, body: body.to_vec() })
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let body = response.bytes().map_err(|error| ProviderTransportError {
+        code: "provider_response_read".into(),
+        message: error.to_string(),
+        status: Some(status),
+    })?;
+    Ok(ProviderRawResponse {
+        status,
+        content_type,
+        body: body.to_vec(),
+    })
 }
 
 pub fn send_openai_chat(
@@ -932,16 +1036,36 @@ fn send_wire_streaming(
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(300))
         .build()
-        .map_err(|error| ProviderTransportError { code: "provider_client_build".into(), message: error.to_string(), status: None })?;
-    let mut request = client.post(endpoint).header(reqwest::header::CONTENT_TYPE, "application/json");
+        .map_err(|error| ProviderTransportError {
+            code: "provider_client_build".into(),
+            message: error.to_string(),
+            status: None,
+        })?;
+    let mut request = client
+        .post(endpoint)
+        .header(reqwest::header::CONTENT_TYPE, "application/json");
     request = if protocol == "anthropic" {
-        request.header("x-api-key", key).header("anthropic-version", "2023-06-01")
+        request
+            .header("x-api-key", key)
+            .header("anthropic-version", "2023-06-01")
     } else {
         request.bearer_auth(key)
     };
-    let response = request.body(payload).send().map_err(|error| ProviderTransportError { code: "provider_transport_send".into(), message: error.to_string(), status: None })?;
+    let response = request
+        .body(payload)
+        .send()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_transport_send".into(),
+            message: error.to_string(),
+            status: None,
+        })?;
     let status = response.status().as_u16();
-    let content_type = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or_default().to_string();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
     let stream = ProviderResponseStream {
         response,
         buffer: Vec::new(),

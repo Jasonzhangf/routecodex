@@ -14,7 +14,12 @@ pub fn active_runtime(contract_json: &str) -> SkeletonRuntime {
     for chain in plan
         .chains
         .iter()
-        .filter(|chain| matches!(chain.chain_id.as_str(), "request" | "response" | "error"))
+        .filter(|chain| {
+            matches!(
+                chain.chain_id.as_str(),
+                "direct_request" | "direct_response" | "relay_request" | "relay_response" | "error"
+            )
+        })
     {
         for node in &chain.nodes {
             let plugin_ids = descriptors
@@ -25,6 +30,8 @@ pub fn active_runtime(contract_json: &str) -> SkeletonRuntime {
                         && descriptor.plugin_id != "v4.std.provider.wire_build"
                         && descriptor.plugin_id != "v4.std.protocol.wire_codec_proto"
                         && !descriptor.plugin_id.ends_with("_mock")
+                        && !(chain.chain_id == "relay_request"
+                            && descriptor.plugin_id.starts_with("v4.std.request.responses_"))
                 })
                 .map(|descriptor| descriptor.plugin_id.as_str())
                 .collect::<Vec<_>>();

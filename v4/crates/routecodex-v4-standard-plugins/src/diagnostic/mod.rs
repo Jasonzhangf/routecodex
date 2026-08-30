@@ -17,7 +17,12 @@ fn colorize(color: &str, text: String) -> String {
     }
 }
 
-pub fn format_startup(identity: &str, version: &str, binary: &str, listeners: &[String]) -> (String, String) {
+pub fn format_startup(
+    identity: &str,
+    version: &str,
+    binary: &str,
+    listeners: &[String],
+) -> (String, String) {
     let addresses = listeners.join(", ");
     let headline = colorize(
         ANSI_GREEN,

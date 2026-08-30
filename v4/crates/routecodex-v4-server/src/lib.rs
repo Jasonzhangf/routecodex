@@ -14,8 +14,8 @@ use std::fs;
 use std::future::Future;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::pin::Pin;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const REQUEST_RECORD_SCHEMA_VERSION: u64 = 1;
@@ -114,7 +114,11 @@ pub fn persist_request_record(request: &HttpRequest, status: u16) -> Result<(), 
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_millis() as u64;
-    let result = if (200..400).contains(&status) { "success" } else { "error" };
+    let result = if (200..400).contains(&status) {
+        "success"
+    } else {
+        "error"
+    };
     let row = serde_json::json!({
         "request_key": format!("{}:{}", request.port, request.request_id),
         "event_type": if result == "success" { "request.completed" } else { "request.failed" },
@@ -217,7 +221,15 @@ impl AsyncHttpServer {
             let max_request_bytes = self.max_request_bytes;
             let port = self.port;
             tokio::spawn(async move {
-                let _ = serve_async_connection(stream, handler, connection_stop, max_request_bytes, request_identity, port).await;
+                let _ = serve_async_connection(
+                    stream,
+                    handler,
+                    connection_stop,
+                    max_request_bytes,
+                    request_identity,
+                    port,
+                )
+                .await;
             });
         }
     }
@@ -435,7 +447,12 @@ impl V4HttpServer {
         mut should_stop: impl FnMut() -> bool,
     ) -> Result<(), HttpServerError> {
         let local_day = local_day();
-        self.run_until_with_counter(handler, V4RequestIdCounter::new(), || should_stop(), &local_day)
+        self.run_until_with_counter(
+            handler,
+            V4RequestIdCounter::new(),
+            || should_stop(),
+            &local_day,
+        )
     }
 
     pub fn run_until_persisted<H: HttpHandler>(
@@ -822,7 +839,10 @@ impl V4RequestIdCounter {
     }
 
     pub fn from_state_file(path: PathBuf) -> Result<Self, RequestIdentityError> {
-        let mut counter = Self { state_file: Some(path), ..Self::default() };
+        let mut counter = Self {
+            state_file: Some(path),
+            ..Self::default()
+        };
         counter.load_state()?;
         Ok(counter)
     }
@@ -873,20 +893,38 @@ impl V4RequestIdCounter {
 
     fn load_state(&mut self) -> Result<(), RequestIdentityError> {
         self.loaded = true;
-        let Some(path) = self.state_file.as_ref() else { return Ok(()); };
-        if !path.exists() { return Ok(()); }
-        let bytes = fs::read(path).map_err(|error| RequestIdentityError::Persistence(format!("failed to read {}: {error}", path.display())))?;
-        let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| RequestIdentityError::Persistence(format!("failed to parse {}: {error}", path.display())))?;
+        let Some(path) = self.state_file.as_ref() else {
+            return Ok(());
+        };
+        if !path.exists() {
+            return Ok(());
+        }
+        let bytes = fs::read(path).map_err(|error| {
+            RequestIdentityError::Persistence(format!("failed to read {}: {error}", path.display()))
+        })?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
+            RequestIdentityError::Persistence(format!(
+                "failed to parse {}: {error}",
+                path.display()
+            ))
+        })?;
         if value.get("version").and_then(serde_json::Value::as_u64) != Some(1) {
-            return Err(RequestIdentityError::Persistence(format!("unsupported request id counter version in {}", path.display())));
+            return Err(RequestIdentityError::Persistence(format!(
+                "unsupported request id counter version in {}",
+                path.display()
+            )));
         }
         if let (Some(server_id), Some(window_key), Some(count)) = (
             value.get("serverId").and_then(serde_json::Value::as_str),
             value.get("windowKey").and_then(serde_json::Value::as_str),
             value.get("windowCount").and_then(serde_json::Value::as_u64),
         ) {
-            self.counters.insert((server_id.to_string(), window_key.to_string()), count);
-            self.total_count = value.get("totalCount").and_then(serde_json::Value::as_u64).unwrap_or(count);
+            self.counters
+                .insert((server_id.to_string(), window_key.to_string()), count);
+            self.total_count = value
+                .get("totalCount")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(count);
             self.window_count = count;
             self.window_key = window_key.to_string();
         }
@@ -894,18 +932,41 @@ impl V4RequestIdCounter {
     }
 
     fn persist_state(&self) -> Result<(), RequestIdentityError> {
-        let Some(path) = self.state_file.as_ref() else { return Ok(()); };
-        let Some(((server_id, window_key), count)) = self.counters.iter().next_back() else { return Ok(()); };
-        let parent = path.parent().ok_or_else(|| RequestIdentityError::Persistence("request id state has no parent".to_string()))?;
-        fs::create_dir_all(parent).map_err(|error| RequestIdentityError::Persistence(format!("failed to create {}: {error}", parent.display())))?;
+        let Some(path) = self.state_file.as_ref() else {
+            return Ok(());
+        };
+        let Some(((server_id, window_key), count)) = self.counters.iter().next_back() else {
+            return Ok(());
+        };
+        let parent = path.parent().ok_or_else(|| {
+            RequestIdentityError::Persistence("request id state has no parent".to_string())
+        })?;
+        fs::create_dir_all(parent).map_err(|error| {
+            RequestIdentityError::Persistence(format!(
+                "failed to create {}: {error}",
+                parent.display()
+            ))
+        })?;
         let updated_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_secs().to_string())
             .unwrap_or_else(|_| "0".to_string());
         let body = serde_json::json!({"version": 1, "serverId": server_id, "totalCount": self.total_count.max(*count), "windowCount": self.window_count.max(*count), "windowKey": window_key, "updatedAt": updated_at});
         let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
-        fs::write(&tmp, serde_json::to_vec_pretty(&body).map_err(|error| RequestIdentityError::Persistence(error.to_string()))?).map_err(|error| RequestIdentityError::Persistence(format!("failed to write {}: {error}", tmp.display())))?;
-        fs::rename(&tmp, path).map_err(|error| RequestIdentityError::Persistence(format!("failed to publish {}: {error}", path.display())))
+        fs::write(
+            &tmp,
+            serde_json::to_vec_pretty(&body)
+                .map_err(|error| RequestIdentityError::Persistence(error.to_string()))?,
+        )
+        .map_err(|error| {
+            RequestIdentityError::Persistence(format!("failed to write {}: {error}", tmp.display()))
+        })?;
+        fs::rename(&tmp, path).map_err(|error| {
+            RequestIdentityError::Persistence(format!(
+                "failed to publish {}: {error}",
+                path.display()
+            ))
+        })
     }
 }
 

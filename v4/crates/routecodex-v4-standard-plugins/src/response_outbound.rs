@@ -112,6 +112,40 @@ pub(crate) fn project_responses_to_chat(value: &Value) -> Value {
     })
 }
 
+/// Adjacent client protocol codec. It converts an already governed semantic
+/// object into a complete SSE frame; transport buffering remains elsewhere.
+pub fn encode_client_sse_frame(
+    entry_protocol: &str,
+    semantic: &Value,
+    terminal: bool,
+) -> Result<Vec<u8>, String> {
+    let encoded = serde_json::to_vec(semantic)
+        .map_err(|error| format!("client SSE semantic encode failed: {error}"))?;
+    let mut frame = Vec::new();
+    match entry_protocol {
+        "responses" => {
+            let event = semantic
+                .get("type")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Responses client semantic object is missing type".to_string())?;
+            frame.extend_from_slice(format!("event: {event}\n").as_bytes());
+            frame.extend_from_slice(b"data: ");
+            frame.extend_from_slice(&encoded);
+            frame.extend_from_slice(b"\n\n");
+        }
+        "chat" => {
+            frame.extend_from_slice(b"data: ");
+            frame.extend_from_slice(&encoded);
+            frame.extend_from_slice(b"\n\n");
+            if terminal {
+                frame.extend_from_slice(b"data: [DONE]\n\n");
+            }
+        }
+        other => return Err(format!("unsupported client SSE protocol {other}")),
+    }
+    Ok(frame)
+}
+
 fn project_responses_event_to_chat(value: &Value) -> Value {
     let event_type = value.get("type").and_then(Value::as_str).unwrap_or_default();
     let response = value.get("response").unwrap_or(value);

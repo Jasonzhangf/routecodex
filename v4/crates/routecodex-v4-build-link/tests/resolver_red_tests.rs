@@ -51,10 +51,7 @@ fn temp_fixture(tag: &str) -> PathBuf {
 
 fn install_protected_version(root: &Path, module_id: &str, version: &str) {
     let fixture = fixture_root();
-    let protected = fixture
-        .join("active/lib")
-        .join(module_id)
-        .join(version);
+    let protected = fixture.join("active/lib").join(module_id).join(version);
     let active = root.join("active/lib").join(module_id).join(version);
     fs::create_dir_all(active.join("lib")).expect("create Active version copy");
     fs::copy(

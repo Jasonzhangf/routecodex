@@ -50,16 +50,14 @@ fn control_socket_reports_status_and_stop_for_exact_instance() {
         thread::sleep(Duration::from_millis(2));
     }
     assert_eq!(status.join().expect("join").state, "running");
-    let running_state: serde_json::Value = serde_json::from_slice(
-        &fs::read(&paths.status_path).expect("running status file"),
-    )
-    .expect("running status JSON");
+    let running_state: serde_json::Value =
+        serde_json::from_slice(&fs::read(&paths.status_path).expect("running status file"))
+            .expect("running status JSON");
     assert_eq!(running_state["state"], "running");
     control.clear_record().expect("clear");
-    let stopped_state: serde_json::Value = serde_json::from_slice(
-        &fs::read(&paths.status_path).expect("stopped status file"),
-    )
-    .expect("stopped status JSON");
+    let stopped_state: serde_json::Value =
+        serde_json::from_slice(&fs::read(&paths.status_path).expect("stopped status file"))
+            .expect("stopped status JSON");
     assert_eq!(stopped_state["state"], "stopped");
     drop(control);
     fs::remove_dir_all(&paths.state_root).expect("cleanup exact test root");
@@ -79,10 +77,15 @@ fn existing_record_or_socket_fails_fast_without_silent_cleanup() {
 fn repair_stale_removes_dead_instance_record_and_socket() {
     let paths = V4LifecyclePaths::for_state_root(test_root("repair"));
     paths.prepare().expect("prepare");
-    fs::write(&paths.record_path, serde_json::to_vec(&ManagedInstanceRecord {
-        pid: 999_999_999,
-        ..record()
-    }).expect("record")).expect("write record");
+    fs::write(
+        &paths.record_path,
+        serde_json::to_vec(&ManagedInstanceRecord {
+            pid: 999_999_999,
+            ..record()
+        })
+        .expect("record"),
+    )
+    .expect("write record");
     std::os::unix::net::UnixListener::bind(&paths.control_socket).expect("socket");
     repair_stale(&paths).expect("repair");
     assert!(!paths.record_path.exists());

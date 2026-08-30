@@ -22,6 +22,7 @@ use routecodex_v4_plugin_contract::{
     PluginKind, PluginPhase, ResourceAxis, ResourceEntry, ResourceRegistry,
 };
 use routecodex_v4_plugin_plan::{compile_node_plan, AuthoringPlugin, NodePluginPlan};
+use routecodex_v4_skeleton::SkeletonPlan;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -392,6 +393,10 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         "V4HubReqInbound02Normalized" => vec!["v4.request.normal_payload".to_string()],
         "V4HubReqChatProcess03Governed" => vec!["v4.request.normal_payload".to_string()],
         "V4HubRespInbound03Normalized" => vec!["v4.response.provider_raw".to_string()],
+        "V4ProviderRespCompat02ProviderCompat" => vec![
+            "v4.response.provider_raw".to_string(),
+            "v4.information.provider_protocol".to_string(),
+        ],
         "V4HubRespChatProcess04Governed" => vec!["v4.response.normal_payload".to_string()],
         "V4HubRespOutbound05ClientSemantic" => vec![
             "v4.response.normal_payload".to_string(),
@@ -427,6 +432,9 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
         "V4HubReqInbound02Normalized" => Vec::new(),
         "V4HubReqChatProcess03Governed" => vec!["v4.request.normal_payload".to_string()],
         "V4HubRespInbound03Normalized" => vec!["v4.response.normal_payload".to_string()],
+        "V4ProviderRespCompat02ProviderCompat" => {
+            vec!["v4.response.provider_raw".to_string()]
+        }
         "V4HubRespChatProcess04Governed" => vec![
             "v4.response.normal_payload".to_string(),
             "v4.control.metadata_center".to_string(),
@@ -817,6 +825,102 @@ pub fn compile_standard_plan(
         &standard_resource_registry(),
         &standard_container_services(),
     )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProductionExecutionPlans {
+    pub plans: Vec<NodePluginPlan>,
+    pub artifact_set_hash: String,
+}
+
+/// Compile the five production execution lanes from the canonical skeleton.
+/// SSE remains outside this JSON semantic graph; mock and superseded plugin
+/// variants are never eligible for publication.
+pub fn compile_production_execution_plans(
+    skeleton: &SkeletonPlan,
+) -> Result<ProductionExecutionPlans, routecodex_v4_plugin_plan::PlanError> {
+    const PRODUCTION_CHAINS: [&str; 5] = [
+        "direct_request",
+        "direct_response",
+        "relay_request",
+        "relay_response",
+        "error",
+    ];
+    const EXCLUDED_PLUGINS: [&str; 7] = [
+        "v4.std.provider.capability_mock",
+        "v4.std.provider.auth_handle_mock",
+        "v4.std.provider.wire_mock",
+        "v4.std.provider.transport_mock",
+        "v4.std.provider.wire_build",
+        "v4.std.protocol.wire_codec_proto",
+        "v4.std.request.governance",
+    ];
+
+    let plugins = standard_plugins();
+    let mut plans = Vec::new();
+    let mut artifact_hashes = Vec::new();
+    for chain_id in PRODUCTION_CHAINS {
+        let chain = skeleton
+            .chains
+            .iter()
+            .find(|chain| chain.chain_id == chain_id)
+            .ok_or_else(|| routecodex_v4_plugin_plan::PlanError::NodeContractInvalid {
+                reason: format!("missing production chain {chain_id}"),
+            })?;
+        for node in &chain.nodes {
+            let selected = plugins
+                .iter()
+                .filter(|plugin| plugin.descriptor.node_selector.node_id == node.node_id)
+                .filter(|plugin| !EXCLUDED_PLUGINS.contains(&plugin.plugin_id.as_str()))
+                .collect::<Vec<_>>();
+            let plan = if selected.is_empty() {
+                let mut plan = NodePluginPlan {
+                    node_id: node.node_id.clone(),
+                    position: node.position,
+                    role_id: node.role_id.clone(),
+                    chain: chain_id.to_string(),
+                    entries: Vec::new(),
+                    selection_groups: Vec::new(),
+                    hash: String::new(),
+                };
+                plan.hash = plan.plan_hash();
+                plan
+            } else {
+                let authoring = selected
+                    .iter()
+                    .map(|plugin| AuthoringPlugin {
+                        descriptor: plugin.descriptor.clone(),
+                        enabled: true,
+                    })
+                    .collect::<Vec<_>>();
+                compile_node_plan(
+                    &node.node_id,
+                    &node.role_id,
+                    chain_id,
+                    node.position,
+                    &authoring,
+                    &standard_node_allowed_reads(&node.node_id),
+                    &standard_node_allowed_writes(&node.node_id),
+                    &standard_resource_registry(),
+                    &standard_container_services(),
+                )?
+            };
+            artifact_hashes.extend(
+                selected
+                    .iter()
+                    .map(|plugin| plugin.descriptor.artifact_hash.clone()),
+            );
+            plans.push(plan);
+        }
+    }
+    artifact_hashes.sort();
+    artifact_hashes.dedup();
+    let encoded = serde_json::to_vec(&artifact_hashes)
+        .expect("standard artifact hash set is serializable");
+    Ok(ProductionExecutionPlans {
+        plans,
+        artifact_set_hash: format!("sha256:{}", sha256_hex(&encoded)),
+    })
 }
 
 struct MockHandle {
@@ -1247,6 +1351,7 @@ mod tests {
             "v4.std.provider.transport_mock",
             "v4.std.response.protocol_decode",
             "v4.std.response.frame_build",
+            "v4.std.response.provider_compat",
             "v4.std.request.responses_normalize",
             "v4.std.request.governance",
             "v4.std.request.responses_wire_build",

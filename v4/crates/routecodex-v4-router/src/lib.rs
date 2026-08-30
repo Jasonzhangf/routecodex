@@ -9,8 +9,8 @@
 //! - control fields never enter provider/client normal payload.
 
 use routecodex_v4_config::{
-    RuntimeProductConfig, RuntimeProductProvider, RuntimeProductTarget, RuntimeProviderCandidate,
-    RuntimeProductPolicyAction, RuntimeRoute,
+    RuntimeProductConfig, RuntimeProductPolicyAction, RuntimeProductProvider, RuntimeProductTarget,
+    RuntimeProviderCandidate, RuntimeRoute,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +51,10 @@ impl std::fmt::Display for TargetSelectionError {
                 write!(f, "no product route pool serves request in group {group}")
             }
             Self::ProductTargetMissing(target) => {
-                write!(f, "compiled product target references missing provider/model {target}")
+                write!(
+                    f,
+                    "compiled product target references missing provider/model {target}"
+                )
             }
         }
     }
@@ -92,7 +95,9 @@ pub fn select_product_target_with_unavailable(
         .route_groups
         .iter()
         .find(|group| group.route_group_id == route_group_id)
-        .ok_or_else(|| TargetSelectionError::ProductRouteGroupMissing(route_group_id.to_string()))?;
+        .ok_or_else(|| {
+            TargetSelectionError::ProductRouteGroupMissing(route_group_id.to_string())
+        })?;
     let mut pools = group
         .pools
         .iter()
@@ -101,8 +106,13 @@ pub fn select_product_target_with_unavailable(
                 .as_deref()
                 .map_or(true, |protocol| protocol == entry_protocol)
         })
-        .filter(|pool| pool.models.is_empty() || pool.models.iter().any(|model| model == requested_model))
-        .filter(|pool| pool.min_input_tokens.map_or(true, |minimum| input_tokens >= minimum))
+        .filter(|pool| {
+            pool.models.is_empty() || pool.models.iter().any(|model| model == requested_model)
+        })
+        .filter(|pool| {
+            pool.min_input_tokens
+                .map_or(true, |minimum| input_tokens >= minimum)
+        })
         .filter(|pool| {
             pool.required_capabilities
                 .iter()
@@ -114,7 +124,11 @@ pub fn select_product_target_with_unavailable(
             .required_capabilities
             .len()
             .cmp(&left.required_capabilities.len())
-            .then_with(|| left.precedence.unwrap_or(i32::MAX).cmp(&right.precedence.unwrap_or(i32::MAX)))
+            .then_with(|| {
+                left.precedence
+                    .unwrap_or(i32::MAX)
+                    .cmp(&right.precedence.unwrap_or(i32::MAX))
+            })
     });
     let pool = pools
         .into_iter()
@@ -137,7 +151,11 @@ pub fn select_product_target_with_unavailable(
                     })
                     .is_some()
         })
-        .filter(|target| !unavailable_provider_ids.iter().any(|provider| *provider == target.provider_id))
+        .filter(|target| {
+            !unavailable_provider_ids
+                .iter()
+                .any(|provider| *provider == target.provider_id)
+        })
         .min_by_key(|target| target.priority)
         .ok_or_else(|| TargetSelectionError::ProductPoolUnavailable(pool.pool_id.clone()))?;
     let provider = product
@@ -202,7 +220,9 @@ pub fn apply_product_error_policy(
             .scope_provider_id
             .as_deref()
             .map_or(true, |scope| scope == provider_id)
-            && policy.match_status.map_or(true, |expected| expected == status)
+            && policy
+                .match_status
+                .map_or(true, |expected| expected == status)
             && (policy.match_content_contains_any.is_empty()
                 || policy
                     .match_content_contains_any
@@ -233,12 +253,16 @@ pub fn apply_product_error_policy(
             .unwrap_or(1)
             .max(1) as u64,
         project_status: actions.iter().find_map(|action| {
-            (action.step == "project").then_some(action.status).flatten()
+            (action.step == "project")
+                .then_some(action.status)
+                .flatten()
         }),
         reason_code: reason_code.or_else(|| {
-            actions
-                .iter()
-                .find_map(|action| (action.step == "project").then(|| action.reason_code.clone()).flatten())
+            actions.iter().find_map(|action| {
+                (action.step == "project")
+                    .then(|| action.reason_code.clone())
+                    .flatten()
+            })
         }),
     })
 }
@@ -252,9 +276,8 @@ fn product_target_to_selected(
     model: Option<&routecodex_v4_config::RuntimeProductModel>,
     target: &RuntimeProductTarget,
 ) -> Result<SelectedTarget, TargetSelectionError> {
-    let provider = provider.ok_or_else(|| {
-        TargetSelectionError::ProductTargetMissing(target.provider_id.clone())
-    })?;
+    let provider = provider
+        .ok_or_else(|| TargetSelectionError::ProductTargetMissing(target.provider_id.clone()))?;
     let model = model.ok_or_else(|| {
         TargetSelectionError::ProductTargetMissing(format!(
             "{}/{}",
@@ -266,7 +289,10 @@ fn product_target_to_selected(
         config_path: provider.config_path.clone(),
         protocol: provider.protocol.clone(),
         wire_model: model.wire_name.clone(),
-        auth_alias: provider.auth_handles.first().map(|handle| handle.alias.clone()),
+        auth_alias: provider
+            .auth_handles
+            .first()
+            .map(|handle| handle.alias.clone()),
     })
 }
 

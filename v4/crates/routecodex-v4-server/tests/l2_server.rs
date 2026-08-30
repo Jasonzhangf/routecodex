@@ -104,7 +104,8 @@ fn request_identity_counter_persists_and_reloads() {
 
 #[test]
 fn request_identity_counter_rejects_corrupt_state() {
-    let path = std::env::temp_dir().join(format!("rccv4-counter-corrupt-{}.json", std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("rccv4-counter-corrupt-{}.json", std::process::id()));
     std::fs::write(&path, br#"{"version":99}"#).expect("write corrupt state");
     assert!(V4RequestIdCounter::from_state_file(path.clone()).is_err());
     std::fs::remove_file(path).expect("remove corrupt state");
@@ -114,9 +115,22 @@ fn request_identity_counter_rejects_corrupt_state() {
 fn request_identity_counter_resets_daily_window_but_keeps_total() {
     let path = std::env::temp_dir().join(format!("rccv4-counter-day-{}.json", std::process::id()));
     let mut counter = V4RequestIdCounter::from_state_file(path.clone()).expect("load counter");
-    assert_eq!(counter.next_request_identity("srv-1", "2026-08-16").unwrap().sequence, 1);
-    assert_eq!(counter.next_request_identity("srv-1", "2026-08-17").unwrap().sequence, 1);
-    let state: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).expect("read state")).expect("parse state");
+    assert_eq!(
+        counter
+            .next_request_identity("srv-1", "2026-08-16")
+            .unwrap()
+            .sequence,
+        1
+    );
+    assert_eq!(
+        counter
+            .next_request_identity("srv-1", "2026-08-17")
+            .unwrap()
+            .sequence,
+        1
+    );
+    let state: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).expect("read state")).expect("parse state");
     assert_eq!(state["windowCount"], 1);
     assert_eq!(state["totalCount"], 2);
     std::fs::remove_file(path).expect("remove day state");
@@ -139,11 +153,26 @@ fn wire_evidence_terminal_failure_positive_and_red() {
 #[test]
 fn provider_exchange_evidence_requires_canonical_same_request_bundle() {
     let mut evidence = V4ErrorEvidenceFlushOnTerminalFailure::new();
-    let bundle = evidence
-        .capture_provider_exchange("responses", "/v1/responses", 5520, "req-1", b"{}", b"{}");
+    let bundle = evidence.capture_provider_exchange(
+        "responses",
+        "/v1/responses",
+        5520,
+        "req-1",
+        b"{}",
+        b"{}",
+    );
     let bundle = bundle.expect("canonical provider exchange must be captured");
-    assert_eq!(bundle.provider_request.artifact_name, "provider-request.json");
-    assert_eq!(bundle.provider_response.artifact_name, "provider-response.json");
-    assert_eq!(bundle.provider_request.request_id, bundle.provider_response.request_id);
+    assert_eq!(
+        bundle.provider_request.artifact_name,
+        "provider-request.json"
+    );
+    assert_eq!(
+        bundle.provider_response.artifact_name,
+        "provider-response.json"
+    );
+    assert_eq!(
+        bundle.provider_request.request_id,
+        bundle.provider_response.request_id
+    );
     assert_eq!(evidence.records().count(), 2);
 }

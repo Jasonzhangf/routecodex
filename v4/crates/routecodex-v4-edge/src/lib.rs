@@ -399,16 +399,14 @@ pub fn validate_edge(
                     Some(registered) if *registered == scope_id => Ok(()),
                     _ => Err(EdgeError::ScopeMismatch),
                 },
-                Some("release") => {
-                    match scopes.registered.get(&key) {
-                        Some(registered) if *registered == scope_id => {
-                            scopes.registered.remove(&key);
-                            Ok(())
-                        }
-                        Some(_) => Err(EdgeError::ScopeMismatch),
-                        None => Err(EdgeError::ControlNotRegistered),
+                Some("release") => match scopes.registered.get(&key) {
+                    Some(registered) if *registered == scope_id => {
+                        scopes.registered.remove(&key);
+                        Ok(())
                     }
-                }
+                    Some(_) => Err(EdgeError::ScopeMismatch),
+                    None => Err(EdgeError::ControlNotRegistered),
+                },
                 _ => Err(EdgeError::ControlRecordRequired),
             }
         }

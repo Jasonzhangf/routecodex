@@ -32,16 +32,30 @@ impl AsyncHttpHandler for Handler {
 struct IdentityHandler;
 
 impl AsyncHttpHandler for IdentityHandler {
-    fn handle_async<'a>(&'a self, request: HttpRequest, _cancel: CancellationToken) -> Pin<Box<dyn Future<Output = HttpResponse> + Send + 'a>> {
+    fn handle_async<'a>(
+        &'a self,
+        request: HttpRequest,
+        _cancel: CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = HttpResponse> + Send + 'a>> {
         Box::pin(async move {
-            HttpResponse::json(200, format!("{}|{}|{}", request.server_id, request.port, request.request_id).into_bytes())
+            HttpResponse::json(
+                200,
+                format!(
+                    "{}|{}|{}",
+                    request.server_id, request.port, request.request_id
+                )
+                .into_bytes(),
+            )
         })
     }
 }
 
 async fn request(address: String, path: &str) -> String {
     let mut client = TcpStream::connect(address).await.expect("connect");
-    client.write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes()).await.expect("request");
+    client
+        .write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes())
+        .await
+        .expect("request");
     let mut response = Vec::new();
     client.read_to_end(&mut response).await.expect("response");
     String::from_utf8(response).expect("UTF-8 response")
@@ -72,7 +86,12 @@ async fn async_dispatch_does_not_head_of_line_block_connections() {
     let task = tokio::spawn(server.run_until(Arc::new(Handler), stop.clone()));
     let slow = tokio::spawn(request(address.clone(), "/slow"));
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    let fast = tokio::time::timeout(std::time::Duration::from_millis(50), request(address, "/fast")).await.expect("fast request blocked");
+    let fast = tokio::time::timeout(
+        std::time::Duration::from_millis(50),
+        request(address, "/fast"),
+    )
+    .await
+    .expect("fast request blocked");
     assert!(fast.contains("/fast"));
     assert!(slow.await.expect("slow join").contains("/slow"));
     stop.cancel();

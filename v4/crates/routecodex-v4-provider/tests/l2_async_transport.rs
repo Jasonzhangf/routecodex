@@ -46,8 +46,15 @@ fn profile_for(address: &str) -> String {
     path.display().to_string()
 }
 
-async fn mock_provider(body: Vec<u8>, status: u16, content_type: &str, delay: Duration) -> (String, JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock provider");
+async fn mock_provider(
+    body: Vec<u8>,
+    status: u16,
+    content_type: &str,
+    delay: Duration,
+) -> (String, JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock provider");
     let address = format!("http://{}", listener.local_addr().expect("mock address"));
     let content_type = content_type.to_string();
     let task = tokio::spawn(async move {
@@ -77,7 +84,12 @@ async fn native_transport_preserves_json_status_and_body() {
     let profile = profile_for(&address);
     let transport = NativeProviderTransport::new(Duration::from_secs(2), 1024).expect("transport");
     let response = transport
-        .send_json(&profile, "responses", &json!({"input": []}), CancellationToken::new())
+        .send_json(
+            &profile,
+            "responses",
+            &json!({"input": []}),
+            CancellationToken::new(),
+        )
         .await
         .expect("native response");
     assert_eq!(response.status, 201);
@@ -89,17 +101,18 @@ async fn native_transport_preserves_json_status_and_body() {
 #[tokio::test]
 async fn native_transport_stream_splits_chunks_and_preserves_http_error() {
     let body = vec![b'x'; 70 * 1024];
-    let (address, task) = mock_provider(
-        body.clone(),
-        429,
-        "text/event-stream",
-        Duration::ZERO,
-    )
-    .await;
+    let (address, task) =
+        mock_provider(body.clone(), 429, "text/event-stream", Duration::ZERO).await;
     let profile = profile_for(&address);
-    let transport = NativeProviderTransport::new(Duration::from_secs(2), 128 * 1024).expect("transport");
+    let transport =
+        NativeProviderTransport::new(Duration::from_secs(2), 128 * 1024).expect("transport");
     let mut stream = transport
-        .send_streaming(&profile, "responses", &json!({"stream": true}), CancellationToken::new())
+        .send_streaming(
+            &profile,
+            "responses",
+            &json!({"stream": true}),
+            CancellationToken::new(),
+        )
         .await
         .expect("native stream");
     assert_eq!(stream.status(), 429);
@@ -124,7 +137,8 @@ async fn native_transport_fails_closed_on_deadline_cancellation_and_buffer_overf
     )
     .await;
     let profile = profile_for(&address);
-    let transport = NativeProviderTransport::new(Duration::from_millis(20), 1024).expect("transport");
+    let transport =
+        NativeProviderTransport::new(Duration::from_millis(20), 1024).expect("transport");
     let error = transport
         .send_json(&profile, "responses", &json!({}), CancellationToken::new())
         .await

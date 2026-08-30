@@ -28,11 +28,10 @@ impl Cli {
     }
 
     pub fn command_or_start(self) -> V4CommandIntent {
-        self.command
-            .unwrap_or(V4CommandIntent::Start(StartIntent {
-                foreground: false,
-                ..StartIntent::default()
-            }))
+        self.command.unwrap_or(V4CommandIntent::Start(StartIntent {
+            foreground: false,
+            ..StartIntent::default()
+        }))
     }
 }
 

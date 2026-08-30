@@ -21,6 +21,17 @@ fn transport_frames_bytes_without_reading_payload_semantics() {
 }
 
 #[test]
+fn transport_frames_crlf_without_protocol_interpretation() {
+    let policy = SseTransportPolicy::new(128, 128, Duration::from_secs(30)).unwrap();
+    let mut plugin = SseIngressPlugin::new(policy, Instant::now());
+    let frames = plugin
+        .push_chunk(b"event: opaque\r\ndata: bytes\r\n\r\n", Instant::now())
+        .unwrap();
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0].as_bytes(), b"event: opaque\r\ndata: bytes\r\n\r\n");
+}
+
+#[test]
 fn transport_bounds_buffer_and_timeout_without_terminal_inference() {
     let start = Instant::now();
     let policy = SseTransportPolicy::new(8, 32, Duration::from_millis(5)).unwrap();

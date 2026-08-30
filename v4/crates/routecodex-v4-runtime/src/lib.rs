@@ -826,8 +826,23 @@ pub struct ControlView {
 pub struct InformationView {
     #[serde(rename = "entry_protocol")]
     pub protocol: Option<String>,
+    pub execution_lane: Option<String>,
+    pub client_protocol: Option<String>,
+    pub provider_protocol: Option<String>,
     pub endpoint: Option<String>,
     pub model: Option<String>,
+}
+
+fn canonical_protocol_information(protocol: &str) -> Result<&'static str, RuntimeFault> {
+    match protocol {
+        "responses" | "openai-responses" => Ok("openai-responses"),
+        "chat" | "openai-chat" => Ok("openai-chat"),
+        "anthropic" => Ok("anthropic"),
+        other => Err(RuntimeFault::new(
+            "protocol_information_invalid",
+            format!("unsupported protocol information {other}"),
+        )),
+    }
 }
 
 /// Diagnostic view: execution trace, observability only, never live-path input.
@@ -947,8 +962,12 @@ impl ExecutionContext {
         let encoded = serde_json::to_string(&frame.data)
             .map_err(|error| RuntimeFault::new("execution_frame_data", error.to_string()))?;
         match chain_id {
-            "request" => context.data.provider_wire = Some(encoded),
-            "response" => context.data.client_frame = Some(encoded),
+            "request" | "direct_request" | "relay_request" => {
+                context.data.provider_wire = Some(encoded)
+            }
+            "response" | "direct_response" | "relay_response" => {
+                context.data.client_frame = Some(encoded)
+            }
             other => {
                 return Err(RuntimeFault::new(
                     "execution_chain_external_owner",
@@ -956,8 +975,42 @@ impl ExecutionContext {
                 ));
             }
         }
-        let control: ControlFrame = serde_json::from_value(frame.control.clone())
-            .map_err(|error| RuntimeFault::new("execution_frame_control", error.to_string()))?;
+        let control_object = frame.control.as_object().ok_or_else(|| {
+            RuntimeFault::new("execution_frame_control", "control frame must be an object")
+        })?;
+        let control_string = |name: &str| {
+            control_object.get(name).and_then(|value| {
+                value
+                    .as_str()
+                    .map(str::to_string)
+                    .or_else(|| (!value.is_null()).then(|| value.to_string()))
+            })
+        };
+        let control = ControlFrame {
+            continuation_scope: control_string("continuation_scope"),
+            continuation_owner: control_string("continuation_owner"),
+            execution_mode: control_string("execution_mode"),
+            relay_operator_selected: control_object
+                .get("relay_operator_selected")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            governance_applied: control_object
+                .get("governance_applied")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            execution_plan: control_string("execution_plan"),
+            route_facts: control_string("route_facts"),
+            target_selection: control_string("target_selection"),
+            route_exit: control_string("route_exit"),
+            continuation_committed: control_object
+                .get("continuation_committed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            continuation_restored: control_object
+                .get("continuation_restored")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        };
         context.control.continuation_scope = control.continuation_scope;
         context.control.continuation_owner = control.continuation_owner;
         context.control.execution_mode = control.execution_mode;
@@ -992,8 +1045,10 @@ impl ExecutionContext {
             continuation_restored: self.control.continuation_restored,
         };
         let raw_payload = match chain_id {
-            "request" => self.data.raw_entry.as_deref(),
-            "response" => self.data.provider_raw.as_deref(),
+            "request" | "direct_request" | "relay_request" => self.data.raw_entry.as_deref(),
+            "response" | "direct_response" | "relay_response" => {
+                self.data.provider_raw.as_deref()
+            }
             other => {
                 return Err(RuntimeFault::new(
                     "execution_chain_external_owner",
@@ -1004,7 +1059,7 @@ impl ExecutionContext {
         .ok_or_else(|| RuntimeFault::new("execution_frame_data", "business payload is missing"))?;
         let data = serde_json::from_str(raw_payload).map_err(|error| {
             RuntimeFault::new(
-                if chain_id == "response" {
+                if matches!(chain_id, "response" | "direct_response" | "relay_response") {
                     "raw_parse"
                 } else {
                     "execution_frame_data"
@@ -1580,6 +1635,12 @@ impl SkeletonRuntime {
     pub fn load(contract_json: &str) -> Result<Self, RuntimeFault> {
         let plan = SkeletonPlan::from_contract_json(contract_json)
             .map_err(|error| RuntimeFault::new("plan_invalid", error.to_string()))?;
+        Self::from_compiled_plan(plan)
+    }
+
+    pub fn from_compiled_plan(plan: SkeletonPlan) -> Result<Self, RuntimeFault> {
+        plan.verify()
+            .map_err(|error| RuntimeFault::new("plan_invalid", error.to_string()))?;
         Ok(Self {
             plan,
             epoch_store: ActiveEpochStore::empty(),
@@ -1791,6 +1852,35 @@ impl SkeletonRuntime {
         continuation_owner: Option<&str>,
         request_lease: Option<&RuntimeLease>,
     ) -> Result<ExecutionReport, RuntimeFault> {
+        self.execute_request_json_scoped_for_target_with_lease(
+            body,
+            protocol,
+            protocol,
+            wire_model,
+            stream,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            continuation_owner,
+            request_lease,
+        )
+    }
+
+    pub fn execute_request_json_scoped_for_target_with_lease(
+        &self,
+        body: &str,
+        client_protocol: &str,
+        provider_protocol: &str,
+        wire_model: &str,
+        stream: bool,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        continuation_owner: Option<&str>,
+        request_lease: Option<&RuntimeLease>,
+    ) -> Result<ExecutionReport, RuntimeFault> {
         if let Some(lease) = request_lease {
             if lease.request_id() != request_id {
                 return Err(RuntimeFault::new(
@@ -1811,15 +1901,36 @@ impl SkeletonRuntime {
         if request_lease.is_none() {
             self.claim(request_id)?;
         }
+        let client_protocol = canonical_protocol_information(client_protocol)?;
+        let provider_protocol = canonical_protocol_information(provider_protocol)?;
+        let execution_lane = continuation_owner.ok_or_else(|| {
+            RuntimeFault::new(
+                "execution_lane_missing",
+                "Direct/Relay execution lane is required",
+            )
+        })?;
+        let chain_id = match execution_lane {
+            "direct" => "direct_request",
+            "relay" => "relay_request",
+            other => {
+                return Err(RuntimeFault::new(
+                    "execution_lane_invalid",
+                    format!("unsupported execution lane {other}"),
+                ))
+            }
+        };
         let result = self.execute_path(
-            "request",
+            chain_id,
             request_id,
             port,
             session_scope,
             conversation_scope,
             |ctx| {
                 ctx.data.raw_entry = Some(raw);
-                ctx.information.protocol = Some(protocol.to_string());
+                ctx.information.protocol = Some(client_protocol.to_string());
+                ctx.information.execution_lane = Some(execution_lane.to_string());
+                ctx.information.client_protocol = Some(client_protocol.to_string());
+                ctx.information.provider_protocol = Some(provider_protocol.to_string());
                 ctx.information.model = Some(wire_model.to_string());
                 if let Some(owner) = continuation_owner {
                     ctx.control.continuation_owner = Some(owner.to_string());
@@ -1845,8 +1956,13 @@ impl SkeletonRuntime {
         conversation_scope: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
+        let chain_id = if fixture.path.starts_with("/v1/responses") {
+            "direct_request"
+        } else {
+            "relay_request"
+        };
         let result = self.execute_path(
-            "request",
+            chain_id,
             request_id,
             port,
             session_scope,
@@ -1857,6 +1973,13 @@ impl SkeletonRuntime {
                 ctx.data.request_path = Some(fixture.path.clone());
                 ctx.data.request_headers = Some(fixture.headers.clone());
                 ctx.information.endpoint = Some(fixture.path.clone());
+                ctx.information.execution_lane = Some(chain_id.to_string());
+                ctx.information.client_protocol = Some(if chain_id == "direct_request" {
+                    "openai-responses"
+                } else {
+                    "openai-chat"
+                }.to_string());
+                ctx.information.provider_protocol = Some("openai-responses".to_string());
                 ctx.information.model = Some(fixture.model.clone());
             },
             None,
@@ -1879,7 +2002,7 @@ impl SkeletonRuntime {
             "",
             "",
             "responses",
-            "none",
+            "relay",
         )
     }
 
@@ -1918,6 +2041,36 @@ impl SkeletonRuntime {
         continuation_owner: &str,
         request_lease: Option<&RuntimeLease>,
     ) -> Result<ExecutionReport, RuntimeFault> {
+        let provider_protocol = if entry_protocol == "chat" {
+            "responses"
+        } else {
+            entry_protocol
+        };
+        self.execute_provider_response_scoped_for_target_with_lease(
+            provider_raw,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            provider_protocol,
+            entry_protocol,
+            continuation_owner,
+            request_lease,
+        )
+    }
+
+    pub fn execute_provider_response_scoped_for_target_with_lease(
+        &self,
+        provider_raw: &str,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        entry_protocol: &str,
+        provider_protocol: &str,
+        continuation_owner: &str,
+        request_lease: Option<&RuntimeLease>,
+    ) -> Result<ExecutionReport, RuntimeFault> {
         if let Some(lease) = request_lease {
             if lease.request_id() != request_id {
                 return Err(RuntimeFault::new(
@@ -1929,8 +2082,20 @@ impl SkeletonRuntime {
         if request_lease.is_none() {
             self.claim(request_id)?;
         }
+        let entry_protocol = canonical_protocol_information(entry_protocol)?;
+        let provider_protocol = canonical_protocol_information(provider_protocol)?;
+        let chain_id = match continuation_owner {
+            "direct" => "direct_response",
+            "relay" => "relay_response",
+            other => {
+                return Err(RuntimeFault::new(
+                    "execution_lane_invalid",
+                    format!("unsupported execution lane {other}"),
+                ))
+            }
+        };
         let result = self.execute_path(
-            "response",
+            chain_id,
             request_id,
             port,
             session_scope,
@@ -1938,6 +2103,9 @@ impl SkeletonRuntime {
             |ctx| {
                 ctx.data.provider_raw = Some(provider_raw.to_string());
                 ctx.information.protocol = Some(entry_protocol.to_string());
+                ctx.information.execution_lane = Some(continuation_owner.to_string());
+                ctx.information.client_protocol = Some(entry_protocol.to_string());
+                ctx.information.provider_protocol = Some(provider_protocol.to_string());
                 ctx.control.continuation_owner = Some(continuation_owner.to_string());
                 ctx.control.execution_mode = Some(if continuation_owner == "relay" {
                     "relay".to_string()

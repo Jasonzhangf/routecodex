@@ -36,7 +36,7 @@ pub struct SseTransportFrame(Arc<[u8]>);
 
 impl SseTransportFrame {
     pub fn from_complete_bytes(bytes: Vec<u8>) -> Result<Self, SseTransportError> {
-        if !bytes.ends_with(b"\n\n") {
+        if !bytes.ends_with(b"\n\n") && !bytes.ends_with(b"\r\n\r\n") {
             return Err(SseTransportError::IncompleteFrame);
         }
         Ok(Self(bytes.into()))
@@ -92,8 +92,7 @@ impl SseIngressPlugin {
         self.last_activity = now;
 
         let mut frames = Vec::new();
-        while let Some(end) = self.buffer.windows(2).position(|window| window == b"\n\n") {
-            let complete_len = end + 2;
+        while let Some(complete_len) = frame_end(&self.buffer) {
             let tail = self.buffer.split_off(complete_len);
             let complete = std::mem::replace(&mut self.buffer, tail);
             frames.push(SseTransportFrame::from_complete_bytes(complete)?);
@@ -101,7 +100,7 @@ impl SseIngressPlugin {
         Ok(frames)
     }
 
-    pub fn finish(self) -> Result<(), SseTransportError> {
+    pub fn finish(&self) -> Result<(), SseTransportError> {
         if self.buffer.is_empty() {
             Ok(())
         } else {
@@ -115,6 +114,22 @@ impl SseIngressPlugin {
         } else {
             Ok(())
         }
+    }
+}
+
+fn frame_end(bytes: &[u8]) -> Option<usize> {
+    let lf = bytes
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|position| position + 2);
+    let crlf = bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|position| position + 4);
+    match (lf, crlf) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(end), None) | (None, Some(end)) => Some(end),
+        (None, None) => None,
     }
 }
 

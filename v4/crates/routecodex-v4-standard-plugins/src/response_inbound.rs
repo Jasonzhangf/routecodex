@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, StandardPlugin};
 
 const PLUGIN_ID: &str = "v4.std.response.protocol_decode";
+const PROVIDER_COMPAT_PLUGIN_ID: &str = "v4.std.response.provider_compat";
 
 pub(crate) fn control_keys() -> &'static [&'static str] {
     &[
@@ -68,19 +69,57 @@ fn normalize_output(value: &Value) -> Result<Value, String> {
 }
 
 pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
-    vec![plugin(
-        PLUGIN_ID,
-        PluginCategory::Protocol,
-        "V4HubRespInbound03Normalized",
-        "response_inbound",
-        Some(3),
-        PluginKind::Operator,
-        PluginEffect::Semantic,
-        PluginPhase::Semantic,
-        200,
-        vec!["v4.response.provider_raw"],
-        vec!["v4.response.normal_payload"],
-    )]
+    vec![
+        plugin(
+            PROVIDER_COMPAT_PLUGIN_ID,
+            PluginCategory::Protocol,
+            "V4ProviderRespCompat02ProviderCompat",
+            "response_inbound",
+            Some(2),
+            PluginKind::Operator,
+            PluginEffect::Semantic,
+            PluginPhase::Projection,
+            100,
+            vec![
+                "v4.response.provider_raw",
+                "v4.information.provider_protocol",
+            ],
+            vec!["v4.response.provider_raw"],
+        ),
+        plugin(
+            PLUGIN_ID,
+            PluginCategory::Protocol,
+            "V4HubRespInbound03Normalized",
+            "response_inbound",
+            Some(3),
+            PluginKind::Operator,
+            PluginEffect::Semantic,
+            PluginPhase::Semantic,
+            200,
+            vec!["v4.response.provider_raw"],
+            vec!["v4.response.normal_payload"],
+        ),
+    ]
+}
+
+fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let protocol = ctx
+        .read_information_resource("v4.information.provider_protocol")
+        .map_err(|error| error.to_string())?
+        .and_then(Value::as_str)
+        .ok_or_else(|| "provider response compat requires provider protocol".to_string())?
+        .to_string();
+    let provider_protocol = match protocol.as_str() {
+        "openai-responses" => "responses",
+        "openai-chat" => "chat",
+        other => other,
+    };
+    let normalized = routecodex_v4_provider::normalize_provider_response(
+        provider_protocol,
+        ctx.read_data(),
+    )
+    .map_err(|error| format!("{}: {}", error.code, error.message))?;
+    ctx.write_data(normalized).map_err(|error| error.to_string())
 }
 
 pub(crate) fn protocol_decode_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -91,6 +130,15 @@ pub(crate) fn protocol_decode_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String>
     reject_control_fields(raw)?;
 
     let mut parsed = raw.clone();
+    if parsed
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind.starts_with("response."))
+    {
+        return ctx
+            .write_data(Value::Object(parsed))
+            .map_err(|error| error.to_string());
+    }
     parsed.insert("output".to_string(), normalize_output(data)?);
     ctx.write_data(Value::Object(parsed))
         .map_err(|error| error.to_string())
@@ -98,6 +146,45 @@ pub(crate) fn protocol_decode_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String>
 
 pub(crate) fn protocol_decode(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     protocol_decode_entry(ctx)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecodedProviderSseFrame {
+    pub semantic: Value,
+    pub terminal: bool,
+}
+
+/// Adjacent provider protocol codec. Transport framing is already complete;
+/// this owner parses one Responses event into its semantic object.
+pub fn decode_provider_sse_frame(frame: &[u8]) -> Result<DecodedProviderSseFrame, String> {
+    let text = std::str::from_utf8(frame)
+        .map_err(|error| format!("provider SSE frame is not UTF-8: {error}"))?;
+    let mut event = None;
+    let mut data = Vec::new();
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("event:") {
+            event = Some(value.trim().to_string());
+        } else if let Some(value) = line.strip_prefix("data:") {
+            data.push(value.trim_start());
+        }
+    }
+    let event = event.ok_or_else(|| "provider SSE frame is missing event".to_string())?;
+    let raw = data.join("\n");
+    let semantic: Value = serde_json::from_str(&raw)
+        .map_err(|error| format!("provider SSE data is invalid JSON: {error}"))?;
+    let semantic_type = semantic
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "provider SSE semantic object is missing type".to_string())?;
+    if semantic_type != event {
+        return Err(format!(
+            "provider SSE event/type mismatch: {event} != {semantic_type}"
+        ));
+    }
+    Ok(DecodedProviderSseFrame {
+        terminal: matches!(semantic_type, "response.completed" | "response.failed"),
+        semantic,
+    })
 }
 
 pub(crate) fn protocol_decode_handle() -> (&'static str, fn(&mut ExecCtx<'_>) -> Result<(), String>)
@@ -110,5 +197,11 @@ pub(crate) fn protocol_decode_handle() -> (&'static str, fn(&mut ExecCtx<'_>) ->
 
 pub(crate) fn response_inbound_handles(
 ) -> Vec<(&'static str, fn(&mut ExecCtx<'_>) -> Result<(), String>)> {
-    vec![protocol_decode_handle()]
+    vec![
+        (
+            PROVIDER_COMPAT_PLUGIN_ID,
+            provider_compat as fn(&mut ExecCtx<'_>) -> Result<(), String>,
+        ),
+        protocol_decode_handle(),
+    ]
 }
