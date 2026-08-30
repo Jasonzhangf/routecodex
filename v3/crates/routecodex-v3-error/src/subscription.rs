@@ -71,7 +71,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .as_ref()
         .and_then(|error| error.status);
     let response_stream_failure = classified.source.code == "provider_response_sse_stream";
-    let http_status_is_health_counted = matches!(status, Some(429 | 500 | 502));
+    let http_status_is_health_counted = matches!(status, Some(429 | 500 | 502 | 503));
     if !response_stream_failure
         && !http_status_is_health_counted
         && is_v3_retryable_transient_source(&classified.source)
@@ -85,7 +85,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             cooldown_ms: 0,
         };
     }
-    if matches!(status, Some(401 | 402 | 403 | 503))
+    if matches!(status, Some(401 | 402 | 403))
         || is_irrecoverable_provider_failure_code(&classified.source.code)
     {
         return V3ProviderFailureAction {
@@ -246,12 +246,9 @@ mod tests {
             "provider_connect_failed",
             503,
         ));
-        assert_eq!(
-            action.recovery,
-            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
-        );
+        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 3);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",
@@ -307,5 +304,13 @@ mod tests {
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
         assert_eq!(action.failure_threshold, 3);
         assert_eq!(action.score_delta_milli, -50);
+
+        let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "provider_connect_failed",
+            502,
+        ));
+        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
+        assert_eq!(action.failure_threshold, 3);
     }
 }

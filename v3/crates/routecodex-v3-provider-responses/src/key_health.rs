@@ -31,18 +31,18 @@ pub struct V3ProviderSchedulingProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ProviderKeyHealthProbePermit {
+pub struct V3ProviderHealthProbePermit {
     provider_id: String,
-    auth_alias: String,
-    model_id: String,
+    auth_alias: Option<String>,
+    model_id: Option<String>,
     expected_generation: u64,
 }
 
-impl V3ProviderKeyHealthProbePermit {
+impl V3ProviderHealthProbePermit {
     pub(crate) fn new(
         provider_id: String,
-        auth_alias: String,
-        model_id: String,
+        auth_alias: Option<String>,
+        model_id: Option<String>,
         expected_generation: u64,
     ) -> Self {
         Self {
@@ -57,12 +57,12 @@ impl V3ProviderKeyHealthProbePermit {
         &self.provider_id
     }
 
-    pub fn auth_alias(&self) -> &str {
-        &self.auth_alias
+    pub fn auth_alias(&self) -> Option<&str> {
+        self.auth_alias.as_deref()
     }
 
-    pub fn model_id(&self) -> &str {
-        &self.model_id
+    pub fn model_id(&self) -> Option<&str> {
+        self.model_id.as_deref()
     }
 
     pub fn expected_generation(&self) -> u64 {
@@ -91,13 +91,12 @@ impl V3ProviderSchedulingProjection {
         score_milli: u32,
         base_weight: u32,
     ) -> Self {
-        let health_adjustment = cap_health_adjustment(priority, score_milli);
         Self {
             provider_id: provider_id.to_string(),
             auth_alias: auth_alias.to_string(),
             model_id: model_id.to_string(),
             priority,
-            effective_priority: priority.saturating_add(health_adjustment),
+            effective_priority: priority,
             score_milli,
             base_weight,
             effective_weight_milli: u64::from(base_weight.max(1)),
@@ -106,20 +105,6 @@ impl V3ProviderSchedulingProjection {
             score_generation: 0,
         }
     }
-}
-
-pub(crate) fn cap_health_adjustment(priority: i32, score_milli: u32) -> i32 {
-    let raw_adjustment = i32::try_from(score_milli)
-        .unwrap_or(i32::MAX)
-        .saturating_sub(1_000);
-    if priority == 0 {
-        return raw_adjustment.min(0);
-    }
-    if priority < 0 {
-        return raw_adjustment;
-    }
-    let max_adjustment = (i64::from(priority) * 50 / 100).min(i64::from(i32::MAX));
-    raw_adjustment.min(max_adjustment as i32)
 }
 
 // Compatibility name only. State and transitions live in V3ProviderHealthStore.

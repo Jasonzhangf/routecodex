@@ -1460,20 +1460,11 @@ async fn revive_cooled_provider(
             )),
         "provider cooldown must require an explicit probe"
     );
-    assert!(
-        store
-            .try_acquire_provider_cooldown_probe(provider_id, auth_alias, model_id)
-            .expect("provider cooldown probe admission"),
-        "provider cooldown probe must be admitted"
-    );
-    store
-        .complete_provider_cooldown_probe_success(provider_id, auth_alias, model_id)
-        .expect("provider cooldown probe success");
     provider_health
         .runtime_health()
-        .run_due_provider_key_health_probes(u64::MAX, false, |_, _, _| async { Ok(()) })
+        .run_due_provider_health_probes(u64::MAX, false, |_, _, _| async { Ok(()) })
         .await
-        .expect("provider key health probe must revive cooled model key");
+        .expect("provider health probe must revive cooled model key");
 }
 
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {

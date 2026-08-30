@@ -1013,7 +1013,7 @@ resources:
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStateMutated
     identity: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
-    allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_provider_cooldown_probe, V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success, V3ProviderHealthStore::complete_provider_cooldown_probe_failure]
+    allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderSessionAvailabilityReader::availability, V3ProviderHealthStore::wait_for_provider_cooldown_probe_completion]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target]
     may_enter_provider_body: false
@@ -1031,7 +1031,7 @@ resources:
       cross_model_same_key: isolated
       revival_rule: only matching-model probe success removes cooldown
     allowed_writers: [V3ProviderHealthStore::record_provider_failure_action, V3ProviderHealthStore::record_provider_success, V3ProviderHealthStore::complete_probe_success, V3ProviderHealthStore::complete_probe_failure]
-    allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::provider_key_health_probe_keys, V3ProviderHealthStore::acquire_provider_key_health_probe]
+    allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1051,8 +1051,8 @@ resources:
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
       generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block
       dry_run_rule: dry-run never acquires or sends a rescue probe
-    allowed_writers: [V3ProviderHealthStore::try_acquire_provider_cooldown_probe, V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success, V3ProviderHealthStore::complete_provider_cooldown_probe_failure]
-    allowed_readers: [V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::wait_for_provider_cooldown_probe_completion, V3ProviderHealthStore::availability_for_session]
+    allowed_writers: [V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
+    allowed_readers: [V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::wait_for_provider_cooldown_probe_completion, V3ProviderHealthStore::availability_for_session]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, V3ProviderReqOutbound06WirePayload, V3ServerRespOutbound05ClientFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1063,8 +1063,8 @@ resources:
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStore
     identity: [providerId, authAlias, modelId]
-    allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure, V3ProviderHealthStore::record_provider_failure_in_session_with_policy, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at, V3ProviderHealthStore::complete_provider_cooldown_probe_failure]
-    allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::try_acquire_provider_cooldown_probe]
+    allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure, V3ProviderHealthStore::record_provider_failure_in_session_with_policy, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
+    allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-server]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1174,7 +1174,7 @@ resources:
     semantic_contract:
       source_state: v3.provider.key_health_state
       cross_model_same_key: isolated
-      priority_health_cap: effective_priority <= configured_priority + floor(configured_priority * 0.5) for positive configured priorities; zero priority receives no positive health uplift and negative priorities retain additive semantics
+      priority_contract: effective_priority equals configured_priority; health controls availability and diagnostics but never crosses configured priority buckets
       forbidden_consumers: [request.normal_payload, response.client_payload, MetadataCenter]
     allowed_writers: [V3ProviderHealthStore::scheduling_projection]
     allowed_readers: [V3TargetInterpreter::select_available_with_health]

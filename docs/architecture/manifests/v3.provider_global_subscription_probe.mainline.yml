@@ -15,7 +15,7 @@ verification_gates:
 nodes:
   - id: V3ProviderHealthStore
     owner: routecodex-v3-provider-responses
-  - id: V3ProviderGlobalProbePermit
+  - id: V3ProviderHealthProbePermit
     owner: routecodex-v3-provider-responses
   - id: V3ServerAggregateLifecycle
     owner: routecodex-v3-server
@@ -31,9 +31,11 @@ nodes:
     owner: routecodex-v3-runtime
 edges:
   - from: V3ProviderHealthStore
-    to: V3ProviderGlobalProbePermit
+    to: V3ProviderHealthProbePermit
   - from: V3ServerAggregateLifecycle
     to: V3ProviderGlobalProbeExecution
+  - from: V3ProviderGlobalProbeExecution
+    to: V3ProviderHealthStore
   - from: V3ProviderGlobalSubscriptionFailureObservation
     to: V3ProviderHealthStore
   - from: V3Error02Classified

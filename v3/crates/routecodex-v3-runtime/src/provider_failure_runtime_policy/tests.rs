@@ -269,6 +269,59 @@ fn resolve_target_for_scope(
 }
 
 #[test]
+fn recovered_primary_failback_is_not_starved_by_backup_successes() {
+    let manifest = global_pool_alive_manifest("failback_liveness");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure = V3ProviderFailureAction::recoverable("transport");
+
+    let selected = resolve_target(&manifest, "failback_liveness", &BTreeSet::new(), &health);
+    let V3RelayProviderTargetResolution::Selected(selected) = selected else {
+        panic!("healthy primary must be selected");
+    };
+    assert_eq!(selected.candidate.provider_id, "second");
+
+    for now_ms in 101..104 {
+        health
+            .store
+            .record_provider_failure_action("second", "key1", "gpt-test", &failure, now_ms)
+            .expect("primary failure");
+    }
+    let selected = resolve_target(&manifest, "failback_liveness", &BTreeSet::new(), &health);
+    let V3RelayProviderTargetResolution::Selected(selected) = selected else {
+        panic!("backup must be selected while primary is blocked");
+    };
+    assert_eq!(selected.candidate.provider_id, "first");
+
+    for now_ms in 105..155 {
+        health
+            .store
+            .record_provider_success("first", "key1", "gpt-test", now_ms)
+            .expect("stable backup success");
+    }
+    let permit = health
+        .store
+        .acquire_provider_cooldown_probe("second", Some("key1"), Some("gpt-test"))
+        .expect("probe permit acquisition")
+        .expect("blocked primary probe permit");
+    health
+        .store
+        .complete_provider_cooldown_probe_success_at_generation(
+            permit.provider_id(),
+            permit.auth_alias(),
+            permit.model_id(),
+            155,
+            Some(permit.expected_generation()),
+        )
+        .expect("semantic probe recovery");
+
+    let selected = resolve_target(&manifest, "failback_liveness", &BTreeSet::new(), &health);
+    let V3RelayProviderTargetResolution::Selected(selected) = selected else {
+        panic!("recovered primary must be selected");
+    };
+    assert_eq!(selected.candidate.provider_id, "second");
+}
+
+#[test]
 fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let manifest = global_pool_alive_manifest("global_status_policy");
     let cases = [(401, 2), (403, 2), (429, 3), (500, 3), (502, 3), (599, 3)];
@@ -707,7 +760,7 @@ fn post_commit_sse_failures_cool_provider_and_block_fresh_session() {
         &health, "primary", "key1", "gpt-test", 1, 1, 2_000_000,
     );
     assert!(!after.available);
-    assert!(after.effective_priority < before.effective_priority);
+    assert_eq!(after.effective_priority, before.effective_priority);
 }
 
 #[tokio::test]

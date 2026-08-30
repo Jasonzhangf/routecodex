@@ -36137,3 +36137,10 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - `v4-cordis` 主树已合入 feature-layer candidate drift 根因修复：治理闭包路径统一剥离 `v4/` 前缀，fixture 不再在候选提交后重复改写 gate 输入；`--self-test` 5/5、`--red-self-test` 22/22。
 - 当前真实阻塞仍是 `routecodex-v4-error` Active artifact 与当前 evidence hash 不一致；必须由当前 HEAD 重建完整 AppSDK record graph 后才能 gen-index/admission。
 - 运行时 continuation 定向测试仍绿，但源码仍保留 ScopeRegistry/direct continuation control 面；需继续确认并完成本地 continuation 物理退役边界。
+
+## 2026-08-30 V3 provider health failback closeout
+
+- 根因：health score 与 configured priority 直接相加会把瞬态失败的高意愿 target 永久降出最高 priority bucket；双 probe runner 又竞争同一 cooldown map，且 success 分裂恢复 score/cooldown，旧 delta 可在下一次成功后重新污染 score。
+- 修复：configured priority 保持静态；Provider Health 是唯一状态 owner；Runtime 只有一个 generation-guarded probe owner；scheduled/rescue probe 共用 typed permit 和原子 success/failure transition；probe 与 business cooldown 使用独立 deadline；503 改为三次计数恢复；2xx probe 必须通过 provider 协议终态。
+- 证据：provider/error/target/runtime/server 定向与回归测试、resource/function/mainline 及 scoped owner gates、canonical build/install 通过；全局安装 `0.90.4739`，聚合 restart 后 7777/4444 health 200。安装入口真实 Responses 请求完成，并自然观测到 429 进入 typed Error 链。AGY review `v3-health-scheduler-failback-20260830` PASS，零 findings。全量 module-boundary gate 仍被三个未修改文件中的既有 fallback 文案阻断。
+- 在线缺口：当前 cooldown pool 为空，真实 429 分散在不同 auth key；未通过修改 live config/health 或故意压测制造同一 generation 三次失败，因此 scheduled probe 后 failback 未做生产态故障注入重放。

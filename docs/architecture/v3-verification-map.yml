@@ -9,6 +9,7 @@ features:
   owner_modules:
   - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
   contract:
   - docs/design/v3-provider-health-scoring-cooldown-design.md
   - docs/goals/v3-provider-health-scoring-cooldown-plan.md
@@ -18,15 +19,17 @@ features:
   - same provider and auth key share health across sessions for the same model
   - same provider and auth key remain available for a different model
   - legacy model-specific entries remain isolated during migration
-  - positive health adjustment is capped at 150% of configured priority while smaller adjustments remain unchanged
+  - health score changes never modify configured priority or move a candidate across priority buckets
+  - after prolonged backup success traffic, a semantic probe recovery returns the primary to Target selection immediately
   required_negative:
   - v3 persistence without probe_model_id fails explicitly
   - duplicate v4 key health identities fail instead of silently overwriting control truth
-  - health uplift above the 150% cap and zero-priority positive uplift are rejected
+  - degraded, healthy, and elevated scores all preserve configured priority
   - mainline caller/callee symbols, edge owners, and resource writer/reader bindings must resolve to the registered modules
   - key health state never enters provider or client payload
   required_gates:
   - npm run test:v3-provider-health-contract
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime recovered_primary_failback_is_not_starved_by_backup_successes -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-provider-key-health-model-binding
@@ -3182,6 +3185,14 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  required_positive:
+  - one typed permit generation owns each scheduled or rescue probe and successful completion atomically resets score, streak, delta window, cooldown, and probe backoff state
+  - Responses, OpenAI Chat, Anthropic, and Gemini probes require their protocol-specific terminal success shape before recovery
+  - the first transient recovery probe is independently due after the provider-owned probe interval even when the business cooldown deadline is longer
+  required_negative:
+  - stale successful or failed probe generations cannot mutate newer provider health state
+  - HTTP 2xx with an error object, malformed JSON, nonterminal status, or missing protocol terminal shape cannot recover a provider
+  - an early due probe does not make the provider available before semantic probe success
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture

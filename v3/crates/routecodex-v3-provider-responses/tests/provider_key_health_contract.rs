@@ -113,7 +113,11 @@ fn success_increases_score_but_probe_success_controls_cooldown_recovery() {
         .complete_probe_success("provider-a", "key-a", "model-a", 104)
         .expect("probe success");
     assert!(recovered.available);
-    assert!(recovered.score_milli >= 600);
+    assert_eq!(recovered.score_milli, 1_000);
+    let post_probe_success = store
+        .record_provider_success("provider-a", "key-a", "model-a", 105)
+        .expect("post-probe success");
+    assert_eq!(post_probe_success.score_milli, 1_010);
 }
 
 #[test]
@@ -186,7 +190,7 @@ fn success_streak_increments_and_failure_resets_it() {
 }
 
 #[test]
-fn health_adjusted_priority_favors_healthier_key_without_changing_weight() {
+fn health_score_does_not_change_configured_priority_or_weight() {
     let healthy =
         V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 1, 1000, 100);
     let degraded =
@@ -199,43 +203,43 @@ fn health_adjusted_priority_favors_healthier_key_without_changing_weight() {
         degraded.effective_weight_milli
     );
     assert_eq!(healthy.priority, degraded.priority);
-    assert!(healthy.effective_priority > degraded.effective_priority);
+    assert_eq!(healthy.effective_priority, degraded.effective_priority);
     assert!(lower_priority.priority > healthy.priority);
     assert!(lower_priority.effective_priority > healthy.effective_priority);
 }
 
 #[test]
-fn health_adjusts_priority_around_the_configured_baseline() {
+fn health_score_preserves_configured_priority() {
     let healthy =
         V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 10, 1_020, 1);
     let degraded =
         V3ProviderSchedulingProjection::new("provider-b", "key-b", "model-b", 10, 900, 1);
 
-    assert_eq!(healthy.effective_priority, 15);
-    assert_eq!(degraded.effective_priority, -90);
+    assert_eq!(healthy.effective_priority, 10);
+    assert_eq!(degraded.effective_priority, 10);
 }
 
 #[test]
-fn positive_health_uplift_is_capped_at_half_of_configured_priority() {
+fn extreme_positive_health_score_preserves_configured_priority() {
     let projection =
         V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 10, 5_000, 1);
 
-    assert_eq!(projection.effective_priority, 15);
+    assert_eq!(projection.effective_priority, 10);
 }
 
 #[test]
-fn odd_positive_priorities_use_floor_for_health_cap() {
+fn odd_configured_priorities_are_not_health_adjusted() {
     let priority_one =
         V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 1, 5_000, 1);
     let priority_three =
         V3ProviderSchedulingProjection::new("provider-b", "key-b", "model-b", 3, 5_000, 1);
 
     assert_eq!(priority_one.effective_priority, 1);
-    assert_eq!(priority_three.effective_priority, 4);
+    assert_eq!(priority_three.effective_priority, 3);
 }
 
 #[test]
-fn zero_priority_rejects_positive_health_uplift() {
+fn zero_configured_priority_is_not_health_adjusted() {
     let projection =
         V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 0, 5_000, 1);
 
@@ -247,6 +251,21 @@ fn score_zero_keeps_a_positive_minimum_scheduling_weight() {
     let projection = V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 1, 0, 7);
     assert_eq!(projection.effective_weight_milli, 7);
     assert!(projection.available);
+}
+
+#[test]
+fn transient_failure_preserves_configured_priority_recovery_path() {
+    let store = V3ProviderKeyHealthStore::default();
+    let action = V3ProviderFailureAction::recoverable("transport");
+    let failed = store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 100)
+        .expect("failure");
+
+    assert_eq!(failed.score_milli, 950);
+    let scheduling = store
+        .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, 100)
+        .expect("scheduling projection");
+    assert_eq!(scheduling.effective_priority, 1);
 }
 
 #[test]
@@ -316,25 +335,29 @@ fn recoverable_key_probe_is_single_flight_and_global_probe_is_not_duplicated() {
     assert!(!globally_recovered.cooldown);
 
     let startup_keys = store
-        .provider_key_health_probe_keys(0, true)
+        .provider_cooldown_probe_keys(0, true)
         .expect("startup probe candidates");
     assert_eq!(
         startup_keys,
-        vec![("provider-a".into(), "key-a".into(), "model-a".into())]
+        vec![(
+            "provider-a".into(),
+            Some("key-a".into()),
+            Some("model-a".into())
+        )]
     );
     let permit = store
-        .acquire_provider_key_health_probe("provider-a", "key-a", "model-a")
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .expect("probe acquisition")
         .expect("first probe owns key");
     assert!(store
-        .acquire_provider_key_health_probe("provider-a", "key-a", "model-a")
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .expect("single-flight check")
         .is_none());
     store
         .complete_probe_success_at_generation(
             permit.provider_id(),
-            permit.auth_alias(),
-            permit.model_id(),
+            permit.auth_alias().expect("permit auth alias"),
+            permit.model_id().expect("permit model id"),
             104,
             Some(permit.expected_generation()),
         )
@@ -345,22 +368,72 @@ fn recoverable_key_probe_is_single_flight_and_global_probe_is_not_duplicated() {
 fn stale_probe_generation_cannot_clear_newer_failure_state() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
-    let failed = store
-        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 100)
-        .expect("failure");
+    for now_ms in 100..103 {
+        store
+            .record_provider_failure_action("provider-a", "key-a", "model-a", &action, now_ms)
+            .expect("failure");
+    }
+    let permit = store
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+        .expect("probe acquisition")
+        .expect("probe permit");
     store
-        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 101)
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 103)
         .expect("newer failure");
     let error = store
         .complete_probe_success_at_generation(
             "provider-a",
             "key-a",
             "model-a",
-            102,
-            Some(failed.score_generation),
+            104,
+            Some(permit.expected_generation()),
         )
         .expect_err("stale probe must not clear newer state");
     assert!(error.contains("stale provider key health probe generation"));
+    assert!(store
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+        .expect("stale completion releases single-flight permit")
+        .is_some());
+}
+
+#[test]
+fn stale_failed_probe_cannot_mutate_newer_failure_state() {
+    let store = V3ProviderKeyHealthStore::default();
+    let action = V3ProviderFailureAction::recoverable("transport");
+    for now_ms in 100..103 {
+        store
+            .record_provider_failure_action("provider-a", "key-a", "model-a", &action, now_ms)
+            .expect("failure");
+    }
+    let permit = store
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+        .expect("probe acquisition")
+        .expect("probe permit");
+    let newer = store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 103)
+        .expect("newer failure");
+
+    let error = store
+        .complete_provider_cooldown_probe_failure_at_generation(
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            104,
+            Some(permit.expected_generation()),
+        )
+        .expect_err("stale failed probe must not mutate newer state");
+    assert!(error
+        .to_string()
+        .contains("stale provider health probe generation"));
+    let after = store
+        .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, 104)
+        .expect("projection after stale failed probe");
+    assert_eq!(after.score_milli, newer.score_milli);
+    assert_eq!(after.score_generation, newer.score_generation);
+    assert!(store
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+        .expect("stale completion releases single-flight permit")
+        .is_some());
 }
 
 #[test]

@@ -11,8 +11,8 @@
 1. 错误先分类，再按分类处理。
 2. 不可恢复错误进入 provider subscription 级 global cooldown，用于去毛刺；这不等于永久失败。
 3. 可恢复错误累计三次才进入 cooldown。
-4. cooldown 必须持久化；重启只触发 probe，不得直接恢复流量；probe 成功后才能恢复。
-5. 错误降低健康分，成功提高健康分；同一 priority bucket 内按 key 级健康分调度，使错误少的 key 获得更多流量。
+4. 进程内 cooldown 只有 semantic probe 成功才能解除；重启按当前运行时合同清空 transient health/cooldown epoch。
+5. 错误降低健康分，成功提高健康分；health 只决定 availability 和观测，不能改写 configured priority。
 
 设计结果必须保持 V3 控制面/业务 payload 隔离。score、failure streak、cooldown、probe、routing decision 只能存在 Provider health typed resource 或 scheduling projection，不得进入 provider/client normal payload，也不得由 Router 从 payload 重建。
 
@@ -29,7 +29,7 @@
 - cooldown、`blocked_until_ms`、`next_probe_at_ms`、`probe_in_flight`；
 - restart/load、startup/due probe、probe failure reschedule、probe success clear；
 - Target-facing read-only availability projection；
-- priority/weight route contract；health score projection 已接入 Target 的有效 priority；
+- priority/weight route contract；Target 只读 health availability projection，configured priority 保持不变；
 - provider action gate 和 Error05 recovery admission。
 
 代码/合同锚点：
@@ -49,9 +49,9 @@
 | 分类到恢复策略 | failure class 存在；分类、scope、cooldown action、score delta 未统一为一个 typed action | `V3ProviderFailureAction` 唯一策略产物 |
 | 不可恢复/可恢复边界 | global cooldown 与 threshold 路径存在，但组合合同需显式锁定 | 不可恢复 immediate global；可恢复 count=3；health-neutral 不计入 |
 | key 级健康分 | 无 canonical `score` | ProviderKeyHealthState 持有 0..1500 score，1000 为基线 |
-| 成功涨分 | 有 success 清理部分 failure/cooldown 状态 | success 产生明确 score delta；probe success 受 recovery floor 约束 |
-| score 持久化 | 持久化对象主要是 cooldown/probe | score 与 generation 一致性一并持久化 |
-| priority/health 调度 | route contract 有 priority/weight；旧实现按小数值优先且把 score 乘入 weight | Target 消费 typed scheduling projection；大数值优先，score 调整 effective priority，weight 只在同 effective priority 内生效 |
+| 成功涨分 | 有 success 清理部分 failure/cooldown 状态 | success 产生明确 score delta；probe success 原子开启 score=1000 的新积分 epoch |
+| score 持久化 | adaptive score/generation 仅保存在进程内 | 重启开启新的 transient health epoch，不从 cooldown 诊断记录重建 score |
+| priority/health 调度 | route contract 有 priority/weight；旧实现把 score 与 priority 相加 | Target 消费 typed scheduling projection；大数值 configured priority 优先，health 不跨 priority bucket |
 | 文档一致性 | 旧 health-weighted Router 文档与 V3 health-blind Router owner 口径不完全收敛 | canonical V3 文档锁定 Target owner 与 projection 边界 |
 | 架构地图 | 现有 health/global probe 已登记；score resource/function/edge/gate 尚未登记 | 先补 resource/function/mainline/verification map，再实现 |
 
@@ -97,8 +97,8 @@ Virtual Router 只生成 route pool、priority、base weight 和 opaque target p
 Target 在已选 route plan 内：
 
 1. 过滤 unavailable/cooldown key；
-2. 计算 `effective_priority = configured_priority + min(score_milli - 1000, floor(configured_priority * 0.5))`；正的 configured priority 的健康正向调整最高为其 50%，即 effective priority 不超过其 150%；保留最高 effective-priority bucket；
-3. 只在同一 effective priority bucket 内按配置 weight 调度；
+2. 保留最高 configured-priority bucket，且 `effective_priority = configured_priority`；
+3. 只在同一 configured priority bucket 内按配置 weight 调度；
 4. 执行 deterministic selection；
 5. provider failure 后做 target-local reselect，不重新进入 VR，不跨 immutable target plan。
 
@@ -266,29 +266,32 @@ baseline = 1000
 
 | Event | Delta | 其他状态 |
 | --- | ---: | --- |
-| ordinary success | +20 | failure_streak=0 |
-| recoverable failure | -100 | failure_streak += 1 |
-| irrecoverable failure | -400 | immediate global cooldown |
+| ordinary success | +10 | failure_streak=0 |
+| recoverable failure | -50 | failure_streak += 1 |
+| irrecoverable failure | -200 | immediate global cooldown |
 | probe failure | -50 | 保持 cooldown，reschedule |
-| probe success | recovery floor | 清 cooldown，清 failure generation |
+| probe success | reset to 1000 | 清 delta window、cooldown、failure streak 和 probe backoff，开启新 generation |
 | health-neutral | 0 | 可写 request-local bypass |
 
 所有变化执行：
 
 ```text
-score = clamp(score + delta, 0, 1500)
+recent_deltas = rolling_window(last 100 deltas)
+score = clamp(1000 + sum(recent_deltas), 0, 1500)
 ```
 
 ### 6.3 Probe success
 
-probe success 不得直接把 key 恢复到 1000。建议：
+probe success 原子开启新的健康积分 epoch：
 
 ```text
-score_after_probe = max(score_before_probe, recovery_floor)
-recovery_floor = 600
+recent_deltas_milli = []
+score_after_probe = 1000
+failure_streak = 0
+success_streak = 1
 ```
 
-后续真实 success 再逐步涨分，避免刚 probe 通过的 key 瞬间压过长期稳定 key。
+后续真实 success 从新 epoch 的 1000 基线涨分，不能重新应用 probe 前的失败 delta。configured priority 不读取 score，因此恢复健康只恢复原配置意愿，不会跨 priority bucket。
 
 ### 6.4 Time recovery
 
@@ -298,7 +301,7 @@ recovery_floor = 600
 
 ## 7. Cooldown persistence and probe
 
-持久化记录必须至少包含：
+进程内 typed health state 必须至少包含：
 
 ```text
 provider_id
@@ -317,29 +320,28 @@ next_probe_at_ms
 probe_in_flight
 ```
 
-写入必须原子提交；load/decode/lock/persist 失败显式报错，不能把错误转换成 available。
-当前 key-health persistence schema 为 v4，canonical identity 是 `provider_id + auth_alias + model_id`。v1/v2 旧条目按完整 provider/key/model identity 保留，v3 旧条目从 state 的 `probe_model_id` 恢复 model；缺少该字段必须显式拒绝，不能把 cooldown 扩散到同 key 的全部模型。下一次 mutation 以 v4 写回；未知 schema 必须显式拒绝，不能静默解释为新的 score truth。持久化 recoverable key 由 Provider key-health 自己登记 startup/due probe candidate；不可恢复 key 的 probe 由 global cooldown owner 持有，二者不得重复探测。
+状态 mutation 与 cooldown 诊断投影写入必须原子收口；lock/persist 失败显式报错，不能把错误转换成 available。
+canonical identity 是 `provider_id + auth_alias + model_id`。未知或不完整 identity 必须显式拒绝，不能把 cooldown 扩散到同 key 的全部模型。所有 cooldown class 共用一个 Provider health probe inventory、一个 typed permit owner 和一组 generation-guarded completion transitions。
 
-V3 仍保留两个不同 owner 的持久化资源：`provider-key-health.json` 保存 key score、streak、key cooldown 和
-probe generation；`provider-cooldowns.json` 保存分类级 cooldown coordinator 的 probe deadline。
-二者不是两套调度器：前者是 key scheduling truth，后者只承载已登记的 global/class cooldown
-协调状态。启动时两者都只产生 probe candidate，任何一侧未 probe success 都不得重新放行对应 key。
+Provider health store 是 cooldown/probe 调度状态的唯一 owner。持久化 coordinator 只保存诊断投影，不拥有启动恢复、第二套 probe runner 或 completion 语义；当前启动路径清空 transient cooldown 记录并开启新 epoch。
 
 生命周期：
 
 ```text
 record action
   -> mutate in-memory state
-  -> persist
-  -> restart
-  -> load blocked state
-  -> startup probe permit
+  -> persist diagnostic cooldown projection
+  -> process-local scheduled probe permit
   -> provider probe
-      success -> clear cooldown, recovery floor, persist
+      success -> clear cooldown, reset score epoch, persist once
       failure -> preserve block, next probe, persist
+
+restart
+  -> clear transient cooldown/score epoch
+  -> do not reconstruct health truth from diagnostic persistence
 ```
 
-cooldown deadline 到达只表示 probe eligible；不得直接恢复调度。
+`blocked_until_ms` 表示业务流量继续 blocked，`next_probe_at_ms` 表示独立 recovery probe 到期。首次 probe 使用 provider-owned probe interval，可早于业务 cooldown；任一 deadline 到达都不得直接恢复调度，只有 semantic probe success 可以清除 block。
 
 ## 8. Same-priority scheduling
 
@@ -358,23 +360,23 @@ deterministic round-robin cursor
 
 ```text
 1. remove configured-disabled / cooldown / request-excluded keys
-2. choose maximum numeric effective priority bucket
-3. effective_priority = configured_priority + min(score_milli - 1000, floor(configured_priority * 0.5)) for positive configured priority; zero priority receives no positive uplift and negative priority keeps additive semantics
+2. choose maximum numeric configured priority bucket
+3. effective_priority = configured_priority
 4. within bucket:
      effective_weight = base_weight
 5. select by deterministic SWRR
 6. tie-break by stable key order/cursor
 ```
 
-`score_milli` 不再乘入 weight：score 1000 保持 configured priority，score 1500 的正向调整最多为 configured priority 的 50%，score 低于 1000 则按 additive delta 降低 effective priority。`effective_weight_milli` 始终为 `max(base_weight, 1)`；cooldown key 不进入权重计算。
+`score_milli` 不得与 priority 相加，也不乘入 weight。`effective_weight_milli` 始终为 `max(base_weight, 1)`；cooldown key 不进入权重计算。provider 从 cooldown 经 probe success 恢复后，立即重新获得 configured priority。
 
 ## 9. State machine
 
 ```text
 Healthy(score=S, streak=0)
-  success -> Healthy(score=min(1000,S+20), streak=0)
-  recoverable failure -> Degraded(score=max(0,S-100), streak+1)
-  irrecoverable failure -> GlobalCooldown(score=max(0,S-400))
+  success -> Healthy(score from rolling delta window with +10, streak=0)
+  recoverable failure -> Degraded(score from rolling delta window with -50, streak+1)
+  irrecoverable failure -> GlobalCooldown(score from rolling delta window with -200)
 
 Degraded(streak<3)
   success -> Healthy(score up, streak=0)
@@ -384,9 +386,9 @@ Degraded(streak<3)
 
 Cooldown(blocked_until, probe_due)
   ordinary request -> unavailable
-  deadline -> ProbeEligible
+  next_probe_at deadline -> ProbeEligible while business traffic remains blocked
   probe failure -> Cooldown(next probe)
-  probe success -> Healthy(score>=recovery_floor, streak=0)
+  probe success -> Healthy(score=1000, empty delta window, streak=0)
 
 HealthNeutral
   -> no score/cooldown mutation
@@ -430,26 +432,28 @@ HealthNeutral
 - recoverable failures 1/2 do not cooldown;
 - recoverable failure 3 cooldowns;
 - health-neutral event changes neither score nor streak;
-- success increments score and clears failure streak;
+- success adds +10 in the rolling score epoch and clears failure streak;
 - score clamps at 0/1500;
 - probe failure retains cooldown;
-- probe success clears cooldown but uses recovery floor;
+- probe success atomically clears cooldown/backoff and resets score to 1000 with an empty delta window;
 - concurrent probe acquisition is single-flight;
 - stale generation success cannot clear newer cooldown.
+- stale generation failure cannot mutate newer score/backoff state.
+- first scheduled probe uses `next_probe_at_ms` independently of the longer business block deadline.
 
 ### Target black-box
 
-- higher numeric effective priority wins;
-- health score changes effective priority; weight is used only within the highest effective-priority bucket;
+- higher numeric configured priority wins;
+- health score never changes effective priority or weight;
 - cooldown key never selected;
-- low score changes effective priority but does not itself make a key unavailable;
+- low score does not itself make a key unavailable or move it across priority buckets;
 - request-local exclusion does not mutate persistent score;
 - target reselect does not re-enter Virtual Router.
 
 ### Persistence / restart
 
-- score/cooldown/probe state survives restart;
-- startup probe is required before re-admission;
+- transient score/cooldown/probe state starts a new epoch after restart;
+- startup probe uses the same single owner for any startup-visible blocked state;
 - probe failure persists next probe deadline;
 - persistence/lock/decode failure is explicit error, never availability success;
 - atomic temp file collision cannot corrupt prior state.
@@ -465,7 +469,7 @@ HealthNeutral
 
 ### Runtime closeout
 
-按项目硬门禁执行：focused tests -> build -> global install -> one aggregate restart -> all member `/health` -> real old-sample replay -> DSH Review。任何后续代码/测试/构建/运行配置修改都会使旧证据失效。
+按项目硬门禁执行：focused tests -> build -> global install -> one aggregate restart -> all member `/health` -> real old-sample replay -> AGY Review。任何后续代码/测试/构建/运行配置修改都会使旧证据失效。
 
 ## 12. Non-goals
 
