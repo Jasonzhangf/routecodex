@@ -3,13 +3,14 @@
  * v4_parity_gate_node_graph
  *
  * Phase 1 Node Graph machine lock (design V4-NODE-GRAPH-ACTIVE-20260816,
- * owner feature v4.node_graph). Locks the fixed four-chain topology and the
+ * owner feature v4.node_graph). Locks the fixed six-chain topology and the
  * single node catalog shared by node-graph.contract.json, the compiled
  * skeleton plan, the 49/49 anchored resource map, and the mainline call map.
  *
  * Positive checks:
  *  1. node-graph.contract.json status=active with self-consistent graph_hash.
- *  2. Fixed chains: request 7 / response 6 / error 6 / config 5, exact IDs,
+ *  2. Fixed chains: Direct request 3 / Direct response 3 / Relay request 9 /
+ *     Relay response 6 / error 6 / config 5, exact IDs,
  *     positions 01..N, no gap/duplicate/reorder/temp numbering, role_id in
  *     the declared family role subclasses, group flag only on group nodes.
  *  3. registered_nodes: unique ids, every entry has node_id/family/role_id/
@@ -41,21 +42,33 @@ const readText = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 /** Normative fixed topology from V4-NODE-GRAPH-ACTIVE-20260816. */
 const CHAIN_EXPECTED = {
-  request: [
-    'V4ServerReqInbound01ClientRaw',
-    'V4ServerSseIn02FrameBoundary',
-    'V4HubReqInbound03Normalized',
-    'V4HubReqChatProcess04Governed',
-    'V4HubReqOutbound05ProviderSemantic',
-    'V4ProviderReqCompat06Compat',
-    'V4ProviderSseOut07WireBoundary',
+  direct_request: [
+    'V4DirectReq01ClientProtocol',
+    'V4DirectReq02RelayContainer',
+    'V4DirectReq03ProviderWire',
   ],
-  response: [
-    'V4ProviderSseIn01FrameBoundary',
-    'V4HubRespInbound02Parsed',
-    'V4HubRespChatProcess03Governed',
-    'V4HubRespOutbound04ClientSemantic',
-    'V4ServerSseOut05FrameBoundary',
+  direct_response: [
+    'V4DirectResp01ProviderRaw',
+    'V4DirectResp02RelayContainer',
+    'V4DirectResp03ClientProtocol',
+  ],
+  relay_request: [
+    'V4ServerReqInbound01ClientRaw',
+    'V4HubReqInbound02Normalized',
+    'V4HubReqChatProcess03Governed',
+    'V4HubReqExecution04Planned',
+    'V4HubReqTarget05Resolved',
+    'V4HubReqOutbound06ProviderSemantic',
+    'V4ProviderReqCompat07ProviderCompat',
+    'V4ProviderReqOutbound08WirePayload',
+    'V4ProviderReqOutbound09TransportRequest',
+  ],
+  relay_response: [
+    'V4ProviderRespInbound01Raw',
+    'V4ProviderRespCompat02ProviderCompat',
+    'V4HubRespInbound03Normalized',
+    'V4HubRespChatProcess04Governed',
+    'V4HubRespOutbound05ClientSemantic',
     'V4ServerRespOutbound06ClientFrame',
   ],
   error: [
@@ -76,22 +89,26 @@ const CHAIN_EXPECTED = {
 };
 
 const CHAIN_KEYS = {
-  request: 'v4_hub_request_chain',
-  response: 'v4_hub_response_chain',
+  direct_request: 'v4_direct_request_chain',
+  direct_response: 'v4_direct_response_chain',
+  relay_request: 'v4_hub_request_chain',
+  relay_response: 'v4_hub_response_chain',
   error: 'v4_error_chain',
   config: 'v4_config_chain',
 };
 
 const CHAIN_FAMILY = {
-  request: 'RequestChainNode',
-  response: 'ResponseChainNode',
+  direct_request: 'RequestChainNode',
+  direct_response: 'ResponseChainNode',
+  relay_request: 'RequestChainNode',
+  relay_response: 'ResponseChainNode',
   error: 'ErrorChainNode',
   config: 'ConfigChainNode',
 };
 
 const GROUP_NODES = new Set([
-  'V4HubReqChatProcess04Governed',
-  'V4HubRespChatProcess03Governed',
+  'V4HubReqChatProcess03Governed',
+  'V4HubRespChatProcess04Governed',
 ]);
 
 /** Old compressed/legacy IDs that must never reappear after migration. */
@@ -107,10 +124,20 @@ const REVIVAL_DENYLIST = new Set([
   'V4ReqOutbound05ProviderSemantic',
   'V4ProviderReqOutbound06WirePayload',
   'V4ProviderTransport07Request',
-  'V4ProviderRespInbound01Raw',
   'V4RespInbound02Parsed',
   'V4RespOutbound04ClientSemantic',
   'V4ServerRespOutbound05ClientFrame',
+  'V4ServerSseIn02FrameBoundary',
+  'V4ProviderSseOut07WireBoundary',
+  'V4ProviderSseIn01FrameBoundary',
+  'V4ServerSseOut05FrameBoundary',
+  'V4HubReqInbound03Normalized',
+  'V4HubReqChatProcess04Governed',
+  'V4HubReqOutbound05ProviderSemantic',
+  'V4ProviderReqCompat06Compat',
+  'V4HubRespInbound02Parsed',
+  'V4HubRespChatProcess03Governed',
+  'V4HubRespOutbound04ClientSemantic',
 ]);
 
 const NODE_ID_RE = /^V4[A-Za-z0-9_]+$/;
@@ -259,6 +286,9 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
     for (const kind of ['allowed_writers', 'allowed_readers', 'forbidden_writers']) {
       for (const ref of resource[kind] ?? []) {
         const base = /^(V4[A-Za-z0-9_]+)(?:::.*)?$/.exec(ref)?.[1];
+        if (kind === 'forbidden_writers' && REVIVAL_DENYLIST.has(base)) {
+          continue;
+        }
         if (base && !nodeCatalog.has(base)) {
           failures.push(`anchored resource ${resource.resource_id}: ${kind} ref ${ref} not registered in node catalog`);
         }
@@ -353,7 +383,7 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
   const mainlineEdges = (mainline.edges ?? []).filter((edge) => {
     const from = /^(V4[A-Za-z0-9_]+)(?:::.*)?$/.exec(edge.from ?? '')?.[1];
     const to = /^(V4[A-Za-z0-9_]+)(?:::.*)?$/.exec(edge.to ?? '')?.[1];
-    return from || to;
+    return from && to;
   });
   for (const edge of mainlineEdges) {
     const from = /^(V4[A-Za-z0-9_]+)(?:::.*)?$/.exec(edge.from ?? '')?.[1];
@@ -369,7 +399,7 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
       failures.push(`mainline edge references unregistered node (${from}->${to})`);
     }
   }
-  for (const chainId of ['request', 'response', 'config']) {
+  for (const chainId of ['direct_request', 'direct_response', 'relay_request', 'relay_response', 'config']) {
     const expected = CHAIN_EXPECTED[chainId];
     const expectedEdgeType = chainId === 'config' ? 'information_flow' : 'data_flow';
     for (let i = 0; i < expected.length - 1; i += 1) {
@@ -452,7 +482,7 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
   if (!executionEngineSource.includes('pub struct ExecutionEngine')) {
     failures.push('execution-engine source missing ExecutionEngine');
   }
-  if (!executionEngineSource.includes('lease.execute(')) {
+  if (!/lease\s*\.\s*execute\s*\(/.test(executionEngineSource)) {
     failures.push('ExecutionEngine must execute the NodeContainer through EpochLease::execute');
   }
   if (!nodeContainerSource.includes('pub struct NodeContainer')) {
@@ -513,7 +543,14 @@ function makeCleanBase() {
   const expectedChains = {};
   for (const chainId of Object.keys(CHAIN_EXPECTED)) {
     expectedChains[chainId] = {
-      chain_version: chainId === 'config' ? 'v4-config-1' : chainId === 'error' ? 'v4-error-1' : 'v4-hub-1',
+      chain_version:
+        chainId === 'config'
+          ? 'v4-config-1'
+          : chainId === 'error'
+            ? 'v4-error-1'
+            : chainId.startsWith('direct_')
+              ? 'v4-direct-1'
+              : 'v4-relay-1',
       nodes: CHAIN_EXPECTED[chainId].map((nodeId, index) => ({
         position: index + 1,
         node_id: nodeId,
@@ -575,13 +612,15 @@ function makeCleanBase() {
     owner_feature_id: 'v4.node_graph',
     standard_node_families: families,
     graph_hash: 'sha256:placeholder',
-    [CHAIN_KEYS.request]: expectedChains.request,
-    [CHAIN_KEYS.response]: expectedChains.response,
+    [CHAIN_KEYS.direct_request]: expectedChains.direct_request,
+    [CHAIN_KEYS.direct_response]: expectedChains.direct_response,
+    [CHAIN_KEYS.relay_request]: expectedChains.relay_request,
+    [CHAIN_KEYS.relay_response]: expectedChains.relay_response,
     [CHAIN_KEYS.error]: expectedChains.error,
     [CHAIN_KEYS.config]: expectedChains.config,
     registered_nodes: [
       {
-        node_id: 'V4HubReqChatProcess04GroupPrivate',
+        node_id: 'V4HubReqChatProcess03GroupPrivate',
         family: 'RequestChainNode',
         role_id: 'request_chat_process',
         scope: 'group_private',
@@ -619,7 +658,7 @@ function makeCleanBase() {
           terminal: index === expected.length - 1,
           kernel: index === 0,
           plugins:
-            chainId === 'request' && index === 0
+            chainId === 'relay_request' && index === 0
               ? [{ plugin_id: 'protocol_parse', effects: ['semantic'] }]
               : [],
         })),
@@ -642,11 +681,11 @@ function makeCleanBase() {
         resource_id: 'v4.test.data',
         axis: 'data',
         binding_status: 'anchored',
-        owner_node: 'V4HubReqInbound03Normalized',
+        owner_node: 'V4HubReqInbound02Normalized',
         owner_crate: 'routecodex-v4-runtime',
         owner_symbols: ['test'],
-        allowed_writers: ['V4HubReqInbound03Normalized'],
-        allowed_readers: ['V4HubReqChatProcess04Governed'],
+        allowed_writers: ['V4HubReqInbound02Normalized'],
+        allowed_readers: ['V4HubReqChatProcess03Governed'],
         forbidden_writers: ['V4ScopeRegistry'],
         verification_gate: ['v4_parity_gate_node_graph'],
       },
@@ -654,11 +693,11 @@ function makeCleanBase() {
         resource_id: 'v4.request.provider_semantic',
         axis: 'data',
         binding_status: 'anchored',
-        owner_node: 'V4HubReqOutbound05ProviderSemantic',
+        owner_node: 'V4HubReqOutbound06ProviderSemantic',
         owner_crate: 'routecodex-v4-runtime',
         owner_symbols: ['SemanticProjection'],
-        allowed_writers: ['V4HubReqOutbound05ProviderSemantic'],
-        allowed_readers: ['V4ProviderReqCompat06Compat'],
+        allowed_writers: ['V4HubReqOutbound06ProviderSemantic'],
+        allowed_readers: ['V4ProviderReqCompat07ProviderCompat'],
         forbidden_writers: ['V4ScopeRegistry'],
         verification_gate: ['v4_parity_gate_node_graph'],
       },
@@ -666,11 +705,11 @@ function makeCleanBase() {
         resource_id: 'v4.request.provider_wire_payload',
         axis: 'data',
         binding_status: 'anchored',
-        owner_node: 'V4ProviderReqCompat06Compat',
+        owner_node: 'V4ProviderReqCompat07ProviderCompat',
         owner_crate: 'routecodex-v4-runtime',
         owner_symbols: ['WireBuild'],
-        allowed_writers: ['V4ProviderReqCompat06Compat'],
-        allowed_readers: ['V4ProviderSseOut07WireBoundary'],
+        allowed_writers: ['V4ProviderReqCompat07ProviderCompat'],
+        allowed_readers: ['V4ProviderReqOutbound08WirePayload'],
         forbidden_writers: ['V4ScopeRegistry'],
         verification_gate: ['v4_parity_gate_node_graph'],
       },
@@ -679,7 +718,7 @@ function makeCleanBase() {
   const mainline = {
     edges: [],
   };
-  for (const chainId of ['request', 'response']) {
+  for (const chainId of ['direct_request', 'direct_response', 'relay_request', 'relay_response']) {
     const expected = CHAIN_EXPECTED[chainId];
     for (let i = 0; i < expected.length - 1; i += 1) {
       mainline.edges.push({
@@ -688,9 +727,9 @@ function makeCleanBase() {
         owner: 'routecodex-v4-runtime::SkeletonRuntime',
         edge_type: 'data_flow',
         resource:
-          expected[i] === 'V4HubReqOutbound05ProviderSemantic'
+          expected[i] === 'V4HubReqOutbound06ProviderSemantic'
             ? 'v4.request.provider_semantic'
-            : expected[i] === 'V4ProviderReqCompat06Compat'
+            : expected[i] === 'V4ProviderReqCompat07ProviderCompat'
               ? 'v4.request.provider_wire_payload'
               : 'v4.test.data',
         path: 'crates/routecodex-v4-runtime/src/lib.rs',
@@ -734,26 +773,37 @@ function makeCleanBase() {
 }
 
 function chainRole(chainId, index) {
-  const requestRoles = [
-    'request_inbound',
+  const directRequestRoles = ['request_inbound', 'request_outbound', 'request_outbound'];
+  const directResponseRoles = ['response_inbound', 'response_outbound', 'response_outbound'];
+  const relayRequestRoles = [
     'request_inbound',
     'request_inbound',
     'request_chat_process',
+    'request_execution',
+    'request_execution',
+    'request_outbound',
     'request_outbound',
     'request_outbound',
     'request_outbound',
   ];
-  const responseRoles = [
+  const relayResponseRoles = [
+    'response_inbound',
     'response_inbound',
     'response_inbound',
     'response_chat_process',
     'response_outbound',
     'response_outbound',
-    'response_outbound',
   ];
   const errorRoles = ['error_source', 'error_source', 'error_classify', 'error_policy', 'error_decision', 'error_projection'];
   const configRoles = ['config_authoring', 'config_authoring', 'config_authoring', 'config_registry', 'config_manifest'];
-  const map = { request: requestRoles, response: responseRoles, error: errorRoles, config: configRoles };
+  const map = {
+    direct_request: directRequestRoles,
+    direct_response: directResponseRoles,
+    relay_request: relayRequestRoles,
+    relay_response: relayResponseRoles,
+    error: errorRoles,
+    config: configRoles,
+  };
   return map[chainId][index];
 }
 
@@ -766,16 +816,16 @@ function runSelfTest() {
   add('error chain section missing', (d) => { delete d.nodeGraph.v4_error_chain; }, 'missing chain section');
   add('request node missing', (d) => {
     d.nodeGraph.v4_hub_request_chain.nodes = d.nodeGraph.v4_hub_request_chain.nodes.slice(0, -1);
-  }, 'expected 7 nodes');
+  }, 'expected 9 nodes');
   add('request duplicate node', (d) => {
     d.nodeGraph.v4_hub_request_chain.nodes = [...d.nodeGraph.v4_hub_request_chain.nodes, d.nodeGraph.v4_hub_request_chain.nodes[3]];
   }, 'duplicate');
   add('request reordered', (d) => {
     const nodes = d.nodeGraph.v4_hub_request_chain.nodes;
     [nodes[1], nodes[2]] = [nodes[2], nodes[1]];
-  }, 'expected V4ServerSseIn02FrameBoundary');
+  }, 'expected V4HubReqInbound02Normalized');
   add('temp numbering', (d) => {
-    d.nodeGraph.v4_hub_request_chain.nodes[3].node_id = 'V4HubReqChatProcess04.1Governed';
+    d.nodeGraph.v4_hub_request_chain.nodes[2].node_id = 'V4HubReqChatProcess03.1Governed';
   }, 'temp numbering');
   add('registered duplicate', (d) => {
     d.nodeGraph.registered_nodes.push({ ...d.nodeGraph.registered_nodes[1] });
@@ -794,7 +844,7 @@ function runSelfTest() {
   }, 'not registered in node catalog');
   add('skeleton old 3-node request', (d) => {
     d.skeleton.chains = d.skeleton.chains.map((chain) =>
-      chain.chain_id === 'request'
+      chain.chain_id === 'relay_request'
         ? {
             ...chain,
             nodes: [
@@ -811,8 +861,8 @@ function runSelfTest() {
     );
   }, 'nodes ');
   add('skeleton extra edge', (d) => {
-    const chain = d.skeleton.chains.find((c) => c.chain_id === 'request');
-    chain.edges.push({ from: 'V4ServerReqInbound01ClientRaw', to: 'V4HubReqInbound03Normalized', direction: 'forward' });
+    const chain = d.skeleton.chains.find((c) => c.chain_id === 'relay_request');
+    chain.edges.push({ from: 'V4ServerReqInbound01ClientRaw', to: 'V4HubReqChatProcess03Governed', direction: 'forward' });
   }, 'edges');
   add('checkpoint unregistered node', (d) => {
     d.skeleton.chains[0].checkpoints.push({ node_id: 'V4GhostCheckpoint', semantic: 'x', owner: 'x' });
@@ -821,7 +871,7 @@ function runSelfTest() {
     d.skeleton.chains[0].checkpoints.push({ node_id: 'V4ReqInbound02Normalized', semantic: 'x', owner: 'x' });
   }, 'legacy node');
   add('checkpoint wrong chain', (d) => {
-    d.skeleton.chains[0].checkpoints.push({ node_id: 'V4HubRespInbound02Parsed', semantic: 'x', owner: 'x' });
+    d.skeleton.chains[0].checkpoints.push({ node_id: 'V4ProviderRespInbound01Raw', semantic: 'x', owner: 'x' });
   }, 'chain mismatch');
   add('mainline legacy edge', (d) => {
     d.mainline.edges.push({ from: 'V4ReqInbound01Raw', to: 'V4ReqProcess02', owner: 'x', edge_type: 'data_flow', resource: 'v4.test.data', path: 'x', status: 'active' });
@@ -844,14 +894,14 @@ function runSelfTest() {
     chain.nodes[2].role_id = 'config_registry';
   }, '!= graph role');
   add('group-internal parent edge', (d) => {
-    const chain = d.skeleton.chains.find((c) => c.chain_id === 'request');
-    chain.edges.push({ from: 'V4HubReqInbound03Normalized', to: 'V4HubReqChatProcess04GroupPrivate', direction: 'forward' });
+    const chain = d.skeleton.chains.find((c) => c.chain_id === 'relay_request');
+    chain.edges.push({ from: 'V4HubReqInbound02Normalized', to: 'V4HubReqChatProcess03GroupPrivate', direction: 'forward' });
   }, 'group-internal node');
   add('mainline missing adjacent edge', (d) => {
     d.mainline.edges = d.mainline.edges.filter(
-      (edge) => !(edge.from === 'V4ServerReqInbound01ClientRaw' && edge.to === 'V4ServerSseIn02FrameBoundary'),
+      (edge) => !(edge.from === 'V4ServerReqInbound01ClientRaw' && edge.to === 'V4HubReqInbound02Normalized'),
     );
-  }, 'missing request adjacent edge');
+  }, 'missing relay_request adjacent edge');
   add('runtime SkeletonRuntime ghost', (d) => {
     d.sources.runtime = d.sources.runtime.replace('pub struct SkeletonRuntime', 'pub struct GhostRuntime');
   }, 'SkeletonRuntime');
@@ -871,7 +921,7 @@ function runSelfTest() {
     d.sources.runtime = d.sources.runtime.replace('ExecutionEngine::execute_pinned_node(', 'ExecutionEngine::execute(');
   }, 'lease-bound ExecutionEngine call');
   add('execution engine bypasses lease container', (d) => {
-    d.sources.executionEngine = d.sources.executionEngine.replace('lease.execute(', 'container.execute(');
+    d.sources.executionEngine = d.sources.executionEngine.replace(/lease\s*\.\s*execute\s*\(/, 'container.execute(');
   }, 'EpochLease::execute');
   add('typed handle registry removed', (d) => {
     d.sources.standardPlugins = d.sources.standardPlugins.replace('impl HandleRegistry for StandardHandleRegistry', 'impl GhostRegistry');

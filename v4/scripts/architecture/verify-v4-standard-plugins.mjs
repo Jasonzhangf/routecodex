@@ -100,32 +100,47 @@ const REQUIRED_SOURCE = [
 ];
 
 const NODE_PERMISSIONS = new Map([
-  ['V4HubReqInbound03Normalized', {
+  ['V4DirectReq01ClientProtocol', {
+    reads: ['v4.direct.request.client_payload'], writes: [],
+  }],
+  ['V4DirectReq02RelayContainer', {
+    reads: ['v4.direct.request.client_payload'], writes: ['v4.direct.request.provider_wire'],
+  }],
+  ['V4DirectReq03ProviderWire', {
+    reads: ['v4.direct.request.provider_wire'], writes: [],
+  }],
+  ['V4DirectResp01ProviderRaw', {
+    reads: ['v4.direct.response.provider_raw'], writes: [],
+  }],
+  ['V4DirectResp02RelayContainer', {
+    reads: ['v4.direct.response.provider_raw'], writes: ['v4.direct.response.client_payload'],
+  }],
+  ['V4DirectResp03ClientProtocol', {
+    reads: ['v4.direct.response.client_payload'], writes: [],
+  }],
+  ['V4HubReqInbound02Normalized', {
     reads: ['v4.request.normal_payload'], writes: [],
   }],
-  ['V4HubReqChatProcess04Governed', {
+  ['V4HubReqChatProcess03Governed', {
     reads: ['v4.request.normal_payload'], writes: ['v4.request.normal_payload'],
   }],
-  ['V4HubRespInbound02Parsed', {
+  ['V4HubRespInbound03Normalized', {
     reads: ['v4.response.provider_raw'], writes: ['v4.response.normal_payload'],
   }],
-  ['V4HubRespChatProcess03Governed', {
+  ['V4HubRespChatProcess04Governed', {
     reads: ['v4.response.normal_payload'],
     writes: ['v4.response.normal_payload', 'v4.control.metadata_center'],
   }],
-  ['V4HubRespOutbound04ClientSemantic', {
+  ['V4HubRespOutbound05ClientSemantic', {
     reads: ['v4.response.normal_payload'], writes: ['v4.response.client_wire_payload'],
   }],
-  ['V4ServerSseOut05FrameBoundary', {
-    reads: ['v4.response.client_wire_payload'], writes: [],
-  }],
-  ['V4HubReqOutbound05ProviderSemantic', {
+  ['V4HubReqOutbound06ProviderSemantic', {
     reads: ['v4.request.normal_payload'], writes: ['v4.request.provider_semantic'],
   }],
-  ['V4ProviderReqCompat06Compat', {
+  ['V4ProviderReqCompat07ProviderCompat', {
     reads: ['v4.request.provider_semantic'], writes: ['v4.request.provider_wire_payload'],
   }],
-  ['V4ProviderSseOut07WireBoundary', {
+  ['V4ProviderReqOutbound09TransportRequest', {
     reads: [
       'v4.request.provider_wire_payload',
       'v4.config.manifest',

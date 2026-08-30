@@ -27,6 +27,153 @@ notes: '本注册表是 V4 真源资源图，binding_status 已按机器 gate
 
   '
 resources:
+- resource_id: v4.direct.request.client_payload
+  axis: data
+  verification_gate:
+  - v4_parity_gate_direct_relay_sse
+  resource_kind: normal_payload
+  lifecycle: v4.pipeline.direct_request
+  owner_crate: routecodex-v4-node-container
+  owner_node: V4DirectReq01ClientProtocol
+  owner_symbols:
+  - DirectRequestPayload
+  allowed_writers:
+  - V4DirectReq01ClientProtocol
+  allowed_readers:
+  - V4DirectReq02RelayContainer
+  forbidden_writers:
+  - V4TransportSsePlugin
+  binding_status: design
+- resource_id: v4.direct.request.provider_wire
+  axis: data
+  verification_gate:
+  - v4_parity_gate_direct_relay_sse
+  resource_kind: provider_wire
+  lifecycle: v4.pipeline.direct_request
+  owner_crate: routecodex-v4-node-container
+  owner_node: V4DirectReq02RelayContainer
+  owner_symbols:
+  - DirectRequestHookOutput
+  allowed_writers:
+  - V4DirectReq02RelayContainer
+  allowed_readers:
+  - V4DirectReq03ProviderWire
+  forbidden_writers:
+  - V4TransportSsePlugin
+  binding_status: design
+- resource_id: v4.direct.response.provider_raw
+  axis: data
+  verification_gate:
+  - v4_parity_gate_direct_relay_sse
+  resource_kind: provider_response
+  lifecycle: v4.pipeline.direct_response
+  owner_crate: routecodex-v4-node-container
+  owner_node: V4DirectResp01ProviderRaw
+  owner_symbols:
+  - DirectResponsePayload
+  allowed_writers:
+  - V4DirectResp01ProviderRaw
+  allowed_readers:
+  - V4DirectResp02RelayContainer
+  forbidden_writers:
+  - V4TransportSsePlugin
+  binding_status: design
+- resource_id: v4.direct.response.client_payload
+  axis: data
+  verification_gate:
+  - v4_parity_gate_direct_relay_sse
+  resource_kind: client_wire
+  lifecycle: v4.pipeline.direct_response
+  owner_crate: routecodex-v4-node-container
+  owner_node: V4DirectResp02RelayContainer
+  owner_symbols:
+  - DirectResponseHookOutput
+  allowed_writers:
+  - V4DirectResp02RelayContainer
+  allowed_readers:
+  - V4DirectResp03ClientProtocol
+  forbidden_writers:
+  - V4TransportSsePlugin
+  binding_status: design
+- resource_id: v4.transport.sse_frames
+  axis: data
+  verification_gate:
+  - v4_parity_gate_direct_relay_sse
+  resource_kind: transport_frame
+  lifecycle: v4.transport.sse
+  owner_crate: routecodex-v4-server
+  owner_node: V4TransportSsePlugin
+  owner_symbols:
+  - SseTransportPlugin
+  allowed_writers:
+  - V4TransportSsePlugin
+  allowed_readers:
+  - V4TransportSsePlugin
+  forbidden_writers:
+  - V4DirectReq02RelayContainer
+  - V4DirectResp02RelayContainer
+  - V4HubReqChatProcess03Governed
+  - V4HubRespChatProcess04Governed
+  binding_status: design
+- resource_id: v4.information.execution_lane
+  axis: information
+  verification_gate:
+  - v4_parity_gate_direct_relay_sse
+  resource_kind: execution_lane
+  lifecycle: v4.pipeline.admission
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4ExecutionLaneInformation
+  owner_symbols:
+  - ExecutionLane
+  allowed_writers:
+  - V4ExecutionLaneInformation
+  allowed_readers:
+  - V4DirectReq02RelayContainer
+  - V4DirectResp02RelayContainer
+  - V4HubReqExecution04Planned
+  forbidden_writers:
+  - V4TransportSsePlugin
+  binding_status: design
+- resource_id: v4.information.client_protocol
+  axis: information
+  verification_gate:
+  - v4_parity_gate_direct_relay_sse
+  resource_kind: client_protocol
+  lifecycle: v4.pipeline.admission
+  owner_crate: routecodex-v4-server
+  owner_node: V4ClientProtocolInformation
+  owner_symbols:
+  - ClientProtocol
+  allowed_writers:
+  - V4ClientProtocolInformation
+  allowed_readers:
+  - V4DirectReq02RelayContainer
+  - V4DirectResp02RelayContainer
+  - V4HubReqInbound02Normalized
+  - V4HubRespOutbound05ClientSemantic
+  forbidden_writers:
+  - V4TransportSsePlugin
+  binding_status: design
+- resource_id: v4.information.provider_protocol
+  axis: information
+  verification_gate:
+  - v4_parity_gate_direct_relay_sse
+  resource_kind: provider_protocol
+  lifecycle: v4.pipeline.target
+  owner_crate: routecodex-v4-router
+  owner_node: V4ProviderProtocolInformation
+  owner_symbols:
+  - ProviderProtocol
+  allowed_writers:
+  - V4ProviderProtocolInformation
+  allowed_readers:
+  - V4DirectReq02RelayContainer
+  - V4DirectResp02RelayContainer
+  - V4ProviderReqCompat07ProviderCompat
+  - V4ProviderRespCompat02ProviderCompat
+  forbidden_writers:
+  - V4TransportSsePlugin
+  binding_status: design
 - resource_id: v4.request.normal_payload
   axis: data
   verification_gate:
@@ -35,7 +182,7 @@ resources:
   resource_kind: normal_payload
   lifecycle: v4.pipeline.mainline
   owner_crate: routecodex-v4-runtime
-  owner_node: V4HubReqInbound03Normalized
+  owner_node: V4HubReqInbound02Normalized
   owner_symbols:
   - ProtocolParse
   - Normalize
@@ -45,11 +192,13 @@ resources:
   - requestId
   - endpoint
   allowed_writers:
-  - V4HubReqInbound03Normalized
-  - V4HubReqChatProcess04Governed
+  - V4HubReqInbound02Normalized
+  - V4HubReqChatProcess03Governed
   allowed_readers:
-  - V4HubReqChatProcess04Governed
-  - V4HubReqOutbound05ProviderSemantic
+  - V4HubReqChatProcess03Governed
+  - V4HubReqExecution04Planned
+  - V4HubReqTarget05Resolved
+  - V4HubReqOutbound06ProviderSemantic
   forbidden_writers:
   - V4ControlMetadataCenter
   - V4DebugSnapshotLedger
@@ -65,7 +214,7 @@ resources:
   resource_kind: provider_semantic
   lifecycle: v4.pipeline.mainline
   owner_crate: routecodex-v4-runtime
-  owner_node: V4HubReqOutbound05ProviderSemantic
+  owner_node: V4HubReqOutbound06ProviderSemantic
   owner_symbols:
   - SemanticProjection
   identity:
@@ -74,9 +223,9 @@ resources:
   - providerId
   - modelId
   allowed_writers:
-  - V4HubReqOutbound05ProviderSemantic
+  - V4HubReqOutbound06ProviderSemantic
   allowed_readers:
-  - V4ProviderReqCompat06Compat
+  - V4ProviderReqCompat07ProviderCompat
   forbidden_writers:
   - V4ControlMetadataCenter
   - V4Router
@@ -91,7 +240,7 @@ resources:
   resource_kind: provider_wire
   lifecycle: v4.pipeline.mainline
   owner_crate: routecodex-v4-runtime
-  owner_node: V4ProviderReqCompat06Compat
+  owner_node: V4ProviderReqCompat07ProviderCompat
   owner_symbols:
   - WireBuild
   identity:
@@ -105,12 +254,14 @@ resources:
     protocol_metadata_forbidden: true
     secret_handle_only: true
   allowed_writers:
-  - V4ProviderReqCompat06Compat
+  - V4ProviderReqCompat07ProviderCompat
+  - V4ProviderReqOutbound08WirePayload
   allowed_readers:
-  - V4ProviderSseOut07WireBoundary
+  - V4ProviderReqOutbound08WirePayload
+  - V4ProviderReqOutbound09TransportRequest
   forbidden_writers:
   - V4ControlMetadataCenter
-  - V4HubReqChatProcess04Governed
+  - V4HubReqChatProcess03Governed
   - V4Router
   - V4DebugSnapshotLedger
   - V4ScopeRegistry
@@ -124,7 +275,7 @@ resources:
   resource_kind: provider_response
   lifecycle: v4.pipeline.mainline
   owner_crate: routecodex-v4-runtime
-  owner_node: V4ProviderSseIn01FrameBoundary
+  owner_node: V4ProviderRespInbound01Raw
   owner_symbols:
   - FrameParse
   - JsonParse
@@ -133,9 +284,10 @@ resources:
   - providerId
   - statusCode
   allowed_writers:
-  - V4ProviderSseIn01FrameBoundary
+  - V4ProviderRespInbound01Raw
   allowed_readers:
-  - V4HubRespInbound02Parsed
+  - V4ProviderRespCompat02ProviderCompat
+  - V4HubRespInbound03Normalized
   - V4Error01SourceRaised
   forbidden_writers:
   - V4ControlMetadataCenter
@@ -151,18 +303,18 @@ resources:
   resource_kind: normal_payload
   lifecycle: v4.pipeline.mainline
   owner_crate: routecodex-v4-runtime
-  owner_node: V4HubRespInbound02Parsed
+  owner_node: V4HubRespInbound03Normalized
   owner_symbols:
   - ProtocolDecode
   identity:
   - requestId
   - endpoint
   allowed_writers:
-  - V4HubRespInbound02Parsed
-  - V4HubRespChatProcess03Governed
+  - V4HubRespInbound03Normalized
+  - V4HubRespChatProcess04Governed
   allowed_readers:
-  - V4HubRespChatProcess03Governed
-  - V4HubRespOutbound04ClientSemantic
+  - V4HubRespChatProcess04Governed
+  - V4HubRespOutbound05ClientSemantic
   forbidden_writers:
   - V4ControlMetadataCenter
   - V4DebugSnapshotLedger
@@ -177,7 +329,7 @@ resources:
   resource_kind: client_wire
   lifecycle: v4.pipeline.mainline
   owner_crate: routecodex-v4-runtime
-  owner_node: V4HubRespOutbound04ClientSemantic
+  owner_node: V4HubRespOutbound05ClientSemantic
   owner_symbols:
   - FrameBuild
   identity:
@@ -188,9 +340,8 @@ resources:
     control_fields_forbidden: true
     error_projection_only: V4Error06ClientProjected
   allowed_writers:
-  - V4HubRespOutbound04ClientSemantic
+  - V4HubRespOutbound05ClientSemantic
   allowed_readers:
-  - V4ServerSseOut05FrameBoundary
   - V4ServerRespOutbound06ClientFrame
   - V4ServerFrame
   forbidden_writers:
@@ -220,7 +371,6 @@ resources:
   allowed_writers:
   - V4ServerRespOutbound06ClientFrame
   allowed_readers:
-  - V4ServerSseOut05FrameBoundary
   - V4ServerRespOutbound06ClientFrame
   - V4ServerFrame
   forbidden_writers:
@@ -289,7 +439,7 @@ resources:
   - V4Router
   - V4ErrorChain
   allowed_readers:
-  - V4HubReqChatProcess04Governed
+  - V4HubReqChatProcess03Governed
   - V4Router
   - V4ErrorChain
   - V4ScopeRegistry
@@ -330,10 +480,10 @@ resources:
   - V4MetadataCenter01ScopeRegistry::register
   - V4MetadataCenter01ScopeRegistry::consume
   - V4MetadataCenter01ScopeRegistry::release
-  - V4HubReqChatProcess04Governed
-  - V4HubRespChatProcess03Governed
+  - V4HubReqChatProcess03Governed
+  - V4HubRespChatProcess04Governed
   allowed_readers:
-  - V4HubReqChatProcess04Governed
+  - V4HubReqChatProcess03Governed
   - V4Router
   - V4ErrorChain
   - V4StoplessControlState
@@ -406,7 +556,7 @@ resources:
   - V4Router06SelectionPlan
   - V4Target07OpaqueTarget
   allowed_readers:
-  - V4HubReqOutbound05ProviderSemantic
+  - V4HubReqOutbound06ProviderSemantic
   - V4Error04RouterPolicyApplied
   forbidden_writers:
   - V4HubReqChatProcess04Governed
@@ -441,7 +591,7 @@ resources:
   allowed_writers:
   - V4Router07RouteDecisionExit
   allowed_readers:
-  - V4HubReqOutbound05ProviderSemantic
+  - V4HubReqOutbound06ProviderSemantic
   - V4Error04RouterPolicyApplied
   forbidden_writers:
   - V4HubReqChatProcess04Governed
@@ -651,7 +801,7 @@ resources:
   resource_kind: typed_side_channel
   lifecycle: v4.pipeline.request_cycle
   owner_crate: routecodex-v4-runtime
-  owner_node: V4HubReqChatProcess04Governed
+  owner_node: V4HubReqChatProcess03Governed
   owner_symbols:
   - RequestPortLease
   identity:
@@ -680,7 +830,7 @@ resources:
   resource_kind: typed_side_channel
   lifecycle: v4.pipeline.response_cycle
   owner_crate: routecodex-v4-runtime
-  owner_node: V4HubRespInbound02Parsed
+  owner_node: V4HubRespInbound03Normalized
   owner_symbols:
   - ResponsePortReceipt
   - consume_response
@@ -693,7 +843,7 @@ resources:
   - consume_response
   - consume_error
   allowed_readers:
-  - V4HubRespInbound02Parsed
+  - V4HubRespInbound03Normalized
   - V4Error05ExecutionDecision
   forbidden_writers:
   - V4HubReqInbound03Normalized
@@ -865,8 +1015,8 @@ resources:
   - V4StoplessControlState::store_for_scope
   - V4StoplessControlState::clear_for_scope
   allowed_readers:
-  - V4HubReqChatProcess04Governed
-  - V4HubRespChatProcess03Governed
+  - V4HubReqChatProcess03Governed
+  - V4HubRespChatProcess04Governed
   forbidden_writers:
   - V4ProviderReqCompat06Compat
   - V4HubRespOutbound04ClientSemantic
@@ -1063,7 +1213,7 @@ resources:
   allowed_writers:
   - V4Config05ManifestPublished
   allowed_readers:
-  - V4ProviderSseOut07WireBoundary
+  - V4ProviderReqOutbound09TransportRequest
   forbidden_writers:
   - V4DebugSnapshotLedger
   - V4Error06ClientProjected
@@ -1804,7 +1954,7 @@ resources:
   resource_kind: provider_bound_failure_scoped_diagnostic_artifact
   lifecycle: v4.provider.bound_raw_evidence
   owner_crate: routecodex-v4-provider
-  owner_node: V4ProviderSseOut07WireBoundary
+  owner_node: V4ProviderReqOutbound09TransportRequest
   owner_symbols:
   - PROVIDER_BOUND_RAW_EVIDENCE_OWNER
   - ProviderBoundRawEvidence
@@ -2416,7 +2566,7 @@ resources:
   resource_kind: provider_transport
   lifecycle: v4.provider.mainline
   owner_crate: routecodex-v4-provider
-  owner_node: V4ProviderSseOut07WireBoundary
+  owner_node: V4ProviderReqOutbound09TransportRequest
   owner_symbols:
   - ProviderResponseStream
   - ProviderRawResponse
@@ -2434,10 +2584,10 @@ resources:
     internal_control_fields_forbidden: true
     continuation_owner_compiled_from_provider_profile: true
   allowed_writers:
-  - V4ProviderSseOut07WireBoundary
-  - V4ProviderSseIn01FrameBoundary
+  - V4ProviderReqOutbound09TransportRequest
+  - V4ProviderRespInbound01Raw
   allowed_readers:
-  - V4ProviderSseIn01FrameBoundary
+  - V4ProviderRespInbound01Raw
   - V4Error01SourceRaised
   forbidden_writers:
   - V4HubReqChatProcess04Governed
@@ -2742,15 +2892,15 @@ resources:
   resource_kind: normal_payload
   lifecycle: v4.plugin.standard_library
   owner_crate: routecodex-v4-standard-plugins
-  owner_node: V4HubReqInbound03Normalized
+  owner_node: V4HubReqInbound02Normalized
   owner_symbols:
   - StandardPlugin
   - StandardHandleRegistry
   allowed_writers:
-  - V4HubReqInbound03Normalized
+  - V4HubReqInbound02Normalized
   allowed_readers:
-  - V4HubReqInbound03Normalized
-  - V4HubReqChatProcess04Governed
+  - V4HubReqInbound02Normalized
+  - V4HubReqChatProcess03Governed
   forbidden_writers:
   - V4ControlMetadataCenter
   may_enter_provider_body: true
@@ -2764,15 +2914,15 @@ resources:
   resource_kind: normal_payload
   lifecycle: v4.plugin.standard_library
   owner_crate: routecodex-v4-standard-plugins
-  owner_node: V4HubReqInbound03Normalized
+  owner_node: V4HubReqInbound02Normalized
   owner_symbols:
   - StandardPlugin
   - StandardHandleRegistry
   allowed_writers:
-  - V4HubReqInbound03Normalized
+  - V4HubReqInbound02Normalized
   allowed_readers:
-  - V4HubReqInbound03Normalized
-  - V4HubReqChatProcess04Governed
+  - V4HubReqInbound02Normalized
+  - V4HubReqChatProcess03Governed
   forbidden_writers:
   - V4ControlMetadataCenter
   may_enter_provider_body: true
@@ -2786,15 +2936,15 @@ resources:
   resource_kind: normal_payload
   lifecycle: v4.plugin.standard_library
   owner_crate: routecodex-v4-standard-plugins
-  owner_node: V4HubReqChatProcess04Governed
+  owner_node: V4HubReqChatProcess03Governed
   owner_symbols:
   - StandardPlugin
   - StandardHandleRegistry
   allowed_writers:
-  - V4HubReqChatProcess04Governed
+  - V4HubReqChatProcess03Governed
   allowed_readers:
-  - V4HubReqChatProcess04Governed
-  - V4HubReqOutbound05ProviderSemantic
+  - V4HubReqChatProcess03Governed
+  - V4HubReqOutbound06ProviderSemantic
   forbidden_writers:
   - V4ControlMetadataCenter
   may_enter_provider_body: true
@@ -2808,14 +2958,14 @@ resources:
   resource_kind: provider_semantic
   lifecycle: v4.plugin.standard_library
   owner_crate: routecodex-v4-standard-plugins
-  owner_node: V4HubReqOutbound05ProviderSemantic
+  owner_node: V4HubReqOutbound06ProviderSemantic
   owner_symbols:
   - StandardPlugin
   - StandardHandleRegistry
   allowed_writers:
-  - V4HubReqOutbound05ProviderSemantic
+  - V4HubReqOutbound06ProviderSemantic
   allowed_readers:
-  - V4ProviderReqCompat06Compat
+  - V4ProviderReqCompat07ProviderCompat
   forbidden_writers:
   - V4ControlMetadataCenter
   may_enter_provider_body: true
@@ -2829,16 +2979,16 @@ resources:
   resource_kind: provider_wire
   lifecycle: v4.plugin.standard_library
   owner_crate: routecodex-v4-standard-plugins
-  owner_node: V4ProviderReqCompat06Compat
+  owner_node: V4ProviderReqCompat07ProviderCompat
   owner_symbols:
   - StandardPlugin
   - StandardHandleRegistry
   semantic_contract:
     control_fields_forbidden: true
   allowed_writers:
-  - V4ProviderReqCompat06Compat
+  - V4ProviderReqCompat07ProviderCompat
   allowed_readers:
-  - V4ProviderSseOut07WireBoundary
+  - V4ProviderReqOutbound08WirePayload
   forbidden_writers:
   - V4ControlMetadataCenter
   may_enter_provider_body: true
@@ -2867,13 +3017,13 @@ resources:
   resource_kind: response_plugin
   lifecycle: v4.response.inbound
   owner_crate: routecodex-v4-standard-plugins
-  owner_node: V4HubRespInbound02Parsed
+  owner_node: V4HubRespInbound03Normalized
   owner_symbols:
   - StandardPlugin
   allowed_writers:
-  - V4HubRespInbound02Parsed
+  - V4HubRespInbound03Normalized
   allowed_readers:
-  - V4HubRespChatProcess03Governed
+  - V4HubRespChatProcess04Governed
   forbidden_writers: []
   binding_status: anchored
 - resource_id: v4.plugin.response.governance
@@ -2883,13 +3033,13 @@ resources:
   resource_kind: response_plugin
   lifecycle: v4.response.chat_process
   owner_crate: routecodex-v4-standard-plugins
-  owner_node: V4HubRespChatProcess03Governed
+  owner_node: V4HubRespChatProcess04Governed
   owner_symbols:
   - StandardPlugin
   allowed_writers:
-  - V4HubRespChatProcess03Governed
+  - V4HubRespChatProcess04Governed
   allowed_readers:
-  - V4HubRespOutbound04ClientSemantic
+  - V4HubRespOutbound05ClientSemantic
   forbidden_writers: []
   binding_status: anchored
 - resource_id: v4.plugin.response.fault_intake
@@ -2899,11 +3049,11 @@ resources:
   resource_kind: response_error_control
   lifecycle: v4.error.mainline
   owner_crate: routecodex-v4-standard-plugins
-  owner_node: V4HubRespInbound02Parsed
+  owner_node: V4HubRespInbound03Normalized
   owner_symbols:
   - StandardPlugin
   allowed_writers:
-  - V4HubRespInbound02Parsed
+  - V4HubRespInbound03Normalized
   allowed_readers:
   - V4Error01SourceRaised
   forbidden_writers: []

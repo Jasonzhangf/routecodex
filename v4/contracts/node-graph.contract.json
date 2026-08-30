@@ -3,7 +3,7 @@
   "contract_id": "v4-node-graph",
   "status": "active",
   "owner_feature_id": "v4.node_graph",
-  "graph_hash": "sha256:45f393fcccb5d429e1b55d8d6dd05e364858c743e02d04c256d11bc26a905930",
+  "graph_hash": "sha256:a5a425813e35a66ba2d1832181b7c710b386f94c6079ebdce3e0b7d98a5f0437",
   "canonical_docs": [
     "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
@@ -521,114 +521,104 @@
     "rule": "node_id encodes topological order (NN) and semantic function (SemanticName); both are contract and immutable after publication",
     "node_class_required": true
   },
-  "v4_hub_request_chain": {
-    "chain_version": "v4-hub-1",
+  "v4_direct_request_chain": {
+    "chain_version": "v4-direct-1",
     "nodes": [
       {
         "position": 1,
-        "node_id": "V4ServerReqInbound01ClientRaw",
+        "node_id": "V4DirectReq01ClientProtocol",
         "role_id": "request_inbound",
-        "data_plane": "raw_entry"
+        "data_plane": "client_protocol_payload"
       },
       {
         "position": 2,
-        "node_id": "V4ServerSseIn02FrameBoundary",
-        "role_id": "request_inbound",
-        "data_plane": "sse_frame_to_json"
+        "node_id": "V4DirectReq02RelayContainer",
+        "role_id": "request_outbound",
+        "data_plane": "same_protocol_direct_hook_queue"
       },
       {
         "position": 3,
-        "node_id": "V4HubReqInbound03Normalized",
-        "role_id": "request_inbound",
-        "data_plane": "json_semantic"
-      },
-      {
-        "position": 4,
-        "node_id": "V4HubReqChatProcess04Governed",
-        "role_id": "request_chat_process",
-        "group": true,
-        "data_plane": "json_semantic"
-      },
-      {
-        "position": 5,
-        "node_id": "V4HubReqOutbound05ProviderSemantic",
+        "node_id": "V4DirectReq03ProviderWire",
         "role_id": "request_outbound",
-        "data_plane": "json_semantic"
-      },
-      {
-        "position": 6,
-        "node_id": "V4ProviderReqCompat06Compat",
-        "role_id": "request_outbound",
-        "data_plane": "json_semantic"
-      },
-      {
-        "position": 7,
-        "node_id": "V4ProviderSseOut07WireBoundary",
-        "role_id": "request_outbound",
-        "data_plane": "json_to_sse_frame"
+        "data_plane": "provider_wire_payload"
       }
     ],
     "semantics": {
-      "sse_boundary_only": true,
-      "internal_data_plane": "json_semantic",
-      "direct_also_uses_chain": true,
-      "direct_flow": "sse_in -> json_semantic -> sse_out",
-      "sse_in_sse_out_coupling": "forbidden; SSE is transport boundary only",
-      "chat_process": "supernode group with entry/exit hooks for servertool and cross-cutting processing"
+      "flow": "client protocol -> DirectRelay NodeContainer -> same-protocol provider wire",
+      "same_protocol": true,
+      "protocol_mismatch": "fail_fast",
+      "relay_hook_mount": "forbidden",
+      "sse_semantic_ownership": "forbidden"
+    }
+  },
+  "v4_direct_response_chain": {
+    "chain_version": "v4-direct-1",
+    "mirror_of": "v4_direct_request_chain",
+    "nodes": [
+      {
+        "position": 1,
+        "node_id": "V4DirectResp01ProviderRaw",
+        "role_id": "response_inbound",
+        "data_plane": "provider_protocol_payload"
+      },
+      {
+        "position": 2,
+        "node_id": "V4DirectResp02RelayContainer",
+        "role_id": "response_outbound",
+        "data_plane": "same_protocol_direct_hook_queue"
+      },
+      {
+        "position": 3,
+        "node_id": "V4DirectResp03ClientProtocol",
+        "role_id": "response_outbound",
+        "data_plane": "client_protocol_payload"
+      }
+    ],
+    "semantics": {
+      "flow": "provider protocol -> DirectRelay NodeContainer -> same-protocol client payload",
+      "same_protocol": true,
+      "protocol_mismatch": "fail_fast",
+      "relay_hook_mount": "forbidden",
+      "sse_semantic_ownership": "forbidden"
+    }
+  },
+  "v4_hub_request_chain": {
+    "chain_version": "v4-relay-1",
+    "nodes": [
+      {"position": 1, "node_id": "V4ServerReqInbound01ClientRaw", "role_id": "request_inbound", "data_plane": "client_raw"},
+      {"position": 2, "node_id": "V4HubReqInbound02Normalized", "role_id": "request_inbound", "data_plane": "hub_normalized"},
+      {"position": 3, "node_id": "V4HubReqChatProcess03Governed", "role_id": "request_chat_process", "group": true, "data_plane": "hub_governed"},
+      {"position": 4, "node_id": "V4HubReqExecution04Planned", "role_id": "request_execution", "data_plane": "execution_plan"},
+      {"position": 5, "node_id": "V4HubReqTarget05Resolved", "role_id": "request_execution", "data_plane": "target_resolved"},
+      {"position": 6, "node_id": "V4HubReqOutbound06ProviderSemantic", "role_id": "request_outbound", "data_plane": "provider_semantic"},
+      {"position": 7, "node_id": "V4ProviderReqCompat07ProviderCompat", "role_id": "request_outbound", "data_plane": "provider_compat"},
+      {"position": 8, "node_id": "V4ProviderReqOutbound08WirePayload", "role_id": "request_outbound", "data_plane": "provider_wire"},
+      {"position": 9, "node_id": "V4ProviderReqOutbound09TransportRequest", "role_id": "request_outbound", "data_plane": "transport_request"}
+    ],
+    "semantics": {
+      "flow": "client entry codec -> Hub -> request Chat Process -> Relay hook -> provider codec -> wire",
+      "direct_hook_mount": "forbidden",
+      "client_provider_protocol_independence": true,
+      "sse_semantic_ownership": "forbidden"
     }
   },
   "v4_hub_response_chain": {
-    "chain_version": "v4-hub-1",
+    "chain_version": "v4-relay-1",
     "mirror_of": "v4_hub_request_chain",
     "nodes": [
-      {
-        "position": 1,
-        "node_id": "V4ProviderSseIn01FrameBoundary",
-        "role_id": "response_inbound",
-        "data_plane": "sse_frame_to_json"
-      },
-      {
-        "position": 2,
-        "node_id": "V4HubRespInbound02Parsed",
-        "role_id": "response_inbound",
-        "data_plane": "json_semantic"
-      },
-      {
-        "position": 3,
-        "node_id": "V4HubRespChatProcess03Governed",
-        "role_id": "response_chat_process",
-        "group": true,
-        "data_plane": "json_semantic"
-      },
-      {
-        "position": 4,
-        "node_id": "V4HubRespOutbound04ClientSemantic",
-        "role_id": "response_outbound",
-        "data_plane": "json_semantic"
-      },
-      {
-        "position": 5,
-        "node_id": "V4ServerSseOut05FrameBoundary",
-        "role_id": "response_outbound",
-        "data_plane": "json_to_sse_frame"
-      },
-      {
-        "position": 6,
-        "node_id": "V4ServerRespOutbound06ClientFrame",
-        "role_id": "response_outbound",
-        "data_plane": "client_frame"
-      }
+      {"position": 1, "node_id": "V4ProviderRespInbound01Raw", "role_id": "response_inbound", "data_plane": "provider_raw"},
+      {"position": 2, "node_id": "V4ProviderRespCompat02ProviderCompat", "role_id": "response_inbound", "data_plane": "provider_compat"},
+      {"position": 3, "node_id": "V4HubRespInbound03Normalized", "role_id": "response_inbound", "data_plane": "hub_normalized"},
+      {"position": 4, "node_id": "V4HubRespChatProcess04Governed", "role_id": "response_chat_process", "group": true, "data_plane": "hub_governed"},
+      {"position": 5, "node_id": "V4HubRespOutbound05ClientSemantic", "role_id": "response_outbound", "data_plane": "client_semantic"},
+      {"position": 6, "node_id": "V4ServerRespOutbound06ClientFrame", "role_id": "response_outbound", "data_plane": "client_frame"}
     ],
     "semantics": {
-      "flow": "provider_sse -> inbound -> chat_process(group) -> outbound -> client_sse -> server",
-      "sse_boundary_only": true,
-      "internal_data_plane": "json_semantic",
-      "sse_in_sse_out_coupling": "forbidden; provider SSE must not pipe directly to client SSE",
-      "chat_process": "supernode group with continuation save, response governance, tool harvest, and entry/exit hooks for servertool",
-      "continuation_save_only_at": "V4HubRespChatProcess03Governed",
-      "immutable_interval": "resp_chatprocess save -> next req_chatprocess restore; no semantic transformation in between",
-      "terminal": "V4ServerRespOutbound06ClientFrame is the single success terminal",
-      "direct_also_uses_chain": true
+      "flow": "provider codec -> Hub -> response Chat Process -> Relay hook -> client codec",
+      "direct_hook_mount": "forbidden",
+      "client_provider_protocol_independence": true,
+      "sse_semantic_ownership": "forbidden",
+      "local_continuation": "physically_forbidden"
     }
   },
   "v4_config_chain": {
@@ -1089,10 +1079,10 @@
     "rule": "different protocols share the same node instance and role subclass; each protocol registers an operator on that slot",
     "wiring_selection": "exactly one active operator per node instance per compiled manifest",
     "selection_facts": [
-      "entry_protocol",
+      "execution_lane",
+      "client_protocol",
       "provider_wire_protocol",
-      "continuation_owner",
-      "execution_mode"
+      "target_model"
     ],
     "forbidden_selection_facts": [
       "provider_id",
@@ -1102,94 +1092,150 @@
   },
   "registered_nodes": [
     {
+      "node_id": "V4DirectReq01ClientProtocol",
+      "family": "RequestChainNode",
+      "role_id": "request_inbound",
+      "scope": "Direct client protocol payload admission",
+      "owner": "routecodex-v4-server"
+    },
+    {
+      "node_id": "V4DirectReq02RelayContainer",
+      "family": "RequestChainNode",
+      "role_id": "request_outbound",
+      "scope": "Direct request relay container and hook queue",
+      "owner": "routecodex-v4-node-container"
+    },
+    {
+      "node_id": "V4DirectReq03ProviderWire",
+      "family": "RequestChainNode",
+      "role_id": "request_outbound",
+      "scope": "Direct same-protocol provider wire",
+      "owner": "routecodex-v4-provider"
+    },
+    {
+      "node_id": "V4DirectResp01ProviderRaw",
+      "family": "ResponseChainNode",
+      "role_id": "response_inbound",
+      "scope": "Direct provider protocol response",
+      "owner": "routecodex-v4-provider"
+    },
+    {
+      "node_id": "V4DirectResp02RelayContainer",
+      "family": "ResponseChainNode",
+      "role_id": "response_outbound",
+      "scope": "Direct response relay container and hook queue",
+      "owner": "routecodex-v4-node-container"
+    },
+    {
+      "node_id": "V4DirectResp03ClientProtocol",
+      "family": "ResponseChainNode",
+      "role_id": "response_outbound",
+      "scope": "Direct same-protocol client payload",
+      "owner": "routecodex-v4-server"
+    },
+    {
       "node_id": "V4ServerReqInbound01ClientRaw",
       "family": "RequestChainNode",
       "role_id": "request_inbound",
-      "scope": "client request entry raw capture",
+      "scope": "Relay client request entry raw capture",
       "owner": "routecodex-v4-server"
     },
     {
-      "node_id": "V4ServerSseIn02FrameBoundary",
+      "node_id": "V4HubReqInbound02Normalized",
       "family": "RequestChainNode",
       "role_id": "request_inbound",
-      "scope": "server SSE inbound frame boundary",
-      "owner": "routecodex-v4-server"
-    },
-    {
-      "node_id": "V4HubReqInbound03Normalized",
-      "family": "RequestChainNode",
-      "role_id": "request_inbound",
-      "scope": "hub request normalization",
+      "scope": "Relay Hub request normalization",
       "owner": "routecodex-v4-runtime"
     },
     {
-      "node_id": "V4HubReqChatProcess04Governed",
+      "node_id": "V4HubReqChatProcess03Governed",
       "family": "RequestChainNode",
       "role_id": "request_chat_process",
-      "scope": "request chat process governance group",
+      "scope": "Relay request Chat Process governance group",
       "owner": "routecodex-v4-runtime"
     },
     {
-      "node_id": "V4HubReqOutbound05ProviderSemantic",
+      "node_id": "V4HubReqExecution04Planned",
       "family": "RequestChainNode",
-      "role_id": "request_outbound",
-      "scope": "provider semantic request projection",
+      "role_id": "request_execution",
+      "scope": "Relay request execution plan",
       "owner": "routecodex-v4-runtime"
     },
     {
-      "node_id": "V4ProviderReqCompat06Compat",
+      "node_id": "V4HubReqTarget05Resolved",
+      "family": "RequestChainNode",
+      "role_id": "request_execution",
+      "scope": "Relay target resolution",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4HubReqOutbound06ProviderSemantic",
       "family": "RequestChainNode",
       "role_id": "request_outbound",
-      "scope": "provider request compat boundary",
+      "scope": "Relay provider semantic request projection",
+      "owner": "routecodex-v4-standard-plugins"
+    },
+    {
+      "node_id": "V4ProviderReqCompat07ProviderCompat",
+      "family": "RequestChainNode",
+      "role_id": "request_outbound",
+      "scope": "Relay provider request compat",
       "owner": "routecodex-v4-provider"
     },
     {
-      "node_id": "V4ProviderSseOut07WireBoundary",
+      "node_id": "V4ProviderReqOutbound08WirePayload",
       "family": "RequestChainNode",
       "role_id": "request_outbound",
-      "scope": "provider SSE outbound wire boundary",
+      "scope": "Relay provider wire payload",
       "owner": "routecodex-v4-provider"
     },
     {
-      "node_id": "V4ProviderSseIn01FrameBoundary",
+      "node_id": "V4ProviderReqOutbound09TransportRequest",
+      "family": "RequestChainNode",
+      "role_id": "request_outbound",
+      "scope": "Relay provider transport request",
+      "owner": "routecodex-v4-provider"
+    },
+    {
+      "node_id": "V4ProviderRespInbound01Raw",
       "family": "ResponseChainNode",
       "role_id": "response_inbound",
-      "scope": "provider SSE inbound frame boundary",
+      "scope": "Relay provider raw response",
       "owner": "routecodex-v4-provider"
     },
     {
-      "node_id": "V4HubRespInbound02Parsed",
+      "node_id": "V4ProviderRespCompat02ProviderCompat",
       "family": "ResponseChainNode",
       "role_id": "response_inbound",
-      "scope": "hub response inbound parse",
+      "scope": "Relay provider response compat",
+      "owner": "routecodex-v4-provider"
+    },
+    {
+      "node_id": "V4HubRespInbound03Normalized",
+      "family": "ResponseChainNode",
+      "role_id": "response_inbound",
+      "scope": "Relay Hub response normalization",
       "owner": "routecodex-v4-runtime"
     },
     {
-      "node_id": "V4HubRespChatProcess03Governed",
+      "node_id": "V4HubRespChatProcess04Governed",
       "family": "ResponseChainNode",
       "role_id": "response_chat_process",
-      "scope": "response chat process governance group",
+      "scope": "Relay response Chat Process governance group",
       "owner": "routecodex-v4-runtime"
     },
     {
-      "node_id": "V4HubRespOutbound04ClientSemantic",
+      "node_id": "V4HubRespOutbound05ClientSemantic",
       "family": "ResponseChainNode",
       "role_id": "response_outbound",
-      "scope": "client semantic response projection",
-      "owner": "routecodex-v4-runtime"
-    },
-    {
-      "node_id": "V4ServerSseOut05FrameBoundary",
-      "family": "ResponseChainNode",
-      "role_id": "response_outbound",
-      "scope": "server SSE outbound frame boundary",
-      "owner": "routecodex-v4-server"
+      "scope": "Relay client semantic projection",
+      "owner": "routecodex-v4-standard-plugins"
     },
     {
       "node_id": "V4ServerRespOutbound06ClientFrame",
       "family": "ResponseChainNode",
       "role_id": "response_outbound",
-      "scope": "server response client frame terminal",
+      "scope": "Relay server client frame terminal",
       "owner": "routecodex-v4-server"
     },
     {
@@ -1748,12 +1794,16 @@
     "parent chain cannot connect to group internal nodes",
     "every chain has single entry and single terminal",
     "every published node/group/chain has its standard test surface",
-    "v4 hub request chain is fixed: server -> sse_in -> inbound -> chat_process(group) -> outbound -> compat -> provider_sse_out",
-    "v4 hub response chain is the request chain mirror: provider_sse_in -> inbound -> chat_process(group) -> outbound -> client_sse_out -> server",
-    "continuation save occurs only at V4HubRespChatProcess03Governed; resp_chatprocess save -> req_chatprocess restore interval is immutable",
-    "sse is transport boundary only; internal data plane is json semantic",
-    "sse_in and sse_out cannot be directly coupled",
-    "direct and relay share the same chain; they differ only in operator selection and typed facts",
+    "v4 Direct request chain is fixed: client protocol -> direction-specific DirectRelay NodeContainer -> same-protocol provider wire",
+    "v4 Direct response chain is fixed: provider protocol -> direction-specific DirectRelay NodeContainer -> same-protocol client protocol",
+    "v4 Relay request chain is fixed: server raw -> Hub inbound -> request Chat Process -> execution plan -> target -> Hub outbound -> provider compat -> provider wire -> transport",
+    "v4 Relay response chain is fixed: provider raw -> provider compat -> Hub inbound -> response Chat Process -> Hub outbound -> server client frame",
+    "local and Relay continuation are physically forbidden; only provider-owned Direct Responses continuation may exist outside SSE transport",
+    "SSE is an independent transport plugin and owns framing, ordering, bounded buffering, backpressure, timeout, keepalive, and closeout only",
+    "SSE plugins cannot read, write, infer, normalize, project, or classify normal payload semantics or business terminal truth",
+    "Direct and Relay are different chain families selected only by typed execution-lane information",
+    "Direct requires client_protocol == provider_protocol and fails fast on mismatch; it never auto-switches to Relay",
+    "Relay client_protocol and provider_protocol are independent typed information resources and cannot be inferred from payload or each other",
     "every node entry/exit hook queue is machine declared and ordered"
   ]
 }
