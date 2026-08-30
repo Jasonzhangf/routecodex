@@ -799,6 +799,51 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
 }
 
 #[test]
+fn relay_missing_provider_snapshot_does_not_project_client_failure() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-relay-missing-provider-snapshot-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        5555,
+        true,
+        true,
+        None,
+        false,
+    );
+    let output = V3ResponsesRelayRuntimeOutput {
+        status: 200,
+        client_body: V3ResponsesRelayClientBody::Json(json!({"status": "completed"})),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+    let mut snapshots = Some(routecodex_v3_runtime::V3RelayProviderSnapshots {
+        provider_request: None,
+        provider_response: None,
+    });
+    assert!(capture_v3_relay_provider_snapshots(
+        &state,
+        "responses",
+        "/v1/responses",
+        "relay-missing-provider",
+        &mut snapshots,
+    )
+    .is_none());
+    assert_eq!(output.status, 200);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
     let _home_lock = TEST_HOME_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(
@@ -912,7 +957,8 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         "missing-carrier",
         &mut missing,
     )
-    .is_some());
+    .is_none());
+    assert_eq!(missing.client_payload.status, 200);
     let missing_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/missing-carrier");
     assert!(!missing_dir.exists(), "server must not fabricate direct artifacts");
 
@@ -3154,8 +3200,8 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
             "terminal-provider-attempt",
             &mut terminal_failure,
         )
-        .is_some(),
-        "a terminal HTTP error must retain explicit missing-carrier evidence failure"
+        .is_none(),
+        "missing diagnostic carrier must not manufacture a client failure"
     );
 
     fs::remove_dir_all(root).unwrap();

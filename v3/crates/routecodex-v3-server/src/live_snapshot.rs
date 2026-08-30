@@ -651,17 +651,7 @@ pub(crate) fn capture_v3_responses_relay_provider_snapshots(
     }
     let snapshots = match output.provider_snapshots.as_mut() {
         Some(snapshots) => snapshots,
-        None => {
-            if provider_attempt_evidence && !terminal_error_evidence {
-                return None;
-            }
-            return Some(foundation_output_response(project_v3_debug_failure(
-                "V3DebugProviderSnapshotCaptured",
-                V3DebugError::MalformedFixture(
-                    "Responses relay provider snapshot carrier is missing".to_string(),
-                ),
-            )))
-        }
+        None => return None,
     };
     let error_status = (output.status >= 400).then_some(output.status);
     if let Some(provider_request) = snapshots.provider_request.take() {
@@ -770,12 +760,7 @@ pub(crate) fn capture_v3_relay_provider_snapshots(
             continue;
         }
         let Some(value) = value else {
-            return Some(foundation_output_response(project_v3_debug_failure(
-                "V3DebugProviderSnapshotCaptured",
-                V3DebugError::MalformedFixture(format!(
-                    "Responses relay {stage} snapshot carrier is missing"
-                )),
-            )));
+            continue;
         };
         let value = state.debug.project_payload_verbatim(value);
         if let Err(error) = persist_v3_codex_sample_payload(
@@ -1132,11 +1117,6 @@ pub(crate) fn capture_v3_responses_direct_provider_snapshots(
     request_id: &str,
     output: &mut V3ResponsesDirectRuntimeOutput,
 ) -> Option<V3FoundationRuntimeOutput> {
-    let provider_transport_started = output
-        .node_trace
-        .iter()
-        .any(|node| *node == "V3Transport13ResponsesHttpRequest");
-    let original_error_present = output.error_chain.is_some();
     let stages = [
         (
             "provider-request",
@@ -1154,19 +1134,7 @@ pub(crate) fn capture_v3_responses_direct_provider_snapshots(
             continue;
         }
         let Some(payload) = payload else {
-            if original_error_present || !provider_transport_started {
-                continue;
-            }
-            let allowed_stream_observation = output.stream_observation.is_some();
-            if allowed_stream_observation {
-                continue;
-            }
-            return Some(project_v3_debug_failure(
-                "V3DebugProviderSnapshotCaptured",
-                V3DebugError::MalformedFixture(format!(
-                    "Responses direct {stage} snapshot carrier is missing"
-                )),
-            ));
+            continue;
         };
         if let Err(error) = persist_v3_codex_sample_payload(
             state,
