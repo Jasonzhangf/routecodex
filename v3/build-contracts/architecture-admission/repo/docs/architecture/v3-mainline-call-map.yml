@@ -39,7 +39,7 @@ chains:
     to_node: V3ProviderHealthStore
     caller_symbol: spawn_v3_server_aggregate
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_key_health_probes
+    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
     callee_file: v3/crates/routecodex-v3-server/src/lib.rs
     status: anchored
     owner_feature_id: v3.provider_global_cooldown_persistence
@@ -7327,10 +7327,10 @@ chains:
   edges:
   - step_id: v3-provider-global-probe-01
     from_node: V3ProviderHealthStore
-    to_node: V3ProviderGlobalProbePermit
-    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+    to_node: V3ProviderHealthProbePermit
+    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderHealthStore::try_acquire_provider_cooldown_probe
+    callee_symbol: V3ProviderHealthStore::acquire_provider_cooldown_probe
     callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
@@ -7345,7 +7345,7 @@ chains:
     to_node: V3ProviderGlobalProbeExecution
     caller_symbol: spawn_v3_server_aggregate
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
@@ -7356,9 +7356,9 @@ chains:
       side_channel_writes: [v3.provider.global_subscription_health]
 
   - step_id: v3-provider-global-probe-02-target
-    from_node: V3ProviderGlobalProbePermit
+    from_node: V3ProviderHealthProbePermit
     to_node: V3ProviderGlobalProbeExecution
-    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: probe_v3_provider_global_target
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -7370,12 +7370,42 @@ chains:
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
 
+  - step_id: v3-provider-global-probe-02-success
+    from_node: V3ProviderGlobalProbeExecution
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health]
+      side_channel_writes: [v3.provider.global_subscription_health]
+
+  - step_id: v3-provider-global-probe-02-failure
+    from_node: V3ProviderGlobalProbeExecution
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health]
+      side_channel_writes: [v3.provider.global_subscription_health]
+
   - step_id: v3-provider-global-probe-02-persistent
     from_node: V3ServerAggregateLifecycle
     to_node: V3ProviderGlobalProbeExecution
     caller_symbol: spawn_v3_server_aggregate
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe

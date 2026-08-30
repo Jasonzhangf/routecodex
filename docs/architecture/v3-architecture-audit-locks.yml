@@ -492,7 +492,7 @@ locked_items:
     locked_at: '2026-08-29T20:40:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
-    last_manual_authorization_id: auth-20260829-v3-health-scheduler-failback
+    last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
 manual_authorizations:
   - authorization_id: auth-20260829-v3-health-scheduler-failback
     item_id: chain:v3.provider_global_subscription_probe
@@ -500,6 +500,13 @@ manual_authorizations:
     approved_at: '2026-08-29T20:40:00-07:00'
     reason: "Jason explicitly requested repairing the audited provider health scheduler without fallback. This refresh locks one typed probe permit owner, generation-guarded success/failure completion, protocol-semantic probe success, and atomic recovery of score/streak/delta/cooldown state; health remains a provider-owned side-channel and configured priority remains unchanged."
     fingerprint_before: sha256:4015c43636de22ea0b61ad6cc0604f5b21bbde3178fbf2af5d242de8369f076c
+    fingerprint_after: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
+  - authorization_id: auth-20260830-v3-execution-control-provider-global
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-30T07:31:41-07:00'
+    reason: "Jason authorized syncing the latest main and integrating the execution-control lifecycle changes; provider-global health persistence remains the same owner and the lock is refreshed against the rebased caller map."
+    fingerprint_before: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
     fingerprint_after: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
   - authorization_id: auth-20260827-v3-sse-session-admission-contract
     item_id: chain:v3.responses_session_admission

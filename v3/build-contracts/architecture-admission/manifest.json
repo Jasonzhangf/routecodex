@@ -474,7 +474,7 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.execution_control_payload_architecture.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.execution_control_payload_architecture.mainline.yml",
-      "source_commit": "db0715925cdb7cd5c3d8e09b1d6b8f20f3738ca0",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "cc8c6bb6587a61ab6cb1956efa4f0e7865f87ea7eb38032f4037fb36960b7741"
     },
     {
@@ -564,7 +564,7 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.provider_action_gate.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.provider_action_gate.mainline.yml",
-      "source_commit": "76090d38801931580cabdb365a9cbbc625246284",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "e040b2461e50f607d19e5e1cc7a593a8999742ad3640ccd612c01069c223b2cd"
     },
     {
@@ -576,8 +576,8 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.provider_global_subscription_probe.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.provider_global_subscription_probe.mainline.yml",
-      "source_commit": "b4298160844a8b2cba74900d36c4ec687ecf3c5a",
-      "sha256": "17d577bda6b81bb9410b37ac50a6d080372d472f42208f484c04fb5ca2c116b5"
+      "source_commit": "08ec6fe95f81a5cdcbd849c1c70a1909ed0c1d3a",
+      "sha256": "02b169cd115ec6fec11cd9d3f199a80feed1049a8d220f28c4edbef0053e187f"
     },
     {
       "output_path": "repo/docs/architecture/manifests/v3.resp03_tool_governance_gap_closeout.mainline.yml",
@@ -660,7 +660,7 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.webui_request_observability.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.webui_request_observability.mainline.yml",
-      "source_commit": "2ae1e19d6687332eb588264e16db9079c2e3bb8f",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "092f619de08c375d44118e905508fedd676074b1db4a068f2c3f73a6da32590d"
     },
     {
@@ -786,8 +786,8 @@
     {
       "output_path": "repo/docs/architecture/v3-architecture-audit-locks.yml",
       "source_path": "docs/architecture/v3-architecture-audit-locks.yml",
-      "source_commit": "76090d38801931580cabdb365a9cbbc625246284",
-      "sha256": "a5b4f2570e8f49e809e55505baddd22a4b35f528c68a07cd35ffc04cf9b689f0"
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
+      "sha256": "2e25cf79e85eeb84e619ded7d08576d14cf1b626ab05057c8899514f56290c93"
     },
     {
       "output_path": "repo/docs/architecture/v3-build-tool-module-registry.yml",
@@ -804,8 +804,8 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "deb06571b2c9cd6c2e7a4cc6d8c42eb77e71943a",
-      "sha256": "c403fc02a6afa0f6c3657191664d69c80b7ecd02200faa4be90bed23fb59df02"
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
+      "sha256": "14de4fb2916efa6a24646ce1b79d1e68063ab5a9d099065d120710aff2564a69"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -816,26 +816,26 @@
     {
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
-      "source_commit": "deb06571b2c9cd6c2e7a4cc6d8c42eb77e71943a",
-      "sha256": "42d6892a0b3febe4eb44e93fcad94a0fb1fb54e70f0da4899b5ce40a450858be"
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
+      "sha256": "dede0d252d421b0b0263aa9a64a34dff1c222e74b59840a4efd1af75574b5904"
     },
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "deb06571b2c9cd6c2e7a4cc6d8c42eb77e71943a",
-      "sha256": "c2fc3f405d166dbcb71cf700785061d5b3cf9b848e9ec262d82211664018cc69"
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
+      "sha256": "9471b0cb133b7363786e5a2f5435dcae249d8110b2ba4616943c03b745bdb06f"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
       "source_path": "docs/architecture/v3-runtime-module-registry.yml",
-      "source_commit": "290594ba8cbd27572f0c18fd8894845c7741f3a9",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "cbb6718a96ab3353b288ff065aa66c818b5538c5741944d61c07082df744df21"
     },
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "deb06571b2c9cd6c2e7a4cc6d8c42eb77e71943a",
-      "sha256": "d0be7631d7064f6281b955814f2449bd173a5c7e9318cb80101dddd7175efbd8"
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
+      "sha256": "1c2b06c71074bd514c8bd09e92ace6e0a3b60f57f07f981fd113b08a5990bd7b"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -1008,7 +1008,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-execution-control-payload-architecture.html",
       "source_path": "docs/architecture/wiki/html/v3-execution-control-payload-architecture.html",
-      "source_commit": "db0715925cdb7cd5c3d8e09b1d6b8f20f3738ca0",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "7289225e5f9923c0ea17fde17b2ee2f7dccdf5856e6a0ac14d1e25670b2d6ee5"
     },
     {
@@ -1020,7 +1020,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
-      "source_commit": "6a19fe25b62e8851ba9a8248588212ed1727fbb3",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "3fa8f850e401739b8b680f105bed5f087c4c734ea48af724e189f2b73cfae8c9"
     },
     {
@@ -1236,7 +1236,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-execution-control-payload-architecture.md",
       "source_path": "docs/architecture/wiki/v3-execution-control-payload-architecture.md",
-      "source_commit": "db0715925cdb7cd5c3d8e09b1d6b8f20f3738ca0",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "afbfc9999b94073ca343c205062530678f630e396aab2650ea7c0bd4d8c94b1c"
     },
     {
@@ -1284,7 +1284,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
-      "source_commit": "6a19fe25b62e8851ba9a8248588212ed1727fbb3",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "a21cf28f7ddd2d8d9069519105acb63b79717bb0bb64725d069a8384356d7be7"
     },
     {
@@ -1326,7 +1326,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-provider-action-gate.md",
       "source_path": "docs/architecture/wiki/v3-provider-action-gate.md",
-      "source_commit": "fe6b7e5188e284baed0d7ba8de82ae50f941fe95",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "8de4cba6f8e0603daa64832701987202c8cdea139470bdd294cf47d1086ea81c"
     },
     {
@@ -1548,8 +1548,8 @@
     {
       "output_path": "repo/docs/design/v3-provider-health-scoring-cooldown-design.md",
       "source_path": "docs/design/v3-provider-health-scoring-cooldown-design.md",
-      "source_commit": "157cf1026f49a39fd79a203d0168c41eeb43efcd",
-      "sha256": "f86a97f0ae4e99aba3dee6f3d8aafee970aa476e9e1015c63210b367c1b19efd"
+      "source_commit": "08ec6fe95f81a5cdcbd849c1c70a1909ed0c1d3a",
+      "sha256": "5d64d4c26770a8fc8603cf32eacde41a3d8077339a1a200f3a391357318db015"
     },
     {
       "output_path": "repo/docs/design/v3-routecodex-runtime-resource-contract.md",
@@ -2154,25 +2154,25 @@
     {
       "output_path": "repo/docs/goals/v3-execution-control-payload-architecture-audit-design.md",
       "source_path": "docs/goals/v3-execution-control-payload-architecture-audit-design.md",
-      "source_commit": "db0715925cdb7cd5c3d8e09b1d6b8f20f3738ca0",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "f3f30a6901f5ae5fdae7ca80bc327e8f56959ffaa1991e0387fd7740d49730e5"
     },
     {
       "output_path": "repo/docs/goals/v3-execution-control-payload-architecture-audit-goal-prompt.md",
       "source_path": "docs/goals/v3-execution-control-payload-architecture-audit-goal-prompt.md",
-      "source_commit": "db0715925cdb7cd5c3d8e09b1d6b8f20f3738ca0",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "3b7ee27a9fca8a72e6721e12e1bd66ffcb85e4179ef493f67d6134160d5b0707"
     },
     {
       "output_path": "repo/docs/goals/v3-execution-control-payload-architecture-audit-plan.md",
       "source_path": "docs/goals/v3-execution-control-payload-architecture-audit-plan.md",
-      "source_commit": "db0715925cdb7cd5c3d8e09b1d6b8f20f3738ca0",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "f822d4c116f5b6fc7c23d25e76a7d2629e451797b6e2b3cf2594807f80a24867"
     },
     {
       "output_path": "repo/docs/goals/v3-execution-control-payload-architecture-audit-problem.md",
       "source_path": "docs/goals/v3-execution-control-payload-architecture-audit-problem.md",
-      "source_commit": "db0715925cdb7cd5c3d8e09b1d6b8f20f3738ca0",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "7275d3a8ee4a6933156973eb473fcd4691559fda6d2d14eb361a05c98f85dd9e"
     },
     {
@@ -2730,7 +2730,7 @@
     {
       "output_path": "repo/docs/goals/v3-sse-transient-no-provider-cooldown-test-design.md",
       "source_path": "docs/goals/v3-sse-transient-no-provider-cooldown-test-design.md",
-      "source_commit": "fe6b7e5188e284baed0d7ba8de82ae50f941fe95",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
       "sha256": "cc337e74a110ae6a3e6d57755e0ecad9f88b48a99cbf7cd0455d1f05ef296487"
     },
     {
@@ -2998,5 +2998,5 @@
       "sha256": "5cc420540dffe755ef55174e73198b28d7b0142769fd3fbae89c5c8016250e79"
     }
   ],
-  "manifest_digest": "a496638301b66771f19fa2dd86f8519e38dd265373ac879a671ca7bd2ab182e9"
+  "manifest_digest": "653404c8237e314dfe5340d9b27d4c0bc7aceebbc957ad99689a2c9be92bdc3b"
 }
