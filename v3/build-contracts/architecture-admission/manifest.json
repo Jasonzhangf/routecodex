@@ -786,7 +786,7 @@
     {
       "output_path": "repo/docs/architecture/v3-architecture-audit-locks.yml",
       "source_path": "docs/architecture/v3-architecture-audit-locks.yml",
-      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
+      "source_commit": "0b7a90b021333622f51f08ee4cb588325a72b9c3",
       "sha256": "2e25cf79e85eeb84e619ded7d08576d14cf1b626ab05057c8899514f56290c93"
     },
     {
@@ -2998,5 +2998,5 @@
       "sha256": "5cc420540dffe755ef55174e73198b28d7b0142769fd3fbae89c5c8016250e79"
     }
   ],
-  "manifest_digest": "653404c8237e314dfe5340d9b27d4c0bc7aceebbc957ad99689a2c9be92bdc3b"
+  "manifest_digest": "605e5a74faf2abb3ce429a840f0dfd4cae85d601f0dfa1017a9642ca5df23e6a"
 }
