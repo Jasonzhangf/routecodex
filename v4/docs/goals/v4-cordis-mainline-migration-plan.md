@@ -13,6 +13,7 @@
 - `v4/docs/architecture/maps/function-map.json`
 - `v4/docs/architecture/maps/mainline-call-map.json`
 - `v4/docs/architecture/maps/verification-map.json`
+- `v4/docs/goals/v4-direct-relay-sse-remediation-plan.md`
 
 ## 1. 最终完成定义
 
@@ -25,6 +26,7 @@
 5. `runtime-bin` 不拥有生产路由、provider、retry、continuation、tool、协议 projection 业务编排，不维护第二套 plugin graph/registry/NodeContainer。
 6. Responses、Chat、Anthropic、Gemini、WebSocket 与保留 tools/servertool/stopless 功能完成 differential pass、live pass，并具备 prepare/commit/abort/drain/rollback、canary、审计和 release evidence。
 7. 每个 milestone 都有独立 claim/branch/worktree、red/green/build/evidence，精确合并到独立 `v4-cordis` 主树；不得合入仓库 `main` 或旧 `codex/v4-cordis-refactor-main`，同步 `v4-cordis` 后才能开始下一 milestone。
+8. Direct 两端中继是 Cordis graph 中独立的 NodeContainer 节点；Direct/Relay request/response hooks 分链编译，SSE 是独立 transport plugin，所有 payload 修改不得进入 SSE/runtime-bin/server/provider transport。
 
 ## 2. 范围与硬边界
 
@@ -82,14 +84,6 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 - 并行任务表：runtime core/test 清理（已派发，当前由 master 接管）；provider direct-only 校验（可独立）；runtime-bin relay rejection/SSE 无本地上下文（可独立）；maps/docs/gate 对齐（可独立）。
 - 依赖：四项完成后统一跑 runtime/provider/runtime-bin 定向测试、release/build、install/restart/health/live replay、AGY，再精确合入 `codex/v4-cordis-refactor-main`。
 
-#### M06-T02 — 本地 continuation 退役（Jason 决策）
-
-- 唯一 owner：`routecodex-v4-runtime` / `routecodex-v4-runtime-bin` / `routecodex-v4-provider` 的 continuation boundary。
-- 目标：物理删除 relay/local continuation store、seed/context materialization 与对应测试、map、gate 声明；Responses relay/local `previous_response_id` 必须 fail-fast，禁止 fallback 或静默接受。
-- 保留：Responses direct provider-owned continuation；Chat→Responses 的协议投影不得被解释为本地 continuation。
-- 并行任务表：runtime core/test 清理（已派发，当前由 master 接管）；provider direct-only 校验（可独立）；runtime-bin relay rejection/SSE 无本地上下文（可独立）；maps/docs/gate 对齐（可独立）。
-- 依赖：四项完成后统一跑 runtime/provider/runtime-bin 定向测试、release/build、install/restart/health/live replay、AGY，再精确合入 `codex/v4-cordis-refactor-main`。
-
 ### M07 — Responses JSON response 主线
 
 迁移 raw decode、response governance、tool harvest、direct-provider continuation commit、client semantic、frame build；不得生成本地 continuation record/seed；旧/新 projector 对同一 raw response differential。退出：JSON/tool/usage/error fixtures 全绿，direct save 唯一归 RespChatProcess。
@@ -100,7 +94,7 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 
 ### M09 — SSE 主线
 
-固定 provider bytes → frame parser → response pipeline → client frame → backpressure writer；SSE 不进 Cordis event bus，每 frame 不发生 TS/Rust IPC。退出：正常、malformed、EOF、provider failure、旧 epoch/client drop 全部按合同闭环。
+SSE 作为独立 transport plugin，固定 provider bytes → frame parser → decoded data frame → Direct/Relay response chain → finalized client frame → framing/backpressure writer；SSE 不进 Cordis event bus，每 frame 不发生 TS/Rust IPC，不修改 payload、不做协议投影、不判断工具/continuation/route/retry。Direct 两端中继作为独立 NodeContainer 节点，执行 Direct request/response hook queue；Relay 使用独立相邻 codecs/hooks。退出：正常、malformed、EOF、provider failure、旧 epoch/client drop 全部按合同闭环，且 SSE payload-mutation red gate、Direct/Relay hook isolation、client/provider protocol decoupling 全绿。
 
 ### M10 — Router/Error/Health/Continuation
 
@@ -121,7 +115,7 @@ Cordis config/catalog -> compile graph + mount Fibers -> PrepareEpoch
 3. 先设计并固化最小 red fixture；red 通过后才修改唯一 owner。所有实现、测试、边界自检只在 task worktree。
 4. 完成定向测试、locked build，以及适用时的全局安装、聚合 `routecodex restart`、全部成员 health、在线旧样本 replay；写入 evidence.jsonl。
 5. checker 核对 change set、dirty 文件、owner 边界、相邻调用边、payload/control isolation、无 fallback/重复实现和 evidence；通过后写 merge queue。
-6. 只把声明 change set 精确合并到 `codex/v4-cordis-refactor-main`，在重构主树运行受影响 gates。主树复验失败时不得推进依赖 task。
+6. 只把声明 change set 精确合并到 `v4-cordis`，在重构主树运行受影响 gates。主树复验失败时不得推进依赖 task。
 7. 一个 milestone 的全部 task 合并且 `v4-cordis` 主树复验通过后，才关闭该 milestone；不得把重构提交合入仓库 `main`。
 8. 下一 milestone 只能从同步后的已验证 `v4-cordis` 创建新 claim/worktree；不得从旧 branch/worktree 开始。
 

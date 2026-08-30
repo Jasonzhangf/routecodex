@@ -12,6 +12,7 @@ const DEFAULT_CAPABILITIES = Object.freeze([
   'snapshot', 'heartbeat', 'reconcile', 'shutdown', 'epoch-control',
 ]);
 const HASH_RE = /^sha256:[0-9a-f]{64}$/;
+const ZERO_BASE_HASH = 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
 
 export class CordisHostDaemonError extends Error {
   constructor(code, message) {
@@ -33,7 +34,7 @@ function freezeBundle(value) {
     throw new CordisHostDaemonError('invalid_epoch_bundle', 'ExecutionEpochBundle must be an object');
   }
   const allowed = new Set([
-    'schema_version', 'candidate_id', 'epoch_id', 'manifest_hash', 'graph_hash',
+    'schema_version', 'candidate_id', 'epoch_id', 'plan_epoch', 'manifest_hash', 'graph_hash',
     'plugin_artifact_set_hash', 'entrypoints', 'pipelines', 'nodes', 'policies',
   ]);
   const unknown = Object.keys(value).find((key) => !allowed.has(key));
@@ -42,6 +43,7 @@ function freezeBundle(value) {
     value.schema_version !== 1
     || typeof value.candidate_id !== 'string'
     || typeof value.epoch_id !== 'string'
+    || !Number.isSafeInteger(value.plan_epoch) || value.plan_epoch < 1
     || !HASH_RE.test(value.manifest_hash)
     || !HASH_RE.test(value.graph_hash)
     || !HASH_RE.test(value.plugin_artifact_set_hash)
@@ -56,7 +58,62 @@ function freezeBundle(value) {
   ) {
     throw new CordisHostDaemonError('invalid_epoch_bundle', 'ExecutionEpochBundle fields are invalid');
   }
+  const nodeIds = new Set();
+  const actualPipelines = { request: [], response: [], error: [] };
+  for (const node of value.nodes) {
+    validateCompiledNode(node);
+    if (nodeIds.has(node.node_id)) {
+      throw new CordisHostDaemonError('invalid_epoch_bundle', `duplicate node ${node.node_id}`);
+    }
+    nodeIds.add(node.node_id);
+    actualPipelines[node.plan.chain].push(node.node_id);
+  }
+  for (const chain of ['request', 'response', 'error']) {
+    if (
+      JSON.stringify(value.pipelines[chain]) !== JSON.stringify(actualPipelines[chain])
+      || value.entrypoints[chain] !== value.pipelines[chain][0]
+    ) {
+      throw new CordisHostDaemonError('invalid_epoch_bundle', `pipeline order mismatch for ${chain}`);
+    }
+  }
+  for (const node of value.nodes) {
+    for (const target of Object.values(node.allowed_edges)) {
+      if (!nodeIds.has(target)) {
+        throw new CordisHostDaemonError('invalid_epoch_bundle', `unknown edge target ${target}`);
+      }
+    }
+  }
   return deepFreeze(structuredClone(value));
+}
+
+function validateCompiledNode(node) {
+  const allowed = new Set([
+    'node_id', 'plan_hash', 'input_resource', 'output_resource', 'allowed_edges', 'plan',
+  ]);
+  if (!node || typeof node !== 'object' || Array.isArray(node)) {
+    throw new CordisHostDaemonError('invalid_epoch_bundle', 'compiled node must be an object');
+  }
+  const unknown = Object.keys(node).find((key) => !allowed.has(key));
+  const plan = node.plan;
+  if (
+    unknown
+    || typeof node.node_id !== 'string' || node.node_id.length === 0
+    || !HASH_RE.test(node.plan_hash)
+    || typeof node.input_resource !== 'string' || node.input_resource.length === 0
+    || typeof node.output_resource !== 'string' || node.output_resource.length === 0
+    || !node.allowed_edges || typeof node.allowed_edges !== 'object' || Array.isArray(node.allowed_edges)
+    || Object.values(node.allowed_edges).some((target) => typeof target !== 'string' || target.length === 0)
+    || !plan || typeof plan !== 'object' || Array.isArray(plan)
+    || plan.node_id !== node.node_id
+    || plan.hash !== node.plan_hash
+    || !Number.isSafeInteger(plan.position) || plan.position < 1
+    || typeof plan.role_id !== 'string' || plan.role_id.length === 0
+    || !['request', 'response', 'error'].includes(plan.chain)
+    || !Array.isArray(plan.entries)
+    || !Array.isArray(plan.selection_groups)
+  ) {
+    throw new CordisHostDaemonError('invalid_epoch_bundle', 'compiled node fields are invalid');
+  }
 }
 
 function deepFreeze(value) {
@@ -77,7 +134,7 @@ function validateControl(command) {
   }
   const allowed = new Set([
     'schema_version', 'kind', 'command_id', 'generation', 'candidate_id', 'epoch_id',
-    'expected_base_hash', 'correlation_id', 'payload_hash', 'payload',
+    'base_epoch', 'expected_base_hash', 'correlation_id', 'payload_hash', 'payload',
   ]);
   const unknown = Object.keys(command).find((key) => !allowed.has(key));
   if (unknown) throw new CordisHostDaemonError('protocol_error', `unknown control field ${unknown}`);
@@ -92,6 +149,13 @@ function validateControl(command) {
   ) throw new CordisHostDaemonError('protocol_error', 'epoch control command fields are invalid');
   if (command.payload_hash !== payloadDigest(command.payload)) {
     throw new CordisHostDaemonError('payload_hash_mismatch', 'epoch control payload hash does not verify');
+  }
+  if (command.kind === 'PrepareEpoch' && (
+    !Number.isSafeInteger(command.base_epoch)
+    || command.base_epoch < 0
+    || !HASH_RE.test(command.expected_base_hash)
+  )) {
+    throw new CordisHostDaemonError('protocol_error', 'PrepareEpoch requires base_epoch and expected_base_hash');
   }
   return command;
 }
@@ -221,21 +285,33 @@ export async function startCordisHostDaemon({
             result = { active_epoch: active, generation: snapshot.generation };
           } else if (command.kind === 'PrepareEpoch') {
             const candidate = freezeBundle(payload.bundle);
-            if (!active) throw new CordisHostDaemonError('active_epoch_unavailable', 'cannot prepare without an active ExecutionEpochBundle');
-            if (candidate.epoch_id === active.epoch_id || candidate.candidate_id === active.candidate_id) {
-              throw new CordisHostDaemonError('stale_epoch', 'candidate ExecutionEpochBundle is already active');
+            if (!active && (command.base_epoch !== 0 || command.expected_base_hash !== ZERO_BASE_HASH)) {
+              throw new CordisHostDaemonError('stale_base', 'empty active epoch requires the canonical zero base');
             }
-            if (command.expected_base_hash !== active.manifest_hash) {
-              throw new CordisHostDaemonError('stale_base', 'expected base hash does not match active bundle');
+            if (active && (command.base_epoch !== active.plan_epoch || command.expected_base_hash !== active.manifest_hash)) {
+              throw new CordisHostDaemonError('stale_base', 'expected base epoch/hash does not match active bundle');
+            }
+            if (active && (candidate.epoch_id === active.epoch_id || candidate.candidate_id === active.candidate_id)) {
+              throw new CordisHostDaemonError('stale_epoch', 'candidate ExecutionEpochBundle is already active');
             }
             const existing = epochState.transactions.get(command.command_id);
             if (existing) {
-              if (JSON.stringify(existing.candidate) !== JSON.stringify(candidate)) {
+              if (
+                existing.base_epoch !== command.base_epoch
+                || existing.expected_base_hash !== command.expected_base_hash
+                || JSON.stringify(existing.candidate) !== JSON.stringify(candidate)
+              ) {
                 throw new CordisHostDaemonError('idempotency_conflict', 'command id was reused with a different bundle');
               }
               result = existing;
             } else {
-              result = Object.freeze({ command_id: command.command_id, state: 'Prepared', candidate });
+              result = Object.freeze({
+                command_id: command.command_id,
+                state: 'Prepared',
+                base_epoch: command.base_epoch,
+                expected_base_hash: command.expected_base_hash,
+                candidate,
+              });
               epochState.transactions.set(command.command_id, result);
             }
           } else {
@@ -248,6 +324,16 @@ export async function startCordisHostDaemon({
               throw new CordisHostDaemonError('invalid_transaction_state', `${command.kind} requires ${expected}`);
             }
             if (command.kind === 'CommitEpoch') {
+              const current = epochState.active;
+              if (!current && (transaction.base_epoch !== 0 || transaction.expected_base_hash !== ZERO_BASE_HASH)) {
+                throw new CordisHostDaemonError('stale_base', 'empty active epoch no longer matches transaction base');
+              }
+              if (current && (
+                transaction.base_epoch !== current.plan_epoch
+                || transaction.expected_base_hash !== current.manifest_hash
+              )) {
+                throw new CordisHostDaemonError('stale_base', 'active epoch changed after prepare');
+              }
               result = Object.freeze({ ...transaction, state: 'Committed', previous: active });
               epochState.active = transaction.candidate;
             } else if (command.kind === 'AbortEpoch') {

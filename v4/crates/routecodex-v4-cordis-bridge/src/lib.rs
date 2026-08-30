@@ -91,7 +91,7 @@ impl ScopeSessionCommand {
 }
 
 /// One typed diagnostic fact published by a plugin (side-channel only).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticFact {
     pub kind: String,
     pub plugin_id: String,
@@ -112,6 +112,7 @@ pub struct NodeExecutionInput {
 pub struct NodeExecutionOutput {
     pub data: Value,
     pub control: Value,
+    pub information: Value,
     pub diagnostics: Vec<DiagnosticFact>,
 }
 
@@ -231,6 +232,7 @@ impl std::error::Error for BridgeError {}
 struct ExecState {
     data: Value,
     control: Value,
+    information: Value,
     diagnostics: Vec<DiagnosticFact>,
 }
 
@@ -247,6 +249,30 @@ pub struct ExecCtx<'a> {
 impl ExecCtx<'_> {
     pub fn read_data(&self) -> &Value {
         &self.state.data
+    }
+
+    pub fn read_information_resource(
+        &mut self,
+        resource_id: &str,
+    ) -> Result<Option<&Value>, BridgeError> {
+        if !self.reads.iter().any(|declared_id| declared_id == resource_id) {
+            return Err(self.deny_resource_access(resource_id, "read"));
+        }
+        let Some(key) = information_resource_key(resource_id) else {
+            return Err(self.deny_resource_access(resource_id, "read"));
+        };
+        if !self.state.information.is_object() {
+            return Err(self.deny_resource_access(
+                resource_id,
+                "read from non-object carrier",
+            ));
+        }
+        let information = self
+            .state
+            .information
+            .as_object()
+            .expect("information object checked before read");
+        Ok(information.get(key))
     }
 
     pub fn read_control_resource(
@@ -367,6 +393,16 @@ fn control_resource_key(resource_id: &str) -> Option<&'static str> {
     }
 }
 
+fn information_resource_key(resource_id: &str) -> Option<&'static str> {
+    match resource_id {
+        "v4.information.entry_protocol" => Some("entry_protocol"),
+        "v4.information.execution_lane" => Some("execution_lane"),
+        "v4.information.client_protocol" => Some("client_protocol"),
+        "v4.information.provider_protocol" => Some("provider_protocol"),
+        _ => None,
+    }
+}
+
 /// A typed native handle registered for one plugin id. Handles are the only
 /// business code the executor runs; identity/order/permissions come from the
 /// compiled plan.
@@ -391,6 +427,15 @@ pub fn execute_plan(
     input: NodeExecutionInput,
     registry: &dyn HandleRegistry,
 ) -> Result<NodeExecutionOutput, BridgeError> {
+    execute_plan_with_information(plan, input, Value::Object(Default::default()), registry)
+}
+
+pub fn execute_plan_with_information(
+    plan: &NodePluginPlan,
+    input: NodeExecutionInput,
+    information: Value,
+    registry: &dyn HandleRegistry,
+) -> Result<NodeExecutionOutput, BridgeError> {
     if !plan.verify() {
         return Err(BridgeError::PlanHashMismatch);
     }
@@ -402,6 +447,7 @@ pub fn execute_plan(
     let mut state = ExecState {
         data: input.data,
         control: input.control,
+        information,
         diagnostics: Vec::new(),
     };
     for entry in &plan.entries {
@@ -434,6 +480,7 @@ pub fn execute_plan(
     let snapshot = ExecState {
         data: state.data.clone(),
         control: state.control.clone(),
+        information: state.information.clone(),
         diagnostics: Vec::new(),
     };
     let sink: std::sync::Mutex<Vec<(usize, Result<Vec<DiagnosticFact>, BridgeError>)>> =
@@ -491,6 +538,7 @@ pub fn execute_plan(
     Ok(NodeExecutionOutput {
         data: state.data,
         control: state.control,
+        information: state.information,
         diagnostics: state.diagnostics,
     })
 }
@@ -770,7 +818,13 @@ mod tests {
         };
         plan.hash = plan.plan_hash();
         assert!(matches!(
-            mount_candidate(&plan.node_id, plan.clone(), "graph-drift", &plan.hash, &plan.hash),
+            mount_candidate(
+                &plan.node_id,
+                plan.clone(),
+                "graph-drift",
+                &plan.hash,
+                &plan.hash
+            ),
             Err(BridgeError::PlanHashMismatch)
         ));
         let mut drifted = plan.clone();

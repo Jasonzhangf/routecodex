@@ -1,13 +1,13 @@
 # V4 Cordis 主线 Milestone 独立任务表
 
-状态：`active`。本文件是 worker claim 入口；所有 task 的 merge target 固定为 `codex/v4-cordis-refactor-main`。
+状态：`active`。本文件是 worker claim 入口；所有 task 的 merge target 固定为 `v4-cordis`。V3 与仓库 `main` 保持并行，不归档、不合并。
 
 ## Claim 与合并合同
 
 - 每一行是一个独立 semantic claim；worker 只能 claim 自己的一行。
 - 每个 task 必须从当前 V4 重构主树 HEAD 新建独立 branch/worktree，完成 red → implementation → boundary self-check → required gates → evidence。
 - task 通过后先进入 merge queue，由 checker 精确合并到 V4 重构主树；主树合并后跑受影响 gate。
-- milestone 只有在本 milestone 的所有 task 合并并通过主树复验后，才允许把 V4 重构主树整体合并仓库 `main`；main 复验并同步回重构主树后，才开放下一个依赖 milestone。
+- milestone 只有在本 milestone 的所有 task 合并并通过 `v4-cordis` 复验后，才开放下一个依赖 milestone。
 - `blocked` 不得被 worker 自行改成 `available`；依赖由主树 merge receipt 和复验事实解除。
 
 ## M00 — 架构冻结与接线准备
@@ -53,13 +53,13 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M05-T01 | `feature_id:v4.execution_engine` | M04 | merged (`02c1b410b` → `80ebaac9b`; target reverify + live short replay + AGY pass) | `codex/v4-cordis-refactor-main` |
+| M05-R01 | `feature_id:v4.execution_engine.production_owner` | M04 | reopened_p0 / in_progress（历史 `80ebaac9b` 只完成构件；production owner 未闭环） | `v4-cordis` |
 
 ## M06 — Responses Request 主线
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M06-T01 | `feature_id:v4.responses_request_mainline` | M05 | available (new claim/worktree required) | `codex/v4-cordis-refactor-main` |
+| M06-T01 | `feature_id:v4.responses_request_mainline` | M05-R01 | blocked | `v4-cordis` |
 
 ## M07 — Responses Response 主线
 
@@ -71,7 +71,7 @@
 
 | task_id | claim_id | 依赖 | 状态 | merge target |
 |---|---|---|---|---|
-| M08-T01 | `feature_id:v4.async_data_plane` | M00 structural contracts + M00-T07 | in_progress (reuse existing claim/worktree; M05 overlap cleared) | `codex/v4-cordis-refactor-main` |
+| M08-T01 | `feature_id:v4.async_data_plane` | M00 structural contracts + M00-T07 + M05-R01 | blocked_waiting_m05_r01 | `v4-cordis` |
 
 ## M09 — SSE 主线
 

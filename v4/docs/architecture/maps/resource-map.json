@@ -1106,6 +1106,20 @@
         "payload_projection",
         "fallback_epoch_selection"
       ],
+      "direct_relations": [
+        {
+          "resource_id": "v4.cordis.host_daemon",
+          "via": "typed_epoch_control_port",
+          "operations": ["prepare", "commit", "abort", "drain", "rollback", "query"]
+        }
+      ],
+      "indirect_relations": [
+        {
+          "resource_id": "v4.request.normal_payload",
+          "via": "RuntimeLease/EpochLease/ExecutionEngine",
+          "rule": "epoch identity and control never enter payload"
+        }
+      ],
       "status": "active"
     },
     {
@@ -1345,5 +1359,10 @@
     ,{"resource_id":"v4.plugin.response.fault_intake","owner":"routecodex-v4-standard-plugins::StandardPlugin","truth_store":"crates/routecodex-v4-standard-plugins/src/response_fault.rs","allowed_operations":["read","write","validate"],"status":"active","feature_id":"V4-PLUGIN-008"}
     ,{"resource_id":"v4.governance.feature_layer_gate_contract","owner":"routecodex-v4-governance","truth_store":"v4/scripts/architecture/verify-v4-feature-layer-batches.mjs","allowed_operations":["read","validate"],"status":"active","feature_id":"V4-GATE-001"}
     ,{"resource_id":"v4.governance.feature_layer_product_lockstep","owner":"routecodex-v4-governance","truth_store":"v4/scripts/architecture/lib/feature-layer-batch-source.mjs","allowed_operations":["read","validate"],"status":"active","feature_id":"V4-LAYER-GATE-001"}
+    ,{"resource_id":"v4.transport.sse_frames","owner":"routecodex-v4-standard-plugins::sse_transport","truth_store":"crates/routecodex-v4-standard-plugins/src/sse_transport.rs","allowed_operations":["frame","order","buffer","backpressure","timeout","keepalive","closeout"],"forbidden_operations":["payload_read","payload_write","protocol_projection","terminal_semantic_decision","continuation","route","retry"],"status":"design","feature_id":"V4-DIRECT-RELAY-SSE"}
+    ,{"resource_id":"v4.execution.direct_relay_container","owner":"routecodex-v4-node-container::DirectRelayContainer","truth_store":"contracts/skeleton-plan.contract.json","allowed_operations":["execute_direct_request_hooks","execute_direct_response_hooks","validate_same_protocol"],"forbidden_relations":["relay_chat_process","runtime_bin_bypass","sse_semantic_mutation"],"status":"design","feature_id":"V4-DIRECT-RELAY-SSE"}
+    ,{"resource_id":"v4.information.execution_lane","owner":"routecodex-v4-runtime admission information carrier","truth_store":"contracts/skeleton-plan.contract.json","allowed_operations":["bind","read","validate"],"forbidden_relations":["normal_payload","protocol_metadata"],"status":"design","feature_id":"V4-DIRECT-RELAY-SSE"}
+    ,{"resource_id":"v4.information.client_protocol","owner":"routecodex-v4-server admission information carrier","truth_store":"contracts/skeleton-plan.contract.json","allowed_operations":["bind","read","validate"],"forbidden_relations":["normal_payload","infer_from_provider_protocol"],"status":"design","feature_id":"V4-DIRECT-RELAY-SSE"}
+    ,{"resource_id":"v4.information.provider_protocol","owner":"routecodex-v4-router target information carrier","truth_store":"contracts/skeleton-plan.contract.json","allowed_operations":["bind","read","validate"],"forbidden_relations":["normal_payload","infer_from_client_protocol"],"status":"design","feature_id":"V4-DIRECT-RELAY-SSE"}
   ]
 }

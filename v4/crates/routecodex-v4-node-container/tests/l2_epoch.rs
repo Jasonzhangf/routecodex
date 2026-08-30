@@ -1,15 +1,20 @@
 use routecodex_v4_node_container::{
-    ActiveEpochStore, ExecutionEpochBundle, ExecutionEpochIdentity, ExecutionEpochState, EpochError,
-    NodeContainer, PlanBindings,
+    ActiveEpochStore, EpochError, ExecutionEpochBundle, ExecutionEpochIdentity, ExecutionEpochNode,
+    ExecutionEpochState, NodeContainer, PlanBindings, ZERO_BASE_MANIFEST_HASH,
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
+use std::collections::HashMap;
 
 fn accepting_container(node_id: &str) -> NodeContainer {
+    accepting_container_at(node_id, "request", 1)
+}
+
+fn accepting_container_at(node_id: &str, chain: &str, position: u32) -> NodeContainer {
     let plan = NodePluginPlan {
         node_id: node_id.into(),
-        position: 1,
+        position,
         role_id: "role".into(),
-        chain: "request".into(),
+        chain: chain.into(),
         entries: vec![],
         selection_groups: vec![],
         hash: String::new(),
@@ -32,6 +37,78 @@ fn accepting_container(node_id: &str) -> NodeContainer {
     container.plugins_mounted().unwrap();
     container.publish().unwrap();
     container
+}
+
+#[test]
+fn empty_store_accepts_only_the_explicit_zero_base_transaction() {
+    let store = ActiveEpochStore::empty();
+    let candidate = epoch("first", 1);
+    let prepared = store
+        .prepare("first", 0, ZERO_BASE_MANIFEST_HASH, candidate, "manifest-1")
+        .expect("canonical zero base must allow the first prepare");
+    assert_eq!(prepared.plan_epoch, 1);
+    assert_eq!(store.commit("first").unwrap().plan_epoch, 1);
+    assert_eq!(store.active_snapshot().unwrap().plan_epoch, 1);
+
+    let wrong_epoch = ActiveEpochStore::empty().prepare(
+        "wrong-epoch",
+        1,
+        ZERO_BASE_MANIFEST_HASH,
+        epoch("wrong-epoch", 1),
+        "manifest-1",
+    );
+    assert!(matches!(wrong_epoch, Err(EpochError::StaleBase { .. })));
+    let wrong_hash = ActiveEpochStore::empty().prepare(
+        "wrong-hash",
+        0,
+        "manifest-not-zero",
+        epoch("wrong-hash", 1),
+        "manifest-1",
+    );
+    assert!(matches!(wrong_hash, Err(EpochError::StaleBase { .. })));
+}
+
+#[test]
+fn ordered_bundle_exposes_exact_chain_order_and_declared_branch_edges() {
+    let bundle = ExecutionEpochBundle::from_ordered_nodes(
+        vec![
+            ExecutionEpochNode::new(
+                accepting_container_at("request-a", "request", 1),
+                HashMap::from([("skip".to_string(), "request-c".to_string())]),
+            ),
+            ExecutionEpochNode::new(
+                accepting_container_at("request-b", "request", 2),
+                HashMap::new(),
+            ),
+            ExecutionEpochNode::new(
+                accepting_container_at("request-c", "request", 3),
+                HashMap::new(),
+            ),
+            ExecutionEpochNode::new(
+                accepting_container_at("response-a", "response", 1),
+                HashMap::new(),
+            ),
+        ],
+        ExecutionEpochIdentity {
+            plan_epoch: 9,
+            manifest_hash: "manifest-9".into(),
+            execution_identity: "execution-9".into(),
+        },
+    )
+    .unwrap();
+    let lease = bundle.admit().unwrap();
+    assert_eq!(lease.entrypoint("request").unwrap(), "request-a");
+    assert_eq!(
+        lease.next_node("request", "request-a").unwrap(),
+        Some("request-b".to_string())
+    );
+    assert_eq!(lease.next_node("request", "request-c").unwrap(), None);
+    assert_eq!(
+        lease.branch_target("request-a", "skip").unwrap(),
+        "request-c"
+    );
+    assert!(lease.branch_target("request-a", "missing").is_err());
+    assert_eq!(lease.entrypoint("response").unwrap(), "response-a");
 }
 
 fn epoch(node_id: &str, plan_epoch: u64) -> ExecutionEpochBundle {

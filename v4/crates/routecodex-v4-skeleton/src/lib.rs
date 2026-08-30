@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const SKELETON_VERSION: &str = "v4-skeleton-1";
+pub const SKELETON_VERSION: &str = "v4-direct-relay-1";
 pub const PLAN_CONTRACT_PATH: &str = "v4/contracts/skeleton-plan.contract.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,6 +25,20 @@ pub struct BindingContract {
 pub struct PluginBinding {
     pub plugin_id: String,
     pub effects: Vec<String>,
+    #[serde(default)]
+    pub writes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectProtocolContract {
+    pub same_protocol: bool,
+    pub mismatch: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtocolInformationContract {
+    pub client_provider_independent: bool,
+    pub payload_inference: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +91,8 @@ pub struct SkeletonPlan {
     pub manifest_hash: String,
     pub plan_epoch: u64,
     pub plan_hash: String,
+    pub direct_protocol_contract: DirectProtocolContract,
+    pub protocol_information_contract: ProtocolInformationContract,
     pub chains: Vec<ChainDefinition>,
 }
 
@@ -281,7 +297,7 @@ mod tests {
         .expect("contract file");
         let plan = SkeletonPlan::from_contract_json(&json).expect("real contract must load");
         assert_eq!(plan.skeleton_version, SKELETON_VERSION);
-        assert_eq!(plan.chains.len(), 4);
+        assert_eq!(plan.chains.len(), 6);
         assert!(plan.verify().is_ok());
     }
 
@@ -304,6 +320,14 @@ mod tests {
             manifest_hash: "sha256:m".to_string(),
             plan_epoch: 1,
             plan_hash: String::new(),
+            direct_protocol_contract: DirectProtocolContract {
+                same_protocol: true,
+                mismatch: "fail_fast".to_string(),
+            },
+            protocol_information_contract: ProtocolInformationContract {
+                client_provider_independent: true,
+                payload_inference: "forbidden".to_string(),
+            },
             chains,
         }
     }
@@ -399,6 +423,7 @@ mod tests {
                 plugins: vec![PluginBinding {
                     plugin_id: "bad".to_string(),
                     effects: vec!["next_node".to_string()],
+                    writes: vec![],
                 }],
             }],
             edges: vec![],

@@ -28,10 +28,10 @@ fn publish(mut container: NodeContainer) -> NodeContainer {
 
 fn response_plan() -> routecodex_v4_plugin_plan::NodePluginPlan {
     compile_standard_plan(
-        "V4HubRespChatProcess03Governed",
+        "V4HubRespChatProcess04Governed",
         "response_chat_process",
         "response",
-        3,
+        4,
         &[
             "v4.std.chat_process.response_governance",
             "v4.std.chat_process.tool_harvest",
@@ -47,7 +47,7 @@ fn execute(
 ) -> Result<routecodex_v4_cordis_bridge::NodeExecutionOutput, NodeContainerError> {
     let hash = plan.plan_hash();
     let mut container = NodeContainer::declare(
-        "V4HubRespChatProcess03Governed",
+        "V4HubRespChatProcess04Governed",
         plan.clone(),
         plan_bindings(plan),
     )
@@ -107,7 +107,7 @@ fn positive_response_chat_process_group_plan_compiles_and_executes() {
     );
 
     let mut container = NodeContainer::declare(
-        "V4HubRespChatProcess03Governed",
+        "V4HubRespChatProcess04Governed",
         plan.clone(),
         plan_bindings(&plan),
     )

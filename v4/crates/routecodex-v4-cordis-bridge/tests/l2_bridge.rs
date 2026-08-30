@@ -99,8 +99,8 @@ fn authoring_plugin(
             selection_group: None,
             node_selector: NodeSelector {
                 role_id: "request_chat_process".to_string(),
-                node_id: "V4HubReqChatProcess04Governed".to_string(),
-                position: 4,
+                node_id: "V4HubReqChatProcess03Governed".to_string(),
+                position: 3,
             },
             services_provided: vec![],
             inject: vec![],
@@ -113,10 +113,10 @@ fn authoring_plugin(
 
 fn compile_one_node(authoring: &[AuthoringPlugin]) -> routecodex_v4_plugin_plan::NodePluginPlan {
     compile_node(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         "request_chat_process",
         "request",
-        4,
+        3,
         authoring,
         &allowed_reads(),
         &allowed_writes(),

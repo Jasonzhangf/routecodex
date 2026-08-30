@@ -202,6 +202,9 @@
     },
     {
       "gate_id": "v4_parity_gate_node_graph",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.execution_engine.production_owner", "V4-RUNTIME-002", "V4-RUNTIME-REQUEST-MAINLINE"],
       "command": "node scripts/architecture/verify-v4-node-graph.mjs",
       "required_for": [
         "routecodex-v4-governance:architecture_stable",
@@ -240,6 +243,9 @@
     },
     {
       "gate_id": "v4_parity_gate_execution_binding",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.execution_engine.production_owner", "V4-RUNTIME-002", "V4-RUNTIME-REQUEST-MAINLINE"],
       "command": "node scripts/architecture/verify-v4-execution-binding.mjs",
       "required_for": [
         "routecodex-v4-runtime:architecture_stable"
@@ -692,6 +698,9 @@
     },
     {
       "gate_id": "v4_parity_gate_cordis_host",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.execution_engine.production_owner", "v4.cordis_host_daemon", "V4-RUNTIME-002"],
       "command": "node scripts/architecture/verify-v4-cordis-host.mjs",
       "required_for": [
         "routecodex-v4-cordis-host:architecture_stable"
@@ -1354,6 +1363,39 @@
       "evidence_role": "negative",
       "input_paths": ["crates/routecodex-v4-standard-plugins/src/model_hooks.rs"],
       "required_for": ["V4-PLUGIN-MODEL-HOOK:source_green"]
+    },
+    {
+      "gate_id": "v4_direct_relay_sse",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-DIRECT-RELAY-SSE"],
+      "command": "node scripts/architecture/verify-v4-direct-relay-sse.mjs",
+      "argv": ["node", "scripts/architecture/verify-v4-direct-relay-sse.mjs"],
+      "producer": {"adapter": "node", "identity": "v4_direct_relay_sse"},
+      "evidence_role": "positive",
+      "input_paths": [
+        "contracts/skeleton-plan.contract.json",
+        "docs/architecture/maps/resource-map.json",
+        "docs/architecture/maps/function-map.json",
+        "docs/architecture/maps/mainline-call-map.json",
+        "crates/routecodex-v4-runtime/src/lib.rs",
+        "crates/routecodex-v4-runtime-bin/src/main.rs",
+        "crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
+        "scripts/architecture/verify-v4-direct-relay-sse.mjs"
+      ],
+      "required_for": ["V4-DIRECT-RELAY-SSE:source_green", "merge_queue_admission"]
+    },
+    {
+      "gate_id": "v4_direct_relay_sse_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-DIRECT-RELAY-SSE"],
+      "command": "node scripts/architecture/verify-v4-direct-relay-sse.mjs --red-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-direct-relay-sse.mjs", "--red-self-test"],
+      "producer": {"adapter": "node", "identity": "v4_direct_relay_sse_red"},
+      "evidence_role": "red_gate",
+      "input_paths": ["scripts/architecture/verify-v4-direct-relay-sse.mjs"],
+      "required_for": ["V4-DIRECT-RELAY-SSE:source_green", "merge_queue_admission"]
     }
   ]
 }
