@@ -1286,7 +1286,7 @@ fn collect_json_candidates(text: &str) -> Vec<String> {
             }
         }
     }
-    if candidates.is_empty() && (text.contains("tool_calls") || text.contains("\"name\"")) {
+    if candidates.is_empty() && text.contains("tool_calls") {
         let mut index = 0usize;
         while index < text.len() {
             let Some(ch) = text[index..].chars().next() else {
@@ -2194,5 +2194,41 @@ mod tests {
             result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
             "exec_command"
         );
+    }
+
+    #[test]
+    fn minimax_response_profile_does_not_harvest_ordinary_anthropic_wrapper_text() {
+        let wrapper = r#"{"name":"probe","arguments":"{\"cmd\":\"ping\",\"reason\":\"执行 ping 命令进行探测\"}"}"#;
+        let input = ReqOutboundCompatInput {
+            payload: json!({
+                "id":"resp_ordinary_wrapper",
+                "status":"completed",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":wrapper}]
+                }]
+            }),
+            adapter_context: AdapterContext {
+                compatibility_profile: Some("chat:minimax".to_string()),
+                provider_protocol: Some("openai-responses".to_string()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        };
+
+        let result = run_resp_inbound_stage3_compat(input).unwrap();
+        assert_eq!(result.payload["output"][0]["type"], "message");
+        assert_eq!(result.payload["output"][0]["content"][0]["text"], wrapper);
+        assert!(result.payload["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| {
+                !matches!(
+                    item["type"].as_str(),
+                    Some("function_call" | "custom_tool_call" | "tool_call")
+                )
+            }));
     }
 }
