@@ -575,22 +575,15 @@ pub fn load_profile(path: &str) -> Result<ProviderProfile, ProviderTransportErro
             id,
         })
         .collect();
-    if file.provider.responses_continuation != "direct" {
-        return Err(ProviderTransportError {
-            code: "provider_continuation_owner_invalid".to_string(),
-            message: format!(
-                "responsesContinuation must be direct; local relay continuation is unsupported, got {}",
-                file.provider.responses_continuation
-            ),
-            status: None,
-        });
-    }
     Ok(ProviderProfile {
         provider_id: file.provider_id,
         base_url: file.provider.base_url,
         default_model: file.provider.default_model,
         protocol: file.provider.protocol,
-        responses_continuation: file.provider.responses_continuation,
+        // V4 has no local continuation owner. Provider profiles may carry the
+        // retired V3 hint, but runtime semantics are always provider-owned
+        // Direct and never inferred from that legacy field.
+        responses_continuation: "direct".to_string(),
         models,
         auth,
     })

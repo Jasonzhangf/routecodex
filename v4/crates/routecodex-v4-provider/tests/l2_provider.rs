@@ -159,9 +159,9 @@ fn responses_continuation_owner_is_compiled_and_invalid_values_fail_fast() {
         "providerId = \"relay\"\n[provider]\nbaseURL = \"https://example.invalid/v1\"\ndefaultModel = \"wire\"\ntype = \"responses\"\nresponsesContinuation = \"relay\"\n[provider.models.wire]\nwireName = \"wire\"\n[provider.auth]\nenv = \"RCCV4_TEST_KEY\"\n",
     )
     .expect("relay profile");
-    let error = load_profile(relay_path.to_str().expect("utf8 path"))
-        .expect_err("local relay continuation must be rejected");
-    assert_eq!(error.code, "provider_continuation_owner_invalid");
+    let profile = load_profile(relay_path.to_str().expect("utf8 path"))
+        .expect("retired relay hint is ignored");
+    assert_eq!(profile.responses_continuation, "direct");
 
     let invalid_path = root.join("invalid.toml");
     fs::write(
@@ -169,9 +169,9 @@ fn responses_continuation_owner_is_compiled_and_invalid_values_fail_fast() {
         "providerId = \"invalid\"\n[provider]\nbaseURL = \"https://example.invalid/v1\"\ndefaultModel = \"wire\"\ntype = \"responses\"\nresponsesContinuation = \"unknown\"\n[provider.models.wire]\nwireName = \"wire\"\n[provider.auth]\nenv = \"RCCV4_TEST_KEY\"\n",
     )
     .expect("invalid profile");
-    let error = load_profile(invalid_path.to_str().expect("utf8 path"))
-        .expect_err("unknown continuation owner must fail");
-    assert_eq!(error.code, "provider_continuation_owner_invalid");
+    let profile = load_profile(invalid_path.to_str().expect("utf8 path"))
+        .expect("retired continuation hint is ignored");
+    assert_eq!(profile.responses_continuation, "direct");
 }
 
 #[test]
