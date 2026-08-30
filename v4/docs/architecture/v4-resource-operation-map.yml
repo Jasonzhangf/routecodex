@@ -1853,6 +1853,21 @@ resources:
   allowed_readers:
   - V4RuntimeInspector
   - V4Admin
+  - V4Runtime01MainlineKernel
+  direct_relations:
+  - resource_id: v4.cordis.host_daemon
+    via: typed_epoch_control_port
+    operations:
+    - prepare
+    - commit
+    - abort
+    - drain
+    - rollback
+    - query
+  indirect_relations:
+  - resource_id: v4.request.normal_payload
+    via: RuntimeLease/EpochLease/ExecutionEngine
+    rule: epoch identity and control never enter payload
   forbidden_writers:
   - V4AdminCommand
   - V4NodeContainer

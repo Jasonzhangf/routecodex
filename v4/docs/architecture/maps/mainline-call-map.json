@@ -1007,6 +1007,54 @@
       "status": "active"
     },
     {
+      "from": "routecodex-v4-cordis-host::CordisHostDaemonClient::commitEpoch",
+      "to": "routecodex-v4-node-container::ActiveEpochStore::commit",
+      "owner": "v4.execution_epoch_control_port",
+      "edge_type": "typed_epoch_control_commit",
+      "caller_feature_id": "v4.cordis.host_daemon",
+      "callee_feature_id": "v4.node_container.execution_epoch",
+      "resource_id": "v4.node_container.execution_epoch",
+      "path": "cordis/routecodex-v4-cordis-host/src/daemon.mjs,crates/routecodex-v4-node-container/src/lib.rs",
+      "symbols": ["CordisHostDaemonClient::commitEpoch", "ActiveEpochStore::commit", "ExecutionEpochBundle"],
+      "status": "integration_pending"
+    },
+    {
+      "from": "routecodex-v4-node-container::ActiveEpochStore::admit",
+      "to": "routecodex-v4-runtime::SkeletonRuntime::admit_request",
+      "owner": "routecodex-v4-runtime::RuntimeLease",
+      "edge_type": "typed_epoch_admission",
+      "caller_feature_id": "v4.node_container.execution_epoch",
+      "callee_feature_id": "v4.runtime.production_request_chain",
+      "resource_id": "v4.node_container.execution_epoch",
+      "path": "crates/routecodex-v4-node-container/src/lib.rs,crates/routecodex-v4-runtime/src/lib.rs",
+      "symbols": ["ActiveEpochStore::admit", "SkeletonRuntime::admit_request", "RuntimeLease", "EpochLease"],
+      "status": "integration_pending"
+    },
+    {
+      "from": "routecodex-v4-runtime::SkeletonRuntime::execute_request_json_scoped_with_lease",
+      "to": "routecodex-v4-runtime::ExecutionEngine::execute_pinned_node",
+      "owner": "routecodex-v4-runtime::ExecutionEngine",
+      "edge_type": "lease_bound_node_execution",
+      "caller_feature_id": "v4.runtime.production_request_chain",
+      "callee_feature_id": "v4.execution_engine.production_owner",
+      "resource_id": "v4.node_container.execution_epoch",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs,crates/routecodex-v4-runtime/src/execution_engine.rs",
+      "symbols": ["execute_request_json_scoped_with_lease", "ExecutionEngine::execute_pinned_node", "RuntimeLease"],
+      "status": "integration_pending"
+    },
+    {
+      "from": "routecodex-v4-runtime::ExecutionEngine::execute_pinned_node",
+      "to": "routecodex-v4-node-container::EpochLease::execute",
+      "owner": "routecodex-v4-runtime::ExecutionEngine",
+      "edge_type": "leased_container_execution",
+      "caller_feature_id": "v4.execution_engine.production_owner",
+      "callee_feature_id": "v4.node_container.execution_epoch",
+      "resource_id": "v4.node_container.execution_epoch",
+      "path": "crates/routecodex-v4-runtime/src/execution_engine.rs,crates/routecodex-v4-node-container/src/lib.rs",
+      "symbols": ["ExecutionEngine::execute_pinned_node", "EpochLease::execute", "NodeContainer::execute_with_plan_hash"],
+      "status": "integration_pending"
+    },
+    {
       "from": "routecodex-v4-runtime::ExecutionReport::provider_wire_value",
       "to": "routecodex-v4-runtime-bin::send_target_nonstream|send_target_streaming",
       "owner": "routecodex-v4-runtime-bin::handle_responses",

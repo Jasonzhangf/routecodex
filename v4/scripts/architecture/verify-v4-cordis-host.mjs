@@ -17,6 +17,7 @@ const ratchetBaselineIds = [
   'discarded_node_output',
   'test_only_cordis_binding_in_production_shape',
 ];
+const ratchetCurrentExceptionIds = ['runtime_bin_direct_business_calls'];
 const ratchetCanonicalDocs = [
   'docs/architecture/v4-cordis-mainline-adr.md',
   'docs/goals/v4-cordis-mainline-migration-plan.md',
@@ -235,12 +236,22 @@ function validateRatchet(ratchet, canonicalDocs, migrationPlan) {
   if (new Set(ids).size !== ids.length || ids.some((id) => !ratchetBaselineIds.includes(id))) {
     failures.push('Cordis mainline ratchet contains a new or duplicate bypass exception');
   }
+  if (JSON.stringify(ids) !== JSON.stringify(ratchetCurrentExceptionIds)) {
+    failures.push('Cordis mainline ratchet restored a retired exception or lost the current exception');
+  }
   if (exceptions.length > ratchetBaselineIds.length) {
     failures.push('Cordis mainline ratchet bypass count increased');
   }
   for (const entry of exceptions) {
-    const evidencePath = typeof entry?.evidence === 'string' ? entry.evidence.split(':', 1)[0] : '';
-    if (!evidencePath || !fs.existsSync(path.join(root, evidencePath))
+    const evidencePath = entry?.evidence?.path;
+    const evidenceSymbols = entry?.evidence?.symbols;
+    const absoluteEvidencePath = typeof evidencePath === 'string' ? path.join(root, evidencePath) : '';
+    const evidenceSource = absoluteEvidencePath && fs.existsSync(absoluteEvidencePath)
+      ? fs.readFileSync(absoluteEvidencePath, 'utf8')
+      : '';
+    if (!evidencePath || !evidenceSource
+        || !Array.isArray(evidenceSymbols) || evidenceSymbols.length === 0
+        || evidenceSymbols.some((symbol) => typeof symbol !== 'string' || !evidenceSource.includes(symbol))
         || !ratchetCanonicalDocs.every((doc) => canonicalDocs.includes(doc))) {
       failures.push(`Cordis mainline ratchet evidence/doc binding invalid for ${entry?.id ?? '(missing)'}`);
     }
@@ -303,7 +314,9 @@ function runSelfTest() {
   }
   if (missed > 0) process.exit(1);
   const ratchetCases = [
-    ['new bypass exception', (candidate) => ({ ratchet: { ...candidate, known_exceptions: [...candidate.known_exceptions, { id: 'new_bypass', evidence: 'new' }] } })],
+    ['new bypass exception', (candidate) => ({ ratchet: { ...candidate, known_exceptions: [...candidate.known_exceptions, { id: 'new_bypass', evidence: { path: 'new', symbols: ['new'] } }] } })],
+    ['retired bypass restored', (candidate) => ({ ratchet: { ...candidate, known_exceptions: [...candidate.known_exceptions, { id: 'static_plugin_registry', evidence: candidate.known_exceptions[0].evidence }] } })],
+    ['evidence symbol missing', (candidate) => ({ ratchet: { ...candidate, known_exceptions: candidate.known_exceptions.map((entry) => ({ ...entry, evidence: { ...entry.evidence, symbols: ['missing_symbol'] } })) } })],
     ['baseline drift', (candidate) => ({ ratchet: { ...candidate, baseline_exception_ids: ['new_bypass'] } })],
     ['plan reintroduces test bypass', (candidate) => ({ ratchet: candidate, migrationPlan: 'v4.test.fake production plan' })],
   ];
@@ -360,7 +373,7 @@ function runSelfTest() {
     console.log(`[v4 cordis host red] execution failure resource/edge removed: FAIL as expected (${executionResourceFailures.length})`);
   }
   if (missed > 0) process.exit(1);
-  console.log('[v4 cordis host red] OK red self-test 10/10');
+  console.log(`[v4 cordis host red] OK red self-test ${cases.length + ratchetCases.length + bindingCases.length + 1}/${cases.length + ratchetCases.length + bindingCases.length + 1}`);
 }
 
 if (process.argv.includes('--red-self-test')) {

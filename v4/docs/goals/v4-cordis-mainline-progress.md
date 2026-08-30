@@ -30,10 +30,10 @@ M00 -> M01 -> M02 --┐
 | M03 Cordis daemon | `merged` | M00 structural contracts | task `8be1e7ced` 已合入重构主树 `3a425633c`；daemon 3/3、host 联测 30/30、red 10/10、release build 通过 |
 | D0 differential harness | `merged` | M00 structural contracts | commit `2a48fe256` 已在 `codex/v4-cordis-refactor-main`；AGY PASS、merge queue 状态 `merged_main_tree`，worktree clean，无需重复实现 |
 | M04 epoch transaction | `merged` | M02 + M03 | task `9914a69fe` 已以 merge `ba4af6c02` 合入重构主树；目标树定向 gates 全部通过，active-link 仍缺 frozen-consumer-registry 环境文件 |
-| M05 ExecutionEngine | `merged_to_refactor_main_reverify_pass` | M04 | 精确 11 文件提交 `02c1b410b`，合入重构主树 `80ebaac9b`；runtime/node-container locked tests、execution-binding red 7/7、node/plugin gates、workspace locked build、managed restart/5520 health、Responses/Chat 短请求真实复验、AGY controller pass |
+| M05 ExecutionEngine | `reopened_p0 / in_progress` | M04 | 历史提交 `80ebaac9b` 只完成构件；复审确认生产 runtime 仍自建 active epoch，并以 `NodeSpec/chains/execute_local_plugin` 执行第二 graph。M05-R01 必须接通 Cordis commit → ActiveEpochStore → RuntimeLease/EpochLease → ExecutionEngine → NodeContainer/HandleRegistry，删除第二执行语义后重新闭环 |
 | M06 request JSON | `blocked` | M05 | 必须串行 |
 | M07 response JSON | `blocked` | M06 | 必须串行 |
-| M08 async data plane | `blocked_waiting_m05_handoff` | M00 structural contracts + M00-T07 | provider/server 独立 slice 已交接（5/5 provider、2/2 server、locked check、diff-check、handoff PASS）；整体无合法并发实现面，待 M05 明确交接，runtime-bin async stream/cancellation、M00-T07 live evidence、full gates/live/AGY 未闭环；不得覆盖 M05 execution owner |
+| M08 async data plane | `blocked_waiting_m05_r01` | M00 structural contracts + M00-T07 + M05-R01 | provider/server 独立 slice已合入；runtime-bin async stream/cancellation 必须等待唯一 lease 执行链稳定，不得覆盖 M05 execution owner |
 | M09 SSE | `blocked` | M07 + M08 | 必须串行 |
 | M10 state semantics | `blocked` | M09 | 必须串行 |
 | M11 protocols/tools/admin | `contract_preflight_merged` | M10 | M11-T01 前置合同已合入；实现仍依赖 M10，既有 host owner/catalog drift 仍需后续治理 |
@@ -41,9 +41,9 @@ M00 -> M01 -> M02 --┐
 
 ## 周期
 
-`audit → claim → isolated worktree → red → implement → boundary self-check → focused gates → build/live → evidence → checker → merge refactor main → refactor main reverify → milestone merge repo main → sync`。
+`audit → claim → isolated worktree → red → implement → boundary self-check → focused gates → evidence → checker → merge v4-cordis → v4-cordis reverify`。
 
-任何 task 未合并并通过主树复验，依赖 task 保持 blocked；worker 不得直接写主树。
+任何 task 未合并并通过 `v4-cordis` 复验，依赖 task 保持 blocked；worker 不得直接写主树。V3 与仓库 `main` 保持并行，不归档、不合并。
 
 ## 当前并发任务清单（2026-08-26）
 

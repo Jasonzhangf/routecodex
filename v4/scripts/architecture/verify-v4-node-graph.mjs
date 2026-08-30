@@ -409,13 +409,13 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
 
   // ---- 8. code binding: the registered topology must be implemented ----
   // Registry self-consistency is not proof (AGENTS §20/§29): the runtime
-  // source must implement the mainline executor, compiled plan and static
-  // plugin registry, and the skeleton source must implement the immutable
-  // plan loader/verifier. Every plugin_id compiled into the skeleton plan
-  // must be resolvable in the runtime's static registry surface.
+  // source must consume the Cordis-compiled epoch bundle. Runtime may not
+  // reconstruct a second graph or dispatch plugins by authoring id.
   const runtimeSource = sources?.runtime ?? '';
   const executionEngineSource = sources?.executionEngine ?? '';
   const nodeContainerSource = sources?.nodeContainer ?? '';
+  const standardPluginsSource = sources?.standardPlugins ?? '';
+  const runtimeBinSource = sources?.runtimeBin ?? '';
   const skeletonSource = sources?.skeleton ?? '';
   if (runtimeSource) {
     for (const [symbol, label] of [
@@ -424,6 +424,12 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
       ['pub static PLUGIN_REGISTRY', 'PLUGIN_REGISTRY'],
       ['pub const EXTERNAL_CHAIN_PLUGINS', 'EXTERNAL_CHAIN_PLUGINS'],
       ['fn run_chain(', 'run_chain'],
+      ['struct NodeSpec', 'NodeSpec graph'],
+      ['chains: HashMap<String, Vec<NodeSpec>>', 'chain graph'],
+      ['fn execute_local_plugin(', 'plugin-id dispatcher'],
+      ['match plugin_id', 'plugin-id execution match'],
+      ['ActiveEpochStore::new(', 'runtime-owned active epoch'],
+      ['NodeContainer::declare(', 'runtime-declared NodeContainer'],
     ]) {
       if (runtimeSource.includes(symbol)) {
         failures.push(`runtime contains retired ${label} (${symbol})`);
@@ -433,6 +439,8 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
       ['pub struct SkeletonRuntime', 'SkeletonRuntime'],
       ['pub fn execution_binding(', 'execution_binding'],
       ['pub struct ExecutionContext', 'ExecutionContext'],
+      ['ActiveEpochStore::empty(', 'empty production epoch store'],
+      ['ExecutionEngine::execute_pinned_node(', 'lease-bound ExecutionEngine call'],
     ]) {
       if (!runtimeSource.includes(symbol)) {
         failures.push(`runtime source missing ${label} (${symbol})`);
@@ -444,8 +452,23 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
   if (!executionEngineSource.includes('pub struct ExecutionEngine')) {
     failures.push('execution-engine source missing ExecutionEngine');
   }
+  if (!executionEngineSource.includes('lease.execute(')) {
+    failures.push('ExecutionEngine must execute the NodeContainer through EpochLease::execute');
+  }
   if (!nodeContainerSource.includes('pub struct NodeContainer')) {
     failures.push('node-container source missing NodeContainer');
+  }
+  for (const symbol of ['pub struct ExecutionEpochBundle', 'pub struct EpochLease']) {
+    if (!nodeContainerSource.includes(symbol)) {
+      failures.push(`node-container source missing ${symbol}`);
+    }
+  }
+  if (!standardPluginsSource.includes('pub struct StandardHandleRegistry')
+      || !standardPluginsSource.includes('impl HandleRegistry for StandardHandleRegistry')) {
+    failures.push('standard plugin source missing the unique typed HandleRegistry implementation');
+  }
+  if (runtimeBinSource.includes('const SKELETON_PLAN: &str = include_str!(')) {
+    failures.push('runtime-bin embeds the authoring skeleton as a production active graph');
   }
   if (skeletonSource) {
     for (const [symbol, label] of [
@@ -462,19 +485,6 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
   } else {
     failures.push('skeleton source not loaded for code binding');
   }
-  const planPluginIds = new Set();
-  for (const chain of skeleton.chains ?? []) {
-    for (const node of chain.nodes ?? []) {
-      for (const plugin of node.plugins ?? []) {
-        if (plugin?.plugin_id) planPluginIds.add(plugin.plugin_id);
-      }
-    }
-  }
-  for (const pluginId of planPluginIds) {
-    if (!runtimeSource.includes(`"${pluginId}"`)) {
-      failures.push(`skeleton plugin ${pluginId} has no implementation in the runtime static registry`);
-    }
-  }
   return failures;
 }
 
@@ -488,6 +498,8 @@ function loadCurrent() {
       runtime: readText('crates/routecodex-v4-runtime/src/lib.rs'),
       executionEngine: readText('crates/routecodex-v4-runtime/src/execution_engine.rs'),
       nodeContainer: readText('crates/routecodex-v4-node-container/src/lib.rs'),
+      standardPlugins: readText('crates/routecodex-v4-standard-plugins/src/lib.rs'),
+      runtimeBin: readText('crates/routecodex-v4-runtime-bin/src/main.rs'),
       skeleton: readText('crates/routecodex-v4-skeleton/src/lib.rs'),
     },
   };
@@ -701,15 +713,15 @@ function makeCleanBase() {
   const sources = {
     runtime: [
       'pub struct SkeletonRuntime',
-      'pub struct NodePluginPlan',
-      'pub struct NodeContainer',
-      'pub static PLUGIN_REGISTRY',
-      'pub const EXTERNAL_CHAIN_PLUGINS',
       'pub fn execution_binding(',
-      'fn run_chain(',
       'pub struct ExecutionContext',
-      '"protocol_parse"',
+      'ActiveEpochStore::empty(',
+      'ExecutionEngine::execute_pinned_node(',
     ].join('\n'),
+    executionEngine: ['pub struct ExecutionEngine', 'lease.execute('].join('\n'),
+    nodeContainer: ['pub struct NodeContainer', 'pub struct ExecutionEpochBundle', 'pub struct EpochLease'].join('\n'),
+    standardPlugins: ['pub struct StandardHandleRegistry', 'impl HandleRegistry for StandardHandleRegistry'].join('\n'),
+    runtimeBin: 'production runtime without embedded authoring plan',
     skeleton: [
       'pub struct SkeletonPlan',
       'pub struct PluginBinding',
@@ -846,9 +858,27 @@ function runSelfTest() {
   add('runtime PLUGIN_REGISTRY ghost', (d) => {
     d.sources.runtime = `${d.sources.runtime}\npub static PLUGIN_REGISTRY: &[()] = &[];`;
   }, 'PLUGIN_REGISTRY');
-  add('skeleton plan plugin without runtime implementation', (d) => {
-    d.sources.runtime = d.sources.runtime.replace('"protocol_parse"', '"ghost_plugin"');
-  }, 'has no implementation');
+  add('runtime NodeSpec graph restored', (d) => {
+    d.sources.runtime = `${d.sources.runtime}\nstruct NodeSpec;`;
+  }, 'NodeSpec graph');
+  add('runtime plugin id dispatcher restored', (d) => {
+    d.sources.runtime = `${d.sources.runtime}\nfn execute_local_plugin() { match plugin_id { _ => {} } }`;
+  }, 'plugin-id dispatcher');
+  add('runtime local active epoch restored', (d) => {
+    d.sources.runtime = `${d.sources.runtime}\nActiveEpochStore::new(bundle);`;
+  }, 'runtime-owned active epoch');
+  add('runtime lease execution removed', (d) => {
+    d.sources.runtime = d.sources.runtime.replace('ExecutionEngine::execute_pinned_node(', 'ExecutionEngine::execute(');
+  }, 'lease-bound ExecutionEngine call');
+  add('execution engine bypasses lease container', (d) => {
+    d.sources.executionEngine = d.sources.executionEngine.replace('lease.execute(', 'container.execute(');
+  }, 'EpochLease::execute');
+  add('typed handle registry removed', (d) => {
+    d.sources.standardPlugins = d.sources.standardPlugins.replace('impl HandleRegistry for StandardHandleRegistry', 'impl GhostRegistry');
+  }, 'unique typed HandleRegistry');
+  add('runtime-bin embeds authoring skeleton', (d) => {
+    d.sources.runtimeBin = 'const SKELETON_PLAN: &str = include_str!("skeleton-plan.contract.json");';
+  }, 'embeds the authoring skeleton');
   add('skeleton SkeletonPlan ghost', (d) => {
     d.sources.skeleton = d.sources.skeleton.replace('pub struct SkeletonPlan', 'pub struct GhostPlan');
   }, 'SkeletonPlan');

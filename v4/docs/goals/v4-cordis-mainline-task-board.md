@@ -49,7 +49,7 @@ M00 结构出口：T00/T01/T02/T03/T04/T06/T07/T09 都完成并合并主树；T0
 | M02-T01 | `feature_id:v4.cordis_generic_factory` | canonical catalog → generic Cordis factory → Fiber mount/dispose | M01 | `merged` (`ff9065c8c`, main-tree merge `aa5518b50`) | refactor main |
 | M03-T01 | `feature_id:v4.cordis_host_daemon` | child daemon、handshake、socket、heartbeat、generation、reconcile | M00 structural contracts | `merged` (`8be1e7ced`, main-tree merge `3a425633c`) | refactor main |
 | M04-T01 | `feature_id:v4.execution_epoch_transaction` | prepare/commit/abort/drain/rollback、stale/hash/idempotency | M02 + M03 | `merged` (`9914a69fe`; main-tree merge `ba4af6c02`; target gates passed; active-link manifest environment-blocked) | refactor main |
-| M05-T01 | `feature_id:v4.execution_engine` | 唯一 ExecutionEngine、真实 NodeOutcome 链、删除第二 graph/registry | M04 | `in_progress` (source/M05 gates green; Active/feature-layer/install/live admission still blocked; no AGY/commit/merge) | refactor main |
+| M05-R01 | `feature_id:v4.execution_engine.production_owner` | Cordis commit 是 active epoch 唯一来源；请求执行 lease 内 immutable NodeContainer/HandleRegistry；物理删除 NodeSpec/chains/plugin-id dispatcher 第二 graph | M04 | `in_progress / red_first`（execution-binding red 15/15、node-graph red 36/36；当前源码 gate 精确红） | `v4-cordis` |
 
 M01 与 M03 可并行；M02 等 M01；M04 等 M02+M03；M05 等 M04。
 
@@ -58,9 +58,9 @@ M01 与 M03 可并行；M02 等 M01；M04 等 M02+M03；M05 等 M04。
 | task_id | claim_id | 内容 | 依赖 | 状态 | merge target |
 |---|---|---|---|---|---|
 | D0-T01 | `feature_id:v4.differential_harness` | old/new wire 与 raw response differential，不重复 provider 请求 | M00 structural contracts | `in_progress` (T05 独立 blocker 不传播) | refactor main |
-| M06-T01 | `feature_id:v4.responses_request_mainline` | Responses JSON request chain takeover | M05 | `blocked` | refactor main |
+| M06-T01 | `feature_id:v4.responses_request_mainline` | Responses JSON request chain takeover | M05-R01 | `blocked` | `v4-cordis` |
 | M07-T01 | `feature_id:v4.responses_response_mainline` | Responses JSON response chain takeover | M06 | `blocked` | refactor main |
-| M08-T01 | `feature_id:v4.async_data_plane` | async server、native provider transport、cancel/deadline/buffer，并接入 M00-T07 已冻结的 live evidence owner | M00 structural contracts + M00-T07 | `paused_due_to_m05_runtime_bin_overlap` (原 worktree 保留；与 M05 共享 runtime-bin execution owner，待 M05 收口后恢复) | refactor main |
+| M08-T01 | `feature_id:v4.async_data_plane` | async server、native provider transport、cancel/deadline/buffer，并接入 M00-T07 已冻结的 live evidence owner | M00 structural contracts + M00-T07 + M05-R01 | `paused_due_to_m05_runtime_bin_overlap` | `v4-cordis` |
 | M09-T01 | `feature_id:v4.sse_mainline` | SSE parser → response pipeline → frame writer，zero per-frame IPC | M07 + M08 | `blocked` | refactor main |
 | M10-T01 | `feature_id:v4.state_semantics` | Router/Error/Health/Continuation typed owner 接管 | M09 | `blocked` | refactor main |
 

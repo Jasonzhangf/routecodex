@@ -202,6 +202,9 @@
     },
     {
       "gate_id": "v4_parity_gate_node_graph",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.execution_engine.production_owner", "V4-RUNTIME-002", "V4-RUNTIME-REQUEST-MAINLINE"],
       "command": "node scripts/architecture/verify-v4-node-graph.mjs",
       "required_for": [
         "routecodex-v4-governance:architecture_stable",
@@ -240,6 +243,9 @@
     },
     {
       "gate_id": "v4_parity_gate_execution_binding",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.execution_engine.production_owner", "V4-RUNTIME-002", "V4-RUNTIME-REQUEST-MAINLINE"],
       "command": "node scripts/architecture/verify-v4-execution-binding.mjs",
       "required_for": [
         "routecodex-v4-runtime:architecture_stable"
@@ -692,6 +698,9 @@
     },
     {
       "gate_id": "v4_parity_gate_cordis_host",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.execution_engine.production_owner", "v4.cordis_host_daemon", "V4-RUNTIME-002"],
       "command": "node scripts/architecture/verify-v4-cordis-host.mjs",
       "required_for": [
         "routecodex-v4-cordis-host:architecture_stable"

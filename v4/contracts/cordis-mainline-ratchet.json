@@ -7,11 +7,13 @@
   "rule": "known production bypass count may only decrease; new bypasses fail the gate; each retired exception requires source evidence and a negative test",
   "baseline_exception_ids": ["internal_rust_node_container", "static_plugin_registry", "runtime_bin_direct_business_calls", "discarded_node_output", "test_only_cordis_binding_in_production_shape"],
   "known_exceptions": [
-    {"id": "internal_rust_node_container", "evidence": "crates/routecodex-v4-runtime/src/lib.rs"},
-    {"id": "static_plugin_registry", "evidence": "crates/routecodex-v4-runtime/src/lib.rs:PLUGIN_REGISTRY"},
-    {"id": "runtime_bin_direct_business_calls", "evidence": "crates/routecodex-v4-runtime-bin/src/main.rs"},
-    {"id": "discarded_node_output", "evidence": "crates/routecodex-v4-runtime-bin/src/main.rs:execute_with_plan_hash"},
-    {"id": "test_only_cordis_binding_in_production_shape", "evidence": "contracts/node-container-host-binding.contract.json"}
+    {
+      "id": "runtime_bin_direct_business_calls",
+      "evidence": {
+        "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+        "symbols": ["handle_responses", "send_target_nonstream", "send_target_streaming"]
+      }
+    }
   ],
   "forbidden_new_patterns": ["fallback", "silent strip", "Cordis event bus payload", "second NodeContainer", "runtime graph construction", "v4.test.* in active production plan"]
 }

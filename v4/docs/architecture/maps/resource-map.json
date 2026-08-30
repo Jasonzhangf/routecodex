@@ -1106,6 +1106,20 @@
         "payload_projection",
         "fallback_epoch_selection"
       ],
+      "direct_relations": [
+        {
+          "resource_id": "v4.cordis.host_daemon",
+          "via": "typed_epoch_control_port",
+          "operations": ["prepare", "commit", "abort", "drain", "rollback", "query"]
+        }
+      ],
+      "indirect_relations": [
+        {
+          "resource_id": "v4.request.normal_payload",
+          "via": "RuntimeLease/EpochLease/ExecutionEngine",
+          "rule": "epoch identity and control never enter payload"
+        }
+      ],
       "status": "active"
     },
     {

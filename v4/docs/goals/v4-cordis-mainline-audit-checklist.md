@@ -10,7 +10,7 @@
 - [ ] 唯一 owner 修改；禁止 fallback、silent strip、payload/control 混载、第二实现。
 - [ ] diff 越界自检 → 定向测试 → locked build → 必要 install/restart/health/live replay。
 - [ ] evidence.jsonl + handoff/merge-queue + checker。
-- [ ] 精确合并 V4 重构主树；主树复验；milestone 结束后合并仓库 main、复验、同步。
+- [ ] 精确合并 `v4-cordis`；主树复验。V3 与仓库 `main` 保持并行，不归档、不合并。
 
 ## 全局阶段审计
 
@@ -19,7 +19,7 @@
 - [ ] M02：generic Cordis factory；真实 request/response Fiber mount/dispose。
 - [ ] M03：Cordis daemon、typed socket、generation、heartbeat、reconcile。
 - [ ] M04：prepare/commit/abort/drain/rollback；hash/stale/idempotency/lease。
-- [ ] M05：唯一 ExecutionEngine；节点输出接线；删除第二 graph/registry。
+- [ ] M05-R01：Cordis commit 是 active epoch 唯一来源；请求执行 lease 内 immutable NodeContainer/HandleRegistry；删除 `NodeSpec/chains/execute_local_plugin` 第二 graph/dispatcher。
 - [ ] M06-M07：Responses JSON request/response 主线与 old/new differential。
 - [ ] M08-M09：async server/provider transport 与零逐帧 IPC SSE。
 - [ ] M10：Router/Error/Health/Continuation typed owner、scope、正反测试。

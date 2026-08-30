@@ -915,7 +915,7 @@
         "v4.node_container.execution_epoch"
       ],
       "resource_ids": ["v4.node_container.execution_epoch"],
-      "mainline_binding": "forbidden_before_integration"
+      "mainline_binding": "integration_pending"
     },
     {
       "function_id": "v4.cordis.host_binding",
@@ -976,7 +976,7 @@
       ],
       "resource_bindings": ["v4.cordis.host_daemon"],
       "resource_ids": ["v4.cordis.host_daemon"],
-      "mainline_binding": "forbidden_before_integration"
+      "mainline_binding": "integration_pending"
     },
     {
       "function_id": "v4.node_container.lifecycle_dispatch",
@@ -1285,10 +1285,11 @@
       "status": "active",
       "feature_id": "V4-RUNTIME-REQUEST-MAINLINE",
       "owner": "routecodex-v4-runtime",
-      "entry_symbols": ["SkeletonRuntime::execute_request_json_scoped", "ExecutionReport::provider_wire_value"],
-      "resource_ids": ["v4.request.normal_payload", "v4.request.provider_semantic", "v4.request.provider_wire_payload"],
+      "entry_symbols": ["SkeletonRuntime::admit_request", "SkeletonRuntime::execute_request_json_scoped_with_lease", "ExecutionEngine::execute_pinned_node", "ExecutionReport::provider_wire_value"],
+      "resource_ids": ["v4.node_container.execution_epoch", "v4.request.normal_payload", "v4.request.provider_semantic", "v4.request.provider_wire_payload"],
       "source_paths": ["crates/routecodex-v4-runtime/src/lib.rs", "crates/routecodex-v4-runtime-bin/src/main.rs"],
-      "required_gates": ["v4_production_mainline_red", "v4_runtime_l2_regression", "v4_real_runtime_responses_json", "v4_real_runtime_responses_sse"]
+      "required_gates": ["v4_parity_gate_node_graph", "v4_parity_gate_node_graph_red", "v4_parity_gate_execution_binding", "v4_parity_gate_execution_binding_red", "v4_parity_gate_cordis_host", "v4_parity_gate_cordis_host_red", "v4_production_mainline_red", "v4_runtime_l2_regression", "v4_real_runtime_responses_json", "v4_real_runtime_responses_sse"],
+      "mainline_binding": "integration_pending"
     },
     {
       "function_id": "v4.plugin.hook.model_mapping",
