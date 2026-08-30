@@ -108,16 +108,18 @@ pub(crate) fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 pub(crate) fn wire_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = require_object(ctx, "wire_build")?;
     reject_control(&object)?;
-    let model = object
+    object
         .get("model")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "wire_build requires model".to_string())?;
-    let input = object
+    object
         .get("input")
-        .cloned()
         .ok_or_else(|| "wire_build requires input".to_string())?;
-    ctx.write_data(json!({"model": model, "input": input}))
+    // Preserve the complete protocol business envelope. Responses fields such
+    // as previous_response_id and store are client/provider payload semantics,
+    // not runtime control state, and must not be silently discarded.
+    ctx.write_data(Value::Object(object))
         .map_err(|error| error.to_string())
 }
 

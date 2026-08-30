@@ -148,6 +148,25 @@ fn negative_request_plugins_reject_control_leakage_and_invalid_shapes() {
 }
 
 #[test]
+fn responses_wire_builder_preserves_protocol_continuation_fields() {
+    let wire = execute(
+        "V4ProviderReqCompat07ProviderCompat",
+        "request_outbound",
+        7,
+        "v4.std.request.responses_wire_build",
+        json!({
+            "model": "m",
+            "input": "next",
+            "previous_response_id": "resp_previous",
+            "store": true
+        }),
+    )
+    .expect("wire builder preserves valid Responses fields");
+    assert_eq!(wire["previous_response_id"], "resp_previous");
+    assert_eq!(wire["store"], true);
+}
+
+#[test]
 fn direct_and_relay_model_hooks_are_protocol_scoped() {
     let direct = execute_with_information(
         "V4DirectReq02RelayContainer",
