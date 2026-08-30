@@ -4889,9 +4889,7 @@ async fn debug_response_dry_run_replays_captured_sse_through_direct_resp03_witho
         .expect("visible toolreason text must close the assistant message item");
     let completed_index = projected_events
         .iter()
-        .position(|event| {
-            event.get("type").and_then(Value::as_str) == Some("response.completed")
-        })
+        .position(|event| event.get("type").and_then(Value::as_str) == Some("response.completed"))
         .expect("provider terminal response must remain projected");
     assert!(message_added_index < text_delta_index);
     assert!(text_delta_index < message_done_index);
