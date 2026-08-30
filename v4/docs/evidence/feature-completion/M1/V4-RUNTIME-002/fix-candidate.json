@@ -9,7 +9,7 @@
   "diff_hash": "sha256:cb7b5c2a7b26d81eaaf32285a7f2f4f353eda96c92b78cacd7b07c420d9969e4",
   "design_id": "v4-feature-completion-r002-epoch-lifecycle",
   "owner": "routecodex-v4-node-container",
-  "scope_hash": "sha256:26bf97873bc3f37347c0ab583c828f5e48657edadf1ab497e17719fb2cb9d1d8",
+  "scope_hash": "sha256:b6d36c07d2d2d28ce1d0111266f6871101bfc103f2c8638ded4df620a7192d13",
   "changed_paths": [
     "v4/crates/routecodex-v4-node-container/src/lib.rs",
     "v4/crates/routecodex-v4-node-container/tests/l2_epoch.rs"
