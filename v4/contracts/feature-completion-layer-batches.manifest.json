@@ -51,7 +51,7 @@
       "status": "pass",
       "gap_detected": true,
       "epoch_closure_lane_status": "source_green",
-      "audit_commit": "9727191b9a2ecbce18b600ca65cf9e645306a311",
+      "audit_commit": "fa64444e9cb6f8029accaf80b1dd9e4349876613",
       "source_paths": ["crates/routecodex-v4-node-container/src/lib.rs"],
       "evidence_refs": [
         {"role":"closure_audit","gate_id":"v4_node_container_epoch_closure_audit","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/closure-audit.json"}

@@ -4,7 +4,7 @@
   "experiment_id": "v4-runtime-002-epoch-lifecycle",
   "phase": "positive_intervention",
   "kind": "positive_test",
-  "source_commit": "9727191b9a2ecbce18b600ca65cf9e645306a311",
+  "source_commit": "fa64444e9cb6f8029accaf80b1dd9e4349876613",
   "scope": {"feature_id": "V4-RUNTIME-002", "module_id": "routecodex-v4-node-container"},
   "producer": {"adapter": "cargo", "identity": "v4_node_container_epoch_positive"},
   "command_argv": ["cargo", "test", "-p", "routecodex-v4-node-container", "--manifest-path", "Cargo.toml", "--locked"],
@@ -13,5 +13,5 @@
   "created_at": "2026-08-30T03:09:09Z",
   "expires_at": "2026-09-05T03:09:09Z",
   "input_hashes": ["sha256:217e53f92d014cbe07a11a15615f2bcd6577e6b7274fe22256b32b6c8b1f5574", "sha256:b8d1bc287dc18ed0b6d072c9482fa6881fd17ee23f8db9699067d4223ccbd850"],
-  "scope_hash": "sha256:006ac8f87084f36aa9e78352ef6c8f739a217212dddd450045f2215af15a008b"
+  "scope_hash": "sha256:525f3d836950eda83ab30e2e8c905f22c409729b57b2d5cbc15d87dde4968099"
 }
