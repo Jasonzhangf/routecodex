@@ -48,12 +48,14 @@
   "prerequisites": [
     {
       "feature_id": "V4-RUNTIME-002",
-      "status": "pending",
-      "gap_detected": null,
-      "epoch_closure_lane_status": "pending",
-      "audit_commit": null,
-      "source_paths": [],
-      "evidence_refs": []
+      "status": "pass",
+      "gap_detected": true,
+      "epoch_closure_lane_status": "source_green",
+      "audit_commit": "9727191b9a2ecbce18b600ca65cf9e645306a311",
+      "source_paths": ["crates/routecodex-v4-node-container/src/lib.rs"],
+      "evidence_refs": [
+        {"role":"closure_audit","gate_id":"v4_node_container_epoch_closure_audit","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/closure-audit.json"}
+      ]
     }
   ],
   "batches": [
@@ -273,19 +275,24 @@
       "module_ids": ["routecodex-v4-node-container"],
       "owned_paths": ["crates/routecodex-v4-node-container/**"],
       "source_dependencies": [],
-      "status": "pending",
+      "status": "source_green",
       "tasks": [
         {
           "task_id":"V4-RUNTIME-002",
-          "status":"pending",
-          "candidate_record":null,
-          "function_ids":[],
-          "resource_ids":[],
-          "source_paths":[],
+          "status":"source_green",
+          "candidate_record":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/fix-candidate.json",
+          "function_ids":["v4.node_container.execution_epoch"],
+          "resource_ids":["v4.node_container.execution_epoch"],
+          "source_paths":["crates/routecodex-v4-node-container/src/lib.rs","crates/routecodex-v4-node-container/tests/l2_epoch.rs"],
           "support_paths":[],
           "required_gate_ids":["v4_node_container_epoch_positive","v4_node_container_epoch_red","v4_node_container_epoch_boundary","v4_node_container_epoch_plane"],
           "mainline_binding":"forbidden_before_integration",
-          "evidence_refs":[]
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_node_container_epoch_positive","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/positive.json"},
+            {"role":"red_gate","gate_id":"v4_node_container_epoch_red","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_node_container_epoch_boundary","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_node_container_epoch_plane","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/plane-isolation.json"}
+          ]
         }
       ]
     }

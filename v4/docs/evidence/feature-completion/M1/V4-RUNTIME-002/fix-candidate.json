@@ -2,20 +2,20 @@
   "fix_candidate_id": "v4-runtime-002-epoch-candidate",
   "issue_id": "V4-RUNTIME-002",
   "module_id": "routecodex-v4-node-container",
-  "worktree_id": "v4-cordis-m00-empty-epoch-admission-20260826T081500Z",
-  "base_commit": "f14106bd9924eb33b5495a1de8896845c5efb712",
-  "head_commit": "a5b629bad00fc2f5c2cec548617936b633c2a3fe",
-  "tree_hash": "c17c94cca7d6a06949e8d993bce570d6a0b5add3",
-  "diff_hash": "sha256:7e3776eadcc8a0365fe78b263b3f19606021483e864c4c61adf2da3b132acf58",
+  "worktree_id": "v4-feature-layer-h-current-0830",
+  "base_commit": "e3277d10aeb441adad3e82acbe80b19bae4cca41",
+  "head_commit": "9727191b9a2ecbce18b600ca65cf9e645306a311",
+  "tree_hash": "b486e5a2f408b50299cb68f3f079b1b45e35d07c",
+  "diff_hash": "sha256:cb7b5c2a7b26d81eaaf32285a7f2f4f353eda96c92b78cacd7b07c420d9969e4",
   "design_id": "v4-feature-completion-r002-epoch-lifecycle",
   "owner": "routecodex-v4-node-container",
-  "scope_hash": "sha256:d6244efbc433fcbc59d9b295c339506455c911241341fd0cb63b004dddd24504",
+  "scope_hash": "sha256:26bf97873bc3f37347c0ab583c828f5e48657edadf1ab497e17719fb2cb9d1d8",
   "changed_paths": [
     "v4/crates/routecodex-v4-node-container/src/lib.rs",
     "v4/crates/routecodex-v4-node-container/tests/l2_epoch.rs"
   ],
   "verification_evidence_ids": ["boundary-audit", "plane-isolation", "positive", "red-gate"],
-  "created_at": "2026-08-26T08:15:00Z",
+  "created_at": "2026-08-30T03:09:09Z",
   "batch_id": "H",
   "task_ids": ["V4-RUNTIME-002"]
 }
