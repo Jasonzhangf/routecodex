@@ -116,7 +116,7 @@ edges:
     to: V3ProviderActionGateAdmission
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -125,7 +125,7 @@ edges:
     to: V3ProviderActionGateAdmission
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_exact_selected_provider_action
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -170,7 +170,7 @@ edges:
     to: V3Error05ExecutionDecision
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: run_v3_direct_provider_failure_policy
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
@@ -197,7 +197,7 @@ edges:
     to: V3ProviderActionPermitInFlight
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3ProviderActionAdmission::take_permit
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -242,7 +242,7 @@ edges:
     to: V3ProviderActionPermitAbandonRequested
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3ProviderActionPermit::drop
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -287,7 +287,7 @@ edges:
     to: V3ProviderActionPermitAbandonRequested
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3ProviderActionPermit::drop
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -323,7 +323,7 @@ edges:
     to: V3ProviderActionSuccessObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: record_v3_direct_provider_success
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
@@ -337,23 +337,23 @@ edges:
     callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-35
-    from: V3ProviderActionPermitInFlight
+    from: V3ProviderActionPermitAbandoned
     to: V3ProviderActionFailureObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: run_v3_direct_provider_failure_policy
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - step_id: v3-provider-action-gate-36
-    from: V3ProviderActionPermitAbandoned
+    from: V3ProviderActionFailureObserved
     to: V3ProviderActionFailureRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    caller_symbol: run_v3_direct_provider_failure_policy
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+    callee_symbol: record_v3_direct_provider_failure_record
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - step_id: v3-provider-action-gate-37
     from: V3ProviderActionPermitInFlight
     to: V3ProviderActionSuccessObserved

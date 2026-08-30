@@ -2019,11 +2019,11 @@ resources:
     binding_status: source_controlled
     required_gates: [cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests, npm run verify:v3-resource-map]
 
-  - resource_id: v3.config.webui_observability_store
+  - resource_id: v3.observability.webui_store
     resource_kind: diagnostic_persistence
     lifecycle: v3.server.console_projection
     owner_feature_id: v3.server_internal_observability_projection
-    owner_crate: routecodex-v3-config
+    owner_crate: routecodex-v3-debug
     owner_node: V3WebuiObservabilityStore
     identity: [configPath, debugLogPath, port]
     semantic_contract:
@@ -2041,7 +2041,7 @@ resources:
     may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: source_controlled
-    required_gates: [cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --lib v3_webui_observability_io, npm run verify:v3-resource-map]
+    required_gates: [cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store, npm run verify:v3-resource-map]
 
   - resource_id: v3.build.assembled_binary
     resource_kind: assembled_release_candidate
@@ -2348,13 +2348,184 @@ resources:
     owner_feature_id: v3.responses_direct_full_attempt_commit
     owner_crate: routecodex-v3-runtime
     owner_module: direct_runtime_helpers_stream
-    owner_node: V3DirectSseAttemptBuffer
+    owner_node: V3CommittedClientSseBuilder
     identity: [requestId, attemptId, providerKey, protocol]
-    allowed_writers: [V3DirectSseAttemptBuffer::push, V3DirectSseAttemptBuffer::finish_terminal, V3DirectSseAttemptBuffer::discard]
-    allowed_readers: [commit_direct_sse_attempt_after_terminal, V3DirectSseAttemptBuffer::release]
+    allowed_writers: [V3CommittedClientSseBuilder::push, V3CommittedClientSseBuilder::seal, V3CommittedClientSseBuilder::drop]
+    allowed_readers: [collect_direct_sse_attempt_after_terminal, V3CommittedClientSseStream]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload, session.cache]
     must_pass_through: [V3ProviderResp14Raw, V3DirectResp14ProviderProjectionPrepared, Error01, Error03, Error04, Error05]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    binding_status: design
+    binding_status: active
+
+  - resource_id: v3.execution.request_lifecycle_control
+    resource_kind: request_local_control
+    lifecycle: v3.execution_control_payload_architecture
+    owner_feature_id: v3.execution_request_lifecycle
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3RequestExecutionControl
+    identity: [requestId, executionId]
+    semantic_contract:
+      current_binding: Resident Direct/Relay controllers carry one opaque V3RequestExecutionControl across typed protocol handoffs and retain the originating target plan and Error05 state.
+      target_contract: One resident request controller owns immutable target plan, cumulative attempt/deadline budget, cancellation, Error05 recovery execution, and terminal closeout.
+      runtime_driver: Provider network requests and lazy response streams remain on a resident Tokio Runtime for their complete lifetime.
+    allowed_writers: [execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core]
+    allowed_readers: [V3Error05ExecutionDecision, ProviderTransport, AttemptPayloadStore]
+    forbidden_writers: [SSE_stream_wrapper, routecodex-v3-server, protocol_codec, compat_hook, observability, provider_payload, client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
+  - resource_id: v3.execution.target_plan
+    resource_kind: immutable_request_plan
+    lifecycle: v3.execution_control_payload_architecture
+    owner_feature_id: v3.execution_request_lifecycle
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3Target09CandidateSetExpanded
+    identity: [requestId, routePoolId, candidateSetRevision]
+    semantic_contract:
+      immutable_after_hit: true
+      recovery_scope: Target-local reselect consumes this plan and never re-enters Router classify, route policy evaluation, or opaque pool hit.
+    allowed_writers: [V3Target09CandidateSetExpanded]
+    allowed_readers: [execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core, V3Error05ExecutionDecision]
+    forbidden_writers: [SSE_stream_wrapper, ProviderTransport, protocol_codec, compat_hook, observability]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
+  - resource_id: v3.execution.attempt_budget
+    resource_kind: request_local_control
+    lifecycle: v3.execution_control_payload_architecture
+    owner_feature_id: v3.execution_attempt_budget_store
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3AttemptBudget
+    identity: [requestId, executionId]
+    semantic_contract:
+      dimensions: [attempt_count, request_resident_bytes, process_resident_bytes, deadline_or_residence]
+      admission_order: Reserve byte/frame capacity before append or copy; release exactly once on seal, discard, cancellation, or terminal error.
+      exhaustion_lane: LocalResourceExhausted in the internal Error chain; never provider ResponseBody and never provider health mutation.
+    allowed_writers: [resident_request_controller, AttemptPayloadStore]
+    allowed_readers: [resident_request_controller, AttemptPayloadStore, V3Error05ExecutionDecision]
+    forbidden_writers: [SSE_stream_wrapper, ProviderTransport, observability, health, payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
+  - resource_id: v3.execution.attempt_payload_store
+    resource_kind: bounded_payload_store
+    lifecycle: v3.execution_control_payload_architecture
+    owner_feature_id: v3.execution_attempt_budget_store
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3CommittedClientSseBuilder
+    identity: [requestId, attemptId]
+    semantic_contract:
+      current_binding: Direct and Relay both use V3CommittedClientSseBuilder with one shared V3AttemptBudget; append reserves attempt/request/process bytes before copying and seal transfers the reservation to replay.
+      shared_contract: Direct and Relay consume one bounded attempt-store interface with per-attempt, per-request, process-global, and residence/deadline limits.
+      initial_storage: bounded_memory_only
+      spill_policy: forbidden_until_explicit_resource_contract_and_gate
+    allowed_writers: [V3CommittedClientSseBuilder::push, V3CommittedClientSseBuilder::seal, V3CommittedClientSseBuilder::drop]
+    allowed_readers: [resident_request_controller, client_commit_projector]
+    forbidden_writers: [routecodex-v3-server, protocol_codec, compat_hook, health, observability, provider_payload, client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
+  - resource_id: v3.execution.attempt_success_receipt
+    resource_kind: sealed_control_receipt
+    lifecycle: v3.execution_control_payload_architecture
+    owner_feature_id: v3.execution_attempt_success_receipt
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3AttemptSuccessReceipt
+    identity: [requestId, attemptId, providerRuntimeIdentity, protocolTerminalGeneration]
+    semantic_contract:
+      issuance_condition: Protocol-valid terminal observed and bounded attempt payload sealed successfully.
+      consumers: [provider_health_success, route_policy_success_commit, continuation_commit, client_semantic_commit]
+      non_receipts: [HTTP_2xx_headers, stream_object_constructed, first_business_frame, clean_transport_accept]
+    allowed_writers: [runtime_response_semantic_owner]
+    allowed_readers: [provider_health_success, route_policy_success_commit, continuation_commit, client_semantic_commit]
+    forbidden_writers: [ProviderTransport, SSE_stream_wrapper, routecodex-v3-server, observability, payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
+  - resource_id: v3.execution.attempt_control_state
+    resource_kind: small_control_state
+    lifecycle: v3.execution_control_payload_architecture
+    owner_feature_id: v3.execution_stream_control_diagnostics_split
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3RuntimeStreamControlState
+    identity: [requestId, attemptId, generation]
+    semantic_contract:
+      fields: [terminal, failure, cancellation, commit_state, generation]
+      read_complexity: constant_and_independent_of_payload_bytes
+      lock_contract: Does not share a lock or clone path with raw SSE, sampled frames, usage details, trace artifacts, or payload snapshots.
+    allowed_writers: [runtime_response_semantic_owner]
+    allowed_readers: [resident_request_controller, AttemptPayloadStore, client_closeout]
+    forbidden_writers: [StreamDiagnostics, routecodex-v3-server, provider_health, persistence_writer]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
+  - resource_id: v3.observability.stream_diagnostics
+    resource_kind: diagnostic
+    lifecycle: v3.execution_control_payload_architecture
+    owner_feature_id: v3.execution_stream_control_diagnostics_split
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3RuntimeStreamObservationSnapshot
+    identity: [requestId, attemptId, captureGeneration]
+    semantic_contract:
+      fields: [sampled_raw_sse, usage_projection, timing, typed_object_types, artifact_reference]
+      control_authority: none
+      failure_lane: ObservationFailure in the internal Error chain; never provider failure or provider health mutation.
+    allowed_writers: [runtime_observability_projector]
+    allowed_readers: [developer_diagnostics, webui_projection]
+    forbidden_writers: [resident_request_controller, route_policy, provider_health, continuation, payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
+  - resource_id: v3.provider.health_persistence_queue
+    resource_kind: bounded_persistence_control
+    lifecycle: v3.execution_control_payload_architecture
+    owner_feature_id: v3.provider_health_persistence_isolation
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3ProviderHealthPersistenceWriter
+    identity: [healthStoreId, mutationVersion]
+    semantic_contract:
+      current_binding: Health mutation projects immutable entries under the health lock, performs bounded non-blocking enqueue, and the dedicated writer owns replace/serialize/write/rename outside the lock.
+      target_contract: In-memory health mutation produces a versioned delta; a bounded single writer persists outside the global health lock.
+      durability_failure: explicit_internal_persistence_error_without_provider_penalty
+    allowed_writers: [V3ProviderHealthStore]
+    allowed_readers: [provider_health_single_writer]
+    forbidden_writers: [runtime_request_controller, routecodex-v3-server, observability, payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
+  - resource_id: v3.observability.request_ledger_queue
+    resource_kind: bounded_persistence_control
+    lifecycle: v3.execution_control_payload_architecture
+    owner_feature_id: v3.observability_persistence_isolation
+    owner_crate: routecodex-v3-server
+    owner_node: V3WebuiObservabilityPersistenceWriter
+    identity: [listenerId, recordSequence]
+    semantic_contract:
+      current_binding: record_observed updates a bounded active/recent cache, releases the listener mutex, and then performs bounded non-blocking enqueue to a dedicated writer; startup folding is capped.
+      target_contract: Active requests and bounded recent terminals remain in memory; a bounded single-writer queue owns append, rotation, and retention outside the request mutex.
+      config_boundary: Config compiles path and policy only; runtime observability I/O is owned by observability storage.
+    allowed_writers: [V3WebuiObservability::record_observed]
+    allowed_readers: [observability_single_writer, admin_paginated_history_reader]
+    forbidden_writers: [routecodex-v3-config_runtime_io, provider_health, resident_request_controller, payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active

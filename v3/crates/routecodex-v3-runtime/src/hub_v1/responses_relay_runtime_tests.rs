@@ -3,6 +3,25 @@ use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use serde_json::json;
 
+#[test]
+fn execution_control_payload_architecture_terminal_read_isolated_from_diagnostics_lock() {
+    let observation = V3RuntimeStreamObservation::default();
+    observation
+        .record_provider_event_json(&json!({
+            "type": "response.completed",
+            "response": {"status": "completed"}
+        }))
+        .expect("record terminal before diagnostic failure");
+    observation.poison_diagnostics_for_test();
+
+    assert_eq!(
+        observation
+            .semantic_terminal()
+            .expect("terminal control must not depend on diagnostic lock"),
+        Some(V3RuntimeSemanticTerminal::Success)
+    );
+}
+
 fn anthropic_then_openai_chat_manifest() -> V3Config05ManifestPublished {
     let authoring = parse_v3_config_02_authoring(
             r#"
@@ -51,6 +70,149 @@ targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
         )
         .expect("mixed protocol authoring");
     compile_v3_config_05_manifest(authoring).expect("mixed protocol manifest")
+}
+
+fn anthropic_relay_then_responses_direct_manifest() -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[providers.relay_first]
+type = "anthropic"
+base_url = "http://relay.invalid/v1"
+default_model = "claude-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "RELAY_FIRST_KEY" }] }
+[providers.relay_first.models.claude-test]
+wire_name = "claude-test"
+capabilities = ["text", "tools"]
+
+[providers.direct_second]
+type = "responses"
+base_url = "http://direct.invalid/v1"
+default_model = "responses-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "DIRECT_SECOND_KEY" }] }
+[providers.direct_second.models.responses-test]
+wire_name = "responses-test"
+capabilities = ["text", "tools"]
+
+[forwarders.mixed]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "relay_first", model = "claude-test", key = "key", priority = 2 },
+  { kind = "provider_model", provider = "direct_second", model = "responses-test", key = "key", priority = 1 }
+]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
+"#,
+    )
+    .expect("Relay-to-Direct authoring");
+    compile_v3_config_05_manifest(authoring).expect("Relay-to-Direct manifest")
+}
+
+struct RelayFailsBeforeDirectHandoffTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl ResponsesTransport for RelayFailsBeforeDirectHandoffTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.provider_ids
+            .lock()
+            .expect("provider id recorder")
+            .push(request.provider_id().to_string());
+        if request.provider_id() == "relay_first" {
+            return Err(V3ProviderError::Transport {
+                request_id: request.request_id().to_string(),
+                provider_id: request.provider_id().to_string(),
+                reason: "controlled Relay failure before Direct reselection".to_string(),
+            });
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_direct_second","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"unexpected relay execution"}]}]}"#.to_vec(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn execution_control_payload_architecture_relay_reselection_returns_typed_direct_handoff() {
+    std::env::set_var("RELAY_FIRST_KEY", "relay-secret");
+    std::env::set_var("DIRECT_SECOND_KEY", "direct-secret");
+    let manifest = anthropic_relay_then_responses_direct_manifest();
+    let transport = RelayFailsBeforeDirectHandoffTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+
+    let output = execute_v3_responses_relay_runtime_inner(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "test".to_string(),
+            failure_session_scope: V3ProviderFailureSessionScope::new(
+                "test",
+                "default",
+                "relay-to-direct-handoff-session",
+            )
+            .expect("session scope"),
+            request_id: "req-relay-to-direct-handoff".to_string(),
+            payload: json!({"model": "client-model", "input": "hello"}),
+        },
+        &transport,
+        None,
+        None,
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        V3ResponsesRelayRetryPolicy::default(),
+        false,
+        None,
+        None,
+        None,
+        None,
+        BTreeSet::new(),
+        None,
+        None,
+    )
+    .await
+    .expect("Relay failure must return a typed Direct handoff");
+
+    let handoff = output
+        .protocol_direct_handoff
+        .expect("Relay reselection must stop before sending the Direct target");
+    assert_eq!(
+        handoff.plan.decision.mode,
+        crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
+    );
+    assert_eq!(
+        handoff
+            .request_execution_control
+            .attempt_budget()
+            .transport_attempts(),
+        1
+    );
+    assert_eq!(
+        transport.provider_ids.lock().expect("provider ids").as_slice(),
+        &["relay_first".to_string()]
+    );
 }
 
 struct RecordingChatTransport {
@@ -121,6 +283,7 @@ async fn target_protocol_unmapped_field_projects_internal_598_without_switching_
         None,
         BTreeSet::new(),
         None,
+        None,
     )
     .await
     .expect("unmapped target field must project as client request error");
@@ -137,6 +300,77 @@ async fn target_protocol_unmapped_field_projects_internal_598_without_switching_
             .expect("provider ids")
             .is_empty(),
         "a request-shape error must not send or switch provider"
+    );
+}
+
+#[tokio::test]
+async fn execution_control_payload_architecture_responses_relay_handoff_does_not_reset_attempt_budget() {
+    std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
+    std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
+    let mut manifest = anthropic_then_openai_chat_manifest();
+    manifest
+        .servers
+        .get_mut("test")
+        .and_then(|server| server.execution.as_mut())
+        .expect("test server execution policy")
+        .attempt_store
+        .request_max_attempts = 1;
+    let request_execution_control =
+        crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
+            .expect("request execution control");
+    request_execution_control
+        .attempt_budget()
+        .admit_transport_attempt()
+        .expect("Direct attempt before Relay handoff");
+    let transport = RecordingChatTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+
+    let error = execute_v3_responses_relay_runtime_inner(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "test".to_string(),
+            failure_session_scope: V3ProviderFailureSessionScope::new(
+                "test",
+                "default",
+                "shared-attempt-budget-session",
+            )
+            .expect("session scope"),
+            request_id: "req-shared-attempt-budget".to_string(),
+            payload: json!({
+                "model": "client-model",
+                "input": "hello",
+                "store": true
+            }),
+        },
+        &transport,
+        None,
+        None,
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        V3ResponsesRelayRetryPolicy::default(),
+        false,
+        None,
+        None,
+        None,
+        None,
+        BTreeSet::new(),
+        None,
+        Some(request_execution_control),
+    )
+    .await
+    .expect_err("Relay must reject the next transport attempt from the shared budget");
+
+    assert!(matches!(
+        error,
+        V3ResponsesRelayRuntimeError::ExecutionControl(_)
+    ));
+    assert!(
+        transport
+            .provider_ids
+            .lock()
+            .expect("provider ids")
+            .is_empty(),
+        "budget exhaustion must happen before transport.send"
     );
 }
 

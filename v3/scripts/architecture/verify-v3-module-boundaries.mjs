@@ -39,6 +39,115 @@ function fail(message) {
   failures.push(message);
 }
 
+function stripRustCfgTestItems(source, sourcePath) {
+  let cursor = 0;
+  let output = '';
+  const marker = '#[cfg(test)]';
+  while (true) {
+    const attributeStart = source.indexOf(marker, cursor);
+    if (attributeStart < 0) {
+      output += source.slice(cursor);
+      return output;
+    }
+    output += source.slice(cursor, attributeStart);
+    const itemStart = attributeStart + marker.length;
+    const braceStart = source.indexOf('{', itemStart);
+    const semicolon = source.indexOf(';', itemStart);
+    if (semicolon >= 0 && (braceStart < 0 || semicolon < braceStart)) {
+      cursor = semicolon + 1;
+      continue;
+    }
+    if (braceStart < 0) {
+      fail(`cannot parse #[cfg(test)] item in ${sourcePath}`);
+      return output;
+    }
+    let depth = 0;
+    let index = braceStart;
+    let mode = 'code';
+    let blockCommentDepth = 0;
+    let rawHashes = 0;
+    while (index < source.length) {
+      const char = source[index];
+      const next = source[index + 1];
+      if (mode === 'line_comment') {
+        if (char === '\n') mode = 'code';
+        index += 1;
+        continue;
+      }
+      if (mode === 'block_comment') {
+        if (char === '/' && next === '*') {
+          blockCommentDepth += 1;
+          index += 2;
+        } else if (char === '*' && next === '/') {
+          blockCommentDepth -= 1;
+          index += 2;
+          if (blockCommentDepth === 0) mode = 'code';
+        } else {
+          index += 1;
+        }
+        continue;
+      }
+      if (mode === 'string') {
+        if (char === '\\') index += 2;
+        else {
+          if (char === '"') mode = 'code';
+          index += 1;
+        }
+        continue;
+      }
+      if (mode === 'raw_string') {
+        if (char === '"' && source.slice(index + 1, index + 1 + rawHashes) === '#'.repeat(rawHashes)) {
+          index += rawHashes + 1;
+          mode = 'code';
+        } else {
+          index += 1;
+        }
+        continue;
+      }
+      if (char === '/' && next === '/') {
+        mode = 'line_comment';
+        index += 2;
+        continue;
+      }
+      if (char === '/' && next === '*') {
+        mode = 'block_comment';
+        blockCommentDepth = 1;
+        index += 2;
+        continue;
+      }
+      if (char === '"') {
+        mode = 'string';
+        index += 1;
+        continue;
+      }
+      if (char === 'r' || (char === 'b' && next === 'r')) {
+        const rawStart = char === 'b' ? index + 2 : index + 1;
+        let quote = rawStart;
+        while (source[quote] === '#') quote += 1;
+        if (source[quote] === '"') {
+          rawHashes = quote - rawStart;
+          mode = 'raw_string';
+          index = quote + 1;
+          continue;
+        }
+      }
+      if (char === '{') depth += 1;
+      if (char === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          cursor = index + 1;
+          break;
+        }
+      }
+      index += 1;
+    }
+    if (depth !== 0) {
+      fail(`unterminated #[cfg(test)] item in ${sourcePath}`);
+      return output;
+    }
+  }
+}
+
 const all = files('v3/crates');
 const read = (path) => readFileSync(resolveV3Path(path), 'utf8');
 const moduleRegistryPath = 'docs/architecture/v3-runtime-module-registry.yml';
@@ -131,7 +240,7 @@ const isRustTestSource = (path) =>
 
 for (const path of all) {
   const text = read(path);
-  const productionText = text.replace(/#\[cfg\(test\)\][\s\S]*/, '');
+  const productionText = stripRustCfgTestItems(text, path);
   const semanticProductionText = productionText
     .replace(/\.method_not_allowed_fallback\(method_not_allowed\)/g, '')
     .replace(/\.fallback\(path_not_found\)/g, '')
@@ -220,10 +329,12 @@ if (/serde_json::from_slice|default_tier|providers\.get/.test(hookSource)) {
 
 const serverSource = files('v3/crates/routecodex-v3-server/src')
   .filter((path) => !isRustTestSource(path))
-  .map((path) => read(path).replace(/#\[cfg\(test\)\][\s\S]*/, ''))
+  .map((path) => stripRustCfgTestItems(read(path), path))
   .join('\n');
-const serverLibSource = read('v3/crates/routecodex-v3-server/src/lib.rs')
-  .replace(/#\[cfg\(test\)\][\s\S]*/, '');
+const serverLibSource = stripRustCfgTestItems(
+  read('v3/crates/routecodex-v3-server/src/lib.rs'),
+  'v3/crates/routecodex-v3-server/src/lib.rs',
+);
 if (/build_v3_error_0[1-6]|V3ErrorSourceKind|V3ErrorActionScope/.test(serverSource)) {
   fail('Server must project Runtime output and cannot build or classify Error nodes');
 }

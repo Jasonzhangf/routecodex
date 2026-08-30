@@ -134,8 +134,8 @@ pub(crate) fn provider_response_stream_relay_failure(
     request_id: &str,
     provider_id: &str,
     observability: Option<V3RuntimeObservability>,
-) -> V3ResponsesRelayProviderFailure {
-    match error {
+) -> Result<V3ResponsesRelayProviderFailure, V3ResponsesRelayRuntimeError> {
+    Ok(match error {
         V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
             status,
             code,
@@ -159,11 +159,11 @@ pub(crate) fn provider_response_stream_relay_failure(
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(reason) =>
             provider_response_codec_relay_failure(reason, provider_id, observability),
         other => provider_runtime_failure(
-            provider_response_stream_failure(other, request_id, provider_id),
+            provider_response_stream_failure(other, request_id, provider_id)?,
             provider_id,
             observability,
         ),
-    }
+    })
 }
 
 fn provider_response_codec_relay_failure(
@@ -272,8 +272,8 @@ pub(crate) fn provider_response_stream_failure(
     error: V3ResponsesRelayRuntimeError,
     request_id: &str,
     provider_id: &str,
-) -> V3ProviderError {
-    match error {
+) -> Result<V3ProviderError, V3ResponsesRelayRuntimeError> {
+    Ok(match error {
         V3ResponsesRelayRuntimeError::Provider(error) => error,
         V3ResponsesRelayRuntimeError::ProviderResponseEmpty { .. } => {
             V3ProviderError::ResponseBody {
@@ -297,12 +297,8 @@ pub(crate) fn provider_response_stream_failure(
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(reason) => {
             provider_response_codec_error(reason, request_id, provider_id)
         }
-        other => V3ProviderError::ResponseBody {
-            request_id: request_id.to_string(),
-            provider_id: provider_id.to_string(),
-            reason: format!("provider response event codec failed: {other}"),
-        },
-    }
+        other => return Err(other),
+    })
 }
 
 fn provider_response_codec_error(
@@ -450,7 +446,8 @@ mod tests {
             "req-1",
             "provider-1",
             None,
-        );
+        )
+        .expect("provider SSE transport error attribution");
         assert_eq!(failure.source_stage, "V3ProviderRespInbound01Raw");
         assert_eq!(failure.status, 502);
         assert!(failure.policy_error_message.contains("malformed SSE"));
@@ -488,6 +485,52 @@ mod tests {
             projected.body.get("response"),
             Some(&json!({"status":"completed"}))
         );
+    }
+
+    #[test]
+    fn local_response_failures_never_become_provider_failures() {
+        let cases = [
+            V3ResponsesRelayRuntimeError::ExecutionControl(
+                "request attempt budget exhausted".to_string(),
+            ),
+            V3ResponsesRelayRuntimeError::RuntimeTiming(
+                "request residence deadline elapsed".to_string(),
+            ),
+            V3ResponsesRelayRuntimeError::LocalContinuationStatePoisoned,
+            V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned,
+        ];
+
+        for error in cases {
+            let returned = provider_response_stream_failure(error, "req-local", "provider-1")
+                .expect_err("local response failure must stay outside provider attribution");
+            assert!(matches!(
+                returned,
+                V3ResponsesRelayRuntimeError::ExecutionControl(_)
+                    | V3ResponsesRelayRuntimeError::RuntimeTiming(_)
+                    | V3ResponsesRelayRuntimeError::LocalContinuationStatePoisoned
+                    | V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned
+            ));
+        }
+    }
+
+    #[test]
+    fn local_response_failures_never_enter_provider_relay_policy() {
+        let returned = match provider_response_stream_relay_failure(
+            V3ResponsesRelayRuntimeError::ExecutionControl(
+                "process-global attempt store exhausted".to_string(),
+            ),
+            "req-local",
+            "provider-1",
+            None,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("local resource exhaustion must not produce provider failure policy input"),
+        };
+
+        assert!(matches!(
+            returned,
+            V3ResponsesRelayRuntimeError::ExecutionControl(_)
+        ));
     }
 
     #[test]

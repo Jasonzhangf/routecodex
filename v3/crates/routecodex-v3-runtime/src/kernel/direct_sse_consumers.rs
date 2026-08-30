@@ -382,7 +382,8 @@ impl V3DirectSseContentConsumer {
                                     .and_then(serde_json::Value::as_str)
                                     .filter(|text| !text.is_empty())
                                 {
-                                    native_toolreason = Some((output_index, item_id, reason.to_owned()));
+                                    native_toolreason =
+                                        Some((output_index, item_id, reason.to_owned()));
                                 }
                             }
                         }

@@ -5,7 +5,6 @@ mod store;
 mod types;
 mod user_config;
 mod v2_compat;
-mod v3_webui_observability_io;
 pub use v2_compat::{
     generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderAuthConfig,
     V2ProviderAuthEntry, V2ProviderConcurrencyConfig, V2ProviderConfig, V2ProviderConfigFile,
@@ -27,11 +26,6 @@ pub use user_config::{
     generate_v3_user_config_02_routing, parse_v3_user_config_02_routing,
     project_v3_user_config_03_authoring, V3UserConfig01FileSource,
     V3UserConfig02RoutingSelectionParsed, V3UserConfigStore, V3UserRouteMember, V3UserRoutePool,
-};
-pub use v3_webui_observability_io::{
-    v3_webui_observability_append_row, v3_webui_observability_read_raw_rows,
-    v3_webui_observability_read_rows, V3WebuiObservabilityStoreError,
-    V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION,
 };
 
 use std::collections::{BTreeMap, BTreeSet};

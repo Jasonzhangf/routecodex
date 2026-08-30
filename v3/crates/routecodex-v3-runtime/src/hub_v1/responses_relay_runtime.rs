@@ -95,6 +95,14 @@ impl V3ResponsesRelayProviderHealthHandle {
     pub fn runtime_health(&self) -> V3ProviderFailureRuntimeHealth {
         self.runtime_health.clone()
     }
+
+    pub fn flush_persistence(&self) -> Result<(), String> {
+        self.runtime_health.store().flush_persistence()
+    }
+
+    pub fn persistence_alarm(&self) -> Option<String> {
+        self.runtime_health.store().persistence_alarm()
+    }
 }
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
@@ -159,6 +167,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_stople
         None,
         BTreeSet::new(),
         None,
+        None,
     )
     .await
 }
@@ -198,6 +207,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
         None,
         BTreeSet::new(),
         None,
+        None,
     )
     .await
 }
@@ -214,6 +224,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: BTreeSet<String>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&local_stopless.scope);
     let provider_failure_event_sink = local_stopless.provider_failure_event_sink.clone();
@@ -241,6 +252,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
         Some(initial_expanded),
         request_local_excluded_candidates,
         observability_accumulator,
+        request_execution_control,
     )
     .await
 }
@@ -295,6 +307,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
         initial_expanded,
         BTreeSet::new(),
         None,
+        None,
     )
     .await
 }
@@ -324,6 +337,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: BTreeSet<String>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target(
         manifest,
@@ -335,6 +349,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
         initial_expanded,
         request_local_excluded_candidates,
         observability_accumulator,
+        request_execution_control,
     )
     .await
 }
@@ -372,6 +387,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: BTreeSet<String>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
@@ -386,6 +402,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
             initial_expanded,
             request_local_excluded_candidates,
             observability_accumulator,
+            request_execution_control,
         )
         .await?;
     output.provider_snapshots =
@@ -429,6 +446,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         None,
         BTreeSet::new(),
         None,
+        None,
     )
     .await
 }
@@ -456,6 +474,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         None,
         None,
         BTreeSet::new(),
+        None,
         None,
     )
     .await
@@ -495,6 +514,7 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
         None,
         None,
         BTreeSet::new(),
+        None,
         None,
     )
     .await
@@ -671,6 +691,7 @@ fn payload_input_paired_call_ids(payload: &Value) -> Vec<String> {
 }
 
 fn commit_or_release_responses_local_continuation(
+    _receipt: &crate::nodes::V3AttemptSuccessReceipt,
     local: Option<&V3ResponsesRelayLocalContinuationExecution<'_>>,
     restored_context_ids: &[String],
     canonical_request: &Value,
@@ -936,7 +957,7 @@ pub(crate) fn extract_v3_runtime_usage_summary(value: &Value) -> Option<V3Runtim
     }
 }
 
-pub(crate) fn repair_v3_runtime_input_usage_from_request(
+pub(crate) fn materialize_v3_runtime_input_usage_estimate_from_request(
     response: &mut Value,
     request: &Value,
 ) {
@@ -1105,14 +1126,21 @@ pub fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
         ));
     }
     frames.push(b"data: [DONE]\n\n".to_vec());
-    let mut committed = crate::nodes::V3CommittedClientSseBuilder::new();
+    let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .map_err(|error| error.to_string())?;
     for (index, frame) in frames.into_iter().enumerate() {
-        committed.push(frame)?;
+        committed.push(frame).map_err(|error| error.to_string())?;
         if index == terminal_frame_index {
-            committed.mark_last_frame_as_terminal()?;
+            committed
+                .mark_last_frame_as_terminal()
+                .map_err(|error| error.to_string())?;
         }
     }
-    committed.seal_after_validated_terminal()
+    committed
+        .seal_after_validated_terminal()
+        .map_err(|error| error.to_string())
 }
 
 fn append_v3_responses_client_reasoning_progress_frames(
@@ -1248,7 +1276,7 @@ fn append_v3_responses_client_function_call_progress_frames(
     // it into a 502: native string arguments pass through byte-for-byte;
     // structured arguments are deterministically encoded; an absent field is
     // represented by the protocol's empty initial argument buffer. This does
-    // not infer or repair toolreason fields, and it never changes the command
+    // does not infer or alter toolreason fields, and never changes the command
     // object itself.
     let arguments = match item.get("arguments") {
         Some(Value::String(arguments)) => arguments.clone(),

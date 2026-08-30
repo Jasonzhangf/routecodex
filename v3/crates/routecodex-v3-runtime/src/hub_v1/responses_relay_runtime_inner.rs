@@ -18,6 +18,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
     initial_request_local_excluded_candidates: BTreeSet<String>,
     initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    initial_request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let observability_accumulator =
         initial_observability_accumulator.unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
@@ -183,8 +184,19 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let mut initial_selected_target = initial_selected_target;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
-    let mut provider_send_attempts = 0usize;
+    let request_execution_control = match initial_request_execution_control {
+        Some(control) => control,
+        None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
+            .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))?,
+    };
+    let attempt_budget = request_execution_control.attempt_budget();
+    let mut provider_send_attempts = attempt_budget.transport_attempts();
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
+    let allowed_execution_modes =
+        handle_error_before_resp03!(allowed_execution_modes_for_relay_server(
+            manifest,
+            &input.server_id,
+        ));
     let shared_retry_policy = retry_policy.as_shared_policy();
     let provider_failure_health = provider_health.clone();
     let failure_context = V3RelayProviderFailurePolicyContext {
@@ -261,6 +273,71 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 }
             }
         };
+        let protocol_decision = handle_error_before_resp03!(
+            crate::nodes::build_v3_execution_11_protocol_decision_from_v3_target_10(
+                selected.clone(),
+                "responses",
+                &allowed_execution_modes,
+            )
+            .map_err(|source| V3ResponsesRelayRuntimeError::ExecutionControl(format!(
+                "{}: {}",
+                source.code, source.message
+            )))
+        );
+        if matches!(
+            protocol_decision.mode,
+            crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
+        ) {
+            let captured_expanded = match initial_expanded.as_ref() {
+                Some(expanded) => expanded.clone(),
+                None => handle_error_before_resp03!(expand_v3_relay_target_plan_for_selected(
+                    manifest,
+                    &selected,
+                    deterministic_sample,
+                )
+                .map_err(V3ResponsesRelayRuntimeError::ExecutionControl)),
+            };
+            let protocol_candidate_keys = handle_error_before_resp03!(
+                crate::kernel::protocol_candidate_keys_for_decision_mode(
+                    &captured_expanded,
+                    "responses",
+                    &allowed_execution_modes,
+                    protocol_decision.mode,
+                )
+                .map_err(|source| V3ResponsesRelayRuntimeError::ExecutionControl(format!(
+                    "{}: {}",
+                    source.code, source.message
+                )))
+            );
+            let mut handoff_trace = trace.clone();
+            handoff_trace.push("V3Target10ConcreteProviderSelected");
+            handoff_trace.push("V3Execution11ProtocolDecision");
+            return Ok(V3ResponsesRelayRuntimeOutput {
+                status: 200,
+                client_body: V3ResponsesRelayClientBody::Json(json!({})),
+                node_trace: handoff_trace.clone(),
+                error_chain: None,
+                observability: None,
+                stream_observation: None,
+                finalized_response: None,
+                provider_snapshots: None,
+                protocol_direct_handoff: Some(V3ResponsesProtocolDirectHandoff {
+                    request_payload: req05.governed_payload().clone(),
+                    plan: V3ResponsesProtocolExecutionPlan {
+                        decision: protocol_decision,
+                        node_trace: handoff_trace.clone(),
+                        expanded: captured_expanded,
+                        protocol_candidate_keys,
+                        request_local_excluded_candidates: failed_candidates.clone(),
+                    },
+                    node_trace: handoff_trace,
+                    provider_failure_events,
+                    observability_accumulator: observability_accumulator
+                        .with_additional_attempts(provider_send_attempts),
+                    request_execution_control,
+                }),
+            });
+        }
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
         let selected_target_model_id = selected.candidate.model_id.clone();
@@ -400,10 +477,12 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 }
             }
         }
+        provider_send_attempts = handle_error_before_resp03!(attempt_budget
+            .admit_transport_attempt()
+            .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())));
         handle_error_before_resp03!(runtime_timing
             .start_external()
             .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-        provider_send_attempts = provider_send_attempts.saturating_add(1);
         let transport_result = match tokio::time::timeout(
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
             transport.send(transport_request),
@@ -791,7 +870,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     }
                     Err(error) => handle_error_before_resp03!(Err(error)),
                 };
-                repair_v3_runtime_input_usage_from_request(
+                materialize_v3_runtime_input_usage_estimate_from_request(
                     &mut finalized_provider_value,
                     provider_semantic_body.as_ref(),
                 );
@@ -840,7 +919,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         }
                     }
                 }
+                let attempt_success_receipt =
+                    crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
                 commit_or_release_responses_local_continuation(
+                    &attempt_success_receipt,
                     local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
                     provider_semantic_body.as_ref(),
@@ -853,6 +935,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 )?;
                 handle_error_before_resp03!(provider_health
                     .record_provider_success_in_failure_scope(
+                        &attempt_success_receipt,
                         &failure_context.failure_session_scope,
                         &selected_target_provider_id,
                         Some(&selected_target_auth_alias),
@@ -926,12 +1009,12 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 let provider_value = match provider_value_result {
                     Ok(value) => value,
                     Err(error) => {
-                        let failure = provider_response_stream_relay_failure(
+                        let failure = handle_error_before_resp03!(provider_response_stream_relay_failure(
                             error,
                             &input.request_id,
                             &selected_target_provider_id,
                             Some(selected_observability.clone()),
-                        );
+                        ));
                         drop(_provider_action_permit.take());
                         let terminal_failure = handle_error_before_resp03!(
                             handle_v3_responses_relay_provider_failure(
@@ -1138,7 +1221,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     }
                     Err(error) => handle_error_before_resp03!(Err(error)),
                 };
-                repair_v3_runtime_input_usage_from_request(
+                materialize_v3_runtime_input_usage_estimate_from_request(
                     &mut finalized_provider_value,
                     provider_semantic_body.as_ref(),
                 );
@@ -1190,7 +1273,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         }
                     }
                 }
+                let attempt_success_receipt =
+                    crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt();
                 commit_or_release_responses_local_continuation(
+                    &attempt_success_receipt,
                     local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
                     provider_semantic_body.as_ref(),
@@ -1203,6 +1289,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 )?;
                 handle_error_before_resp03!(provider_health
                     .record_provider_success_in_failure_scope(
+                        &attempt_success_receipt,
                         &failure_context.failure_session_scope,
                         &selected_target_provider_id,
                         Some(&selected_target_auth_alias),

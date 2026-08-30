@@ -176,6 +176,25 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
     .await
 }
 
+pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control(
+    manifest: &V3Config05ManifestPublished,
+    input: V3OpenAiChatRelayRuntimeInput,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    execution_mode: V3HubExecutionMode,
+    request_execution_control: crate::nodes::V3RequestExecutionControl,
+) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
+    execute_v3_openai_chat_relay_runtime_inner(
+        manifest,
+        input,
+        crate::default_responses_transport(),
+        provider_health,
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        execution_mode,
+        Some(request_execution_control),
+    )
+    .await
+}
+
 pub async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3OpenAiChatRelayRuntimeInput,
@@ -222,6 +241,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health_and_execu
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
+        None,
     )
     .await
 }
@@ -233,6 +253,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     execution_mode: V3HubExecutionMode,
+    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3OpenAiChatRelayCodec。
@@ -262,6 +283,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         continuation_lookup,
         Vec::new(),
         true,
+        request_execution_control,
     )
     .await
     .map_err(|error| match error {
@@ -547,8 +569,11 @@ impl V3OpenAiChatSseProviderOutcome {
         if self.recorded {
             return Ok(());
         }
+        let attempt_success_receipt =
+            crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt();
         self.provider_health
             .record_provider_success_in_failure_scope(
+                &attempt_success_receipt,
                 &self.failure_session_scope,
                 &self.provider_id,
                 Some(&self.auth_alias),

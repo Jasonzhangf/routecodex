@@ -45,12 +45,12 @@ fn token_for(row_usage: Option<&Value>, name: &str) -> u64 {
         .unwrap_or(0)
 }
 
-fn row_cache_read(row_usage: Option<&Value>, fallback: u64) -> u64 {
+fn row_cache_read(row_usage: Option<&Value>, legacy_cached_tokens: u64) -> u64 {
     let direct = token_for(row_usage, "cache_read_input_tokens");
     if direct > 0 {
         return direct;
     }
-    fallback
+    legacy_cached_tokens
 }
 
 pub(crate) fn system_epoch_ms() -> Result<u64, String> {

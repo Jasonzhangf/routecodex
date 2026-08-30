@@ -212,17 +212,17 @@ const cases = [
     path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
     mutate: (source) =>
       source.replace(
-        "commit_direct_sse_attempt_after_terminal(",
-        "commit_direct_sse_attempt_after_terminal_removed(",
+        "collect_direct_sse_attempt_after_terminal(",
+        "collect_direct_sse_attempt_after_terminal_removed(",
       ),
-    diagnostic: /Direct SSE Runtime must hand off a typed provider attempt to the client broker/u,
+    diagnostic: /Direct SSE Runtime must collect the provider attempt into the bounded committed replay/u,
   },
   {
     name: "Direct SSE Resp15 exposes the unsealed stream",
     path: "v3/crates/routecodex-v3-runtime/src/kernel.rs",
     mutate: (source) =>
-      source.replaceAll("V3ClientBody::Sse(stream)", "V3ClientBody::Json(serde_json::Value::Null)"),
-    diagnostic: /Direct SSE Resp15 must expose the incremental client broker stream/u,
+      source.replaceAll("V3ClientBody::CommittedSse(committed)", "V3ClientBody::Json(serde_json::Value::Null)"),
+    diagnostic: /Direct SSE Resp15 must expose only the terminal-sealed committed replay/u,
   },
   {
     name: "V3 timing mainline drops Relay and Server edges",

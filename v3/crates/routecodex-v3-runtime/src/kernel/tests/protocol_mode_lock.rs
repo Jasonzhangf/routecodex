@@ -102,6 +102,11 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
         1,
         "Direct must not retry the failed first provider when a route candidate remains"
     );
+    assert_eq!(
+        handoff.request_execution_control.transport_attempts(),
+        1,
+        "typed Direct-to-Relay handoff must carry the admitted transport attempt"
+    );
 }
 
 #[tokio::test]

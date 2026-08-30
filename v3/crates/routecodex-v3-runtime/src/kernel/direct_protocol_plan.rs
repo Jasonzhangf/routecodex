@@ -198,7 +198,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     })
 }
 
-fn protocol_candidate_keys_for_decision_mode(
+pub(crate) fn protocol_candidate_keys_for_decision_mode(
     expanded: &routecodex_v3_target::V3Target09CandidateSetExpanded,
     entry_protocol: &str,
     allowed_modes: &[String],

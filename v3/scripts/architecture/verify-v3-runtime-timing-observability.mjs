@@ -339,8 +339,8 @@ requireMatch(
 );
 requireMatch(
   directRuntimeHelpers,
-  /pub\(crate\) fn commit_direct_sse_attempt_after_terminal\(\s*stream: V3ProviderAttemptSseStream,\s*\)\s*-> V3ClientSseStream/,
-  "Direct SSE Runtime must hand off a typed provider attempt to the client broker without full-stream draining",
+  /pub\(crate\) async fn collect_direct_sse_attempt_after_terminal\([\s\S]*V3CommittedClientSseBuilder::with_budget/,
+  "Direct SSE Runtime must collect the provider attempt into the bounded committed replay before client projection",
 );
 requireMatch(
   kernel,
@@ -349,13 +349,13 @@ requireMatch(
 );
 requireMatch(
   kernel,
-  /V3ClientBody::Sse\(stream\)/,
-  "Direct SSE Resp15 must expose the incremental client broker stream",
+  /V3ClientBody::CommittedSse\(committed\)/,
+  "Direct SSE Resp15 must expose only the terminal-sealed committed replay",
 );
 requireMatch(
   directCore,
-  /V3ClientBody::Sse\(stream\)/,
-  "Direct SSE core must expose the incremental client broker stream",
+  /V3ClientBody::CommittedSse\(committed\)/,
+  "Direct SSE core must expose only the terminal-sealed committed replay",
 );
 forbidMatch(
   nodes,
@@ -364,8 +364,8 @@ forbidMatch(
 );
 forbidMatch(
   directRuntimeHelpers,
-  /commit_direct_sse_attempt_after_terminal[\s\S]*while\s+let\s+Some\(frame\)\s*=\s*stream\.next\(\)\.await/,
-  "Direct SSE broker must not drain the provider stream before Resp15",
+  /wrap_direct_sse_provider_handoff_stream|commit_direct_sse_attempt_after_terminal/,
+  "Direct SSE timing owner must not revive the removed lazy handoff path",
 );
 requireMatch(
   directSseOutcome,

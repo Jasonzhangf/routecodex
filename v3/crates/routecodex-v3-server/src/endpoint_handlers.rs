@@ -1185,7 +1185,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 );
             }
         }
-        return anthropic_relay_output_response(output, stream);
+        return anthropic_relay_output_response(
+            output,
+            stream,
+            &state.manifest,
+            &state.server.id,
+        );
     }
     if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let output = match execute_v3_gemini_relay_runtime_with_default_transport_provider_health(
@@ -1337,6 +1342,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     plan.expanded.clone(),
                     BTreeSet::new(),
                     None,
+                    None,
                 )
                 .await
                 {
@@ -1390,6 +1396,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     plan.expanded.clone(),
                     BTreeSet::new(),
                     None,
+                    None,
                 )
                 .await
                 {
@@ -1434,6 +1441,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         }
         if let Some(handoff) = output.protocol_direct_handoff.take() {
+            let request_execution_control = handoff.request_execution_control;
             let outcome = execute_responses_direct_server_outcome(
                 &state,
                 &request_headers,
@@ -1445,6 +1453,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 handoff.request_payload.clone(),
                 Some(&handoff.plan),
                 Some(handoff.observability_accumulator),
+                Some(request_execution_control),
                 Some(provider_failure_event_sink.clone()),
                 Some(route_selection_event_sink.clone()),
                 request_purpose,
@@ -1588,6 +1597,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             responses_protocol_plan
                 .as_ref()
                 .map(V3MetadataCenterExecutionPlan::protocol_plan),
+            None,
             None,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),

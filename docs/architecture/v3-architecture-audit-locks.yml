@@ -451,8 +451,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:fe71d0220bfc597c445299aa478b6e7735ae9d6d69e634ba162c08a1fb8e3702
-    last_manual_authorization_id: auth-20260827-v3-sse-closeout-map-sync-provider-action
+    fingerprint: sha256:6969ab703d50e0f71f8fdf68ddb7eac38f971c64105ef9a4467a29b539d6413c
+    last_manual_authorization_id: auth-20260830-v3-execution-control-provider-action
   - item_id: chain:v3.build_test_artifact_budget
     chain_id: v3.build_test_artifact_budget
     status: audited_locked
@@ -522,6 +522,13 @@ manual_authorizations:
     reason: "Jason authorized the SSE/client connection decoupling audit and architecture-compliant repair. This refresh records the verified provider-action gate after its source ownership and manifest bindings were synchronized to the current typed SSE boundary; provider policy semantics remain owned by the provider-failure claim."
     fingerprint_before: sha256:3c8d46790fab4b8241fe9f8b0357f2ff8023ab81985426bdca969c422af953cd
     fingerprint_after: sha256:fe71d0220bfc597c445299aa478b6e7735ae9d6d69e634ba162c08a1fb8e3702
+  - authorization_id: auth-20260830-v3-execution-control-provider-action
+    item_id: chain:v3.provider_action_gate.mainline
+    approved_by: Jason
+    approved_at: '2026-08-30T07:31:41-07:00'
+    reason: "Jason explicitly authorized refreshing the provider-action gate lock for the V3 execution-control architecture repair. The new fingerprint binds Direct provider-action admission, failure recording, and success recording to the resident executor and pre-commit full-attempt lifecycle; the removed handoff-budget executor and post-commit Direct stream-failure edge remain forbidden."
+    fingerprint_before: sha256:fe71d0220bfc597c445299aa478b6e7735ae9d6d69e634ba162c08a1fb8e3702
+    fingerprint_after: sha256:6969ab703d50e0f71f8fdf68ddb7eac38f971c64105ef9a4467a29b539d6413c
   - authorization_id: auth-20260827-v3-sse-closeout-map-sync-build
     item_id: chain:v3.build_test_artifact_budget
     approved_by: Jason

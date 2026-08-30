@@ -551,6 +551,26 @@ fn compile_server_execution(
             .collect())
     }
 
+    let attempt_store = authoring.attempt_store;
+    if attempt_store.request_max_attempts == 0
+        || attempt_store.attempt_max_bytes == 0
+        || attempt_store.attempt_max_frames == 0
+        || attempt_store.request_max_bytes == 0
+        || attempt_store.process_max_bytes == 0
+        || attempt_store.residence_timeout_ms == 0
+    {
+        return Err(validation(format!(
+            "hub_v1 server {server_id} attempt_store limits must be non-zero"
+        )));
+    }
+    if attempt_store.attempt_max_bytes > attempt_store.request_max_bytes
+        || attempt_store.request_max_bytes > attempt_store.process_max_bytes
+    {
+        return Err(validation(format!(
+            "hub_v1 server {server_id} attempt_store byte limits must satisfy attempt <= request <= process"
+        )));
+    }
+
     Ok(V3ServerExecutionManifest {
         allowed_modes: closed_list(
             server_id,
@@ -591,6 +611,14 @@ fn compile_server_execution(
                 }
                 scope_keys
             },
+        },
+        attempt_store: V3AttemptStorePolicyManifest {
+            request_max_attempts: attempt_store.request_max_attempts,
+            attempt_max_bytes: attempt_store.attempt_max_bytes,
+            attempt_max_frames: attempt_store.attempt_max_frames,
+            request_max_bytes: attempt_store.request_max_bytes,
+            process_max_bytes: attempt_store.process_max_bytes,
+            residence_timeout_ms: attempt_store.residence_timeout_ms,
         },
     })
 }

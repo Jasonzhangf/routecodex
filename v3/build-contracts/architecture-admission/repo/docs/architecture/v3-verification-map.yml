@@ -18,9 +18,11 @@ features:
   - same provider and auth key share health across sessions for the same model
   - same provider and auth key remain available for a different model
   - legacy model-specific entries remain isolated during migration
+  - positive health adjustment is capped at 150% of configured priority while smaller adjustments remain unchanged
   required_negative:
   - v3 persistence without probe_model_id fails explicitly
   - duplicate v4 key health identities fail instead of silently overwriting control truth
+  - health uplift above the 150% cap and zero-priority positive uplift are rejected
   - mainline caller/callee symbols, edge owners, and resource writer/reader bindings must resolve to the registered modules
   - key health state never enters provider or client payload
   required_gates:
@@ -125,6 +127,44 @@ features:
   completion_rule:
     source: all unit + integration tests pass
     runtime: WebUI/CLI behave correctly against real ~/.rcc config
+- feature_id: v3.simplified_user_config
+  status: default_config_toml_source_cutover
+  change_risk: high
+  owner_kind: rust_v3_config_authoring_projection
+  owner_scope: Strict minimal config.toml parser and deterministic projection into the existing V3Config02 authoring contract.
+  owner_modules:
+  - v3/crates/routecodex-v3-config/src/user_config.rs
+  contract:
+  - docs/goals/v3-simplified-config-test-design.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - Ordered outer tiers compile to deterministic descending internal priority values (`N..1`), because current V3 Target selects the maximum numeric priority.
+  - Omitted weights in one multi-member tier compile to equal weights.
+  - Different TOML table ordering and explicit equal weights produce the same normalized authoring and Manifest output.
+  - The projected authoring enters the existing Config03, Config04, and Config05 functions without a second compiler.
+  - Exact basename config.toml selects V3UserConfigStore once in the Config owner and server status consumes its loaded snapshot.
+  - CLI lifecycle and config commands without an explicit path resolve only ~/.rcc/config.toml.
+  - Explicit config.v3.toml remains on V3ConfigStore until the retirement phase.
+  required_negative:
+  - Unknown user fields, internal fields, malformed provider/model refs, empty pools or tiers, duplicate members, invalid weights, and unknown topology fail before Manifest publication.
+  - Runtime, Server, Virtual Router, Target, Provider, and Error crates do not read config.toml or call the user parser.
+  - Parse failure never retries config.v3.toml and config.v3 failure never retries config.toml.
+  - Lifecycle does not directly choose a parser or re-read config.toml through the legacy store.
+  - No user-config value enters request, response, provider wire, protocol metadata, Error payload, or debug payload.
+  required_gates:
+  - npm run verify:v3-simplified-user-config
+  - npm run test:v3-simplified-user-config-red-fixtures
+  - npm run test:v3-user-config-contract
+  - npm run test:v3-user-config-cli
+  - npm run verify:v3-managed-server-lifecycle
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_rule:
+    source: Standalone parser/projector, exact-path CLI/lifecycle blackbox, negative, mutation, architecture, differential tests, and the default config.toml resolver pass.
+    runtime: Explicit config.toml status, dry-run, aggregate restart, health, browser and same-entry replay pass before default-path cutover; no-argument aggregate restart and the same live matrix must pass after cutover.
 - feature_id: v3.managed_server_lifecycle
   status: source_controlled_and_live_5555_release_rollover_verified
   change_risk: high
@@ -150,7 +190,8 @@ features:
   - no resolved secret in lifecycle projection
   - wrong identity, stale state, duplicate-start takeover, explicit listener PID force release, foreign managed multi-port port-scoped release, and already-stopped failures
   - terminal same-config release executable rollover succeeds while running or missing-terminal rollover fails without reaping
-  - top-level start without -c resolves ~/.rcc/config.v3.toml and --snap forces snapshots
+  - config-path restart transfers only to a typed target declaration with the exact same listener set; listener drift is rejected
+  - top-level lifecycle commands without -c resolve ~/.rcc/config.toml and --snap forces snapshots
   - foreground start forces startup and common HTTP request console even when config log_console is false
   - routecodex dev shim may enable snap/debug by default while rcc/rccv3 stable shims require explicit --snap/--debug and restart.plan.json remains previous-release compatible
   required_integration:
@@ -1830,6 +1871,7 @@ features:
   - responses_inbound_restores_codex_integer_tool_schema_types
   - responses_inbound_does_not_rewrite_string_session_id_schema
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
+  - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   - Live V3 0.90.4017 request `openai-responses-router-gpt-5.5-20260801T215453223-700406-1956` entered on 5520, targeted `modrouter_anthropic[key2].claude-fable-5`, and returned HTTP 200 `requires_action`
     after the complete typed node chain.
   - Managed instance `v3-91d56506a37701333e88` reported build 0.90.4017 healthy on 5520, 5555, and 10000; installed binary SHA256 was `01c4144679fbb424771ba5f15341eedf1f05cc2b78d3ba7a92578177ee00af9c`.
@@ -2917,11 +2959,13 @@ features:
   - docs/architecture/v3-resource-operation-map.yml
   required_positive:
   - Debug artifacts are preserved verbatim before filesystem persistence; no proxy-generated redaction marker is allowed.
+  - Direct runtime typed provider request/response carriers persist canonical artifacts without rebuilding provider payloads at the server boundary.
   - Error evidence force-writes request/error samples even when sampling is disabled.
   - Dev builds sample by default; release builds require explicit opt-in.
   - Each port retains at most 200 request directories.
   required_negative:
   - Debug payload copies never enter MetadataCenter, provider payload, client payload, continuation state, or routing truth.
+  - Missing Direct typed carriers do not cause the server to fabricate provider artifacts.
   - No truncation or placeholder machinery may exist anywhere in the sample path.
   required_gates:
   - npm run verify:v3-debug-payload-budget
@@ -3423,7 +3467,7 @@ features:
   owner_scope: Server appends typed lifecycle rows to a per-listener JSONL store; Admin reads the same store directly and no public observability API is registered on ordinary listeners.
   unit:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
-  - v3/crates/routecodex-v3-config/src/v3_webui_observability_io.rs
+  - v3/crates/routecodex-v3-debug/src/observability_store.rs
   contract:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
@@ -3441,7 +3485,7 @@ features:
   - Admin does not use SSE, snapshot polling, or loopback HTTP transport to read request records.
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
-  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --lib v3_webui_observability_io
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store
   - npm run verify:v3-resource-map
   - npm run verify-architecture-mainline-call-map
   - git diff --check
@@ -3452,3 +3496,148 @@ features:
     live_evidence:
     - docs/architecture/evidence/v3-route-policy-condition-evaluation-live.json
     dsh_review: 'VERDICT: PASS (v3-route-policy-condition-20260820-final-review-12)'
+
+- feature_id: v3.execution_request_lifecycle
+  status: active
+  change_risk: critical
+  owner_kind: rust_v3_resident_request_execution_lifecycle
+  owner_scope: Resident Direct and Relay transitions reuse one request control, target plan, Error05 recovery state, deadline, and attempt budget.
+  required_gates:
+  - npm run verify:v3-execution-control-payload-architecture
+  - npm run test:v3-execution-control-payload-architecture-red-fixtures
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime execution_control_payload_architecture -- --nocapture
+  completion_boundary: {source_controlled: true, live_cutover: required}
+
+- feature_id: v3.execution_attempt_budget_store
+  status: active
+  change_risk: critical
+  owner_kind: rust_v3_bounded_attempt_payload_store
+  owner_scope: Direct and Relay append only through byte, frame, request, process, and residence admission before copy.
+  required_gates:
+  - npm run verify:v3-direct-sse-full-attempt-commit
+  - npm run verify:v3-execution-control-payload-architecture
+  - npm run test:v3-execution-control-payload-architecture-red-fixtures
+  completion_boundary: {source_controlled: true, live_cutover: required}
+
+- feature_id: v3.execution_attempt_success_receipt
+  status: active
+  change_risk: critical
+  owner_kind: rust_v3_protocol_terminal_seal_receipt
+  owner_scope: Only a buffered terminal response or terminal-sealed SSE attempt can issue success consumed by health, route, continuation, and commit owners.
+  required_gates:
+  - npm run verify:v3-execution-control-payload-architecture
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime execution_control_payload_architecture -- --nocapture
+  completion_boundary: {source_controlled: true, live_cutover: required}
+
+- feature_id: v3.execution_stream_control_diagnostics_split
+  status: active
+  change_risk: high
+  owner_kind: rust_v3_small_stream_control_and_bounded_diagnostics
+  owner_scope: Terminal control reads remain independent of raw SSE diagnostics size and local observation failure cannot become provider failure.
+  required_gates:
+  - npm run verify:v3-execution-control-payload-architecture
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime local_response_failures_never -- --nocapture
+  completion_boundary: {source_controlled: true, live_cutover: required}
+
+- feature_id: v3.provider_health_persistence_isolation
+  status: active
+  change_risk: high
+  owner_kind: rust_v3_provider_health_bounded_single_writer
+  owner_scope: Provider health truth mutates under a short lock and persistence is queued to the provider-owned writer after unlock.
+  required_gates:
+  - npm run verify:v3-execution-control-payload-architecture
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --lib
+  completion_boundary: {source_controlled: true, live_cutover: required}
+
+- feature_id: v3.observability_persistence_isolation
+  status: active
+  change_risk: high
+  owner_kind: rust_v3_bounded_request_ledger_single_writer
+  owner_scope: Server queues outside its request mutex, Debug owns runtime JSONL append/read and hard caps, and Config publishes path/policy only.
+  required_gates:
+  - npm run verify:v3-execution-control-payload-architecture
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server webui_observability::tests --lib
+  completion_boundary: {source_controlled: true, live_cutover: required}
+
+- feature_id: v3.execution_control_payload_architecture
+  status: active
+  change_risk: critical
+  owner_kind: rust_v3_execution_control_payload_global_architecture
+  owner_scope: One resident request lifecycle owns immutable target plan, cumulative budget, Error05 recovery, bounded Direct/Relay attempt storage, sealed success, and closeout; diagnostics and persistence cannot control or block it.
+  owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+  - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  - v3/crates/routecodex-v3-debug/src/observability_store.rs
+  contract:
+  - docs/goals/v3-execution-control-payload-architecture-audit-problem.md
+  - docs/goals/v3-execution-control-payload-architecture-audit-design.md
+  - docs/goals/v3-execution-control-payload-architecture-audit-plan.md
+  - docs/architecture/manifests/v3.execution_control_payload_architecture.mainline.yml
+  - docs/architecture/wiki/v3-execution-control-payload-architecture.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-runtime-module-registry.yml
+  required_positive:
+  - Direct and Relay attempts consume one request-level attempt/deadline budget and one immutable target plan.
+  - A real local TCP replacement SSE stream remains readable to protocol terminal on the resident Runtime.
+  - Direct and Relay share bounded attempt-store admission for per-attempt, per-request, process-global, and residence/deadline dimensions.
+  - Protocol terminal plus successful payload seal issues one typed success receipt consumed by provider health, route policy, continuation, and client commit.
+  - Terminal checks read only small control state and remain constant-cost as raw SSE diagnostics grow.
+  - Local resource, observation, client cancellation, persistence, upstream, and protocol failures retain distinct typed attribution.
+  - Provider-health and request-ledger persistence mutate memory under a short lock and perform filesystem I/O through an ordered bounded single writer outside that lock.
+  - Active request and recent terminal caches, history file bytes, and startup history loading all have explicit testable limits.
+  required_negative:
+  - No SSE wrapper, compat hook, codec, Server handler, or persistence component creates a Tokio Runtime or re-enters a complete request executor.
+  - Target-local recovery does not reclassify the request, reevaluate route policy, re-hit an opaque pool, or reset failed candidates/retry counts.
+  - HTTP 2xx, response headers, a constructed stream object, first business frame, or clean transport accept cannot issue success.
+  - Attempt byte/frame admission occurs before append or copy; capacity exhaustion cannot continue with a partial response presented as complete.
+  - Control state never enters provider/client payload, protocol metadata, continuation payload, history, or debug snapshot; payload and diagnostics never reconstruct control truth.
+  - Local resource, observation, persistence, and client-cancel failures never become provider ResponseBody and never penalize provider health.
+  - Provider health write locks and listener observability mutexes never cover open, serialize, write, flush, rename, rotation, or history load.
+  - Module-boundary scanning cannot discard production code merely because it appears after a test module.
+  - Full-attempt gates cannot pass from names, comments, or marker-only implementations.
+  required_red_gates:
+  - npm run test:v3-execution-control-payload-architecture-red-fixtures
+  - real local TCP handoff fixture fails or hangs when the response stream is bound to a destroyed temporary Runtime
+  - Direct attempt buffer overflow fixture fails before byte/frame/request/global admission exists
+  - early-success fixture observes provider success before post-header SSE failure on the current baseline
+  - terminal-query allocation fixture observes raw SSE clone cost on the current baseline
+  - local buffer/observation failure fixture observes provider ResponseBody attribution on the current baseline
+  - health and request-ledger persistence mutations fail when bounded-writer or mutex-release guards are removed
+  required_gates:
+  - npm run verify:v3-execution-control-payload-architecture
+  - npm run test:v3-execution-control-payload-architecture-red-fixtures
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime execution_control_payload_architecture -- --nocapture
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test execution_control_tcp_handoff -- --nocapture
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses health_persistence_isolation -- --nocapture
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server observability_persistence_isolation -- --nocapture
+  - npm run verify:v3-direct-sse-full-attempt-commit
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-architecture-ci
+  - npm run verify:ci
+  - git diff --check
+  live_required:
+  - globally install the exact worktree artifact and prove installed binary hash/version identity
+  - run the single aggregate routecodex restart command and verify every configured listener health endpoint
+  - replay the old mid-stream failure sample and a real local/upstream TCP replacement stream to terminal
+  - run concurrent large-response capacity tests and long-running request-ledger retention/rotation tests
+  completion_boundary:
+    source_controlled: true
+    all_contract_bindings_anchored: required
+    runtime_red_status_remaining: forbidden
+    live_cutover: required
+    global_install_restart: required
+    live_evidence: required
+    agy_review: controller_pass_required
+    commit_push: exact_reviewed_commit_required

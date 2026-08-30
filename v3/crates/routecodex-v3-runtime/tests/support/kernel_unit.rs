@@ -451,6 +451,7 @@ pub(super) async fn run_normal_direct_request_does_not_consume_unrelated_provide
 
     provider_health
         .record_provider_success_in_failure_scope(
+            &V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
             &failure_session_scope,
             "other-provider",
             Some("key1"),
@@ -1168,6 +1169,10 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
         json!({"model":"client-model","input":"hello","stream":true}),
     );
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    assert_eq!(
+        plan.decision.target.candidate.provider_id, "first",
+        "the immutable preplanned Target10 must begin with the priority-1 candidate"
+    );
     let output = execute_v3_responses_direct_runtime_kernel_core(
         V3ResponsesDirectRuntimeCoreState::no_continuation()
             .with_provider_health(provider_health)
@@ -1248,23 +1253,29 @@ async fn direct_sse_full_attempt_commit_reselects_after_partial_network_failure(
             "network failure after partial provider output",
         )),
     ]));
-    let client = wrap_direct_sse_provider_handoff_stream(
+    let error = collect_direct_sse_attempt_after_terminal(
         source,
         V3HubProviderWireProtocol::Responses,
-        move |_| {
-            async move {
-                Ok(Some(Box::pin(stream::iter([Ok(
-                    b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"recovered\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"recovered\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
-                )])) as V3ClientSseStream))
-            }
-        },
-        Some(1),
-    );
-    let frames = client.collect::<Vec<_>>().await;
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect_err("resident owner must receive the partial attempt failure");
+    assert_eq!(error.code, "provider_response_sse_stream");
+    let replacement: V3ClientSseStream = Box::pin(stream::iter([Ok(
+        b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"recovered\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"recovered\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
+    )]));
+    let frames = collect_direct_sse_attempt_after_terminal(
+        replacement,
+        V3HubProviderWireProtocol::Responses,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("resident owner must seal the replacement attempt")
+    .collect::<Vec<_>>()
+    .await;
     let text = String::from_utf8(
         frames
             .into_iter()
-            .map(|frame| frame.expect("replacement attempt must succeed"))
             .flatten()
             .collect(),
     )
@@ -1274,21 +1285,174 @@ async fn direct_sse_full_attempt_commit_reselects_after_partial_network_failure(
 }
 
 #[tokio::test]
+async fn execution_control_payload_architecture_real_tcp_sse_reselection_stays_on_resident_runtime() {
+    use futures_util::StreamExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    std::env::set_var("TCP_FIRST_KEY", "first-secret");
+    std::env::set_var("TCP_SECOND_KEY", "second-secret");
+    let first_listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind first TCP provider");
+    let first_address = first_listener
+        .local_addr()
+        .expect("first TCP provider address");
+    let second_listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind second TCP provider");
+    let second_address = second_listener
+        .local_addr()
+        .expect("second TCP provider address");
+
+    let first_server = tokio::spawn(async move {
+        for _ in 0..3 {
+            let (mut socket, _) = first_listener.accept().await.expect("first provider accept");
+            let mut request = [0_u8; 4096];
+            let _ = socket.read(&mut request).await.expect("first provider request");
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
+                )
+                .await
+                .expect("first provider headers");
+            socket
+                .write_all(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-a-must-not-commit\"}\n\n")
+                .await
+                .expect("first provider partial frame");
+            socket.shutdown().await.expect("first provider disconnect");
+        }
+    });
+    let second_server = tokio::spawn(async move {
+        let (mut socket, _) = second_listener
+            .accept()
+            .await
+            .expect("second provider accept");
+        let mut request = [0_u8; 4096];
+        let _ = socket.read(&mut request).await.expect("second provider request");
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .expect("second provider headers");
+        socket
+            .write_all(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider-b\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-b-only\"}\n\n")
+            .await
+            .expect("second provider first frames");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        socket
+            .write_all(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider-b\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"provider-b-only\"}]}}\n\n")
+            .await
+            .expect("second provider terminal frame");
+        socket.shutdown().await.expect("second provider shutdown");
+    });
+
+    let authoring = parse_v3_config_02_authoring(&format!(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "tcp_lifecycle"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = {{ allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }}
+attempt_store = {{ request_max_attempts = 8, attempt_max_bytes = 67108864, attempt_max_frames = 262144, request_max_bytes = 67108864, process_max_bytes = 536870912, residence_timeout_ms = 600000 }}
+
+[providers.tcp_first]
+type = "responses"
+base_url = "http://{first_address}/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "TCP_FIRST_KEY" }}] }}
+[providers.tcp_first.models.test]
+wire_name = "wire-first"
+[providers.tcp_first.health]
+enabled = true
+failure_threshold = 3
+cooldown_ms = 900000
+
+[providers.tcp_second]
+type = "responses"
+base_url = "http://{second_address}/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "TCP_SECOND_KEY" }}] }}
+[providers.tcp_second.models.test]
+wire_name = "wire-second"
+[providers.tcp_second.health]
+enabled = true
+failure_threshold = 3
+cooldown_ms = 900000
+
+[forwarders.tcp]
+model = "client-model"
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "tcp_first", model = "test", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "tcp_second", model = "test", key = "key", priority = 1 }}
+]
+
+[route_groups.tcp_lifecycle.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "tcp", priority = 1 }}]
+"#
+    ))
+    .expect("real TCP SSE authoring config");
+    let manifest = compile_v3_config_05_manifest(authoring).expect("real TCP SSE manifest");
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        "tcp_lifecycle",
+        "req-real-tcp-sse",
+        "exec-real-tcp-sse",
+        json!({"model":"client-model","input":"hello","stream":true}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let request_execution_control =
+        V3RequestExecutionControl::from_manifest(&manifest, "test").expect("request control");
+    let attempt_budget = request_execution_control.attempt_budget();
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan)
+            .with_request_execution_control(Some(request_execution_control)),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &ReqwestResponsesTransport::default(),
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(attempt_budget.transport_attempts(), 4);
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let V3ClientBody::CommittedSse(stream) = output.client_payload.body else {
+        panic!("replacement TCP stream must be atomically committed")
+    };
+    let committed = stream.collect::<Vec<_>>().await;
+    let text = String::from_utf8(committed.into_iter().flatten().collect()).unwrap();
+    assert!(text.contains("provider-b-only"));
+    assert!(!text.contains("provider-a-must-not-commit"));
+    first_server.await.expect("first provider task");
+    second_server.await.expect("second provider task");
+}
+
+#[tokio::test]
 async fn direct_sse_full_attempt_commit_rejects_eof_without_terminal() {
     use futures_util::StreamExt;
 
     let source: V3ClientSseStream = Box::pin(stream::iter([Ok(
         b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
     )]));
-    let client = wrap_direct_sse_provider_handoff_stream(
+    let error = collect_direct_sse_attempt_after_terminal(
         source,
         V3HubProviderWireProtocol::Responses,
-        |_| async { Ok(None) },
-        Some(0),
-    );
-    let frames = client.collect::<Vec<_>>().await;
-    assert_eq!(frames.len(), 1);
-    let error = frames.into_iter().next().unwrap().expect_err("EOF without terminal must be an error");
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect_err("EOF without terminal must be an error");
     assert_eq!(error.code, "provider_response_sse_stream");
 }
 
@@ -1305,24 +1469,29 @@ async fn direct_sse_full_attempt_commit_does_not_mix_failed_attempt_bytes() {
             "provider A disconnected",
         )),
     ]));
-    let client = wrap_direct_sse_provider_handoff_stream(
+    let error = collect_direct_sse_attempt_after_terminal(
         source,
         V3HubProviderWireProtocol::Responses,
-        move |_| {
-            async move {
-                Ok(Some(Box::pin(stream::iter([Ok(
-                    b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider-b\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-b-only\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider-b\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
-                )])) as V3ClientSseStream))
-            }
-        },
-        Some(1),
-    );
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect_err("provider A must fail before any bytes are committed");
+    assert_eq!(error.code, "provider_response_sse_stream");
+    let replacement: V3ClientSseStream = Box::pin(stream::iter([Ok(
+        b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider-b\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-b-only\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider-b\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
+    )]));
+    let committed = collect_direct_sse_attempt_after_terminal(
+        replacement,
+        V3HubProviderWireProtocol::Responses,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("provider B must complete");
     let text = String::from_utf8(
-        client
+        committed
             .collect::<Vec<_>>()
             .await
             .into_iter()
-            .map(|frame| frame.expect("provider B must complete"))
             .flatten()
             .collect(),
     )
@@ -1344,22 +1513,22 @@ async fn direct_sse_full_attempt_commit_ignores_late_error_after_terminal() {
             "late provider close error",
         )),
     ]));
-    let client = wrap_direct_sse_provider_handoff_stream(
+    let frames = collect_direct_sse_attempt_after_terminal(
         source,
         V3HubProviderWireProtocol::Responses,
-        |_| async { panic!("terminal stream must not be handed off") },
-        Some(1),
-    );
-    let frames = client.collect::<Vec<_>>().await;
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("terminal stream must seal")
+    .collect::<Vec<_>>()
+    .await;
     assert_eq!(frames.len(), 1);
-    let text = String::from_utf8(frames.into_iter().next().unwrap().unwrap()).unwrap();
+    let text = String::from_utf8(frames.into_iter().next().unwrap()).unwrap();
     assert!(text.contains("response.completed"));
 }
 
 #[tokio::test]
 async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
-    use futures_util::StreamExt;
-
     struct FailedSseTransport;
 
     #[async_trait]
@@ -1405,13 +1574,32 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
     )
     .await;
 
-    assert_eq!(output.client_payload.status, 200, "SSE headers are already accepted: {output:?}");
-    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
-        panic!("provider SSE must remain a lazy client stream: {output:?}");
+    assert_eq!(
+        output.client_payload.status, 502,
+        "pre-terminal EOF must finish Error01-06 before any client body is committed: {output:?}"
+    );
+    let V3ClientBody::Json(body) = output.client_payload.body else {
+        panic!("exhausted pre-terminal SSE failure must be a typed terminal error: {output:?}");
     };
-    let frames = stream.collect::<Vec<_>>().await;
-    assert!(frames.iter().all(Result::is_err), "partial provider bytes must not be exposed: {frames:?}");
-    assert!(frames.iter().any(|frame| frame.as_ref().unwrap_err().code == "provider_response_sse_stream"));
+    assert_eq!(body["error"]["code"], "provider_response_sse_stream");
+    assert!(
+        !body.to_string().contains("partial"),
+        "failed attempt bytes must never enter the terminal client payload: {body}"
+    );
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice()),
+        "the resident controller must consume the complete Error01-06 chain"
+    );
+    assert!(output.stream_observation.is_none());
+    assert_eq!(
+        output
+            .observability
+            .as_ref()
+            .and_then(|observability| observability.attempts),
+        Some(3),
+        "one request-level lifecycle must retain all same-provider attempts"
+    );
 }
 
 #[tokio::test]

@@ -717,6 +717,89 @@ fn compact_native_hub_v1_authoring_derives_closed_internal_defaults() {
         execution.continuation.scope_keys,
         vec!["entry_protocol", "server", "routing_group", "session"]
     );
+    assert_eq!(execution.attempt_store.request_max_attempts, 8);
+    assert_eq!(execution.attempt_store.attempt_max_bytes, 64 * 1024 * 1024);
+    assert_eq!(execution.attempt_store.attempt_max_frames, 262_144);
+    assert_eq!(execution.attempt_store.request_max_bytes, 64 * 1024 * 1024);
+    assert_eq!(
+        execution.attempt_store.process_max_bytes,
+        512 * 1024 * 1024
+    );
+    assert_eq!(execution.attempt_store.residence_timeout_ms, 600_000);
+}
+
+#[test]
+fn server_execution_attempt_store_compiles_explicit_policy() {
+    let explicit_execution = HUB_V1_SERVER_EXECUTION.replacen(
+        "continuation = { allowed_owners = [\"none\", \"remote_provider\", \"routecodex_local\"], scope_keys = [\"entry_protocol\", \"server\", \"routing_group\", \"session\"] }",
+        "continuation = { allowed_owners = [\"none\", \"remote_provider\", \"routecodex_local\"], scope_keys = [\"entry_protocol\", \"server\", \"routing_group\", \"session\"] }\nattempt_store = { request_max_attempts = 7, attempt_max_bytes = 1024, attempt_max_frames = 16, request_max_bytes = 2048, process_max_bytes = 4096, residence_timeout_ms = 5000 }",
+        1,
+    );
+    let raw = format!(
+        "{}\n{}\n{}",
+        FULL_CONFIG, HUB_V1_DECLARATION, explicit_execution
+    );
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap())
+        .expect("explicit attempt-store policy must compile");
+    let policy = &manifest.servers["primary"]
+        .execution
+        .as_ref()
+        .expect("primary execution policy")
+        .attempt_store;
+
+    assert_eq!(policy.request_max_attempts, 7);
+    assert_eq!(policy.attempt_max_bytes, 1024);
+    assert_eq!(policy.attempt_max_frames, 16);
+    assert_eq!(policy.request_max_bytes, 2048);
+    assert_eq!(policy.process_max_bytes, 4096);
+    assert_eq!(policy.residence_timeout_ms, 5000);
+}
+
+#[test]
+fn server_execution_attempt_store_rejects_zero_and_inverted_limits() {
+    let continuation = "continuation = { allowed_owners = [\"none\", \"remote_provider\", \"routecodex_local\"], scope_keys = [\"entry_protocol\", \"server\", \"routing_group\", \"session\"] }";
+    let invalid_policies = [
+        "attempt_store = { request_max_attempts = 0 }",
+        "attempt_store = { attempt_max_bytes = 0 }",
+        "attempt_store = { attempt_max_frames = 0 }",
+        "attempt_store = { request_max_bytes = 0 }",
+        "attempt_store = { process_max_bytes = 0 }",
+        "attempt_store = { residence_timeout_ms = 0 }",
+        "attempt_store = { attempt_max_bytes = 2048, request_max_bytes = 1024 }",
+        "attempt_store = { request_max_bytes = 4096, process_max_bytes = 2048 }",
+    ];
+
+    for invalid_policy in invalid_policies {
+        let execution = HUB_V1_SERVER_EXECUTION.replacen(
+            continuation,
+            &format!("{continuation}\n{invalid_policy}"),
+            1,
+        );
+        let raw = format!("{}\n{}\n{}", FULL_CONFIG, HUB_V1_DECLARATION, execution);
+        let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap())
+            .expect_err("invalid attempt-store policy must fail");
+        assert!(
+            error.to_string().contains("attempt_store"),
+            "unexpected error for {invalid_policy}: {error}"
+        );
+    }
+}
+
+#[test]
+fn server_execution_attempt_store_rejects_unknown_fields() {
+    let raw = format!(
+        "{}\n{}\n{}",
+        FULL_CONFIG,
+        HUB_V1_DECLARATION,
+        HUB_V1_SERVER_EXECUTION.replacen(
+            "continuation = { allowed_owners = [\"none\", \"remote_provider\", \"routecodex_local\"], scope_keys = [\"entry_protocol\", \"server\", \"routing_group\", \"session\"] }",
+            "continuation = { allowed_owners = [\"none\", \"remote_provider\", \"routecodex_local\"], scope_keys = [\"entry_protocol\", \"server\", \"routing_group\", \"session\"] }\nattempt_store = { unknown_limit = 1 }",
+            1,
+        )
+    );
+    let error = parse_v3_config_02_authoring(&raw)
+        .expect_err("unknown attempt-store authoring field must fail");
+    assert!(error.to_string().contains("unknown field `unknown_limit`"));
 }
 
 #[test]

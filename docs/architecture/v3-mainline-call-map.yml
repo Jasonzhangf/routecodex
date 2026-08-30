@@ -6330,7 +6330,7 @@ chains:
     - step_id: v3-provider-action-gate-08
       from_node: V3Error05RecoveryWitness
       to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -6350,7 +6350,7 @@ chains:
     - step_id: v3-provider-action-gate-09
       from_node: V3ExecutionRetryOrReselect
       to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_exact_selected_provider_action
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -6450,7 +6450,7 @@ chains:
     - step_id: v3-provider-action-gate-14
       from_node: V3Error01SourceRaised
       to_node: V3Error05ExecutionDecision
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: run_v3_direct_provider_failure_policy
       callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
@@ -6510,7 +6510,7 @@ chains:
     - step_id: v3-provider-action-gate-19
       from_node: V3ProviderActionGateAdmission
       to_node: V3ProviderActionPermitInFlight
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: V3ProviderActionAdmission::take_permit
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6610,7 +6610,7 @@ chains:
     - step_id: v3-provider-action-gate-24
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: V3ProviderActionPermit::drop
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6710,7 +6710,7 @@ chains:
     - step_id: v3-provider-action-gate-29
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: V3ProviderActionPermit::drop
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6790,7 +6790,7 @@ chains:
     - step_id: v3-provider-action-gate-33
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionSuccessObserved
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: record_v3_direct_provider_success
       callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
@@ -6828,9 +6828,9 @@ chains:
         side_channel_writes:
           - v3.error.provider_action_gate
     - step_id: v3-provider-action-gate-35
-      from_node: V3ProviderActionPermitInFlight
+      from_node: V3ProviderActionPermitAbandoned
       to_node: V3ProviderActionFailureObserved
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
+      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: run_v3_direct_provider_failure_policy
       callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
@@ -6848,12 +6848,12 @@ chains:
         side_channel_writes:
           - v3.error.provider_action_gate
     - step_id: v3-provider-action-gate-36
-      from_node: V3ProviderActionPermitAbandoned
+      from_node: V3ProviderActionFailureObserved
       to_node: V3ProviderActionFailureRecorded
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      caller_symbol: run_v3_direct_provider_failure_policy
+      caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+      callee_symbol: record_v3_direct_provider_failure_record
+      callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -7596,27 +7596,27 @@ chains:
     caller_symbol: record_v3_observability_event
     caller_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
     callee_symbol: v3_webui_observability_append_row
-    callee_file: v3/crates/routecodex-v3-config/src/v3_webui_observability_io.rs
+    callee_file: v3/crates/routecodex-v3-debug/src/observability_store.rs
     status: anchored
     owner_feature_id: v3.server_internal_observability_projection
     resource_flow:
       consumes: [v3.runtime.responses_observability, v3.server.internal_observability_projection]
-      produces: [v3.config.webui_observability_store]
+      produces: [v3.observability.webui_store]
       side_channel_reads: [v3.runtime.responses_observability, v3.server.internal_observability_projection]
-      side_channel_writes: [v3.config.webui_observability_store]
+      side_channel_writes: [v3.observability.webui_store]
   - step_id: v3-admin-observability-read
     from_node: V3WebuiObservabilityStore
     to_node: V3AdminObservabilityAggregation
     caller_symbol: records
     caller_file: v3/crates/routecodex-v3-admin/src/api/observability.rs
     callee_symbol: v3_webui_observability_read_raw_rows
-    callee_file: v3/crates/routecodex-v3-config/src/v3_webui_observability_io.rs
+    callee_file: v3/crates/routecodex-v3-debug/src/observability_store.rs
     status: anchored
     owner_feature_id: v3.server_internal_observability_projection
     resource_flow:
-      consumes: [v3.config.webui_observability_store]
+      consumes: [v3.observability.webui_store]
       produces: []
-      side_channel_reads: [v3.config.webui_observability_store]
+      side_channel_reads: [v3.observability.webui_store]
       side_channel_writes: []
 
 - chain_id: v3.route_policy.condition_evaluation
@@ -8145,7 +8145,7 @@ chains:
   owner_feature_id: v3.responses_direct_full_attempt_commit
   summary: Direct provider SSE attempts remain runtime-buffered until a protocol terminal; failure enters Error01-05 and reselects before any business frame reaches the client.
   manifest: docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
-  implementation_symbols: [V3DirectSseAttemptBuffer, commit_direct_sse_attempt_after_terminal]
+  implementation_symbols: [V3CommittedClientSseBuilder, collect_direct_sse_attempt_after_terminal]
   entry_contract:
     node: V3ProviderResp14Raw
     owner_doc: docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md
@@ -8153,11 +8153,11 @@ chains:
   - step_id: v3-direct-sse-full-attempt-buffer
     from_node: V3ProviderResp14Raw
     to_node: V3DirectResp14ProviderProjectionPrepared
-    caller_symbol: wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook
+    caller_symbol: collect_direct_sse_attempt_after_terminal
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
-    callee_symbol: V3DirectSseAttemptBuffer::push
-    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
-    status: binding_pending
+    callee_symbol: V3CommittedClientSseBuilder::push
+    callee_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+    status: anchored
     edge_kind: runtime_attempt_buffer
     owner_feature_id: v3.responses_direct_full_attempt_commit
     resource_flow:
@@ -8165,14 +8165,138 @@ chains:
       produces: [v3.sse.direct.full_attempt_buffer]
       side_channel_reads: []
       side_channel_writes: []
+
+- chain_id: v3.execution_control_payload_architecture
+  owner_feature_id: v3.execution_request_lifecycle
+  summary: Active adjacent edges for one resident request lifecycle, bounded attempt storage, sealed success, constant-cost terminal control, and lock-isolated persistence.
+  manifest: docs/architecture/manifests/v3.execution_control_payload_architecture.mainline.yml
+  implementation_symbols:
+  - execute_v3_direct_runtime_kernel_core_resident
+  - execute_v3_responses_direct_runtime_kernel_core_resident
+  - V3RequestExecutionControl
+  - V3AttemptBudget::admit_transport_attempt
+  - V3CommittedClientSseBuilder::push
+  - V3RuntimeStreamObservation::semantic_terminal
+  - V3AttemptSuccessReceipt
+  - V3ProviderHealthPersistenceWriter::enqueue
+  - V3WebuiObservabilityPersistenceWriter::enqueue
+  entry_contract:
+    node: V3ExecutionControl01RequestAccepted
+    owner_doc: docs/architecture/wiki/v3-execution-control-payload-architecture.md
+  edges:
+  - step_id: v3-execution-control-target-plan
+    from_node: V3ExecutionControl01RequestAccepted
+    to_node: V3ExecutionControl02RecoveryDecision
+    caller_symbol: execute_v3_direct_runtime_kernel_core_resident
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    callee_symbol: build_v3_error_05_execution_decision_from_v3_error_04
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    status: anchored
+    edge_kind: immutable_plan_and_single_error05_recovery_entry
+    owner_feature_id: v3.execution_request_lifecycle
+    resource_flow:
+      consumes: [v3.execution.target_plan, v3.execution.attempt_budget, v3.error.execution_decision]
+      produces: [v3.execution.request_lifecycle_control]
+      side_channel_reads: [v3.error.execution_decision]
+      side_channel_writes: [v3.execution.request_lifecycle_control]
+  - step_id: v3-execution-control-attempt-admission
+    from_node: V3ExecutionControl02RecoveryDecision
+    to_node: V3ExecutionControl03AttemptReserved
+    caller_symbol: execute_v3_direct_runtime_kernel_core_resident
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    callee_symbol: V3AttemptBudget::admit_transport_attempt
+    callee_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+    status: anchored
+    edge_kind: reserve_before_append
+    owner_feature_id: v3.execution_attempt_budget_store
+    resource_flow:
+      consumes: [v3.execution.request_lifecycle_control, v3.execution.attempt_budget]
+      produces: [v3.execution.attempt_payload_store]
+      side_channel_reads: [v3.execution.attempt_budget]
+      side_channel_writes: [v3.execution.attempt_budget]
+  - step_id: v3-execution-control-attempt-stream
+    from_node: V3ExecutionControl03AttemptReserved
+    to_node: V3ExecutionControl04AttemptInFlight
+    caller_symbol: collect_direct_sse_attempt_after_terminal
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+    callee_symbol: V3CommittedClientSseBuilder::push
+    callee_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+    status: anchored
+    edge_kind: bounded_payload_and_small_control_update
+    owner_feature_id: v3.execution_attempt_budget_store
+    resource_flow:
+      consumes: [v3.execution.attempt_payload_store, v3.execution.attempt_control_state]
+      produces: [v3.execution.attempt_payload_store, v3.execution.attempt_control_state, v3.observability.stream_diagnostics]
+      side_channel_reads: [v3.execution.attempt_budget]
+      side_channel_writes: [v3.execution.attempt_control_state, v3.observability.stream_diagnostics]
+  - step_id: v3-execution-control-terminal-read
+    from_node: V3ExecutionControl04AttemptInFlight
+    to_node: V3ExecutionControl05AttemptSealed
+    caller_symbol: V3RuntimeStreamObservation::has_semantic_terminal
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+    callee_symbol: V3RuntimeStreamObservation::semantic_terminal
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+    status: anchored
+    edge_kind: constant_cost_terminal_control_read
+    owner_feature_id: v3.execution_stream_control_diagnostics_split
+    resource_flow:
+      consumes: [v3.execution.attempt_control_state]
+      produces: []
+      side_channel_reads: [v3.execution.attempt_control_state]
+      side_channel_writes: []
+  - step_id: v3-execution-control-success-receipt
+    from_node: V3ExecutionControl05AttemptSealed
+    to_node: V3ExecutionControl06SuccessCommitted
+    caller_symbol: execute_v3_direct_runtime_kernel_core_resident
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    callee_symbol: V3AttemptSuccessReceipt::from_sealed_sse_attempt
+    callee_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+    status: anchored
+    edge_kind: sealed_terminal_receipt_before_success_side_effects
+    owner_feature_id: v3.execution_attempt_success_receipt
+    resource_flow:
+      consumes: [v3.execution.attempt_control_state, v3.execution.attempt_payload_store]
+      produces: [v3.execution.attempt_success_receipt]
+      side_channel_reads: [v3.execution.attempt_control_state]
+      side_channel_writes: [v3.execution.attempt_success_receipt]
+  - step_id: v3-execution-control-health-persistence
+    from_node: V3ExecutionControl06SuccessCommitted
+    to_node: V3ExecutionControl07PersistenceQueued
+    caller_symbol: persist_cooldown_state
+    caller_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    callee_symbol: V3ProviderHealthPersistenceWriter::enqueue
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    status: anchored
+    edge_kind: bounded_health_persistence_queue
+    owner_feature_id: v3.provider_health_persistence_isolation
+    resource_flow:
+      consumes: [v3.execution.attempt_success_receipt, v3.provider.health_state]
+      produces: [v3.provider.health_persistence_queue]
+      side_channel_reads: [v3.execution.attempt_success_receipt]
+      side_channel_writes: [v3.provider.health_persistence_queue]
+  - step_id: v3-execution-control-observability-persistence
+    from_node: V3ExecutionControl06SuccessCommitted
+    to_node: V3ExecutionControl07PersistenceQueued
+    caller_symbol: V3WebuiObservability::record_observed
+    caller_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    callee_symbol: V3WebuiObservabilityPersistenceWriter::enqueue
+    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    status: anchored
+    edge_kind: bounded_observability_persistence_queue_after_lock_release
+    owner_feature_id: v3.observability_persistence_isolation
+    resource_flow:
+      consumes: [v3.observability.stream_diagnostics]
+      produces: [v3.observability.request_ledger_queue]
+      side_channel_reads: [v3.observability.stream_diagnostics]
+      side_channel_writes: [v3.observability.request_ledger_queue]
   - step_id: v3-direct-sse-full-attempt-terminal-commit
     from_node: V3DirectResp14ProviderProjectionPrepared
     to_node: V3DirectSseAccept03ProjectedClientFrame
-    caller_symbol: execute_v3_direct_runtime_kernel_core
+    caller_symbol: execute_v3_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
-    callee_symbol: commit_direct_sse_attempt_after_terminal
+    callee_symbol: collect_direct_sse_attempt_after_terminal
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
-    status: binding_pending
+    status: anchored
     edge_kind: terminal_attempt_client_commit
     owner_feature_id: v3.responses_direct_full_attempt_commit
     resource_flow:

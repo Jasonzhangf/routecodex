@@ -5115,21 +5115,23 @@ features:
   runtime_status: source_controlled_runtime_pending_live_replay
 
 - feature_id: v3.responses_direct_full_attempt_commit
-  status: design
+  status: active
   change_risk: critical
   owner_crate: routecodex-v3-runtime
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
   - v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs
   resource_bindings: [v3.sse.direct.full_attempt_buffer, v3.error.chain]
   entry_symbols:
-  - V3DirectSseAttemptBuffer
-  - commit_direct_sse_attempt_after_terminal
-  - wrap_direct_sse_provider_handoff_stream
+  - V3CommittedClientSseBuilder
+  - collect_direct_sse_attempt_after_terminal
+  - execute_v3_direct_runtime_kernel_core_resident
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
   - v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs
   - v3/scripts/architecture/verify-v3-direct-sse-full-attempt-commit.mjs
   - docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
@@ -5154,10 +5156,10 @@ features:
   - npm run verify:v3-module-boundaries
   - git diff --check
   completion_boundary:
-    source_controlled: pending
+    source_controlled: active
     live_cutover: required
     global_install_restart: required
-    dsh_review: required
+    agy_review: required
 
 - feature_id: v3.runtime_restart_handoff_skeleton
   status: design
@@ -5509,11 +5511,11 @@ features:
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
-  - v3/crates/routecodex-v3-config/src/v3_webui_observability_io.rs
+  - v3/crates/routecodex-v3-debug/src/observability_store.rs
   - v3/crates/routecodex-v3-config/src/store.rs
   resource_bindings:
   - v3.server.internal_observability_projection
-  - v3.config.webui_observability_store
+  - v3.observability.webui_store
   entry_symbols:
   - record_v3_observability_event
   - record_v3_webui_error_projection
@@ -5529,7 +5531,7 @@ features:
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
-  - v3/crates/routecodex-v3-config/src/v3_webui_observability_io.rs
+  - v3/crates/routecodex-v3-debug/src/observability_store.rs
   - v3/crates/routecodex-v3-config/src/store.rs
   forbidden_paths:
   - request.normal_payload
@@ -5621,7 +5623,7 @@ features:
   - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
   - v3/admin-webui/requests.html
   resource_bindings:
-  - v3.config.webui_observability_store
+  - v3.observability.webui_store
   entry_symbols:
   - records
   - v3_webui_observability_read_raw_rows
@@ -5642,3 +5644,229 @@ features:
   - npm run verify:v3-resource-map
   - git diff --check
   runtime_status: source_controlled_runtime_pending_live_replay
+
+- feature_id: v3.execution_request_lifecycle
+  status: active
+  change_risk: critical
+  owner_kind: rust_v3_resident_request_execution_lifecycle
+  owner_crates:
+  - routecodex-v3-runtime
+  owner_files:
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  resource_bindings:
+  - v3.execution.request_lifecycle_control
+  - v3.execution.target_plan
+  - v3.execution.attempt_budget
+  - v3.error.execution_decision
+  mainline_bindings:
+  - v3-execution-control-current-handoff
+  - v3-execution-control-current-responses-handoff
+  entry_symbols:
+  - execute_v3_direct_runtime_kernel_core_resident
+  - execute_v3_responses_direct_runtime_kernel_core_resident
+  - V3RequestExecutionControl
+  allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/tests
+  - docs/architecture
+  - docs/goals/v3-execution-control-payload-architecture-audit-*.md
+  forbidden_paths:
+  - v3/crates/routecodex-v3-server
+  - provider.wire_payload
+  - response.client_payload
+  - protocol.metadata
+  - MetadataCenter
+  - debug.snapshot
+  required_gates:
+  - npm run verify:v3-execution-control-payload-architecture
+  - npm run test:v3-execution-control-payload-architecture-red-fixtures
+  - real local TCP SSE replacement stream reaches protocol terminal on the resident Runtime
+  - no SSE wrapper creates a Runtime or re-enters a full executor
+  - one request-level attempt/deadline budget survives Direct, Relay, and typed handoff
+  - git diff --check
+
+- feature_id: v3.execution_attempt_budget_store
+  status: active
+  change_risk: critical
+  owner_kind: rust_v3_bounded_attempt_payload_store
+  owner_crates:
+  - routecodex-v3-runtime
+  owner_files:
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  resource_bindings:
+  - v3.execution.attempt_budget
+  - v3.execution.attempt_payload_store
+  entry_symbols:
+  - V3AttemptBudget::admit_transport_attempt
+  - V3CommittedClientSseBuilder::push
+  - collect_direct_sse_attempt_after_terminal
+  allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/tests
+  - docs/architecture
+  forbidden_paths:
+  - routecodex-v3-server
+  - routecodex-v3-provider-responses
+  - provider.wire_payload
+  - response.client_payload
+  - MetadataCenter
+  required_gates:
+  - Direct append rejects byte and frame overflow before allocation/copy
+  - concurrent attempts share request and process-global reservations
+  - seal/discard/cancel/error release reservations exactly once
+  - local resource exhaustion never mutates provider health
+  - npm run verify:v3-execution-control-payload-architecture
+  - git diff --check
+
+- feature_id: v3.execution_attempt_success_receipt
+  status: active
+  change_risk: critical
+  owner_kind: rust_v3_protocol_terminal_seal_receipt
+  owner_crates:
+  - routecodex-v3-runtime
+  owner_files:
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  resource_bindings:
+  - v3.execution.attempt_success_receipt
+  - v3.execution.attempt_control_state
+  - v3.provider.health_state
+  entry_symbols:
+  - V3AttemptSuccessReceipt
+  - record_provider_success_in_failure_scope
+  - commit_or_release_v3_direct_continuation
+  allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/tests
+  - docs/architecture
+  forbidden_paths:
+  - ProviderTransport
+  - routecodex-v3-server
+  - observability
+  - provider.wire_payload
+  - response.client_payload
+  required_gates:
+  - response headers and stream construction cannot issue success
+  - provider health, route policy, continuation, and client commit consume one sealed success receipt
+  - post-header SSE failure produces no earlier health success
+  - npm run verify:v3-execution-control-payload-architecture
+  - git diff --check
+
+- feature_id: v3.execution_stream_control_diagnostics_split
+  status: active
+  change_risk: high
+  owner_kind: rust_v3_small_stream_control_and_bounded_diagnostics
+  owner_crates:
+  - routecodex-v3-runtime
+  owner_files:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
+  resource_bindings:
+  - v3.execution.attempt_control_state
+  - v3.observability.stream_diagnostics
+  - v3.error.chain
+  entry_symbols:
+  - V3RuntimeStreamObservation::snapshot
+  - V3RuntimeStreamObservation::semantic_terminal
+  - V3RuntimeStreamObservation::has_semantic_terminal
+  allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
+  - v3/crates/routecodex-v3-runtime/tests
+  - docs/architecture
+  forbidden_paths:
+  - provider.wire_payload
+  - response.client_payload
+  - provider_health
+  - continuation
+  - route_policy
+  required_gates:
+  - terminal reads do not clone raw SSE or diagnostic payload
+  - local resource and observation failures remain typed internal failures
+  - provider ResponseBody is reserved for true upstream/protocol response failures
+  - npm run verify:v3-execution-control-payload-architecture
+  - git diff --check
+
+- feature_id: v3.provider_health_persistence_isolation
+  status: active
+  change_risk: high
+  owner_kind: rust_v3_provider_health_bounded_single_writer
+  owner_crates:
+  - routecodex-v3-provider-responses
+  owner_files:
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+  resource_bindings:
+  - v3.provider.health_state
+  - v3.provider.health_persistence_queue
+  entry_symbols:
+  - V3ProviderHealthPersistenceWriter::enqueue
+  - V3ProviderHealthPersistenceWriter::flush_snapshot
+  allowed_paths:
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+  - v3/crates/routecodex-v3-provider-responses/tests
+  - docs/architecture
+  forbidden_paths:
+  - routecodex-v3-runtime
+  - routecodex-v3-server
+  - request.normal_payload
+  - response.client_payload
+  required_gates:
+  - no filesystem write or rename occurs while the provider health state write lock is held
+  - persistence queue is bounded and ordered by mutation version
+  - persistence failure is explicit and never penalizes a provider
+  - npm run verify:v3-execution-control-payload-architecture
+  - git diff --check
+
+- feature_id: v3.observability_persistence_isolation
+  status: active
+  change_risk: high
+  owner_kind: rust_v3_bounded_request_ledger_single_writer
+  owner_crates:
+  - routecodex-v3-server
+  - routecodex-v3-debug
+  owner_files:
+  - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  - v3/crates/routecodex-v3-debug/src/observability_store.rs
+  resource_bindings:
+  - v3.observability.request_ledger_queue
+  - v3.observability.webui_store
+  entry_symbols:
+  - V3WebuiObservability::record_observed
+  - V3WebuiObservabilityPersistenceWriter::enqueue
+  - V3WebuiObservabilityPersistenceWriter::flush
+  allowed_paths:
+  - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  - v3/crates/routecodex-v3-debug/src
+  - v3/crates/routecodex-v3-debug/src/observability_store.rs
+  - v3/crates/routecodex-v3-admin/src
+  - docs/architecture
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  - provider.wire_payload
+  - provider_health
+  - continuation
+  required_gates:
+  - request mutex critical sections perform no open/write/flush
+  - active and recent-terminal in-memory rows have explicit limits
+  - history files enforce a hard byte cap and startup loading is bounded
+  - config publishes path/policy but does not own runtime append execution
+  - npm run verify:v3-execution-control-payload-architecture
+  - git diff --check

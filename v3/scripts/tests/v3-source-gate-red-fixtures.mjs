@@ -20,7 +20,10 @@ const fixtures = [
   {
     name: 'target source gains a duplicate module owner',
     file: 'docs/architecture/v3-runtime-module-registry.yml',
-    mutation: '\n  - module_id: v3.target_duplicate\n    owner_feature_id: v3.virtual_router_target_interpreter\n    owned_paths:\n      - v3/crates/routecodex-v3-target/**\n',
+    transform: (source) => source.replace(
+      '\nresponsibility_contracts:',
+      '\n  - module_id: v3.target_duplicate\n    owner_feature_id: v3.virtual_router_target_interpreter\n    owned_paths:\n      - v3/crates/routecodex-v3-target/**\n\nresponsibility_contracts:',
+    ),
     diagnostic: /source must have exactly one module owner: v3\/crates\/routecodex-v3-target.*v3\.target,v3\.target_duplicate/,
   },
   {
@@ -171,6 +174,12 @@ const fixtures = [
     file: 'v3/crates/routecodex-v3-runtime/src/lib.rs',
     mutation: '\nfn forbidden_response_repair() {}\n',
     diagnostic: /forbidden V3 MVP lifecycle\/fallback wording/,
+  },
+  {
+    name: 'production violation after cfg test module remains visible',
+    file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
+    transform: (source) => source + '\nfn forbidden_response_repair_after_cfg_test_module() {}\n',
+    diagnostic: /forbidden V3 MVP lifecycle\/fallback wording in source: .*routecodex-v3-runtime\/src\/nodes\.rs/,
   },
   {
     name: 'undeclared Resp03 repair helper stays forbidden',

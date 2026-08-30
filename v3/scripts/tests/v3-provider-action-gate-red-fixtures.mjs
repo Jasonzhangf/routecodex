@@ -79,6 +79,24 @@ function removeEdge(document, chainId, stepId) {
 }
 const cases = [
   {
+    name: 'Direct provider action gate revives the removed handoff-budget executor',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    mutate: (source) => source.replaceAll(
+      'execute_v3_responses_direct_runtime_kernel_core_resident',
+      'execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget',
+    ),
+    diagnostic: /forbidden removed Direct lifecycle symbol execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget/u,
+  },
+  {
+    name: 'Direct provider action gate revives the removed SSE handoff wrapper',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs',
+    mutate: (source) => source.replaceAll(
+      'collect_direct_sse_attempt_after_terminal',
+      'wrap_direct_sse_provider_handoff_stream',
+    ),
+    diagnostic: /forbidden removed Direct lifecycle symbol wrap_direct_sse_provider_handoff_stream/u,
+  },
+  {
     name: 'isolated floor shrinks',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace('V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000', 'V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 100'),

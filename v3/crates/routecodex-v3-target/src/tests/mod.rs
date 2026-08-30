@@ -271,6 +271,61 @@ fn direct_provider_model_expands_pinned_provider_but_respects_health_cooldown() 
 }
 
 #[test]
+fn direct_provider_model_never_selects_an_unavailable_candidate_without_a_scope_label() {
+    struct UnavailableWithoutScope;
+    impl V3ProviderSchedulingReader for UnavailableWithoutScope {
+        fn scheduling_projection(
+            &self,
+            provider_id: &str,
+            auth_alias: &str,
+            model_id: &str,
+            priority: i32,
+            base_weight: u32,
+            _now_ms: u64,
+        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+            let mut projection = routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
+                provider_id,
+                auth_alias,
+                model_id,
+                priority,
+                1_000,
+                base_weight,
+            );
+            projection.available = false;
+            projection
+        }
+    }
+
+    let manifest = manifest();
+    let router = V3VirtualRouter::default();
+    let target = V3TargetInterpreter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("a.m".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 10,
+                route_classification: RouteClassification::default(),
+            },
+        )
+        .unwrap();
+    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+
+    let exhausted = target
+        .select_available_with_health(expanded, &UnavailableWithoutScope, 0, 0)
+        .expect_err("unavailable direct candidate must remain unavailable");
+    assert_eq!(exhausted.attempted_candidates, vec!["a:ka:m:health_cooldown"]);
+}
+
+#[test]
 fn direct_provider_model_respects_request_local_exclusion() {
     let manifest = manifest();
     let router = V3VirtualRouter::default();

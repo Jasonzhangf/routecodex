@@ -87,6 +87,7 @@ use routecodex_v3_runtime::{
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode,
+    execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
@@ -123,7 +124,8 @@ use routecodex_v3_runtime::{
     V3ResponsesRelayStoplessControlState, V3RuntimeObservability,
     V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
-    V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
+    V3RequestExecutionControl, V3RuntimeStreamObservation, V3RuntimeTimingSummary,
+    V3RuntimeUsageSummary,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -237,6 +239,8 @@ pub struct V3ServerAggregateHandle {
     probe_shutdown: Option<oneshot::Sender<()>>,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
+    provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
+    observability_writers: Vec<V3WebuiObservability>,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -259,6 +263,7 @@ impl V3ServerAggregateHandle {
     }
 
     pub async fn shutdown(mut self) {
+        self.flush_runtime_persistence();
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -280,6 +285,7 @@ impl V3ServerAggregateHandle {
         // the process; otherwise the replacement can restore a lease with no
         // socket owner and the client waits forever.
         self.front_transport_broker.close_active_client_transports();
+        self.flush_runtime_persistence();
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -290,6 +296,17 @@ impl V3ServerAggregateHandle {
         }
         let _ = &self.request_activity_gate;
         checkpoints
+    }
+
+    fn flush_runtime_persistence(&self) {
+        if let Err(error) = self.provider_health.flush_persistence() {
+            eprintln!("V3 provider health persistence flush failed: {error}");
+        }
+        for observability in &self.observability_writers {
+            if let Err(error) = observability.flush_persistence() {
+                eprintln!("V3 observability persistence flush failed: {error}");
+            }
+        }
     }
 
     pub fn restore_front_checkpoints(
@@ -410,6 +427,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
             .map(routecodex_v3_config::default_v3_config_path)
     });
     let mut listeners = Vec::with_capacity(bound.len());
+    let mut observability_writers = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
         let app = if server_id == "admin_webui" {
@@ -435,6 +453,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
             let webui_observability =
                 V3WebuiObservability::load_persisted(&observability_store_path)
                     .map_err(std::io::Error::other)?;
+            observability_writers.push(webui_observability.clone());
             build_v3_listener_router(V3ListenerState {
                 server,
                 manifest_version: preflight.manifest_version,
@@ -577,6 +596,8 @@ pub async fn spawn_v3_server_aggregate_with_admin(
         probe_shutdown: Some(probe_shutdown),
         request_activity_gate,
         front_transport_broker,
+        provider_health,
+        observability_writers,
     })
 }
 

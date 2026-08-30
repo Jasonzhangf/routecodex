@@ -96,6 +96,26 @@ pub struct V3AnthropicRelayRuntimeOutput {
 pub fn project_v3_anthropic_client_sse_stream(
     client_response: Value,
 ) -> Result<crate::nodes::V3CommittedClientSseStream, String> {
+    project_v3_anthropic_client_sse_stream_with_budget(
+        client_response,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+}
+
+pub fn project_v3_anthropic_client_sse_stream_from_manifest(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+    client_response: Value,
+) -> Result<crate::nodes::V3CommittedClientSseStream, String> {
+    let budget = crate::nodes::V3AttemptBudget::from_manifest(manifest, server_id)
+        .map_err(|error| error.to_string())?;
+    project_v3_anthropic_client_sse_stream_with_budget(client_response, budget)
+}
+
+fn project_v3_anthropic_client_sse_stream_with_budget(
+    client_response: Value,
+    budget: crate::nodes::V3AttemptBudget,
+) -> Result<crate::nodes::V3CommittedClientSseStream, String> {
     let events = client_response
         .get("events")
         .and_then(Value::as_array)
@@ -115,14 +135,21 @@ pub fn project_v3_anthropic_client_sse_stream(
                 .to_string(),
         );
     }
-    let mut committed = crate::nodes::V3CommittedClientSseBuilder::new();
+    let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(budget)
+        .map_err(|error| error.to_string())?;
     for event in &events {
-        committed.push(build_v3_anthropic_client_sse_event_chunk(event)?)?;
+        committed
+            .push(build_v3_anthropic_client_sse_event_chunk(event)?)
+            .map_err(|error| error.to_string())?;
         if event.get("event").and_then(Value::as_str) == Some("message_stop") {
-            committed.mark_last_frame_as_terminal()?;
+            committed
+                .mark_last_frame_as_terminal()
+                .map_err(|error| error.to_string())?;
         }
     }
-    committed.seal_after_validated_terminal()
+    committed
+        .seal_after_validated_terminal()
+        .map_err(|error| error.to_string())
 }
 
 fn build_v3_anthropic_client_sse_event_chunk(event: &Value) -> Result<Vec<u8>, String> {
@@ -1041,6 +1068,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         }
                     };
                 record_provider_success_after_resp04(
+                    &crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
                     &provider_health,
                     &input.failure_session_scope,
                     &selected_target_provider_id,
@@ -1225,6 +1253,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         }
                     };
                 record_provider_success_after_resp04(
+                    &crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt(),
                     &provider_health,
                     &input.failure_session_scope,
                     &selected_target_provider_id,
@@ -1515,6 +1544,7 @@ fn commit_or_release_local_continuation(
 }
 
 fn record_provider_success_after_resp04(
+    receipt: &crate::nodes::V3AttemptSuccessReceipt,
     provider_health: &V3ProviderFailureRuntimeHealth,
     failure_session_scope: &V3ProviderFailureSessionScope,
     provider_id: &str,
@@ -1523,6 +1553,7 @@ fn record_provider_success_after_resp04(
 ) -> Result<(), V3AnthropicRelayRuntimeError> {
     provider_health
         .record_provider_success_in_failure_scope(
+            receipt,
             failure_session_scope,
             provider_id,
             Some(auth_alias),

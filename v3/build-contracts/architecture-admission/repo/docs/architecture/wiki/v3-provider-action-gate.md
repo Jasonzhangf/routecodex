@@ -61,8 +61,8 @@ flowchart TD
   AbandonRequest -->|v3-provider-action-gate-32| Abandoned
   Permit -->|v3-provider-action-gate-33| SuccessObserved
   SuccessObserved -->|v3-provider-action-gate-34| SuccessRecorded
-  Permit -->|v3-provider-action-gate-35| FailureObserved
-  Abandoned -->|v3-provider-action-gate-36| FailureRecorded
+  Abandoned -->|v3-provider-action-gate-35| FailureObserved
+  FailureObserved -->|v3-provider-action-gate-36| FailureRecorded
   Permit -->|v3-provider-action-gate-37| SuccessObserved
   SuccessObserved -->|v3-provider-action-gate-38| SuccessRecorded
   Permit -->|v3-provider-action-gate-39| FailureObserved

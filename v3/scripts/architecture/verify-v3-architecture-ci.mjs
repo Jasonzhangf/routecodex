@@ -36,6 +36,8 @@ const STEPS = [
   ['test:v3-p5-router-target', 'Priority-first and same-priority weighted Router/Target selection'],
   ['verify:v3-module-boundaries', 'V3 module boundaries (Server cannot build/classify Error)'],
   ['test:v3-source-gate-red-fixtures', 'V3 module-boundary mutations are rejected'],
+  ['verify:v3-execution-control-payload-architecture', 'Execution lifecycle, bounded attempt storage, control/payload, failure, and persistence contracts'],
+  ['test:v3-execution-control-payload-architecture-red-fixtures', 'Execution-control architecture contract mutations are rejected'],
   ['test:v3-compile-fail', 'V3 private and non-adjacent type boundaries remain compiler-enforced'],
   ['verify:v3-hub-v1-node-file-topology', 'Hub v1 node file topology symbols resolve'],
   ['verify:v3-mainline-caller-flow', 'V3 mainline caller flow + lock fingerprint'],

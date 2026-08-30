@@ -225,5 +225,6 @@ pub(crate) fn default_server_execution() -> V3ServerExecutionAuthoringConfig {
                 "session".to_string(),
             ],
         },
+        attempt_store: Default::default(),
     }
 }

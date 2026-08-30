@@ -15,7 +15,7 @@ fn zero_input_usage_uses_request_tiktoken_estimate() {
         "status": "requires_action",
         "usage": {"input_tokens": 0, "output_tokens": 3, "total_tokens": 3}
     });
-    repair_v3_runtime_input_usage_from_request(&mut response, &request);
+    materialize_v3_runtime_input_usage_estimate_from_request(&mut response, &request);
     assert_eq!(response["usage"]["input_tokens"], 2);
     assert_eq!(response["usage"]["total_tokens"], 5);
 }
@@ -30,7 +30,7 @@ fn nonzero_provider_input_usage_is_preserved() {
         "status": "completed",
         "usage": {"input_tokens": 345678, "output_tokens": 3, "total_tokens": 345681}
     });
-    repair_v3_runtime_input_usage_from_request(&mut response, &request);
+    materialize_v3_runtime_input_usage_estimate_from_request(&mut response, &request);
     assert_eq!(response["usage"]["input_tokens"], 345678);
     assert_eq!(response["usage"]["total_tokens"], 345681);
 }
@@ -42,7 +42,7 @@ fn missing_usage_gets_request_tiktoken_input_estimate() {
         "input": [{"type":"message","role":"user","content":"hello"}]
     });
     let mut response = json!({"status": "completed"});
-    repair_v3_runtime_input_usage_from_request(&mut response, &request);
+    materialize_v3_runtime_input_usage_estimate_from_request(&mut response, &request);
     assert_eq!(response["usage"]["input_tokens"], 2);
     assert!(response["usage"].get("total_tokens").is_none());
 }
@@ -552,7 +552,8 @@ async fn provider_sse_empty_body_classifies_as_provider_response_empty() {
         other => panic!("expected ProviderResponseEmpty, got {other:?}"),
     }
     assert!(is_v3_responses_provider_response_failure(&error));
-    let typed = provider_response_stream_failure(error, "req-empty", "glmrelay_anthropic");
+    let typed = provider_response_stream_failure(error, "req-empty", "glmrelay_anthropic")
+        .expect("provider response empty attribution");
     match typed {
         V3ProviderError::ResponseBody { reason, .. } => {
             assert!(reason.contains("provider response body is empty"));
