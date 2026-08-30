@@ -652,6 +652,9 @@ pub(crate) fn capture_v3_responses_relay_provider_snapshots(
     let snapshots = match output.provider_snapshots.as_mut() {
         Some(snapshots) => snapshots,
         None => {
+            if provider_attempt_evidence && !terminal_error_evidence {
+                return None;
+            }
             return Some(foundation_output_response(project_v3_debug_failure(
                 "V3DebugProviderSnapshotCaptured",
                 V3DebugError::MalformedFixture(
