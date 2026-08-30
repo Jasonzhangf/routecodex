@@ -107,10 +107,30 @@ fn request_admission_rejects_plan_epoch_drift_before_response_port() {
 }
 
 #[test]
+fn request_admission_rejects_empty_request_identity() {
+    let p = plan();
+    let error = match RequestPortLease::admit(&store(), "", &p) {
+        Ok(_) => panic!("request admission must reject an empty request identity"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, "request_identity");
+}
+
+#[test]
 fn response_receipt_preserves_immutable_execution_identity() {
     let p = plan();
     let request = RequestPortLease::admit(&store(), "req-4", &p).unwrap();
     let receipt = response_error_port::consume_response(&request, &execution_binding(&p)).unwrap();
     assert_eq!(receipt.binding.plan_epoch, 7);
     assert_eq!(request.lease_snapshot().execution_identity, "exec-7");
+}
+
+#[test]
+fn response_and_error_ports_share_one_terminal_claim() {
+    let p = plan();
+    let request = RequestPortLease::admit(&store(), "req-terminal", &p).unwrap();
+    let binding = execution_binding(&p);
+    response_error_port::consume_response(&request, &binding).unwrap();
+    let error = response_error_port::consume_error(&request, &binding).unwrap_err();
+    assert_eq!(error.code, "response_error_terminal");
 }
