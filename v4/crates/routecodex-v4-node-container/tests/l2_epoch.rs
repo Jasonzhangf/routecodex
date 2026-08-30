@@ -99,6 +99,19 @@ fn candidate_identity_failure_cannot_replace_active_epoch() {
 }
 
 #[test]
+fn zero_plan_epoch_is_not_an_executable_epoch_identity() {
+    let rejected = ExecutionEpochBundle::new(
+        accepting_container("candidate-zero"),
+        ExecutionEpochIdentity {
+            plan_epoch: 0,
+            manifest_hash: "manifest-zero".into(),
+            execution_identity: "execution-zero".into(),
+        },
+    );
+    assert!(matches!(rejected, Err(EpochError::InvalidIdentity)));
+}
+
+#[test]
 fn rebuild_keeps_execution_identity_stable() {
     let identity = ExecutionEpochIdentity {
         plan_epoch: 11,

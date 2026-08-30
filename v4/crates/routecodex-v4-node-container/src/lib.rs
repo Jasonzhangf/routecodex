@@ -1083,19 +1083,6 @@ mod tests {
     }
 
     #[test]
-    fn zero_plan_epoch_is_not_an_executable_epoch_identity() {
-        let rejected = ExecutionEpochBundle::new(
-            accepting_container("candidate-zero"),
-            ExecutionEpochIdentity {
-                plan_epoch: 0,
-                manifest_hash: "manifest-zero".into(),
-                execution_identity: "execution-zero".into(),
-            },
-        );
-        assert!(matches!(rejected, Err(EpochError::InvalidIdentity)));
-    }
-
-    #[test]
     fn rebuild_preserves_immutable_execution_identity() {
         let identity = ExecutionEpochIdentity {
             plan_epoch: 11,
