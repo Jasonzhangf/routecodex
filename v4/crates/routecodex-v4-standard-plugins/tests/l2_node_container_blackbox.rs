@@ -72,6 +72,7 @@ fn positive_blackbox_execute_standard_plan_through_node_container() {
             NodeExecutionInput {
                 data: request_data(),
                 control: json!({}),
+                information: json!({}),
             },
             &registry,
         )
@@ -148,6 +149,7 @@ fn positive_error_plugin_writes_typed_error_side_channel_only() {
                 control: json!({
                     "error_chain": {"code": "provider_failure"}
                 }),
+                information: json!({}),
             },
             &registry,
         )
@@ -200,6 +202,7 @@ fn positive_response_governance_preserves_response_data() {
             NodeExecutionInput {
                 data: input.clone(),
                 control: json!({}),
+                information: json!({}),
             },
             &registry,
         )
@@ -230,6 +233,7 @@ fn negative_execute_rejects_plan_hash_drift() {
             NodeExecutionInput {
                 data: request_data(),
                 control: json!({}),
+                information: json!({}),
             },
             &registry,
         )
@@ -262,6 +266,7 @@ fn negative_scope_consume_rejects_non_object_control() {
             NodeExecutionInput {
                 data: json!({}),
                 control: json!("scalar"),
+                information: json!({}),
             },
             &registry,
         )
@@ -306,6 +311,7 @@ fn positive_scope_consume_records_object_control_carrier() {
                     "error_chain": {"stage": "source_raised"},
                     "route_facts": {"selected": false}
                 }),
+                information: json!({}),
             },
             &registry,
         )
@@ -348,6 +354,7 @@ fn negative_error_intake_rejects_non_object_control() {
             NodeExecutionInput {
                 data: json!({}),
                 control: json!([1, 2, 3]),
+                information: json!({}),
             },
             &registry,
         )
@@ -381,6 +388,7 @@ fn assert_missing_control_resource_fails(
             NodeExecutionInput {
                 data: json!({}),
                 control: json!({}),
+                information: json!({}),
             },
             &registry,
         )
@@ -482,6 +490,7 @@ fn negative_unregistered_handle_fails_fast() {
             NodeExecutionInput {
                 data: request_data(),
                 control: json!({}),
+                information: json!({}),
             },
             &registry,
         )
@@ -508,6 +517,7 @@ fn negative_execute_before_publish_is_rejected() {
             NodeExecutionInput {
                 data: request_data(),
                 control: json!({}),
+                information: json!({}),
             },
             &registry,
         )

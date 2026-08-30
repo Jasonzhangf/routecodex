@@ -55,7 +55,11 @@ fn execute(
     container = publish(container);
     container.execute_with_plan_hash(
         &hash,
-        NodeExecutionInput { data, control },
+        NodeExecutionInput {
+            data,
+            control,
+            information: json!({}),
+        },
         &StandardHandleRegistry::new(),
     )
 }

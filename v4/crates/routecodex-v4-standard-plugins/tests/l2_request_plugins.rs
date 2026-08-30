@@ -28,6 +28,7 @@ fn execute(
         NodeExecutionInput {
             data,
             control: json!({}),
+            information: json!({}),
         },
         &StandardHandleRegistry::new(),
     );
@@ -55,12 +56,12 @@ fn execute_with_information(
     container.context_created().unwrap();
     container.plugins_mounted().unwrap();
     container.publish().unwrap();
-    let output = container.execute_with_information(
+    let output = container.execute(
         NodeExecutionInput {
             data,
             control: json!({}),
+            information,
         },
-        information,
         &StandardHandleRegistry::new(),
     );
     container.drain().unwrap();

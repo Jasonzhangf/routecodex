@@ -98,13 +98,15 @@ pub struct DiagnosticFact {
     pub message: String,
 }
 
-/// Typed per-node execution input. Data and control stay in separate fields;
-/// no synthetic metadata blob is accepted.
+/// Typed per-node execution input. Business data, typed control, and immutable
+/// information resources stay in separate fields; no synthetic metadata blob
+/// is accepted.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeExecutionInput {
     pub data: Value,
     pub control: Value,
+    pub information: Value,
 }
 
 /// Typed per-node execution output.
@@ -427,15 +429,6 @@ pub fn execute_plan(
     input: NodeExecutionInput,
     registry: &dyn HandleRegistry,
 ) -> Result<NodeExecutionOutput, BridgeError> {
-    execute_plan_with_information(plan, input, Value::Object(Default::default()), registry)
-}
-
-pub fn execute_plan_with_information(
-    plan: &NodePluginPlan,
-    input: NodeExecutionInput,
-    information: Value,
-    registry: &dyn HandleRegistry,
-) -> Result<NodeExecutionOutput, BridgeError> {
     if !plan.verify() {
         return Err(BridgeError::PlanHashMismatch);
     }
@@ -447,7 +440,7 @@ pub fn execute_plan_with_information(
     let mut state = ExecState {
         data: input.data,
         control: input.control,
-        information,
+        information: input.information,
         diagnostics: Vec::new(),
     };
     for entry in &plan.entries {
