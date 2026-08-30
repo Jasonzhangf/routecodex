@@ -48,6 +48,7 @@ pub enum NodeContainerError {
     },
     PlanHashMismatch,
     BindingMismatch,
+    NodeIdentityMismatch,
     InFlightExecutions(usize),
     HostLifecycle(String),
     Bridge(BridgeError),
@@ -61,6 +62,9 @@ impl std::fmt::Display for NodeContainerError {
             }
             Self::PlanHashMismatch => write!(f, "node plugin plan hash mismatch"),
             Self::BindingMismatch => write!(f, "Cordis graph/manifest/loaded plan hashes differ"),
+            Self::NodeIdentityMismatch => {
+                write!(f, "node container identity differs from the compiled plugin plan")
+            }
             Self::InFlightExecutions(count) => {
                 write!(
                     f,
@@ -96,6 +100,10 @@ impl NodeContainer {
         plan: NodePluginPlan,
         bindings: PlanBindings,
     ) -> Result<Self, NodeContainerError> {
+        let node_id = node_id.into();
+        if node_id.is_empty() || node_id != plan.node_id {
+            return Err(NodeContainerError::NodeIdentityMismatch);
+        }
         if !plan.verify() {
             return Err(NodeContainerError::PlanHashMismatch);
         }
@@ -103,7 +111,7 @@ impl NodeContainer {
             return Err(NodeContainerError::BindingMismatch);
         }
         Ok(Self {
-            node_id: node_id.into(),
+            node_id,
             plan,
             bindings,
             state: NodeContainerState::Declared,

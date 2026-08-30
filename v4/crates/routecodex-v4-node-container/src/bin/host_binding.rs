@@ -470,7 +470,9 @@ impl LifecycleFailureFact {
     ) -> Self {
         let code = match error {
             NodeContainerError::PlanHashMismatch => LifecycleFailureCode::PlanHashMismatch,
-            NodeContainerError::BindingMismatch => LifecycleFailureCode::BindingMismatch,
+            NodeContainerError::BindingMismatch | NodeContainerError::NodeIdentityMismatch => {
+                LifecycleFailureCode::BindingMismatch
+            }
             NodeContainerError::InFlightExecutions(_) => LifecycleFailureCode::InFlight,
             NodeContainerError::InvalidState { .. } => LifecycleFailureCode::InvalidState,
             NodeContainerError::HostLifecycle(_) => LifecycleFailureCode::HostLifecycle,
@@ -515,7 +517,9 @@ impl ExecutionFailureFact {
     fn from_error(request_id: String, node_id: Option<String>, error: &NodeContainerError) -> Self {
         let code = match error {
             NodeContainerError::PlanHashMismatch => ExecutionFailureCode::PlanHashMismatch,
-            NodeContainerError::BindingMismatch => ExecutionFailureCode::ProtocolError,
+            NodeContainerError::BindingMismatch | NodeContainerError::NodeIdentityMismatch => {
+                ExecutionFailureCode::ProtocolError
+            }
             NodeContainerError::InFlightExecutions(_) => ExecutionFailureCode::InvalidState,
             NodeContainerError::InvalidState { .. } => ExecutionFailureCode::InvalidState,
             NodeContainerError::HostLifecycle(_) => ExecutionFailureCode::ProtocolError,
