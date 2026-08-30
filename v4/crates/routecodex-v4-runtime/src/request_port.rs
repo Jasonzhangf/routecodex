@@ -39,8 +39,12 @@ impl RequestPortLease {
         })
     }
 
-    pub fn request_id(&self) -> &str { &self.request_id }
-    pub fn binding(&self) -> &ExecutionBinding { &self.binding }
+    pub fn request_id(&self) -> &str {
+        &self.request_id
+    }
+    pub fn binding(&self) -> &ExecutionBinding {
+        &self.binding
+    }
     pub fn lease_snapshot(&self) -> routecodex_v4_node_container::ExecutionEpochSnapshot {
         self.lease.snapshot()
     }

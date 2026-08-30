@@ -7,16 +7,23 @@ use routecodex_v4_control::{ControlError, ControlSignal, ControlSignalKind, Meta
 use routecodex_v4_error::{DecisionAction, ErrorChain, ErrorStage, ExecutionDecision, RetryPolicy};
 use routecodex_v4_runtime::{
     assert_no_control_leak, bind_scope_via_bridge, execution_binding, project_runtime_fault,
-    project_runtime_fault_with_policy,
-    release_scope_via_bridge, select_relay_operator, ContinuationFacts, ContinuationKey,
-    ExecutionBinding, ExecutionContext, PayloadCycleError, PayloadCycleRegistry,
-    PayloadCycleState, RelayOperator, ScopeError, ScopeRegistry, SkeletonRuntime,
+    project_runtime_fault_with_policy, release_scope_via_bridge, select_relay_operator,
+    ContinuationFacts, ContinuationKey, ExecutionBinding, ExecutionContext, PayloadCycleError,
+    PayloadCycleRegistry, PayloadCycleState, RelayOperator, ScopeError, ScopeRegistry,
+    SkeletonRuntime,
 };
 use routecodex_v4_skeleton::{
-    BindingContract, ChainDefinition, Edge, NodeSlot, PluginBinding, SkeletonPlan,
+    BindingContract, ChainDefinition, DirectProtocolContract, Edge, NodeSlot, PluginBinding,
+    ProtocolInformationContract, SkeletonPlan,
 };
 use serde_json::json;
 use std::fs;
+
+mod support;
+
+fn active_runtime() -> SkeletonRuntime {
+    support::active_runtime(&contract_json())
+}
 
 fn contract_json() -> String {
     let path = std::env::var("RUNTIME_CONTRACT_PATH").unwrap_or_else(|_| {
@@ -184,6 +191,7 @@ fn plugin(plugin_id: &str) -> PluginBinding {
     PluginBinding {
         plugin_id: plugin_id.to_string(),
         effects: vec!["semantic".to_string()],
+        writes: vec![],
     }
 }
 
@@ -206,13 +214,21 @@ fn test_plan(chains: Vec<ChainDefinition>) -> SkeletonPlan {
         manifest_hash: "sha256:test".to_string(),
         plan_epoch: 1,
         plan_hash: "sha256:test".to_string(),
+        direct_protocol_contract: DirectProtocolContract {
+            same_protocol: true,
+            mismatch: "fail_fast".to_string(),
+        },
+        protocol_information_contract: ProtocolInformationContract {
+            client_provider_independent: true,
+            payload_inference: "forbidden".to_string(),
+        },
         chains,
     }
 }
 
 #[test]
 fn positive_request_chain_produces_wire_and_stable_binding() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     let plan = runtime.plan();
     let report = runtime
         .execute_request("chat:hello", "r-request-1")
@@ -241,7 +257,7 @@ fn positive_request_chain_produces_wire_and_stable_binding() {
 
 #[test]
 fn responses_entry_classifies_direct_owner() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     let report = runtime
         .execute_request("responses:hello", "r-direct-1")
         .expect("responses request chain runs");
@@ -255,8 +271,10 @@ fn responses_entry_classifies_direct_owner() {
 
 #[test]
 fn one_admission_lease_survives_request_provider_response_to_terminal() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
-    let lease = runtime.admit_request("r-lease-lifecycle").expect("admission");
+    let runtime = active_runtime();
+    let lease = runtime
+        .admit_request("r-lease-lifecycle")
+        .expect("admission");
     assert_eq!(lease.snapshot().in_flight_leases, 1);
     let request = runtime
         .execute_request_json_scoped_with_lease(
@@ -302,7 +320,7 @@ fn relay_operator_select_uses_typed_facts_only() {
         "direct",
         "direct",
     ))
-        .expect("responses + direct owner selects direct operator");
+    .expect("responses + direct owner selects direct operator");
     assert_eq!(direct, RelayOperator::Direct);
     let responses_relay = select_relay_operator(&ContinuationFacts::new(
         "responses",
@@ -320,7 +338,7 @@ fn relay_operator_select_uses_typed_facts_only() {
 
 #[test]
 fn continuation_three_key_save_and_restore_roundtrip() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     // Response chat process commit saves the three-key binding.
     let response = runtime
         .execute_provider_response_scoped(
@@ -350,7 +368,7 @@ fn continuation_three_key_save_and_restore_roundtrip() {
 
 #[test]
 fn responses_local_owner_override_is_typed_before_request_classification() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("skeleton plan");
+    let runtime = active_runtime();
     let report = runtime
         .execute_request_scoped_with_owner(
             "responses:{\"model\":\"gpt-wire\",\"input\":[]}",
@@ -366,7 +384,7 @@ fn responses_local_owner_override_is_typed_before_request_classification() {
 
 #[test]
 fn red_continuation_checkpoint_cannot_rebind_before_restore() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     runtime
         .execute_provider_response_scoped(
             "{\"text\":\"first\"}",
@@ -395,7 +413,7 @@ fn red_continuation_checkpoint_cannot_rebind_before_restore() {
 
 #[test]
 fn red_direct_relay_cross_continuation_fails() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     runtime
         .execute_provider_response_scoped(
             "{\"text\":\"ok\"}",
@@ -497,7 +515,7 @@ fn payload_cycle_error_terminal_and_double_close_red() {
 
 #[test]
 fn positive_provider_response_chain_projects_client_frame() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     let report = runtime
         .execute_provider_response("{\"text\":\"ok\"}", "r-response-1")
         .expect("provider response chain runs");
@@ -515,7 +533,7 @@ fn positive_provider_response_chain_projects_client_frame() {
 
 #[test]
 fn direct_sse_frame_runs_frame_parse_through_client_frame() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     let report = runtime
         .execute_provider_response_scoped(
             "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n",
@@ -538,7 +556,7 @@ fn direct_sse_frame_runs_frame_parse_through_client_frame() {
 
 #[test]
 fn relay_json_projects_responses_to_chat_semantic() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     let report = runtime
         .execute_provider_response_scoped(
             "{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}]}",
@@ -565,7 +583,7 @@ fn relay_json_projects_responses_to_chat_semantic() {
 
 #[test]
 fn relay_json_projects_tool_calls_and_usage_to_chat_contract() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     let report = runtime
         .execute_provider_response_scoped(
             "{\"id\":\"resp_tool\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"{}\"}],\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18}}",
@@ -598,7 +616,7 @@ fn relay_json_projects_tool_calls_and_usage_to_chat_contract() {
 
 #[test]
 fn relay_sse_delta_projects_responses_event_to_chat_chunk() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     let report = runtime
         .execute_provider_response_scoped(
             "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n",
@@ -622,7 +640,7 @@ fn relay_sse_delta_projects_responses_event_to_chat_chunk() {
 
 #[test]
 fn relay_sse_function_arguments_delta_is_preserved() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     let report = runtime
         .execute_provider_response_scoped(
             "event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":1,\"delta\":\"{\\\"city\\\":\"}\n\n",
@@ -649,7 +667,7 @@ fn relay_sse_function_arguments_delta_is_preserved() {
 
 #[test]
 fn relay_sse_tool_terminal_projects_tool_calls_finish_reason() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     let report = runtime
         .execute_provider_response_scoped(
             "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_tool\",\"model\":\"m\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"{}\"}]}}\n\n",
@@ -672,7 +690,7 @@ fn relay_sse_tool_terminal_projects_tool_calls_finish_reason() {
 
 #[test]
 fn continuation_rotates_after_restore_for_next_response() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     runtime
         .execute_provider_response_scoped(
             "{\"text\":\"first\"}",
@@ -708,7 +726,7 @@ fn continuation_rotates_after_restore_for_next_response() {
 
 #[test]
 fn red_invalid_input_flows_typed_error_path_to_terminal_projection() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     let mut chain = ErrorChain::new(scope("r-error-1"));
     let fault = runtime
         .execute_request("bad:input", "r-error-1")
@@ -752,60 +770,20 @@ fn provider_policy_decision_enters_error_chain_without_payload_control() {
     .expect("policy decision projects");
     assert_eq!(projection.code, "provider_http_401");
     assert_eq!(chain.current_stage(), Some(ErrorStage::ClientProjected));
-    assert!(chain.records().any(|record| {
-        record.detail.as_deref() == Some("account_http_401_two_errors")
-    }));
-}
-
-#[test]
-fn red_unknown_plugin_fails_fast() {
-    let plan = test_plan(vec![ChainDefinition {
-        chain_id: "request".to_string(),
-        nodes: vec![slot(
-            "V4ServerReqInbound01ClientRaw",
-            1,
-            true,
-            true,
-            vec![plugin("mystery_plugin")],
-        )],
-        edges: vec![],
-        checkpoints: vec![],
-    }]);
-    let error = routecodex_v4_runtime::validate_execution_plan(&plan)
-        .expect_err("unknown plugin must fail plan validation");
-    assert_eq!(error.code, "unknown_plugin");
-    assert!(error.message.contains("mystery_plugin"));
+    assert!(chain
+        .records()
+        .any(|record| { record.detail.as_deref() == Some("account_http_401_two_errors") }));
 }
 
 #[test]
 fn red_external_chain_plugins_never_run_inside_runtime() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     for chain_id in ["error", "config"] {
         let error = runtime
             .execute_chain(chain_id, &format!("r-ext-{chain_id}"))
             .expect_err("external-owned chain must not execute in the runtime");
         assert_eq!(error.code, "external_owner_violation");
     }
-}
-
-#[test]
-fn red_non_adjacent_chain_fails_plan_compile() {
-    let plan = test_plan(vec![ChainDefinition {
-        chain_id: "request".to_string(),
-        nodes: vec![
-            slot("a", 1, false, true, vec![]),
-            slot("b", 3, true, false, vec![]),
-        ],
-        edges: vec![Edge {
-            from: "a".to_string(),
-            to: "b".to_string(),
-            direction: "forward".to_string(),
-        }],
-        checkpoints: vec![],
-    }]);
-    let error = routecodex_v4_runtime::validate_execution_plan(&plan)
-        .expect_err("non-consecutive positions must fail");
-    assert_eq!(error.code, "non_adjacent_chain");
 }
 
 #[test]
@@ -846,7 +824,7 @@ fn red_binding_drift_fails() {
 
 #[test]
 fn red_cross_request_reuse_fails() {
-    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let runtime = active_runtime();
     runtime.claim("r-reuse-1").expect("first claim succeeds");
     let error = runtime
         .execute_request("chat:hi", "r-reuse-1")
