@@ -5816,3 +5816,11 @@ Tags: #v3 #restart #keepalive #InvalidHTTPResponse #front-closeout #request-cycl
 - V4 currently requires `version = 4`, `runtime.id = "rccv4"`, and a compiled manifest; V3 7777 uses `version = 3` with route groups, multiple pools, multiple protocols, and provider-specific policies. V4 does not yet consume or compile the V3 config and cannot claim equivalent routing/provider/config behavior.
 - Completion claims must follow the product definition in `v4/docs/goals/v4-feature-completion-plan.md`: all selected V3 features must reach differential/live parity, not merely mapped/source/production-canary states. Keep the V4 independent runtime admission milestone explicitly separate from the V4 product-parity milestone.
 - 2026-08-24 Jason correction: RCCV4 install/restart/live verification must use only global `rccv4`; never use `routecodex` as the V4 lifecycle command. Any V4 evidence must bind installed binary identity, `rccv4 restart`, 5520 health, and live samples to the same V4 artifact.
+
+## 2026-08-30 - V4 Direct / Relay / SSE owner lock
+
+- V4 SSE is an independent transport plugin. It owns framing, ordering, bounded buffering, backpressure, timeout, keepalive, and closeout only; it never mutates model/fields/payload shape, protocol semantics, tools, continuation, routing, retry, or terminal truth.
+- Direct client-to-provider mediation is an independent NodeContainer feature with direction-specific request/response entrypoints. It executes only Cordis-compiled Direct hooks under the request's immutable epoch lease; it is not a runtime-bin/handler bypass.
+- Every payload change belongs to a registered Direct/Relay request/response hook or its adjacent protocol codec. Direct is same-protocol and fail-fast on mismatch. Relay keeps client and provider protocols independently typed; neither may infer the other from payload.
+- Required regression proof: SSE semantic-write red gate, Direct/Relay hook cross-mount red gates, typed lane/protocol carrier tests, and real Direct/Relay JSON+SSE replay from the globally installed `rccv4`.
+Tags: #v4 #cordis #direct #relay #sse #node-container #hook-owner

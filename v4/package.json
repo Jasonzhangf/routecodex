@@ -23,6 +23,8 @@
     "verify:v4-feature-layer-batches-red": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --red-self-test",
     "verify:v4-node-graph": "node scripts/architecture/verify-v4-node-graph.mjs",
     "verify:v4-node-graph-red": "node scripts/architecture/verify-v4-node-graph.mjs --red-self-test",
+    "verify:v4-direct-relay-sse": "node scripts/architecture/verify-v4-direct-relay-sse.mjs",
+    "verify:v4-direct-relay-sse-red": "node scripts/architecture/verify-v4-direct-relay-sse.mjs --red-self-test",
     "verify:v4-infrastructure": "node scripts/architecture/verify-v4-infrastructure.mjs",
     "verify:v4-infrastructure-red": "node scripts/architecture/verify-v4-infrastructure.mjs --red-self-test",
     "verify:v4-cordis-concurrency-reconciliation": "node scripts/verify-v4-cordis-concurrency-reconciliation.mjs",

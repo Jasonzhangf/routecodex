@@ -1293,13 +1293,53 @@
     },
     {
       "function_id": "v4.plugin.hook.model_mapping",
-      "status": "active",
+      "status": "integration_pending",
       "feature_id": "V4-PLUGIN-MODEL-HOOK",
       "owner": "routecodex-v4-standard-plugins",
       "entry_symbols": ["direct_model_passthrough", "relay_model_projection"],
       "resource_ids": ["v4.request.normal_payload"],
       "source_paths": ["crates/routecodex-v4-standard-plugins/src/model_hooks.rs"],
-      "required_gates": ["v4_standard_plugins_l2_regression", "v4_parity_gate_standard_plugins", "v4_plugin_model_hook_red"]
+      "required_gates": ["v4_standard_plugins_l2_regression", "v4_parity_gate_standard_plugins", "v4_plugin_model_hook_red", "v4_direct_relay_sse", "v4_direct_relay_sse_red"]
+    },
+    {
+      "function_id": "v4.transport.sse_plugin",
+      "status": "design",
+      "feature_id": "V4-DIRECT-RELAY-SSE",
+      "owner": "routecodex-v4-server/routecodex-v4-provider transport plugin boundary",
+      "entry_symbols": [],
+      "resource_ids": ["v4.transport.sse_frames"],
+      "source_paths": ["crates/routecodex-v4-server/src/lib.rs", "crates/routecodex-v4-provider/src/lib.rs"],
+      "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red"]
+    },
+    {
+      "function_id": "v4.direct.relay_container",
+      "status": "design",
+      "feature_id": "V4-DIRECT-RELAY-SSE",
+      "owner": "routecodex-v4-node-container",
+      "entry_symbols": [],
+      "resource_ids": ["v4.execution.direct_relay_container", "v4.information.execution_lane", "v4.information.client_protocol", "v4.information.provider_protocol"],
+      "source_paths": ["crates/routecodex-v4-node-container/src/lib.rs"],
+      "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red", "v4_parity_gate_node_graph", "v4_parity_gate_execution_binding"]
+    },
+    {
+      "function_id": "v4.hook.direct.request_response",
+      "status": "design",
+      "feature_id": "V4-DIRECT-RELAY-SSE",
+      "owner": "routecodex-v4-standard-plugins",
+      "entry_symbols": [],
+      "resource_ids": ["v4.request.normal_payload", "v4.response.normal_payload", "v4.information.execution_lane", "v4.information.client_protocol", "v4.information.provider_protocol"],
+      "source_paths": ["crates/routecodex-v4-standard-plugins/src/model_hooks.rs"],
+      "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red", "v4_parity_gate_standard_plugins"]
+    },
+    {
+      "function_id": "v4.hook.relay.request_response",
+      "status": "design",
+      "feature_id": "V4-DIRECT-RELAY-SSE",
+      "owner": "routecodex-v4-standard-plugins",
+      "entry_symbols": [],
+      "resource_ids": ["v4.request.normal_payload", "v4.response.normal_payload", "v4.information.execution_lane", "v4.information.client_protocol", "v4.information.provider_protocol"],
+      "source_paths": ["crates/routecodex-v4-standard-plugins/src/model_hooks.rs", "crates/routecodex-v4-standard-plugins/src/response_outbound.rs"],
+      "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red", "v4_parity_gate_standard_plugins"]
     }
   ]
 }

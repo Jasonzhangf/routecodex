@@ -1163,6 +1163,72 @@
       "callee_feature_id": "v4.servertool.cli_projection",
       "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
       "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime::typed admission information",
+      "to": "routecodex-v4-node-container::DirectRelayContainer",
+      "owner": "v4.direct.relay_container",
+      "edge_type": "typed_lane_to_direct_relay",
+      "caller_feature_id": "V4-DIRECT-RELAY-SSE",
+      "callee_feature_id": "V4-DIRECT-RELAY-SSE",
+      "resource_id": "v4.information.execution_lane",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs,crates/routecodex-v4-node-container/src/lib.rs",
+      "status": "binding_pending"
+    },
+    {
+      "from": "V4DirectReq02RelayContainer",
+      "to": "v4.hook.direct.request",
+      "owner": "v4.hook.direct.request_response",
+      "edge_type": "direct_request_hook_execution",
+      "caller_feature_id": "V4-DIRECT-RELAY-SSE",
+      "callee_feature_id": "V4-DIRECT-RELAY-SSE",
+      "resource_id": "v4.request.normal_payload",
+      "path": "crates/routecodex-v4-node-container/src/lib.rs,crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
+      "status": "binding_pending"
+    },
+    {
+      "from": "V4DirectResp02RelayContainer",
+      "to": "v4.hook.direct.response",
+      "owner": "v4.hook.direct.request_response",
+      "edge_type": "direct_response_hook_execution",
+      "caller_feature_id": "V4-DIRECT-RELAY-SSE",
+      "callee_feature_id": "V4-DIRECT-RELAY-SSE",
+      "resource_id": "v4.response.normal_payload",
+      "path": "crates/routecodex-v4-node-container/src/lib.rs,crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
+      "status": "binding_pending"
+    },
+    {
+      "from": "V4HubReqChatProcess03Governed",
+      "to": "v4.hook.relay.request",
+      "owner": "v4.hook.relay.request_response",
+      "edge_type": "relay_request_adjacent_projection",
+      "caller_feature_id": "V4-DIRECT-RELAY-SSE",
+      "callee_feature_id": "V4-DIRECT-RELAY-SSE",
+      "resource_id": "v4.request.normal_payload",
+      "path": "crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
+      "status": "binding_pending"
+    },
+    {
+      "from": "V4HubRespChatProcess04Governed",
+      "to": "v4.hook.relay.response",
+      "owner": "v4.hook.relay.request_response",
+      "edge_type": "relay_response_adjacent_projection",
+      "caller_feature_id": "V4-DIRECT-RELAY-SSE",
+      "callee_feature_id": "V4-DIRECT-RELAY-SSE",
+      "resource_id": "v4.response.normal_payload",
+      "path": "crates/routecodex-v4-standard-plugins/src/response_outbound.rs",
+      "status": "binding_pending"
+    },
+    {
+      "from": "routecodex-v4-provider::SseIngressPlugin",
+      "to": "Direct/Relay response codec",
+      "owner": "v4.transport.sse_plugin",
+      "edge_type": "sse_transport_frame_handoff",
+      "caller_feature_id": "V4-DIRECT-RELAY-SSE",
+      "callee_feature_id": "V4-DIRECT-RELAY-SSE",
+      "resource_id": "v4.transport.sse_frames",
+      "path": "crates/routecodex-v4-provider/src/lib.rs,crates/routecodex-v4-server/src/lib.rs",
+      "status": "binding_pending"
     }
   ]
 }
