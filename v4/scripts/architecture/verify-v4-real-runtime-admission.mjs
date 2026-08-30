@@ -284,6 +284,7 @@ try {
   const requestBody = {
     model: ADMISSION_MODEL,
     input: [{ role: 'user', content: 'say hi in 3 words' }],
+    store: true,
   };
   const jsonResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'x-rccv4-session-id': directSession }, 60000);
   if (jsonResp.status !== 200) throw new Error(`responses JSON status ${jsonResp.status}, body=${jsonResp.body.substring(0, 200)}`);
@@ -308,6 +309,7 @@ try {
     model: ADMISSION_MODEL,
     previous_response_id: directResponseId,
     input: [{ role: 'user', content: 'now say bye in 3 words' }],
+    store: true,
   }, { 'x-rccv4-session-id': directSession }, 60000);
   if (continuation.status !== 200) throw new Error(`continuation status ${continuation.status}, body=${continuation.body.substring(0, 200)}`);
   const body = JSON.parse(continuation.body);
