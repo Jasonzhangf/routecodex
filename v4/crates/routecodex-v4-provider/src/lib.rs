@@ -1127,6 +1127,16 @@ pub fn normalize_provider_response(
 /// provider boundary. Unknown envelope members fail closed so a new control
 /// field cannot silently become client-visible business data.
 fn normalize_responses_response(body: &Value) -> Result<Value, ProviderTransportError> {
+    const KNOWN_DIAGNOSTIC_FIELDS: &[&str] = &[
+        "chunk_index",
+        "dropped_compat_plugin_params",
+        "latency",
+        "original_model_requested",
+        "provider",
+        "provider_response_headers",
+        "request_type",
+        "resolved_model_used",
+    ];
     let mut object = body
         .as_object()
         .cloned()
@@ -1143,16 +1153,6 @@ fn normalize_responses_response(body: &Value) -> Result<Value, ProviderTransport
                 status: None,
             });
         };
-        const KNOWN_DIAGNOSTIC_FIELDS: &[&str] = &[
-            "chunk_index",
-            "dropped_compat_plugin_params",
-            "latency",
-            "original_model_requested",
-            "provider",
-            "provider_response_headers",
-            "request_type",
-            "resolved_model_used",
-        ];
         if let Some(unknown) = extra_fields
             .keys()
             .find(|key| !KNOWN_DIAGNOSTIC_FIELDS.contains(&key.as_str()))
@@ -1162,6 +1162,27 @@ fn normalize_responses_response(body: &Value) -> Result<Value, ProviderTransport
                 message: format!("unknown Responses extra_fields member {unknown}"),
                 status: None,
             });
+        }
+    }
+    if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
+        if let Some(extra_fields) = response.remove("extra_fields") {
+            let Some(extra_fields) = extra_fields.as_object() else {
+                return Err(ProviderTransportError {
+                    code: "provider_response_control_envelope".to_string(),
+                    message: "Responses response.extra_fields envelope must be an object".to_string(),
+                    status: None,
+                });
+            };
+            if let Some(unknown) = extra_fields
+                .keys()
+                .find(|key| !KNOWN_DIAGNOSTIC_FIELDS.contains(&key.as_str()))
+            {
+                return Err(ProviderTransportError {
+                    code: "provider_response_control_envelope".to_string(),
+                    message: format!("unknown Responses response.extra_fields member {unknown}"),
+                    status: None,
+                });
+            }
         }
     }
     Ok(Value::Object(object))
@@ -1198,7 +1219,7 @@ pub fn normalize_provider_sse_frame(
         let event = match protocol {
             "openai" | "chat" => normalize_openai_sse_event(&value),
             "anthropic" => normalize_anthropic_sse_event(&value),
-            "responses" => Some(value),
+            "responses" => Some(normalize_responses_response(&value)?),
             other => {
                 return Err(ProviderTransportError {
                     code: "provider_protocol_unsupported".to_string(),

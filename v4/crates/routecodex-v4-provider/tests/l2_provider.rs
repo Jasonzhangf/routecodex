@@ -340,3 +340,18 @@ fn provider_sse_normalizers_project_text_and_terminal_events() {
         .expect("utf8")
         .contains("response.completed"));
 }
+
+#[test]
+fn responses_sse_normalizer_removes_transport_envelopes() {
+    let normalized = normalize_provider_sse_frame(
+        "responses",
+        br#"event: response.created
+data: {"type":"response.created","extra_fields":{"provider":"openai","latency":4},"response":{"id":"resp-1","extra_fields":{"chunk_index":0}}}
+
+"#,
+    )
+    .expect("responses sse normalized");
+    let text = String::from_utf8(normalized).expect("utf8");
+    assert!(!text.contains("extra_fields"));
+    assert!(text.contains("response.created"));
+}
