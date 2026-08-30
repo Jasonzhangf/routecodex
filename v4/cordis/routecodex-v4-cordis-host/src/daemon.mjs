@@ -13,6 +13,13 @@ const DEFAULT_CAPABILITIES = Object.freeze([
 ]);
 const HASH_RE = /^sha256:[0-9a-f]{64}$/;
 const ZERO_BASE_HASH = 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
+const PRODUCTION_CHAINS = Object.freeze([
+  'direct_request',
+  'direct_response',
+  'relay_request',
+  'relay_response',
+  'error',
+]);
 
 export class CordisHostDaemonError extends Error {
   constructor(code, message) {
@@ -50,16 +57,17 @@ function freezeBundle(value) {
     || !value.entrypoints || typeof value.entrypoints !== 'object' || Array.isArray(value.entrypoints)
     || Object.keys(value.entrypoints).length === 0
     || !value.pipelines || typeof value.pipelines !== 'object' || Array.isArray(value.pipelines)
-    || !Array.isArray(value.pipelines.request) || value.pipelines.request.length === 0
-    || !Array.isArray(value.pipelines.response) || value.pipelines.response.length === 0
-    || !Array.isArray(value.pipelines.error) || value.pipelines.error.length === 0
+    || PRODUCTION_CHAINS.some(
+      (chain) => !Array.isArray(value.pipelines[chain]) || value.pipelines[chain].length === 0,
+    )
+    || Object.keys(value.pipelines).length !== PRODUCTION_CHAINS.length
     || !Array.isArray(value.nodes) || value.nodes.length === 0
     || !value.policies || typeof value.policies !== 'object' || Array.isArray(value.policies)
   ) {
     throw new CordisHostDaemonError('invalid_epoch_bundle', 'ExecutionEpochBundle fields are invalid');
   }
   const nodeIds = new Set();
-  const actualPipelines = { request: [], response: [], error: [] };
+  const actualPipelines = Object.fromEntries(PRODUCTION_CHAINS.map((chain) => [chain, []]));
   for (const node of value.nodes) {
     validateCompiledNode(node);
     if (nodeIds.has(node.node_id)) {
@@ -68,7 +76,7 @@ function freezeBundle(value) {
     nodeIds.add(node.node_id);
     actualPipelines[node.plan.chain].push(node.node_id);
   }
-  for (const chain of ['request', 'response', 'error']) {
+  for (const chain of PRODUCTION_CHAINS) {
     if (
       JSON.stringify(value.pipelines[chain]) !== JSON.stringify(actualPipelines[chain])
       || value.entrypoints[chain] !== value.pipelines[chain][0]
@@ -108,7 +116,7 @@ function validateCompiledNode(node) {
     || plan.hash !== node.plan_hash
     || !Number.isSafeInteger(plan.position) || plan.position < 1
     || typeof plan.role_id !== 'string' || plan.role_id.length === 0
-    || !['request', 'response', 'error'].includes(plan.chain)
+    || !PRODUCTION_CHAINS.includes(plan.chain)
     || !Array.isArray(plan.entries)
     || !Array.isArray(plan.selection_groups)
   ) {

@@ -50,8 +50,10 @@ fn plan(node_id: &str, chain: &str, position: u32) -> NodePluginPlan {
 }
 
 fn candidate() -> Value {
-    let request = plan("request-1", "request", 1);
-    let response = plan("response-1", "response", 1);
+    let direct_request = plan("direct-request-1", "direct_request", 1);
+    let direct_response = plan("direct-response-1", "direct_response", 1);
+    let relay_request = plan("relay-request-1", "relay_request", 1);
+    let relay_response = plan("relay-response-1", "relay_response", 1);
     let error = plan("error-1", "error", 1);
     json!({
         "schema_version": 1,
@@ -61,15 +63,25 @@ fn candidate() -> Value {
         "manifest_hash": MANIFEST_HASH,
         "graph_hash": GRAPH_HASH,
         "plugin_artifact_set_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
-        "entrypoints": {"request": "request-1", "response": "response-1", "error": "error-1"},
+        "entrypoints": {
+            "direct_request": "direct-request-1",
+            "direct_response": "direct-response-1",
+            "relay_request": "relay-request-1",
+            "relay_response": "relay-response-1",
+            "error": "error-1"
+        },
         "pipelines": {
-            "request": ["request-1"],
-            "response": ["response-1"],
+            "direct_request": ["direct-request-1"],
+            "direct_response": ["direct-response-1"],
+            "relay_request": ["relay-request-1"],
+            "relay_response": ["relay-response-1"],
             "error": ["error-1"]
         },
         "nodes": [
-            {"node_id": "request-1", "plan_hash": request.hash, "input_resource": "request.in", "output_resource": "request.out", "allowed_edges": {}, "plan": request},
-            {"node_id": "response-1", "plan_hash": response.hash, "input_resource": "response.in", "output_resource": "response.out", "allowed_edges": {}, "plan": response},
+            {"node_id": "direct-request-1", "plan_hash": direct_request.hash, "input_resource": "direct.request.in", "output_resource": "direct.request.out", "allowed_edges": {}, "plan": direct_request},
+            {"node_id": "direct-response-1", "plan_hash": direct_response.hash, "input_resource": "direct.response.in", "output_resource": "direct.response.out", "allowed_edges": {}, "plan": direct_response},
+            {"node_id": "relay-request-1", "plan_hash": relay_request.hash, "input_resource": "relay.request.in", "output_resource": "relay.request.out", "allowed_edges": {}, "plan": relay_request},
+            {"node_id": "relay-response-1", "plan_hash": relay_response.hash, "input_resource": "relay.response.in", "output_resource": "relay.response.out", "allowed_edges": {}, "plan": relay_response},
             {"node_id": "error-1", "plan_hash": error.hash, "input_resource": "error.in", "output_resource": "error.out", "allowed_edges": {}, "plan": error}
         ],
         "policies": {}
@@ -82,8 +94,10 @@ fn exact_compiled_candidate_materializes_in_cordis_order() {
         materialize_execution_epoch_bundle(&candidate(), GRAPH_HASH, MANIFEST_HASH, &Registry)
             .expect("exact Cordis candidate materializes");
     let lease = bundle.admit().expect("materialized bundle admits");
-    assert_eq!(lease.entrypoint("request").unwrap(), "request-1");
-    assert_eq!(lease.entrypoint("response").unwrap(), "response-1");
+    assert_eq!(lease.entrypoint("direct_request").unwrap(), "direct-request-1");
+    assert_eq!(lease.entrypoint("direct_response").unwrap(), "direct-response-1");
+    assert_eq!(lease.entrypoint("relay_request").unwrap(), "relay-request-1");
+    assert_eq!(lease.entrypoint("relay_response").unwrap(), "relay-response-1");
     assert_eq!(lease.entrypoint("error").unwrap(), "error-1");
 }
 
@@ -117,7 +131,7 @@ fn missing_plan_hash_drift_and_unknown_handle_fail_fast() {
 #[test]
 fn pipeline_order_and_external_identity_drift_fail_fast() {
     let mut reordered = candidate();
-    reordered["pipelines"]["request"] = json!(["response-1"]);
+    reordered["pipelines"]["direct_request"] = json!(["relay-request-1"]);
     assert!(matches!(
         materialize_execution_epoch_bundle(&reordered, GRAPH_HASH, MANIFEST_HASH, &Registry),
         Err(MaterializationError::PipelineMismatch(_))
