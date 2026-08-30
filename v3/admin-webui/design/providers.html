@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Providers — RouteCodex Design</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">RouteCodex</div>
+    <nav class="nav">
+      <a href="./index.html">Design Review</a>
+      <a href="./dashboard.html">Dashboard</a>
+      <a href="./requests.html">Requests</a>
+      <a href="./routes.html">Route Pools</a>
+      <a class="active" href="./providers.html">Providers</a>
+    </nav>
+    <div class="top-actions"><button class="btn small">Refresh</button></div>
+  </header>
+
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Providers</h1>
+        <p class="sub">Generic configuration, model catalog, route references, and health.</p>
+      </div>
+    </div>
+
+    <section class="list-detail-layout">
+      <article class="panel">
+        <div class="panel-head"><h2>Providers</h2><input placeholder="Search"></div>
+        <div class="panel-body provider-list">
+          <div class="provider-item status-green active"><div class="name"><span>openai</span><span class="meta">4 models</span></div><div class="meta">anthropic-compatible · healthy</div></div>
+          <div class="provider-item status-red"><div class="name"><span>cc</span><span class="meta">8 models</span></div><div class="meta">HTTP 429 · cooling</div></div>
+          <div class="provider-item"><div class="name"><span>vertex</span><span class="meta">12 models</span></div><div class="meta">disabled · unknown health</div></div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head"><h2>openai</h2><button class="btn small">Edit provider</button></div>
+        <div class="tabs"><button class="active">Config</button><button>Models</button><button>Routing</button><button>Health</button><button>Raw</button></div>
+        <div class="panel-body">
+          <section class="form-grid">
+            <label class="form-field"><span>ID</span><input value="openai"></label>
+            <label class="form-field"><span>Type</span><select><option>openai</option><option>anthropic</option></select></label>
+            <label class="form-field full"><span>Base URL</span><input value="https://api.example.com/v1"></label>
+            <label class="form-field"><span>Default wire model</span><input value="gpt-5.2"></label>
+            <label class="form-field"><span>Enabled</span><select><option>Yes</option><option>No</option></select></label>
+            <label class="form-field full"><span>Credential source</span><input value="env:OPENAI_API_KEY ****" readonly><span class="help">Secret values are never displayed.</span></label>
+          </section>
+          <div class="action-row">
+            <button class="btn">Test connection</button>
+            <button class="btn primary">Save</button>
+            <button class="btn">Revert</button>
+          </div>
+
+          <h2 class="section-title">Models</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Client alias</th><th>Wire model</th><th class="num">Context</th><th>Capabilities</th><th>Default</th></tr></thead>
+              <tbody>
+                <tr><td>gpt-5.2</td><td class="mono">gpt-5.2</td><td class="num">400K</td><td>tools · vision</td><td>yes</td></tr>
+                <tr><td>gpt-5-mini</td><td class="mono">gpt-5-mini</td><td class="num">200K</td><td>tools</td><td>no</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 class="section-title">Routing references</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Group</th><th class="num">Port</th><th>Pool</th><th class="num">Tier</th><th class="num">Priority</th><th>Model</th><th>Key ref</th></tr></thead>
+              <tbody>
+                <tr><td>production</td><td class="num">7777</td><td>default</td><td class="num">1</td><td class="num">100</td><td class="mono">gpt-5.2</td><td class="mono">key-1</td></tr>
+                <tr><td>fallback</td><td class="num">4444</td><td>primary</td><td class="num">2</td><td class="num">80</td><td class="mono">gpt-5-mini</td><td class="mono">key-2</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 class="section-title">Health</h2>
+          <div class="card status-green"><span class="label">Last test</span><strong>HTTP 200</strong><span class="hint">12:31:22 · 320 ms</span></div>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

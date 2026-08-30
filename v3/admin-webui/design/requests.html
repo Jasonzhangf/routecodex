@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Requests — RouteCodex Design</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="with-drawer">
+  <header class="topbar">
+    <div class="brand">RouteCodex</div>
+    <nav class="nav">
+      <a href="./index.html">Design Review</a>
+      <a href="./dashboard.html">Dashboard</a>
+      <a class="active" href="./requests.html">Requests</a>
+      <a href="./routes.html">Route Pools</a>
+      <a href="./providers.html">Providers</a>
+    </nav>
+    <div class="top-actions">
+      <span class="live-state live">Live · updated 12:31:22</span>
+      <button class="btn small" type="button">Pause</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Requests</h1>
+        <p class="sub">Persistent records with usage, routing, lifecycle, and diagnostics.</p>
+      </div>
+      <div class="controls">
+        <div class="seg">
+          <button class="active" type="button">All requests</button>
+          <button type="button">Errors</button>
+        </div>
+        <div class="seg">
+          <button class="active" type="button">Today</button>
+          <button type="button">7 days</button>
+          <button type="button">All</button>
+        </div>
+      </div>
+    </div>
+
+    <section class="toolbar">
+      <label>Status<select><option>All</option><option>Error</option></select></label>
+      <label>Port<select><option>All</option><option>4444</option><option>7777</option></select></label>
+      <label>Provider<select><option>All</option><option>cc</option><option>openai</option></select></label>
+      <label>Model<input value="gpt-5"></label>
+      <label>Error code<select><option>All</option><option>400</option><option>502</option></select></label>
+      <label>Mode<select><option>All</option><option>direct</option><option>relay</option></select></label>
+      <label>Session<input placeholder="session id"></label>
+      <label class="search">Search<input placeholder="request, model, provider, route, error"></label>
+    </section>
+
+    <div class="filter-chips">
+      <span>Filters:</span>
+      <span class="chip">status:error <span class="x">×</span></span>
+      <span class="chip">port:7777 <span class="x">×</span></span>
+      <button class="btn small" type="button">Clear all</button>
+    </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Error rollup</h2>
+        <span class="meta">Raw upstream status codes</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Code</th><th class="num">Count</th><th>First seen</th><th>Last seen</th><th>Sample</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr class="status-red"><td><span class="status-pill">400<small>ERR</small></span></td><td class="num">11</td><td class="mono">11:02:11</td><td class="mono">12:31:01</td><td class="mono">req_a91f…</td><td><button class="btn small">Open</button></td></tr>
+            <tr class="status-red"><td><span class="status-pill">502<small>ERR</small></span></td><td class="num">4</td><td class="mono">10:14:00</td><td class="mono">12:29:44</td><td class="mono">req_77c2…</td><td><button class="btn small">Open</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="pagination">
+      <button class="btn small" type="button">Previous</button>
+      <span class="muted">Page 1 of 24 · 2,341 records</span>
+      <button class="btn small" type="button">Next</button>
+      <span class="spacer"></span>
+      <label class="muted">Rows
+        <select><option>100</option><option>200</option><option>300</option></select>
+      </label>
+    </div>
+
+    <section class="panel">
+      <div class="table-wrap">
+        <table class="request-table">
+          <thead>
+            <tr>
+              <th class="sortable sorted">Status<span class="arrow">▼</span></th>
+              <th class="num">Port</th><th>Entry</th><th>Exit</th><th>Route reason</th>
+              <th>Sent</th><th>Responded</th><th class="num">Internal</th><th class="num">External</th>
+              <th class="num">In</th><th class="num">Out</th><th class="num">Cached</th><th class="num">Hit</th><th>Finish</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="status-green"><td><span class="status-pill">200<small>OK</small></span></td><td class="num">7777</td><td>/v1/responses</td><td class="mono">openai.gpt-5.2</td><td>default</td><td class="mono">12:31:02</td><td class="mono">12:31:04</td><td class="num">420ms</td><td class="num">1.7s</td><td class="num">12.0K</td><td class="num">2.0K</td><td class="num">9.1K</td><td class="num">75.8%</td><td>stop</td></tr>
+            <tr class="status-blue"><td><span class="status-pill">—<small>RUN</small></span></td><td class="num">4444</td><td>/v1/messages</td><td class="mono">cc.gpt-5.5</td><td>priority</td><td class="mono">12:31:18</td><td class="mono">—</td><td class="num">380ms</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td>—</td></tr>
+            <tr class="status-red"><td><span class="status-pill">502<small>ERR</small></span></td><td class="num">7777</td><td>/v1/responses</td><td class="mono">cc.gpt-5.5</td><td>failover</td><td class="mono">12:30:58</td><td class="mono">12:31:01</td><td class="num">380ms</td><td class="num">900ms</td><td class="num">8.0K</td><td class="num">0</td><td class="num">0</td><td class="num">0%</td><td>error</td></tr>
+            <tr><td><span class="status-pill">CXL<small>STOP</small></span></td><td class="num">4444</td><td>/v1/chat/completions</td><td class="mono">vertex.gemini</td><td>fallback</td><td class="mono">12:30:40</td><td class="mono">12:30:41</td><td class="num">120ms</td><td class="num">240ms</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td>cancelled</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <aside class="mock-drawer" aria-label="Request detail">
+    <div class="drawer-head">
+      <div>
+        <h2>Request req_77c2</h2>
+        <span class="meta">Opened from row 3</span>
+      </div>
+      <button class="drawer-close" type="button" aria-label="Close">×</button>
+    </div>
+
+    <section class="detail-section">
+      <h3>Summary</h3>
+      <div class="detail-grid">
+        <div class="detail-field"><span>Status</span><strong>502</strong></div>
+        <div class="detail-field"><span>Port</span><strong>7777</strong></div>
+        <div class="detail-field"><span>Entry</span><strong>/v1/responses</strong></div>
+        <div class="detail-field"><span>Session</span><strong>sess_91f…</strong></div>
+        <div class="detail-field"><span>Started</span><strong>12:30:58</strong></div>
+        <div class="detail-field"><span>Finished</span><strong>12:31:04</strong></div>
+      </div>
+    </section>
+
+    <section class="detail-section">
+      <h3>Routing</h3>
+      <div class="detail-grid">
+        <div class="detail-field"><span>Route</span><strong>default</strong></div>
+        <div class="detail-field"><span>Reason</span><strong>failover</strong></div>
+        <div class="detail-field"><span>Switches</span><strong>2</strong></div>
+      </div>
+    </section>
+
+    <section class="detail-section">
+      <h3>Attempts</h3>
+      <div class="table-wrap">
+        <table class="attempt-table">
+          <thead><tr><th>#</th><th>Provider</th><th>Code</th><th>Reason</th><th>Time</th><th class="num">Duration</th></tr></thead>
+          <tbody>
+            <tr class="status-red"><td>1</td><td class="mono">provider.a.gpt-5</td><td>429</td><td>quota exceeded</td><td class="mono">12:30:58</td><td class="num">320ms</td></tr>
+            <tr class="status-red"><td>2</td><td class="mono">provider.b.gpt-5</td><td>500</td><td>upstream error</td><td class="mono">12:31:00</td><td class="num">540ms</td></tr>
+            <tr class="status-red"><td>3</td><td class="mono">provider.c.gpt-5</td><td>502</td><td>bad gateway</td><td class="mono">12:31:02</td><td class="num">720ms</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="detail-section">
+      <h3>Usage</h3>
+      <div class="detail-grid">
+        <div class="detail-field"><span>Input</span><strong>8,012</strong></div>
+        <div class="detail-field"><span>Output</span><strong>0</strong></div>
+        <div class="detail-field"><span>Cached</span><strong>0</strong></div>
+        <div class="detail-field"><span>Total</span><strong>8,012</strong></div>
+        <div class="detail-field"><span>Hit</span><strong>0%</strong></div>
+        <div class="detail-field"><span>Finish</span><strong>error</strong></div>
+      </div>
+    </section>
+
+    <section class="detail-section">
+      <h3>Lifecycle</h3>
+      <ol class="timeline">
+        <li class="status-blue"><time>12:30:58</time><span>request.received</span></li>
+        <li class="status-red"><time>12:31:00</time><span>provider.attempt.failed · HTTP 500</span></li>
+        <li class="status-blue"><time>12:31:02</time><span>provider.switch · failover</span></li>
+        <li class="status-red"><time>12:31:04</time><span>request.failed · HTTP 502</span></li>
+      </ol>
+    </section>
+
+    <section class="detail-section">
+      <h3>Servertool</h3>
+      <div class="detail-grid">
+        <div class="detail-field"><span>Servertool</span><strong>yes</strong></div>
+        <div class="detail-field"><span>Stopless</span><strong>no</strong></div>
+        <div class="detail-field"><span>Tool calls</span><strong>2</strong></div>
+      </div>
+    </section>
+
+    <div class="action-row">
+      <button class="btn small">Copy request JSON</button>
+      <button class="btn small">Copy response JSON</button>
+      <button class="btn small">Copy diagnostic bundle</button>
+    </div>
+  </aside>
+
+  <script>
+    const drawer = document.querySelector('.mock-drawer');
+    document.querySelectorAll('.drawer-close').forEach((button) => {
+      button.addEventListener('click', () => {
+        drawer.hidden = true;
+        document.body.classList.remove('with-drawer');
+      });
+    });
+  </script>
+</body>
+</html>

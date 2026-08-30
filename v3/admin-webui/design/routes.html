@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Route Pools — RouteCodex Design</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">RouteCodex</div>
+    <nav class="nav">
+      <a href="./index.html">Design Review</a>
+      <a href="./dashboard.html">Dashboard</a>
+      <a href="./requests.html">Requests</a>
+      <a class="active" href="./routes.html">Route Pools</a>
+      <a href="./providers.html">Providers</a>
+    </nav>
+    <div class="top-actions">
+      <button class="btn small">Apply</button>
+      <button class="btn small primary">Apply &amp; save</button>
+      <button class="btn small">Export</button>
+      <button class="btn small">Discard</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Route Pools</h1>
+        <p class="sub">Apply changes to live memory or save them to the config file; export a snapshot at any time.</p>
+      </div>
+      <div class="controls">
+        <div class="seg">
+          <button class="active" type="button">Topology</button>
+          <button type="button">Cooldown pool</button>
+        </div>
+      </div>
+    </div>
+
+    <section class="tree-layout">
+      <article class="panel">
+        <div class="panel-head"><h2>Route Pools</h2><span class="meta">Fixed pools · add or remove route members</span></div>
+        <div class="tree">
+          <details open>
+            <summary>production<span class="summary-meta">3 fixed pools</span></summary>
+            <div class="tree-children">
+              <details open>
+                <summary>port 7777<span class="summary-meta">pool default</span></summary>
+                <div class="tree-children">
+                  <details open>
+                    <summary>pool default<span class="summary-meta">3 members</span></summary>
+                    <div class="tree-children">
+                      <div class="member status-green">
+                        <span class="provider">cc.gpt-5.5</span>
+                        <input class="weight-input" value="70" aria-label="Weight">
+                        <div class="rank-controls"><button type="button" aria-label="Move up">↑</button><button type="button" aria-label="Move down">↓</button></div>
+                        <span class="meta">p1</span>
+                      </div>
+                      <div class="member status-red">
+                        <span class="provider">openai.gpt-5.2</span>
+                        <input class="weight-input" value="30" aria-label="Weight">
+                        <div class="rank-controls"><button type="button" aria-label="Move up">↑</button><button type="button" aria-label="Move down">↓</button></div>
+                        <span class="meta">p2</span>
+                      </div>
+                      <div class="member">
+                        <span class="provider">vertex.gemini-pro</span>
+                        <input class="weight-input" value="0" aria-label="Weight">
+                        <div class="rank-controls"><button type="button" aria-label="Move up">↑</button><button type="button" aria-label="Move down">↓</button></div>
+                        <span class="meta">disabled</span>
+                      </div>
+                    </div>
+                  </details>
+                  <details>
+                    <summary>pool fallback<span class="summary-meta">not active</span></summary>
+                    <div class="tree-children">
+                      <div class="member status-green">
+                        <span class="provider">anthropic.claude</span>
+                        <input class="weight-input" value="100" aria-label="Weight">
+                        <div class="rank-controls"><button type="button" aria-label="Move up">↑</button><button type="button" aria-label="Move down">↓</button></div>
+                        <span class="meta">p3</span>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </details>
+            </div>
+          </details>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="inspector">
+          <div class="inspector-title">
+            <div><h2>default · port 7777</h2><span class="meta">Fixed pool · members can be added or removed</span></div>
+            <button class="btn small">Add route member</button>
+          </div>
+          <div class="counts"><span>6 normal</span><span>1 cooling</span><span>2 disabled</span></div>
+          <div class="diff-banner"><span>2 unsaved changes · revision 184 → draft</span><span>Apply = memory only · Apply &amp; save = config file</span></div>
+
+          <h2 class="section-title">Fixed pool inclusion</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Pool</th><th>Include in config</th><th>Members</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">default</td><td><input type="checkbox" checked aria-label="Include default pool"></td><td class="num">3</td></tr>
+                <tr><td class="mono">fallback</td><td><input type="checkbox" aria-label="Include fallback pool"></td><td class="num">1</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 class="section-title">Active route members</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Exit</th><th class="num">Weight / order</th><th>Key ref</th><th>Status</th><th></th></tr>
+              </thead>
+              <tbody>
+                <tr class="status-green">
+                  <td class="mono">cc.gpt-5.5</td>
+                  <td><div class="weight-group"><input class="weight-input" value="70" aria-label="Weight"><div class="rank-controls"><button type="button" aria-label="Move up">↑</button><button type="button" aria-label="Move down">↓</button></div></div></td>
+                  <td class="mono">key-1</td>
+                  <td>normal</td>
+                  <td><button class="btn small">Remove</button></td>
+                </tr>
+                <tr class="status-red">
+                  <td class="mono">openai.gpt-5.2</td>
+                  <td><div class="weight-group"><input class="weight-input" value="30" aria-label="Weight"><div class="rank-controls"><button type="button" aria-label="Move up">↑</button><button type="button" aria-label="Move down">↓</button></div></div></td>
+                  <td class="mono">key-2</td>
+                  <td>cooling</td>
+                  <td><button class="btn small">Remove</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 class="section-title">Add route member</h2>
+          <div class="provider-picker">
+            <input class="picker-search" placeholder="Filter provider or model" aria-label="Filter provider or model">
+            <div class="picker-options">
+              <label class="picker-option"><input type="checkbox" checked> <span class="mono">cc.gpt-5.5</span> <span class="meta">key-1</span></label>
+              <label class="picker-option"><input type="checkbox" checked> <span class="mono">openai.gpt-5.2</span> <span class="meta">key-2</span></label>
+              <label class="picker-option"><input type="checkbox"> <span class="mono">openai.gpt-5-mini</span> <span class="meta">key-2</span></label>
+              <label class="picker-option"><input type="checkbox"> <span class="mono">anthropic.claude-3.7</span> <span class="meta">key-3</span></label>
+              <label class="picker-option"><input type="checkbox"> <span class="mono">vertex.gemini-pro</span> <span class="meta">key-4</span></label>
+            </div>
+          </div>
+
+          <h2 class="section-title">Validation</h2>
+          <div class="empty">No validation errors</div>
+
+          <div class="action-row">
+            <button class="btn">Apply to memory</button>
+            <button class="btn primary">Apply &amp; save</button>
+            <button class="btn">Export config</button>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Cooldown pool</h2>
+        <span class="meta">Runtime state · manual removal is explicit</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Exit</th><th>Pool / port</th><th>Reason</th><th class="num">Code</th><th>Entered</th><th>Expires</th><th class="num">Failures</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr class="status-red"><td class="mono">cc.gpt-5.5</td><td>default / 7777</td><td>quota exceeded</td><td class="num">429</td><td class="mono">12:28:11</td><td class="mono">12:38:11</td><td class="num">3</td><td><button class="btn small">Remove</button></td></tr>
+            <tr class="status-red"><td class="mono">openai.gpt-5.2</td><td>primary / 4444</td><td>bad gateway</td><td class="num">502</td><td class="mono">12:30:02</td><td class="mono">12:35:02</td><td class="num">1</td><td><button class="btn small">Remove</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

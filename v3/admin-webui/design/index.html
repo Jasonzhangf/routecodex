@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RouteCodex WebUI Design Review</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">RouteCodex</div>
+    <nav class="nav">
+      <a class="active" href="./index.html">Design Review</a>
+      <a href="./dashboard.html">Dashboard</a>
+      <a href="./requests.html">Requests</a>
+      <a href="./routes.html">Route Pools</a>
+      <a href="./providers.html">Providers</a>
+    </nav>
+    <div class="top-actions">
+      <span class="live-state live">Static mock</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>WebUI redesign mockups</h1>
+        <p class="sub">Black / white / gray system. Color is limited to status borders.</p>
+      </div>
+    </div>
+
+    <section class="mock-links">
+      <a class="mock-link" href="./dashboard.html">
+        <strong>Dashboard</strong>
+        <span>Five KPIs, paired time charts, and drill-down breakdowns.</span>
+      </a>
+      <a class="mock-link" href="./requests.html">
+        <strong>Requests</strong>
+        <span>Dense sortable records, error rollup, and a full request drawer.</span>
+      </a>
+      <a class="mock-link" href="./routes.html">
+        <strong>Route Pools</strong>
+        <span>Editable priority and weight, live apply, config save, export, and cooldown pool.</span>
+      </a>
+      <a class="mock-link" href="./providers.html">
+        <strong>Providers</strong>
+        <span>Editable master-detail management for config, models, routing, and health.</span>
+      </a>
+    </section>
+
+    <p class="sub">These pages contain representative data only and do not call the admin API.</p>
+  </main>
+</body>
+</html>

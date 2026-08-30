@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard — RouteCodex Design</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">RouteCodex</div>
+    <nav class="nav">
+      <a href="./index.html">Design Review</a>
+      <a class="active" href="./dashboard.html">Dashboard</a>
+      <a href="./requests.html">Requests</a>
+      <a href="./routes.html">Route Pools</a>
+      <a href="./providers.html">Providers</a>
+    </nav>
+    <div class="top-actions">
+      <span class="live-state live">Live · updated 12:31:22</span>
+      <button class="btn small" type="button">Refresh</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Dashboard</h1>
+        <p class="sub">Traffic, token usage, cache efficiency, and routing health.</p>
+      </div>
+      <div class="controls">
+        <div class="seg">
+          <button class="active" type="button">Today</button>
+          <button type="button">7 days</button>
+          <button type="button">All</button>
+        </div>
+      </div>
+    </div>
+
+    <section class="cards">
+      <article class="card">
+        <span class="label">Requests</span>
+        <strong>1,284</strong>
+        <span class="hint">Today · live</span>
+      </article>
+      <article class="card status-red">
+        <span class="label">Errors</span>
+        <strong>15</strong>
+        <span class="hint">400 ×11 · 502 ×4</span>
+      </article>
+      <article class="card">
+        <span class="label">Total tokens</span>
+        <strong>12.4M</strong>
+        <span class="hint">Input 9.8M · output 2.6M</span>
+      </article>
+      <article class="card status-green">
+        <span class="label">Cache hit</span>
+        <strong>38.2%<span class="low">LOW</span></strong>
+        <span class="hint">4.7M cached input tokens</span>
+      </article>
+      <article class="card status-blue">
+        <span class="label">Active</span>
+        <strong>6</strong>
+        <span class="hint">2 retrying</span>
+      </article>
+    </section>
+
+    <section class="grid-2">
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Requests by day</h2>
+          <span class="meta">Count</span>
+        </div>
+        <div class="panel-body">
+          <div class="chart">
+            <div class="bar-col"><div class="bar" style="height:22%"></div><span class="bar-label">20</span></div>
+            <div class="bar-col"><div class="bar" style="height:38%"></div><span class="bar-label">21</span></div>
+            <div class="bar-col"><div class="bar" style="height:64%"></div><span class="bar-label">22</span></div>
+            <div class="bar-col"><div class="bar" style="height:31%"></div><span class="bar-label">23</span></div>
+            <div class="bar-col"><div class="bar selected" style="height:88%"></div><span class="bar-label">24</span></div>
+            <div class="bar-col"><div class="bar" style="height:47%"></div><span class="bar-label">25</span></div>
+          </div>
+        </div>
+      </article>
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Tokens by day</h2>
+          <div class="seg">
+            <button class="active" type="button">Total</button>
+            <button type="button">Cached</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="chart">
+            <div class="bar-col"><div class="bar" style="height:17%"></div><span class="bar-label">20</span></div>
+            <div class="bar-col"><div class="bar" style="height:29%"></div><span class="bar-label">21</span></div>
+            <div class="bar-col"><div class="bar" style="height:72%"></div><span class="bar-label">22</span></div>
+            <div class="bar-col"><div class="bar" style="height:24%"></div><span class="bar-label">23</span></div>
+            <div class="bar-col"><div class="bar selected" style="height:96%"></div><span class="bar-label">24</span></div>
+            <div class="bar-col"><div class="bar" style="height:52%"></div><span class="bar-label">25</span></div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Breakdown</h2>
+        <div class="seg">
+          <button class="active" type="button">Port</button>
+          <button type="button">Provider</button>
+          <button type="button">Model</button>
+          <button type="button">Status</button>
+          <button type="button">Reason</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Port</th><th class="num sortable sorted">Requests<span class="arrow">▼</span></th>
+              <th class="num">Tokens</th><th class="num">Errors</th>
+              <th class="num">Cache hit</th><th class="num">Avg duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="status-green"><td>4444</td><td class="num">620</td><td class="num">6.1M</td><td class="num">4</td><td class="num">41.2%</td><td class="num">1.8s</td></tr>
+            <tr class="status-red"><td>7777</td><td class="num">664</td><td class="num">6.3M</td><td class="num">11</td><td class="num">35.7% <span class="low">LOW</span></td><td class="num">2.4s</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+
