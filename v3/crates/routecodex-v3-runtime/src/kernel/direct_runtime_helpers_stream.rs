@@ -74,7 +74,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
         StreamState {
             source,
             decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
-            stream_observation,
+            stream_observation: stream_observation.clone(),
             runtime_timing,
             strip_client_response_id,
             retain_response_cipher,
@@ -87,6 +87,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                 session_id,
                 request_id,
                 expected_model_id,
+                stream_observation: Some(stream_observation.clone()),
                 ..Default::default()
             }
             .with_typed_hooks(typed_hooks)
@@ -157,7 +158,12 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                     let decoder_result = decoder
                         .finish()
                         .map_err(build_v3_sse_transport_error_source);
-                    state.content_consumer.finalize_toolreason_observation();
+                    if let Err(error) = state.content_consumer.finalize_toolreason_observation() {
+                        return Some((
+                            Err(runtime_source("V3RuntimeToolreasonObservation", error)),
+                            state,
+                        ));
+                    }
                     match decoder_result {
                         Ok(()) if state.runtime_timing.is_finished().unwrap_or(false) => None,
                         Ok(()) => {
@@ -669,8 +675,14 @@ mod direct_sse_timing_tests {
             Some(0),
         );
         let mut observed = observed;
-        let result = observed.next().await.expect("event-only frame must be observed");
-        assert!(result.is_err(), "event: must not fabricate provider JSON type");
+        let result = observed
+            .next()
+            .await
+            .expect("event-only frame must be observed");
+        assert!(
+            result.is_err(),
+            "event: must not fabricate provider JSON type"
+        );
     }
 
     #[tokio::test]
@@ -738,7 +750,10 @@ mod direct_sse_timing_tests {
         )
         .expect("provider codec should classify response.done without transport failure");
 
-        assert!(!terminal, "response.done must not bypass the codec terminal contract");
+        assert!(
+            !terminal,
+            "response.done must not bypass the codec terminal contract"
+        );
     }
 
     #[test]
@@ -763,6 +778,121 @@ mod direct_sse_timing_tests {
             observation.snapshot().unwrap().provider_raw_sse,
             std::str::from_utf8(chunk).unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn direct_sse_toolreason_records_typed_observation_at_resp03() {
+        let request_id = format!("{}-request-live-observation", module_path!());
+        let observation = V3RuntimeStreamObservation::default();
+        let runtime_timing = V3RuntimeTimingState::start();
+        runtime_timing.start_external().unwrap();
+        let source = V3ProviderAttemptSseStream::new(Box::pin(stream::iter(vec![Ok(
+            r#"event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"call_live_observation","type":"function_call","name":"pwd","call_id":"call_live_observation","arguments":""}}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","output_index":0,"item_id":"call_live_observation","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"call_live_observation","type":"function_call","name":"pwd","call_id":"call_live_observation","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\"}"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_live_observation","status":"completed","output":[{"id":"call_live_observation","type":"function_call","name":"pwd","call_id":"call_live_observation","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\"}"}]}}
+
+"#
+            .as_bytes()
+            .to_vec(),
+        )])));
+        let mut projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
+            source,
+            observation.clone(),
+            runtime_timing,
+            false,
+            false,
+            V3HubProviderWireProtocol::Responses,
+            false,
+            false,
+            crate::hooks::register_responses_direct_hooks().direct_sse_typed_hooks(),
+            true,
+            true,
+            Some("session-live-observation".to_string()),
+            Some(request_id.clone()),
+            Some("gpt-5.6-sol".to_string()),
+            true,
+        );
+
+        while let Some(chunk) = projected.next().await {
+            chunk.expect("live-equivalent Direct Toolreason SSE must project");
+        }
+
+        let snapshot = observation.snapshot().expect("observation snapshot");
+        let toolreason = snapshot
+            .toolreason
+            .expect("Direct Resp03 must publish the typed Toolreason observation");
+        assert_eq!(toolreason.status, "OK");
+        assert_eq!(toolreason.stage, "resp03_direct_sse");
+        assert_eq!(toolreason.request_id.as_deref(), Some(request_id.as_str()));
+        assert_eq!(toolreason.tool, "pwd");
+        assert_eq!(toolreason.reason.as_deref(), Some("确认当前工作目录"));
+    }
+
+    #[tokio::test]
+    async fn direct_sse_toolreason_missing_records_typed_observation_without_projection() {
+        let request_id = format!("{}-request-live-missing", module_path!());
+        let observation = V3RuntimeStreamObservation::default();
+        let runtime_timing = V3RuntimeTimingState::start();
+        runtime_timing.start_external().unwrap();
+        let source = V3ProviderAttemptSseStream::new(Box::pin(stream::iter(vec![Ok(
+            r#"event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"call_live_missing","type":"function_call","name":"pwd","call_id":"call_live_missing","arguments":""}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"call_live_missing","type":"function_call","name":"pwd","call_id":"call_live_missing","arguments":"{\"cmd\":\"pwd\"}"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_live_missing","status":"completed","output":[{"id":"call_live_missing","type":"function_call","name":"pwd","call_id":"call_live_missing","arguments":"{\"cmd\":\"pwd\"}"}]}}
+
+"#
+            .as_bytes()
+            .to_vec(),
+        )])));
+        let mut projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
+            source,
+            observation.clone(),
+            runtime_timing,
+            false,
+            false,
+            V3HubProviderWireProtocol::Responses,
+            false,
+            false,
+            crate::hooks::register_responses_direct_hooks().direct_sse_typed_hooks(),
+            true,
+            true,
+            Some("session-live-missing".to_string()),
+            Some(request_id.clone()),
+            Some("gpt-5.6-sol".to_string()),
+            true,
+        );
+        let mut client_sse = Vec::new();
+        while let Some(chunk) = projected.next().await {
+            client_sse.extend(chunk.expect("missing Toolreason must preserve the native call"));
+        }
+
+        let client_sse = String::from_utf8(client_sse).unwrap();
+        assert!(!client_sse.contains("rcc_reason_"));
+        assert!(!client_sse.contains("response.output_text.delta"));
+        assert!(client_sse.contains("call_live_missing"));
+        assert!(client_sse.contains(r#"{\"cmd\":\"pwd\"}"#));
+        let toolreason = observation
+            .snapshot()
+            .expect("observation snapshot")
+            .toolreason
+            .expect("Direct Resp03 must publish a MISSING observation");
+        assert_eq!(toolreason.status, "MISSING");
+        assert_eq!(toolreason.stage, "resp03_direct_sse");
+        assert_eq!(toolreason.request_id.as_deref(), Some(request_id.as_str()));
+        assert_eq!(toolreason.tool, "pwd");
+        assert_eq!(toolreason.reason, None);
     }
 
     #[tokio::test]
