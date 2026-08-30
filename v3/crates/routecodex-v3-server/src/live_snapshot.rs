@@ -1157,8 +1157,7 @@ pub(crate) fn capture_v3_responses_direct_provider_snapshots(
             if original_error_present || !provider_transport_started {
                 continue;
             }
-            let allowed_stream_observation = stage == "provider-response"
-                && output.stream_observation.is_some();
+            let allowed_stream_observation = output.stream_observation.is_some();
             if allowed_stream_observation {
                 continue;
             }
