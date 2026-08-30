@@ -163,19 +163,24 @@
       "module_ids": ["routecodex-v4-cordis-bridge"],
       "owned_paths": ["crates/routecodex-v4-cordis-bridge/**"],
       "source_dependencies": [],
-      "status": "pending",
+      "status": "source_green",
       "tasks": [
         {
           "task_id":"V4-RUNTIME-004",
-          "status":"pending",
-          "candidate_record":null,
-          "function_ids":[],
-          "resource_ids":[],
-          "source_paths":[],
+          "status":"source_green",
+          "candidate_record":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/fix-candidate.json",
+          "function_ids":["v4.runtime.cordis_mount_candidate"],
+          "resource_ids":["v4.cordis.mount_candidate"],
+          "source_paths":["crates/routecodex-v4-cordis-bridge/src/lib.rs"],
           "support_paths":[],
           "required_gate_ids":["v4_runtime_004_mount_positive","v4_runtime_004_mount_red","v4_runtime_004_mount_boundary","v4_runtime_004_mount_plane"],
           "mainline_binding":"forbidden_before_integration",
-          "evidence_refs":[]
+          "evidence_refs":[
+            {"role":"positive","gate_id":"v4_runtime_004_mount_positive","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/positive.json"},
+            {"role":"red_gate","gate_id":"v4_runtime_004_mount_red","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/red-gate.json"},
+            {"role":"boundary_audit","gate_id":"v4_runtime_004_mount_boundary","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/boundary-audit.json"},
+            {"role":"plane_isolation","gate_id":"v4_runtime_004_mount_plane","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/plane-isolation.json"}
+          ]
         }
       ]
     },
