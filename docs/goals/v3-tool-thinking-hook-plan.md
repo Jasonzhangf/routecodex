@@ -73,52 +73,34 @@ The feature is transparent to both endpoints:
 
 ## 3. Exact model-facing guidance
 
-The canonical full guidance is attached once to the first eligible tool. Every
-remaining eligible tool receives the compact reminder. Both strings are stable
-and deterministic so tool ordering and cache-stable request regions remain
-unchanged.
+Req04 selects one deterministic, protocol-pure guidance slice before appending
+it to the current provider-facing system/instructions surface and the first
+eligible tool description. Another protocol's field container or wire example
+must never appear in that slice.
 
-Full guidance:
-
-```text
-Tool-call auxiliary JSON fields. This instruction applies only when calling a
-tool; it does not apply to ordinary answers.
-
-For every tool call, include `reason` at the top level of the same JSON
-parameter object as the tool's native parameters. The other two fields are
-optional diagnostics:
-- reason: one short phrase stating only the immediate motivation for this call;
-- goal_alignment_confidence: if supplied, an integer from 0 to 100 comparing
-  this call with the user's latest goal, where 100 is directly required and 0
-  is unrelated;
-- model_id: if supplied, the non-empty model identifier used for this response.
-
-Positive example for a `bash` tool whose native parameters are
-{"command":"pwd","description":"Show current working directory"}:
-{"command":"pwd","description":"Show current working directory",
- "reason":"Confirm the current working directory",
- "goal_alignment_confidence":100,"model_id":"x-preview-f-free"}
-
-Negative examples: omit `reason`; use null, a placeholder, or a string score
-for a supplied diagnostic;
-nest the fields under metadata or another parameter; emit a fence, preamble,
-ordinary reasoning, or a second explanation; rename or restructure native tool
-parameters. Older tool calls in conversation history do not define the current
-schema and must not be copied when they omit these fields.
-
-Emit the tool call immediately. For parallel calls, each call carries its own
-`reason`; diagnostic fields are included independently when their values are
-known.
-```
-
-Compact reminder:
+Responses/OpenAI Chat guidance describes only the native `arguments` object:
 
 ```text
-This tool call must include top-level reason beside its native parameters.
-goal_alignment_confidence (integer 0-100) and model_id (non-empty string) are
-optional diagnostics when their values are known. Do not emit a fence, preamble,
-metadata wrapper, placeholder, or second explanation.
+Every tool call must include a required, non-empty top-level `reason` beside
+the tool's native parameters inside the Responses/Chat `arguments` object.
+`reason` states only the immediate motivation, is at most 50 characters, and
+must not be nested under metadata or another parameter. Emit the tool call
+immediately without a fence, preamble, or second explanation.
 ```
+
+Anthropic guidance describes only a native `tool_use` block:
+
+```text
+When calling a tool, immediately return only a native `tool_use` block.
+`tool_use.input.reason` is a required, non-empty top-level string containing
+only the immediate motivation and at most 50 characters. Never emit the call
+as ordinary text, Markdown, or a generic JSON wrapper; do not emit a fence,
+preamble, or second explanation.
+```
+
+`goal_alignment_confidence` and `model_id` remain optional schema diagnostics
+and are deliberately omitted from model-facing guidance. Their absence never
+blocks a valid reason.
 
 The guidance is strict. The response validator is tolerant only in the sense
 that non-conforming output remains an observable native tool call; it never
@@ -637,11 +619,14 @@ tools in their original order, a new user turn, and forced `apply_patch`:
 | same schema + repeated full guidance | 10/10 | 10/10 |
 | compact guidance + nonempty model schema without exact enum | 10/10 | 10/10 |
 
-The full repeated guidance did not improve auxiliary-field adherence. The
-observed production gap is final schema loss, not insufficient guidance length.
-With no exact model enum, model IDs were `x-preview-f-free` in 2/10 and the
-model's self-ID `ox-alpha` in 8/10; all were non-empty. These curls are diagnostic
-evidence only, not RCC acceptance.
+That experiment showed that repeating a protocol-compatible prompt did not
+improve that provider's adherence. It did not test cross-protocol guidance
+pollution. A later exact MiniMax Anthropic A/B found that the mixed guidance
+occasionally copied the Responses/Chat `arguments` example as ordinary text
+(4/5 native `tool_use`), while the same model/key/tool with Anthropic-only
+`tool_use.input.reason` guidance produced 5/5 native `tool_use`. Therefore final
+schema preservation and protocol-pure guidance are separate request gates.
+These curls are diagnostic evidence only, not RCC acceptance.
 
 ## 15. Required code ownership
 
@@ -765,23 +750,24 @@ Forbidden owners:
 
 After worktree tests and architecture gates pass, integrate into the latest
 `main`, build and install the exact source hash, use only managed
-`routecodex restart`, and verify all configured listener health. Do not use port
-4444 for functional Tool-Thinking requests.
+`routecodex restart`, and verify the configured aggregate health. The current
+functional acceptance target is port 4444 only; port 7777 is neither enabled nor
+tested by this task.
 
 Required entry matrix:
 
-- port 7777: Responses Direct, Responses Relay, OpenAI Chat Relay;
-- port 10000: actually enabled Anthropic Direct/Relay paths;
-- current active non-Gemini providers only.
+- port 4444 `/v1/responses`: `cc-sol.gpt-5.6-sol`, Responses Direct SSE;
+- port 4444 `/v1/messages`: `minimax_anthropic.MiniMax-M3`, Anthropic Relay JSON.
 
-For every applicable protocol/provider/path combination, open fresh real Codex
-sessions and collect at least 10 consecutive tool turns. Curl remains diagnostic
-only.
+For each path, collect five consecutive real pipeline tool turns after the exact
+source is installed and the aggregate instance is restarted. Curl A/B verifies
+provider behavior and the exact provider-bound body but remains diagnostic; it
+does not replace the live RouteCodex pipeline window.
 
 Machine-counted acceptance metrics:
 
 1. terminal observation coverage: 100%, exactly one per tool turn;
-2. complete valid model contract: 10/10 per fresh window;
+2. complete valid model contract: 5/5 per fresh window;
 3. valid reserved-field removal: 100%;
 4. valid reasoning projection: 100%, at most once per turn;
 5. missing/invalid native-field protection: 100%;
@@ -815,7 +801,7 @@ required `reason`, any provider-complete object is lost before Resp03,
 any valid turn fails client reasoning projection, or any observed tool turn lacks
 one canonical terminal status.
 
-## 19. Independent JSON v2 closeout addendum (2026-08-23)
+## 19. Independent JSON v2 closeout addendum (updated 2026-08-30)
 
 This addendum is the execution contract for the current isolated worktree. It
 does not authorize a merge, commit, or modification of `main`. It deliberately
@@ -823,12 +809,13 @@ keeps JSON v2; it does not reopen the abandoned turn-fence v3 experiment.
 
 ### 19.1 Target and scope
 
-- Worktree: `/Users/fanzhang/Documents/github/routecodex/playground/tool-thinking-json-v2-closeout-20260823`.
-- Functional server: a standalone build of this worktree on port `10000`.
-- Production ports `7777` and `4444` are negative controls only; they must not
-  receive Tool-Thinking functional requests.
-- The active production config must not contain a `10000` server. The standalone
-  test config may contain exactly one isolated `10000` server.
+- Worktree: `/Users/fanzhang/Documents/github/routecodex/playground/tr-live-0830`.
+- Functional server: the managed aggregate instance's port `4444` after the
+  exact candidate is installed and restarted once.
+- Port `7777` is out of scope: do not enable it and do not use it for tests.
+- Required routes are exact: Responses Direct uses
+  `cc-sol.gpt-5.6-sol`; Anthropic Relay uses
+  `minimax_anthropic.MiniMax-M3`.
 - Feature enablement and client projection are server-scoped. A global manifest
   flag is not evidence that a request on this server is governed.
 
@@ -900,15 +887,14 @@ measured result, not permission to guess or rewrite the response.
 3. Run focused Rust tests and `cargo check`; resolve every failure or classify
    it with a reproducible pre-existing cause. No red test may be reported as a
    pass.
-4. Build and install the isolated release artifact, record source/build
-   hashes, and start only the standalone `10000` server from that artifact.
-   Verify `/health` and the absence of `10000` from the production aggregate.
-5. Run fresh-session black-box groups: at least 10 Anthropic/MiniMax
-   transactions, 10 OpenAI Chat transactions, and 10 Responses transactions
-   wherever the isolated server has an applicable route. Include single-tool,
-   multi-tool, custom `apply_patch`, missing-field, malformed-field, and
-   provider-retry cases. Direct/Relay must be tested separately when available.
-   Curl is diagnostic only; it cannot replace a real Codex business sample.
+4. Before build, sync the candidate with latest `main`; then build/install the
+   exact release artifact, record source/build hashes, execute one aggregate
+   `routecodex restart`, and verify port `4444` health/version. Never use
+   start/stop/foreground or a port-scoped restart.
+5. Run five fresh Responses Direct turns and five fresh Anthropic Relay turns
+   on port `4444` using the exact route bindings above. Curl A/B and request or
+   response dry-run are diagnostic stage proofs; neither replaces the real
+   pipeline windows.
 6. For each group, calculate rather than eyeball: Req04 coverage, provider raw
    field presence, valid/missing/invalid/misplaced rates, exact model match,
    one terminal status per turn, projection rate for valid turns, native
@@ -921,37 +907,37 @@ measured result, not permission to guess or rewrite the response.
 
 ### 19.5 Completion criteria
 
-Completion means the isolated `10000` build has a reproducible evidence bundle
-showing all applicable paths are wired to Req04 and Resp03, valid JSON v2
+Completion means the installed port `4444` build has a reproducible evidence
+bundle showing both required paths are wired to Req04 and Resp03, valid JSON v2
 responses are fully stripped and project only `reason`, native tool calls are
 unchanged, and every governed turn has exactly one terminal observation. The
-model's JSON v2 adherence rate must be reported honestly; it is not required to
-be 100%, but every non-conforming response must be classified without mutation
-or fallback. Duplicate/missing observations caused by proxy plumbing, client
+two current five-turn windows must be 100%; any future non-conforming response
+must still be classified without mutation or fallback. Duplicate/missing
+observations caused by proxy plumbing, client
 leakage, native-payload corruption, feature-caused HTTP/SSE/mapping failures,
 and panics must be zero.
 
 The handoff must include changed paths, exact source and binary hashes, test
 commands/results, per-protocol statistics, representative raw-to-client
 correlations, unresolved risks, and explicit confirmation that `main` was not
-modified. Do not run DSH Review, merge, push, or claim production completion
+modified. Do not run AGY Review, merge, push, or claim production completion
 from this isolated task; those are separate gates after an authorized
 integration.
 
 ### 19.6 Phase 1 acceptance override (2026-08-23)
 
 For the first production iteration, `reason` is the only required model field.
-`goal_alignment_confidence` and `model_id` are optional diagnostics: the
-request guidance may describe them and Req04 may expose their schema, but
+`goal_alignment_confidence` and `model_id` are optional diagnostics: Req04 may
+expose their schema but current model-facing guidance deliberately omits them;
 Resp03 must not reject, repair, infer, or block projection because either is
 absent or differs from the expected value. When present and well-typed they
 are logged only, then discarded with the other internal fields.
 
-Phase 1 passes the model-adherence gate when at least 50% of applicable
-governed tool turns contain a valid non-empty `reason` and those valid reasons
-are correctly projected once into client reasoning content. This is a rate
-gate, not a permission to mutate failures: every remaining turn must still
+Phase 1 passes the current live adherence gate only when each required 4444
+window is 5/5 for a valid non-empty `reason` and every valid reason is projected
+once into client reasoning and independent visible text. This rate gate is not
+permission to mutate failures: any future non-conforming response must still
 produce one accurate terminal `MISSING`/`INVALID`/`MISPLACED` observation and
-leave the native call untouched. The 50% gate does not waive zero-tolerance
+leave the native call untouched. The gate does not waive zero-tolerance
 requirements for parser miswiring, duplicate observations, leakage, native
 payload changes, or feature-caused protocol/runtime failures.

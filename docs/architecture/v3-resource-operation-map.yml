@@ -719,6 +719,7 @@ resources:
     identity: [requestId, pipelineId]
     semantic_contract:
       request_owner: Req04 compiles the request-local tool_thinking_json_v2 contract and records only original custom-tool provenance in this typed resource.
+      guidance_contract: Req04 selects one protocol-pure provider-facing guidance slice; Anthropic native tool_use/input.reason instructions and Responses/OpenAI Chat arguments/reason instructions never share wire examples.
       response_owner: Resp03 consumes the same-turn provenance after strict Phase 1 classification; only one valid nonempty reason authorizes all-or-nothing removal of supplied auxiliary keys and reasoning, while a valid custom input wrapper is mechanically restored for every terminal status.
       parser_boundary: protocol and SSE adapters may carry complete native parameter containers but may not parse, strip, infer, or project Tool-Thinking semantics.
       payload_boundary: this context is never serialized into request JSON, provider wire/options, protocol metadata, history, continuation, response JSON, or client SSE.

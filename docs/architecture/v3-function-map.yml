@@ -5424,6 +5424,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/shared.rs
   test_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_anthropic_native_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
@@ -5474,6 +5475,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_anthropic_native_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
@@ -5491,6 +5493,7 @@ features:
   contract_version: tool_thinking_json_v2
   contract_rules:
   - Req04 adds required reason plus optional confidence/model diagnostic properties to each eligible non-Gemini structured tool schema and wraps free-form custom tools as request-local structured provider contracts
+  - Req04 guidance is protocol-pure at the provider-facing slice: Anthropic native tools receive only tool_use/input.reason instructions, while Responses/OpenAI Chat tools receive only arguments/reason instructions; wire examples from another protocol are forbidden
   - Req04 records original custom-tool provenance only in v3.request.tool_thinking_turn_context; that resource never enters payload, metadata, history, or continuation
   - Req04 compilation is atomic and runs once per execution; Direct retries reuse its typed context and may not recompile from an already governed tool list
   - downstream protocol projection preserves the Req04 contract mechanically and never performs a second semantic injection

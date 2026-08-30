@@ -17,12 +17,12 @@ use std::sync::Arc;
 const STOPLESS_CALL_ID: &str = "call_stopless_reasoning";
 const STOPLESS_CLI_COMMAND: &str = "routecodex hook run reasoningStop";
 
-pub(crate) const V3_TOOL_THINKING_GUIDANCE: &str = r#"工具调用协议（只适用于本轮工具调用，不适用于普通回答）：
+pub(crate) const V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE: &str = r#"工具调用协议（只适用于本轮工具调用，不适用于普通回答）：
 
 每次发起工具调用时，必须在工具参数 JSON 对象本层增加 `reason`，并立即输出工具调用：
 `reason`：现在调用该工具的唯一直接动机；只说动机，不写计划、步骤、结果或工具参数；不超过 50 个字符。
 
-字段必须和原生工具参数处于同一个参数对象层级；对于 Anthropic 的 `input`、Responses/Chat 的 `arguments` 或其他参数容器，字段放在该容器对象的顶层。不要把字段嵌套到命令参数对象内部；RouteCodex 会在工具执行前剥离这三个辅助字段。
+字段必须和原生工具参数处于同一个参数对象层级；对于 Responses/Chat 的 `arguments`，字段放在该参数对象的顶层。不要把字段嵌套到命令参数对象内部；RouteCodex 会在工具执行前剥离这三个辅助字段。
 
 正确：`{"name":"pwd","arguments":"{\"reason\":\"确认当前工作目录\"}"}`
 错误：`{"name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"metadata\":{\"reason\":\"确认当前工作目录\"}}"}`
@@ -30,8 +30,13 @@ pub(crate) const V3_TOOL_THINKING_GUIDANCE: &str = r#"工具调用协议（只�
 同一轮多个工具调用时，每个工具调用对象分别填写 `reason`。不要输出 fence、preamble、普通解释或第二份原因文本。
 
 例外：`apply_patch` 是 raw free-form 控制工具，参数必须保持一份原始 patch 文本；不要把它包装成 JSON，也不要把 `reason` 写进 patch。
+"#;
 
-Anthropic native 通道契约：进入 Anthropic provider 必须使用原生 `tool_use` 块；不要把工具调用写成普通文本段、Markdown 代码块或通用 JSON wrapper（不要 `"action":"tool_call"` / `"type":"function_call"` 字符串 / 纯文本描述代替原生 block）。`reason` 始终放在 `tool_use.input` 顶层与 `input` 同级，禁止嵌套到 `input` 内部子字段或 metadata 容器。
+pub(crate) const V3_TOOL_THINKING_ANTHROPIC_GUIDANCE: &str = r#"Anthropic native 工具调用协议（只适用于本轮工具调用，不适用于普通回答）：
+
+决定调用工具时，必须立即只返回原生 `tool_use` 块；不要把工具调用写成普通文本段、Markdown 代码块或通用 JSON wrapper。
+`reason` 是必填的非空字符串，必须放在 `tool_use.input` 顶层；只写现在调用该工具的唯一直接动机，不写计划、步骤、结果或工具参数，不超过 50 个字符。
+同一轮多个工具调用时，每个原生 `tool_use` 块都必须分别填写 `input.reason`。不要输出 fence、preamble、普通解释或第二份原因文本。
 "#;
 
 pub(crate) const V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER: &str =
@@ -101,11 +106,12 @@ pub(crate) fn compile_v3_tool_thinking_turn_context_at_req04(
     {
         return Ok(V3ToolThinkingTurnContext::disabled());
     }
+    let provider_guidance = v3_tool_thinking_provider_guidance(payload);
     inject_v3_tool_thinking_fields_into_tool_schemas(payload)
         .map_err(|reason| V3HubRelayRequestError::ToolThinkingSchemaInvalid { reason })?;
     let original_custom_tool_names = wrap_v3_custom_tools_at_req04(payload)?;
-    inject_v3_tool_thinking_guidance_into_prompt(payload, current_payload_start);
-    inject_tool_thinking_into_tool_list_guidance(payload);
+    inject_v3_tool_thinking_guidance_into_prompt(payload, current_payload_start, provider_guidance);
+    inject_tool_thinking_into_tool_list_guidance(payload, provider_guidance);
     if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
         if current_payload_start > messages.len() {
             return Err(V3HubRelayRequestError::CurrentPayloadBoundaryInvalid {
@@ -119,10 +125,26 @@ pub(crate) fn compile_v3_tool_thinking_turn_context_at_req04(
     ))
 }
 
-fn inject_v3_tool_thinking_guidance_into_prompt(payload: &mut Value, current_payload_start: usize) {
+fn v3_tool_thinking_provider_guidance(payload: &Value) -> &'static str {
+    if payload
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| tools.iter().any(|tool| tool.get("input_schema").is_some()))
+    {
+        V3_TOOL_THINKING_ANTHROPIC_GUIDANCE
+    } else {
+        V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE
+    }
+}
+
+fn inject_v3_tool_thinking_guidance_into_prompt(
+    payload: &mut Value,
+    current_payload_start: usize,
+    provider_guidance: &'static str,
+) {
     for key in ["instructions", "system"] {
         if let Some(value) = payload.get_mut(key) {
-            append_v3_tool_thinking_guidance_to_text(value);
+            append_v3_tool_thinking_guidance_to_text(value, provider_guidance);
             return;
         }
     }
@@ -138,7 +160,7 @@ fn inject_v3_tool_thinking_guidance_into_prompt(payload: &mut Value, current_pay
             })
         {
             if let Some(content) = message.get_mut("content") {
-                append_v3_tool_thinking_guidance_to_text(content);
+                append_v3_tool_thinking_guidance_to_text(content, provider_guidance);
             }
         }
     }
@@ -372,7 +394,10 @@ pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> 
     Ok(())
 }
 
-fn inject_tool_thinking_into_tool_list_guidance(payload: &mut Value) {
+fn inject_tool_thinking_into_tool_list_guidance(
+    payload: &mut Value,
+    provider_guidance: &'static str,
+) {
     let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
         return;
     };
@@ -395,19 +420,19 @@ fn inject_tool_thinking_into_tool_list_guidance(payload: &mut Value) {
         guidance_injected = true;
         if let Some(function) = tool.get_mut("function") {
             if let Some(description) = function.get_mut("description") {
-                append_v3_tool_thinking_guidance_to_text(description);
+                append_v3_tool_thinking_guidance_to_text(description, provider_guidance);
             } else if let Some(function) = function.as_object_mut() {
                 function.insert(
                     "description".to_string(),
-                    Value::String(V3_TOOL_THINKING_GUIDANCE.to_string()),
+                    Value::String(provider_guidance.to_string()),
                 );
             }
         } else if let Some(description) = tool.get_mut("description") {
-            append_v3_tool_thinking_guidance_to_text(description);
+            append_v3_tool_thinking_guidance_to_text(description, provider_guidance);
         } else if let Some(tool) = tool.as_object_mut() {
             tool.insert(
                 "description".to_string(),
-                Value::String(V3_TOOL_THINKING_GUIDANCE.to_string()),
+                Value::String(provider_guidance.to_string()),
             );
         }
     }
@@ -432,7 +457,7 @@ fn is_v3_tool_thinking_guidance_anchor(tool: &Value) -> bool {
         )
 }
 
-fn append_v3_tool_thinking_guidance_to_text(value: &mut Value) {
+fn append_v3_tool_thinking_guidance_to_text(value: &mut Value, provider_guidance: &'static str) {
     if value
         .to_string()
         .contains("工具调用协议（只适用于本轮工具调用")
@@ -444,7 +469,7 @@ fn append_v3_tool_thinking_guidance_to_text(value: &mut Value) {
             if !existing.trim().is_empty() {
                 existing.push_str("\n\n");
             }
-            existing.push_str(V3_TOOL_THINKING_GUIDANCE);
+            existing.push_str(provider_guidance);
         }
         Value::Array(parts) => {
             if let Some(text) = parts.iter_mut().find_map(|part| {
@@ -459,15 +484,15 @@ fn append_v3_tool_thinking_guidance_to_text(value: &mut Value) {
                 if !text.trim().is_empty() {
                     text.push_str("\n\n");
                 }
-                text.push_str(V3_TOOL_THINKING_GUIDANCE);
+                text.push_str(provider_guidance);
             } else {
                 parts.push(json!({
                     "type": "text",
-                    "text": V3_TOOL_THINKING_GUIDANCE
+                    "text": provider_guidance
                 }));
             }
         }
-        _ => *value = Value::String(V3_TOOL_THINKING_GUIDANCE.to_string()),
+        _ => *value = Value::String(provider_guidance.to_string()),
     }
 }
 

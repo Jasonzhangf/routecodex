@@ -24,7 +24,9 @@ fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
     let guidance = payload["tools"][0]["description"].as_str().unwrap();
     assert!(guidance.contains("工具调用协议（只适用于本轮工具调用"));
     assert!(guidance.contains("工具参数 JSON 对象本层"));
-    assert!(guidance.contains("Anthropic 的 `input`、Responses/Chat 的 `arguments`"));
+    assert!(guidance.contains("Responses/Chat 的 `arguments`"));
+    assert!(!guidance.contains("Anthropic native"));
+    assert!(!guidance.contains("tool_use.input"));
     assert!(guidance.contains("不超过 50 个字符"));
     assert!(!guidance.contains("goal_alignment_confidence"));
     assert!(!guidance.contains("model_id"));
@@ -58,10 +60,14 @@ fn req04_tool_thinking_keeps_apply_patch_raw_and_outside_reason_contract() {
     assert_eq!(apply_patch["type"], "custom");
     assert_eq!(apply_patch["name"], "apply_patch");
     assert!(!apply_patch.to_string().contains("\"reason\""));
-    assert!(!apply_patch.to_string().contains("工具调用协议（只适用于本轮工具调用"));
+    assert!(!apply_patch
+        .to_string()
+        .contains("工具调用协议（只适用于本轮工具调用"));
 
     let pwd = &payload["tools"][1];
-    assert!(pwd.to_string().contains("工具调用协议（只适用于本轮工具调用"));
+    assert!(pwd
+        .to_string()
+        .contains("工具调用协议（只适用于本轮工具调用"));
 }
 
 #[test]

@@ -3425,6 +3425,7 @@ features:
   required_positive:
   - disabled mode preserves payload identity
   - direct and relay Req04 compile one tool_thinking_json_v2 request-local contract without changing tool order, system/developer/history order, or static tool registries
+  - Anthropic provider-facing system and tool descriptions contain only native tool_use/input.reason guidance, while Responses/OpenAI Chat provider-facing guidance contains only arguments/reason guidance
   - OpenAI Chat, Responses, and Anthropic eligible tool parameter schemas require reason and preserve optional confidence/model diagnostics; Gemini is excluded
   - every free-form custom tool is wrapped by Req04 with input plus required reason and optional diagnostics, then restored after Resp03 with byte-stable custom input
   - provenance-matched custom calls with valid string input are restored for OK, MISSING, INVALID, and MISPLACED statuses; only OK authorizes reasoning
@@ -3439,6 +3440,7 @@ features:
   - v3.request.tool_thinking_turn_context carries original custom provenance only as a request-local typed resource and is released after Resp03
   - v3.response.tool_thinking_turn_result carries projection authorization only as a request-local typed resource and is released after observation/client projection
   required_negative:
+  - provider-facing guidance never contains another protocol's wire wrapper, field container, or positive example
   - missing, partial, wrong-type, out-of-range, duplicate, misplaced, malformed, or incomplete reason/diagnostic fields never authorize reasoning, reserved-key removal, or any tool-call rewrite
   - malformed custom wrappers or non-string custom input are never guessed or repaired
   - ordinary model reasoning, thinking, text, history, descriptions, and legacy fences are never parsed as Tool-Thinking
@@ -3471,11 +3473,11 @@ features:
     live_evidence:
     - docs/architecture/evidence/v3-tool-thinking-live.json
     fresh_real_codex_windows:
-    - port 7777 Responses Direct, Responses Relay, and OpenAI Chat Relay
-    - port 10000 actually enabled Anthropic Direct/Relay paths
-    - each applicable protocol/provider/path has at least 10 consecutive tool turns with 100 percent terminal observation, valid stripping, and reasoning projection
+    - port 4444 Responses Direct with cc-sol.gpt-5.6-sol has five consecutive real tool turns
+    - port 4444 Anthropic Relay with minimax_anthropic.MiniMax-M3 has five consecutive real tool turns
+    - every turn correlates the client request, provider-bound request, provider raw response, Resp03 result, client projection, typed TOOLREASON observation, and managed log by request_id
     curl_is_diagnostic_only: true
-    dsh_review: required
+    agy_review: required
 
 - feature_id: v3.server_internal_observability_projection
   status: source_active_live_verified
