@@ -1,5 +1,5 @@
 {
-  "active_version": "active-v2",
+  "active_version": "active-v3",
   "artifact_record_id": "v4-cordis-base-node-current-candidate",
   "clean_scope": {
     "base_commit": "8f906514a9a454add8dabc129b24d0852d43a724",
@@ -26,8 +26,8 @@
     "review": "v4-cordis-master",
     "vcs": "git"
   },
-  "previous_active_immutable": false,
-  "previous_active_version": null,
+  "previous_active_immutable": true,
+  "previous_active_version": "active-v2",
   "promotion_id": "v4-cordis-base-node-promotion",
   "promotion_record_hash": "sha256:60a8fa2fe692311ed0c01615a2e7a58f932350bdacea041f39f657aa1d158ec7",
   "public_api_hash": "sha256:4fde764e2ba6dcd121e980143ce7d9de1eb6518cd9aee52124c668bc76e3e7ce",
