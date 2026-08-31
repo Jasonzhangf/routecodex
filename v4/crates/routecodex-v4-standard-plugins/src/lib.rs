@@ -563,6 +563,32 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             vec![],
         ),
         plugin(
+            "v4.std.diagnostic.request_payload_console_render",
+            PluginCategory::Diagnostic,
+            "V4HubReqChatProcess03Governed",
+            "request_chat_process",
+            Some(3),
+            PluginKind::Observer,
+            PluginEffect::DiagnosticOnly,
+            PluginPhase::Observation,
+            903,
+            vec!["v4.request.normal_payload"],
+            vec![],
+        ),
+        plugin(
+            "v4.std.diagnostic.response_payload_console_render",
+            PluginCategory::Diagnostic,
+            "V4HubRespChatProcess04Governed",
+            "response_chat_process",
+            Some(4),
+            PluginKind::Observer,
+            PluginEffect::DiagnosticOnly,
+            PluginPhase::Observation,
+            903,
+            vec!["v4.response.normal_payload"],
+            vec![],
+        ),
+        plugin(
             "v4.std.control.scope_consume",
             PluginCategory::Control,
             "V4MetadataCenter01ScopeRegistry",
@@ -971,6 +997,20 @@ fn snapshot_record(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     Ok(())
 }
 
+fn request_payload_console(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    chat_process_payload_console(ctx, "request")
+}
+
+fn response_payload_console(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    chat_process_payload_console(ctx, "response")
+}
+
+fn chat_process_payload_console(ctx: &mut ExecCtx<'_>, direction: &str) -> Result<(), String> {
+    let line = diagnostic::format_chat_process_payload(direction, ctx.read_data());
+    ctx.emit("console.payload_ready", line);
+    Ok(())
+}
+
 fn scope_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut metadata = ctx
         .read_control_resource("v4.control.metadata_center")
@@ -1230,6 +1270,14 @@ impl StandardHandleRegistry {
             ("v4.std.diagnostic.debug_observe", debug_observe),
             ("v4.std.diagnostic.timing", timing),
             ("v4.std.diagnostic.snapshot_record", snapshot_record),
+            (
+                "v4.std.diagnostic.request_payload_console_render",
+                request_payload_console,
+            ),
+            (
+                "v4.std.diagnostic.response_payload_console_render",
+                response_payload_console,
+            ),
             ("v4.std.control.scope_consume", scope_consume),
             ("v4.std.control.payload_cycle_record", payload_cycle_record),
             ("v4.std.error.typed_intake", error_intake),
@@ -1337,6 +1385,8 @@ mod tests {
             "v4.std.contract.input_validate",
             "v4.std.contract.output_validate",
             "v4.std.diagnostic.debug_observe",
+            "v4.std.diagnostic.request_payload_console_render",
+            "v4.std.diagnostic.response_payload_console_render",
             "v4.std.diagnostic.timing",
             "v4.std.diagnostic.snapshot_record",
             "v4.std.control.scope_consume",

@@ -10,8 +10,14 @@ fn execute(
     data: Value,
     information: Value,
 ) -> Result<Value, NodeContainerError> {
-    let plan = compile_standard_plan(node_id, "response_outbound", "response", position, &[plugin_id])
-        .expect("response hook plan compiles");
+    let plan = compile_standard_plan(
+        node_id,
+        "response_outbound",
+        "response",
+        position,
+        &[plugin_id],
+    )
+    .expect("response hook plan compiles");
     let hash = plan.plan_hash();
     let bindings = PlanBindings {
         graph_hash: hash.clone(),
@@ -73,7 +79,10 @@ fn relay_response_hook_uses_typed_protocol_pair() {
     )
     .unwrap();
     assert_eq!(projected["object"], json!("chat.completion"));
-    assert_eq!(projected["choices"][0]["message"]["content"], json!("hello"));
+    assert_eq!(
+        projected["choices"][0]["message"]["content"],
+        json!("hello")
+    );
 
     let error = execute(
         "V4HubRespOutbound05ClientSemantic",

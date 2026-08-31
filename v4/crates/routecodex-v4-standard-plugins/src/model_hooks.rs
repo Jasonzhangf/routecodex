@@ -98,8 +98,7 @@ pub(crate) fn relay_response_projection(ctx: &mut ExecCtx<'_>) -> Result<(), Str
             ))
         }
     };
-    ctx.write_data(projected)
-        .map_err(|error| error.to_string())
+    ctx.write_data(projected).map_err(|error| error.to_string())
 }
 
 pub(crate) fn descriptors() -> Vec<StandardPlugin> {
@@ -190,14 +189,8 @@ mod tests {
 
     #[test]
     fn hook_ids_are_stable() {
-        assert_eq!(
-            DIRECT_MODEL_HOOK_PLUGIN_ID,
-            "v4.hook.direct.request"
-        );
-        assert_eq!(
-            RELAY_MODEL_HOOK_PLUGIN_ID,
-            "v4.hook.relay.request"
-        );
+        assert_eq!(DIRECT_MODEL_HOOK_PLUGIN_ID, "v4.hook.direct.request");
+        assert_eq!(RELAY_MODEL_HOOK_PLUGIN_ID, "v4.hook.relay.request");
     }
 
     #[test]

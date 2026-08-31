@@ -496,6 +496,7 @@ fn format_status(state: &str, record: &ManagedInstanceRecord) -> String {
     )
 }
 
+#[derive(Clone)]
 struct PipelineHandler {
     manifest: RuntimeConfigManifest,
     runtime: Arc<Mutex<SkeletonRuntime>>,
@@ -590,7 +591,19 @@ impl AsyncHttpHandler for PipelineHandler {
         request: HttpRequest,
         _cancellation: CancellationToken,
     ) -> Pin<Box<dyn Future<Output = HttpResponse> + Send + 'a>> {
-        Box::pin(async move { self.handle_request(request) })
+        let handler = self.clone();
+        let request_for_fault = request.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || handler.handle_request(request))
+                .await
+                .unwrap_or_else(|error| {
+                    project_fault(
+                        &request_for_fault,
+                        RuntimeFault::new("request_worker_panicked", error.to_string()),
+                        500,
+                    )
+                })
+        })
     }
 }
 
@@ -773,16 +786,6 @@ fn handle_responses(
             status,
         )
     })?;
-    println!(
-        "{}",
-        diagnostic::format_request(
-            request.path.as_str(),
-            &request.request_id,
-            model,
-            &target.provider_id,
-        )
-    );
-    let _ = std::io::stdout().flush();
     let continuation_owner = if entry_protocol == "responses" {
         // V4 retains only provider-owned Direct Responses continuation.
         // Local/relay continuation is retired and must never be inferred from
@@ -826,6 +829,7 @@ fn handle_responses(
             Some(&request_lease),
         )
         .map_err(|fault| project_fault(request, fault, 598))?;
+    emit_payload_console_events(&request_report.trace);
     if entry_protocol == "responses"
         && continuation_owner == "relay"
         && body.get("previous_response_id").is_some()
@@ -967,15 +971,6 @@ fn handle_responses(
         } else {
             status
         };
-        println!(
-            "{}",
-            diagnostic::format_response(
-                request.path.as_str(),
-                &request.request_id,
-                client_status,
-                model,
-            )
-        );
         let _ = std::io::stdout().flush();
         let response_processor = ResponseStreamProcessor::new(
             request_lease,
@@ -1175,15 +1170,7 @@ fn handle_responses(
             } else {
                 raw.status
             };
-            println!(
-                "{}",
-                diagnostic::format_response(
-                    request.path.as_str(),
-                    &request.request_id,
-                    client_status,
-                    model,
-                )
-            );
+            emit_payload_console_events(&report.trace);
             let _ = std::io::stdout().flush();
             Ok(json_response(client_status, projected))
         }
@@ -1347,6 +1334,7 @@ impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
                         {
                             Ok((disposition, report)) => {
                                 if let Some(report) = report {
+                                    emit_payload_console_events(&report.trace);
                                     if report.client_frame.is_none() {
                                         Err(RuntimeFault::new(
                                             "response_frame_missing",
@@ -1375,6 +1363,20 @@ impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
                     }
                 }
             }
+        }
+    }
+}
+
+fn emit_payload_console_events(trace: &[String]) {
+    for event in trace {
+        let Some((plugin_id, rest)) = event.split_once(':') else {
+            continue;
+        };
+        let Some((kind, message)) = rest.split_once(':') else {
+            continue;
+        };
+        if plugin_id.ends_with("payload_console_render") && kind == "console.payload_ready" {
+            println!("{message}");
         }
     }
 }
