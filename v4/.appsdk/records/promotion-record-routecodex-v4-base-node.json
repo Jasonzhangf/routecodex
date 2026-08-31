@@ -1,7 +1,7 @@
 {
   "architecture_review_id": "v4-cordis-base-node-review",
   "artifact_hash": "sha256:36febd56fcfe92b397abb82fefce01ce75397e4baf0049f3aece3f58c08520fa",
-  "base_artifact_hash": "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54e9f54f5c6fb1ba26bfd",
+  "base_artifact_hash": "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd",
   "base_commit": "8f906514a9a454add8dabc129b24d0852d43a724",
   "candidate_commit": "3930d19f22be04ee4e9a38076a877c1c3cd69a5d",
   "change_reason_comment": "Bind the current Cordis base-node artifact to a fresh governance graph.",
