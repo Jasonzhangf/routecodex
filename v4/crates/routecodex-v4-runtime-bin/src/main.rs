@@ -13,8 +13,8 @@ use routecodex_v4_error::ErrorChain;
 use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
     exec_managed_restart, release_for_foreground, repair_stale, request_restart, request_stop,
-    start_managed, status_managed, ManagedAction, ManagedControlPlane, ManagedInstanceRecord,
-    ManagedSpawnOptions, V4LifecyclePaths,
+    start_managed, status_managed, LifecycleError, ManagedAction, ManagedControlPlane,
+    ManagedInstanceRecord, ManagedSpawnOptions, V4LifecyclePaths,
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
@@ -267,14 +267,25 @@ fn repair_stale_state(intent: ConfigPathIntent) -> Result<String, String> {
 }
 
 fn restart(intent: RestartIntent) -> Result<String, String> {
-    let (_, manifest, paths) = compile_for_lifecycle(intent.config)?;
-    let record = request_restart(
-        &paths,
-        &manifest.manifest_digest,
-        Duration::from_millis(intent.timeout_ms),
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(format_status("restarted", &record))
+    let (config, manifest, paths) = compile_for_lifecycle(intent.config)?;
+    let timeout = Duration::from_millis(intent.timeout_ms);
+    match request_restart(&paths, &manifest.manifest_digest, timeout) {
+        Ok(record) => Ok(format_status("restarted", &record)),
+        Err(LifecycleError::NotRunning) => {
+            let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+            let record = start_managed(
+                &paths,
+                &executable,
+                &config,
+                &paths.manifest_path,
+                &ManagedSpawnOptions::default(),
+                timeout,
+            )
+            .map_err(|error| error.to_string())?;
+            Ok(format_status("running", &record))
+        }
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 fn stop(intent: StopIntent) -> Result<String, String> {

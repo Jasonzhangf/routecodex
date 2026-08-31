@@ -180,3 +180,37 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
     );
     assert!(!state_root.join("instance.json").exists());
 }
+
+#[test]
+fn restart_cold_starts_when_no_managed_instance_exists() {
+    let test_root = root("cold-restart");
+    let state_root = std::path::PathBuf::from("/tmp").join(format!(
+        "rccv4-cold-restart-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let port = free_port();
+    let config = initialize(&test_root, port);
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_rccv4"))
+            .current_dir("/tmp")
+            .env("RCCV4_STATE_ROOT", &state_root)
+            .args(args)
+            .output()
+            .expect("lifecycle command")
+    };
+    let restart = run(&["restart", "-c", config.to_str().expect("config")]);
+    assert!(
+        restart.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restart.stderr)
+    );
+    assert!(String::from_utf8_lossy(&restart.stdout).contains("state=running"));
+    let status = run(&["status", "-c", config.to_str().expect("config")]);
+    assert!(status.status.success());
+    let stop = run(&["stop", "-c", config.to_str().expect("config")]);
+    assert!(stop.status.success());
+}
