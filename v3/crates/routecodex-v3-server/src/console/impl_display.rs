@@ -138,16 +138,25 @@ pub(crate) fn extract_v3_console_usage_summary(value: &Value) -> Option<V3Runtim
             .or_else(|| {
                 read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cache_read_tokens"])
             }),
-        cache_creation_input_tokens: read_v3_console_usage_u64(usage, &["cache_creation_input_tokens"])
-            .or_else(|| {
-                read_v3_console_usage_u64(usage, &["input_tokens_details", "cached_write_tokens"])
-            })
-            .or_else(|| {
-                read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cache_creation_input_tokens"])
-            })
-            .or_else(|| {
-                read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cached_creation_input_tokens"])
-            }),
+        cache_creation_input_tokens: read_v3_console_usage_u64(
+            usage,
+            &["cache_creation_input_tokens"],
+        )
+        .or_else(|| {
+            read_v3_console_usage_u64(usage, &["input_tokens_details", "cached_write_tokens"])
+        })
+        .or_else(|| {
+            read_v3_console_usage_u64(
+                usage,
+                &["prompt_tokens_details", "cache_creation_input_tokens"],
+            )
+        })
+        .or_else(|| {
+            read_v3_console_usage_u64(
+                usage,
+                &["prompt_tokens_details", "cached_creation_input_tokens"],
+            )
+        }),
     };
     if summary.input_tokens.is_some()
         || summary.output_tokens.is_some()
@@ -606,7 +615,7 @@ pub(crate) fn colorize_v3_layered_console_line(
         format!("{} {}", block.human_prefix, block.headline)
     };
     let diagnostic = block.diagnostic();
-    format!("{headline_color}{human_line}{ANSI_RESET}\n\n{debug_color}  {diagnostic}{ANSI_RESET}")
+    format!("{headline_color}{human_line}{ANSI_RESET}{debug_color}  {diagnostic}{ANSI_RESET}")
 }
 
 pub(crate) fn format_v3_console_layered_block_plain(block: V3ConsoleLayeredBlock<'_>) -> String {
@@ -615,7 +624,7 @@ pub(crate) fn format_v3_console_layered_block_plain(block: V3ConsoleLayeredBlock
     } else {
         format!("{} {}", block.human_prefix, block.headline)
     };
-    format!("{head}\n\n  {}", block.diagnostic())
+    format!("{head}  {}", block.diagnostic())
 }
 
 pub(crate) fn resolve_v3_log_session_color_key(
