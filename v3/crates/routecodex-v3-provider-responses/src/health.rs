@@ -386,7 +386,7 @@ impl V3ProviderHealthStore {
                         score_milli: priority.clamp(0, 150) as u32,
                         ..V3ProviderAdaptiveHistory::default()
                     };
-                    state.adaptive_history.insert(key, history);
+                    state.adaptive_history.entry(key).or_insert(history);
                 }
             }
         }
@@ -1256,16 +1256,18 @@ impl V3ProviderHealthStore {
             .state
             .read()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
-        let history = state.adaptive_history.get(&key);
-        let net_delta: i32 = history
-            .map(|history| history.recent_deltas_milli.iter().copied().sum())
-            .unwrap_or_default();
+        let (net_delta, score_generation) = state
+            .adaptive_history
+            .get(&key)
+            .map(|history| {
+                (
+                    history.recent_deltas_milli.iter().copied().sum::<i32>(),
+                    history.score_generation,
+                )
+            })
+            .unwrap_or((0, 0));
         let score_milli = priority.saturating_add(net_delta).clamp(0, 150) as u32;
-        let score_generation = history
-            .map(|history| history.score_generation)
-            .unwrap_or_default();
-        let has_health_events = history.is_some_and(|history| !history.recent_deltas_milli.is_empty());
-        let available = (score_milli > 0 || !has_health_events)
+        let available = score_milli > 0
             && state
                 .provider_cooldown_probes
                 .get(&key)

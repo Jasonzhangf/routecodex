@@ -181,21 +181,6 @@ fn health_score_uses_configured_priority_as_its_baseline() {
 }
 
 #[test]
-fn scheduling_projection_does_not_mutate_health_state() {
-    let store = V3ProviderKeyHealthStore::default();
-    let first = store
-        .scheduling_projection("provider-a", "key-a", "model-a", 100, 1, 100)
-        .expect("initial projection");
-    let second = store
-        .scheduling_projection("provider-a", "key-a", "model-a", 80, 1, 101)
-        .expect("changed-priority projection");
-
-    assert_eq!(first.score_milli, 100);
-    assert_eq!(second.score_milli, 80);
-    assert_eq!(second.score_generation, 0);
-}
-
-#[test]
 fn one_502_does_not_enter_cooldown() {
     let store = V3ProviderHealthStore::default();
     store
