@@ -1652,11 +1652,11 @@ impl ResponseStreamProcessor {
         self.request_lease.snapshot()
     }
 
-    pub fn process_frame(
+    pub fn execute_provider_response_scoped(
         &mut self,
         runtime: &SkeletonRuntime,
         frame: SseTransportFrame,
-    ) -> Result<ResponseStreamDisposition, RuntimeFault> {
+    ) -> Result<(ResponseStreamDisposition, Option<ExecutionReport>), RuntimeFault> {
         if self.semantic_terminal || self.failure_projected {
             return Err(RuntimeFault::new(
                 "response_stream_after_terminal",
@@ -1666,7 +1666,10 @@ impl ResponseStreamProcessor {
         let decoded = decode_provider_sse_frame(frame.as_bytes())
             .map_err(|error| RuntimeFault::new("provider_sse_decode", error))?;
         if let ProviderSseEventDisposition::Failed { message } = decoded.disposition {
-            return self.project_failure(RuntimeFault::new("provider_response_failed", message));
+            return Ok((
+                self.project_failure(RuntimeFault::new("provider_response_failed", message))?,
+                None,
+            ));
         }
         let terminal = matches!(decoded.disposition, ProviderSseEventDisposition::Completed);
         let provider_semantic = serde_json::to_string(&decoded.semantic)
@@ -1682,7 +1685,7 @@ impl ResponseStreamProcessor {
             &self.continuation_owner,
             Some(&self.request_lease),
         )?;
-        let client_frame = report.client_frame.ok_or_else(|| {
+        let client_frame = report.client_frame.clone().ok_or_else(|| {
             RuntimeFault::new(
                 "response_frame_missing",
                 "response chain produced no client frame",
@@ -1696,10 +1699,19 @@ impl ResponseStreamProcessor {
             .map_err(|error| RuntimeFault::new("client_sse_transport", format!("{error:?}")))?;
         if terminal {
             self.semantic_terminal = true;
-            Ok(ResponseStreamDisposition::Terminal { frame })
+            Ok((ResponseStreamDisposition::Terminal { frame }, Some(report)))
         } else {
-            Ok(ResponseStreamDisposition::Continue { frame })
+            Ok((ResponseStreamDisposition::Continue { frame }, Some(report)))
         }
+    }
+
+    pub fn process_frame(
+        &mut self,
+        runtime: &SkeletonRuntime,
+        frame: SseTransportFrame,
+    ) -> Result<ResponseStreamDisposition, RuntimeFault> {
+        self.execute_provider_response_scoped(runtime, frame)
+            .map(|(disposition, _report)| disposition)
     }
 
     pub fn finish(&mut self) -> Result<(), RuntimeFault> {

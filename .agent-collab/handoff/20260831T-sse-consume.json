@@ -1,0 +1,17 @@
+{
+  "issue_id": "v4-production-sse-consume",
+  "status": "ready_for_merge",
+  "target": "v4-cordis",
+  "worktree": "/Users/fanzhang/Documents/github/routecodex/playground/v4-production-sse-consume-0831",
+  "changed_paths": [
+    "v4/crates/routecodex-v4-runtime/src/lib.rs",
+    "v4/crates/routecodex-v4-runtime-bin/src/main.rs"
+  ],
+  "verification": [
+    "verify-v4-production-mainline-red green",
+    "runtime-bin unit tests 10/10",
+    "runtime-bin l2_cli_blackbox 3/3",
+    "git diff --check"
+  ],
+  "next": "cherry-pick commit, rerun main-tree gates"
+}

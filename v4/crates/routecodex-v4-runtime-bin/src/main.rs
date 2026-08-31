@@ -1340,7 +1340,28 @@ impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
             };
             for frame in frames {
                 let disposition = match self.runtime.lock() {
-                    Ok(runtime) => self.processor.process_frame(&runtime, frame),
+                    Ok(runtime) => {
+                        match self
+                            .processor
+                            .execute_provider_response_scoped(&runtime, frame)
+                        {
+                            Ok((disposition, report)) => {
+                                if let Some(report) = report {
+                                    if report.client_frame.is_none() {
+                                        Err(RuntimeFault::new(
+                                            "response_frame_missing",
+                                            "response chain produced no client frame",
+                                        ))
+                                    } else {
+                                        Ok(disposition)
+                                    }
+                                } else {
+                                    Ok(disposition)
+                                }
+                            }
+                            Err(fault) => Err(fault),
+                        }
+                    }
                     Err(_) => Err(RuntimeFault::new(
                         "response_runtime_lock",
                         "response runtime lock poisoned",
