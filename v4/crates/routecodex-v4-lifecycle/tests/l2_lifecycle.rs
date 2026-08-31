@@ -55,6 +55,7 @@ fn control_socket_reports_status_and_stop_for_exact_instance() {
             .expect("running status JSON");
     assert_eq!(running_state["state"], "running");
     control.clear_record().expect("clear");
+    assert!(!paths.control_socket.exists());
     let stopped_state: serde_json::Value =
         serde_json::from_slice(&fs::read(&paths.status_path).expect("stopped status file"))
             .expect("stopped status JSON");

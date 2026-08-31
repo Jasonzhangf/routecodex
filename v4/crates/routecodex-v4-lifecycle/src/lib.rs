@@ -215,6 +215,14 @@ impl ManagedControlPlane {
             fs::remove_file(&self.paths.record_path)
                 .map_err(|error| io_error(&self.paths.record_path, error))?;
         }
+        // Restart execs the same process immediately after clearing state.
+        // Remove the pathname while this owner still controls the listener;
+        // otherwise the new image can observe the inherited stale socket and
+        // fail its bind before it can publish a fresh record.
+        if self.paths.control_socket.exists() {
+            fs::remove_file(&self.paths.control_socket)
+                .map_err(|error| io_error(&self.paths.control_socket, error))?;
+        }
         write_status_atomic(&self.paths, "stopped", None)?;
         Ok(())
     }
