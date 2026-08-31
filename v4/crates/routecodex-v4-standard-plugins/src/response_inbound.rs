@@ -29,6 +29,7 @@ pub(crate) fn control_keys() -> &'static [&'static str] {
         "debug",
         "diagnostics",
         "snapshot",
+        "extra_fields",
     ]
 }
 
@@ -178,6 +179,10 @@ pub fn decode_provider_sse_frame(frame: &[u8]) -> Result<DecodedProviderSseFrame
     let raw = data.join("\n");
     let semantic: Value = serde_json::from_str(&raw)
         .map_err(|error| format!("provider SSE data is invalid JSON: {error}"))?;
+    let object = semantic
+        .as_object()
+        .ok_or_else(|| "provider SSE semantic object must be an object".to_string())?;
+    reject_control_fields(object)?;
     let semantic_type = semantic
         .get("type")
         .and_then(Value::as_str)

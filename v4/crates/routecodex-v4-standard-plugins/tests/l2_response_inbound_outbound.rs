@@ -265,6 +265,15 @@ fn provider_sse_codec_rejects_failed_event_without_error_truth() {
 }
 
 #[test]
+fn provider_sse_codec_rejects_control_extra_fields_before_client_projection() {
+    let error = decode_provider_sse_frame(
+        b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\",\"extra_fields\":{\"provider\":\"openai\"}}\n\n",
+    )
+    .expect_err("diagnostic extra_fields must not enter response semantic payload");
+    assert!(error.contains("extra_fields"));
+}
+
+#[test]
 fn provider_sse_codec_rejects_malformed_function_arguments_delta() {
     for frame in [
         b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{}\"}\n\n".as_slice(),
