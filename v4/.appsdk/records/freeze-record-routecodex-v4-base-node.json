@@ -30,7 +30,7 @@
   "previous_active_version": null,
   "promotion_id": "v4-cordis-base-node-promotion",
   "promotion_record_hash": "sha256:9f4b344abf0dd824f6a7ec5a81603e95512243f5480a6634946b61ef0133c1ae",
-  "public_api_hash": "sha256:45f153ddb96a6dab9f73e037a6ae4c4377fde82524a76a44586ff2089f5902fe",
+  "public_api_hash": "sha256:4fde764e2ba6dcd121e980143ce7d9de1eb6518cd9aee52124c668bc76e3e7ce",
   "regression_report_hash": "sha256:d30bf19f1fb77d805529c684e7e716639e71bbb62e9f5cc62493a2fb1faf501f",
   "regression_report_id": "v4-cordis-base-node-regression",
   "review_id": "v4-cordis-base-node-review",
