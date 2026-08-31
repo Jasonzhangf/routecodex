@@ -17,17 +17,7 @@ pub(crate) fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSumma
         .total_tokens
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unreported".to_string());
-    let cache_read = usage.cache_read_input_tokens.or(usage.cached_tokens);
-    let cache = match (cache_read, input_tokens) {
-        (Some(cached), Some(input)) if input > 0 => {
-            format!(
-                "{cached}/{input}({:.1}%)",
-                (cached as f64 / input as f64) * 100.0
-            )
-        }
-        (Some(cached), _) => cached.to_string(),
-        (None, _) => "0".to_string(),
-    };
+    let cache = format_v3_console_cache_summary(usage).unwrap_or_else(|| "0".to_string());
     format!("usage_in={input} usage_out={output} usage_cache={cache} usage_total={total}")
 }
 
@@ -43,22 +33,35 @@ pub(crate) fn format_v3_console_human_usage_summary(
     if let Some(output) = usage.output_tokens {
         fields.push(format!("usage_out={output}"));
     }
-    if let Some(cached) = usage.cache_read_input_tokens.or(usage.cached_tokens) {
-        let cache = match input_tokens {
-            Some(input) if input > 0 => {
-                format!(
-                    "{cached}/{input}({:.1}%)",
-                    (cached as f64 / input as f64) * 100.0
-                )
-            }
-            _ => cached.to_string(),
-        };
+    if let Some(cache) = format_v3_console_cache_summary(usage) {
         fields.push(format!("usage_cache={cache}"));
     }
     if let Some(total) = usage.total_tokens {
         fields.push(format!("usage_total={total}"));
     }
     (!fields.is_empty()).then(|| fields.join(" "))
+}
+
+fn format_v3_console_cache_summary(usage: &V3RuntimeUsageSummary) -> Option<String> {
+    let cache_read = usage.cache_read_input_tokens;
+    let cached = cache_read.or(usage.cached_tokens)?;
+    let denominator = match (cache_read, usage.input_tokens) {
+        // Anthropic-compatible usage reports the uncached increment separately.
+        (Some(_), Some(input)) => Some(cached as f64 + input as f64),
+        // OpenAI-compatible usage reports cached tokens as a sub-count of input.
+        (None, Some(input)) if input > 0 => Some(input as f64),
+        _ => None,
+    };
+    Some(match denominator {
+        Some(denominator) if denominator > 0.0 => {
+            format!(
+                "{cached}/{:.0}({:.1}%)",
+                denominator,
+                (cached as f64 / denominator) * 100.0
+            )
+        }
+        _ => cached.to_string(),
+    })
 }
 
 pub(crate) fn read_v3_console_response_status(value: &Value) -> Option<String> {

@@ -1195,11 +1195,11 @@ fn usage_summary_preserves_raw_input_and_total_with_separate_cache_read() {
     };
     assert_eq!(
         format_v3_console_usage_summary(Some(&summary)),
-        "usage_in=184 usage_out=448 usage_cache=147840/184(80347.8%) usage_total=632"
+        "usage_in=184 usage_out=448 usage_cache=147840/148024(99.9%) usage_total=632"
     );
     assert_eq!(
         format_v3_console_human_usage_summary(Some(&summary)).as_deref(),
-        Some("usage_in=184 usage_out=448 usage_cache=147840/184(80347.8%) usage_total=632")
+        Some("usage_in=184 usage_out=448 usage_cache=147840/148024(99.9%) usage_total=632")
     );
 }
 
@@ -1256,7 +1256,7 @@ fn usage_summary_extracts_cached_read_hit_tokens() {
     assert_eq!(summary.cached_tokens, None);
     assert_eq!(
         format_v3_console_usage_summary(Some(&summary)),
-        "usage_in=59842 usage_out=822 usage_cache=41984/59842(70.2%) usage_total=60664"
+        "usage_in=59842 usage_out=822 usage_cache=41984/101826(41.2%) usage_total=60664"
     );
 }
 

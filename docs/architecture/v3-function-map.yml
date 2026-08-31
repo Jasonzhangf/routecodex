@@ -4361,6 +4361,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+  - v3/crates/routecodex-v3-server/src/console/impl_display.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   owner_scope: Runtime owns route/provider-failure observability event truth; Server
     owns human console projection, terminal output, and request-scoped realtime dedupe.
@@ -4389,6 +4390,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+  - v3/crates/routecodex-v3-server/src/console/impl_display.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
