@@ -17,7 +17,7 @@
   "freeze_id": "v4-cordis-base-node-freeze",
   "git_clean": true,
   "issue_id": "v4-cordis-base-node-rebuild",
-  "library_hash": "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd",
+  "library_hash": "sha256:36febd56fcfe92b397abb82fefce01ce75397e4baf0049f3aece3f58c08520fa",
   "module_id": "routecodex-v4-base-node",
   "owners": {
     "api_extractor": "appsdk-0.1.5",
@@ -29,9 +29,9 @@
   "previous_active_immutable": false,
   "previous_active_version": null,
   "promotion_id": "v4-cordis-base-node-promotion",
-  "promotion_record_hash": "sha256:9f4b344abf0dd824f6a7ec5a81603e95512243f5480a6634946b61ef0133c1ae",
+  "promotion_record_hash": "sha256:60a8fa2fe692311ed0c01615a2e7a58f932350bdacea041f39f657aa1d158ec7",
   "public_api_hash": "sha256:4fde764e2ba6dcd121e980143ce7d9de1eb6518cd9aee52124c668bc76e3e7ce",
-  "regression_report_hash": "sha256:d30bf19f1fb77d805529c684e7e716639e71bbb62e9f5cc62493a2fb1faf501f",
+  "regression_report_hash": "sha256:d913e43c4d2225e755dcbd78cb093506c19b9f9110b61316f732c69ffb6974e0",
   "regression_report_id": "v4-cordis-base-node-regression",
   "review_id": "v4-cordis-base-node-review",
   "source_commit_or_tag": "8f906514a9a454add8dabc129b24d0852d43a724"
