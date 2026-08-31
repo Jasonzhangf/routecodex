@@ -19,7 +19,7 @@
       "output_path": "repo/.github/workflows/release.yml",
       "source_path": ".github/workflows/release.yml",
       "source_commit": "86dff16032428a5fb580db245082275cc7865eef",
-      "sha256": "df6814455ce83f908dbae1e40ce6f0581dc7a2629ee653774f33ba9ca5e6548a"
+      "sha256": "2aa39b981acc5e33495274129a2095761686b96caa1650d483b17eb6060daf2b"
     },
     {
       "output_path": "repo/.github/workflows/test.yml",
@@ -2998,5 +2998,5 @@
       "sha256": "5cc420540dffe755ef55174e73198b28d7b0142769fd3fbae89c5c8016250e79"
     }
   ],
-  "manifest_digest": "87bcbae242fd77c0d1cc06d6b3dc8ea87260005774e3d2f7569c1bce7e392194"
+  "manifest_digest": "c7eb791e5d159bfeeddb8380041543e0e1d21da777da287389a3db042a44c60c"
 }
