@@ -13,7 +13,7 @@
   "mainline_call_map_hash": "sha256:c36e4f9d5cff527d7f98b339772a53c87f420db58bb2215b6b68210e01124673",
   "pre_review_validation_id": "v4-cordis-plugin-contract-prereview-current",
   "promotion_id": "v4-cordis-plugin-contract-promotion-current",
-  "resource_map_hash": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
+  "resource_map_hash": "sha256:3497ad275b5c5b897810f54ce4582389979957f7c606e11b46f6c0b31926d4c3",
   "review_id": "v4-cordis-plugin-contract-review-current",
   "review_kind": "architecture",
   "reviewed_artifact_hash": "sha256:308725f4606c2751f861efe5401f63b57fab38a8c3fb827cc6958e06a70a9ff3",

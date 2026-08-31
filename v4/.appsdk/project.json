@@ -257,13 +257,7 @@
         "suite_id": "v4-base-node-l0-regression"
       },
       "source_owner": "routecodex-v4-base-node",
-      "stage": "architecture_stable",
-      "version_base": {
-        "base_artifact_hash": "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd",
-        "base_source_commit": "8f906514a9a454add8dabc129b24d0852d43a724",
-        "new_active_version": "active-v3",
-        "previous_active_version": "active-v2"
-      }
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-edge/**",
@@ -337,7 +331,13 @@
         "suite_id": "v4-edge-l1-regression"
       },
       "source_owner": "routecodex-v4-edge",
-      "stage": "frozen"
+      "stage": "architecture_stable",
+      "version_base": {
+        "base_artifact_hash": "sha256:83728d3d7967db171cfb627301ba8e8d636eaf6015101f70e316a5234c260ea6",
+        "base_source_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
+        "new_active_version": "active-v5",
+        "previous_active_version": "active-v4"
+      }
     },
     {
       "active_artifact": "active/lib/routecodex-v4-control/**",
