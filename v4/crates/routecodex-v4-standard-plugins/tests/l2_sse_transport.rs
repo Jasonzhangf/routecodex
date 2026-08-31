@@ -1,8 +1,8 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use routecodex_v4_standard_plugins::sse_transport::{
-    SseEgressPlugin, SseIngressPlugin, SseTransportError, SseTransportFrame,
-    SseTransportPolicy,
+    SseEgressPlugin, SseIngressPlugin, SseTransportError, SseTransportFrame, SseTransportPolicy,
 };
 
 #[test]
@@ -11,7 +11,9 @@ fn transport_frames_bytes_without_reading_payload_semantics() {
     let mut plugin = SseIngressPlugin::new(policy, Instant::now());
     let now = Instant::now();
 
-    let first = plugin.push_chunk(b"data: {\"model\":\"untouched\"}\n", now).unwrap();
+    let first = plugin
+        .push_chunk(b"data: {\"model\":\"untouched\"}\n", now)
+        .unwrap();
     assert!(first.is_empty());
     let second = plugin.push_chunk(b"\ndata: [DONE]\n\n", now).unwrap();
 
@@ -28,7 +30,10 @@ fn transport_frames_crlf_without_protocol_interpretation() {
         .push_chunk(b"event: opaque\r\ndata: bytes\r\n\r\n", Instant::now())
         .unwrap();
     assert_eq!(frames.len(), 1);
-    assert_eq!(frames[0].as_bytes(), b"event: opaque\r\ndata: bytes\r\n\r\n");
+    assert_eq!(
+        frames[0].as_bytes(),
+        b"event: opaque\r\ndata: bytes\r\n\r\n"
+    );
 }
 
 #[test]
@@ -58,9 +63,27 @@ fn egress_preserves_order_applies_backpressure_and_drains_closeout() {
     let second = SseTransportFrame::from_complete_bytes(b"data: two\n\n".to_vec()).unwrap();
 
     plugin.enqueue(first.clone(), start).unwrap();
-    assert_eq!(plugin.enqueue(second.clone(), start), Err(SseTransportError::Backpressure));
+    assert_eq!(
+        plugin.enqueue(second.clone(), start),
+        Err(SseTransportError::Backpressure)
+    );
     assert_eq!(plugin.pop(), Some(first));
     plugin.enqueue(second.clone(), start).unwrap();
     assert_eq!(plugin.drain_closeout(), vec![second]);
-    assert_eq!(SseEgressPlugin::keepalive_frame().as_bytes(), b": keepalive\n\n");
+    assert_eq!(
+        SseEgressPlugin::keepalive_frame().as_bytes(),
+        b": keepalive\n\n"
+    );
+}
+
+#[test]
+fn frame_clones_share_the_same_payload_allocation() {
+    let source: Arc<[u8]> = Arc::from(&b"data: shared\n\n"[..]);
+    let frame = SseTransportFrame::from_shared_bytes(Arc::clone(&source)).unwrap();
+    let cloned = frame.clone();
+    let frame_bytes = frame.shared_bytes();
+    let cloned_bytes = cloned.shared_bytes();
+
+    assert!(Arc::ptr_eq(&source, &frame_bytes));
+    assert!(Arc::ptr_eq(&frame_bytes, &cloned_bytes));
 }

@@ -125,6 +125,13 @@ const NODE_PERMISSIONS = new Map([
   ['V4HubRespInbound03Normalized', {
     reads: ['v4.response.provider_raw'], writes: ['v4.response.normal_payload'],
   }],
+  ['V4ProviderRespCompat02ProviderCompat', {
+    reads: [
+      'v4.response.provider_raw',
+      'v4.information.provider_protocol',
+    ],
+    writes: ['v4.response.provider_raw'],
+  }],
   ['V4HubRespChatProcess04Governed', {
     reads: ['v4.response.normal_payload'],
     writes: ['v4.response.normal_payload', 'v4.control.metadata_center'],
@@ -218,9 +225,9 @@ function functionBody(source, functionName) {
 function parseNodePermissionFunction(source, functionName) {
   const body = functionBody(source, functionName);
   const permissions = new Map();
-  const armPattern = /"([^"]+)"\s*=>\s*(vec!\[[\s\S]*?\]|Vec::new\(\)),/g;
+  const armPattern = /"([^"]+)"\s*=>\s*(?:\{\s*(vec!\[[\s\S]*?\]|Vec::new\(\))\s*\}|(vec!\[[\s\S]*?\]|Vec::new\(\))\s*,)/g;
   for (const match of body.matchAll(armPattern)) {
-    permissions.set(match[1], parseStringVector(match[2]));
+    permissions.set(match[1], parseStringVector(match[2] ?? match[3]));
   }
   return permissions;
 }
@@ -513,8 +520,8 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 29) {
-      failures.push(`${MODULE}: expected 29 active standard descriptors, got ${activeDescriptors.length}`);
+    if (activeDescriptors.length !== 30) {
+      failures.push(`${MODULE}: expected 30 active standard descriptors, got ${activeDescriptors.length}`);
     }
     if (!activeDescriptors.some(
       (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',
@@ -718,11 +725,21 @@ function runSelfTest() {
     }],
     ['node permission broadened', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat07ProviderCompat" => vec!["v4.request.provider_wire_payload".to_string()],',
-        '"V4ProviderReqCompat07ProviderCompat" => vec![\n'
-          + '            "v4.request.provider_wire_payload".to_string(),\n'
-          + '            "v4.request.normal_payload".to_string(),\n'
-          + '        ],',
+        '"V4ProviderReqCompat07ProviderCompat" => {\n'
+          + '            vec!["v4.request.provider_wire_payload".to_string()]\n'
+          + '        }',
+        '"V4ProviderReqCompat07ProviderCompat" => {\n'
+          + '            vec![\n'
+          + '                "v4.request.provider_wire_payload".to_string(),\n'
+          + '                "v4.request.normal_payload".to_string(),\n'
+          + '            ]\n'
+          + '        }',
+      );
+    }],
+    ['provider response compat permission removed', (state) => {
+      state.source = source.replace(
+        '"V4ProviderRespCompat02ProviderCompat" => vec!["v4.response.provider_raw".to_string()],',
+        '"V4ProviderRespCompat02ProviderCompat" => Vec::new(),',
       );
     }],
     ['resource operation owner and writer removed', (state) => {

@@ -15,7 +15,7 @@
   },
   "manifest_hash": "sha256:pending-config-v2-manifest",
   "plan_epoch": 2,
-  "plan_hash": "sha256:63de1ee5d70800831fdc64ecc4351d96b5614af2c8eb3bbc75664fe7f4c6dc70",
+  "plan_hash": "sha256:eec49ae8aed92af29c4c89d99be91974fa466b0a5479e5670cd02981c3e7b8ee",
   "direct_protocol_contract": {
     "same_protocol": true,
     "mismatch": "fail_fast"
@@ -24,6 +24,28 @@
     "client_provider_independent": true,
     "payload_inference": "forbidden"
   },
+  "transport_plugins": [
+    {
+      "plugin_id": "v4.transport.sse.ingress",
+      "node_id": "V4TransportSsePlugin",
+      "owner": "routecodex-v4-standard-plugins::sse_transport",
+      "direction": "ingress",
+      "attachment": "provider_response",
+      "effect": "transport",
+      "resource_id": "v4.transport.sse_frames",
+      "writes": []
+    },
+    {
+      "plugin_id": "v4.transport.sse.egress",
+      "node_id": "V4TransportSsePlugin",
+      "owner": "routecodex-v4-standard-plugins::sse_transport",
+      "direction": "egress",
+      "attachment": "client_response",
+      "effect": "transport",
+      "resource_id": "v4.transport.sse_frames",
+      "writes": []
+    }
+  ],
   "chains": [
     {
       "chain_id": "direct_request",
@@ -49,15 +71,11 @@
     {
       "chain_id": "direct_response",
       "nodes": [
-        {"node_id": "V4DirectResp01ProviderRaw", "chain": "direct_response", "position": 1, "role_id": "response_inbound", "terminal": false, "kernel": true, "plugins": [
-          {"plugin_id": "v4.transport.sse.ingress", "effects": ["transport"], "writes": []}
-        ]},
+        {"node_id": "V4DirectResp01ProviderRaw", "chain": "direct_response", "position": 1, "role_id": "response_inbound", "terminal": false, "kernel": true, "plugins": []},
         {"node_id": "V4DirectResp02RelayContainer", "chain": "direct_response", "position": 2, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": [
           {"plugin_id": "v4.hook.direct.response", "effects": ["semantic"]}
         ]},
-        {"node_id": "V4DirectResp03ClientProtocol", "chain": "direct_response", "position": 3, "role_id": "response_outbound", "terminal": true, "kernel": false, "plugins": [
-          {"plugin_id": "v4.transport.sse.egress", "effects": ["transport"], "writes": []}
-        ]}
+        {"node_id": "V4DirectResp03ClientProtocol", "chain": "direct_response", "position": 3, "role_id": "response_outbound", "terminal": true, "kernel": false, "plugins": []}
       ],
       "edges": [
         {"from": "V4DirectResp01ProviderRaw", "to": "V4DirectResp02RelayContainer", "direction": "forward"},
@@ -98,12 +116,12 @@
     {
       "chain_id": "relay_response",
       "nodes": [
-        {"node_id": "V4ProviderRespInbound01Raw", "chain": "relay_response", "position": 1, "role_id": "response_inbound", "terminal": false, "kernel": true, "plugins": [{"plugin_id": "v4.transport.sse.ingress", "effects": ["transport"], "writes": []}]},
+        {"node_id": "V4ProviderRespInbound01Raw", "chain": "relay_response", "position": 1, "role_id": "response_inbound", "terminal": false, "kernel": true, "plugins": []},
         {"node_id": "V4ProviderRespCompat02ProviderCompat", "chain": "relay_response", "position": 2, "role_id": "response_inbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "provider_protocol_decode", "effects": ["semantic"]}]},
         {"node_id": "V4HubRespInbound03Normalized", "chain": "relay_response", "position": 3, "role_id": "response_inbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "hub_response_normalize", "effects": ["semantic"]}]},
         {"node_id": "V4HubRespChatProcess04Governed", "chain": "relay_response", "position": 4, "role_id": "response_chat_process", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "response_governance", "effects": ["semantic"]}, {"plugin_id": "tool_harvest", "effects": ["semantic"]}]},
         {"node_id": "V4HubRespOutbound05ClientSemantic", "chain": "relay_response", "position": 5, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.hook.relay.response", "effects": ["semantic"]}]},
-        {"node_id": "V4ServerRespOutbound06ClientFrame", "chain": "relay_response", "position": 6, "role_id": "response_outbound", "terminal": true, "kernel": false, "plugins": [{"plugin_id": "v4.transport.sse.egress", "effects": ["transport"], "writes": []}]}
+        {"node_id": "V4ServerRespOutbound06ClientFrame", "chain": "relay_response", "position": 6, "role_id": "response_outbound", "terminal": true, "kernel": false, "plugins": []}
       ],
       "edges": [
         {"from": "V4ProviderRespInbound01Raw", "to": "V4ProviderRespCompat02ProviderCompat", "direction": "forward"},

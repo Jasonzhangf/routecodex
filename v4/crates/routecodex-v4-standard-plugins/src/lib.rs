@@ -432,15 +432,15 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
         "V4HubReqInbound02Normalized" => Vec::new(),
         "V4HubReqChatProcess03Governed" => vec!["v4.request.normal_payload".to_string()],
         "V4HubRespInbound03Normalized" => vec!["v4.response.normal_payload".to_string()],
-        "V4ProviderRespCompat02ProviderCompat" => {
-            vec!["v4.response.provider_raw".to_string()]
-        }
+        "V4ProviderRespCompat02ProviderCompat" => vec!["v4.response.provider_raw".to_string()],
         "V4HubRespChatProcess04Governed" => vec![
             "v4.response.normal_payload".to_string(),
             "v4.control.metadata_center".to_string(),
         ],
         "V4HubRespOutbound05ClientSemantic" => vec!["v4.response.client_wire_payload".to_string()],
-        "V4ProviderReqCompat07ProviderCompat" => vec!["v4.request.provider_wire_payload".to_string()],
+        "V4ProviderReqCompat07ProviderCompat" => {
+            vec!["v4.request.provider_wire_payload".to_string()]
+        }
         "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_object".to_string()],
         "V4MetadataCenter01ScopeRegistry" => vec!["v4.control.metadata_center".to_string()],
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
@@ -864,9 +864,11 @@ pub fn compile_production_execution_plans(
             .chains
             .iter()
             .find(|chain| chain.chain_id == chain_id)
-            .ok_or_else(|| routecodex_v4_plugin_plan::PlanError::NodeContractInvalid {
-                reason: format!("missing production chain {chain_id}"),
-            })?;
+            .ok_or_else(
+                || routecodex_v4_plugin_plan::PlanError::NodeContractInvalid {
+                    reason: format!("missing production chain {chain_id}"),
+                },
+            )?;
         for node in &chain.nodes {
             let selected = plugins
                 .iter()
@@ -915,8 +917,8 @@ pub fn compile_production_execution_plans(
     }
     artifact_hashes.sort();
     artifact_hashes.dedup();
-    let encoded = serde_json::to_vec(&artifact_hashes)
-        .expect("standard artifact hash set is serializable");
+    let encoded =
+        serde_json::to_vec(&artifact_hashes).expect("standard artifact hash set is serializable");
     Ok(ProductionExecutionPlans {
         plans,
         artifact_set_hash: format!("sha256:{}", sha256_hex(&encoded)),

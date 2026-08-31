@@ -119,6 +119,10 @@ pub fn encode_client_sse_frame(
     semantic: &Value,
     terminal: bool,
 ) -> Result<Vec<u8>, String> {
+    let object = semantic
+        .as_object()
+        .ok_or_else(|| "client SSE semantic value must be an object".to_string())?;
+    reject_control_fields(object)?;
     let encoded = serde_json::to_vec(semantic)
         .map_err(|error| format!("client SSE semantic encode failed: {error}"))?;
     let mut frame = Vec::new();
@@ -157,11 +161,30 @@ pub fn encode_client_error_sse_frame(
         "type": "error",
         "error": {"message": message}
     });
-    encode_client_sse_frame(entry_protocol, &semantic, true)
+    let encoded = serde_json::to_vec(&semantic)
+        .map_err(|error| format!("client SSE error encode failed: {error}"))?;
+    let mut frame = Vec::new();
+    match entry_protocol {
+        "responses" => {
+            frame.extend_from_slice(b"event: error\ndata: ");
+            frame.extend_from_slice(&encoded);
+            frame.extend_from_slice(b"\n\n");
+        }
+        "chat" => {
+            frame.extend_from_slice(b"data: ");
+            frame.extend_from_slice(&encoded);
+            frame.extend_from_slice(b"\n\n");
+        }
+        other => return Err(format!("unsupported client SSE protocol {other}")),
+    }
+    Ok(frame)
 }
 
 fn project_responses_event_to_chat(value: &Value) -> Value {
-    let event_type = value.get("type").and_then(Value::as_str).unwrap_or_default();
+    let event_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let response = value.get("response").unwrap_or(value);
     let mut delta = Map::new();
     let mut finish_reason = Value::Null;
@@ -173,13 +196,32 @@ fn project_responses_event_to_chat(value: &Value) -> Value {
         "response.output_text.delta" => {
             delta.insert(
                 "content".to_string(),
-                value.get("delta").cloned().unwrap_or_else(|| Value::String(String::new())),
+                value
+                    .get("delta")
+                    .cloned()
+                    .unwrap_or_else(|| Value::String(String::new())),
+            );
+        }
+        "response.function_call_arguments.delta" => {
+            delta.insert(
+                "tool_calls".to_string(),
+                json!([{
+                    "index": value.get("output_index").cloned().unwrap_or(Value::Null),
+                    "type": "function",
+                    "function": {
+                        "arguments": value.get("delta").cloned().unwrap_or(Value::Null)
+                    }
+                }]),
             );
         }
         "response.completed" => {
             finish_reason = Value::String(
-                if responses_tool_calls(response).is_empty() { "stop" } else { "tool_calls" }
-                    .to_string(),
+                if responses_tool_calls(response).is_empty() {
+                    "stop"
+                } else {
+                    "tool_calls"
+                }
+                .to_string(),
             );
         }
         _ => {}

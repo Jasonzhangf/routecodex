@@ -57,13 +57,19 @@ resources:
   owner_node: V4DirectReq02RelayContainer
   owner_symbols:
   - NodeContainer
+  semantic_contract:
+    control_fields_forbidden: true
+    protocol_metadata_forbidden: true
   allowed_writers:
   - V4DirectReq02RelayContainer
   allowed_readers:
   - V4DirectReq03ProviderWire
   forbidden_writers:
+  - V4ControlMetadataCenter
   - SseIngressPlugin
   - SseEgressPlugin
+  may_enter_provider_body: true
+  may_enter_client_body: false
   binding_status: anchored
 - resource_id: v4.direct.response.provider_raw
   axis: data
@@ -95,13 +101,19 @@ resources:
   owner_node: V4DirectResp02RelayContainer
   owner_symbols:
   - NodeContainer
+  semantic_contract:
+    control_fields_forbidden: true
+    protocol_metadata_forbidden: true
   allowed_writers:
   - V4DirectResp02RelayContainer
   allowed_readers:
   - V4DirectResp03ClientProtocol
   forbidden_writers:
+  - V4ControlMetadataCenter
   - SseIngressPlugin
   - SseEgressPlugin
+  may_enter_provider_body: false
+  may_enter_client_body: true
   binding_status: anchored
 - resource_id: v4.transport.sse_frames
   axis: data
@@ -127,7 +139,31 @@ resources:
   - V4DirectResp02RelayContainer
   - V4HubReqChatProcess03Governed
   - V4HubRespChatProcess04Governed
-  binding_status: design
+  binding_status: anchored
+- resource_id: v4.event.response_stream_disposition
+  axis: control
+  verification_gate:
+  - v4_direct_relay_sse
+  - v4_direct_relay_sse_red
+  resource_kind: typed_stream_event
+  lifecycle: v4.transport.sse
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols:
+  - ResponseStreamDisposition
+  - ResponseStreamProcessor
+  allowed_writers:
+  - ResponseStreamProcessor
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - SseIngressPlugin
+  - SseEgressPlugin
+  - V4DirectReq02RelayContainer
+  - V4DirectResp02RelayContainer
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
 - resource_id: v4.execution.direct_relay_container
   axis: control
   verification_gate:
@@ -246,8 +282,6 @@ resources:
   - V4HubReqChatProcess03Governed
   allowed_readers:
   - V4HubReqChatProcess03Governed
-  - V4HubReqExecution04Planned
-  - V4HubReqTarget05Resolved
   - V4HubReqOutbound06ProviderSemantic
   forbidden_writers:
   - V4ControlMetadataCenter
@@ -335,6 +369,7 @@ resources:
   - statusCode
   allowed_writers:
   - V4ProviderRespInbound01Raw
+  - V4ProviderRespCompat02ProviderCompat
   allowed_readers:
   - V4ProviderRespCompat02ProviderCompat
   - V4HubRespInbound03Normalized

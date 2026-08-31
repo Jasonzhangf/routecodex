@@ -1375,13 +1375,21 @@
       "evidence_role": "positive",
       "input_paths": [
         "contracts/skeleton-plan.contract.json",
+        "contracts/node-graph.contract.json",
+        "docs/architecture/v4-resource-operation-map.yml",
         "docs/architecture/maps/resource-map.json",
         "docs/architecture/maps/function-map.json",
         "docs/architecture/maps/mainline-call-map.json",
         "crates/routecodex-v4-runtime/src/lib.rs",
+        "crates/routecodex-v4-runtime/tests/l2_runtime.rs",
         "crates/routecodex-v4-runtime-bin/src/main.rs",
         "crates/routecodex-v4-node-container/src/lib.rs",
         "crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
+        "crates/routecodex-v4-standard-plugins/src/response_inbound.rs",
+        "crates/routecodex-v4-standard-plugins/src/response_outbound.rs",
+        "crates/routecodex-v4-standard-plugins/src/sse_transport.rs",
+        "crates/routecodex-v4-standard-plugins/tests/l2_response_inbound_outbound.rs",
+        "crates/routecodex-v4-standard-plugins/tests/l2_sse_transport.rs",
         "scripts/architecture/verify-v4-direct-relay-sse.mjs"
       ],
       "required_for": ["V4-DIRECT-RELAY-SSE:source_green", "merge_queue_admission"]

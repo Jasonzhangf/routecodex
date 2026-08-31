@@ -1312,6 +1312,16 @@
       "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red"]
     },
     {
+      "function_id": "v4.runtime.sse_response_pipeline",
+      "status": "active",
+      "feature_id": "V4-DIRECT-RELAY-SSE",
+      "owner": "routecodex-v4-runtime",
+      "entry_symbols": ["ResponseStreamProcessor::process_frame", "ResponseStreamProcessor::finish", "ResponseStreamProcessor::project_failure"],
+      "resource_ids": ["v4.transport.sse_frames", "v4.event.response_stream_disposition", "v4.information.execution_lane", "v4.information.client_protocol", "v4.information.provider_protocol"],
+      "source_paths": ["crates/routecodex-v4-runtime/src/lib.rs", "crates/routecodex-v4-standard-plugins/src/response_inbound.rs", "crates/routecodex-v4-standard-plugins/src/response_outbound.rs", "crates/routecodex-v4-runtime-bin/src/main.rs"],
+      "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red", "v4_runtime_l2_regression", "v4_standard_plugins_l2_regression"]
+    },
+    {
       "function_id": "v4.direct.relay_container",
       "status": "active",
       "feature_id": "V4-DIRECT-RELAY-SSE",

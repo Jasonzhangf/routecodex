@@ -36,10 +36,14 @@ pub struct SseTransportFrame(Arc<[u8]>);
 
 impl SseTransportFrame {
     pub fn from_complete_bytes(bytes: Vec<u8>) -> Result<Self, SseTransportError> {
+        Self::from_shared_bytes(bytes.into())
+    }
+
+    pub fn from_shared_bytes(bytes: Arc<[u8]>) -> Result<Self, SseTransportError> {
         if !bytes.ends_with(b"\n\n") && !bytes.ends_with(b"\r\n\r\n") {
             return Err(SseTransportError::IncompleteFrame);
         }
-        Ok(Self(bytes.into()))
+        Ok(Self(bytes))
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -52,6 +56,10 @@ impl SseTransportFrame {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    pub fn shared_bytes(&self) -> Arc<[u8]> {
+        Arc::clone(&self.0)
     }
 }
 

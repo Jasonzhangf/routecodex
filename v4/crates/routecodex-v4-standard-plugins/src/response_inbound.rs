@@ -114,12 +114,11 @@ fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         "openai-chat" => "chat",
         other => other,
     };
-    let normalized = routecodex_v4_provider::normalize_provider_response(
-        provider_protocol,
-        ctx.read_data(),
-    )
-    .map_err(|error| format!("{}: {}", error.code, error.message))?;
-    ctx.write_data(normalized).map_err(|error| error.to_string())
+    let normalized =
+        routecodex_v4_provider::normalize_provider_response(provider_protocol, ctx.read_data())
+            .map_err(|error| format!("{}: {}", error.code, error.message))?;
+    ctx.write_data(normalized)
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn protocol_decode_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -151,7 +150,14 @@ pub(crate) fn protocol_decode(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DecodedProviderSseFrame {
     pub semantic: Value,
-    pub terminal: bool,
+    pub disposition: ProviderSseEventDisposition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderSseEventDisposition {
+    Continue,
+    Completed,
+    Failed { message: String },
 }
 
 /// Adjacent provider protocol codec. Transport framing is already complete;
@@ -181,9 +187,42 @@ pub fn decode_provider_sse_frame(frame: &[u8]) -> Result<DecodedProviderSseFrame
             "provider SSE event/type mismatch: {event} != {semantic_type}"
         ));
     }
+    if semantic_type == "response.function_call_arguments.delta" {
+        semantic
+            .get("output_index")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                "provider SSE response.function_call_arguments.delta requires integer output_index"
+                    .to_string()
+            })?;
+        semantic
+            .get("delta")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                "provider SSE response.function_call_arguments.delta requires string delta"
+                    .to_string()
+            })?;
+    }
+    let disposition = match semantic_type {
+        "response.completed" => ProviderSseEventDisposition::Completed,
+        "response.failed" => {
+            let message = semantic
+                .pointer("/response/error/message")
+                .or_else(|| semantic.pointer("/error/message"))
+                .and_then(Value::as_str)
+                .filter(|message| !message.trim().is_empty())
+                .ok_or_else(|| {
+                    "provider SSE response.failed is missing error.message".to_string()
+                })?;
+            ProviderSseEventDisposition::Failed {
+                message: message.to_string(),
+            }
+        }
+        _ => ProviderSseEventDisposition::Continue,
+    };
     Ok(DecodedProviderSseFrame {
-        terminal: matches!(semantic_type, "response.completed" | "response.failed"),
         semantic,
+        disposition,
     })
 }
 

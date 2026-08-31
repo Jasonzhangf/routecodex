@@ -30,6 +30,7 @@ fn plan() -> SkeletonPlan {
             client_provider_independent: true,
             payload_inference: "forbidden".into(),
         },
+        transport_plugins: vec![],
         chains: vec![],
     }
 }

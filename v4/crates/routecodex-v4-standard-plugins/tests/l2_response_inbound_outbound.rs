@@ -5,6 +5,12 @@
 use routecodex_v4_cordis_bridge::{BridgeError, NodeExecutionInput};
 use routecodex_v4_node_container::{NodeContainer, NodeContainerError, PlanBindings};
 use routecodex_v4_plugin_plan::{compile_node_plan, PlanError};
+use routecodex_v4_standard_plugins::response_inbound::{
+    decode_provider_sse_frame, ProviderSseEventDisposition,
+};
+use routecodex_v4_standard_plugins::response_outbound::{
+    encode_client_error_sse_frame, encode_client_sse_frame,
+};
 use routecodex_v4_standard_plugins::{
     compile_standard_plan, standard_authoring, standard_container_services,
     standard_node_allowed_reads, standard_node_allowed_writes, standard_resource_registry,
@@ -113,7 +119,10 @@ fn relay_response_hook_projects_only_registered_protocol_pair() {
         json!({"provider_protocol":"openai-responses","client_protocol":"openai-chat"}),
     )
     .unwrap();
-    assert_eq!(projected["choices"][0]["message"]["content"], json!("hello"));
+    assert_eq!(
+        projected["choices"][0]["message"]["content"],
+        json!("hello")
+    );
 
     assert!(execute(
         "V4HubRespOutbound05ClientSemantic",
@@ -123,6 +132,31 @@ fn relay_response_hook_projects_only_registered_protocol_pair() {
         json!({"provider_protocol":"openai-responses","client_protocol":"gemini"}),
     )
     .is_err());
+}
+
+#[test]
+fn relay_response_hook_projects_responses_function_arguments_delta() {
+    let projected = execute(
+        "V4HubRespOutbound05ClientSemantic",
+        5,
+        "v4.hook.relay.response",
+        json!({
+            "type": "response.function_call_arguments.delta",
+            "output_index": 1,
+            "delta": "{\"city\":"
+        }),
+        json!({"provider_protocol":"openai-responses","client_protocol":"openai-chat"}),
+    )
+    .expect("registered Responses event projects through the Relay response hook");
+
+    assert_eq!(
+        projected["choices"][0]["delta"]["tool_calls"][0]["index"],
+        1
+    );
+    assert_eq!(
+        projected["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
+        "{\"city\":"
+    );
 }
 
 #[test]
@@ -156,6 +190,17 @@ fn frame_build_rejects_control_plane_fields() {
 }
 
 #[test]
+fn client_sse_codec_rejects_control_plane_fields_before_projection() {
+    let error = encode_client_sse_frame(
+        "responses",
+        &json!({"type":"response.completed","route_facts":{}}),
+        true,
+    )
+    .expect_err("client SSE projection must reject control leakage");
+    assert!(error.contains("rejects control/debug field route_facts"));
+}
+
+#[test]
 fn frame_builder_cannot_bind_to_chat_process_node() {
     let authoring = standard_authoring(&["v4.std.response.frame_build"]).unwrap();
     let error = compile_node_plan(
@@ -176,4 +221,71 @@ fn frame_builder_cannot_bind_to_chat_process_node() {
             | PlanError::NodeSelectorPositionMismatch { .. }
             | PlanError::NodeRoleMismatch { .. }
     ));
+}
+
+#[test]
+fn provider_sse_codec_classifies_continue_complete_and_failure() {
+    let continuing = decode_provider_sse_frame(
+        b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n",
+    )
+    .expect("delta frame decodes");
+    assert_eq!(
+        continuing.disposition,
+        ProviderSseEventDisposition::Continue
+    );
+
+    let completed = decode_provider_sse_frame(
+        b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\"}}\n\n",
+    )
+    .expect("completed frame decodes");
+    assert_eq!(
+        completed.disposition,
+        ProviderSseEventDisposition::Completed
+    );
+
+    let failed = decode_provider_sse_frame(
+        b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"upstream failed\"}}}\n\n",
+    )
+    .expect("failed frame decodes");
+    assert_eq!(
+        failed.disposition,
+        ProviderSseEventDisposition::Failed {
+            message: "upstream failed".to_string(),
+        }
+    );
+}
+
+#[test]
+fn provider_sse_codec_rejects_failed_event_without_error_truth() {
+    let error = decode_provider_sse_frame(
+        b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{}}\n\n",
+    )
+    .expect_err("failed event without error truth must fail fast");
+    assert!(error.contains("missing error.message"));
+}
+
+#[test]
+fn provider_sse_codec_rejects_malformed_function_arguments_delta() {
+    for frame in [
+        b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{}\"}\n\n".as_slice(),
+        b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":1,\"delta\":{}}\n\n".as_slice(),
+    ] {
+        let error = decode_provider_sse_frame(frame)
+            .expect_err("malformed function arguments delta must fail at provider codec");
+        assert!(error.contains("response.function_call_arguments.delta"));
+    }
+}
+
+#[test]
+fn client_error_frame_never_fabricates_success_closeout() {
+    let responses = encode_client_error_sse_frame("responses", "upstream failed")
+        .expect("Responses error frame");
+    let responses = String::from_utf8(responses).expect("Responses error frame is UTF-8");
+    assert!(responses.starts_with("event: error\ndata: "));
+    assert!(!responses.contains("response.completed"));
+
+    let chat = encode_client_error_sse_frame("chat", "upstream failed").expect("Chat error frame");
+    let chat = String::from_utf8(chat).expect("Chat error frame is UTF-8");
+    assert!(chat.starts_with("data: "));
+    assert!(!chat.contains("[DONE]"));
 }

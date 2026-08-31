@@ -28,7 +28,8 @@ use routecodex_v4_router::{
 };
 use routecodex_v4_runtime::{
     parse_responses_provider_payload, project_runtime_fault, project_runtime_fault_with_policy,
-    ResponsesProviderPayload, RuntimeFault, RuntimeLease, SkeletonRuntime,
+    ResponseStreamDisposition, ResponseStreamProcessor, ResponsesProviderPayload, RuntimeFault,
+    SkeletonRuntime,
 };
 use routecodex_v4_server::{
     AsyncHttpHandler, AsyncHttpServer, HttpHandler, HttpRequest, HttpResponse, ResponseStream,
@@ -827,6 +828,7 @@ fn handle_responses(
             400,
         ));
     }
+    let request_scope = request_report.scope.clone();
     let semantic_body = request_report.provider_wire_value.ok_or_else(|| {
         project_fault(
             request,
@@ -964,18 +966,19 @@ fn handle_responses(
             )
         );
         let _ = std::io::stdout().flush();
-        let response_stream = ResponsesSseStream::new(
-            stream,
-            Arc::clone(runtime),
+        let response_processor = ResponseStreamProcessor::new(
             request_lease,
-            request.request_id.clone(),
+            request_scope,
             request.port,
-            entry_protocol.to_string(),
-            continuation_owner.to_string(),
-            target.protocol.clone(),
-            session_scope.to_string(),
-            conversation_scope.to_string(),
-        );
+            entry_protocol,
+            &target.protocol,
+            &continuation_owner,
+            session_scope,
+            conversation_scope,
+        )
+        .map_err(|fault| project_fault(request, fault, 599))?;
+        let response_stream =
+            ResponsesSseStream::new(stream, Arc::clone(runtime), response_processor);
         return Ok(HttpResponse::streaming(
             client_status,
             "text/event-stream",
@@ -1202,49 +1205,22 @@ impl ProviderSseSource for ProviderResponseStream {
 struct ResponsesSseStream<S = ProviderResponseStream> {
     stream: S,
     runtime: Arc<Mutex<SkeletonRuntime>>,
-    request_lease: RuntimeLease,
-    request_id: String,
-    port: u16,
-    entry_protocol: String,
-    continuation_owner: String,
-    provider_protocol: String,
-    session_scope: String,
-    conversation_scope: String,
-    frame_sequence: u64,
-    pending: Vec<u8>,
+    processor: ResponseStreamProcessor,
     ingress: SseIngressPlugin,
     egress: SseEgressPlugin,
-    terminal_seen: bool,
     close_after_pending: bool,
-    chat_role_emitted: bool,
 }
 
 impl<S: ProviderSseSource> ResponsesSseStream<S> {
     fn new(
         stream: S,
         runtime: Arc<Mutex<SkeletonRuntime>>,
-        request_lease: RuntimeLease,
-        request_id: String,
-        port: u16,
-        entry_protocol: String,
-        continuation_owner: String,
-        provider_protocol: String,
-        session_scope: String,
-        conversation_scope: String,
+        processor: ResponseStreamProcessor,
     ) -> Self {
         Self {
             stream,
             runtime,
-            request_lease,
-            request_id,
-            port,
-            entry_protocol,
-            continuation_owner,
-            provider_protocol,
-            session_scope,
-            conversation_scope,
-            frame_sequence: 0,
-            pending: Vec::new(),
+            processor,
             ingress: SseIngressPlugin::new(
                 SseTransportPolicy::new(1024 * 1024, 1024 * 1024, Duration::from_secs(30))
                     .expect("constant SSE transport policy"),
@@ -1255,102 +1231,34 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
                     .expect("constant SSE transport policy"),
                 std::time::Instant::now(),
             ),
-            terminal_seen: false,
             close_after_pending: false,
-            chat_role_emitted: false,
         }
     }
 
-    fn queue_error(&mut self, message: impl Into<String>) {
-        let encoded =
-            routecodex_v4_standard_plugins::response_outbound::encode_client_error_sse_frame(
-                &self.entry_protocol,
-                &message.into(),
-            )
-            .expect("client SSE error projection must be serializable");
-        let frame =
-            routecodex_v4_standard_plugins::sse_transport::SseTransportFrame::from_complete_bytes(
-                encoded,
-            )
-            .expect("client SSE error projection must produce a complete frame");
+    fn enqueue_disposition(
+        &mut self,
+        disposition: ResponseStreamDisposition,
+    ) -> Result<(), std::io::Error> {
+        let (frame, failed) = match disposition {
+            ResponseStreamDisposition::Continue { frame } => (frame, false),
+            ResponseStreamDisposition::Terminal { frame } => (frame, false),
+            ResponseStreamDisposition::Failure { frame } => (frame, true),
+        };
         self.egress
             .enqueue(frame, std::time::Instant::now())
-            .expect("client SSE error frame must fit transport queue");
-        self.close_after_pending = true;
-    }
-
-    fn project_frame(&mut self, frame: &[u8], terminal: bool) -> Result<(), RuntimeFault> {
-        self.frame_sequence += 1;
-        if self.entry_protocol == "chat"
-            && std::str::from_utf8(frame)
-                .ok()
-                .and_then(|value| value.lines().find_map(|line| line.strip_prefix("event:")))
-                .map(str::trim)
-                == Some("response.in_progress")
-            && self.chat_role_emitted
-        {
-            return Ok(());
-        }
-        if self.provider_protocol != "responses" {
-            return Err(RuntimeFault::new(
-                "provider_sse_protocol_unsupported",
-                format!(
-                    "unsupported provider SSE protocol {}",
-                    self.provider_protocol
-                ),
-            ));
-        }
-        let decoded =
-            routecodex_v4_standard_plugins::response_inbound::decode_provider_sse_frame(frame)
-                .map_err(|error| RuntimeFault::new("provider_sse_decode", error))?;
-        if decoded.terminal != terminal {
-            return Err(RuntimeFault::new(
-                "provider_sse_terminal_drift",
-                "provider SSE terminal classification drift",
-            ));
-        }
-        let provider_semantic = serde_json::to_string(&decoded.semantic)
-            .map_err(|error| RuntimeFault::new("provider_sse_encode", error.to_string()))?;
-        let report = self
-            .runtime
-            .lock()
-            .map_err(|_| {
-                RuntimeFault::new("response_runtime_lock", "response runtime lock poisoned")
-            })?
-            .execute_provider_response_scoped_for_target_with_lease(
-                &provider_semantic,
-                &self.request_id,
-                self.port,
-                &self.session_scope,
-                &self.conversation_scope,
-                &self.entry_protocol,
-                &self.provider_protocol,
-                &self.continuation_owner,
-                Some(&self.request_lease),
-            )?;
-        let client_frame = report.client_frame.ok_or_else(|| {
-            RuntimeFault::new(
-                "response_frame_missing",
-                "response chain produced no client frame",
-            )
-        })?;
-        let client_semantic: serde_json::Value = serde_json::from_str(&client_frame)
-            .map_err(|error| RuntimeFault::new("client_sse_semantic", error.to_string()))?;
-        let encoded = routecodex_v4_standard_plugins::response_outbound::encode_client_sse_frame(
-            &self.entry_protocol,
-            &client_semantic,
-            terminal,
-        )
-        .map_err(|error| RuntimeFault::new("client_sse_encode", error))?;
-        let frame =
-            routecodex_v4_standard_plugins::sse_transport::SseTransportFrame::from_complete_bytes(
-                encoded,
-            )
-            .map_err(|error| RuntimeFault::new("client_sse_transport", format!("{error:?}")))?;
-        self.egress
-            .enqueue(frame, std::time::Instant::now())
-            .map_err(|error| RuntimeFault::new("client_sse_backpressure", format!("{error:?}")))?;
+            .map_err(|error| {
+                std::io::Error::other(format!("client SSE transport failed: {error:?}"))
+            })?;
+        self.close_after_pending |= failed;
         Ok(())
+    }
+
+    fn enqueue_runtime_failure(&mut self, fault: RuntimeFault) -> Result<(), std::io::Error> {
+        let disposition = self
+            .processor
+            .project_failure(fault)
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        self.enqueue_disposition(disposition)
     }
 }
 
@@ -1361,11 +1269,6 @@ impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
                 chunk.extend_from_slice(frame.as_bytes());
                 return Ok(true);
             }
-            if !self.pending.is_empty() {
-                chunk.extend_from_slice(&self.pending);
-                self.pending.clear();
-                return Ok(true);
-            }
             if self.close_after_pending {
                 return Ok(false);
             }
@@ -1373,31 +1276,43 @@ impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
             let count = match self.stream.read_chunk(&mut bytes) {
                 Ok(count) => count,
                 Err(error) => {
-                    self.queue_error(format!("provider SSE read failed: {error}"));
+                    self.enqueue_runtime_failure(RuntimeFault::new(
+                        "provider_sse_read",
+                        format!("provider SSE read failed: {error}"),
+                    ))?;
                     continue;
                 }
             };
             if count == 0 {
                 if let Err(error) = self.ingress.finish() {
-                    let message = match error {
+                    let fault = match error {
                         routecodex_v4_standard_plugins::sse_transport::SseTransportError::IncompleteFrame =>
-                            "incomplete provider SSE frame at end of stream".to_string(),
-                        other => format!("provider SSE framing failed: {other:?}"),
+                            RuntimeFault::new(
+                                "provider_sse_incomplete_frame",
+                                "incomplete provider SSE frame at end of stream",
+                            ),
+                        other => RuntimeFault::new(
+                            "provider_sse_transport",
+                            format!("provider SSE framing failed: {other:?}"),
+                        ),
                     };
-                    self.queue_error(message);
-                    continue;
-                }
-                if !self.terminal_seen {
-                    self.queue_error(
-                        "provider SSE ended before response.completed or response.failed",
-                    );
+                    self.enqueue_runtime_failure(fault)?;
                     continue;
                 }
                 if let Err(error) = self.stream.wait() {
-                    self.queue_error(format!("provider SSE closeout failed: {error}"));
+                    self.enqueue_runtime_failure(RuntimeFault::new(
+                        "provider_sse_closeout",
+                        format!("provider SSE closeout failed: {error}"),
+                    ))?;
                     continue;
                 }
-                return Ok(false);
+                match self.processor.finish() {
+                    Ok(()) => return Ok(false),
+                    Err(fault) => {
+                        self.enqueue_runtime_failure(fault)?;
+                        continue;
+                    }
+                }
             }
             let frames = match self
                 .ingress
@@ -1405,24 +1320,27 @@ impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
             {
                 Ok(frames) => frames,
                 Err(error) => {
-                    self.queue_error(format!("provider SSE framing failed: {error:?}"));
+                    self.enqueue_runtime_failure(RuntimeFault::new(
+                        "provider_sse_transport",
+                        format!("provider SSE framing failed: {error:?}"),
+                    ))?;
                     continue;
                 }
             };
             for frame in frames {
-                let frame_bytes = frame.as_bytes();
-                let terminal =
-                    match routecodex_v4_runtime::validate_responses_sse_frame(frame_bytes) {
-                        Ok(terminal) => terminal,
-                        Err(fault) => {
-                            self.queue_error(fault.to_string());
-                            break;
-                        }
-                    };
-                self.terminal_seen |= terminal;
-                if let Err(fault) = self.project_frame(frame_bytes, terminal) {
-                    self.queue_error(fault.to_string());
-                    break;
+                let disposition = match self.runtime.lock() {
+                    Ok(runtime) => self.processor.process_frame(&runtime, frame),
+                    Err(_) => Err(RuntimeFault::new(
+                        "response_runtime_lock",
+                        "response runtime lock poisoned",
+                    )),
+                };
+                match disposition {
+                    Ok(disposition) => self.enqueue_disposition(disposition)?,
+                    Err(fault) => {
+                        self.enqueue_runtime_failure(fault)?;
+                        break;
+                    }
                 }
             }
         }
@@ -1700,25 +1618,52 @@ targets = ["mock"]
         entry_protocol: &str,
         continuation_owner: &str,
     ) -> ResponsesSseStream<MockSseSource> {
-        let request_lease = runtime
-            .lock()
-            .expect("test runtime lock")
-            .admit_request("request-1")
-            .expect("test stream admission");
+        let port = u16::from_ne_bytes([0, 1]);
+        let (request_lease, request_scope) = {
+            let runtime = runtime.lock().expect("test runtime lock");
+            let request_lease = runtime
+                .admit_request("request-1")
+                .expect("test stream admission");
+            let body = if entry_protocol == "chat" {
+                r#"{"model":"m","messages":[{"role":"user","content":"hello"}]}"#
+            } else {
+                r#"{"model":"m","input":[]}"#
+            };
+            let report = runtime
+                .execute_request_json_scoped_for_target_with_lease(
+                    body,
+                    entry_protocol,
+                    "responses",
+                    "m",
+                    true,
+                    "request-1",
+                    port,
+                    "session-1",
+                    "conversation-1",
+                    Some(continuation_owner),
+                    Some(&request_lease),
+                )
+                .expect("test request establishes stream scope");
+            (request_lease, report.scope)
+        };
+        let processor = ResponseStreamProcessor::new(
+            request_lease,
+            request_scope,
+            port,
+            entry_protocol,
+            "responses",
+            continuation_owner,
+            "session-1",
+            "conversation-1",
+        )
+        .expect("test stream processor");
         ResponsesSseStream::new(
             MockSseSource {
                 chunks: chunks.into(),
                 wait_result: Ok(()),
             },
             runtime,
-            request_lease,
-            "request-1".to_string(),
-            u16::from_ne_bytes([0, 1]),
-            entry_protocol.to_string(),
-            continuation_owner.to_string(),
-            "responses".to_string(),
-            "session-1".to_string(),
-            "conversation-1".to_string(),
+            processor,
         )
     }
 
@@ -1808,7 +1753,26 @@ targets = ["mock"]
             .expect("error event must emit"));
         let text = String::from_utf8(chunk).expect("error event must be UTF-8");
         assert!(text.starts_with("event: error\ndata: "));
-        assert!(text.contains("provider_sse_malformed"));
+        assert!(text.contains("invalid JSON"));
+    }
+
+    #[test]
+    fn provider_failed_event_projects_error_once_without_success_terminal() {
+        let frame = b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"upstream failed\"}}}\n\n";
+        let mut stream = stream(vec![Ok(frame.to_vec())]);
+        let mut chunk = Vec::new();
+        assert!(stream
+            .next_chunk(&mut chunk)
+            .expect("failure event must emit"));
+        let text = String::from_utf8(chunk).expect("failure event must be UTF-8");
+        assert!(text.starts_with("event: error\ndata: "));
+        assert!(text.contains("upstream failed"));
+        assert!(!text.contains("response.completed"));
+        let mut closed = Vec::new();
+        assert!(!stream
+            .next_chunk(&mut closed)
+            .expect("failed stream must close"));
+        assert!(closed.is_empty());
     }
 
     #[test]

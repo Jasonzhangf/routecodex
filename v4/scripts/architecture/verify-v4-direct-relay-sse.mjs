@@ -38,6 +38,12 @@ const RELAY_REQUEST_HOOK = 'v4.hook.relay.request';
 const RELAY_RESPONSE_HOOK = 'v4.hook.relay.response';
 const SSE_INGRESS = 'v4.transport.sse.ingress';
 const SSE_EGRESS = 'v4.transport.sse.egress';
+const SSE_TRANSPORT_NODE = 'V4TransportSsePlugin';
+const SSE_TRANSPORT_OWNER = 'routecodex-v4-standard-plugins::sse_transport';
+const REQUIRED_TRANSPORT_PLUGINS = new Map([
+  [SSE_INGRESS, { direction: 'ingress', attachment: 'provider_response' }],
+  [SSE_EGRESS, { direction: 'egress', attachment: 'client_response' }],
+]);
 
 function chainMap(plan) {
   return new Map((plan.chains ?? []).map((chain) => [chain.chain_id, chain]));
@@ -48,7 +54,7 @@ function pluginEntries(chain) {
     (node.plugins ?? []).map((plugin) => ({ nodeId: node.node_id, ...plugin })));
 }
 
-function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, sources) {
+function validate(plan, nodeGraph, functionMap, resourceMap, mainlineMap, verificationMap, sources) {
   const failures = [];
   const chains = chainMap(plan);
 
@@ -108,22 +114,48 @@ function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, 
   rejectPlugin(relayRequestPlugins, DIRECT_REQUEST_HOOK, 'relay_request');
   rejectPlugin(relayResponsePlugins, DIRECT_RESPONSE_HOOK, 'relay_response');
 
-  const allPlugins = [...chains.values()].flatMap(pluginEntries);
-  for (const pluginId of [SSE_INGRESS, SSE_EGRESS]) {
-    const matches = allPlugins.filter((entry) => entry.plugin_id === pluginId);
-    if (matches.length === 0) failures.push(`missing independent SSE plugin ${pluginId}`);
-    for (const match of matches) {
-      if ((match.effects ?? []).join(',') !== 'transport') {
-        failures.push(`${pluginId} must declare only transport effect`);
-      }
-      if ((match.writes ?? []).some((resource) => /payload|semantic|model/i.test(resource))) {
-        failures.push(`${pluginId} writes semantic payload resource`);
-      }
+  const allNodePlugins = [...chains.values()].flatMap(pluginEntries);
+  for (const pluginId of REQUIRED_TRANSPORT_PLUGINS.keys()) {
+    if (allNodePlugins.some((entry) => entry.plugin_id === pluginId)) {
+      failures.push(`${pluginId} is mounted in semantic NodeSlot.plugins`);
     }
+  }
+  const transportPlugins = plan.transport_plugins ?? [];
+  for (const [pluginId, contract] of REQUIRED_TRANSPORT_PLUGINS) {
+    const matches = transportPlugins.filter((entry) => entry.plugin_id === pluginId);
+    if (matches.length !== 1) {
+      failures.push(`compiled transport registration ${pluginId} must exist exactly once; found ${matches.length}`);
+      continue;
+    }
+    const [binding] = matches;
+    if (binding.node_id !== SSE_TRANSPORT_NODE
+        || binding.owner !== SSE_TRANSPORT_OWNER
+        || binding.direction !== contract.direction
+        || binding.attachment !== contract.attachment
+        || binding.effect !== 'transport'
+        || binding.resource_id !== 'v4.transport.sse_frames') {
+      failures.push(`${pluginId} compiled transport registration drift`);
+    }
+    if ((binding.writes ?? []).length !== 0) {
+      failures.push(`${pluginId} writes semantic payload resource`);
+    }
+  }
+  if (transportPlugins.length !== REQUIRED_TRANSPORT_PLUGINS.size) {
+    failures.push(`compiled transport registration count drift; found ${transportPlugins.length}`);
+  }
+
+  const registeredTransportNode = (nodeGraph.registered_nodes ?? [])
+    .find((entry) => entry.node_id === SSE_TRANSPORT_NODE);
+  if (!registeredTransportNode
+      || registeredTransportNode.family !== 'TransportPluginNode'
+      || registeredTransportNode.role_id !== 'sse_transport'
+      || registeredTransportNode.owner !== 'routecodex-v4-standard-plugins') {
+    failures.push('node graph missing compiled V4TransportSsePlugin ownership');
   }
 
   const requiredFunctionIds = [
     'v4.transport.sse_plugin',
+    'v4.runtime.sse_response_pipeline',
     'v4.direct.relay_container',
     'v4.hook.direct.request_response',
     'v4.hook.relay.request_response',
@@ -153,6 +185,22 @@ function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, 
       failures.push('Direct relay node function map registers a second execution surface');
     }
   }
+  const transportFunction = (functionMap.functions ?? [])
+    .find((entry) => entry.function_id === 'v4.transport.sse_plugin');
+  if (transportFunction?.status !== 'active' || transportFunction?.owner !== SSE_TRANSPORT_OWNER) {
+    failures.push('SSE transport function must be active under the transport owner');
+  }
+  const streamPipelineFunction = (functionMap.functions ?? [])
+    .find((entry) => entry.function_id === 'v4.runtime.sse_response_pipeline');
+  for (const symbol of [
+    'ResponseStreamProcessor::process_frame',
+    'ResponseStreamProcessor::finish',
+    'ResponseStreamProcessor::project_failure',
+  ]) {
+    if (streamPipelineFunction && !(streamPipelineFunction.entry_symbols ?? []).includes(symbol)) {
+      failures.push(`SSE response pipeline function map missing ${symbol}`);
+    }
+  }
 
   const requiredResources = [
     'v4.transport.sse_frames',
@@ -172,6 +220,17 @@ function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, 
       && directContainerResource.owner !== 'routecodex-v4-node-container::NodeContainer') {
     failures.push('Direct relay resource must be owned by generic NodeContainer');
   }
+  const sseResource = (resourceMap.resources ?? [])
+    .find((entry) => entry.resource_id === 'v4.transport.sse_frames');
+  if (!sseResource || sseResource.status !== 'active' || sseResource.owner !== 'routecodex-v4-standard-plugins::SseTransportFrame') {
+    failures.push('SSE transport resource is not active under SseTransportFrame');
+  }
+  const dispositionResource = (resourceMap.resources ?? [])
+    .find((entry) => entry.resource_id === 'v4.event.response_stream_disposition');
+  if (!dispositionResource || dispositionResource.status !== 'active'
+      || dispositionResource.owner !== 'routecodex-v4-runtime::ResponseStreamDisposition') {
+    failures.push('typed response stream disposition event resource missing');
+  }
 
   const requiredEdgeTypes = [
     'typed_lane_to_direct_relay',
@@ -180,6 +239,8 @@ function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, 
     'relay_request_adjacent_projection',
     'relay_response_adjacent_projection',
     'sse_transport_frame_handoff',
+    'sse_transport_to_runtime_codec',
+    'sse_runtime_to_transport_egress',
   ];
   for (const edgeType of requiredEdgeTypes) {
     if (!(mainlineMap.edges ?? []).some((entry) => entry.edge_type === edgeType)) {
@@ -258,6 +319,42 @@ function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, 
   if (/serde_json|serde::|\bValue\b/.test(sources.sseTransport ?? '')) {
     failures.push('SSE transport plugin reads semantic payload');
   }
+  for (const symbol of [
+    'pub enum ResponseStreamDisposition',
+    'pub struct ResponseStreamProcessor',
+    'pub fn process_frame(',
+    'pub fn finish(',
+    'pub fn project_failure(',
+  ]) {
+    if (!(sources.runtime ?? '').includes(symbol)) {
+      failures.push(`runtime SSE response owner missing ${symbol}`);
+    }
+  }
+  for (const symbol of [
+    'pub struct ResponsesSseFrame',
+    'pub fn parse_responses_sse_frame(',
+    'pub fn validate_responses_sse_frame(',
+  ]) {
+    if ((sources.runtime ?? '').includes(symbol)) {
+      failures.push(`runtime duplicates provider SSE codec ${symbol}`);
+    }
+  }
+  const runtimeBinStream = (sources['runtime-bin'] ?? '')
+    .match(/struct ResponsesSseStream[\s\S]*?\nfn project_fault/)?.[0] ?? '';
+  for (const [pattern, label] of [
+    [/serde_json|decode_provider_sse_frame|encode_client_sse_frame|encode_client_error_sse_frame/, 'semantic codec'],
+    [/validate_responses_sse_frame|response\.completed|response\.failed|event:/, 'provider event parsing'],
+    [/terminal_seen|chat_role_emitted|project_frame|queue_error/, 'semantic stream state'],
+  ]) {
+    if (pattern.test(runtimeBinStream)) {
+      failures.push(`runtime-bin SSE stream owns forbidden ${label}`);
+    }
+  }
+  for (const symbol of ['#[serde(deny_unknown_fields)]', 'pub struct TransportPluginBinding']) {
+    if (!(sources.skeleton ?? '').includes(symbol)) {
+      failures.push(`skeleton compiled transport contract missing ${symbol}`);
+    }
+  }
   const directContract = plan.direct_protocol_contract ?? {};
   if (directContract.same_protocol !== true || directContract.mismatch !== 'fail_fast') {
     failures.push('Direct same-protocol fail-fast contract missing');
@@ -287,22 +384,40 @@ function fixture() {
       })),
   });
   const plan = {
+    transport_plugins: [
+      {
+        plugin_id: SSE_INGRESS,
+        node_id: SSE_TRANSPORT_NODE,
+        owner: SSE_TRANSPORT_OWNER,
+        direction: 'ingress',
+        attachment: 'provider_response',
+        effect: 'transport',
+        resource_id: 'v4.transport.sse_frames',
+        writes: [],
+      },
+      {
+        plugin_id: SSE_EGRESS,
+        node_id: SSE_TRANSPORT_NODE,
+        owner: SSE_TRANSPORT_OWNER,
+        direction: 'egress',
+        attachment: 'client_response',
+        effect: 'transport',
+        resource_id: 'v4.transport.sse_frames',
+        writes: [],
+      },
+    ],
     chains: [
       chain('direct_request', REQUIRED_CHAINS.get('direct_request'), {
         V4DirectReq02RelayContainer: [{ plugin_id: DIRECT_REQUEST_HOOK, effects: ['semantic'] }],
       }),
       chain('direct_response', REQUIRED_CHAINS.get('direct_response'), {
-        V4DirectResp01ProviderRaw: [{ plugin_id: SSE_INGRESS, effects: ['transport'], writes: [] }],
         V4DirectResp02RelayContainer: [{ plugin_id: DIRECT_RESPONSE_HOOK, effects: ['semantic'] }],
-        V4DirectResp03ClientProtocol: [{ plugin_id: SSE_EGRESS, effects: ['transport'], writes: [] }],
       }),
       chain('relay_request', REQUIRED_CHAINS.get('relay_request'), {
         V4HubReqOutbound06ProviderSemantic: [{ plugin_id: RELAY_REQUEST_HOOK, effects: ['semantic'] }],
       }),
       chain('relay_response', REQUIRED_CHAINS.get('relay_response'), {
-        V4ProviderRespInbound01Raw: [{ plugin_id: SSE_INGRESS, effects: ['transport'], writes: [] }],
         V4HubRespOutbound05ClientSemantic: [{ plugin_id: RELAY_RESPONSE_HOOK, effects: ['semantic'] }],
-        V4ServerRespOutbound06ClientFrame: [{ plugin_id: SSE_EGRESS, effects: ['transport'], writes: [] }],
       }),
     ],
     direct_protocol_contract: { same_protocol: true, mismatch: 'fail_fast' },
@@ -310,8 +425,22 @@ function fixture() {
   };
   return {
     plan,
+    nodeGraph: { registered_nodes: [{
+      node_id: SSE_TRANSPORT_NODE,
+      family: 'TransportPluginNode',
+      role_id: 'sse_transport',
+      owner: 'routecodex-v4-standard-plugins',
+    }] },
     functionMap: { functions: [
-      { function_id: 'v4.transport.sse_plugin' },
+      { function_id: 'v4.transport.sse_plugin', status: 'active', owner: SSE_TRANSPORT_OWNER },
+      {
+        function_id: 'v4.runtime.sse_response_pipeline',
+        entry_symbols: [
+          'ResponseStreamProcessor::process_frame',
+          'ResponseStreamProcessor::finish',
+          'ResponseStreamProcessor::project_failure',
+        ],
+      },
       {
         function_id: 'v4.direct.relay_container',
         owner: 'routecodex-v4-node-container::NodeContainer',
@@ -329,7 +458,8 @@ function fixture() {
       { function_id: 'v4.hook.relay.request_response' },
     ] },
     resourceMap: { resources: [
-      { resource_id: 'v4.transport.sse_frames' },
+      { resource_id: 'v4.transport.sse_frames', status: 'active', owner: 'routecodex-v4-standard-plugins::SseTransportFrame' },
+      { resource_id: 'v4.event.response_stream_disposition', status: 'active', owner: 'routecodex-v4-runtime::ResponseStreamDisposition' },
       {
         resource_id: 'v4.execution.direct_relay_container',
         owner: 'routecodex-v4-node-container::NodeContainer',
@@ -355,6 +485,8 @@ function fixture() {
       { edge_type: 'relay_request_adjacent_projection' },
       { edge_type: 'relay_response_adjacent_projection' },
       { edge_type: 'sse_transport_frame_handoff' },
+      { edge_type: 'sse_transport_to_runtime_codec' },
+      { edge_type: 'sse_runtime_to_transport_egress' },
     ] },
     verificationMap: { gates: [
       { gate_id: 'v4_direct_relay_sse' },
@@ -370,6 +502,15 @@ function fixture() {
       ].join('\n'),
       runtime: [
         'ExecutionEngine::execute_pinned_node',
+        'pub enum ResponseStreamDisposition',
+        'pub struct ResponseStreamProcessor',
+        'pub fn process_frame(',
+        'pub fn finish(',
+        'pub fn project_failure(',
+      ].join('\n'),
+      skeleton: [
+        '#[serde(deny_unknown_fields)]',
+        'pub struct TransportPluginBinding',
       ].join('\n'),
       nodeContainer: [
         'pub struct NodeContainer',
@@ -386,8 +527,18 @@ function redSelfTest() {
     ['Direct mounts Relay hook', (data) => data.plan.chains[0].nodes[1].plugins.push({ plugin_id: RELAY_REQUEST_HOOK, effects: ['semantic'] }), 'cross-mounts'],
     ['Direct hook mounted twice', (data) => data.plan.chains[0].nodes[1].plugins.push({ plugin_id: DIRECT_REQUEST_HOOK, effects: ['semantic'] }), 'exactly once'],
     ['Relay mounts Direct hook', (data) => data.plan.chains[2].nodes[5].plugins.push({ plugin_id: DIRECT_REQUEST_HOOK, effects: ['semantic'] }), 'cross-mounts'],
-    ['SSE semantic effect', (data) => { data.plan.chains[1].nodes[0].plugins[0].effects = ['semantic']; }, 'only transport'],
-    ['SSE payload write', (data) => { data.plan.chains[1].nodes[0].plugins[0].writes = ['v4.response.normal_payload']; }, 'semantic payload'],
+    ['SSE mounted in semantic node', (data) => { data.plan.chains[1].nodes[0].plugins.push({ plugin_id: SSE_INGRESS, effects: ['transport'] }); }, 'semantic NodeSlot'],
+    ['SSE compiled registration missing', (data) => { data.plan.transport_plugins.pop(); }, 'must exist exactly once'],
+    ['SSE semantic effect', (data) => { data.plan.transport_plugins[0].effect = 'semantic'; }, 'registration drift'],
+    ['SSE payload write', (data) => { data.plan.transport_plugins[0].writes = ['v4.response.normal_payload']; }, 'semantic payload'],
+    ['SSE transport node missing', (data) => { data.nodeGraph.registered_nodes = []; }, 'compiled V4TransportSsePlugin'],
+    ['SSE resource remains design', (data) => { data.resourceMap.resources[0].status = 'design'; }, 'not active'],
+    ['stream disposition event missing', (data) => { data.resourceMap.resources.splice(1, 1); }, 'disposition event resource missing'],
+    ['runtime-bin parses SSE event', (data) => { data.sources['runtime-bin'] = 'struct ResponsesSseStream {}\nfn x(){ decode_provider_sse_frame(b""); }\nfn project_fault() {}'; }, 'semantic codec'],
+    ['runtime-bin owns terminal state', (data) => { data.sources['runtime-bin'] = 'struct ResponsesSseStream { terminal_seen: bool }\nfn project_fault() {}'; }, 'semantic stream state'],
+    ['runtime duplicates SSE codec', (data) => { data.sources.runtime += '\npub fn parse_responses_sse_frame('; }, 'duplicates provider SSE codec'],
+    ['runtime disposition removed', (data) => { data.sources.runtime = data.sources.runtime.replace('pub enum ResponseStreamDisposition', ''); }, 'runtime SSE response owner missing'],
+    ['skeleton unknown-field guard removed', (data) => { data.sources.skeleton = data.sources.skeleton.replace('#[serde(deny_unknown_fields)]', ''); }, 'deny_unknown_fields'],
     ['runtime payload projection', (data) => { data.sources.runtime = 'project_chat_request_to_responses(&value)'; }, 'forbidden payload projection'],
     ['runtime local continuation', (data) => { data.sources.runtime = 'continuation_restore'; }, 'runtime-local continuation'],
     ['hook protocol payload inference', (data) => { data.sources.modelHooks = 'value.get("protocol")'; }, 'infers protocol'],
@@ -398,14 +549,18 @@ function redSelfTest() {
     ['runtime-bin Direct request passthrough', (data) => { data.sources['runtime-bin'] = 'struct DirectRequestPassthrough;'; }, 'second Direct execution surface'],
     ['runtime-bin Direct response execution', (data) => { data.sources['runtime-bin'] = 'direct_relay.execute_response('; }, 'second Direct execution surface'],
     ['dedicated Direct container module', (data) => { data.sources.nodeContainer += '\npub mod direct_relay;'; }, 'dedicated DirectRelayContainer'],
-    ['Direct function map old owner', (data) => { data.functionMap.functions[1].owner = 'routecodex-v4-node-container'; }, 'generic NodeContainer'],
+    ['Direct function map old owner', (data) => {
+      data.functionMap.functions
+        .find((entry) => entry.function_id === 'v4.direct.relay_container')
+        .owner = 'routecodex-v4-node-container';
+    }, 'generic NodeContainer'],
     ['Direct mainline old execution surface', (data) => { data.mainlineMap.edges[0].path += ',crates/routecodex-v4-node-container/src/direct_relay.rs'; }, 'second Direct execution surface'],
     ['generic NodeContainer execution removed', (data) => { data.sources.nodeContainer = data.sources.nodeContainer.replace('pub fn execute_with_plan_hash', ''); }, 'generic NodeContainer execution surface missing'],
   ];
   for (const [name, mutate, expected] of cases) {
     const data = structuredClone(fixture());
     mutate(data);
-    const failures = validate(data.plan, data.functionMap, data.resourceMap, data.mainlineMap, data.verificationMap, data.sources);
+    const failures = validate(data.plan, data.nodeGraph, data.functionMap, data.resourceMap, data.mainlineMap, data.verificationMap, data.sources);
     if (!failures.some((failure) => failure.includes(expected))) {
       throw new Error(`${name}: expected failure containing ${expected}; got ${failures.join(' | ')}`);
     }
@@ -418,6 +573,7 @@ if (process.argv.includes('--red-self-test')) {
 } else {
   const failures = validate(
     readJson('contracts/skeleton-plan.contract.json'),
+    readJson('contracts/node-graph.contract.json'),
     readJson('docs/architecture/maps/function-map.json'),
     readJson('docs/architecture/maps/resource-map.json'),
     readJson('docs/architecture/maps/mainline-call-map.json'),
@@ -428,6 +584,7 @@ if (process.argv.includes('--red-self-test')) {
       modelHooks: readText('crates/routecodex-v4-standard-plugins/src/model_hooks.rs'),
       sseTransport: readText('crates/routecodex-v4-standard-plugins/src/sse_transport.rs'),
       nodeContainer: readText('crates/routecodex-v4-node-container/src/lib.rs'),
+      skeleton: readText('crates/routecodex-v4-skeleton/src/lib.rs'),
     },
   );
   if (failures.length > 0) {

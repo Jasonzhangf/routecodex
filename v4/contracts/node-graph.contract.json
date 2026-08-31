@@ -3,7 +3,7 @@
   "contract_id": "v4-node-graph",
   "status": "active",
   "owner_feature_id": "v4.node_graph",
-  "graph_hash": "sha256:a5a425813e35a66ba2d1832181b7c710b386f94c6079ebdce3e0b7d98a5f0437",
+  "graph_hash": "sha256:413e883986c4e605a027501ecd7f1c97f55ffac0066a55829d16806d03b6e92d",
   "canonical_docs": [
     "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
@@ -341,6 +341,27 @@
           ],
           "data_in_kind": null,
           "data_out_kind": null
+        }
+      ]
+    },
+    {
+      "family": "TransportPluginNode",
+      "chain": "transport",
+      "data_plane": true,
+      "role_subclasses": [
+        {
+          "role_id": "sse_transport",
+          "allowed_operator_kinds": [
+            "frame",
+            "order",
+            "buffer",
+            "backpressure",
+            "timeout",
+            "keepalive",
+            "closeout"
+          ],
+          "data_in_kind": "opaque_bytes",
+          "data_out_kind": "opaque_sse_frames"
         }
       ]
     },
@@ -1132,6 +1153,13 @@
       "role_id": "response_outbound",
       "scope": "Direct same-protocol client payload",
       "owner": "routecodex-v4-server"
+    },
+    {
+      "node_id": "V4TransportSsePlugin",
+      "family": "TransportPluginNode",
+      "role_id": "sse_transport",
+      "scope": "opaque SSE framing and transport lifecycle",
+      "owner": "routecodex-v4-standard-plugins"
     },
     {
       "node_id": "V4ServerReqInbound01ClientRaw",

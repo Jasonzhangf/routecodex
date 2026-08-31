@@ -26,7 +26,12 @@ use routecodex_v4_error::{
 };
 use routecodex_v4_node_container::{ActiveEpochStore, ExecutionEpochBundle};
 use routecodex_v4_skeleton::SkeletonPlan;
-use routecodex_v4_standard_plugins::StandardHandleRegistry;
+use routecodex_v4_standard_plugins::{
+    response_inbound::{decode_provider_sse_frame, ProviderSseEventDisposition},
+    response_outbound::{encode_client_error_sse_frame, encode_client_sse_frame},
+    sse_transport::SseTransportFrame,
+    StandardHandleRegistry,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -61,51 +66,6 @@ pub enum ResponsesProviderPayload {
     Sse(Vec<u8>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ResponsesSseFrame {
-    pub events: Vec<Value>,
-    pub terminal: bool,
-}
-
-/// Validate one complete Responses SSE frame. Returns true only for a
-/// terminal `response.completed` or `response.failed` event.
-pub fn validate_responses_sse_frame(frame: &[u8]) -> Result<bool, RuntimeFault> {
-    parse_responses_sse_frame(frame).map(|parsed| parsed.terminal)
-}
-
-pub fn parse_responses_sse_frame(frame: &[u8]) -> Result<ResponsesSseFrame, RuntimeFault> {
-    let text = std::str::from_utf8(frame)
-        .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?;
-    let mut events = Vec::new();
-    let mut terminal = false;
-    for line in text.lines() {
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        if let Some(value) = line.strip_prefix("data:") {
-            let value = value.trim();
-            if value == "[DONE]" {
-                continue;
-            }
-            let event: Value = serde_json::from_str(value)
-                .map_err(|error| RuntimeFault::new("provider_sse_malformed", error.to_string()))?;
-            let event_type = event
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            if matches!(event_type, "response.completed" | "response.failed") {
-                terminal = true;
-            }
-            events.push(event);
-        }
-    }
-    if events.is_empty() {
-        return Err(RuntimeFault::new(
-            "provider_sse_missing_data",
-            "Responses SSE frame has no data field",
-        ));
-    }
-    Ok(ResponsesSseFrame { events, terminal })
-}
-
 /// Build the only provider-bound Responses request shape. The input is the
 /// client data-plane object; runtime writes only the selected upstream model
 /// and stream flag. Control carriers are never serialized here.
@@ -138,9 +98,9 @@ pub fn build_responses_wire_request(
     })
 }
 
-/// Parse and validate the provider response at the response-inbound owner.
-/// The returned bytes/JSON remain data-plane content; transport and error
-/// facts stay outside the payload.
+/// Classify a non-stream provider response at the response-inbound owner.
+/// Streaming bytes remain opaque here and are consumed only by
+/// `SseIngressPlugin -> ResponseStreamProcessor`.
 pub fn parse_responses_provider_payload(
     status: u16,
     content_type: &str,
@@ -159,7 +119,6 @@ pub fn parse_responses_provider_payload(
             .to_ascii_lowercase()
             .contains("text/event-stream")
     {
-        validate_responses_sse(body)?;
         return Ok(ResponsesProviderPayload::Sse(body.to_vec()));
     }
     let value: Value = serde_json::from_slice(body)
@@ -194,31 +153,6 @@ pub fn parse_responses_provider_payload(
         ));
     }
     Ok(ResponsesProviderPayload::Json(value))
-}
-
-fn validate_responses_sse(body: &[u8]) -> Result<(), RuntimeFault> {
-    let text = std::str::from_utf8(body)
-        .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?;
-    let mut data_lines = 0usize;
-    for line in text.lines() {
-        let line = line.trim_end_matches('\r');
-        if let Some(data) = line.strip_prefix("data:") {
-            let data = data.trim();
-            if data != "[DONE]" {
-                serde_json::from_str::<Value>(data).map_err(|error| {
-                    RuntimeFault::new("provider_sse_malformed", error.to_string())
-                })?;
-            }
-            data_lines += 1;
-        }
-    }
-    if data_lines == 0 {
-        return Err(RuntimeFault::new(
-            "provider_sse_empty",
-            "provider SSE contained no data frames",
-        ));
-    }
-    Ok(())
 }
 
 /// Typed runtime fault. Never contains business payload content; carries only
@@ -1024,9 +958,12 @@ impl ExecutionContext {
         context.control.continuation_restored = control.continuation_restored;
         context.information = serde_json::from_value(frame.information.clone())
             .map_err(|error| RuntimeFault::new("execution_frame_information", error.to_string()))?;
-        context.diagnostic.trace.extend(frame.events.iter().map(|event| {
-            format!("{}:{}:{}", event.plugin_id, event.kind, event.message)
-        }));
+        context.diagnostic.trace.extend(
+            frame
+                .events
+                .iter()
+                .map(|event| format!("{}:{}:{}", event.plugin_id, event.kind, event.message)),
+        );
         Ok(context)
     }
 
@@ -1046,9 +983,7 @@ impl ExecutionContext {
         };
         let raw_payload = match chain_id {
             "request" | "direct_request" | "relay_request" => self.data.raw_entry.as_deref(),
-            "response" | "direct_response" | "relay_response" => {
-                self.data.provider_raw.as_deref()
-            }
+            "response" | "direct_response" | "relay_response" => self.data.provider_raw.as_deref(),
             other => {
                 return Err(RuntimeFault::new(
                     "execution_chain_external_owner",
@@ -1604,7 +1539,6 @@ pub struct SkeletonRuntime {
     epoch_store: ActiveEpochStore,
     handle_registry: StandardHandleRegistry,
     active_requests: RefCell<HashSet<String>>,
-    scopes: RefCell<ScopeRegistry>,
     payload_cycles: RefCell<PayloadCycleRegistry>,
 }
 
@@ -1631,6 +1565,180 @@ impl RuntimeLease {
     }
 }
 
+/// Typed response-stream event emitted by the runtime semantic owner. The
+/// frame remains Arc-backed opaque bytes for the transport layer; terminal
+/// and failure truth never has to be reconstructed from the payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResponseStreamDisposition {
+    Continue { frame: SseTransportFrame },
+    Terminal { frame: SseTransportFrame },
+    Failure { frame: SseTransportFrame },
+}
+
+/// Owns provider-event decode, Direct/Relay response-chain execution, client
+/// protocol projection and semantic closeout for one admitted request. The
+/// request lease stays here until the stream object is dropped.
+pub struct ResponseStreamProcessor {
+    request_lease: RuntimeLease,
+    request_scope: Scope,
+    port: u16,
+    entry_protocol: String,
+    provider_protocol: String,
+    continuation_owner: String,
+    session_scope: String,
+    conversation_scope: String,
+    semantic_terminal: bool,
+    failure_projected: bool,
+}
+
+impl ResponseStreamProcessor {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        request_lease: RuntimeLease,
+        request_scope: Scope,
+        port: u16,
+        entry_protocol: &str,
+        provider_protocol: &str,
+        continuation_owner: &str,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> Result<Self, RuntimeFault> {
+        let entry_protocol = match canonical_protocol_information(entry_protocol)? {
+            "openai-responses" => "responses",
+            "openai-chat" => "chat",
+            other => {
+                return Err(RuntimeFault::new(
+                    "client_sse_protocol_unsupported",
+                    format!("unsupported client SSE protocol {other}"),
+                ))
+            }
+        };
+        let provider_protocol = match canonical_protocol_information(provider_protocol)? {
+            "openai-responses" => "responses",
+            other => {
+                return Err(RuntimeFault::new(
+                    "provider_sse_protocol_unsupported",
+                    format!("unsupported provider SSE protocol {other}"),
+                ))
+            }
+        };
+        if !matches!(continuation_owner, "direct" | "relay") {
+            return Err(RuntimeFault::new(
+                "execution_lane_invalid",
+                format!("unsupported execution lane {continuation_owner}"),
+            ));
+        }
+        if continuation_owner == "direct" && entry_protocol != provider_protocol {
+            return Err(RuntimeFault::new(
+                "direct_protocol_mismatch",
+                "Direct SSE requires identical client and provider protocols",
+            ));
+        }
+        Ok(Self {
+            request_lease,
+            request_scope,
+            port,
+            entry_protocol: entry_protocol.to_string(),
+            provider_protocol: provider_protocol.to_string(),
+            continuation_owner: continuation_owner.to_string(),
+            session_scope: session_scope.to_string(),
+            conversation_scope: conversation_scope.to_string(),
+            semantic_terminal: false,
+            failure_projected: false,
+        })
+    }
+
+    pub fn lease_snapshot(&self) -> routecodex_v4_node_container::ExecutionEpochSnapshot {
+        self.request_lease.snapshot()
+    }
+
+    pub fn process_frame(
+        &mut self,
+        runtime: &SkeletonRuntime,
+        frame: SseTransportFrame,
+    ) -> Result<ResponseStreamDisposition, RuntimeFault> {
+        if self.semantic_terminal || self.failure_projected {
+            return Err(RuntimeFault::new(
+                "response_stream_after_terminal",
+                "provider emitted a semantic frame after stream terminal",
+            ));
+        }
+        let decoded = decode_provider_sse_frame(frame.as_bytes())
+            .map_err(|error| RuntimeFault::new("provider_sse_decode", error))?;
+        if let ProviderSseEventDisposition::Failed { message } = decoded.disposition {
+            return self.project_failure(RuntimeFault::new("provider_response_failed", message));
+        }
+        let terminal = matches!(decoded.disposition, ProviderSseEventDisposition::Completed);
+        let provider_semantic = serde_json::to_string(&decoded.semantic)
+            .map_err(|error| RuntimeFault::new("provider_sse_encode", error.to_string()))?;
+        let report = runtime.execute_provider_response_scoped_for_target_with_lease(
+            &provider_semantic,
+            self.request_lease.request_id(),
+            self.port,
+            &self.session_scope,
+            &self.conversation_scope,
+            &self.entry_protocol,
+            &self.provider_protocol,
+            &self.continuation_owner,
+            Some(&self.request_lease),
+        )?;
+        let client_frame = report.client_frame.ok_or_else(|| {
+            RuntimeFault::new(
+                "response_frame_missing",
+                "response chain produced no client frame",
+            )
+        })?;
+        let client_semantic: Value = serde_json::from_str(&client_frame)
+            .map_err(|error| RuntimeFault::new("client_sse_semantic", error.to_string()))?;
+        let encoded = encode_client_sse_frame(&self.entry_protocol, &client_semantic, terminal)
+            .map_err(|error| RuntimeFault::new("client_sse_encode", error))?;
+        let frame = SseTransportFrame::from_complete_bytes(encoded)
+            .map_err(|error| RuntimeFault::new("client_sse_transport", format!("{error:?}")))?;
+        if terminal {
+            self.semantic_terminal = true;
+            Ok(ResponseStreamDisposition::Terminal { frame })
+        } else {
+            Ok(ResponseStreamDisposition::Continue { frame })
+        }
+    }
+
+    pub fn finish(&mut self) -> Result<(), RuntimeFault> {
+        if self.semantic_terminal || self.failure_projected {
+            Ok(())
+        } else {
+            Err(RuntimeFault::new(
+                "provider_sse_eof_before_terminal",
+                "provider SSE ended before response.completed or response.failed",
+            ))
+        }
+    }
+
+    pub fn project_failure(
+        &mut self,
+        fault: RuntimeFault,
+    ) -> Result<ResponseStreamDisposition, RuntimeFault> {
+        if self.failure_projected {
+            return Err(RuntimeFault::new(
+                "response_stream_failure_duplicate",
+                "response stream failure was already projected",
+            ));
+        }
+        let mut chain = ErrorChain::new(self.request_scope.clone());
+        let projection = project_runtime_fault(&mut chain, fault).map_err(|error| {
+            RuntimeFault::new(
+                "response_error_projection",
+                format!("error chain projection failed: {error:?}"),
+            )
+        })?;
+        let encoded = encode_client_error_sse_frame(&self.entry_protocol, &projection.message)
+            .map_err(|error| RuntimeFault::new("client_sse_error_encode", error))?;
+        let frame = SseTransportFrame::from_complete_bytes(encoded)
+            .map_err(|error| RuntimeFault::new("client_sse_transport", format!("{error:?}")))?;
+        self.failure_projected = true;
+        Ok(ResponseStreamDisposition::Failure { frame })
+    }
+}
+
 impl SkeletonRuntime {
     pub fn load(contract_json: &str) -> Result<Self, RuntimeFault> {
         let plan = SkeletonPlan::from_contract_json(contract_json)
@@ -1646,7 +1754,6 @@ impl SkeletonRuntime {
             epoch_store: ActiveEpochStore::empty(),
             handle_registry: StandardHandleRegistry::new(),
             active_requests: RefCell::new(HashSet::new()),
-            scopes: RefCell::new(ScopeRegistry::new()),
             payload_cycles: RefCell::new(PayloadCycleRegistry::new()),
         })
     }
@@ -1974,11 +2081,14 @@ impl SkeletonRuntime {
                 ctx.data.request_headers = Some(fixture.headers.clone());
                 ctx.information.endpoint = Some(fixture.path.clone());
                 ctx.information.execution_lane = Some(chain_id.to_string());
-                ctx.information.client_protocol = Some(if chain_id == "direct_request" {
-                    "openai-responses"
-                } else {
-                    "openai-chat"
-                }.to_string());
+                ctx.information.client_protocol = Some(
+                    if chain_id == "direct_request" {
+                        "openai-responses"
+                    } else {
+                        "openai-chat"
+                    }
+                    .to_string(),
+                );
                 ctx.information.provider_protocol = Some("openai-responses".to_string());
                 ctx.information.model = Some(fixture.model.clone());
             },
@@ -2052,8 +2162,8 @@ impl SkeletonRuntime {
             port,
             session_scope,
             conversation_scope,
-            provider_protocol,
             entry_protocol,
+            provider_protocol,
             continuation_owner,
             request_lease,
         )
@@ -2241,12 +2351,10 @@ impl SkeletonRuntime {
                 control,
                 information,
                 events,
-            } => {
-                ctx.from_frame(
-                    chain_id,
-                    &NodeExecutionFrame::with_side_channels(data, control, information, events),
-                )?
-            }
+            } => ctx.from_frame(
+                chain_id,
+                &NodeExecutionFrame::with_side_channels(data, control, information, events),
+            )?,
             NodeOutcome::Terminal { .. } => {
                 ctx.data = DataView::default();
                 ctx
@@ -2695,46 +2803,5 @@ fn error_chain_client_projection_message(
             "unknown_mock_transport_fault_code",
             format!("error-chain projection failed: {error:?}"),
         )),
-    }
-}
-
-#[cfg(test)]
-mod admission_sse_tests {
-    use super::{parse_responses_sse_frame, validate_responses_sse_frame};
-
-    #[test]
-    fn completed_frame_is_terminal() {
-        let frame = "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n";
-        assert!(validate_responses_sse_frame(frame.as_bytes()).expect("completed frame is valid"));
-    }
-
-    #[test]
-    fn failed_frame_is_terminal() {
-        let frame = "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"upstream\"}}}\n\n";
-        assert!(validate_responses_sse_frame(frame.as_bytes()).expect("failed frame is valid"));
-    }
-
-    #[test]
-    fn intermediate_frame_is_not_terminal() {
-        let frame = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n";
-        assert!(!validate_responses_sse_frame(frame.as_bytes()).expect("delta frame is valid"));
-        let parsed = parse_responses_sse_frame(frame.as_bytes()).expect("parsed frame");
-        assert_eq!(parsed.events[0]["delta"], "hi");
-    }
-
-    #[test]
-    fn malformed_data_fails_fast() {
-        let frame = "data: {not-json}\n\n";
-        let error =
-            validate_responses_sse_frame(frame.as_bytes()).expect_err("malformed JSON must fail");
-        assert_eq!(error.code, "provider_sse_malformed");
-    }
-
-    #[test]
-    fn frame_without_data_fails_fast() {
-        let frame = "event: ping\n\n";
-        let error = validate_responses_sse_frame(frame.as_bytes())
-            .expect_err("frame without data must fail");
-        assert_eq!(error.code, "provider_sse_missing_data");
     }
 }

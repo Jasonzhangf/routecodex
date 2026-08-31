@@ -1147,8 +1147,41 @@
       "status": "binding_pending"
     },
     {
-      "from": "routecodex-v4-provider::SseIngressPlugin",
-      "to": "Direct/Relay response codec",
+      "from": "routecodex-v4-runtime-bin::ProviderSseSource",
+      "to": "routecodex-v4-standard-plugins::SseIngressPlugin",
+      "owner": "v4.transport.sse_plugin",
+      "edge_type": "provider_bytes_to_sse_transport_ingress",
+      "caller_feature_id": "V4-DIRECT-RELAY-SSE",
+      "callee_feature_id": "V4-DIRECT-RELAY-SSE",
+      "resource_id": "v4.transport.sse_frames",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs,crates/routecodex-v4-standard-plugins/src/sse_transport.rs",
+      "status": "verified"
+    },
+    {
+      "from": "routecodex-v4-standard-plugins::SseIngressPlugin",
+      "to": "routecodex-v4-runtime::ResponseStreamProcessor",
+      "owner": "v4.runtime.sse_response_pipeline",
+      "edge_type": "sse_transport_to_runtime_codec",
+      "caller_feature_id": "V4-DIRECT-RELAY-SSE",
+      "callee_feature_id": "V4-DIRECT-RELAY-SSE",
+      "resource_id": "v4.transport.sse_frames",
+      "path": "crates/routecodex-v4-standard-plugins/src/sse_transport.rs,crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "verified"
+    },
+    {
+      "from": "routecodex-v4-runtime::ResponseStreamProcessor",
+      "to": "routecodex-v4-standard-plugins::SseEgressPlugin",
+      "owner": "v4.runtime.sse_response_pipeline",
+      "edge_type": "sse_runtime_to_transport_egress",
+      "caller_feature_id": "V4-DIRECT-RELAY-SSE",
+      "callee_feature_id": "V4-DIRECT-RELAY-SSE",
+      "resource_id": "v4.event.response_stream_disposition",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs,crates/routecodex-v4-standard-plugins/src/sse_transport.rs",
+      "status": "verified"
+    },
+    {
+      "from": "routecodex-v4-standard-plugins::SseEgressPlugin",
+      "to": "routecodex-v4-runtime-bin::ResponsesSseStream",
       "owner": "v4.transport.sse_plugin",
       "edge_type": "sse_transport_frame_handoff",
       "caller_feature_id": "V4-DIRECT-RELAY-SSE",
