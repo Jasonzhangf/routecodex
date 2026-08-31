@@ -1558,21 +1558,36 @@ fn console_human_prefix_is_bright_while_debug_stays_dim() {
         "human prefix must not use debug gray: {colored:?}"
     );
     assert!(
-        !colored
-            .split("\n\n")
-            .next()
-            .expect("human line")
-            .contains(ANSI_DEBUG_DIM),
+        !colored[..colored.find(ANSI_RESET).expect("human color reset")].contains(ANSI_DEBUG_DIM),
         "human line must not contain debug gray: {colored:?}"
     );
     assert!(
-        colored.contains(&format!("\n\n{ANSI_DEBUG_DIM}")),
+        colored.contains(&format!("{ANSI_RESET}{ANSI_DEBUG_DIM}")),
         "diagnostic layer must stay dim: {colored:?}"
     );
 }
 
 #[test]
-fn console_plain_layer_has_one_blank_separator_and_one_diagnostic_line() {
+fn console_layered_block_is_compact_by_default() {
+    let block =
+        V3ConsoleLayeredBlock::new("", "headline", "req=req-1 event=completed", "session-1");
+    let colored = strip_test_ansi(&colorize_v3_layered_console_line(
+        block,
+        ANSI_REQUEST_CYAN,
+        ANSI_DEBUG_DIM,
+    ));
+    let plain = format_v3_console_layered_block_plain(block);
+
+    assert!(!colored.contains("\n\n"), "{colored:?}");
+    assert!(!plain.contains("\n\n"), "{plain:?}");
+    assert!(colored.contains("headline"), "{colored:?}");
+    assert!(colored.contains("event=completed"), "{colored:?}");
+    assert!(plain.contains("headline"), "{plain:?}");
+    assert!(plain.contains("event=completed"), "{plain:?}");
+}
+
+#[test]
+fn console_plain_layer_keeps_diagnostic_on_the_same_line() {
     let prefix = format_v3_console_human_prefix(
         "5520",
         "/v1/responses",
@@ -1588,16 +1603,17 @@ fn console_plain_layer_has_one_blank_separator_and_one_diagnostic_line() {
     ));
 
     let lines = plain.lines().collect::<Vec<_>>();
-    assert_eq!(lines.len(), 3, "{plain:?}");
+    assert_eq!(lines.len(), 1, "{plain:?}");
     assert!(lines[0].contains("▶ [/v1/responses]"), "{plain:?}");
-    assert!(lines[1].is_empty(), "{plain:?}");
     let expected_scope = align_v3_console_display_width(
         "[sessionID:session-1]",
         V3_CONSOLE_DEBUG_SCOPE_COLUMN_WIDTH,
     );
     assert_eq!(
-        lines[2],
-        format!("  {expected_scope} req=req-1 event=started providerSwitchReason=pool:longcontext")
+        lines[0],
+        format!(
+            "{prefix} ▶ [/v1/responses] 13:27:35 route=longcontext  {expected_scope} req=req-1 event=started providerSwitchReason=pool:longcontext"
+        )
     );
 }
 
@@ -1635,7 +1651,7 @@ fn console_machine_fields_start_at_one_column_across_session_lengths() {
     ));
 
     let columns = [&short, &long, &oversized_plain, &oversized_color].map(|block| {
-        let debug = block.lines().nth(2).expect("diagnostic line");
+        let debug = block.lines().next().expect("diagnostic line");
         let req = debug.find("req=").expect("machine field");
         v3_console_display_width(&debug[..req])
     });
@@ -1657,13 +1673,12 @@ fn startup_console_uses_the_same_layered_builder() {
     let block = strip_test_ansi(&format_v3_startup_console_block(&[]));
 
     let lines = block.lines().collect::<Vec<_>>();
-    assert_eq!(lines.len(), 3, "{block:?}");
+    assert_eq!(lines.len(), 1, "{block:?}");
     assert!(lines[0].contains("[server:startup"), "{block}");
     assert!(lines[0].contains("✅ [RouteCodexV3]"), "{block}");
-    assert!(lines[1].is_empty(), "{block:?}");
-    assert!(lines[2].contains("event=started"), "{block}");
-    assert!(lines[2].contains("version="), "{block}");
-    assert!(lines[2].contains("binary="), "{block}");
+    assert!(lines[0].contains("event=started"), "{block}");
+    assert!(lines[0].contains("version="), "{block}");
+    assert!(lines[0].contains("binary="), "{block}");
 }
 
 #[test]
@@ -2130,8 +2145,8 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
         "{ANSI_ERROR_TEXT_WHITE}externalCode=TRANSPORT_ERROR{ANSI_ERROR_RED}"
     )));
     assert!(
-        colored.contains(&format!("\n\n{ANSI_DEBUG_DIM}")),
-        "provider error diagnostic line must be dim gray: {colored:?}"
+        colored.contains(&format!("{ANSI_RESET}{ANSI_DEBUG_DIM}")),
+        "provider error diagnostic layer must be dim gray: {colored:?}"
     );
 
     let terminal_event = V3RuntimeProviderFailureObservation {
@@ -2475,9 +2490,9 @@ fn routed_observability_emits_exactly_one_request_block() {
         "the single human request headline must carry endpoint and routed truth: {log}"
     );
     assert_eq!(
-        log.matches("\n\n").count(),
+        log.matches("▶ [/v1/responses]").count(),
         1,
-        "the request must emit one block with one blank separator: {log}"
+        "the request must emit one physical request block: {log}"
     );
     assert!(!log.contains("[pending"), "{log}");
     let _ = std::fs::remove_file(&log_file);
@@ -3527,8 +3542,8 @@ fn stopless_console_activation_requires_action_stop_and_uses_fixed_orange() {
         "stopless console line must use fixed orange color: {colored:?}"
     );
     assert!(
-        colored.contains(&format!("\n\n{ANSI_DEBUG_DIM}")),
-        "stopless diagnostic line must be dim gray: {colored:?}"
+        colored.contains(&format!("{ANSI_RESET}{ANSI_DEBUG_DIM}")),
+        "stopless diagnostic layer must be dim gray: {colored:?}"
     );
     assert!(colored.contains("hook="));
     assert!(colored.contains("reasoningStop"));

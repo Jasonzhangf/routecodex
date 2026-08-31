@@ -391,6 +391,7 @@ impl V3CommittedClientSseStream {
                 source: self,
                 on_frame: Box::new(on_frame),
                 on_terminal: Some(Box::new(on_terminal)),
+                terminal_frame_consumed: false,
             }),
             next_frame_index,
             terminal_frame_index,
@@ -402,6 +403,9 @@ struct V3ObservedCommittedSseStream {
     source: V3CommittedClientSseStream,
     on_frame: Box<dyn Fn(&[u8]) + Send + Sync>,
     on_terminal: Option<Box<dyn FnOnce(V3CommittedSseTerminal) + Send>>,
+    /// Whether the protocol terminal frame has been yielded to the client.
+    /// Drop uses this to preserve Completed versus Dropped semantics.
+    terminal_frame_consumed: bool,
 }
 
 impl V3ObservedCommittedSseStream {
@@ -420,8 +424,11 @@ impl Stream for V3ObservedCommittedSseStream {
             Poll::Ready(Some(frame)) => {
                 (self.on_frame)(&frame);
                 if self.source.next_frame_index > self.source.terminal_frame_index {
-                    self.finish(V3CommittedSseTerminal::Completed);
+                    self.terminal_frame_consumed = true;
                 }
+                // Terminal callbacks run only after EOF or Drop. Running one
+                // beside on_frame would let recorders overwrite artifacts
+                // before the terminal frame is returned.
                 Poll::Ready(Some(frame))
             }
             Poll::Ready(None) => {
@@ -435,7 +442,12 @@ impl Stream for V3ObservedCommittedSseStream {
 
 impl Drop for V3ObservedCommittedSseStream {
     fn drop(&mut self) {
-        self.finish(V3CommittedSseTerminal::Dropped);
+        let terminal = if self.terminal_frame_consumed {
+            V3CommittedSseTerminal::Completed
+        } else {
+            V3CommittedSseTerminal::Dropped
+        };
+        self.finish(terminal);
     }
 }
 

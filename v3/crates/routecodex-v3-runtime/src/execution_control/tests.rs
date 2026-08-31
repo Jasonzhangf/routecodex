@@ -263,6 +263,37 @@ async fn observed_terminal_after_drop(frames_to_consume: usize) -> V3CommittedSs
 }
 
 #[tokio::test]
+async fn committed_sse_terminal_callback_waits_until_terminal_frame_is_returned() {
+    let mut builder = V3CommittedClientSseBuilder::new();
+    builder
+        .push(b"event: response.completed\n\n".to_vec())
+        .unwrap();
+    builder.mark_last_frame_as_terminal().unwrap();
+    let terminal = Arc::new(Mutex::new(None));
+    let observed_terminal = Arc::clone(&terminal);
+    let terminal_writer = Arc::clone(&terminal);
+    let mut stream = builder.seal_after_validated_terminal().unwrap().observe(
+        move |_| {
+            assert!(
+                observed_terminal.lock().unwrap().is_none(),
+                "terminal callback must not run during frame callback"
+            );
+        },
+        move |value| {
+            *terminal_writer.lock().unwrap() = Some(value);
+        },
+    );
+
+    assert!(stream.next().await.is_some());
+    assert!(terminal.lock().unwrap().is_none());
+    assert!(stream.next().await.is_none());
+    assert_eq!(
+        terminal.lock().unwrap().as_ref(),
+        Some(&V3CommittedSseTerminal::Completed)
+    );
+}
+
+#[tokio::test]
 async fn committed_sse_drop_before_last_handoff_frame_remains_dropped() {
     assert_eq!(
         observed_terminal_after_drop(1).await,
