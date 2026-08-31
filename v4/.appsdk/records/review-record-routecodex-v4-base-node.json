@@ -16,11 +16,11 @@
   "resource_map_hash": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
   "review_id": "v4-cordis-base-node-review",
   "review_kind": "architecture",
-  "reviewed_artifact_hash": "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd",
-  "reviewed_commit": "8f906514a9a454add8dabc129b24d0852d43a724",
+  "reviewed_artifact_hash": "sha256:36febd56fcfe92b397abb82fefce01ce75397e4baf0049f3aece3f58c08520fa",
+  "reviewed_commit": "3930d19f22be04ee4e9a38076a877c1c3cd69a5d",
   "reviewed_diff_hash": "sha256:2bd91fe6908d5c95e515155cc0330551f603144a54178456e65c8b87eba21ff2",
   "reviewed_scope_hash": "sha256:7d1e6dda7043dedd559eb5c13df6ae94d7c49165b54e4602ecbd29ad5c6c6de9",
-  "reviewed_tree_hash": "266bdf4e21cb087288563e5a7399ca650dbc0d31",
+  "reviewed_tree_hash": "58b78a7f3d9244199a3c559b59eb270273f6b3a5",
   "reviewer": {
     "adapter": "dsh",
     "identity": "v4-cordis-master"
