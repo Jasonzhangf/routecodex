@@ -1315,10 +1315,10 @@
       "function_id": "v4.direct.relay_container",
       "status": "active",
       "feature_id": "V4-DIRECT-RELAY-SSE",
-      "owner": "routecodex-v4-node-container",
-      "entry_symbols": ["DirectRelayInformation::direct", "DirectRelayContainer::execute_request", "DirectRelayContainer::execute_response"],
+      "owner": "routecodex-v4-node-container::NodeContainer",
+      "entry_symbols": ["ExecutionEngine::execute_pinned_node", "EpochLease::execute", "NodeContainer::execute_with_plan_hash"],
       "resource_ids": ["v4.execution.direct_relay_container", "v4.information.execution_lane", "v4.information.client_protocol", "v4.information.provider_protocol"],
-      "source_paths": ["crates/routecodex-v4-node-container/src/direct_relay.rs", "crates/routecodex-v4-runtime-bin/src/main.rs"],
+      "source_paths": ["crates/routecodex-v4-runtime/src/execution_engine.rs", "crates/routecodex-v4-node-container/src/lib.rs"],
       "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red", "v4_parity_gate_node_graph", "v4_parity_gate_execution_binding"]
     },
     {

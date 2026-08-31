@@ -15,7 +15,7 @@
   },
   "manifest_hash": "sha256:pending-config-v2-manifest",
   "plan_epoch": 2,
-  "plan_hash": "sha256:aa641e75d7b2b1b2a719494324ab8c684edff1e807fc27732a10b4680141d05c",
+  "plan_hash": "sha256:63de1ee5d70800831fdc64ecc4351d96b5614af2c8eb3bbc75664fe7f4c6dc70",
   "direct_protocol_contract": {
     "same_protocol": true,
     "mismatch": "fail_fast"
@@ -43,7 +43,7 @@
         {"from": "V4DirectReq02RelayContainer", "to": "V4DirectReq03ProviderWire", "direction": "forward"}
       ],
       "checkpoints": [
-        {"node_id": "V4DirectReq02RelayContainer", "semantic": "direct_same_protocol_request_hooked", "owner": "routecodex-v4-node-container::DirectRelayContainer"}
+        {"node_id": "V4DirectReq02RelayContainer", "semantic": "direct_same_protocol_request_hooked", "owner": "routecodex-v4-node-container::NodeContainer"}
       ]
     },
     {
@@ -64,7 +64,7 @@
         {"from": "V4DirectResp02RelayContainer", "to": "V4DirectResp03ClientProtocol", "direction": "forward"}
       ],
       "checkpoints": [
-        {"node_id": "V4DirectResp02RelayContainer", "semantic": "direct_same_protocol_response_hooked", "owner": "routecodex-v4-node-container::DirectRelayContainer"}
+        {"node_id": "V4DirectResp02RelayContainer", "semantic": "direct_same_protocol_response_hooked", "owner": "routecodex-v4-node-container::NodeContainer"}
       ]
     },
     {

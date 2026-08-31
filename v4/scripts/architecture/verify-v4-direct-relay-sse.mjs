@@ -78,10 +78,25 @@ function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, 
       failures.push(`${lane} missing ${pluginId}`);
     }
   };
-  requirePlugin(directRequestPlugins, DIRECT_REQUEST_HOOK, 'direct_request');
-  requirePlugin(directResponsePlugins, DIRECT_RESPONSE_HOOK, 'direct_response');
   requirePlugin(relayRequestPlugins, RELAY_REQUEST_HOOK, 'relay_request');
   requirePlugin(relayResponsePlugins, RELAY_RESPONSE_HOOK, 'relay_response');
+  const requireSinglePlugin = (entries, pluginId, lane) => {
+    const count = entries.filter((entry) => entry.plugin_id === pluginId).length;
+    if (count !== 1) failures.push(`${lane} must mount ${pluginId} exactly once; found ${count}`);
+  };
+  requireSinglePlugin(directRequestPlugins, DIRECT_REQUEST_HOOK, 'direct_request');
+  requireSinglePlugin(directResponsePlugins, DIRECT_RESPONSE_HOOK, 'direct_response');
+
+  for (const [chainId, nodeId] of [
+    ['direct_request', 'V4DirectReq02RelayContainer'],
+    ['direct_response', 'V4DirectResp02RelayContainer'],
+  ]) {
+    const checkpoint = (chains.get(chainId)?.checkpoints ?? [])
+      .find((entry) => entry.node_id === nodeId);
+    if (!checkpoint || checkpoint.owner !== 'routecodex-v4-node-container::NodeContainer') {
+      failures.push(`${nodeId} checkpoint must be owned by generic NodeContainer`);
+    }
+  }
 
   const rejectPlugin = (entries, pluginId, lane) => {
     if (entries.some((entry) => entry.plugin_id === pluginId)) {
@@ -118,6 +133,26 @@ function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, 
       failures.push(`function map missing ${functionId}`);
     }
   }
+  const directContainerFunction = (functionMap.functions ?? [])
+    .find((entry) => entry.function_id === 'v4.direct.relay_container');
+  if (directContainerFunction) {
+    if (directContainerFunction.owner !== 'routecodex-v4-node-container::NodeContainer') {
+      failures.push('Direct relay node must be owned by generic NodeContainer');
+    }
+    for (const symbol of [
+      'ExecutionEngine::execute_pinned_node',
+      'EpochLease::execute',
+      'NodeContainer::execute_with_plan_hash',
+    ]) {
+      if (!(directContainerFunction.entry_symbols ?? []).includes(symbol)) {
+        failures.push(`Direct relay node function map missing ${symbol}`);
+      }
+    }
+    if ((directContainerFunction.source_paths ?? [])
+      .some((sourcePath) => sourcePath.includes('direct_relay.rs') || sourcePath.includes('runtime-bin'))) {
+      failures.push('Direct relay node function map registers a second execution surface');
+    }
+  }
 
   const requiredResources = [
     'v4.transport.sse_frames',
@@ -131,6 +166,12 @@ function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, 
       failures.push(`resource map missing ${resourceId}`);
     }
   }
+  const directContainerResource = (resourceMap.resources ?? [])
+    .find((entry) => entry.resource_id === 'v4.execution.direct_relay_container');
+  if (directContainerResource
+      && directContainerResource.owner !== 'routecodex-v4-node-container::NodeContainer') {
+    failures.push('Direct relay resource must be owned by generic NodeContainer');
+  }
 
   const requiredEdgeTypes = [
     'typed_lane_to_direct_relay',
@@ -143,6 +184,16 @@ function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, 
   for (const edgeType of requiredEdgeTypes) {
     if (!(mainlineMap.edges ?? []).some((entry) => entry.edge_type === edgeType)) {
       failures.push(`mainline map missing ${edgeType}`);
+    }
+  }
+  for (const edge of (mainlineMap.edges ?? []).filter((entry) => [
+    'typed_lane_to_direct_relay',
+    'direct_request_hook_execution',
+    'direct_response_hook_execution',
+  ].includes(entry.edge_type))) {
+    const serialized = JSON.stringify(edge);
+    if (serialized.includes('DirectRelayContainer') || serialized.includes('direct_relay.rs')) {
+      failures.push(`${edge.edge_type} mainline edge registers a second Direct execution surface`);
     }
   }
 
@@ -161,6 +212,30 @@ function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, 
   for (const [sourceId, pattern] of forbiddenRuntimePatterns) {
     if (pattern.test(sources[sourceId] ?? '')) {
       failures.push(`${sourceId} owns forbidden payload projection ${pattern}`);
+    }
+  }
+
+  const forbiddenSecondDirectSurfacePatterns = [
+    /\bDirectRelayContainer\b/,
+    /\bDirectRequestPassthrough\b/,
+    /\bDirectResponsePassthrough\b/,
+    /\bdirect_relay\s*\.\s*execute_(?:request|response)\s*\(/,
+  ];
+  for (const pattern of forbiddenSecondDirectSurfacePatterns) {
+    if (pattern.test(sources['runtime-bin'] ?? '')) {
+      failures.push(`runtime-bin owns forbidden second Direct execution surface ${pattern}`);
+    }
+  }
+  if (/\bpub\s+mod\s+direct_relay\b|\bpub\s+struct\s+DirectRelayContainer\b/
+    .test(sources.nodeContainer ?? '')) {
+    failures.push('node-container exposes forbidden dedicated DirectRelayContainer implementation');
+  }
+  if (!(sources.runtime ?? '').includes('ExecutionEngine::execute_pinned_node')) {
+    failures.push('runtime Direct chain does not enter ExecutionEngine::execute_pinned_node');
+  }
+  for (const symbol of ['pub struct NodeContainer', 'pub fn execute_with_plan_hash']) {
+    if (!(sources.nodeContainer ?? '').includes(symbol)) {
+      failures.push(`generic NodeContainer execution surface missing ${symbol}`);
     }
   }
 
@@ -183,22 +258,6 @@ function validate(plan, functionMap, resourceMap, mainlineMap, verificationMap, 
   if (/serde_json|serde::|\bValue\b/.test(sources.sseTransport ?? '')) {
     failures.push('SSE transport plugin reads semantic payload');
   }
-  for (const symbol of [
-    'pub struct DirectRelayInformation',
-    'pub trait DirectRequestHook',
-    'pub trait DirectResponseHook',
-    'pub struct DirectRelayContainer',
-    'pub fn execute_request(',
-    'pub fn execute_response(',
-  ]) {
-    if (!(sources.directRelay ?? '').includes(symbol)) {
-      failures.push(`DirectRelay container missing ${symbol}`);
-    }
-  }
-  if (!(sources.directRelay ?? '').includes('pub type SharedPayload = Arc<Value>')) {
-    failures.push('DirectRelay container does not use shared payload ownership');
-  }
-
   const directContract = plan.direct_protocol_contract ?? {};
   if (directContract.same_protocol !== true || directContract.mismatch !== 'fail_fast') {
     failures.push('Direct same-protocol fail-fast contract missing');
@@ -219,6 +278,13 @@ function fixture() {
       position: index + 1,
       plugins: pluginByNode[nodeId] ?? [],
     })),
+    checkpoints: nodeIds
+      .filter((nodeId) => nodeId === 'V4DirectReq02RelayContainer'
+        || nodeId === 'V4DirectResp02RelayContainer')
+      .map((nodeId) => ({
+        node_id: nodeId,
+        owner: 'routecodex-v4-node-container::NodeContainer',
+      })),
   });
   const plan = {
     chains: [
@@ -246,21 +312,46 @@ function fixture() {
     plan,
     functionMap: { functions: [
       { function_id: 'v4.transport.sse_plugin' },
-      { function_id: 'v4.direct.relay_container' },
+      {
+        function_id: 'v4.direct.relay_container',
+        owner: 'routecodex-v4-node-container::NodeContainer',
+        entry_symbols: [
+          'ExecutionEngine::execute_pinned_node',
+          'EpochLease::execute',
+          'NodeContainer::execute_with_plan_hash',
+        ],
+        source_paths: [
+          'crates/routecodex-v4-runtime/src/execution_engine.rs',
+          'crates/routecodex-v4-node-container/src/lib.rs',
+        ],
+      },
       { function_id: 'v4.hook.direct.request_response' },
       { function_id: 'v4.hook.relay.request_response' },
     ] },
     resourceMap: { resources: [
       { resource_id: 'v4.transport.sse_frames' },
-      { resource_id: 'v4.execution.direct_relay_container' },
+      {
+        resource_id: 'v4.execution.direct_relay_container',
+        owner: 'routecodex-v4-node-container::NodeContainer',
+      },
       { resource_id: 'v4.information.execution_lane' },
       { resource_id: 'v4.information.client_protocol' },
       { resource_id: 'v4.information.provider_protocol' },
     ] },
     mainlineMap: { edges: [
-      { edge_type: 'typed_lane_to_direct_relay' },
-      { edge_type: 'direct_request_hook_execution' },
-      { edge_type: 'direct_response_hook_execution' },
+      {
+        edge_type: 'typed_lane_to_direct_relay',
+        to: 'routecodex-v4-node-container::NodeContainer',
+        path: 'crates/routecodex-v4-runtime/src/execution_engine.rs,crates/routecodex-v4-node-container/src/lib.rs',
+      },
+      {
+        edge_type: 'direct_request_hook_execution',
+        path: 'crates/routecodex-v4-node-container/src/lib.rs,crates/routecodex-v4-standard-plugins/src/model_hooks.rs',
+      },
+      {
+        edge_type: 'direct_response_hook_execution',
+        path: 'crates/routecodex-v4-node-container/src/lib.rs,crates/routecodex-v4-standard-plugins/src/model_hooks.rs',
+      },
       { edge_type: 'relay_request_adjacent_projection' },
       { edge_type: 'relay_response_adjacent_projection' },
       { edge_type: 'sse_transport_frame_handoff' },
@@ -270,7 +361,6 @@ function fixture() {
       { gate_id: 'v4_direct_relay_sse_red' },
     ] },
     sources: {
-      runtime: '',
       'runtime-bin': '',
       modelHooks: '',
       sseTransport: [
@@ -278,14 +368,12 @@ function fixture() {
         'pub struct SseIngressPlugin',
         'pub struct SseEgressPlugin',
       ].join('\n'),
-      directRelay: [
-        'pub type SharedPayload = Arc<Value>',
-        'pub struct DirectRelayInformation',
-        'pub trait DirectRequestHook',
-        'pub trait DirectResponseHook',
-        'pub struct DirectRelayContainer',
-        'pub fn execute_request(',
-        'pub fn execute_response(',
+      runtime: [
+        'ExecutionEngine::execute_pinned_node',
+      ].join('\n'),
+      nodeContainer: [
+        'pub struct NodeContainer',
+        'pub fn execute_with_plan_hash',
       ].join('\n'),
     },
   };
@@ -296,6 +384,7 @@ function redSelfTest() {
     ['combined lane', (data) => data.plan.chains.push({ chain_id: 'request', nodes: [] }), 'combined request'],
     ['missing Direct relay node', (data) => data.plan.chains[0].nodes.splice(1, 1), 'topology mismatch'],
     ['Direct mounts Relay hook', (data) => data.plan.chains[0].nodes[1].plugins.push({ plugin_id: RELAY_REQUEST_HOOK, effects: ['semantic'] }), 'cross-mounts'],
+    ['Direct hook mounted twice', (data) => data.plan.chains[0].nodes[1].plugins.push({ plugin_id: DIRECT_REQUEST_HOOK, effects: ['semantic'] }), 'exactly once'],
     ['Relay mounts Direct hook', (data) => data.plan.chains[2].nodes[5].plugins.push({ plugin_id: DIRECT_REQUEST_HOOK, effects: ['semantic'] }), 'cross-mounts'],
     ['SSE semantic effect', (data) => { data.plan.chains[1].nodes[0].plugins[0].effects = ['semantic']; }, 'only transport'],
     ['SSE payload write', (data) => { data.plan.chains[1].nodes[0].plugins[0].writes = ['v4.response.normal_payload']; }, 'semantic payload'],
@@ -305,7 +394,13 @@ function redSelfTest() {
     ['Direct protocol fallback', (data) => { data.plan.direct_protocol_contract.mismatch = 'relay'; }, 'same-protocol'],
     ['client/provider coupling', (data) => { data.plan.protocol_information_contract.client_provider_independent = false; }, 'typed protocol independence'],
     ['SSE semantic parser', (data) => { data.sources.sseTransport += '\nuse serde_json::Value;'; }, 'reads semantic payload'],
-    ['Direct shared payload removed', (data) => { data.sources.directRelay = data.sources.directRelay.replace('pub type SharedPayload = Arc<Value>', 'pub type SharedPayload = Value'); }, 'shared payload ownership'],
+    ['runtime-bin Direct container constructor', (data) => { data.sources['runtime-bin'] = 'DirectRelayContainer::new('; }, 'second Direct execution surface'],
+    ['runtime-bin Direct request passthrough', (data) => { data.sources['runtime-bin'] = 'struct DirectRequestPassthrough;'; }, 'second Direct execution surface'],
+    ['runtime-bin Direct response execution', (data) => { data.sources['runtime-bin'] = 'direct_relay.execute_response('; }, 'second Direct execution surface'],
+    ['dedicated Direct container module', (data) => { data.sources.nodeContainer += '\npub mod direct_relay;'; }, 'dedicated DirectRelayContainer'],
+    ['Direct function map old owner', (data) => { data.functionMap.functions[1].owner = 'routecodex-v4-node-container'; }, 'generic NodeContainer'],
+    ['Direct mainline old execution surface', (data) => { data.mainlineMap.edges[0].path += ',crates/routecodex-v4-node-container/src/direct_relay.rs'; }, 'second Direct execution surface'],
+    ['generic NodeContainer execution removed', (data) => { data.sources.nodeContainer = data.sources.nodeContainer.replace('pub fn execute_with_plan_hash', ''); }, 'generic NodeContainer execution surface missing'],
   ];
   for (const [name, mutate, expected] of cases) {
     const data = structuredClone(fixture());
@@ -332,7 +427,7 @@ if (process.argv.includes('--red-self-test')) {
       'runtime-bin': readText('crates/routecodex-v4-runtime-bin/src/main.rs'),
       modelHooks: readText('crates/routecodex-v4-standard-plugins/src/model_hooks.rs'),
       sseTransport: readText('crates/routecodex-v4-standard-plugins/src/sse_transport.rs'),
-      directRelay: readText('crates/routecodex-v4-node-container/src/direct_relay.rs'),
+      nodeContainer: readText('crates/routecodex-v4-node-container/src/lib.rs'),
     },
   );
   if (failures.length > 0) {

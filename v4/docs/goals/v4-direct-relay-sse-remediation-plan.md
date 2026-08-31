@@ -1,6 +1,6 @@
 # V4 Direct / Relay / SSE 架构整改计划
 
-状态：`hooks_green_runtime_migration_pending`
+状态：`direct_single_execution_green_sse_semantic_separation_pending`
 
 目标：把当前合并的 request/response lane 拆成 Direct 与 Relay 独立执行链；把 Direct 两端中继落实为独立 NodeContainer 节点；把 SSE 落实为独立 transport plugin；所有 payload 修改只由 registered Direct/Relay hook 或相邻 protocol codec 完成。
 
@@ -34,6 +34,8 @@ SSE:
 ```
 
 `V4DirectReq02RelayContainer` 与 `V4DirectResp02RelayContainer` 是同一 Direct relay container feature 的方向化 entrypoint，作为 client/provider Direct 连接之间唯一独立 NodeContainer 节点；它们不能复用 Relay Chat Process 节点，也不能绕过 NodeContainer/EpochLease。SSE ingress/egress 是独立 plugin identity，effect 固定为 `transport`，不得解析协议事件、判断业务 terminal truth 或声明 normal payload write。
+
+Direct relay 不拥有专用容器类型。唯一生产执行面固定为 `SkeletonRuntime -> ExecutionEngine::execute_pinned_node -> EpochLease::execute -> NodeContainer::execute_with_plan_hash`；方向由 compiled node ID 与 typed information carrier 锁定。`runtime-bin` 禁止实例化第二容器、挂载第二 hook queue 或再次执行 Direct request/response hook。
 
 ## 首批红测
 

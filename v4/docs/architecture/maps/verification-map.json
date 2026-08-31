@@ -1380,6 +1380,7 @@
         "docs/architecture/maps/mainline-call-map.json",
         "crates/routecodex-v4-runtime/src/lib.rs",
         "crates/routecodex-v4-runtime-bin/src/main.rs",
+        "crates/routecodex-v4-node-container/src/lib.rs",
         "crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
         "scripts/architecture/verify-v4-direct-relay-sse.mjs"
       ],
