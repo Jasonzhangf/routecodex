@@ -2,7 +2,7 @@
 
 ## Goal & DoD
 
-V3 server console 输出的每个 routed 请求/响应都成「一层人类可读 headline + 空行 + 完整 dim 诊断」两层结构；其它控制台行（error / stopless / provider-failure / provider-switch / provider-unavailable / startup / health frame error）同样走 layered 形状；不再做 string reparsing；不破坏 request/response payload、routing、provider health、error policy、timing ownership。
+V3 server console 输出的每个 routed 请求/响应都成「一层人类可读 headline + 同行完整 dim 诊断」两层结构；其它控制台行（error / stopless / provider-failure / provider-switch / provider-unavailable / startup / health frame error）同样走 layered 形状；不再做 string reparsing；不破坏 request/response payload、routing、provider health、error policy、timing ownership。
 
 DoD：
 - Source closeout：console/server tests、Server+Runtime check、maps/manifests/gates 全绿，Codex review verdict PASS。
@@ -25,7 +25,7 @@ Out of scope（保留 dirty worktree，不在本次清理）：
 
 ## 设计原则
 
-1. **typed layered builder**：所有 console 行通过 `V3ConsoleLayeredBlock` 拼出 `[port:protocol][project][route:model] {headline}\n\n  [sessionID:{safe}] {debug}`；`headline` 和 `debug` 是独立 typed 字段，colorizer 绝不 split 渲染文本。
+1. **typed layered builder**：所有 console 行通过 `V3ConsoleLayeredBlock` 拼出 `[port:protocol][project][route:model] {headline}  [sessionID:{safe}] {debug}`；`headline` 和 `debug` 是独立 typed 字段，colorizer 绝不 split 渲染文本。
 2. **typed headline fields**：routed request/response 的 headline 由调用方按 typed 字段（status / finish_reason / elapsedMs / transport / usage_in / usage_out / usage_cache / usage_total / time_i / time_e / time_t）拼出，不解析 dim content；`time_i/time_e` 只消费 Runtime 发布的 typed timing。成功响应缺 timing 时显式投影 observability contract failure，禁止显示 `unreported`，也禁止由 Server 合成数值。
 3. **no fallback**：colorizer 看到空 headline 或 debug 直接 panic，绝不退回单行渲染。
 4. **唯一 owner**：`routecodex-v3-server` 拥有 console 投影；runtime / virtual-router / provider-responses 不写 console，不写分层。
@@ -44,7 +44,7 @@ Out of scope（保留 dirty worktree，不在本次清理）：
 V3ConsoleLayeredBlock::new(human_prefix, headline, debug, session_id)
 ```
 
-plain/color renderer 都拼 human_prefix + headline + `\n\n  [sessionID:...] ` + debug。session_id 走 safe-label；超长值中间截断以保持列宽，并在 diagnostic 尾部保留 `sessionIDFull`。
+plain/color renderer 都拼 human_prefix + headline + `  [sessionID:...] ` + debug，并在同一物理行内维持 headline/diagnostic 的颜色层级。session_id 走 safe-label；超长值中间截断以保持列宽，并在 diagnostic 尾部保留 `sessionIDFull`。
 
 `colorize_v3_layered_console_line(block, headline_color, debug_color)` 对完整 human line 和完整 diagnostic line 分层着色；缺 headline/debug 即 panic（fail-fast）。
 
@@ -76,7 +76,7 @@ plain/color renderer 都拼 human_prefix + headline + `\n\n  [sessionID:...] ` +
 
 - `console_layering_keeps_request_debug_fields_off_human_headline`：断言 headline 不含 `req=`, `event=`, `stream=`, `acceptsSse=`, `rawInputItems=`, `preparedInputItems=`, `plannedEntryMode=`；debug 行包含。
 - `console_layering_promotes_human_scope_and_response_facts_before_debug_details`：断言 headline 含 `status=`, `responseStatus=`, `finish_reason=`, `elapsedMs=`, `transport=`；不含 `req=`, `event=`, `nodes=`（这些放 debug）。
-- `provider_failure_console_content_exposes_red_error_and_switch`：断言 layered 形状（headline + `\n\n  [sessionID:...]` + debug）。
+- `provider_failure_console_content_exposes_red_error_and_switch`：断言 layered 形状（headline + `  [sessionID:...]` + debug）。
 - `error_projection_appends_human_console_failure_line`：同上。
 - `stopless_console_activation_requires_action_stop_and_uses_fixed_orange`：同上。
 - 新增：`routed_observability_emits_exactly_one_request_block`，只锁当前真实 Responses observability。

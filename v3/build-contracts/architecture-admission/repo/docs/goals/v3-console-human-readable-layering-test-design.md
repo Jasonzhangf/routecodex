@@ -17,9 +17,10 @@ the routed observability block until their runtime owners publish equivalent tru
 
 1. Runtime observability resolves request scope, project, selected provider/model, and route.
 2. Server builds one human headline containing stable request or response facts.
-3. Server inserts one blank separator line.
-4. Server builds one diagnostic line containing request/session/provider-switch internals.
-5. Both lines enter the existing human console sink and stdout together.
+3. Server appends the diagnostic layer inline after the human headline, with no blank
+   separator or second physical output line.
+4. Server builds the diagnostic layer containing request/session/provider-switch internals.
+5. Both typed layers enter the existing human console sink and stdout as one physical line.
 6. SSE terminal failures enter `routecodex-v3-error` as typed Error01 and project that source to
    the red console block after the response has been committed.
 7. Direct SSE stream errors retain the existing typed Error01 source, including source kind,
@@ -46,10 +47,10 @@ the routed observability block until their runtime owners publish equivalent tru
 - Missing response status or finish reason is the same explicit observability
   contract failure. Missing usage is omitted from the human headline and
   remains visible only as `usage=unreported` in the dim diagnostic line.
-- Diagnostic line is separated from headline by exactly one blank line.
-- Color mode keeps one request/session color across the complete human line; the human line never
-  contains `ANSI_DEBUG_DIM`, and only the complete diagnostic line is dim.
-- Plain mode preserves the same two-line text hierarchy without ANSI escapes.
+- Diagnostic content follows the headline on the same physical line with two spaces of separation.
+- Color mode keeps one request/session color across the human headline; the diagnostic layer starts
+  with `ANSI_DEBUG_DIM`, and the two layers remain visibly distinct.
+- Plain mode preserves the same inline headline/diagnostic hierarchy without ANSI escapes.
 - Short, UUID-length, and oversized session identities keep `req=` at the same diagnostic column.
   Oversized values are middle-truncated only in the fixed-width scope and retained completely as
   `sessionIDFull`.

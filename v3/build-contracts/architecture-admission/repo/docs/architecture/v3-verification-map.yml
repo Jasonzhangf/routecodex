@@ -1163,6 +1163,9 @@ features:
   - routecodex-v3-error six adjacent builders, taxonomy, action scope, target exhaustion, client projection
   - routecodex-v3-provider-responses server/routing-group/session/provider-runtime scoped failure health state and read-only availability
   - routecodex-v3-runtime foundation pending and dry-run kernels
+  - Responses response dry-run consumes captured provider JSON or SSE through the registered Direct response hook and materializes the resulting client payload without provider network access
+  - Responses response dry-run rejects malformed captured provider-response envelopes and does not fabricate toolreason projection when reason is absent
+  - Anthropic Relay response dry-run consumes captured provider JSON or SSE through RespInbound and Resp03, then materializes the Anthropic client projection without provider network access
   - routecodex-v3-runtime provider failure policy constants keep V3 direct and relay retry budgets aligned
   required_contract:
   - Debug/Error/Health remain side-channel resources and cannot enter provider/client success payloads
@@ -1179,6 +1182,8 @@ features:
   - Server pending endpoint emits Debug events and full six-node Error projection
   - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
   - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
+  - Debug response dry-run replays captured provider-response SSE through RespInbound and Resp03, exposes the client projection as a diagnostic artifact, and strips reason only when a valid toolreason was harvested
+  - Debug response dry-run dispatches /v1/responses to Direct and /v1/messages to Anthropic Relay without adding response semantics to the Server handler
   - Provider health scoped action tests prove cross-provider/key/model isolation
   - Direct shared-health blackbox proves three cross-request failures cool the first provider before network send
   - Direct dry-run blackbox proves provider-request dry-run does not clear shared provider cooldown
@@ -3420,8 +3425,9 @@ features:
   required_positive:
   - disabled mode preserves payload identity
   - direct and relay Req04 compile one tool_thinking_json_v2 request-local contract without changing tool order, system/developer/history order, or static tool registries
-  - OpenAI Chat, Responses, and Anthropic eligible tool parameter schemas require reason and preserve optional confidence/model diagnostics; Gemini is excluded
-  - every free-form custom tool is wrapped by Req04 with input plus required reason and optional diagnostics, then restored after Resp03 with byte-stable custom input
+  - Anthropic provider-facing system and tool descriptions contain only native tool_use/input three-field guidance, while Responses/OpenAI Chat provider-facing guidance contains only arguments three-field guidance
+  - OpenAI Chat, Responses, and Anthropic eligible tool parameter schemas require reason, goal_alignment_confidence, and the model's own true self-reported model_id; no request_id, client/request model, route alias, selected target, or provider-bound wire model is copied into model_id guidance, and Gemini is excluded
+  - every eligible free-form custom tool is wrapped by Req04 with input plus all three required auxiliary fields, then restored after Resp03 with byte-stable custom input; registered raw exceptions remain unchanged
   - provenance-matched custom calls with valid string input are restored for OK, MISSING, INVALID, and MISPLACED statuses; only OK authorizes reasoning
   - Direct retries reuse the Req04 typed context without duplicate guidance, schema mutation, or provenance reconstruction
   - provider-bound snapshots prove the governed contract survives every protocol projection, including Responses-to-OpenAI-Chat custom wrapping
@@ -3434,7 +3440,8 @@ features:
   - v3.request.tool_thinking_turn_context carries original custom provenance only as a request-local typed resource and is released after Resp03
   - v3.response.tool_thinking_turn_result carries projection authorization only as a request-local typed resource and is released after observation/client projection
   required_negative:
-  - missing, partial, wrong-type, out-of-range, duplicate, misplaced, malformed, or incomplete reason/diagnostic fields never authorize reasoning, reserved-key removal, or any tool-call rewrite
+  - provider-facing guidance never contains another protocol's wire wrapper, field container, or positive example
+  - missing, empty, or wrong-type reason; wrong-type or out-of-range supplied diagnostics; duplicate or misplaced reserved fields; malformed JSON; and incomplete native calls never authorize reasoning, reserved-key removal, or any tool-call rewrite; absent diagnostics alone remain response-compatible
   - malformed custom wrappers or non-string custom input are never guessed or repaired
   - ordinary model reasoning, thinking, text, history, descriptions, and legacy fences are never parsed as Tool-Thinking
   - visible rcc_reason_* IDs, 调用工具 prefixes, pending ordinary message text, marker characters, and content equality never authorize, replay, suppress, or deduplicate Tool-Thinking
@@ -3466,11 +3473,11 @@ features:
     live_evidence:
     - docs/architecture/evidence/v3-tool-thinking-live.json
     fresh_real_codex_windows:
-    - port 7777 Responses Direct, Responses Relay, and OpenAI Chat Relay
-    - port 10000 actually enabled Anthropic Direct/Relay paths
-    - each applicable protocol/provider/path has at least 10 consecutive tool turns with 100 percent terminal observation, valid stripping, and reasoning projection
+    - port 4444 Responses Direct with cc-sol.gpt-5.6-sol has five consecutive real tool turns
+    - port 4444 Anthropic Relay with minimax_anthropic.MiniMax-M3 has five consecutive real tool turns
+    - every turn correlates the client request, provider-bound request, provider raw response, Resp03 result, client projection, typed TOOLREASON observation, and managed log by request_id
     curl_is_diagnostic_only: true
-    dsh_review: required
+    agy_review: required
 
 - feature_id: v3.server_internal_observability_projection
   status: source_active_live_verified
@@ -3577,12 +3584,17 @@ features:
   owner_kind: rust_v3_execution_control_payload_global_architecture
   owner_scope: One resident request lifecycle owns immutable target plan, cumulative budget, Error05 recovery, bounded Direct/Relay attempt storage, sealed success, and closeout; diagnostics and persistence cannot control or block it.
   owner_modules:
+  - v3/crates/routecodex-v3-config/src/attempt_store.rs
+  - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
   - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
   - v3/crates/routecodex-v3-debug/src/observability_store.rs
@@ -3598,12 +3610,15 @@ features:
   - docs/architecture/v3-runtime-module-registry.yml
   required_positive:
   - Direct and Relay attempts consume one request-level attempt/deadline budget and one immutable target plan.
+  - Responses and Anthropic provider transport admission plus Runtime-sealed client replay consume the same request-local attempt budget; Server only consumes the sealed stream.
+  - Anthropic Runtime exposes JSON versus sealed SSE as a non-optional typed body and Server consumes it exhaustively without panic reconstruction.
   - A real local TCP replacement SSE stream remains readable to protocol terminal on the resident Runtime.
   - Direct and Relay share bounded attempt-store admission for per-attempt, per-request, process-global, and residence/deadline dimensions.
   - Protocol terminal plus successful payload seal issues one typed success receipt consumed by provider health, route policy, continuation, and client commit.
   - Terminal checks read only small control state and remain constant-cost as raw SSE diagnostics grow.
   - Local resource, observation, client cancellation, persistence, upstream, and protocol failures retain distinct typed attribution.
-  - Provider-health and request-ledger persistence mutate memory under a short lock and perform filesystem I/O through an ordered bounded single writer outside that lock.
+  - Provider-health mutation constructs an immutable persistence ticket under its short write lock, consumes the guard before enqueue, and the ordered bounded writer performs filesystem I/O outside that lock.
+  - Request-ledger persistence mutates memory under a short lock and performs filesystem I/O through an ordered bounded single writer outside that lock.
   - Active request and recent terminal caches, history file bytes, and startup history loading all have explicit testable limits.
   required_negative:
   - No SSE wrapper, compat hook, codec, Server handler, or persistence component creates a Tokio Runtime or re-enters a complete request executor.
@@ -3615,6 +3630,8 @@ features:
   - Provider health write locks and listener observability mutexes never cover open, serialize, write, flush, rename, rotation, or history load.
   - Module-boundary scanning cannot discard production code merely because it appears after a test module.
   - Full-attempt gates cannot pass from names, comments, or marker-only implementations.
+  - Server cannot rebuild a request budget from manifest or project a second client replay after Runtime closeout.
+  - Anthropic success cannot be represented as an optional sealed stream that Server unwraps or expects.
   required_red_gates:
   - npm run test:v3-execution-control-payload-architecture-red-fixtures
   - real local TCP handoff fixture fails or hangs when the response stream is bound to a destroyed temporary Runtime
@@ -3627,7 +3644,7 @@ features:
   - npm run verify:v3-execution-control-payload-architecture
   - npm run test:v3-execution-control-payload-architecture-red-fixtures
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime execution_control_payload_architecture -- --nocapture
-  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test execution_control_tcp_handoff -- --nocapture
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib execution_control_payload_architecture_real_tcp_sse_reselection_stays_on_resident_runtime -- --nocapture
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses health_persistence_isolation -- --nocapture
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server observability_persistence_isolation -- --nocapture
   - npm run verify:v3-direct-sse-full-attempt-commit

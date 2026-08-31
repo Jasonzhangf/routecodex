@@ -513,7 +513,19 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3DryRunNoNetworkTerminalEffect
     identity: [fixtureId, serverId, requestId, executionId]
-    allowed_writers: [execute_v3_responses_direct_dry_run_runtime]
+    allowed_writers: [execute_v3_responses_direct_dry_run_runtime, execute_v3_anthropic_relay_response_dry_run_runtime]
+    allowed_readers: [V3Server16HttpFrame, developer_diagnostics]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.debug.response_dry_run_execution
+    resource_kind: diagnostic
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3DryRunResponseReplayCaptured
+    identity: [fixtureId, serverId, requestId, executionId]
+    allowed_writers: [collect_v3_response_dry_run_client_payload, execute_v3_anthropic_relay_response_dry_run_runtime]
     allowed_readers: [V3Server16HttpFrame, developer_diagnostics]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
     may_enter_provider_body: false
@@ -707,7 +719,8 @@ resources:
     identity: [requestId, pipelineId]
     semantic_contract:
       request_owner: Req04 compiles the request-local tool_thinking_json_v2 contract and records only original custom-tool provenance in this typed resource.
-      response_owner: Resp03 consumes the same-turn provenance after strict Phase 1 classification; only one valid nonempty reason authorizes all-or-nothing removal of supplied auxiliary keys and reasoning, while a valid custom input wrapper is mechanically restored for every terminal status.
+      guidance_contract: Req04 selects one protocol-pure provider-facing guidance slice and requires reason, goal_alignment_confidence, and the model's own true self-reported model_id together; model_id is never bound, prefilled, or derived from request_id, client/request model, route alias, selected target, or provider-bound wire model, and Anthropic native tool_use/input instructions and Responses/OpenAI Chat arguments instructions never share wire examples.
+      response_owner: Resp03 consumes the same-turn provenance after Phase 1 compatibility classification; only one valid nonempty reason authorizes all-or-nothing removal of supplied auxiliary keys and reasoning, while a valid custom input wrapper is mechanically restored for every terminal status.
       parser_boundary: protocol and SSE adapters may carry complete native parameter containers but may not parse, strip, infer, or project Tool-Thinking semantics.
       payload_boundary: this context is never serialized into request JSON, provider wire/options, protocol metadata, history, continuation, response JSON, or client SSE.
       lifetime: request-local and immutable after Req04; released after Resp03/client projection for the same request.
@@ -1033,8 +1046,10 @@ resources:
     owner_node: V3ProviderCooldownProbeState
     identity: [providerId, authAlias]
     semantic_contract:
-      ordinary_failure_threshold: 3 consecutive failures
-      configurable_account_failure_threshold: provider_error_action_policy max_attempts
+      health_window: latest 100 calls for this provider+authAlias+model
+      score_contract: clamp(configured_priority + sum(deltas), 0, 150)
+      deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
+      cooldown_condition: score == 0
       revival_rule: only a successful provider transport probe may remove cooldown state
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
       generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block
@@ -1051,7 +1066,7 @@ resources:
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStore
     identity: [providerId, authAlias, modelId]
-    allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure, V3ProviderHealthStore::record_provider_failure_in_session_with_policy, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
+    allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error, V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_key_success, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-server]
     may_enter_provider_body: false
@@ -1162,7 +1177,8 @@ resources:
     semantic_contract:
       source_state: v3.provider.key_health_state
       cross_model_same_key: isolated
-      priority_contract: effective_priority equals configured_priority; health controls availability and diagnostics but never crosses configured priority buckets
+      priority_contract: higher configured priority wins; only exactly equal highest available priority candidates are weighted; health never changes priority
+      weight_contract: effective_weight_milli = max(baseWeight, 1) * max(score, 1)
       forbidden_consumers: [request.normal_payload, response.client_payload, MetadataCenter]
     allowed_writers: [V3ProviderHealthStore::scheduling_projection]
     allowed_readers: [V3TargetInterpreter::select_available_with_health]
@@ -2406,6 +2422,7 @@ resources:
     semantic_contract:
       dimensions: [attempt_count, request_resident_bytes, process_resident_bytes, deadline_or_residence]
       admission_order: Reserve byte/frame capacity before append or copy; release exactly once on seal, discard, cancellation, or terminal error.
+      request_scope: Provider transport admission and every Runtime-sealed client replay projection consume the same request-local budget instance; Server may only move the sealed replay and may not construct or reconstruct a budget.
       exhaustion_lane: LocalResourceExhausted in the internal Error chain; never provider ResponseBody and never provider health mutation.
     allowed_writers: [resident_request_controller, AttemptPayloadStore]
     allowed_readers: [resident_request_controller, AttemptPayloadStore, V3Error05ExecutionDecision]
@@ -2500,8 +2517,8 @@ resources:
     owner_node: V3ProviderHealthPersistenceWriter
     identity: [healthStoreId, mutationVersion]
     semantic_contract:
-      current_binding: Health mutation projects immutable entries under the health lock, performs bounded non-blocking enqueue, and the dedicated writer owns replace/serialize/write/rename outside the lock.
-      target_contract: In-memory health mutation produces a versioned delta; a bounded single writer persists outside the global health lock.
+      current_binding: Health mutation projects an immutable persistence ticket under the health lock, consumes and releases the write guard, then performs bounded non-blocking enqueue; the dedicated writer owns replace/serialize/write/rename outside the lock.
+      target_contract: In-memory health mutation produces an immutable ticket; the ticket cannot enqueue until the global health write guard has been consumed.
       durability_failure: explicit_internal_persistence_error_without_provider_penalty
     allowed_writers: [V3ProviderHealthStore]
     allowed_readers: [provider_health_single_writer]
