@@ -121,7 +121,7 @@
     },
     {
       "resource_id": "v4.request.normal_payload",
-      "owner": "routecodex-v4-runtime::V4HubReqInbound03Normalized",
+      "owner": "routecodex-v4-runtime::V4HubReqInbound02Normalized",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
       "allowed_operations": [
         "read",
@@ -132,7 +132,7 @@
     },
     {
       "resource_id": "v4.request.provider_semantic",
-      "owner": "routecodex-v4-runtime::V4HubReqOutbound05ProviderSemantic",
+      "owner": "routecodex-v4-runtime::V4HubReqOutbound06ProviderSemantic",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
       "allowed_operations": [
         "read",
@@ -143,7 +143,7 @@
     },
     {
       "resource_id": "v4.request.provider_wire_payload",
-      "owner": "routecodex-v4-runtime::V4ProviderReqCompat06Compat",
+      "owner": "routecodex-v4-runtime::V4ProviderReqCompat07ProviderCompat",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
       "allowed_operations": [
         "read",
@@ -154,7 +154,7 @@
     },
     {
       "resource_id": "v4.response.normal_payload",
-      "owner": "routecodex-v4-runtime::V4HubRespInbound02Parsed",
+      "owner": "routecodex-v4-runtime::V4HubRespInbound03Normalized",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
       "allowed_operations": [
         "read",
@@ -165,7 +165,7 @@
     },
     {
       "resource_id": "v4.response.provider_raw",
-      "owner": "routecodex-v4-runtime::V4ProviderSseIn01FrameBoundary",
+      "owner": "routecodex-v4-runtime::V4ProviderRespInbound01Raw",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
       "allowed_operations": [
         "read",
@@ -176,7 +176,7 @@
     },
     {
       "resource_id": "v4.response.client_wire_payload",
-      "owner": "routecodex-v4-runtime::V4HubRespOutbound04ClientSemantic",
+      "owner": "routecodex-v4-runtime::V4HubRespOutbound05ClientSemantic",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
       "allowed_operations": [
         "read",
@@ -231,7 +231,7 @@
     },
     {
       "resource_id": "v4.control.route_facts",
-      "owner": "routecodex-v4-runtime::V4Router05RequestClassified",
+      "owner": "routecodex-v4-runtime::V4HubReqExecution04Planned",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
       "allowed_operations": [
         "read",
@@ -242,7 +242,7 @@
     },
     {
       "resource_id": "v4.control.target_selection",
-      "owner": "routecodex-v4-runtime::V4Router06SelectionPlan",
+      "owner": "routecodex-v4-runtime::V4HubReqTarget05Resolved",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
       "allowed_operations": [
         "read",
@@ -1359,10 +1359,14 @@
     ,{"resource_id":"v4.plugin.response.fault_intake","owner":"routecodex-v4-standard-plugins::StandardPlugin","truth_store":"crates/routecodex-v4-standard-plugins/src/response_fault.rs","allowed_operations":["read","write","validate"],"status":"active","feature_id":"V4-PLUGIN-008"}
     ,{"resource_id":"v4.governance.feature_layer_gate_contract","owner":"routecodex-v4-governance","truth_store":"v4/scripts/architecture/verify-v4-feature-layer-batches.mjs","allowed_operations":["read","validate"],"status":"active","feature_id":"V4-GATE-001"}
     ,{"resource_id":"v4.governance.feature_layer_product_lockstep","owner":"routecodex-v4-governance","truth_store":"v4/scripts/architecture/lib/feature-layer-batch-source.mjs","allowed_operations":["read","validate"],"status":"active","feature_id":"V4-LAYER-GATE-001"}
-    ,{"resource_id":"v4.transport.sse_frames","owner":"routecodex-v4-standard-plugins::sse_transport","truth_store":"crates/routecodex-v4-standard-plugins/src/sse_transport.rs","allowed_operations":["frame","order","buffer","backpressure","timeout","keepalive","closeout"],"forbidden_operations":["payload_read","payload_write","protocol_projection","terminal_semantic_decision","continuation","route","retry"],"status":"active","feature_id":"V4-DIRECT-RELAY-SSE"}
+    ,{"resource_id":"v4.direct.request.client_payload","owner":"routecodex-v4-node-container::NodeContainer","truth_store":"crates/routecodex-v4-node-container/src/lib.rs","allowed_operations":["read","validate","write"],"forbidden_relations":["control_payload","sse_semantic_mutation"],"status":"active","feature_id":"V4-DIRECT-RELAY-SSE"}
+    ,{"resource_id":"v4.direct.request.provider_wire","owner":"routecodex-v4-node-container::NodeContainer","truth_store":"crates/routecodex-v4-node-container/src/lib.rs","allowed_operations":["read","validate","write"],"forbidden_relations":["control_payload","sse_semantic_mutation"],"status":"active","feature_id":"V4-DIRECT-RELAY-SSE"}
+    ,{"resource_id":"v4.direct.response.provider_raw","owner":"routecodex-v4-node-container::NodeContainer","truth_store":"crates/routecodex-v4-node-container/src/lib.rs","allowed_operations":["read","validate","write"],"forbidden_relations":["control_payload","sse_semantic_mutation"],"status":"active","feature_id":"V4-DIRECT-RELAY-SSE"}
+    ,{"resource_id":"v4.direct.response.client_payload","owner":"routecodex-v4-node-container::NodeContainer","truth_store":"crates/routecodex-v4-node-container/src/lib.rs","allowed_operations":["read","validate","write"],"forbidden_relations":["control_payload","sse_semantic_mutation"],"status":"active","feature_id":"V4-DIRECT-RELAY-SSE"}
+    ,{"resource_id":"v4.transport.sse_frames","owner":"routecodex-v4-standard-plugins::SseTransportFrame","truth_store":"crates/routecodex-v4-standard-plugins/src/sse_transport.rs","allowed_operations":["frame","order","buffer","backpressure","timeout","keepalive","closeout"],"forbidden_operations":["payload_read","payload_write","protocol_projection","terminal_semantic_decision","continuation","route","retry"],"status":"design","feature_id":"V4-DIRECT-RELAY-SSE"}
     ,{"resource_id":"v4.execution.direct_relay_container","owner":"routecodex-v4-node-container::NodeContainer","truth_store":"contracts/skeleton-plan.contract.json","allowed_operations":["execute_compiled_direct_request_node","execute_compiled_direct_response_node","validate_plan_hash"],"forbidden_relations":["runtime_bin_second_container","relay_chat_process","sse_semantic_mutation"],"status":"active","feature_id":"V4-DIRECT-RELAY-SSE"}
-    ,{"resource_id":"v4.information.execution_lane","owner":"routecodex-v4-runtime admission information carrier","truth_store":"contracts/skeleton-plan.contract.json","allowed_operations":["bind","read","validate"],"forbidden_relations":["normal_payload","protocol_metadata"],"status":"active","feature_id":"V4-DIRECT-RELAY-SSE"}
-    ,{"resource_id":"v4.information.client_protocol","owner":"routecodex-v4-server admission information carrier","truth_store":"contracts/skeleton-plan.contract.json","allowed_operations":["bind","read","validate"],"forbidden_relations":["normal_payload","infer_from_provider_protocol"],"status":"active","feature_id":"V4-DIRECT-RELAY-SSE"}
-    ,{"resource_id":"v4.information.provider_protocol","owner":"routecodex-v4-router target information carrier","truth_store":"contracts/skeleton-plan.contract.json","allowed_operations":["bind","read","validate"],"forbidden_relations":["normal_payload","infer_from_client_protocol"],"status":"active","feature_id":"V4-DIRECT-RELAY-SSE"}
+    ,{"resource_id":"v4.information.execution_lane","owner":"routecodex-v4-runtime::InformationView","truth_store":"crates/routecodex-v4-runtime/src/lib.rs","allowed_operations":["bind","read","validate"],"forbidden_relations":["normal_payload","protocol_metadata"],"status":"active","feature_id":"V4-DIRECT-RELAY-SSE"}
+    ,{"resource_id":"v4.information.client_protocol","owner":"routecodex-v4-runtime::InformationView","truth_store":"crates/routecodex-v4-runtime/src/lib.rs","allowed_operations":["bind","read","validate"],"forbidden_relations":["normal_payload","infer_from_provider_protocol"],"status":"active","feature_id":"V4-DIRECT-RELAY-SSE"}
+    ,{"resource_id":"v4.information.provider_protocol","owner":"routecodex-v4-runtime::InformationView","truth_store":"crates/routecodex-v4-runtime/src/lib.rs","allowed_operations":["bind","read","validate"],"forbidden_relations":["normal_payload","infer_from_client_protocol"],"status":"active","feature_id":"V4-DIRECT-RELAY-SSE"}
   ]
 }
