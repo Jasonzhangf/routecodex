@@ -65,7 +65,13 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function sourceCommit() {
+function sourceCommit(path) {
+  const pathCommit = execFileSync(
+    'git',
+    ['log', '-1', '--format=%H', '--', path],
+    { cwd: repoRoot, encoding: 'utf8' },
+  ).trim();
+  if (pathCommit) return pathCommit;
   return execFileSync('git', ['rev-parse', 'HEAD'], {
     cwd: repoRoot,
     encoding: 'utf8',
@@ -121,7 +127,7 @@ function expectedAdmission() {
     files.push({
       output_path: outputPath,
       source_path: sourcePath,
-      source_commit: sourceCommit(),
+      source_commit: sourceCommit(sourcePath),
       sha256: sha256(source),
     });
   }
