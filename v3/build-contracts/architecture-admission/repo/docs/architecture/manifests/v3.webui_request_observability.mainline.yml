@@ -1,0 +1,121 @@
+lifecycle_id: v3.webui_request_observability.mainline
+summary: Server appends already-typed Runtime and Error06 lifecycle rows to one
+  per-listener JSONL store; Admin reads raw lifecycle rows, projects failed
+  provider attempts, and folds terminal state for the single WebUI. There is no
+  loopback snapshot or event transport.
+owner_feature_id: v3.server_internal_observability_projection
+entrypoint:
+  node_id: V3RuntimeTimingServerProjection
+  wiki_page: null
+  call_map_chain_id: v3.webui_request_observability.mainline
+node_ids:
+  - V3AdminObservabilityAggregation
+  - V3AdminRequestedPorts
+  - V3AdminRequestsPage
+  - V3OpenAiChatRelayError06Projection
+  - V3RuntimeTimingServerProjection
+  - V3WebuiObservability
+  - V3WebuiObservabilityStore
+edges:
+  - step_id: v3-webui-observability-01
+    from_node: V3RuntimeTimingServerProjection
+    to_node: V3WebuiObservability
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.runtime.responses_observability
+      produces:
+        - v3.server.internal_observability_projection
+      side_channel_reads:
+        - v3.runtime.responses_observability
+      side_channel_writes:
+        - v3.server.internal_observability_projection
+  - step_id: v3-webui-observability-error-sse
+    from_node: V3OpenAiChatRelayError06Projection
+    to_node: V3WebuiObservability
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.error.chain
+      produces:
+        - v3.server.internal_observability_projection
+      side_channel_reads:
+        - v3.error.chain
+      side_channel_writes:
+        - v3.server.internal_observability_projection
+  - step_id: v3-webui-observability-error-json
+    from_node: V3OpenAiChatRelayError06Projection
+    to_node: V3WebuiObservability
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.error.chain
+      produces:
+        - v3.server.internal_observability_projection
+      side_channel_reads:
+        - v3.error.chain
+      side_channel_writes:
+        - v3.server.internal_observability_projection
+  - step_id: v3-webui-observability-store
+    from_node: V3WebuiObservability
+    to_node: V3WebuiObservabilityStore
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.server.internal_observability_projection
+      produces:
+        - v3.observability.webui_store
+      side_channel_reads:
+        - v3.server.internal_observability_projection
+      side_channel_writes:
+        - v3.observability.webui_store
+  - step_id: v3-webui-observability-config
+    from_node: V3AdminRequestsPage
+    to_node: V3AdminRequestedPorts
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.authoring_surface
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-webui-observability-read
+    from_node: V3AdminRequestedPorts
+    to_node: V3AdminObservabilityAggregation
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.observability.webui_store
+      produces: []
+      side_channel_reads:
+        - v3.observability.webui_store
+      side_channel_writes: []
+canonical_docs:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+verification_gates:
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow
+  - npm run render:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs

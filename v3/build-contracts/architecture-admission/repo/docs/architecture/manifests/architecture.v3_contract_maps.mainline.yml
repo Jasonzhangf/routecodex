@@ -1,0 +1,30 @@
+lifecycle_id: architecture.v3_contract_maps.mainline
+summary: V3 architecture contract maps are owned, verified, and released as one
+  synchronized map lifecycle.
+owner_feature_id: architecture.repository_filesystem_governance
+entrypoint:
+  node_id: ArchitectureContractMapAuthoring01
+  wiki_page: null
+  call_map_chain_id: architecture.v3_contract_maps.mainline
+node_ids:
+  - ArchitectureContractMapAuthoring01
+  - ArchitectureContractMapVerification02
+edges:
+  - step_id: architecture-v3-contract-map-01
+    from_node: ArchitectureContractMapAuthoring01
+    to_node: ArchitectureContractMapVerification02
+    status: anchored
+    owner_feature_id: architecture.repository_filesystem_governance
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - architecture.v3_contract_map_set
+      produces:
+        - architecture.v3_contract_map_set
+      side_channel_reads: []
+      side_channel_writes: []
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

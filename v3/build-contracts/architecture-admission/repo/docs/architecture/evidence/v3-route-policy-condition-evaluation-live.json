@@ -1,0 +1,40 @@
+{
+  "evidence_id": "v3-route-policy-condition-evaluation-live-20260820",
+  "feature_ids": [
+    "v3.route_policy_condition_evaluation",
+    "v3.server_internal_observability_projection"
+  ],
+  "review_target_commit": "8633a3ccab7ae25406b31e26e4c053e010fb5aec",
+  "runtime_source_commit": "9d10bee147e5bc5ebc301c742a00ea737bb41ec5",
+  "runtime_source_unchanged_between_commits": true,
+  "installed_binary": {
+    "path": "/Users/fanzhang/.local/bin/rccv3",
+    "sha256": "c2d53ca33e485af93194e4c01a80f21cebb76429c828fc4f2d67d694cc7a34ef",
+    "build_version": "0.90.4574"
+  },
+  "aggregate": {
+    "instance_id": "v3-b471504442d1075ffc56",
+    "listeners": [10000, 7777, 4444],
+    "health": "ok",
+    "manifest_version": 3
+  },
+  "live_replay": {
+    "entry": "openai-responses",
+    "listener": 7777,
+    "status": 200,
+    "terminal_event": "response.completed",
+    "failed_event_count": 0,
+    "public_observability_route_status": 404
+  },
+  "source_gates": [
+    "CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests",
+    "npm run verify:v3-resource-map",
+    "node scripts/architecture/verify-architecture-mainline-call-map.mjs",
+    "git diff --check"
+  ],
+  "dsh_review": {
+    "verdict": "PASS",
+    "task_id": "v3-route-policy-condition-20260820-final-review-12",
+    "final": "/Users/fanzhang/.dsh/reviews/v3-route-policy-condition-20260820-final-review-12/review.final.md"
+  }
+}

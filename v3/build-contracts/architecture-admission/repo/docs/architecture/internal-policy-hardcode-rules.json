@@ -1,0 +1,76 @@
+{
+  "targetRoots": [
+    "v3/crates/routecodex-v3-config/src",
+    "v3/crates/routecodex-v3-runtime/src",
+    "v3/crates/servertool-core/src"
+  ],
+  "extensions": [".rs"],
+  "ignorePathSegments": ["target", "node_modules"],
+  "rules": [
+    {
+      "id": "provider-timeout-default-in-rust",
+      "pattern": "DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS|default_provider_request_timeout_ms|default_provider_sse_first_frame_timeout_ms"
+    },
+    {
+      "id": "direct-sse-timeout-default-in-rust",
+      "pattern": "V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT"
+    },
+    {
+      "id": "provider-action-timing-default-in-rust",
+      "pattern": "V3_PROVIDER_ACTION_(ISOLATED|MEDIUM|SUSTAINED|IDLE_TTL)_DELAY?_MS|V3_PROVIDER_ACTION_IDLE_TTL_MS"
+    },
+    {
+      "id": "stopless-default-in-rust",
+      "pattern": "DEFAULT_STOP_MESSAGE_MAX_REPEATS|STOPLESS_DEFAULT_TEXT|DEFAULT_REASONING_TEXT"
+    },
+    {
+      "id": "provider-error-default-path-in-rust",
+      "pattern": "default_provider_error_path|unwrap_or_else\\(default_provider_error_path\\)"
+    },
+    {
+      "id": "policy-default-operator-in-rust",
+      "pattern": "unwrap_or\\((DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS|V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT)\\)|unwrap_or_else\\(\\|\\|.*(继续执行|继续。)"
+    }
+  ],
+  "allowPatterns": [
+    {
+      "pathContains": "/tests/",
+      "pattern": ""
+    },
+    {
+      "pathContains": "v3/crates/routecodex-v3-config/src/types.rs",
+      "pattern": "default_provider_(request_timeout_ms|sse_first_frame_timeout_ms)",
+      "ruleId": "provider-timeout-default-in-rust"
+    },
+    {
+      "pathContains": "v3/crates/routecodex-v3-config/src/v2_compat.rs",
+      "pattern": "DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS",
+      "ruleId": "provider-timeout-default-in-rust"
+    },
+    {
+      "pathContains": "v3/crates/routecodex-v3-config/src/v2_compat.rs",
+      "pattern": "DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS",
+      "ruleId": "policy-default-operator-in-rust"
+    },
+    {
+      "pathContains": "v3/crates/routecodex-v3-config/src/validate.rs",
+      "pattern": "default_provider_sse_first_frame_timeout_ms",
+      "ruleId": "provider-timeout-default-in-rust"
+    },
+    {
+      "pathContains": "v3/crates/routecodex-v3-config/src/validate/provider_error_policy.rs",
+      "pattern": "default_provider_error_path",
+      "ruleId": "provider-error-default-path-in-rust"
+    },
+    {
+      "pathContains": "v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs",
+      "pattern": "V3_PROVIDER_ACTION_(ISOLATED|MEDIUM|SUSTAINED)_DELAY_MS",
+      "ruleId": "provider-action-timing-default-in-rust"
+    },
+    {
+      "pathContains": "v3/crates/routecodex-v3-runtime/src/shared.rs",
+      "pattern": "default_provider_sse_first_frame_timeout_ms",
+      "ruleId": "provider-timeout-default-in-rust"
+    }
+  ]
+}
