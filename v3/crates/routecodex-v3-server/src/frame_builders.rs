@@ -290,7 +290,7 @@ pub(crate) fn v3_responses_sse_error_event_chunk(
             }
         }
     });
-    format!("event: response.failed\ndata: {event}\n\n").into_bytes()
+    format!("event: response.failed\ndata: {event}\n\ndata: [DONE]\n\n").into_bytes()
 }
 
 fn v3_sse_runtime_error_source_chunk_for_protocol(

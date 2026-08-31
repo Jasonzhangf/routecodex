@@ -517,7 +517,7 @@ async fn direct_live_sse_provider_error_projects_responses_failed_without_provid
     assert!(text.contains("event: response.failed"), "{text}");
     assert!(text.contains("internal_response_stream_error"), "{text}");
     assert!(!text.contains("provider secret detail"), "{text}");
-    assert!(!text.contains("[DONE]"), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
 }
 
 #[tokio::test]
@@ -3253,7 +3253,7 @@ async fn direct_stream_request_error06_projects_sse_error_not_json() {
             assert!(text.contains("event: response.failed"), "{text}");
             assert!(text.contains("HTTP_429"), "{text}");
             assert!(text.contains("Rate limited by upstream provider"), "{text}");
-            assert!(!text.contains("[DONE]"), "{text}");
+            assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
         }
         other => panic!("stream request Error06 must project SSE body, got {other:?}"),
     }
@@ -3574,6 +3574,35 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
     assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
 }
 
+#[tokio::test]
+async fn responses_relay_json_error_projects_failure_terminal_with_done() {
+    let output = V3ResponsesRelayRuntimeOutput {
+        status: 598,
+        client_body: V3ResponsesRelayClientBody::Json(json!({
+            "error": {
+                "code": "provider_request_payload_invalid",
+                "message": "UnmappedOutboundFields target_protocol=anthropic paths=$.request.text.output_config.format.name"
+            }
+        })),
+        node_trace: vec!["V3HubReqChatProcess04Governed", "V3Error06ClientProjected"],
+        error_chain: Some(vec!["V3Error01SourceRaised", "V3Error06ClientProjected"]),
+        observability: None,
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+
+    let response = responses_relay_output_response(output, None, None, true);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(text.starts_with("event: response.failed\n"), "{text}");
+    assert!(text.contains("provider_request_payload_invalid"), "{text}");
+    assert!(text.contains("UnmappedOutboundFields"), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+}
+
 #[test]
 fn relay_chat_sse_json_projection_has_explicit_terminal_marker() {
     let frame = build_v3_openai_chat_relay_json_sse_frame(&json!({
@@ -3680,7 +3709,7 @@ async fn responses_live_sse_error_emits_responses_failed_terminal() {
     let error = std::str::from_utf8(&error).unwrap();
     assert!(error.starts_with("event: response.failed\n"), "{error}");
     assert!(error.contains("internal_response_stream_error"), "{error}");
-    assert!(!error.contains("[DONE]"), "{error}");
+    assert!(error.ends_with("data: [DONE]\n\n"), "{error}");
     assert!(
         client.next().await.is_none(),
         "terminal event must close the body"

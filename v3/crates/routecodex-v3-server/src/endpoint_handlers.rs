@@ -32,7 +32,7 @@ fn v3_front_json_body_to_sse_frame(bytes: &[u8]) -> Vec<u8> {
         "type": "response.failed",
         "response": {"status": "failed", "error": error}
     });
-    format!("event: response.failed\ndata: {event}\n\n").into_bytes()
+    format!("event: response.failed\ndata: {event}\n\ndata: [DONE]\n\n").into_bytes()
 }
 
 fn v3_front_projected_error_sse_frame(
@@ -54,7 +54,7 @@ fn v3_front_projected_error_sse_frame(
             frame.extend_from_slice(b"\n\n");
             frame
         }
-        Err(_) => b"event: response.failed\ndata: {\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"front_error06_serialization_failed\"}},\"type\":\"response.failed\"}\n\n".to_vec(),
+        Err(_) => b"event: response.failed\ndata: {\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"front_error06_serialization_failed\"}},\"type\":\"response.failed\"}\n\ndata: [DONE]\n\n".to_vec(),
     }
 }
 
@@ -1889,10 +1889,10 @@ mod front_sse_contract_tests {
     }
 
     #[test]
-    fn front_json_error_is_projected_as_one_sse_data_frame() {
+    fn front_json_error_is_projected_as_one_sse_failure_terminal() {
         assert_eq!(
             v3_front_json_body_to_sse_frame(br#"{"error":{"code":"internal"}}"#),
-            b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"internal\"},\"status\":\"failed\"},\"type\":\"response.failed\"}\n\n"
+            b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"internal\"},\"status\":\"failed\"},\"type\":\"response.failed\"}\n\ndata: [DONE]\n\n"
         );
     }
 
