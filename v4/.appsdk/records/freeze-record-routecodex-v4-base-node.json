@@ -29,10 +29,10 @@
   "previous_active_immutable": true,
   "previous_active_version": "active-v2",
   "promotion_id": "v4-cordis-base-node-promotion",
-  "promotion_record_hash": "sha256:60a8fa2fe692311ed0c01615a2e7a58f932350bdacea041f39f657aa1d158ec7",
+  "promotion_record_hash": "sha256:563048cb94f5057bbb5c511bcb14a204e0e97c43b1fa51c8728390395e96872a",
   "public_api_hash": "sha256:4fde764e2ba6dcd121e980143ce7d9de1eb6518cd9aee52124c668bc76e3e7ce",
   "regression_report_hash": "sha256:d913e43c4d2225e755dcbd78cb093506c19b9f9110b61316f732c69ffb6974e0",
   "regression_report_id": "v4-cordis-base-node-regression",
   "review_id": "v4-cordis-base-node-review",
-  "source_commit_or_tag": "8f906514a9a454add8dabc129b24d0852d43a724"
+  "source_commit_or_tag": "3930d19f22be04ee4e9a38076a877c1c3cd69a5d"
 }
