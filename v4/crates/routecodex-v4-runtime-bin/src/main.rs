@@ -387,6 +387,10 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     control.clear_record().map_err(|error| error.to_string())?;
     drop(control);
     if action == ManagedAction::Restart {
+        // macOS may retain the just-closed TCP listener briefly after the
+        // shutdown join. Give the kernel a bounded handoff window before the
+        // exec image binds the same aggregate listener again.
+        thread::sleep(Duration::from_millis(100));
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let error = exec_managed_restart(
             &executable,
