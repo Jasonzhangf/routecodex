@@ -165,7 +165,13 @@ pub enum ProviderSseEventDisposition {
 /// this owner parses one Responses event into its semantic object.
 pub fn decode_provider_sse_frame(frame: &[u8]) -> Result<DecodedProviderSseFrame, String> {
     let normalized = routecodex_v4_provider::normalize_provider_sse_frame("responses", frame)
-        .map_err(|error| format!("provider SSE normalization failed: {}", error.message))?;
+        .map_err(|error| {
+            if error.code == "provider_sse_malformed" {
+                format!("provider SSE data is invalid JSON: {}", error.message)
+            } else {
+                format!("provider SSE normalization failed: {}", error.message)
+            }
+        })?;
     let text = std::str::from_utf8(&normalized)
         .map_err(|error| format!("provider SSE frame is not UTF-8: {error}"))?;
     let mut event = None;
