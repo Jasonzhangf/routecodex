@@ -362,33 +362,25 @@ impl V3ProviderHealthStore {
             failure_policies,
             ..V3ProviderHealthState::default()
         };
-        for group in manifest.route_groups.values() {
-            for pool in group.pools.values() {
-                for target in &pool.targets {
-                    let (Some(provider_id), Some(auth_alias), Some(model_id), Some(priority)) = (
-                        target.provider.as_deref(),
-                        target.key.as_deref(),
-                        target.model.as_deref(),
-                        target.priority,
-                    ) else {
-                        continue;
-                    };
-                    if priority <= 0 {
-                        continue;
-                    }
-                    let key = provider_cooldown_probe_key(
-                        provider_id,
-                        Some(auth_alias),
-                        Some(model_id),
-                    );
-                    let history = V3ProviderAdaptiveHistory {
-                        configured_priority: priority,
-                        score_milli: priority.clamp(0, 150) as u32,
-                        ..V3ProviderAdaptiveHistory::default()
-                    };
-                    state.adaptive_history.entry(key).or_insert(history);
-                }
+        for baseline in manifest.provider_priority_baselines() {
+            let provider_id = baseline.provider_id;
+            let auth_alias = baseline.auth_alias;
+            let model_id = baseline.model_id;
+            let priority = baseline.priority;
+            if priority <= 0 {
+                continue;
             }
+            let key = provider_cooldown_probe_key(
+                &provider_id,
+                Some(&auth_alias),
+                Some(&model_id),
+            );
+            let history = V3ProviderAdaptiveHistory {
+                configured_priority: priority,
+                score_milli: priority.clamp(0, 150) as u32,
+                ..V3ProviderAdaptiveHistory::default()
+            };
+            state.adaptive_history.entry(key).or_insert(history);
         }
         state.persistence = start_provider_health_persistence(persistence_path);
         Self {

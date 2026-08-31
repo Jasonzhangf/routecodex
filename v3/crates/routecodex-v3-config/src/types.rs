@@ -959,6 +959,14 @@ pub struct V3Config05ManifestPublished {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ProviderPriorityBaseline {
+    pub provider_id: String,
+    pub auth_alias: String,
+    pub model_id: String,
+    pub priority: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3HubV1Manifest {
     pub skeleton: String,
     pub entry_protocols: Vec<String>,
@@ -1015,6 +1023,22 @@ pub struct V3CapabilityModelCandidate {
 }
 
 impl V3Config05ManifestPublished {
+    pub fn provider_priority_baselines(&self) -> Vec<V3ProviderPriorityBaseline> {
+        self.route_groups
+            .values()
+            .flat_map(|group| group.pools.values())
+            .flat_map(|pool| pool.targets.iter())
+            .filter_map(|target| {
+                Some(V3ProviderPriorityBaseline {
+                    provider_id: target.provider.clone()?,
+                    auth_alias: target.key.clone()?,
+                    model_id: target.model.clone()?,
+                    priority: target.priority?,
+                })
+            })
+            .collect()
+    }
+
     /// Splits `requested` on its first `.` and resolves the leading segment
     /// against enabled providers, mapping model aliases to the canonical id.
     pub fn resolve_direct_provider_model(&self, requested: &str) -> V3DirectModelResolution {
