@@ -432,7 +432,7 @@ fn spawn_servers(
                     .enable_all()
                     .build()
                     .map_err(|error| error.to_string())?;
-                runtime.block_on(async move {
+                let result = runtime.block_on(async move {
                     let server = AsyncHttpServer::bind(&server)
                         .await
                         .map_err(|error| error.to_string())?;
@@ -449,7 +449,14 @@ fn spawn_servers(
                         .run_until(handler, cancellation)
                         .await
                         .map_err(|error| error.to_string())
-                })
+                });
+                // A disconnected client can leave a synchronous provider
+                // call in spawn_blocking. Do not let runtime drop wait
+                // forever for that task during managed restart; the bounded
+                // shutdown preserves lifecycle progress and the process
+                // replacement reclaims any remaining worker threads.
+                runtime.shutdown_timeout(Duration::from_secs(1));
+                result
             })
         })
         .collect()
