@@ -1,5 +1,5 @@
 {
-  "artifact_hash": "sha256:425b50dc8136d5920b21467d6efa4489f1cb10df9bc2ad87f519693b410d806c",
+  "artifact_hash": "sha256:ff89c9752a673f852b66556ee1d25ee01e8c4d407304d4e3ba816d9cf6faa39b",
   "command": {
     "args": [
       "run",
@@ -19,21 +19,21 @@
     "program": "cargo",
     "working_directory": "."
   },
-  "created_at": "2026-08-28T04:56:10Z",
+  "created_at": "2026-08-31T18:30:00Z",
   "failed": 0,
-  "input_hash": "sha256:425b50dc8136d5920b21467d6efa4489f1cb10df9bc2ad87f519693b410d806c",
+  "input_hash": "sha256:ff89c9752a673f852b66556ee1d25ee01e8c4d407304d4e3ba816d9cf6faa39b",
   "module_id": "routecodex-v4-edge",
   "passed": 15,
   "producer": {
     "adapter": "cargo",
     "identity": "v4-cordis-edge-l1"
   },
-  "public_api_hash": "sha256:e843fc703d66f47cadb8d39f000653f50bb42a587bf3c488e42349ba28bd671b",
+  "public_api_hash": "sha256:4a715f6ce89f9fa0e2a3d2b9eb20496f0420969cb81b7b599401f07de72871d",
   "regression_report_id": "v4-cordis-edge-regression-current",
   "result": "pass",
   "scope_hash": "sha256:e6bedbf34de4a84e5c2fbca3c36c077dac4514781f47cd499515594b89cb857d",
   "skipped": 0,
-  "source_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
+  "source_commit": "dbf569de040b34361c980e27849c00726d90d912",
   "suite_id": "v4-edge-l1-regression",
   "test_characteristics": {
     "blackbox": true,
