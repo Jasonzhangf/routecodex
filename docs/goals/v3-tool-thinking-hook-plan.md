@@ -22,7 +22,9 @@ required to add all three fields to its native parameter object:
 - `reason`: a short, direct motivation for this call;
 - `goal_alignment_confidence`: an integer from 0 through 100, measured against
   the user's current-turn goal;
-- `model_id`: the exact selected provider-bound wire model for this request.
+- `model_id`: the model's own true runtime/model identity, self-reported by the
+  model and never copied or derived from request identity, requested/client
+  model aliases, route selection, selected targets, or provider wire identity.
 
 The response hook reads only those explicit fields from a complete native
 tool-call parameter container. For response compatibility, a non-empty valid
@@ -84,9 +86,11 @@ Responses/OpenAI Chat guidance describes only the native `arguments` object:
 Every tool call must include all three required top-level fields beside the
 tool's native parameters inside the Responses/Chat `arguments` object:
 non-empty `reason` of at most 50 characters, integer
-`goal_alignment_confidence` from 0 through 100, and non-empty `model_id` copied
-exactly from that tool schema's bound model description. Emit the tool call
-immediately without a fence, preamble, or second explanation.
+`goal_alignment_confidence` from 0 through 100, and non-empty `model_id` set to
+your own true current model identity. Do not copy or derive `model_id` from a
+request ID, requested model, client alias, route label, selected target, tool
+schema, or provider-bound model value. Emit the tool call immediately without a
+fence, preamble, or second explanation.
 ```
 
 Anthropic guidance describes only a native `tool_use` block:
@@ -95,10 +99,12 @@ Anthropic guidance describes only a native `tool_use` block:
 When calling a tool, immediately return only a native `tool_use` block.
 Every `tool_use.input` must contain all three required top-level fields:
 non-empty `reason` of at most 50 characters, integer
-`goal_alignment_confidence` from 0 through 100, and non-empty `model_id` copied
-exactly from that tool's bound `input_schema` description. Never emit the call
-as ordinary text, Markdown, or a generic JSON wrapper; do not emit a fence,
-preamble, or second explanation.
+`goal_alignment_confidence` from 0 through 100, and non-empty `model_id` set to
+your own true current model identity. Do not copy or derive `model_id` from a
+request ID, requested model, client alias, route label, selected target,
+`input_schema`, or provider-bound model value. Never emit the call as ordinary
+text, Markdown, or a generic JSON wrapper; do not emit a fence, preamble, or
+second explanation.
 ```
 
 The provider-facing guidance and schema are strict. The response validator is
@@ -132,7 +138,7 @@ level and adds all three names to `required`:
   "model_id": {
     "type": "string",
     "minLength": 1,
-    "description": "Exact provider-bound wire model selected for this request"
+    "description": "The model's own true current model identity; never copied or derived from request, route, target, schema, or provider-wire values"
   }
 }
 ```
@@ -186,12 +192,14 @@ provider options, or client payload. Static tool registries are never rewritten.
 
 ### 4.3 Model ID semantics
 
-Req04 owns the `model_id` schema placeholder contract. After target resolution,
-the adjacent provider-request compatibility edge mechanically replaces that
-placeholder with the exact selected wire model before transport. No placeholder
-or client alias may reach the provider. Equality with a provider response's
-public `model` field is a response diagnostic, not a projection authorization
-rule; a mismatch remains observable and does not alter the native tool call.
+Req04 owns the static `model_id` self-report instruction. It requires the model
+to identify its own true current model identity and does not include a value to
+copy. RouteCodex must not bind, prefill, or derive this field from `request_id`,
+session identity, requested/client model, route aliases, selected target,
+provider-bound wire model, schema placeholders, or any other request-side
+identity. Equality with a provider response's public `model` field is a response
+diagnostic, not a projection authorization rule; a mismatch remains observable
+and does not alter the native tool call.
 
 ### 4.4 Reasoning effort ownership
 
@@ -307,9 +315,9 @@ second injection helper.
 The provider-bound snapshot is a mandatory gate. Source presence is insufficient:
 every eligible final tool schema must require `reason`,
 `goal_alignment_confidence`, and `model_id` after all protocol conversions, and
-its model description must contain the exact wire model with no placeholder. A
-custom wrapper that omits any of the four required fields is a request-path
-failure.
+its model description must require a true model self-report without any
+request-, route-, target-, schema-, or provider-wire-derived value. A custom
+wrapper that omits any of the four required fields is a request-path failure.
 
 ## 7. Protocol request matrix
 
@@ -838,7 +846,8 @@ not reopen the abandoned turn-fence v3 experiment.
 
 1. Req04 is the only injection owner. It receives the final provider-bound
    native tool list, compiles one request-local JSON v2 contract, strongly
-   requires all three fields, binds the exact wire model id before transport,
+   requires all three fields, requires `model_id` to be the model's own true
+   identity without binding or prefilling a request/route/wire-derived value,
    and does not mutate system/developer/history ordering,
    native names, native schemas, or native arguments except for the declared
    request-local auxiliary contract.
@@ -896,7 +905,8 @@ measured result, not permission to guess or rewrite the response.
 1. Refresh resource/function/mainline/verification maps and the local
    collaboration run record; verify the unique Req04/Resp03 owners and inspect
    all current dirty changes before editing.
-2. Add red tests for server-scoped enablement, exact wire-model request binding, missing
+2. Add red tests for server-scoped enablement, true model self-report guidance
+   with no request/route/wire-derived binding, missing
    and malformed fields, duplicate observations, multi-tool aggregation,
    custom `apply_patch`, native-payload identity, and no projection of natural
    reasoning. Then make only the unique hook owner green.
@@ -912,7 +922,8 @@ measured result, not permission to guess or rewrite the response.
    response dry-run are diagnostic stage proofs; neither replaces the real
    pipeline windows.
 6. For each group, calculate rather than eyeball: Req04 coverage, provider raw
-   field presence, valid/missing/invalid/misplaced rates, exact model match,
+   field presence, valid/missing/invalid/misplaced rates, observed self-reported
+   model identity and request-derived contamination count,
    one terminal status per turn, projection rate for valid turns, native
    identity, duplicate count, leakage count, and 400/500/502/panic/SSE/tool
    mapping failures.
@@ -943,8 +954,10 @@ verified commit is integrated and pushed.
 ### 19.6 Asymmetric request/response compatibility contract
 
 Req04 model-facing guidance and eligible tool schemas require `reason`,
-`goal_alignment_confidence`, and `model_id` together. `model_id` must be bound
-to the exact provider wire model before transport. Resp03 intentionally uses a
+`goal_alignment_confidence`, and `model_id` together. `model_id` must request
+the model's own true identity and must never be bound, prefilled, or derived
+from request identity, requested/client model, routing, selected target, schema,
+or provider wire identity. Resp03 intentionally uses a
 looser compatibility gate: it must not reject, repair, infer, or block a valid
 reason projection because either diagnostic is absent or differs from the
 expected value. When supplied, diagnostics are type/range checked, logged, and

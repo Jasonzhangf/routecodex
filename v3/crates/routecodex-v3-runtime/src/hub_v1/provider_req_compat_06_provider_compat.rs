@@ -130,13 +130,6 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     .map(|result| result.payload)
     .map_err(|reason| classify_v3_provider_compat_error("request", profile, reason))?;
     let mut result = result;
-    super::servertool_hooks::bind_v3_tool_thinking_guidance_to_wire_model_at_req04(
-        &mut result,
-        &selected.wire_model,
-    )
-    .map_err(|reason| {
-        classify_v3_provider_compat_error("request_tool_thinking", profile, reason)
-    })?;
     project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
     normalize_deepseek_thinking_stopless_tool_choice(&mut result, selected, provider_protocol);
     Ok(result)
@@ -1159,6 +1152,48 @@ mod tests {
                 "{protocol:?} must not leak the client route alias into provider compat"
             );
         }
+    }
+
+    #[test]
+    fn provider_compat_does_not_copy_selected_wire_model_into_tool_model_self_report_guidance() {
+        let mut payload = json!({
+            "model": "client-route-alias",
+            "request_id": "request-identity-must-not-be-model-id",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "call pwd"}]
+            }],
+            "tools": [{
+                "type": "function",
+                "name": "pwd",
+                "parameters": {"type":"object","properties":{}}
+            }]
+        });
+        super::super::servertool_hooks::inject_v3_tool_thinking_guidance_at_req04(
+            &mut payload,
+            0,
+            true,
+        )
+        .expect("Req04 Tool-Thinking guidance");
+        let before = payload["tools"][0]["parameters"]["properties"]["model_id"]
+            ["description"]
+            .clone();
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            payload,
+            V3HubProviderWireProtocol::Responses,
+        );
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("provider compat");
+        let after = &req_compat.provider_semantic_payload()["tools"][0]["parameters"]
+            ["properties"]["model_id"]["description"];
+        assert_eq!(after, &before);
+        assert!(!after
+            .as_str()
+            .expect("model_id description")
+            .contains("provider-wire-model"));
     }
 
     #[test]

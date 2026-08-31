@@ -450,8 +450,10 @@ fn req04_tool_thinking_custom_tool_compiles_provider_wrapper() {
 }
 
 #[test]
-fn req04_tool_thinking_binds_exact_wire_model_into_required_schema_guidance() {
+fn req04_tool_thinking_requires_true_model_self_report_without_request_identity_binding() {
     let mut payload = json!({
+        "model": "client-route-alias",
+        "request_id": "request-identity-must-not-be-model-id",
         "tools": [{
             "type": "function",
             "name": "pwd",
@@ -464,25 +466,37 @@ fn req04_tool_thinking_binds_exact_wire_model_into_required_schema_guidance() {
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject");
-    let before = payload["tools"][0]["parameters"]["properties"]["model_id"]["description"]
+    let native_description = payload["tools"][0]["parameters"]["properties"]["model_id"]
+        ["description"]
         .as_str()
         .expect("model_id description");
-    assert!(before.contains(V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER));
-
-    bind_v3_tool_thinking_guidance_to_wire_model_at_req04(&mut payload, "glm-5.3")
-        .expect("selected wire model must bind");
-    let after = payload["tools"][0]["parameters"]["properties"]["model_id"]["description"]
+    let custom_description = payload["tools"][1]["function"]["parameters"]["properties"]
+        ["model_id"]["description"]
         .as_str()
-        .expect("bound model_id description");
-    assert!(after.contains("glm-5.3"));
-    assert!(
-        payload["tools"][1]["function"]["parameters"]["properties"]["model_id"]["description"]
-            .as_str()
-            .is_some_and(|description| description.contains("glm-5.3"))
-    );
-    assert!(!payload
-        .to_string()
-        .contains(V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER));
+        .expect("custom model_id description");
+    for description in [native_description, custom_description] {
+        assert!(description.contains("自身当前真实的模型 ID"));
+        assert!(description.contains("不得复制或推导"));
+        assert!(!description.contains("client-route-alias"));
+        assert!(!description.contains("request-identity-must-not-be-model-id"));
+    }
+    let payload_text = payload.to_string();
+    assert!(!payload_text.contains("<本次 provider-bound 请求的精确 model 值>"));
+}
+
+#[test]
+fn req04_tool_thinking_guidance_requires_model_self_report_in_both_protocols() {
+    for guidance in [
+        V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE,
+        V3_TOOL_THINKING_ANTHROPIC_GUIDANCE,
+    ] {
+        assert!(guidance.contains("必须填写你自身当前真实的模型 ID"));
+        assert!(guidance.contains("不得复制或推导"));
+        assert!(guidance.contains("request_id"));
+        assert!(guidance.contains("provider-bound wire model"));
+        assert!(!guidance.contains("逐字原样填写"));
+        assert!(!guidance.contains("精确填写本次 provider-bound wire model"));
+    }
 }
 
 #[test]

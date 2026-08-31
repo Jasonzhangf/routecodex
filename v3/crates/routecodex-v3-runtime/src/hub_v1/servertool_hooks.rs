@@ -22,7 +22,7 @@ pub(crate) const V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE: &str = r#"工具调�
 每次发起工具调用时，必须同时填写以下三个字段，缺一不可；字段必须位于工具参数 JSON 对象本层，并立即输出工具调用：
 `reason`：非空字符串；现在调用该工具的唯一直接动机；只说动机，不写计划、步骤、结果或工具参数；不超过 50 个字符。
 `goal_alignment_confidence`：0 到 100 的整数；表示当前工具调用与用户上一轮目标的一致性。
-`model_id`：非空字符串；必须从当前工具参数 schema 的 `model_id.description` 读取本次 provider-bound wire model，并逐字原样填写；禁止填写客户端别名、猜测值或占位符。
+`model_id`：非空字符串；必须填写你自身当前真实的模型 ID；不得复制或推导请求中的 `model`、`request_id`、`session_id`、客户端别名、路由标签、selected target、schema 描述或 provider-bound wire model。
 
 字段必须和原生工具参数处于同一个参数对象层级；对于 Responses/Chat 的 `arguments`，字段放在该参数对象的顶层。不要把字段嵌套到命令参数对象内部；RouteCodex 会在工具执行前剥离这三个辅助字段。
 
@@ -39,12 +39,9 @@ pub(crate) const V3_TOOL_THINKING_ANTHROPIC_GUIDANCE: &str = r#"Anthropic native
 每个 `tool_use.input` 顶层必须同时填写以下三个字段，缺一不可：
 `reason`：非空字符串；只写现在调用该工具的唯一直接动机，不写计划、步骤、结果或工具参数，不超过 50 个字符。
 `goal_alignment_confidence`：0 到 100 的整数；表示当前工具调用与用户上一轮目标的一致性。
-`model_id`：非空字符串；必须从当前工具 `input_schema` 的 `model_id.description` 读取本次 provider-bound wire model，并逐字原样填写；禁止填写客户端别名、猜测值或占位符。
+`model_id`：非空字符串；必须填写你自身当前真实的模型 ID；不得复制或推导请求中的 `model`、`request_id`、`session_id`、客户端别名、路由标签、selected target、`input_schema` 描述或 provider-bound wire model。
 同一轮多个工具调用时，每个原生 `tool_use` 块都必须分别填写完整三字段。不要输出 fence、preamble、普通解释或第二份原因文本。
 "#;
-
-pub(crate) const V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER: &str =
-    "<本次 provider-bound 请求的精确 model 值>";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct V3ToolThinkingTurnContext {
@@ -201,7 +198,7 @@ fn wrap_v3_custom_tools_at_req04(
                 "input":{"type":"string","description":"原生 custom tool 的完整输入，原样填写"},
                 "reason":{"type":"string","minLength":1,"maxLength":50,"description":"必填。当前工具调用的唯一直接动机，只说动机，不超过 50 个字符"},
                 "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100,"description":"必填。当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"},
-                "model_id":{"type":"string","minLength":1,"description":format!("必填。精确填写本次 provider-bound wire model：{}；禁止使用客户端别名、猜测值或占位符", V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER)}
+                "model_id":{"type":"string","minLength":1,"description":"必填。填写你自身当前真实的模型 ID；不得复制或推导请求中的 model、request_id、session_id、客户端别名、路由标签、selected target、schema 描述或 provider-bound wire model"}
             },
             "required":["input","reason","goal_alignment_confidence","model_id"],
             "additionalProperties":false
@@ -219,44 +216,6 @@ fn wrap_v3_custom_tools_at_req04(
         names.insert(name);
     }
     Ok(names)
-}
-
-pub(crate) fn bind_v3_tool_thinking_guidance_to_wire_model_at_req04(
-    payload: &mut Value,
-    wire_model_id: &str,
-) -> Result<(), String> {
-    let wire_model_id = wire_model_id.trim();
-    if wire_model_id.is_empty() {
-        return Err("selected wire model id is empty".to_string());
-    }
-    let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
-        return Ok(());
-    };
-    for tool in tools {
-        replace_v3_tool_thinking_model_placeholder(tool, wire_model_id);
-    }
-    Ok(())
-}
-
-fn replace_v3_tool_thinking_model_placeholder(value: &mut Value, wire_model_id: &str) {
-    match value {
-        Value::String(text) => {
-            if text.contains(V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER) {
-                *text = text.replace(V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER, wire_model_id);
-            }
-        }
-        Value::Array(values) => {
-            for value in values {
-                replace_v3_tool_thinking_model_placeholder(value, wire_model_id);
-            }
-        }
-        Value::Object(object) => {
-            for value in object.values_mut() {
-                replace_v3_tool_thinking_model_placeholder(value, wire_model_id);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) => {}
-    }
 }
 
 pub(crate) fn current_v3_tool_thinking_payload_start(payload: &Value) -> Result<usize, String> {
@@ -384,7 +343,7 @@ pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> 
             json!({
                 "type": "string",
                 "minLength": 1,
-                "description": format!("必填。精确填写本次 provider-bound wire model：{}；禁止使用客户端别名、猜测值或占位符", V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER)
+                "description": "必填。填写你自身当前真实的模型 ID；不得复制或推导请求中的 model、request_id、session_id、客户端别名、路由标签、selected target、schema 描述或 provider-bound wire model"
             }),
         );
     }

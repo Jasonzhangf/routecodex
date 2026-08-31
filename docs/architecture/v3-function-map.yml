@@ -5463,7 +5463,6 @@ features:
   - V3ChatDirectCodec::prepare_before_send
   - V3ToolThinkingTurnContext
   - compile_v3_tool_thinking_turn_context_at_req04
-  - bind_v3_tool_thinking_guidance_to_wire_model_at_req04
   - restore_v3_tool_thinking_custom_calls_in_payload_at_resp03
   - finalize_v3_toolreason_observation_at_resp03_with_context
   - project_v3_toolreason_sse_chunk_at_resp03_with_projection_and_context
@@ -5511,7 +5510,7 @@ features:
   - continuation stores
   contract_version: tool_thinking_json_v2
   contract_rules:
-  - Req04 requires reason, goal_alignment_confidence, and exact provider-bound model_id in each eligible non-Gemini structured tool schema and wraps eligible free-form custom tools as request-local structured provider contracts; Resp03 separately accepts reason-only provider output for compatibility
+  - Req04 requires reason, goal_alignment_confidence, and the model's own true self-reported model_id in each eligible non-Gemini structured tool schema and wraps eligible free-form custom tools as request-local structured provider contracts; RouteCodex never binds, prefills, or derives model_id from request identity, requested/client model, route selection, or provider wire identity, while Resp03 separately accepts reason-only provider output for compatibility
   - Req04 guidance is protocol-pure at the provider-facing slice: Anthropic native tools receive only tool_use/input three-field instructions, while Responses/OpenAI Chat tools receive only arguments three-field instructions; wire examples from another protocol are forbidden
   - Req04 records original custom-tool provenance only in v3.request.tool_thinking_turn_context; that resource never enters payload, metadata, history, or continuation
   - Req04 compilation is atomic and runs once per execution; Direct retries reuse its typed context and may not recompile from an already governed tool list

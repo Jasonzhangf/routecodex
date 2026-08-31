@@ -7526,7 +7526,7 @@ chains:
 - chain_id: v3.tool_thinking_hook_skeleton.mainline
   owner_feature_id: v3.tool_thinking_hook_skeleton
   status: source_controlled_pending_online_matrix
-  summary: Req04 atomically compiles one strict provider-facing tool_thinking_json_v2 contract requiring reason, goal_alignment_confidence, and exact bound model_id, wraps eligible free-form custom tools, and emits request-local typed custom provenance; protocol projections preserve complete schemas and parameter containers; Resp03 separately accepts reason-only output for compatibility, performs all-or-nothing valid-key removal, mechanically restores custom shape, finalizes one typed turn result, and projects one separate normal reasoning item without changing provider-native reasoning.
+  summary: Req04 atomically compiles one strict provider-facing tool_thinking_json_v2 contract requiring reason, goal_alignment_confidence, and the model's own true self-reported model_id without request/route/wire-derived binding, wraps eligible free-form custom tools, and emits request-local typed custom provenance; protocol projections preserve complete schemas and parameter containers; Resp03 separately accepts reason-only output for compatibility, performs all-or-nothing valid-key removal, mechanically restores custom shape, finalizes one typed turn result, and projects one separate normal reasoning item without changing provider-native reasoning.
   edges:
   - step_id: v3-tool-thinking-req04-relay-contract
     from_node: V3HubReqContinuation03Classified

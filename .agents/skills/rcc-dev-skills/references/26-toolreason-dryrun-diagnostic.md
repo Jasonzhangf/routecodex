@@ -53,7 +53,7 @@ client request
 - 当前轮 system/instructions 中有严格三字段 guidance，明确三项缺一不可；
 - 工具 description 与参数 schema 中有 `reason`、`goal_alignment_confidence`、`model_id`；
 - 三字段都位于 `properties`，并全部在 `required`；
-- `model_id.description` 已绑定精确 provider-bound wire model，且无 placeholder、客户端 alias 或猜测值；
+- `model_id.description` 强制要求模型填写自身当前真实 model ID，且没有从 `request_id`、客户端/请求 model、route alias、selected target 或 provider-bound wire model 绑定、预填或派生任何值；
 - 原始 system/history/tool 不被改写；
 - `providerNetworkSend=false`，且 provider pipeline 已执行。
 
