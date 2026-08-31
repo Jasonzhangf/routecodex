@@ -102,22 +102,8 @@ sharedmodule/llmswitch-core/rust-core/note.md
 /active/lib/
 /generated/
 
-# RouteCodex multi-worker collaboration runtime state.
-# Keep .agent-collab/PROTOCOL.md, schema/, and examples/ tracked.
-.agent-collab/runs/
-.agent-collab/claims/
-.agent-collab/handoff/
-.agent-collab/merge-queue/
-.agent-collab/KILL_SWITCH
-.agent-collab/review/
-.agent-collab/heartbeat.json
-
-# Agent collaboration local pointer files. Truth lives under ignored runs/claims;
-# these per-worktree cursors must not dirty git status.
-.agent-collab/current*run_id
-.agent-collab/current*.tmp
-.agent-collab/current*.run_dir
-.agent-collab/.last-*
+# RouteCodex collaboration state and documents are local-only.
+.agent-collab/
 
 # Retired Collab v2 bootstrap and live daemon/mailbox state.
 .agent-collab-v2/
