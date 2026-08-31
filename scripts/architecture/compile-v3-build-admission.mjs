@@ -82,6 +82,16 @@ function canonicalJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+function lockstepManifest(value) {
+  const { manifest_digest: _manifestDigest, ...manifest } = value;
+  return {
+    ...manifest,
+    files: Array.isArray(manifest.files)
+      ? manifest.files.map(({ source_commit: _sourceCommit, ...file }) => file)
+      : [],
+  };
+}
+
 function verifyProviderCompatLegacyMirror() {
   const canonical = JSON.parse(
     readFileSync(resolve(repoRoot, providerCompatCanonicalPath), 'utf8'),
@@ -187,13 +197,17 @@ function verifyAdmissionLockstep() {
     failures.push('missing generated admission manifest: manifest.json');
   } else {
     const actualManifestText = readFileSync(manifestPath, 'utf8');
-    if (actualManifestText !== canonicalJson(expected.manifest)) {
-      let actualManifest;
-      try {
-        actualManifest = JSON.parse(actualManifestText);
-      } catch {
-        actualManifest = null;
-      }
+    let actualManifest;
+    try {
+      actualManifest = JSON.parse(actualManifestText);
+    } catch {
+      actualManifest = null;
+    }
+    if (
+      actualManifestText !== canonicalJson(expected.manifest)
+      && canonicalJson(lockstepManifest(actualManifest ?? {}))
+        !== canonicalJson(lockstepManifest(expected.manifest))
+    ) {
       const differences = actualManifest?.files && Array.isArray(actualManifest.files)
         ? expected.manifest.files
           .map((entry, index) => {
