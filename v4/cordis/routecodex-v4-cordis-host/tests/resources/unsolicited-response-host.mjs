@@ -14,6 +14,7 @@ lines.once('line', () => {
       output: {
         data: {},
         control: {},
+        information: {},
         diagnostics: [{ kind: 1 }],
       },
     })}\n`);

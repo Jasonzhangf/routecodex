@@ -692,6 +692,19 @@ fn handle_responses(
             400,
         )
     })?;
+    if entry_protocol == "responses"
+        && continuation_owner == "relay"
+        && body.get("previous_response_id").is_some()
+    {
+        return Err(project_fault(
+            request,
+            RuntimeFault::new(
+                "continuation_unsupported",
+                "local relay continuation is not implemented",
+            ),
+            400,
+        ));
+    }
     if entry_protocol != "responses" && body.get("previous_response_id").is_some() {
         return Err(project_fault(
             request,
@@ -842,19 +855,6 @@ fn handle_responses(
         )
         .map_err(|fault| project_fault(request, fault, 598))?;
     emit_payload_console_events(&request_report.trace);
-    if entry_protocol == "responses"
-        && continuation_owner == "relay"
-        && body.get("previous_response_id").is_some()
-    {
-        return Err(project_fault(
-            request,
-            RuntimeFault::new(
-                "continuation_unsupported",
-                "local relay continuation is not implemented",
-            ),
-            400,
-        ));
-    }
     let request_scope = request_report.scope.clone();
     let semantic_body = request_report.provider_wire_value.ok_or_else(|| {
         project_fault(

@@ -63,6 +63,13 @@ function freezeBundle(value) {
     || Object.keys(value.pipelines).length !== PRODUCTION_CHAINS.length
     || !Array.isArray(value.nodes) || value.nodes.length === 0
     || !value.policies || typeof value.policies !== 'object' || Array.isArray(value.policies)
+    || Object.keys(value.policies).some(
+      (key) => !['direct_same_protocol', 'protocol_mismatch', 'sse_transport_owner'].includes(key),
+    )
+    || value.policies.direct_same_protocol !== true
+    || value.policies.protocol_mismatch !== 'fail_fast'
+    || typeof value.policies.sse_transport_owner !== 'string'
+    || value.policies.sse_transport_owner.length === 0
   ) {
     throw new CordisHostDaemonError('invalid_epoch_bundle', 'ExecutionEpochBundle fields are invalid');
   }

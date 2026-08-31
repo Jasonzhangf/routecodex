@@ -84,7 +84,11 @@ fn candidate() -> Value {
             {"node_id": "relay-response-1", "plan_hash": relay_response.hash, "input_resource": "relay.response.in", "output_resource": "relay.response.out", "allowed_edges": {}, "plan": relay_response},
             {"node_id": "error-1", "plan_hash": error.hash, "input_resource": "error.in", "output_resource": "error.out", "allowed_edges": {}, "plan": error}
         ],
-        "policies": {}
+        "policies": {
+            "direct_same_protocol": true,
+            "protocol_mismatch": "fail_fast",
+            "sse_transport_owner": "v4.transport.sse_plugin"
+        }
     })
 }
 

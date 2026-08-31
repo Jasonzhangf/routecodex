@@ -354,6 +354,10 @@ function checkMainlineEdges(mainlinePath = path.join(v4Root, 'docs/architecture/
     if (!edge.from || !edge.to || !edge.owner) {
       out.push(`mainline edge missing from/to/owner: ${JSON.stringify(edge)}`);
     }
+    // Design/pending edges describe the target graph and are not active
+    // runtime claims. Their owner may be intentionally unresolved until the
+    // edge is admitted; only active edges participate in executable binding.
+    if (edge.status !== 'active') continue;
     if (!allowedOwners.has(edge.owner)) {
       out.push(`mainline edge unregistered owner ${edge.owner} (${edge.from}->${edge.to})`);
     }

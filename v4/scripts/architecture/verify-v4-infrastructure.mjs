@@ -237,8 +237,8 @@ if (process.argv.includes('--red-self-test')) {
   }
   const payloadDigestLeak = structuredClone(input);
   payloadDigestLeak.runtime = payloadDigestLeak.runtime.replace(
-    '.map(sha256_control_digest)',
-    '.map(|payload| format!("sha256:{payload}"))',
+    'format!("sha256:{:x}", Sha256::digest(value.as_bytes()))',
+    'format!("sha256:{payload}")',
   );
   if (!validate(payloadDigestLeak).includes('runtime control digest embeds business payload')) {
     console.error('[v4_infrastructure] red self-test failed to detect business payload in control digest');

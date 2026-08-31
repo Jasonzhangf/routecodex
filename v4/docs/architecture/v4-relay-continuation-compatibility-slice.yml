@@ -30,7 +30,7 @@ surfaces:
       - v3_stage: request.relay_normalize
         v3_resource: v3.request.normal_payload
         v4_container: {family: RequestChainNode, role: request_inbound}
-        v4_checkpoint: {node_id: V4HubReqInbound03Normalized, semantic: normalized_request_identity_locked}
+        v4_checkpoint: {node_id: V4HubReqInbound02Normalized, semantic: normalized_request_identity_locked}
         v4_resource: v4.request.normal_payload
         verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime ProtocolParse/Normalize (request chain, runtime test-consumer)"
@@ -54,7 +54,7 @@ surfaces:
       - v3_stage: request.relay_governance
         v3_resource: v3.hub.tool_governance_truth
         v4_container: {family: RequestChainNode, role: request_chat_process}
-        v4_checkpoint: {node_id: V4HubReqChatProcess04Governed, semantic: governed_request}
+        v4_checkpoint: {node_id: V4HubReqChatProcess03Governed, semantic: governed_request}
         v4_resource: v4.request.normal_payload
         verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime Governance (request chain, runtime test-consumer)"
@@ -86,7 +86,7 @@ surfaces:
       - v3_stage: request.provider_semantic
         v3_resource: v3.request.provider_semantic
         v4_container: {family: RequestChainNode, role: request_outbound}
-        v4_checkpoint: {node_id: V4HubReqOutbound05ProviderSemantic, semantic: provider_semantic}
+        v4_checkpoint: {node_id: V4HubReqOutbound06ProviderSemantic, semantic: provider_semantic}
         v4_resource: v4.request.provider_semantic
         verification_gates: [v4_parity_gate_semantic_parity, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime SemanticProjection (runtime test-consumer)"
@@ -94,7 +94,7 @@ surfaces:
       - v3_stage: request.wire_build
         v3_resource: v3.provider.responses_wire_payload
         v4_container: {family: RequestChainNode, role: request_outbound}
-        v4_checkpoint: {node_id: V4ProviderReqCompat06Compat, semantic: provider_wire}
+        v4_checkpoint: {node_id: V4ProviderReqCompat07ProviderCompat, semantic: provider_wire}
         v4_resource: v4.request.provider_wire_payload
         verification_gates: [v4_parity_gate_plane_isolation, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime WireBuild + control-leak red test (runtime test-consumer)"
@@ -105,7 +105,7 @@ surfaces:
       - v3_stage: response.relay_provider_inbound
         v3_resource: v3.response.provider_raw
         v4_container: {family: ResponseChainNode, role: response_inbound}
-        v4_checkpoint: {node_id: V4ProviderSseIn01FrameBoundary, semantic: provider_raw}
+        v4_checkpoint: {node_id: V4TransportSsePlugin, semantic: provider_raw}
         v4_resource: v4.response.provider_raw
         verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime FrameParse/JsonParse (response chain, runtime test-consumer)"
@@ -113,7 +113,7 @@ surfaces:
       - v3_stage: response.relay_normalize
         v3_resource: v3.hub.response_semantic
         v4_container: {family: ResponseChainNode, role: response_inbound}
-        v4_checkpoint: {node_id: V4HubRespInbound02Parsed, semantic: parsed_response}
+        v4_checkpoint: {node_id: V4HubRespInbound03Normalized, semantic: parsed_response}
         v4_resource: v4.response.normal_payload
         verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime ProtocolDecode (response chain, runtime test-consumer)"
@@ -121,7 +121,7 @@ surfaces:
       - v3_stage: response.relay_response_process
         v3_resource: v3.hub.tool_governance_truth
         v4_container: {family: ResponseChainNode, role: response_chat_process}
-        v4_checkpoint: {node_id: V4HubRespChatProcess03Governed, semantic: governed_response}
+        v4_checkpoint: {node_id: V4HubRespChatProcess04Governed, semantic: governed_response}
         v4_resource: v4.response.normal_payload
         verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime ResponseGovernance/ToolHarvest (response chain, runtime test-consumer)"
@@ -129,7 +129,7 @@ surfaces:
       - v3_stage: response.continuation_commit
         v3_resource: v3.continuation.remote_binding
         v4_container: {family: ResponseChainNode, role: response_continuation}
-        v4_checkpoint: {node_id: V4ChatProcess03ContinuationCommit, semantic: continuation_saved}
+        v4_checkpoint: {node_id: V4RespContinuationCommitted, semantic: continuation_saved}
         v4_resource: v4.scope.session
         verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime ContinuationCommit real save at resp_chatprocess (runtime test-consumer)"
@@ -137,7 +137,7 @@ surfaces:
       - v3_stage: response.client_projection
         v3_resource: v3.response.client_payload
         v4_container: {family: ResponseChainNode, role: response_outbound}
-        v4_checkpoint: {node_id: V4HubRespOutbound04ClientSemantic, semantic: client_semantic}
+        v4_checkpoint: {node_id: V4HubRespOutbound05ClientSemantic, semantic: client_semantic}
         v4_resource: v4.response.normal_payload
         verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime ClientSemanticProjection (response chain, runtime test-consumer)"
@@ -207,7 +207,7 @@ surfaces:
       - v3_stage: streaming.relay_sse_in
         v3_resource: v3.sse.transport_raw_chunk
         v4_container: {family: ResponseChainNode, role: response_inbound}
-        v4_checkpoint: {node_id: V4ProviderSseIn01FrameBoundary, semantic: sse_frame_to_json}
+        v4_checkpoint: {node_id: V4TransportSsePlugin, semantic: sse_frame_to_json}
         v4_resource: v4.response.provider_raw
         verification_gates: [v4_parity_gate_plane_isolation]
         evidence: "node-graph.contract.json V4ProviderSseIn01FrameBoundary + ABS-GATE-29 hub_response_chain_mirror"
@@ -215,7 +215,7 @@ surfaces:
       - v3_stage: streaming.relay_sse_out
         v3_resource: v3.sse.transport_encoded_chunk
         v4_container: {family: ResponseChainNode, role: response_outbound}
-        v4_checkpoint: {node_id: V4ServerSseOut05FrameBoundary, semantic: json_to_sse_frame}
+        v4_checkpoint: {node_id: V4ServerFrame, semantic: json_to_sse_frame}
         v4_resource: v4.response.client_wire_payload
         verification_gates: [v4_parity_gate_plane_isolation]
         evidence: "node-graph.contract.json V4ServerSseOut05FrameBoundary + sse_in_sse_out_coupling forbidden"
@@ -223,7 +223,7 @@ surfaces:
       - v3_stage: streaming.continuation_never_at_sse_boundary
         v3_resource: v3.hub.continuation_ownership
         v4_container: {family: ResponseChainNode, role: response_continuation}
-        v4_checkpoint: {node_id: V4ChatProcess03ContinuationCommit, semantic: continuation_saved}
+        v4_checkpoint: {node_id: V4RespContinuationCommitted, semantic: continuation_saved}
         v4_resource: v4.scope.session
         verification_gates: [v4_compat_gate_relay_continuation, v4_parity_gate_plane_isolation]
         evidence: "node-graph.contract.json continuation_save_only_at V4HubRespChatProcess03Governed + sse_boundary_only"

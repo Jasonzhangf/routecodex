@@ -16,7 +16,16 @@
     "entrypoints": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}, "minProperties": 1},
     "pipelines": {"type": "object", "required": ["direct_request", "direct_response", "relay_request", "relay_response", "error"], "additionalProperties": false, "properties": {"direct_request": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "direct_response": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "relay_request": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "relay_response": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "error": {"type": "array", "items": {"type": "string"}, "minItems": 1}}},
     "nodes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/node"}},
-    "policies": {"type": "object", "additionalProperties": {"type": "object"}}
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direct_same_protocol", "protocol_mismatch", "sse_transport_owner"],
+      "properties": {
+        "direct_same_protocol": {"const": true},
+        "protocol_mismatch": {"const": "fail_fast"},
+        "sse_transport_owner": {"type": "string", "minLength": 1}
+      }
+    }
   },
   "$defs": {
     "node": {

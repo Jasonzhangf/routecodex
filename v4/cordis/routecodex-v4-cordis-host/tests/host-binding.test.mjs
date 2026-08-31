@@ -365,6 +365,7 @@ test('real Cordis fibers drive ordered Rust NodePluginPlan execution', async (t)
   const output = await host.executeNode(nodePlan.hash, {
     data: { steps: [] },
     control: {},
+    information: {},
   });
   assert.deepEqual(output.data, { steps: ['v4.test.echo'] });
   assert.deepEqual(output.control, {});
@@ -392,7 +393,11 @@ test('resource access violation retains its typed execution failure code', async
 
   await host.mount(entries.map((entry) => plugin(entry)));
   await assert.rejects(
-    host.executeNode(nodePlan.hash, { data: {}, control: 'not-a-control-carrier' }),
+    host.executeNode(nodePlan.hash, {
+      data: {},
+      control: 'not-a-control-carrier',
+      information: {},
+    }),
     (error) => (
       error instanceof CordisHostError
       && error.code === 'resource_access_violation'
@@ -418,11 +423,19 @@ test('execution plan hash mismatch fails before Rust handles run', async (t) => 
 
   await host.mount([plugin(nodePlan.entries[0])]);
   await assert.rejects(
-    host.executeNode('0'.repeat(64), { data: { steps: [] }, control: {} }),
+    host.executeNode('0'.repeat(64), {
+      data: { steps: [] },
+      control: {},
+      information: {},
+    }),
     (error) => error instanceof CordisHostError && error.code === 'plan_hash_mismatch',
   );
   await assert.rejects(
-    port.executeNode('0'.repeat(64), { data: { steps: [] }, control: {} }),
+    port.executeNode('0'.repeat(64), {
+      data: { steps: [] },
+      control: {},
+      information: {},
+    }),
     (error) => (
       error instanceof CordisHostError
       && error.code === 'plan_hash_mismatch'
@@ -450,7 +463,11 @@ test('unregistered plugin handle fails fast with typed execution failure', async
 
   await host.mount([plugin(ghost)]);
   await assert.rejects(
-    host.executeNode(nodePlan.hash, { data: { steps: [] }, control: {} }),
+    host.executeNode(nodePlan.hash, {
+      data: { steps: [] },
+      control: {},
+      information: {},
+    }),
     (error) => (
       error instanceof CordisHostError
       && error.code === 'unregistered_handle'
@@ -467,7 +484,12 @@ test('JS and Rust reject undeclared execution fields', async (t) => {
   const port = new RustNodeContainerPort({ binaryPath });
   t.after(() => port.close());
   assert.throws(
-    () => port.executeNode('0'.repeat(64), { data: {}, control: {}, extra: true }),
+    () => port.executeNode('0'.repeat(64), {
+      data: {},
+      control: {},
+      information: {},
+      extra: true,
+    }),
     (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
   );
 
@@ -475,7 +497,7 @@ test('JS and Rust reject undeclared execution fields', async (t) => {
     op: 'execute_node',
     request_id: 'raw-execution-field',
     plan_hash: '0'.repeat(64),
-    input: { data: {}, control: {}, extra: true },
+    input: { data: {}, control: {}, information: {}, extra: true },
   });
   assert.equal(response.ok, false);
   assert.equal(response.failure.resource_id, 'v4.node_container.lifecycle_failure');
@@ -497,7 +519,11 @@ test('execute after drain rejects invalid_state', async (t) => {
   await host.mount([plugin(nodePlan.entries[0])]);
   await host.drain();
   await assert.rejects(
-    host.executeNode(nodePlan.hash, { data: { steps: [] }, control: {} }),
+    host.executeNode(nodePlan.hash, {
+      data: { steps: [] },
+      control: {},
+      information: {},
+    }),
     (error) => error instanceof CordisHostError && error.code === 'invalid_state',
   );
   await host.dispose();
@@ -510,7 +536,11 @@ test('JS execution response decoder rejects malformed output', async (t) => {
   });
   t.after(() => port.close());
   await assert.rejects(
-    withTimeout(port.executeNode('0'.repeat(64), { data: {}, control: {} })),
+    withTimeout(port.executeNode('0'.repeat(64), {
+      data: {},
+      control: {},
+      information: {},
+    })),
     (error) => error instanceof CordisHostError
       && error.code === 'binding_protocol'
       && error.message === 'diagnostic fact fields must be strings',
@@ -524,7 +554,11 @@ test('JS execution response decoder rejects missing output', async (t) => {
   });
   t.after(() => port.close());
   await assert.rejects(
-    withTimeout(port.executeNode('0'.repeat(64), { data: {}, control: {} })),
+    withTimeout(port.executeNode('0'.repeat(64), {
+      data: {},
+      control: {},
+      information: {},
+    })),
     (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
   );
 });
@@ -536,7 +570,11 @@ test('execution failure response rejects top-level node identity', async (t) => 
   });
   t.after(() => port.close());
   await assert.rejects(
-    withTimeout(port.executeNode('0'.repeat(64), { data: {}, control: {} }), 1_000),
+    withTimeout(port.executeNode('0'.repeat(64), {
+      data: {},
+      control: {},
+      information: {},
+    }), 1_000),
     (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
   );
 });

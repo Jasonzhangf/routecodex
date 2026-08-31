@@ -73,7 +73,7 @@ export const GATE_INPUT_SETS = {
 };
 const GATE_MATRIX_HASHES = {
   architecture: 'sha256:cf8e7fa9a91a53d868681516d7adeafc1de84edcf4cab5d11bf8170dc1cef87d',
-  red: 'sha256:465a132dff4f7a183b943b9630fea127909c79b2fb9cfc14bc39a579a2b49d6c',
+  red: 'sha256:d2904a0d75c7a644b711f9bec64777d953c08071bbf2015c7eef049cbac51a46',
   packageScripts: 'sha256:36b7f79182f3f55d2ce5efc885880ffe3daa9f25334a2117d4e305d814a96762',
 };
 const PREFLIGHT_PREFIXES = new Map([

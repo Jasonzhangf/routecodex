@@ -2443,9 +2443,10 @@ pub fn project_runtime_fault_with_policy(
     let scope = chain.scope().clone();
     let mut center = ErrorCenter::new(scope);
     let node = fault.node_id.as_deref().unwrap_or("unknown");
+    let control_digest = sha256_control_digest(&format!("fault:{}:node:{}", fault.code, node));
     chain.raise(
         &fault.code,
-        Some("sha256:execution-fault"),
+        Some(&control_digest),
         Some(&format!("node:{node}")),
     )?;
     let captured = chain.capture()?;
@@ -2454,6 +2455,12 @@ pub fn project_runtime_fault_with_policy(
     chain.apply_policy(policy)?;
     chain.decide(decision)?;
     chain.project(&fault.message)
+}
+
+/// Hash only typed error/control identity. Business payload bytes never enter
+/// the error-chain digest.
+fn sha256_control_digest(value: &str) -> String {
+    format!("sha256:{:x}", Sha256::digest(value.as_bytes()))
 }
 
 // ---------------------------------------------------------------------------

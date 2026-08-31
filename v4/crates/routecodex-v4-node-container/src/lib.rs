@@ -9,8 +9,7 @@ use routecodex_v4_cordis_bridge::{
     execute_plan, BridgeError, HandleRegistry, NodeExecutionInput, NodeExecutionOutput,
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
-use serde::Deserialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -86,7 +85,15 @@ struct CompiledExecutionEpochCandidate {
     entrypoints: HashMap<String, String>,
     pipelines: HashMap<String, Vec<String>>,
     nodes: Vec<CompiledExecutionNode>,
-    policies: Value,
+    policies: ExecutionPolicies,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecutionPolicies {
+    direct_same_protocol: bool,
+    protocol_mismatch: String,
+    sse_transport_owner: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,19 +121,23 @@ fn is_sha256(value: &str) -> bool {
 /// order, resolves every typed handle before publication, and never compiles
 /// or sorts authoring input.
 pub fn materialize_execution_epoch_bundle(
-    value: &Value,
+    value: &impl Serialize,
     expected_graph_hash: &str,
     expected_manifest_hash: &str,
     registry: &dyn HandleRegistry,
 ) -> Result<ExecutionEpochBundle, MaterializationError> {
-    let candidate: CompiledExecutionEpochCandidate = serde_json::from_value(value.clone())
+    let encoded = serde_json::to_vec(value)
+        .map_err(|error| MaterializationError::Parse(error.to_string()))?;
+    let candidate: CompiledExecutionEpochCandidate = serde_json::from_slice(&encoded)
         .map_err(|error| MaterializationError::Parse(error.to_string()))?;
     if candidate.schema_version != 1
         || candidate.candidate_id.trim().is_empty()
         || candidate.epoch_id.trim().is_empty()
         || candidate.plan_epoch == 0
         || !is_sha256(&candidate.plugin_artifact_set_hash)
-        || !candidate.policies.is_object()
+        || !candidate.policies.direct_same_protocol
+        || candidate.policies.protocol_mismatch != "fail_fast"
+        || candidate.policies.sse_transport_owner.trim().is_empty()
     {
         return Err(MaterializationError::InvalidIdentity(
             "bundle identity".to_string(),

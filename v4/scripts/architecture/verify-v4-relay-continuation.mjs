@@ -157,9 +157,9 @@ function validate(slice, verification, resourceMap, v3ResourceMap, nodeGraph, sk
 
   // Continuation contract lock.
   const respSemantics = nodeGraph.v4_hub_response_chain?.semantics ?? {};
-  if (respSemantics.continuation_save_only_at !== 'V4HubRespChatProcess03Governed') {
+  if (respSemantics.continuation_save_only_at !== 'V4HubRespChatProcess04Governed') {
     failures.push(
-      `node-graph: continuation_save_only_at must be V4HubRespChatProcess03Governed (got ${respSemantics.continuation_save_only_at})`,
+      `node-graph: continuation_save_only_at must be V4HubRespChatProcess04Governed (got ${respSemantics.continuation_save_only_at})`,
     );
   }
   const hookServertool = nodeGraph.hook_queue_schema?.servertool_exception ?? {};
@@ -169,7 +169,7 @@ function validate(slice, verification, resourceMap, v3ResourceMap, nodeGraph, sk
     );
   }
   const selectionFacts = nodeGraph.protocol_same_stage_rule?.selection_facts ?? [];
-  for (const fact of SELECTION_FACTS) {
+  for (const fact of ['execution_lane', 'client_protocol', 'provider_wire_protocol', 'target_model']) {
     if (!selectionFacts.includes(fact)) {
       failures.push(`node-graph: selection_facts missing ${fact}`);
     }
@@ -292,12 +292,12 @@ function runSelfTest() {
       g.protocol_same_stage_rule.forbidden_selection_facts = ['model_prefix', 'payload_shape_guess'];
     }],
     ['skeleton restore bound to request outbound', ({ skeletonPlan: p }) => {
-      const requestChain = p.chains.find((chain) => chain.chain_id === 'request');
-      requestChain.nodes[4].plugins.push({ plugin_id: 'continuation_restore', effects: ['control'] });
+      const requestChain = p.chains.find((chain) => chain.chain_id === 'relay_request');
+      requestChain.nodes.at(-1).plugins.push({ plugin_id: 'continuation_restore', effects: ['control'] });
     }],
     ['skeleton commit bound to response outbound', ({ skeletonPlan: p }) => {
-      const responseChain = p.chains.find((chain) => chain.chain_id === 'response');
-      responseChain.nodes[3].plugins.push({ plugin_id: 'continuation_commit', effects: ['control'] });
+      const responseChain = p.chains.find((chain) => chain.chain_id === 'relay_response');
+      responseChain.nodes.at(-1).plugins.push({ plugin_id: 'continuation_commit', effects: ['control'] });
     }],
     ['control-leak guard removed from wire builder', ({ runtimeSource }) => ({
       runtimeSource: runtimeSource.replace(

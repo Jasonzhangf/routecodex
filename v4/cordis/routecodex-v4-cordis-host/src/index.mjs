@@ -87,13 +87,20 @@ function decodeExecutionOutput(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new CordisHostError('binding_protocol', 'execution output must be an object');
   }
-  const allowedKeys = new Set(['data', 'control', 'diagnostics']);
+  const allowedKeys = new Set(['data', 'control', 'information', 'diagnostics']);
   const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
   if (unknown) {
     throw new CordisHostError('binding_protocol', `unknown execution output field ${unknown}`);
   }
-  if (!Object.hasOwn(value, 'data') || !Object.hasOwn(value, 'control')) {
-    throw new CordisHostError('binding_protocol', 'execution output requires data and control');
+  if (
+    !Object.hasOwn(value, 'data')
+    || !Object.hasOwn(value, 'control')
+    || !Object.hasOwn(value, 'information')
+  ) {
+    throw new CordisHostError(
+      'binding_protocol',
+      'execution output requires data, control, and information',
+    );
   }
   if (!Array.isArray(value.diagnostics)) {
     throw new CordisHostError('binding_protocol', 'execution diagnostics must be an array');
@@ -107,13 +114,20 @@ function validateExecutionInput(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new CordisHostError('binding_protocol', 'execution input must be an object');
   }
-  const allowedKeys = new Set(['data', 'control']);
+  const allowedKeys = new Set(['data', 'control', 'information']);
   const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
   if (unknown) {
     throw new CordisHostError('binding_protocol', `unknown execution input field ${unknown}`);
   }
-  if (!Object.hasOwn(value, 'data') || !Object.hasOwn(value, 'control')) {
-    throw new CordisHostError('binding_protocol', 'execution input requires data and control');
+  if (
+    !Object.hasOwn(value, 'data')
+    || !Object.hasOwn(value, 'control')
+    || !Object.hasOwn(value, 'information')
+  ) {
+    throw new CordisHostError(
+      'binding_protocol',
+      'execution input requires data, control, and information',
+    );
   }
 }
 

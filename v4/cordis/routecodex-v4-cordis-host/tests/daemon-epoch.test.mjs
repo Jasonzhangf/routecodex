@@ -61,7 +61,11 @@ const bundle = (candidateId, epochId, planEpoch = Number(epochId.split('-').at(-
     node(candidateId, epochId, 'relay-resp', 'relay_response'),
     node(candidateId, epochId, 'err', 'error'),
   ],
-  policies: {},
+  policies: {
+    direct_same_protocol: true,
+    protocol_mismatch: 'fail_fast',
+    sse_transport_owner: 'routecodex-v4-standard-plugins::SseTransportFrame',
+  },
 });
 const command = (kind, commandId, payload, extra = {}) => ({
   schema_version: 1,
