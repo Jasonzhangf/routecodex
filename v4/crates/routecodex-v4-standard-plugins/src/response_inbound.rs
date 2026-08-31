@@ -164,7 +164,9 @@ pub enum ProviderSseEventDisposition {
 /// Adjacent provider protocol codec. Transport framing is already complete;
 /// this owner parses one Responses event into its semantic object.
 pub fn decode_provider_sse_frame(frame: &[u8]) -> Result<DecodedProviderSseFrame, String> {
-    let text = std::str::from_utf8(frame)
+    let normalized = routecodex_v4_provider::normalize_provider_sse_frame("responses", frame)
+        .map_err(|error| format!("provider SSE normalization failed: {}", error.message))?;
+    let text = std::str::from_utf8(&normalized)
         .map_err(|error| format!("provider SSE frame is not UTF-8: {error}"))?;
     let mut event = None;
     let mut data = Vec::new();
@@ -179,10 +181,9 @@ pub fn decode_provider_sse_frame(frame: &[u8]) -> Result<DecodedProviderSseFrame
     let raw = data.join("\n");
     let semantic: Value = serde_json::from_str(&raw)
         .map_err(|error| format!("provider SSE data is invalid JSON: {error}"))?;
-    let object = semantic
+    semantic
         .as_object()
         .ok_or_else(|| "provider SSE semantic object must be an object".to_string())?;
-    reject_control_fields(object)?;
     let semantic_type = semantic
         .get("type")
         .and_then(Value::as_str)

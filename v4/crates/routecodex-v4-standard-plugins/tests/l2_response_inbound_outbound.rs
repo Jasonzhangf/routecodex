@@ -265,12 +265,13 @@ fn provider_sse_codec_rejects_failed_event_without_error_truth() {
 }
 
 #[test]
-fn provider_sse_codec_rejects_control_extra_fields_before_client_projection() {
-    let error = decode_provider_sse_frame(
+fn provider_sse_codec_projects_control_extra_fields_out_of_client_payload() {
+    let decoded = decode_provider_sse_frame(
         b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\",\"extra_fields\":{\"provider\":\"openai\"}}\n\n",
     )
-    .expect_err("diagnostic extra_fields must not enter response semantic payload");
-    assert!(error.contains("extra_fields"));
+    .expect("diagnostic extra_fields are consumed by provider normalization");
+    assert_eq!(decoded.semantic["delta"], "hi");
+    assert!(decoded.semantic.get("extra_fields").is_none());
 }
 
 #[test]
