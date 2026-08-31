@@ -230,6 +230,10 @@ fn multi_turn_tool_history_with_current_image_projects_full_anthropic_wire_shape
     assert_eq!(assistant["role"], "assistant");
     assert_eq!(
         assistant["content"][0],
+        json!({"type":"thinking", "thinking":"需要运行 git status"})
+    );
+    assert_eq!(
+        assistant["content"][1],
         json!({"type":"tool_use","id":"call_1","name":"bash","input":{"command":"git status"}})
     );
     // reasoning_content 不得泄漏
@@ -257,6 +261,38 @@ fn multi_turn_tool_history_with_current_image_projects_full_anthropic_wire_shape
             "source":{"type":"base64","media_type":"image/png","data":"AAAA"}
         })
     );
+}
+
+#[test]
+fn anthropic_wire_preserves_reasoning_only_assistant_content() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"glm-5.3",
+        "stream": false,
+        "messages": [
+            {"role":"assistant", "content": null, "reasoning_content":"先检查配置"},
+            {"role":"user", "content":"继续"}
+        ]
+    }))
+    .expect("reasoning-only assistant must remain a valid Anthropic message");
+
+    assert_eq!(
+        provider_request["messages"][0],
+        json!({
+            "role":"assistant",
+            "content":[{"type":"thinking", "thinking":"先检查配置"}]
+        })
+    );
+}
+
+#[test]
+fn anthropic_wire_rejects_non_string_reasoning_content() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"glm-5.3",
+        "messages":[{"role":"assistant", "content":null, "reasoning_content":[]}]
+    }))
+    .expect_err("malformed reasoning must fail at the codec boundary");
+
+    assert!(error.to_string().contains("reasoning_content"), "{error}");
 }
 
 #[test]

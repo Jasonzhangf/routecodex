@@ -92,7 +92,24 @@ pub(super) fn chat_messages_as_anthropic_messages(
             }));
             continue;
         }
-        let mut content = responses_content_as_anthropic_content(object.get("content"))?;
+        let mut content = Vec::new();
+        if let Some(reasoning_content) = object.get("reasoning_content") {
+            if let Some(reasoning_content) = reasoning_content.as_str() {
+                if !reasoning_content.is_empty() {
+                    content.push(json!({
+                        "type":"thinking",
+                        "thinking":reasoning_content
+                    }));
+                }
+            } else if !reasoning_content.is_null() {
+                return Err(V3AnthropicCodecError::MalformedField {
+                    field: "reasoning_content",
+                });
+            }
+        }
+        content.extend(responses_content_as_anthropic_content(
+            object.get("content"),
+        )?);
         if let Some(tool_calls) = object.get("tool_calls").and_then(Value::as_array) {
             for tool_call in tool_calls {
                 content.push(openai_chat_tool_call_as_anthropic_tool_use(tool_call)?);
