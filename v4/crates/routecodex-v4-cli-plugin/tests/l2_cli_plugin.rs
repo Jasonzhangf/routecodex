@@ -37,9 +37,9 @@ fn positive_response_inbound_node_permissions_locked() {
     // the response inbound node so the CLI's `node-permissions` subcommand
     // can render its permission table deterministically.
     let reads =
-        routecodex_v4_standard_plugins::standard_node_allowed_reads("V4HubRespInbound02Parsed");
+        routecodex_v4_standard_plugins::standard_node_allowed_reads("V4HubRespInbound03Normalized");
     let writes =
-        routecodex_v4_standard_plugins::standard_node_allowed_writes("V4HubRespInbound02Parsed");
+        routecodex_v4_standard_plugins::standard_node_allowed_writes("V4HubRespInbound03Normalized");
     assert!(!reads.is_empty(), "response inbound must publish reads");
     assert!(!writes.is_empty(), "response inbound must publish writes");
 }

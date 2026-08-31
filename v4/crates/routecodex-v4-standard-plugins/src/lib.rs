@@ -416,6 +416,8 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         "V4Error06ClientProjected" => vec!["v4.control.error_chain".to_string()],
         "V4HubReqExecution04Planned" => Vec::new(),
         "V4HubReqTarget05Resolved" => vec!["v4.control.route_facts".to_string()],
+        "V4Router05RequestClassified" => vec!["v4.control.route_facts".to_string()],
+        "V4Router06SelectionPlan" => vec!["v4.control.target_selection".to_string()],
         _ => Vec::new(),
     }
 }
@@ -448,6 +450,7 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
         "V4Error06ClientProjected" => vec!["v4.control.error_chain".to_string()],
         "V4HubReqExecution04Planned" => vec!["v4.control.route_facts".to_string()],
         "V4HubReqTarget05Resolved" => vec!["v4.control.target_selection".to_string()],
+        "V4Router05RequestClassified" | "V4Router06SelectionPlan" => Vec::new(),
         _ => Vec::new(),
     }
 }

@@ -63,8 +63,8 @@ fn authoring(plugin_id: &str) -> AuthoringPlugin {
             selection_group: None,
             node_selector: NodeSelector {
                 role_id: "request_inbound".to_string(),
-                node_id: "V4HubReqInbound03Normalized".to_string(),
-                position: 3,
+                node_id: "V4HubReqInbound02Normalized".to_string(),
+                position: 2,
             },
             services_provided: vec![],
             inject: vec![],
@@ -77,10 +77,10 @@ fn authoring(plugin_id: &str) -> AuthoringPlugin {
 
 fn compile_plan(plugin_id: &str) -> Result<NodePluginPlan, PlanError> {
     compile_node_plan(
-        "V4HubReqInbound03Normalized",
+        "V4HubReqInbound02Normalized",
         "request_inbound",
         "request",
-        3,
+        2,
         &[authoring(plugin_id)],
         &allowed_reads(),
         &allowed_writes(),
