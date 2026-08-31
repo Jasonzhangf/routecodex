@@ -5,11 +5,11 @@
   "fix_candidate_id": "v4-cordis-edge-candidate-current",
   "effectiveness_id": "v4-cordis-edge-effectiveness-current",
   "mainline_ref": "v4-cordis",
-  "candidate_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
-  "merge_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
-  "candidate_tree_hash": "7e5a0ce52dbd9640203fd0c3c0c298a92b4b38e8",
-  "merged_tree_hash": "7e5a0ce52dbd9640203fd0c3c0c298a92b4b38e8",
+  "candidate_commit": "dbf569de040b34361c980e27849c00726d90d912",
+  "merge_commit": "dbf569de040b34361c980e27849c00726d90d912",
+  "candidate_tree_hash": "3c94284066ef9f329371730ce00a229a2c07c3d7",
+  "merged_tree_hash": "3c94284066ef9f329371730ce00a229a2c07c3d7",
   "change_identity": "exact",
   "result": "pass",
-  "created_at": "2026-08-28T04:58:10Z"
+  "created_at": "2026-08-31T18:30:00Z"
 }
