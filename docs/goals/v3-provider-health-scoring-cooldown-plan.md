@@ -8,7 +8,7 @@
 
 当前基线：`main` / `origin/main` at `dfbfa79f2`。
 
-当前实施状态：source-controlled runtime pending live replay；workspace build 与 provider key health 定向合同已通过，architecture 全量 gate、全量 runtime 合同、安装/重启/在线 replay/DSH Review 尚未闭环。
+当前实施状态：source-controlled runtime pending live replay；workspace build 与 provider key health 定向合同已通过，architecture 全量 gate、全量 runtime 合同、安装/重启/在线 replay/AGY Review 尚未闭环。
 
 ## 可直接执行的 `/goal` 提示词
 
@@ -16,25 +16,25 @@
 /goal
 按 docs/design/v3-provider-health-scoring-cooldown-design.md 实现 V3 Provider-owned key 级健康治理，并按本计划完成验证与交付。
 
-硬约束：Error 唯一生成 typed failure action；Provider health 唯一修改 score、streak、cooldown、probe；Target 只读 scheduling projection；Virtual Router 不读写 health。不可恢复错误立即进入明确 global cooldown；可恢复错误第 3 次才 cooldown；health-neutral 不计入 score/streak。cooldown 必须持久化，重启只允许 probe；probe failure 保持 blocked，probe success 才恢复并使用 recovery floor。success 涨分，score 只调整 effective priority，正向健康调整不超过 configured priority 的 50%，weight 只在同 effective-priority bucket 内生效，cooldown key 永不被选中。控制状态不得进入 provider/client normal payload；禁止 fallback、silent strip、请求侧 cleanup、VR re-entry 和第二套 scheduler。
+硬约束：Error 唯一生成 typed failure action；Provider health 唯一修改 score、streak、cooldown、probe；Target 只读 scheduling projection；Virtual Router 不读写 health。健康分基于 configured priority，范围 0..150；正常 HTTP 响应 +1；可恢复错误（含 502）-5；401/403 -20；只有 score=0 才 cooldown。cooldown 必须持久化，重启只允许 probe；probe failure 保持 blocked，probe success 恢复到 configured priority。priority 数字越大越优先，只有最高可用 priority 的完全相同桶参与调度；health 只在同桶内作为权重信号。控制状态不得进入 provider/client normal payload；禁止 fallback、silent strip、请求侧 cleanup、VR re-entry 和第二套 scheduler。
 
-执行顺序：先更新并验证 resource/function/mainline/verification map、wiki/manifest；再实现 classification/action、key health、persistence/probe、scheduling projection、runtime 接线；随后跑 red/green 正反测试、fmt/clippy/build 和全部架构 gate；最后 global install、一次聚合 restart、全部成员 health、真实旧样本 replay、DSH Review、evidence/handoff、精准 commit/push、MEMORY 收口。任何 gate、在线验证或 Review 未通过，不得宣称完成。
+执行顺序：先更新并验证 resource/function/mainline/verification map、wiki/manifest；再实现 classification/action、key health、persistence/probe、scheduling projection、runtime 接线；随后跑 red/green 正反测试、fmt/clippy/build 和全部架构 gate；最后 global install、一次聚合 restart、全部成员 health、真实旧样本 replay、AGY Review、evidence/handoff、精准 commit/push、MEMORY 收口。任何 gate、在线验证或 Review 未通过，不得宣称完成。
 
-完成信号：所有 owner/edge/gate 绑定真实 symbol；recoverable 1/2/3、irrecoverable、success/probe、scope isolation、persistence failure、priority-first/same-priority scheduling、payload isolation 和 no-VR-reentry 均有证据；global install、restart、health、online replay、DSH Review PASS 全部记录在 evidence 中。
+完成信号：所有 owner/edge/gate 绑定真实 symbol；502/401/403 计分、score=0 cooldown、success/probe、100-call window、scope isolation、persistence failure、priority-first/same-priority scheduling、payload isolation 和 no-VR-reentry 均有证据；global install、restart、health、online replay、AGY Review PASS 全部记录在 evidence 中。
 ```
 
 ## 1. 目标与验收标准
 
-实现 Provider-owned key health state：错误分类驱动 recovery action；不可恢复错误进入持久化 global cooldown；可恢复错误累计三次后 cooldown；重启只允许 probe 恢复；success/failure 更新 key score；按较大的 effective priority 优先调度，weight 只在同 effective-priority bucket 内生效。
+实现 Provider-owned key health state：错误分类驱动 recovery action；score=0 才进入持久化 global cooldown；重启只允许 probe 恢复；success/failure 更新 key score；按较大的 configured priority 优先调度，health weight 只在同 priority bucket 内生效。
 
 验收：
 
-- 相同 key 的 recoverable failure 第 1/2 次不 cooldown，第 3 次 cooldown；
+- 相同 key 的每次 recoverable failure（含 502）扣 5，只有 score 到 0 才 cooldown；401/403 每次扣 20；
 - 不同 key/session/model 不错误合并；
 - irrecoverable action 直接进入正确 global scope；
 - cooldown 在 restart 后仍阻断，probe failure 不恢复，probe success 才恢复；
 - success 提升 score，probe success 使用 recovery floor，不瞬间满分；
-- 正向 health uplift 不超过 configured priority 的 50%，score/cooldown 不改变 route-tier 身份；cooldown key 永不被选中；
+- score 不改变 configured priority；只在同 priority 桶内参与权重；cooldown key 永不被选中；
 - Target 消费 typed scheduling projection，Router 不拥有 health mutation；
 - score/cooldown/probe 不进入 provider/client payload；
 - 所有 map、manifest、wiki、gate 与真实 symbols 对齐。
@@ -66,7 +66,7 @@
 1. Owner-first：Error 产 action；Provider health 唯一 mutation；Target 只读 projection；Router 只产 route plan。
 2. Classification-first：先分 recoverable/irrecoverable/health-neutral，再执行计数、score、cooldown。
 3. Cooldown-gates-score：score 不能绕过 cooldown；cooldown deadline 不能代替 probe success。
-4. Priority-first：较大的 numeric effective priority 优先；score 只能在已选 route tier 内调整 effective priority，正向调整按 configured priority 的 50% 向下取整封顶。
+4. Priority-first：较大的 numeric configured priority 优先；只保留最高可用 priority 的完全相同桶；score 不改变 priority，只进入同桶权重。
 5. Side-channel-only：health state、score、probe、routing state 不进 normal payload。
 6. No fallback：错误显式进入 Error chain；不靠协议旁路、payload 修补或第二 scheduler 补偿。
 
@@ -128,8 +128,8 @@
 1. 增加 `V3ProviderKeyHealthState`，identity 为 provider + auth key + model；同一 key 的不同 model 必须独立计分、冷却和 probe。
 2. 增加 `score_milli`、failure/success streak、last timestamps、generation、scope/class。
 3. 实现 success/failure/probe score mutation。
-4. 固化默认 delta：success +20、recoverable -100、irrecoverable -400、probe failure -50；实际值经 manifest/policy 注入。
-5. 固化 score clamp 0..1500；health-adjusted priority 不超过正 configured priority 的 150%。
+4. 固化默认 delta：success +1、recoverable -5、account 401/403 -20、probe failure -5；实际值经 typed action 注入。
+5. 固化 score clamp 0..150；configured priority 是基线；success +1、recoverable -5、401/403 -20。
 6. probe success 使用 recovery floor，不直接恢复满分。
 7. 普通 recoverable cooldown 绑定 provider+auth key+model，跨 session 持久化并由对应 model probe 恢复；只有显式 request-local action 才保持 session isolation。
 
@@ -158,8 +158,8 @@
 
 1. 增加 `V3ProviderSchedulingProjection`。
 2. availability/cooldown 先过滤；score 不得改变 blocked 结果。
-3. 只保留最高可用 priority bucket。
-4. equal effective priority 使用 `effective_weight = max(base_weight, 1)`。
+3. 只保留最高可用 configured priority 的完全相同 bucket。
+4. equal priority 使用 `effective_weight = max(base_weight, 1) * max(score, 1)`。
 5. 使用 deterministic SWRR/tie-break；不引入 randomness。
 6. provider failure 后 target-local reselect；禁止重新进入 Virtual Router。
 7. score projection 只通过 typed side-channel 进入 Target。
@@ -190,9 +190,9 @@
 4. global install；
 5. `routecodex restart --port <locator-port>` 一次；
 6. 验证全部成员 `/health`；
-7. 真实旧样本 replay：不可恢复 global cooldown、可恢复三次、restart probe fail/success、same-priority key distribution；
+7. 真实旧样本 replay：502/401/403 score 变化、score=0 cooldown、restart probe fail/success、same-priority key distribution；
 8. 检查 runtime logs/canonical sample evidence；
-9. DSH Review；
+9. AGY Review；
 10. 仅在 review PASS 后精准 commit/push。
 
 任一代码、测试、构建或运行配置在 review 后修改，旧证据和 PASS 失效，必须从受影响 gate 重跑。
@@ -202,12 +202,12 @@
 | Area | Positive | Negative |
 | --- | --- | --- |
 | Classification | action matches class/recovery | caller/store cannot reclassify |
-| Recoverable | failures 1/2 score down, 3 cooldown | 2 failures never cooldown |
+| Recoverable | each failure -5, score=0 cooldown | one 502 never cooldown |
 | Irrecoverable | immediate scoped global cooldown | not same-provider retry |
 | Success | score rises, streak resets | success cannot bypass active global cooldown |
 | Probe | success re-admits at recovery floor | failure keeps blocked/reschedules |
 | Scope | key/session/model isolation | A1+B2 never combine accidentally |
-| Scheduling | higher numeric effective priority wins; positive health uplift is capped at 150% of configured priority | unbounded health uplift cannot dominate; zero priority gets no positive uplift |
+| Scheduling | higher numeric configured priority wins; score weights only equal-priority candidates | health cannot cross priority buckets |
 | Availability | cooldown key excluded | low score alone does not mean blocked |
 | Persistence | restart retains state | decode/lock failure != available |
 | Architecture | typed projection only | score/cooldown absent from payload; no VR re-entry |
@@ -228,5 +228,5 @@
 - classification/action/score/cooldown/probe/scheduling 全部有正反测试；
 - global install、aggregate restart、全部成员 health、真实旧样本 replay 有证据；
 - provider/client payload 无 health control 字段；
-- DSH Review 明确 PASS；
+- AGY Review 明确 PASS；
 - evidence/handoff/commit/MEMORY 收口完成。

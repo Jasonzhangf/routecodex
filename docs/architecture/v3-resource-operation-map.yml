@@ -1046,8 +1046,10 @@ resources:
     owner_node: V3ProviderCooldownProbeState
     identity: [providerId, authAlias]
     semantic_contract:
-      ordinary_failure_threshold: 3 consecutive failures
-      configurable_account_failure_threshold: provider_error_action_policy max_attempts
+      health_window: latest 100 calls for this provider+authAlias+model
+      score_contract: clamp(configured_priority + sum(deltas), 0, 150)
+      deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
+      cooldown_condition: score == 0
       revival_rule: only a successful provider transport probe may remove cooldown state
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
       generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block
@@ -1064,7 +1066,7 @@ resources:
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStore
     identity: [providerId, authAlias, modelId]
-    allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure, V3ProviderHealthStore::record_provider_failure_in_session_with_policy, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
+    allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error, V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_key_success, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-server]
     may_enter_provider_body: false
@@ -1175,7 +1177,8 @@ resources:
     semantic_contract:
       source_state: v3.provider.key_health_state
       cross_model_same_key: isolated
-      priority_contract: effective_priority equals configured_priority; health controls availability and diagnostics but never crosses configured priority buckets
+      priority_contract: higher configured priority wins; only exactly equal highest available priority candidates are weighted; health never changes priority
+      weight_contract: effective_weight_milli = max(baseWeight, 1) * max(score, 1)
       forbidden_consumers: [request.normal_payload, response.client_payload, MetadataCenter]
     allowed_writers: [V3ProviderHealthStore::scheduling_projection]
     allowed_readers: [V3TargetInterpreter::select_available_with_health]

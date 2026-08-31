@@ -344,17 +344,17 @@ impl V3TargetInterpreter {
                 .target_plan
                 .len()
                 .saturating_sub(route_tier_index);
-            let effective_priority = (route_tier_rank as i32)
-                .saturating_mul(1_000_000)
-                .saturating_add(candidate.priority);
-            let projection = scheduling.scheduling_projection(
+            let route_priority = (route_tier_rank as i32).saturating_mul(1_000_000);
+            let mut projection = scheduling.scheduling_projection(
                 &candidate.provider_id,
                 &candidate.auth_alias,
                 &candidate.model_id,
-                effective_priority,
+                candidate.priority,
                 candidate.weight,
                 now_ms,
             );
+            projection.effective_priority =
+                route_priority.saturating_add(projection.effective_priority);
             if projection.available {
                 if context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
                     .is_some()

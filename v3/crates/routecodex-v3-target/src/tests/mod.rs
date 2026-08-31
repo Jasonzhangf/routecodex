@@ -283,14 +283,15 @@ fn direct_provider_model_never_selects_an_unavailable_candidate_without_a_scope_
             base_weight: u32,
             _now_ms: u64,
         ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
-            let mut projection = routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
-                provider_id,
-                auth_alias,
-                model_id,
-                priority,
-                1_000,
-                base_weight,
-            );
+            let mut projection =
+                routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
+                    provider_id,
+                    auth_alias,
+                    model_id,
+                    priority,
+                    1_000,
+                    base_weight,
+                );
             projection.available = false;
             projection
         }
@@ -313,7 +314,9 @@ fn direct_provider_model_never_selects_an_unavailable_candidate_without_a_scope_
             },
         )
         .unwrap();
-    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
@@ -322,7 +325,10 @@ fn direct_provider_model_never_selects_an_unavailable_candidate_without_a_scope_
     let exhausted = target
         .select_available_with_health(expanded, &UnavailableWithoutScope, 0, 0)
         .expect_err("unavailable direct candidate must remain unavailable");
-    assert_eq!(exhausted.attempted_candidates, vec!["a:ka:m:health_cooldown"]);
+    assert_eq!(
+        exhausted.attempted_candidates,
+        vec!["a:ka:m:health_cooldown"]
+    );
 }
 
 #[test]
@@ -807,7 +813,10 @@ fn nested_forwarder_expands_and_reselects_inside_same_route_hit() {
         .provider_request_cleanup
         .historical_fields
         .is_empty());
-    assert_eq!(expanded.candidates[1].compatibility_profile.as_deref(), Some("chat:minimax"));
+    assert_eq!(
+        expanded.candidates[1].compatibility_profile.as_deref(),
+        Some("chat:minimax")
+    );
     assert_eq!(
         expanded.candidates[1]
             .provider_request_cleanup

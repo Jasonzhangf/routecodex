@@ -1,8 +1,7 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderErrorFingerprint,
-    V3ProviderHealthScope,
+    build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderHealthScope,
 };
 use serde_json::json;
 
@@ -162,7 +161,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
 }
 
 #[test]
-fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
+fn provider_failure_policy_uses_key_health_score_instead_of_session_threshold() {
     let manifest = account_threshold_manifest();
     for status in [401, 403] {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -172,7 +171,11 @@ fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
             &format!("account-threshold-{status}"),
         )
         .unwrap();
-        for index in 0..2 {
+        health
+            .store()
+            .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 99)
+            .expect("initial health projection");
+        for index in 0..5 {
             let record = health
                 .record_provider_failure_record_with_policy(
                     None,
@@ -191,11 +194,15 @@ fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
                 )
                 .unwrap();
             assert_eq!(record.failure_count, (index + 1) as u32);
-            assert_eq!(
-                record.state,
-                if index == 0 { "healthy" } else { "cooldown" }
-            );
+            assert_eq!(record.state, "healthy");
         }
+        assert!(
+            !health
+                .store()
+                .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 200)
+                .expect("health projection")
+                .available
+        );
     }
 
     let other_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -205,7 +212,11 @@ fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
         "ordinary-threshold-session",
     )
     .unwrap();
-    for index in 0..3 {
+    other_health
+        .store()
+        .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 199)
+        .expect("initial health projection");
+    for index in 0..20 {
         let record = other_health
             .record_provider_failure_record_with_policy(
                 None,
@@ -223,8 +234,15 @@ fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
                 200 + index,
             )
             .unwrap();
-        assert_eq!(record.state, if index < 2 { "healthy" } else { "cooldown" });
+        assert_eq!(record.state, "healthy");
     }
+    assert!(
+        !other_health
+            .store()
+            .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 300)
+            .expect("health projection")
+            .available
+    );
 }
 
 fn resolve_target(
@@ -324,7 +342,14 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
 #[test]
 fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let manifest = global_pool_alive_manifest("global_status_policy");
-    let cases = [(401, 2), (403, 2), (429, 3), (500, 3), (502, 3), (599, 3)];
+    let cases = [
+        (401, 5),
+        (403, 5),
+        (429, 20),
+        (500, 20),
+        (502, 20),
+        (599, 20),
+    ];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = test_provider_failure_scope(
@@ -394,57 +419,6 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
 }
 
 #[test]
-fn configured_semantic_global_failure_keeps_manifest_cooldown_policy() {
-    let manifest = global_pool_alive_manifest("semantic_global_policy");
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let scope = test_provider_failure_scope(
-        "semantic_global_policy",
-        "semantic_global_policy",
-        "semantic-session",
-    )
-    .expect("failure session scope");
-    let fingerprint = V3ProviderErrorFingerprint::new(
-        "provider_diagnostic_zero_usage",
-        "semantic_error",
-        200,
-        "diagnostic_zero_usage",
-    )
-    .expect("semantic fingerprint");
-    for attempt in 0..3 {
-        health
-            .record_provider_global_subscription_failure(
-                &scope,
-                "first",
-                Some("key1"),
-                Some("gpt-test"),
-                fingerprint.clone(),
-                Some(1234),
-                30_000 + attempt,
-            )
-            .expect("configured semantic global failure should be accepted");
-    }
-    assert!(
-        !health
-            .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 30_000)
-            .available
-    );
-    let no_duration = health.record_provider_global_subscription_failure(
-        &scope,
-        "first",
-        Some("key1"),
-        Some("gpt-test"),
-        fingerprint,
-        None,
-        40_000,
-    );
-    assert_eq!(
-        no_duration,
-        Err("unsupported provider global health error class".to_string())
-    );
-}
-
-#[test]
 fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_alive() {
     let scope = "global_pool_alive";
     let manifest = global_pool_alive_manifest(scope);
@@ -492,8 +466,8 @@ fn session_transient_bypass_is_not_labeled_as_global_probe_pending() {
     let scope = "session_transient_bypass";
     let manifest = global_pool_alive_manifest(scope);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let session = test_provider_failure_scope(scope, scope, "session-only")
-        .expect("failure session scope");
+    let session =
+        test_provider_failure_scope(scope, scope, "session-only").expect("failure session scope");
     health
         .store()
         .record_provider_transient_bypass_in_session(
@@ -513,22 +487,20 @@ fn session_transient_bypass_is_not_labeled_as_global_probe_pending() {
         excluded: &BTreeSet::new(),
     };
     let scheduling = V3ProviderSchedulingReader::scheduling_projection(
-        &reader,
-        "first",
-        "key1",
-        "gpt-test",
-        1,
-        1,
-        2_000_001,
+        &reader, "first", "key1", "gpt-test", 1, 1, 2_000_001,
     );
     assert!(!scheduling.available);
     assert!(!scheduling
         .blocked_scopes
         .iter()
         .any(|scope| scope == "provider_cooldown_probe_pending"));
-    let projection = health
-        .store()
-        .availability_for_session(&session, "first", Some("key1"), Some("gpt-test"), 2_000_001);
+    let projection = health.store().availability_for_session(
+        &session,
+        "first",
+        Some("key1"),
+        Some("gpt-test"),
+        2_000_001,
+    );
     assert!(!projection.available);
     assert!(projection
         .blocked_scopes
@@ -539,17 +511,9 @@ fn session_transient_bypass_is_not_labeled_as_global_probe_pending() {
 #[test]
 fn exhaustion_rescue_identity_is_model_scoped() {
     let mut identities = BTreeSet::new();
-    assert!(identities.insert((
-        "opencode-go-zen",
-        "key1",
-        "mimo-v2.5-free",
-    )));
+    assert!(identities.insert(("opencode-go-zen", "key1", "mimo-v2.5-free",)));
     assert!(identities.insert(("opencode-go-zen", "key1", "hy3-free")));
-    assert!(!identities.insert((
-        "opencode-go-zen",
-        "key1",
-        "mimo-v2.5-free",
-    )));
+    assert!(!identities.insert(("opencode-go-zen", "key1", "mimo-v2.5-free",)));
 }
 
 fn assert_resolution_failure(
@@ -667,7 +631,7 @@ fn post_commit_response_stream_failure_updates_global_key_health() {
             1,
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
         );
-    assert_eq!(projection.score_milli, 850);
+    assert_eq!(projection.score_milli, 0);
     assert!(!projection.available);
 }
 
@@ -741,16 +705,18 @@ fn post_commit_sse_failures_cool_provider_and_block_fresh_session() {
     }
 
     let now_ms = v3_relay_provider_policy_now_epoch_ms().expect("current epoch");
-    assert!(!health
-        .store()
-        .availability_for_session(
-            &fresh_session,
-            "primary",
-            Some("key1"),
-            Some("gpt-test"),
-            now_ms,
-        )
-        .available);
+    assert!(
+        !health
+            .store()
+            .availability_for_session(
+                &fresh_session,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                now_ms,
+            )
+            .available
+    );
     assert!(!health
         .store()
         .provider_cooldown_probe_keys_due(u64::MAX)

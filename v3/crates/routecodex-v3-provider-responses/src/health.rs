@@ -234,6 +234,7 @@ struct V3ProviderAdaptiveHistory {
     recovery_ewma_ms: Option<u64>,
     probe_failure_count: u8,
     score_milli: u32,
+    configured_priority: i32,
     failure_streak: u32,
     success_streak: u32,
     last_success_at_ms: Option<u64>,
@@ -248,7 +249,8 @@ impl Default for V3ProviderAdaptiveHistory {
             failures: 0,
             recovery_ewma_ms: None,
             probe_failure_count: 0,
-            score_milli: 1_000,
+            score_milli: 100,
+            configured_priority: 100,
             failure_streak: 0,
             success_streak: 0,
             last_success_at_ms: None,
@@ -360,6 +362,34 @@ impl V3ProviderHealthStore {
             failure_policies,
             ..V3ProviderHealthState::default()
         };
+        for group in manifest.route_groups.values() {
+            for pool in group.pools.values() {
+                for target in &pool.targets {
+                    let (Some(provider_id), Some(auth_alias), Some(model_id), Some(priority)) = (
+                        target.provider.as_deref(),
+                        target.key.as_deref(),
+                        target.model.as_deref(),
+                        target.priority,
+                    ) else {
+                        continue;
+                    };
+                    if priority <= 0 {
+                        continue;
+                    }
+                    let key = provider_cooldown_probe_key(
+                        provider_id,
+                        Some(auth_alias),
+                        Some(model_id),
+                    );
+                    let history = V3ProviderAdaptiveHistory {
+                        configured_priority: priority,
+                        score_milli: priority.clamp(0, 150) as u32,
+                        ..V3ProviderAdaptiveHistory::default()
+                    };
+                    state.adaptive_history.insert(key, history);
+                }
+            }
+        }
         state.persistence = start_provider_health_persistence(persistence_path);
         Self {
             state: Arc::new(RwLock::new(state)),
@@ -1029,7 +1059,7 @@ impl V3ProviderHealthStore {
             history.attempts = history.attempts.saturating_add(1);
             history.failures = history.failures.saturating_add(1);
             history.probe_failure_count = next_probe_failure_count;
-            record_health_delta(history, -50);
+            record_health_delta(history, -5);
             history.failure_streak = history.failure_streak.saturating_add(1);
             history.success_streak = 0;
             history.score_generation = history.score_generation.saturating_add(1);
@@ -1103,10 +1133,7 @@ impl V3ProviderHealthStore {
                 history.recovery_ewma_ms,
                 history.probe_failure_count,
             );
-            let should_block = action.recovery
-                == V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
-                || (action.scope == V3ProviderHealthScope::GlobalProviderKey
-                    && history.failure_streak >= action.failure_threshold.max(1));
+            let should_block = history.score_milli == 0;
             if should_block {
                 upsert_provider_cooldown_probe_with_interval(
                     &mut state,
@@ -1137,7 +1164,7 @@ impl V3ProviderHealthStore {
             .write()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
         let history = state.adaptive_history.entry(key.clone()).or_default();
-        record_health_delta(history, 10);
+        record_health_delta(history, 1);
         history.failure_streak = 0;
         history.success_streak = history.success_streak.saturating_add(1);
         history.last_success_at_ms = Some(now_ms);
@@ -1230,14 +1257,21 @@ impl V3ProviderHealthStore {
             .read()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
         let history = state.adaptive_history.get(&key);
-        let score_milli = history.map_or(1_000, |history| history.score_milli);
-        let score_generation = history.map_or(0, |history| history.score_generation);
-        let available = state
-            .provider_cooldown_probes
-            .get(&key)
-            .map_or(true, |probe| {
-                !probe.probe_in_flight && probe.blocked_until_ms.is_none()
-            });
+        let net_delta: i32 = history
+            .map(|history| history.recent_deltas_milli.iter().copied().sum())
+            .unwrap_or_default();
+        let score_milli = priority.saturating_add(net_delta).clamp(0, 150) as u32;
+        let score_generation = history
+            .map(|history| history.score_generation)
+            .unwrap_or_default();
+        let has_health_events = history.is_some_and(|history| !history.recent_deltas_milli.is_empty());
+        let available = (score_milli > 0 || !has_health_events)
+            && state
+                .provider_cooldown_probes
+                .get(&key)
+                .map_or(true, |probe| {
+                    !probe.probe_in_flight && probe.blocked_until_ms.is_none()
+                });
         Ok(V3ProviderSchedulingProjection {
             provider_id: provider_id.to_string(),
             auth_alias: auth_alias.to_string(),
@@ -1246,10 +1280,13 @@ impl V3ProviderHealthStore {
             effective_priority: priority,
             score_milli,
             base_weight,
-            effective_weight_milli: u64::from(base_weight.max(1)),
+            effective_weight_milli: u64::from(base_weight.max(1))
+                .saturating_mul(u64::from(score_milli.max(1))),
             available,
             blocked_scopes: if available {
                 Vec::new()
+            } else if score_milli == 0 {
+                vec!["provider_key_health_score_zero".to_string()]
             } else {
                 vec!["provider_key_health_cooldown".to_string()]
             },
@@ -1799,7 +1836,7 @@ fn key_health_projection(
         provider_id: key.provider_id.clone(),
         auth_alias: key.auth_alias.clone().unwrap_or_default(),
         model_id: key.model_id.clone().unwrap_or_default(),
-        score_milli: history.map_or(1_000, |history| history.score_milli),
+        score_milli: history.map_or(100, |history| history.score_milli),
         failure_streak: history.map_or(0, |history| history.failure_streak),
         success_streak: history.map_or(0, |history| history.success_streak),
         cooldown,
@@ -1811,13 +1848,14 @@ fn key_health_projection(
 
 const HEALTH_WINDOW_SIZE: usize = 100;
 
-fn record_health_delta(history: &mut V3ProviderAdaptiveHistory, delta_milli: i32) {
-    history.recent_deltas_milli.push_back(delta_milli);
+fn record_health_delta(history: &mut V3ProviderAdaptiveHistory, delta: i32) {
+    history.recent_deltas_milli.push_back(delta);
     if history.recent_deltas_milli.len() > HEALTH_WINDOW_SIZE {
         history.recent_deltas_milli.pop_front();
     }
     let net_delta: i32 = history.recent_deltas_milli.iter().copied().sum();
-    history.score_milli = (1_000_i32.saturating_add(net_delta)).clamp(0, 1_500) as u32;
+    history.score_milli =
+        (history.configured_priority.saturating_add(net_delta)).clamp(0, 150) as u32;
 }
 
 fn provider_failure_session_scope_label(key: &V3ProviderFailureSessionKey) -> String {
@@ -1980,7 +2018,7 @@ fn complete_provider_probe_success_at_generation(
     if let Some(history) = state.adaptive_history.get_mut(key) {
         history.failure_streak = 0;
         history.success_streak = 1;
-        history.score_milli = 1_000;
+        history.score_milli = history.configured_priority.clamp(0, 150) as u32;
         history.last_success_at_ms = Some(now_ms);
         history.recent_deltas_milli.clear();
         history.probe_failure_count = 0;

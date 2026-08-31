@@ -1,14 +1,13 @@
 use futures_util::future::join_all;
 use routecodex_v3_config::internal::classify_v3_internal_provider_error;
-use routecodex_v3_config::internal::v3_internal_error_handling;
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ProviderDispositionStepManifest,
-    V3ProviderErrorActionPolicyManifest, V3ProviderErrorActionScope, V3ProviderErrorRetryMode,
+    V3ProviderErrorActionPolicyManifest, V3ProviderErrorRetryMode,
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
     build_v3_error_02_classified_from_v3_error_01,
-    build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_failure_policy,
+    build_v3_provider_failure_action_from_v3_error_02,
     V3Error01SourceRaised, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
     V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
     V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
@@ -17,8 +16,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
-    V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
-    V3ProviderGlobalSubscriptionPolicy, V3ProviderHealthStore, V3ProviderRecoveryKind,
+    V3ProviderFailureRecord, V3ProviderHealthStore, V3ProviderRecoveryKind,
     V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
     V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
@@ -340,80 +338,9 @@ impl V3ProviderFailureRuntimeHealth {
             }
             return Ok(());
         };
-        if action.recovery == V3ProviderRecoveryKind::IrrecoverableGlobalCooldown {
-            self.store
-                .record_provider_cooldown_failure(
-                    provider_id,
-                    Some(auth_alias),
-                    Some(model_id),
-                    action.class_code.as_str(),
-                    now_ms,
-                    action.cooldown_ms,
-                )
-                .map_err(|error| error.to_string())?;
-        }
         self.store
             .record_provider_failure_action(provider_id, auth_alias, model_id, action, now_ms)
             .map(|_| ())
-    }
-
-    pub(crate) fn record_provider_global_subscription_failure(
-        &self,
-        failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        fingerprint: routecodex_v3_error::V3ProviderErrorFingerprint,
-        cooldown_ms: Option<u64>,
-        now_ms: u64,
-    ) -> Result<V3ProviderGlobalSubscriptionDecision, String> {
-        let policy = if let Some(cooldown_ms) = cooldown_ms {
-            if cooldown_ms == 0 {
-                return Err("provider global subscription cooldown must be non-zero".to_string());
-            }
-            V3ProviderGlobalSubscriptionPolicy {
-                cooldown_ms,
-                probe_interval_ms: cooldown_ms,
-                ..V3ProviderGlobalSubscriptionPolicy::default()
-            }
-        } else {
-            build_v3_provider_global_failure_policy(fingerprint.http_status)
-                .map(|policy| V3ProviderGlobalSubscriptionPolicy {
-                    failure_threshold: policy.failure_threshold,
-                    cooldown_ms: policy.cooldown_ms,
-                    probe_interval_ms: policy.probe_interval_ms,
-                })
-                .ok_or_else(|| "unsupported provider global health error class".to_string())?
-        };
-        let record = self
-            .store
-            .record_provider_failure_in_session_with_policy(
-                failure_session_scope,
-                provider_id,
-                auth_alias,
-                model_id,
-                Some(fingerprint.reason_code.as_str()),
-                now_ms,
-                Some(V3ProviderFailurePolicy {
-                    failure_threshold: policy.failure_threshold,
-                    cooldown_ms: policy.cooldown_ms,
-                    probe_interval_ms: policy.probe_interval_ms,
-                    until_restart: false,
-                    cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
-                }),
-            )
-            .map_err(|error| error.to_string())?;
-        if record.state == "cooldown" {
-            Ok(V3ProviderGlobalSubscriptionDecision::ProviderBlocked {
-                blocked_until_ms: record
-                    .cooldown_until_ms
-                    .ok_or_else(|| "adaptive provider cooldown missing deadline".to_string())?,
-            })
-        } else {
-            Ok(V3ProviderGlobalSubscriptionDecision::SessionFailure {
-                count: record.failure_count,
-            })
-        }
     }
 
     pub async fn run_due_provider_health_probes<F, Fut>(
@@ -557,27 +484,51 @@ impl V3ProviderFailureRuntimeHealth {
         action: &V3ProviderFailureAction,
     ) -> Result<V3ProviderFailureRecord, String> {
         self.record_provider_key_failure_action(provider_id, auth_alias, model_id, action, now_ms)?;
-        let record = self
-            .store
-            .record_provider_failure_in_session(
+        self.record_provider_failure_in_session_without_health_cooldown(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            reason,
+            now_ms,
+        )
+    }
+
+    pub(crate) fn record_provider_failure_in_session_without_health_cooldown(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        reason: Option<&str>,
+        now_ms: u64,
+    ) -> Result<V3ProviderFailureRecord, String> {
+        self.store
+            .record_provider_failure_in_session_with_policy(
                 failure_session_scope,
                 provider_id,
                 auth_alias,
                 model_id,
                 reason,
                 now_ms,
+                Some(V3ProviderFailurePolicy {
+                    failure_threshold: u32::MAX,
+                    cooldown_ms: 1,
+                    probe_interval_ms: 1,
+                    until_restart: false,
+                    cooldown_scope: V3ProviderFailureCooldownScope::Session,
+                }),
             )
-            .map_err(|error| error.to_string())?;
-        Ok(record)
+            .map_err(|error| error.to_string())
     }
 
     pub(crate) fn record_provider_failure_record_with_policy(
         &self,
-        matched_policy_directive: Option<&V3ProviderErrorActionPolicyManifest>,
-        manifest: &V3Config05ManifestPublished,
+        _matched_policy_directive: Option<&V3ProviderErrorActionPolicyManifest>,
+        _manifest: &V3Config05ManifestPublished,
         failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
-        provider_type: Option<&str>,
+        _provider_type: Option<&str>,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         reason: Option<&str>,
@@ -604,33 +555,24 @@ impl V3ProviderFailureRuntimeHealth {
         );
         let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified);
-        self.record_provider_key_failure_action(
-            provider_id,
-            auth_alias,
-            model_id,
-            &action,
-            now_ms,
-        )?;
-        self.store
-            .record_provider_failure_in_session_with_policy(
-                failure_session_scope,
+        let request_local_provider_error = status == 400 || error_type == Some("invalid_request_error");
+        if !request_local_provider_error {
+            self.record_provider_key_failure_action(
                 provider_id,
                 auth_alias,
                 model_id,
-                reason,
+                &action,
                 now_ms,
-                configured_health_policy_for_failure(
-                    matched_policy_directive,
-                    manifest,
-                    provider_id,
-                    provider_type,
-                    model_id,
-                    status,
-                    error_type,
-                    message,
-                ),
-            )
-            .map_err(|error| error.to_string())
+            )?;
+        }
+        self.record_provider_failure_in_session_without_health_cooldown(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            reason,
+            now_ms,
+        )
     }
 
     pub(crate) fn record_provider_success_in_failure_scope(

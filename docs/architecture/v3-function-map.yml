@@ -518,10 +518,8 @@ features:
   - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
   - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
   - V3ProviderHealthStore::record_provider_key_success
-  - V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
   - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
   - configured_retry_budget_for_failure
-  - configured_health_policy_for_failure
   - provider_error_policy_matches_failure
   - is_v3_retryable_transient_stage_code
   - V3_TRANSIENT_TRANSPORT_HANG_CODE
@@ -4961,7 +4959,6 @@ features:
   - V3ProviderHealthStore::acquire_provider_cooldown_probe
   - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
   - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
-  - V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
   - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
   - probe_v3_provider_global_target
   - spawn_v3_server_aggregate

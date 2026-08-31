@@ -39,8 +39,8 @@ impl V3ProviderFailureAction {
             class_code: class_code.to_string(),
             recovery: V3ProviderRecoveryKind::RecoverableCounted,
             scope: V3ProviderHealthScope::GlobalProviderKey,
-            score_delta_milli: -50,
-            failure_threshold: 3,
+            score_delta_milli: -5,
+            failure_threshold: 0,
             cooldown_ms: 15 * 60_000,
         }
     }
@@ -92,8 +92,8 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             class_code: classified.source.code.clone(),
             recovery: V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
             scope: V3ProviderHealthScope::GlobalProviderKey,
-            score_delta_milli: -200,
-            failure_threshold: 1,
+            score_delta_milli: -20,
+            failure_threshold: 0,
             cooldown_ms: classified
                 .provider_global_cooldown_ms
                 .unwrap_or(60 * 60_000),
@@ -248,7 +248,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.failure_threshold, 0);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",
@@ -260,7 +260,7 @@ mod tests {
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
         );
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 0);
 
         for (code, status) in [("insufficient_quota", 429), ("account_disabled", 403)] {
             let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -272,7 +272,7 @@ mod tests {
                 action.recovery,
                 V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
             );
-            assert_eq!(action.failure_threshold, 1);
+            assert_eq!(action.failure_threshold, 0);
         }
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -282,8 +282,8 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
-        assert_eq!(action.score_delta_milli, -50);
+        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderRespInbound01Raw",
@@ -292,8 +292,8 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
-        assert_eq!(action.score_delta_milli, -50);
+        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",
@@ -302,8 +302,8 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
-        assert_eq!(action.score_delta_milli, -50);
+        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",
@@ -311,6 +311,6 @@ mod tests {
             502,
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.failure_threshold, 0);
     }
 }
