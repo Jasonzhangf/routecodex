@@ -107,4 +107,3 @@ Forbids: `runtime_append`, `runtime_flush`, `history_rotation`, `request_hot_pat
 - `npm run verify:v3-architecture-docs`
 - `npm run verify:v3-architecture-ci`
 - `npm run verify:ci`
-

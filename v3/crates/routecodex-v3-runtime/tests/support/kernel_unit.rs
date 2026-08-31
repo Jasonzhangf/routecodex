@@ -1688,12 +1688,12 @@ async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_fro
     )
     .await;
 
-    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
+    let V3ClientBody::CommittedSse(mut stream) = output.client_payload.body else {
         panic!("expected committed direct SSE client body: {output:?}");
     };
     let mut bytes = Vec::new();
     while let Some(frame) = stream.next().await {
-        bytes.extend_from_slice(&frame.expect("replacement attempt must complete"));
+        bytes.extend_from_slice(&frame);
     }
     let text = String::from_utf8(bytes).expect("committed client frames must be UTF-8");
     assert!(text.contains("recovered"), "{text}");

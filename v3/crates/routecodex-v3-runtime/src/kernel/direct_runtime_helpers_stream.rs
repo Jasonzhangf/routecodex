@@ -784,7 +784,7 @@ mod request_invalid_compat_tests {
     use super::*;
 
     #[test]
-    fn direct_request_compat_invalid_enters_invalid_request_error_chain() {
+    fn direct_request_compat_invalid_enters_internal_request_error_chain() {
         let profile = crate::hub_v1::V3ProviderCompatProfileId::Passthrough;
         let error = crate::hub_v1::classify_v3_provider_compat_error(
             "request_protocol",
@@ -793,7 +793,7 @@ mod request_invalid_compat_tests {
                 .to_string(),
         );
         let source = compat_source("V3HubReqOutbound07ProviderSemantic", &error);
-        assert_eq!(source.source_kind, V3ErrorSourceKind::InvalidRequest);
+        assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
         assert_eq!(source.code, "provider_request_payload_invalid");
     }
 

@@ -280,7 +280,6 @@ function renderMarkdown() {
     '## Verification',
     '',
     ...array(manifest.verification_gates).map((gate) => `- \`${gate}\``),
-    '',
   );
   return `${lines.join('\n')}\n`;
 }
