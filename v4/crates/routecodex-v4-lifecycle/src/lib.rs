@@ -173,6 +173,14 @@ impl ManagedControlPlane {
             }
             Err(error) => return Err(io_error(&self.paths.control_socket, error)),
         };
+        // The listener is nonblocking for the polling loop, but accepted
+        // control connections must be blocking: the client half-shuts down
+        // its write side before the command is read. On macOS the accepted
+        // socket inherits O_NONBLOCK; leaving it set turns a valid restart
+        // request into EAGAIN ("Resource temporarily unavailable").
+        stream
+            .set_nonblocking(false)
+            .map_err(|error| io_error(&self.paths.control_socket, error))?;
         let mut request = String::new();
         stream
             .read_to_string(&mut request)
