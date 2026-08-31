@@ -1,5 +1,5 @@
 {
-  "active_version": "active-v4",
+  "active_version": "active-v5",
   "artifact_record_id": "v4-cordis-edge-positive-current",
   "clean_scope": {
     "base_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
@@ -27,11 +27,11 @@
     "vcs": "git"
   },
   "previous_active_immutable": false,
-  "previous_active_version": null,
+  "previous_active_version": "active-v4",
   "promotion_id": "v4-cordis-edge-promotion",
-  "promotion_record_hash": "sha256:b96da3caa32199a8a3aedc3afc726d34b626eec362a0351ca5fa14ccfa3b9775",
+  "promotion_record_hash": "sha256:eea093236528a0bd77ffb183915e54c50af75b3863cebe98239f41329fd95466",
   "public_api_hash": "sha256:4a715f6ce89f9fa0e2a3d2b9eb20496f0420969cb81b7b599401f07de72871d",
-  "regression_report_hash": "sha256:de5f9d1dbeb7b9a84b4e387a93fa2b836e534fd2a5e9410f09e6bb6d24146c4d",
+  "regression_report_hash": "sha256:7e79bec3721326198435b3a5e47a12bac4632eadec94729b22a0b4e7470fab11",
   "regression_report_id": "v4-cordis-edge-regression-current",
   "review_id": "v4-cordis-edge-review",
   "source_commit_or_tag": "dbf569de040b34361c980e27849c00726d90d912"
