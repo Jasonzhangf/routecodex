@@ -1,6 +1,6 @@
 # V3 Tool-Thinking JSON v2 Hook Design
 
-Status: `phase1_reason_only_verified_pending_full_path_gates`
+Status: `strict_request_relaxed_response_pending_full_path_gates`
 
 Date: 2026-08-23
 
@@ -17,18 +17,19 @@ describe the same lifecycle.
 
 When `tool-thinking` is enabled, the proxy dynamically extends the current
 request's provider-facing non-Gemini tool contracts. Every model tool call is
-asked to add a required `reason` and two optional diagnostic fields to its native parameter object:
+required to add all three fields to its native parameter object:
 
 - `reason`: a short, direct motivation for this call;
 - `goal_alignment_confidence`: an integer from 0 through 100, measured against
   the user's current-turn goal;
-- `model_id`: the model's non-empty identifier for this response.
+- `model_id`: the exact selected provider-bound wire model for this request.
 
 The response hook reads only those explicit fields from a complete native
-tool-call parameter container. A complete valid object authorizes one visible
-reasoning projection for the turn. Before client projection, the three reserved
-fields are removed without changing any native tool name, call ID, command,
-input, argument, result, finish reason, or protocol structure.
+tool-call parameter container. For response compatibility, a non-empty valid
+`reason` authorizes one visible reasoning projection even when the provider omits
+the two diagnostics. Before client projection, every supplied reserved field is
+removed without changing any native tool name, call ID, command, input, argument,
+result, finish reason, or protocol structure.
 
 The feature is transparent to both endpoints:
 
@@ -49,12 +50,11 @@ The feature is transparent to both endpoints:
    project that contract; they cannot independently invent fields or guidance.
 3. Resp03 is the sole response semantic owner. Protocol and SSE adapters only
    deliver complete native tool-call items or typed fragments to Resp03.
-4. Phase 1 reasoning projection requires only an explicit, non-empty `reason`
-   with the exact type defined here. `goal_alignment_confidence` and `model_id`
-   are optional diagnostics in Phase 1; if present they must have their exact
-   types, but absence or model mismatch does not block the reason projection.
-   Phase 2 may restore the three-field hard gate after the observed response
-   rate is sufficient.
+4. Req04 guidance and every eligible provider-facing schema require `reason`,
+   `goal_alignment_confidence`, and `model_id` together. Resp03 remains
+   compatibility-tolerant: an explicit non-empty `reason` authorizes projection;
+   diagnostics are validated when present, but absence or model mismatch does
+   not block that reason projection.
 5. Reserved-field removal is all-or-nothing per native call. A Phase 1 valid
    parameter object has its recognized auxiliary keys removed; every rejected
    object remains unchanged. Removing those keys must not modify any native
@@ -81,10 +81,11 @@ must never appear in that slice.
 Responses/OpenAI Chat guidance describes only the native `arguments` object:
 
 ```text
-Every tool call must include a required, non-empty top-level `reason` beside
-the tool's native parameters inside the Responses/Chat `arguments` object.
-`reason` states only the immediate motivation, is at most 50 characters, and
-must not be nested under metadata or another parameter. Emit the tool call
+Every tool call must include all three required top-level fields beside the
+tool's native parameters inside the Responses/Chat `arguments` object:
+non-empty `reason` of at most 50 characters, integer
+`goal_alignment_confidence` from 0 through 100, and non-empty `model_id` copied
+exactly from that tool schema's bound model description. Emit the tool call
 immediately without a fence, preamble, or second explanation.
 ```
 
@@ -92,15 +93,16 @@ Anthropic guidance describes only a native `tool_use` block:
 
 ```text
 When calling a tool, immediately return only a native `tool_use` block.
-`tool_use.input.reason` is a required, non-empty top-level string containing
-only the immediate motivation and at most 50 characters. Never emit the call
+Every `tool_use.input` must contain all three required top-level fields:
+non-empty `reason` of at most 50 characters, integer
+`goal_alignment_confidence` from 0 through 100, and non-empty `model_id` copied
+exactly from that tool's bound `input_schema` description. Never emit the call
 as ordinary text, Markdown, or a generic JSON wrapper; do not emit a fence,
 preamble, or second explanation.
 ```
 
-`goal_alignment_confidence` and `model_id` remain optional schema diagnostics
-and are deliberately omitted from model-facing guidance. Their absence never
-blocks a valid reason.
+The provider-facing guidance and schema are strict. The response validator is
+deliberately looser: missing diagnostics never block an otherwise valid reason.
 
 The guidance is strict. The response validator is tolerant only in the sense
 that non-conforming output remains an observable native tool call; it never
@@ -111,14 +113,14 @@ guesses missing values and never converts invalid output into success.
 ### 4.1 Structured function tools
 
 For a native object schema, Req04 appends these properties at the schema's top
-level and adds only `reason` to `required`; the two diagnostic properties stay
-optional:
+level and adds all three names to `required`:
 
 ```json
 {
   "reason": {
     "type": "string",
     "minLength": 1,
+    "maxLength": 50,
     "description": "Immediate motivation for this tool call; short and direct"
   },
   "goal_alignment_confidence": {
@@ -130,7 +132,7 @@ optional:
   "model_id": {
     "type": "string",
     "minLength": 1,
-    "description": "Model identifier used for this response"
+    "description": "Exact provider-bound wire model selected for this request"
   }
 }
 ```
@@ -153,7 +155,7 @@ custom declaration in a typed turn context:
 {
   "type": "function",
   "function": {
-    "name": "apply_patch",
+    "name": "custom_text_tool",
     "parameters": {
       "type": "object",
       "properties": {
@@ -164,7 +166,7 @@ custom declaration in a typed turn context:
         },
         "model_id": {"type": "string", "minLength": 1}
       },
-      "required": ["input", "reason"],
+      "required": ["input", "reason", "goal_alignment_confidence", "model_id"],
       "additionalProperties": false
     }
   }
@@ -175,18 +177,21 @@ custom declaration in a typed turn context:
 returns the wrapper object. Resp03 removes the reserved fields and restores the
 original client custom-tool shape before client projection.
 
+`apply_patch` is the registered raw free-form exception: its patch bytes remain
+unwrapped and it is not eligible for this auxiliary-field contract.
+
 The custom provenance is a typed request/response side-channel resource. It is
 not stored in request JSON, protocol metadata, history, continuation state,
 provider options, or client payload. Static tool registries are never rewritten.
 
 ### 4.3 Model ID semantics
 
-Validity requires a non-empty model-reported identifier. Equality with the
-provider response's public `model` field is a separate diagnostic, not an
-authorization rule. Req04 runs before selected-target wire binding on Relay, so
-the implementation must not add a late request mutation or reorder the pipeline
-merely to force a display alias. A mismatch is observable and does not alter the
-tool call.
+Req04 owns the `model_id` schema placeholder contract. After target resolution,
+the adjacent provider-request compatibility edge mechanically replaces that
+placeholder with the exact selected wire model before transport. No placeholder
+or client alias may reach the provider. Equality with a provider response's
+public `model` field is a response diagnostic, not a projection authorization
+rule; a mismatch remains observable and does not alter the native tool call.
 
 ### 4.4 Reasoning effort ownership
 
@@ -296,13 +301,15 @@ Client raw request
 
 Direct and Relay invoke the same Req04 compiler. A downstream protocol
 projection may translate `parameters` to Anthropic `input_schema`, but it must
-preserve the required `reason` field, any supplied diagnostics, and the custom `input` wrapper. It must not run a
+preserve all three required auxiliary fields and the custom `input` wrapper. It must not run a
 second injection helper.
 
 The provider-bound snapshot is a mandatory gate. Source presence is insufficient:
-every eligible final tool schema must contain required `reason` after all
-protocol conversions; confidence/model remain optional properties. A custom
-wrapper with only `input` is a request-path failure.
+every eligible final tool schema must require `reason`,
+`goal_alignment_confidence`, and `model_id` after all protocol conversions, and
+its model description must contain the exact wire model with no placeholder. A
+custom wrapper that omits any of the four required fields is a request-path
+failure.
 
 ## 7. Protocol request matrix
 
@@ -394,8 +401,8 @@ reinterpret that native field as a Tool-Thinking field.
 
 ### 9.0 Phase 1 acceptance gate
 
-Phase 1 measures the observable value of the feature before enforcing the
-optional diagnostic fields as a model-compliance gate. `reason` is the only
+Phase 1 measures the observable value of the feature without enforcing the
+diagnostic fields as a response-compliance gate. `reason` is the only
 field required for a first-stage reasoning projection. A response that has a
 valid, correctly placed, non-empty `reason` may project that reason even when
 `goal_alignment_confidence` or `model_id` is absent. When either optional field
@@ -417,9 +424,9 @@ The Phase 1 online exit gate is:
 - no client leakage, duplicate projection, silent observation loss, or
   feature-caused transport/mapping/error failure occurs.
 
-Phase 1 does not remove the final contract requirement. The three-field,
-exact-model gate remains the Phase 2 hardening target after reason projection
-and response wiring are stable.
+This is an intentional asymmetric compatibility contract: request guidance
+remains strict for all three fields, while response acceptance never fabricates
+or requires diagnostics that the provider omitted.
 
 ### 9.1 Projection authorization
 
@@ -434,10 +441,11 @@ reason-only projection. Otherwise the turn receives `MISSING`, `INVALID`, or
 
 Redaction is part of the same strict parse transaction as authorization. Resp03
 removes the three reserved top-level keys only after one complete native tool
-parameter object passes the Phase 1 reason-only validator. A partial, invalid,
-misplaced, duplicate, malformed, or incomplete object is not rewritten. No
-second privacy parser, key-only scrubber, text search, or malformed-JSON repair
-is allowed.
+parameter object passes the Phase 1 reason-only validator. Missing or invalid
+`reason`, invalid supplied diagnostics, misplaced or duplicate reserved fields,
+or malformed/incomplete native calls are not rewritten. Missing diagnostics
+alone remain valid. No second privacy parser, key-only scrubber, text search,
+or malformed-JSON repair is allowed.
 
 This ordering deliberately gives the explicit no-rewrite rule precedence for
 negative samples. “Zero auxiliary-field leakage” is therefore an acceptance
@@ -452,7 +460,7 @@ calls, so no rejected reserved-looking object may be used to claim acceptance.
 |---|---|---|---|---|
 | valid non-empty reason; diagnostics absent or valid | `OK` | one turn projection | preserved | supplied reserved fields removed |
 | none present | `MISSING` | none | preserved | none |
-| some missing | `MISSING` | none | preserved | unchanged |
+| reason missing while diagnostics are partially or fully present | `MISSING` | none | preserved | unchanged |
 | wrong type / empty / range | `INVALID` | none | preserved | unchanged |
 | outside native container | `MISPLACED` | none | preserved | not treated as a valid source |
 | duplicate reserved key | `INVALID` | none | unchanged | never authorizes projection |
@@ -466,11 +474,12 @@ the terminal status and never authorizes reasoning.
 ### 9.4 Turn aggregation
 
 One assistant turn produces one terminal status. `OK` requires every observed
-eligible native tool call in the turn to contain its own complete valid
-three-field object. If any call fails, the turn is not `OK`, no Tool-Thinking
-reasoning is projected, and each call follows its own all-or-nothing mutation
-rule. Deterministic non-OK precedence is `INVALID` over `MISPLACED` over
-`MISSING`; the observation detail records bounded per-call classifications.
+eligible native tool call in the turn to contain its own valid non-empty
+`reason`; any supplied diagnostics must also be valid. Diagnostics may be absent.
+If any call fails, the turn is not `OK`, no Tool-Thinking reasoning is projected,
+and each call follows its own all-or-nothing mutation rule. Deterministic non-OK
+precedence is `INVALID` over `MISPLACED` over `MISSING`; the observation detail
+records bounded per-call classifications.
 
 Only an all-OK turn uses the first call's valid reason in native call order for
 the one visible projection. Other valid calls are still validated and stripped,
@@ -600,10 +609,10 @@ openai-responses-router-gpt-5.5-20260823T004943173-925485-193
 
 proved:
 
-1. the final OpenAI Chat `exec_command` schema contained required `reason` and optional diagnostics
-   fields;
-2. the final `apply_patch` custom-to-function wrapper contained and required only
-   `input`;
+1. the historical OpenAI Chat `exec_command` schema contained required `reason`
+   and optional diagnostic properties;
+2. the historical custom-to-function wrapper did not require the complete
+   auxiliary contract;
 3. the provider raw `exec_command` arguments contained only `reason` in the
    polluted long session;
 4. strict non-projection behavior correctly refused to invent confidence/model;
@@ -619,7 +628,9 @@ tools in their original order, a new user turn, and forced `apply_patch`:
 | same schema + repeated full guidance | 10/10 | 10/10 |
 | compact guidance + nonempty model schema without exact enum | 10/10 | 10/10 |
 
-That experiment showed that repeating a protocol-compatible prompt did not
+Those historical request gaps motivated the current strict three-field
+provider-facing contract. The experiment showed that repeating a
+protocol-compatible prompt did not
 improve that provider's adherence. It did not test cross-protocol guidance
 pollution. A later exact MiniMax Anthropic A/B found that the mixed guidance
 occasionally copied the Responses/Chat `arguments` example as ordinary text
@@ -688,7 +699,7 @@ Forbidden owners:
 - Gemini unchanged;
 - no tools unchanged;
 - provider-bound OpenAI Chat, Responses, and Anthropic schemas retain required
-  `reason` and optional diagnostics after protocol conversion.
+  `reason`, `goal_alignment_confidence`, and `model_id` after protocol conversion.
 - Direct first attempt and same-provider/provider-switch retries contain one
   guidance append and one unchanged compiled schema;
 - Direct-to-Relay handoff recompiles from the untouched captured client request,
@@ -696,9 +707,11 @@ Forbidden owners:
 
 ### 16.2 Resp03 white-box
 
-- valid three-field object authorizes one projection and removes reserved keys;
-- missing, partial, wrong type, empty, range, duplicate, misplaced, malformed,
-  and incomplete cases never authorize projection;
+- valid non-empty reason, with valid diagnostics when supplied, authorizes one projection and removes supplied reserved keys;
+- missing/wrong-type/empty `reason`, wrong-type/out-of-range supplied
+  diagnostics, duplicate reserved keys, misplaced fields, malformed JSON, and
+  incomplete native calls never authorize projection; absent diagnostics alone
+  remain compatible;
 - duplicate reserved keys are detected from retained native parameter bytes and
   never collapse into first-wins or last-wins success;
 - explicit reserved keys do not leak from a complete recognized container;
@@ -794,18 +807,20 @@ tool item, Resp03 terminal observation, and client projection.
    changes.
 9. Run focused tests, full V3 build, install, managed restart, and formal RCC
    samples.
-10. Only after all online gates pass: DSH Review, targeted commit, and push.
+10. Only after all online gates pass: AGY Review, exact integration, and push.
 
-The feature remains incomplete while any final provider-facing tool schema lacks
-required `reason`, any provider-complete object is lost before Resp03,
+The feature remains incomplete while any final eligible provider-facing tool schema lacks
+required `reason`, `goal_alignment_confidence`, or `model_id`, any provider-complete object is lost before Resp03,
 any valid turn fails client reasoning projection, or any observed tool turn lacks
 one canonical terminal status.
 
 ## 19. Independent JSON v2 closeout addendum (updated 2026-08-30)
 
-This addendum is the execution contract for the current isolated worktree. It
-does not authorize a merge, commit, or modification of `main`. It deliberately
-keeps JSON v2; it does not reopen the abandoned turn-fence v3 experiment.
+This addendum is the execution contract for the current isolated worktree. The
+implementation, tests, and candidate commit stay isolated here; integration and
+push follow Jason's explicit current authorization while preserving unrelated
+dirty state in the local `main` worktree. It deliberately keeps JSON v2; it does
+not reopen the abandoned turn-fence v3 experiment.
 
 ### 19.1 Target and scope
 
@@ -822,8 +837,9 @@ keeps JSON v2; it does not reopen the abandoned turn-fence v3 experiment.
 ### 19.2 Required implementation behavior
 
 1. Req04 is the only injection owner. It receives the final provider-bound
-   native tool list, compiles one request-local JSON v2 contract, injects the
-   exact wire model id, and does not mutate system/developer/history ordering,
+   native tool list, compiles one request-local JSON v2 contract, strongly
+   requires all three fields, binds the exact wire model id before transport,
+   and does not mutate system/developer/history ordering,
    native names, native schemas, or native arguments except for the declared
    request-local auxiliary contract.
 2. Resp03 is the only semantic response owner. It reads explicit `reason`,
@@ -880,7 +896,7 @@ measured result, not permission to guess or rewrite the response.
 1. Refresh resource/function/mainline/verification maps and the local
    collaboration run record; verify the unique Req04/Resp03 owners and inspect
    all current dirty changes before editing.
-2. Add red tests for server-scoped enablement, exact model validation, missing
+2. Add red tests for server-scoped enablement, exact wire-model request binding, missing
    and malformed fields, duplicate observations, multi-tool aggregation,
    custom `apply_patch`, native-payload identity, and no projection of natural
    reasoning. Then make only the unique hook owner green.
@@ -919,19 +935,20 @@ and panics must be zero.
 
 The handoff must include changed paths, exact source and binary hashes, test
 commands/results, per-protocol statistics, representative raw-to-client
-correlations, unresolved risks, and explicit confirmation that `main` was not
-modified. Do not run AGY Review, merge, push, or claim production completion
-from this isolated task; those are separate gates after an authorized
-integration.
+correlations, unresolved risks, and explicit confirmation that unrelated local
+`main` dirty files were untouched. Run AGY Review only after the exact candidate
+is installed and the live gates pass; a controller PASS is required before the
+verified commit is integrated and pushed.
 
-### 19.6 Phase 1 acceptance override (2026-08-23)
+### 19.6 Asymmetric request/response compatibility contract
 
-For the first production iteration, `reason` is the only required model field.
-`goal_alignment_confidence` and `model_id` are optional diagnostics: Req04 may
-expose their schema but current model-facing guidance deliberately omits them;
-Resp03 must not reject, repair, infer, or block projection because either is
-absent or differs from the expected value. When present and well-typed they
-are logged only, then discarded with the other internal fields.
+Req04 model-facing guidance and eligible tool schemas require `reason`,
+`goal_alignment_confidence`, and `model_id` together. `model_id` must be bound
+to the exact provider wire model before transport. Resp03 intentionally uses a
+looser compatibility gate: it must not reject, repair, infer, or block a valid
+reason projection because either diagnostic is absent or differs from the
+expected value. When supplied, diagnostics are type/range checked, logged, and
+discarded with the other internal fields.
 
 Phase 1 passes the current live adherence gate only when each required 4444
 window is 5/5 for a valid non-empty `reason` and every valid reason is projected

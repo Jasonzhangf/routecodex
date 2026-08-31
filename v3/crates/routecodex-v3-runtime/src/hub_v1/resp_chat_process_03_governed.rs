@@ -151,12 +151,14 @@ pub(crate) fn audit_v3_toolreason_dry_run_payloads(
     provider_response: &Value,
 ) -> Value {
     let provider_text = provider_request.to_string();
-    // Phase 1 request coverage is authorized by the required field only.
-    // Confidence and model_id are optional diagnostics; their absence must
-    // never turn a valid reason-only request into a false injection failure.
-    let request_guidance_present = provider_text.contains("reason");
-    let optional_diagnostics_present =
+    // Provider-facing guidance is intentionally stricter than Resp03
+    // compatibility: all three fields must reach the wire contract even
+    // though a reason-only provider response remains acceptable.
+    let request_reason_guidance_present = provider_text.contains("reason");
+    let request_required_diagnostics_present =
         provider_text.contains("goal_alignment_confidence") && provider_text.contains("model_id");
+    let request_guidance_present =
+        request_reason_guidance_present && request_required_diagnostics_present;
     let mut tool_call_count = 0usize;
     let mut toolreason_count = 0usize;
     collect_v3_toolreason_dry_run_counts(
@@ -176,7 +178,8 @@ pub(crate) fn audit_v3_toolreason_dry_run_payloads(
         "original_request_present": !original_request.is_null(),
         "provider_request_present": !provider_request.is_null(),
         "request_guidance_present": request_guidance_present,
-        "optional_diagnostics_present": optional_diagnostics_present,
+        "request_reason_guidance_present": request_reason_guidance_present,
+        "request_required_diagnostics_present": request_required_diagnostics_present,
         "provider_response_present": !provider_response.is_null(),
         "provider_response_tool_call_count": tool_call_count,
         "provider_response_toolreason_count": toolreason_count,
@@ -4647,7 +4650,8 @@ mod tests {
         assert_eq!(audit["provider_response_tool_call_count"], 1);
         assert_eq!(audit["provider_response_toolreason_count"], 1);
         assert_eq!(audit["request_guidance_present"], true);
-        assert_eq!(audit["optional_diagnostics_present"], true);
+        assert_eq!(audit["request_reason_guidance_present"], true);
+        assert_eq!(audit["request_required_diagnostics_present"], true);
 
         let reason_only_provider_request = json!({"tools": [{"description": "reason"}]});
         let reason_only_audit = audit_v3_toolreason_dry_run_payloads(
@@ -4655,9 +4659,14 @@ mod tests {
             &reason_only_provider_request,
             &response,
         );
-        assert_eq!(reason_only_audit["diagnosis"], "raw_contract_present");
-        assert_eq!(reason_only_audit["request_guidance_present"], true);
-        assert_eq!(reason_only_audit["optional_diagnostics_present"], false);
+        assert_eq!(reason_only_audit["diagnosis"], "request_injection_missing");
+        assert_eq!(reason_only_audit["request_guidance_present"], false);
+        assert_eq!(reason_only_audit["request_reason_guidance_present"], true);
+        assert_eq!(
+            reason_only_audit["request_required_diagnostics_present"],
+            false
+        );
+        assert_eq!(reason_only_audit["provider_response_toolreason_count"], 1);
 
         let missing = audit_v3_toolreason_dry_run_payloads(
             &request,

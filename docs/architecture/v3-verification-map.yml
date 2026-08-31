@@ -3425,9 +3425,9 @@ features:
   required_positive:
   - disabled mode preserves payload identity
   - direct and relay Req04 compile one tool_thinking_json_v2 request-local contract without changing tool order, system/developer/history order, or static tool registries
-  - Anthropic provider-facing system and tool descriptions contain only native tool_use/input.reason guidance, while Responses/OpenAI Chat provider-facing guidance contains only arguments/reason guidance
-  - OpenAI Chat, Responses, and Anthropic eligible tool parameter schemas require reason and preserve optional confidence/model diagnostics; Gemini is excluded
-  - every free-form custom tool is wrapped by Req04 with input plus required reason and optional diagnostics, then restored after Resp03 with byte-stable custom input
+  - Anthropic provider-facing system and tool descriptions contain only native tool_use/input three-field guidance, while Responses/OpenAI Chat provider-facing guidance contains only arguments three-field guidance
+  - OpenAI Chat, Responses, and Anthropic eligible tool parameter schemas require reason, goal_alignment_confidence, and exact bound model_id; Gemini is excluded
+  - every eligible free-form custom tool is wrapped by Req04 with input plus all three required auxiliary fields, then restored after Resp03 with byte-stable custom input; registered raw exceptions remain unchanged
   - provenance-matched custom calls with valid string input are restored for OK, MISSING, INVALID, and MISPLACED statuses; only OK authorizes reasoning
   - Direct retries reuse the Req04 typed context without duplicate guidance, schema mutation, or provenance reconstruction
   - provider-bound snapshots prove the governed contract survives every protocol projection, including Responses-to-OpenAI-Chat custom wrapping
@@ -3441,7 +3441,7 @@ features:
   - v3.response.tool_thinking_turn_result carries projection authorization only as a request-local typed resource and is released after observation/client projection
   required_negative:
   - provider-facing guidance never contains another protocol's wire wrapper, field container, or positive example
-  - missing, partial, wrong-type, out-of-range, duplicate, misplaced, malformed, or incomplete reason/diagnostic fields never authorize reasoning, reserved-key removal, or any tool-call rewrite
+  - missing, empty, or wrong-type reason; wrong-type or out-of-range supplied diagnostics; duplicate or misplaced reserved fields; malformed JSON; and incomplete native calls never authorize reasoning, reserved-key removal, or any tool-call rewrite; absent diagnostics alone remain response-compatible
   - malformed custom wrappers or non-string custom input are never guessed or repaired
   - ordinary model reasoning, thinking, text, history, descriptions, and legacy fences are never parsed as Tool-Thinking
   - visible rcc_reason_* IDs, 调用工具 prefixes, pending ordinary message text, marker characters, and content equality never authorize, replay, suppress, or deduplicate Tool-Thinking

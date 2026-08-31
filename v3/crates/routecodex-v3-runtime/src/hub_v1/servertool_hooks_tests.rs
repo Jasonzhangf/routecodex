@@ -28,8 +28,11 @@ fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
     assert!(!guidance.contains("Anthropic native"));
     assert!(!guidance.contains("tool_use.input"));
     assert!(guidance.contains("不超过 50 个字符"));
-    assert!(!guidance.contains("goal_alignment_confidence"));
-    assert!(!guidance.contains("model_id"));
+    assert!(guidance.contains("goal_alignment_confidence"));
+    assert!(guidance.contains("model_id"));
+    assert!(guidance.contains("必须同时填写"));
+    assert!(!guidance.contains("可选"));
+    assert!(!guidance.contains("如提供"));
     assert_eq!(payload["tools"][1]["description"], "internal");
     assert!(payload["instructions"]
         .as_str()
@@ -291,10 +294,10 @@ fn req04_tool_thinking_reaches_anthropic_wire_system_field() {
         "wire: {wire}"
     );
     assert!(
-        !tool_description.contains("goal_alignment_confidence"),
+        tool_description.contains("goal_alignment_confidence"),
         "wire: {wire}"
     );
-    assert!(!tool_description.contains("model_id"), "wire: {wire}");
+    assert!(tool_description.contains("model_id"), "wire: {wire}");
     assert!(!wire.to_string().contains("<legacy-control>"));
 }
 
@@ -312,11 +315,11 @@ fn req04_tool_thinking_injects_anthropic_tool_list_and_parameter_schema() {
         .as_str()
         .unwrap()
         .contains("不超过 50 个字符"));
-    assert!(!payload["tools"][0]["description"]
+    assert!(payload["tools"][0]["description"]
         .as_str()
         .unwrap()
         .contains("goal_alignment_confidence"));
-    assert!(!payload["tools"][0]["description"]
+    assert!(payload["tools"][0]["description"]
         .as_str()
         .unwrap()
         .contains("model_id"));
@@ -331,10 +334,10 @@ fn req04_tool_thinking_injects_anthropic_tool_list_and_parameter_schema() {
     assert!(required
         .iter()
         .any(|value| value.as_str() == Some("reason")));
-    assert!(!required
+    assert!(required
         .iter()
         .any(|value| value.as_str() == Some("goal_alignment_confidence")));
-    assert!(!required
+    assert!(required
         .iter()
         .any(|value| value.as_str() == Some("model_id")));
 }
@@ -364,12 +367,12 @@ fn req04_tool_thinking_injects_every_present_native_schema_shape() {
             .is_some_and(|required| required
                 .iter()
                 .any(|value| value.as_str() == Some("reason"))));
-        assert!(!schema["required"]
+        assert!(schema["required"]
             .as_array()
             .is_some_and(|required| required
                 .iter()
                 .any(|value| value.as_str() == Some("goal_alignment_confidence"))));
-        assert!(!schema["required"]
+        assert!(schema["required"]
             .as_array()
             .is_some_and(|required| required
                 .iter()
@@ -403,6 +406,14 @@ fn req04_tool_thinking_recurses_into_namespace_tools_before_provider_flattening(
     assert!(schema["required"]
         .as_array()
         .is_some_and(|required| required.iter().any(|value| value == "reason")));
+    assert!(schema["required"]
+        .as_array()
+        .is_some_and(|required| required
+            .iter()
+            .any(|value| value == "goal_alignment_confidence")));
+    assert!(schema["required"]
+        .as_array()
+        .is_some_and(|required| required.iter().any(|value| value == "model_id")));
 }
 
 #[test]
@@ -428,6 +439,50 @@ fn req04_tool_thinking_custom_tool_compiles_provider_wrapper() {
     assert!(parameters["required"]
         .as_array()
         .is_some_and(|required| required.iter().any(|value| value == "reason")));
+    assert!(parameters["required"]
+        .as_array()
+        .is_some_and(|required| required
+            .iter()
+            .any(|value| value == "goal_alignment_confidence")));
+    assert!(parameters["required"]
+        .as_array()
+        .is_some_and(|required| required.iter().any(|value| value == "model_id")));
+}
+
+#[test]
+fn req04_tool_thinking_binds_exact_wire_model_into_required_schema_guidance() {
+    let mut payload = json!({
+        "tools": [{
+            "type": "function",
+            "name": "pwd",
+            "parameters": {"type":"object","properties":{}}
+        }, {
+            "type": "custom",
+            "name": "custom_text_tool",
+            "format": {"type":"text"}
+        }]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject");
+    let before = payload["tools"][0]["parameters"]["properties"]["model_id"]["description"]
+        .as_str()
+        .expect("model_id description");
+    assert!(before.contains(V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER));
+
+    bind_v3_tool_thinking_guidance_to_wire_model_at_req04(&mut payload, "glm-5.3")
+        .expect("selected wire model must bind");
+    let after = payload["tools"][0]["parameters"]["properties"]["model_id"]["description"]
+        .as_str()
+        .expect("bound model_id description");
+    assert!(after.contains("glm-5.3"));
+    assert!(
+        payload["tools"][1]["function"]["parameters"]["properties"]["model_id"]["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("glm-5.3"))
+    );
+    assert!(!payload
+        .to_string()
+        .contains(V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER));
 }
 
 #[test]

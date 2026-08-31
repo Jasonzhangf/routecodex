@@ -19,15 +19,16 @@ const STOPLESS_CLI_COMMAND: &str = "routecodex hook run reasoningStop";
 
 pub(crate) const V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE: &str = r#"工具调用协议（只适用于本轮工具调用，不适用于普通回答）：
 
-每次发起工具调用时，必须在工具参数 JSON 对象本层增加 `reason`，并立即输出工具调用：
-`reason`：现在调用该工具的唯一直接动机；只说动机，不写计划、步骤、结果或工具参数；不超过 50 个字符。
+每次发起工具调用时，必须同时填写以下三个字段，缺一不可；字段必须位于工具参数 JSON 对象本层，并立即输出工具调用：
+`reason`：非空字符串；现在调用该工具的唯一直接动机；只说动机，不写计划、步骤、结果或工具参数；不超过 50 个字符。
+`goal_alignment_confidence`：0 到 100 的整数；表示当前工具调用与用户上一轮目标的一致性。
+`model_id`：非空字符串；必须从当前工具参数 schema 的 `model_id.description` 读取本次 provider-bound wire model，并逐字原样填写；禁止填写客户端别名、猜测值或占位符。
 
 字段必须和原生工具参数处于同一个参数对象层级；对于 Responses/Chat 的 `arguments`，字段放在该参数对象的顶层。不要把字段嵌套到命令参数对象内部；RouteCodex 会在工具执行前剥离这三个辅助字段。
 
-正确：`{"name":"pwd","arguments":"{\"reason\":\"确认当前工作目录\"}"}`
 错误：`{"name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"metadata\":{\"reason\":\"确认当前工作目录\"}}"}`
 
-同一轮多个工具调用时，每个工具调用对象分别填写 `reason`。不要输出 fence、preamble、普通解释或第二份原因文本。
+同一轮多个工具调用时，每个工具调用对象都必须分别填写完整三字段。不要输出 fence、preamble、普通解释或第二份原因文本。
 
 例外：`apply_patch` 是 raw free-form 控制工具，参数必须保持一份原始 patch 文本；不要把它包装成 JSON，也不要把 `reason` 写进 patch。
 "#;
@@ -35,8 +36,11 @@ pub(crate) const V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE: &str = r#"工具调�
 pub(crate) const V3_TOOL_THINKING_ANTHROPIC_GUIDANCE: &str = r#"Anthropic native 工具调用协议（只适用于本轮工具调用，不适用于普通回答）：
 
 决定调用工具时，必须立即只返回原生 `tool_use` 块；不要把工具调用写成普通文本段、Markdown 代码块或通用 JSON wrapper。
-`reason` 是必填的非空字符串，必须放在 `tool_use.input` 顶层；只写现在调用该工具的唯一直接动机，不写计划、步骤、结果或工具参数，不超过 50 个字符。
-同一轮多个工具调用时，每个原生 `tool_use` 块都必须分别填写 `input.reason`。不要输出 fence、preamble、普通解释或第二份原因文本。
+每个 `tool_use.input` 顶层必须同时填写以下三个字段，缺一不可：
+`reason`：非空字符串；只写现在调用该工具的唯一直接动机，不写计划、步骤、结果或工具参数，不超过 50 个字符。
+`goal_alignment_confidence`：0 到 100 的整数；表示当前工具调用与用户上一轮目标的一致性。
+`model_id`：非空字符串；必须从当前工具 `input_schema` 的 `model_id.description` 读取本次 provider-bound wire model，并逐字原样填写；禁止填写客户端别名、猜测值或占位符。
+同一轮多个工具调用时，每个原生 `tool_use` 块都必须分别填写完整三字段。不要输出 fence、preamble、普通解释或第二份原因文本。
 "#;
 
 pub(crate) const V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER: &str =
@@ -195,11 +199,11 @@ fn wrap_v3_custom_tools_at_req04(
             "type":"object",
             "properties":{
                 "input":{"type":"string","description":"原生 custom tool 的完整输入，原样填写"},
-                "reason":{"type":"string","description":"当前工具调用的唯一直接动机，只说动机，简短"},
-                "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100},
-                "model_id":{"type":"string"}
+                "reason":{"type":"string","minLength":1,"maxLength":50,"description":"必填。当前工具调用的唯一直接动机，只说动机，不超过 50 个字符"},
+                "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100,"description":"必填。当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"},
+                "model_id":{"type":"string","minLength":1,"description":format!("必填。精确填写本次 provider-bound wire model：{}；禁止使用客户端别名、猜测值或占位符", V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER)}
             },
-            "required":["input","reason"],
+            "required":["input","reason","goal_alignment_confidence","model_id"],
             "additionalProperties":false
         });
         // Keep the provider-facing wrapper owned by Req04. Existing custom
@@ -361,7 +365,9 @@ pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> 
             "reason".to_string(),
             json!({
                 "type": "string",
-                "description": "当前工具调用的唯一直接动机，只说动机，简短"
+                "minLength": 1,
+                "maxLength": 50,
+                "description": "必填。当前工具调用的唯一直接动机，只说动机，不超过 50 个字符"
             }),
         );
         properties.insert(
@@ -370,14 +376,15 @@ pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> 
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 100,
-                "description": "当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"
+                "description": "必填。当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"
             }),
         );
         properties.insert(
             "model_id".to_string(),
             json!({
                 "type": "string",
-                "description": "本次响应实际使用的模型 ID"
+                "minLength": 1,
+                "description": format!("必填。精确填写本次 provider-bound wire model：{}；禁止使用客户端别名、猜测值或占位符", V3_TOOL_THINKING_MODEL_ID_PLACEHOLDER)
             }),
         );
     }
@@ -385,11 +392,10 @@ pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> 
         .get_mut("required")
         .and_then(Value::as_array_mut)
         .expect("validated tool-thinking required array");
-    if !required
-        .iter()
-        .any(|value| value.as_str() == Some("reason"))
-    {
-        required.push(Value::String("reason".to_string()));
+    for field in ["reason", "goal_alignment_confidence", "model_id"] {
+        if !required.iter().any(|value| value.as_str() == Some(field)) {
+            required.push(Value::String(field.to_string()));
+        }
     }
     Ok(())
 }

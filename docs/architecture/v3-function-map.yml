@@ -5492,15 +5492,15 @@ features:
   - continuation stores
   contract_version: tool_thinking_json_v2
   contract_rules:
-  - Req04 adds required reason plus optional confidence/model diagnostic properties to each eligible non-Gemini structured tool schema and wraps free-form custom tools as request-local structured provider contracts
-  - Req04 guidance is protocol-pure at the provider-facing slice: Anthropic native tools receive only tool_use/input.reason instructions, while Responses/OpenAI Chat tools receive only arguments/reason instructions; wire examples from another protocol are forbidden
+  - Req04 requires reason, goal_alignment_confidence, and exact provider-bound model_id in each eligible non-Gemini structured tool schema and wraps eligible free-form custom tools as request-local structured provider contracts; Resp03 separately accepts reason-only provider output for compatibility
+  - Req04 guidance is protocol-pure at the provider-facing slice: Anthropic native tools receive only tool_use/input three-field instructions, while Responses/OpenAI Chat tools receive only arguments three-field instructions; wire examples from another protocol are forbidden
   - Req04 records original custom-tool provenance only in v3.request.tool_thinking_turn_context; that resource never enters payload, metadata, history, or continuation
   - Req04 compilation is atomic and runs once per execution; Direct retries reuse its typed context and may not recompile from an already governed tool list
   - downstream protocol projection preserves the Req04 contract mechanically and never performs a second semantic injection
   - RespInbound02 preserves the complete native parameter container; custom input is not unwrapped before Resp03
   - protocol adapters retain exact complete native parameter JSON bytes so Resp03 can reject duplicate reserved keys without first-wins or last-wins collapse
   - Resp03 alone classifies reason and any supplied diagnostics; only one valid non-empty reason authorizes all-or-nothing removal of supplied auxiliary keys and one typed turn result
-  - missing, invalid, duplicate, misplaced, incomplete, or malformed reason/diagnostic fields never authorize reasoning or any tool-call rewrite
+  - missing, empty, or invalid reason; invalid supplied diagnostics; duplicate or misplaced reserved fields; and incomplete or malformed native calls never authorize reasoning or any tool-call rewrite; absent diagnostics alone remain response-compatible
   - a parallel tool turn is OK only when every eligible native call is valid; mixed status produces one deterministic non-OK terminal result and no reasoning
   - provenance-matched custom restoration is an independent mechanical inverse and preserves valid custom input for every terminal status
   - the typed turn result projects one separate normal reasoning item before the first native tool call without changing provider-native reasoning
