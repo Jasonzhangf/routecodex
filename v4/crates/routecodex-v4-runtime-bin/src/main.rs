@@ -433,7 +433,7 @@ fn spawn_servers(
                     .build()
                     .map_err(|error| error.to_string())?;
                 let result = runtime.block_on(async move {
-                    let server = AsyncHttpServer::bind(&server)
+                    let server = AsyncHttpServer::bind_persisted(&server)
                         .await
                         .map_err(|error| error.to_string())?;
                     let handler = Arc::new(PipelineHandler::new(manifest)?);

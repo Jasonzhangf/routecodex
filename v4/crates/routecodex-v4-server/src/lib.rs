@@ -5,7 +5,8 @@
 //! Hard boundaries:
 //! - console/evidence/identity are diagnostic side-channel projections; they
 //!   never become control decisions and never enter provider/client payload;
-//! - request identity is a deterministic serverId+localDay+sequence counter;
+//! - request identity uses the V3-compatible shared counter state and
+//!   preserves the V4 server identifier as its diagnostic prefix;
 //! - wire evidence flushes only on terminal failure (EOF/error/drop), never
 //!   on success paths.
 
@@ -19,6 +20,7 @@ use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const REQUEST_RECORD_SCHEMA_VERSION: u64 = 1;
+const REQUEST_ID_STATE_VERSION: u64 = 1;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener as TokioTcpListener, TcpStream as TokioTcpStream};
 use tokio_util::sync::CancellationToken;
@@ -177,7 +179,6 @@ pub struct AsyncHttpServer {
     max_request_bytes: usize,
     server_id: String,
     port: u16,
-    local_day: String,
     request_ids: V4RequestIdCounter,
 }
 
@@ -192,7 +193,6 @@ impl AsyncHttpServer {
             max_request_bytes: MAX_BODY_BYTES,
             server_id: listen_address.to_string(),
             port: local.port(),
-            local_day: local_day(),
             request_ids: V4RequestIdCounter::new(),
         })
     }
@@ -212,9 +212,11 @@ impl AsyncHttpServer {
         loop {
             let accepted = tokio::select! { _ = stop.cancelled() => return Ok(()), result = self.listener.accept() => result };
             let (stream, _) = accepted.map_err(HttpServerError::Accept)?;
+            let local_day =
+                local_day().map_err(|error| HttpServerError::RequestIdentity(error.to_string()))?;
             let request_identity = self
                 .request_ids
-                .next_request_identity(&self.server_id, &self.local_day)
+                .next_request_identity(&self.server_id, &local_day)
                 .map_err(|error| HttpServerError::RequestIdentity(error.to_string()))?;
             let handler = std::sync::Arc::clone(&handler);
             let connection_stop = stop.child_token();
@@ -232,6 +234,22 @@ impl AsyncHttpServer {
                 .await;
             });
         }
+    }
+
+    pub async fn bind_persisted(listen_address: &str) -> Result<Self, HttpServerError> {
+        let listener = TokioTcpListener::bind(listen_address)
+            .await
+            .map_err(HttpServerError::Bind)?;
+        let local = listener.local_addr().map_err(HttpServerError::Bind)?;
+        let request_ids = V4RequestIdCounter::from_default_state()
+            .map_err(|error| HttpServerError::RequestIdentity(error.to_string()))?;
+        Ok(Self {
+            listener,
+            max_request_bytes: MAX_BODY_BYTES,
+            server_id: listen_address.to_string(),
+            port: local.port(),
+            request_ids,
+        })
     }
 }
 
@@ -446,13 +464,7 @@ impl V4HttpServer {
         handler: &mut H,
         mut should_stop: impl FnMut() -> bool,
     ) -> Result<(), HttpServerError> {
-        let local_day = local_day();
-        self.run_until_with_counter(
-            handler,
-            V4RequestIdCounter::new(),
-            || should_stop(),
-            &local_day,
-        )
+        self.run_until_with_counter(handler, V4RequestIdCounter::new(), || should_stop())
     }
 
     pub fn run_until_persisted<H: HttpHandler>(
@@ -460,10 +472,9 @@ impl V4HttpServer {
         handler: &mut H,
         mut should_stop: impl FnMut() -> bool,
     ) -> Result<(), HttpServerError> {
-        let local_day = local_day();
         let request_ids = V4RequestIdCounter::from_default_state()
             .map_err(|error| HttpServerError::RequestIdentity(error.to_string()))?;
-        self.run_until_with_counter(handler, request_ids, || should_stop(), &local_day)
+        self.run_until_with_counter(handler, request_ids, || should_stop())
     }
 
     fn run_until_with_counter<H: HttpHandler>(
@@ -471,7 +482,6 @@ impl V4HttpServer {
         handler: &mut H,
         mut request_ids: V4RequestIdCounter,
         mut should_stop: impl FnMut() -> bool,
-        local_day: &str,
     ) -> Result<(), HttpServerError> {
         while !should_stop() {
             let stream = match self.listener.accept() {
@@ -495,8 +505,10 @@ impl V4HttpServer {
             stream
                 .set_write_timeout(Some(Duration::from_secs(30)))
                 .map_err(HttpServerError::Accept)?;
+            let local_day =
+                local_day().map_err(|error| HttpServerError::RequestIdentity(error.to_string()))?;
             let request_identity = request_ids
-                .next_request_identity(&self.server_id, local_day)
+                .next_request_identity(&self.server_id, &local_day)
                 .map_err(|error| HttpServerError::RequestIdentity(error.to_string()))?;
             if let Err(error) = serve_connection(stream, handler, request_identity, self.port) {
                 if !matches!(error, ConnectionError::ClientDisconnected) {
@@ -643,12 +655,28 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, ConnectionError> 
     })
 }
 
-fn local_day() -> String {
-    let days = SystemTime::now()
+fn local_day() -> Result<String, RequestIdentityError> {
+    let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs() / 86_400)
-        .unwrap_or(0);
-    format!("day-{days}")
+        .map_err(|error| {
+            RequestIdentityError::Persistence(format!("request id clock moved backwards: {error}"))
+        })?;
+    let seconds = duration.as_secs() as libc::time_t;
+    let tm = unsafe {
+        let mut raw = std::mem::MaybeUninit::<libc::tm>::uninit();
+        if libc::localtime_r(&seconds, raw.as_mut_ptr()).is_null() {
+            return Err(RequestIdentityError::Persistence(
+                "failed to format request id date".to_string(),
+            ));
+        }
+        raw.assume_init()
+    };
+    Ok(format!(
+        "{:04}{:02}{:02}",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday
+    ))
 }
 
 fn map_read_error(error: io::Error) -> ConnectionError {
@@ -832,10 +860,20 @@ impl V4RequestIdCounter {
     }
 
     pub fn from_default_state() -> Result<Self, RequestIdentityError> {
-        let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
-            RequestIdentityError::Persistence("HOME is required for request id state".to_string())
-        })?;
-        Self::from_state_file(home.join(".rcc/state/request-id-counter.json"))
+        let path = std::env::var_os("ROUTECODEX_REQUEST_ID_COUNTER_FILE")
+            .or_else(|| std::env::var_os("RCC_REQUEST_ID_COUNTER_FILE"))
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .map(|home| home.join(".rcc/state/request-id-counter.json"))
+            })
+            .ok_or_else(|| {
+                RequestIdentityError::Persistence(
+                    "HOME is required for request id state".to_string(),
+                )
+            })?;
+        Self::from_state_file(path)
     }
 
     pub fn from_state_file(path: PathBuf) -> Result<Self, RequestIdentityError> {
@@ -876,7 +914,12 @@ impl V4RequestIdCounter {
         let next = if self.state_file.is_some() {
             self.window_count
         } else {
-            self.counters.get(&key).copied().unwrap_or(0) + 1
+            self.counters
+                .get(&key)
+                .copied()
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or(RequestIdentityError::SequenceOverflow)?
         };
         if next == 0 {
             return Err(RequestIdentityError::SequenceOverflow);
@@ -884,7 +927,16 @@ impl V4RequestIdCounter {
         self.counters.insert(key, next);
         self.persist_state()?;
         Ok(RequestIdentity {
-            request_id: format!("{server_id}-{local_day}-{next:08}"),
+            request_id: if self.state_file.is_some() {
+                format!(
+                    "{server_id}-{}-{}-{}",
+                    request_id_timestamp()?,
+                    self.total_count,
+                    self.window_count
+                )
+            } else {
+                format!("{server_id}-{}-{}-{}", request_id_timestamp()?, next, next)
+            },
             server_id: server_id.to_string(),
             local_day: local_day.to_string(),
             sequence: next,
@@ -908,34 +960,48 @@ impl V4RequestIdCounter {
                 path.display()
             ))
         })?;
-        if value.get("version").and_then(serde_json::Value::as_u64) != Some(1) {
+        if value.get("version").and_then(serde_json::Value::as_u64)
+            != Some(REQUEST_ID_STATE_VERSION)
+        {
             return Err(RequestIdentityError::Persistence(format!(
                 "unsupported request id counter version in {}",
                 path.display()
             )));
         }
-        if let (Some(server_id), Some(window_key), Some(count)) = (
-            value.get("serverId").and_then(serde_json::Value::as_str),
-            value.get("windowKey").and_then(serde_json::Value::as_str),
-            value.get("windowCount").and_then(serde_json::Value::as_u64),
-        ) {
-            self.counters
-                .insert((server_id.to_string(), window_key.to_string()), count);
-            self.total_count = value
-                .get("totalCount")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(count);
-            self.window_count = count;
-            self.window_key = window_key.to_string();
-        }
+        self.total_count = value
+            .get("totalCount")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| {
+                RequestIdentityError::Persistence(format!(
+                    "missing totalCount in {}",
+                    path.display()
+                ))
+            })?;
+        self.window_count = value
+            .get("windowCount")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| {
+                RequestIdentityError::Persistence(format!(
+                    "missing windowCount in {}",
+                    path.display()
+                ))
+            })?;
+        self.window_key = value
+            .get("windowKey")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                RequestIdentityError::Persistence(format!(
+                    "missing windowKey in {}",
+                    path.display()
+                ))
+            })?
+            .to_string();
         Ok(())
     }
 
     fn persist_state(&self) -> Result<(), RequestIdentityError> {
         let Some(path) = self.state_file.as_ref() else {
-            return Ok(());
-        };
-        let Some(((server_id, window_key), count)) = self.counters.iter().next_back() else {
             return Ok(());
         };
         let parent = path.parent().ok_or_else(|| {
@@ -947,11 +1013,13 @@ impl V4RequestIdCounter {
                 parent.display()
             ))
         })?;
-        let updated_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_secs().to_string())
-            .unwrap_or_else(|_| "0".to_string());
-        let body = serde_json::json!({"version": 1, "serverId": server_id, "totalCount": self.total_count.max(*count), "windowCount": self.window_count.max(*count), "windowKey": window_key, "updatedAt": updated_at});
+        let body = serde_json::json!({
+            "version": REQUEST_ID_STATE_VERSION,
+            "totalCount": self.total_count,
+            "windowCount": self.window_count,
+            "windowKey": self.window_key,
+            "updatedAt": utc_timestamp()?,
+        });
         let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
         fs::write(
             &tmp,
@@ -968,6 +1036,64 @@ impl V4RequestIdCounter {
             ))
         })
     }
+}
+
+fn request_id_timestamp() -> Result<String, RequestIdentityError> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| {
+            RequestIdentityError::Persistence(format!("request id clock moved backwards: {error}"))
+        })?;
+    let millis = duration.as_millis();
+    let seconds = (millis / 1000) as libc::time_t;
+    let tm = unsafe {
+        let mut raw = std::mem::MaybeUninit::<libc::tm>::uninit();
+        if libc::localtime_r(&seconds, raw.as_mut_ptr()).is_null() {
+            return Err(RequestIdentityError::Persistence(
+                "failed to format request id timestamp".to_string(),
+            ));
+        }
+        raw.assume_init()
+    };
+    Ok(format!(
+        "{:04}{:02}{:02}T{:02}{:02}{:02}{:03}",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec,
+        millis % 1000
+    ))
+}
+
+fn utc_timestamp() -> Result<String, RequestIdentityError> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| {
+            RequestIdentityError::Persistence(format!("request id clock moved backwards: {error}"))
+        })?;
+    let millis = duration.as_millis();
+    let seconds = (millis / 1000) as libc::time_t;
+    let tm = unsafe {
+        let mut raw = std::mem::MaybeUninit::<libc::tm>::uninit();
+        if libc::gmtime_r(&seconds, raw.as_mut_ptr()).is_null() {
+            return Err(RequestIdentityError::Persistence(
+                "failed to format request id UTC timestamp".to_string(),
+            ));
+        }
+        raw.assume_init()
+    };
+    Ok(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec,
+        millis % 1000
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
