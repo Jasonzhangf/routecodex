@@ -3561,8 +3561,15 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
 
 #[test]
 fn relay_chat_sse_json_projection_has_explicit_terminal_marker() {
-    let frame =
-        append_v3_openai_chat_relay_sse_done(b"data: {\"id\":\"chatcmpl_test\",\"choices\":[]}");
+    let frame = build_v3_openai_chat_relay_json_sse_frame(&json!({
+        "id": "chatcmpl_test",
+        "choices": []
+    }))
+    .expect("JSON relay SSE projection");
+    assert!(frame.starts_with(b"data: {"));
+    assert!(frame[..frame.len() - b"\n\ndata: [DONE]\n\n".len()]
+        .windows(b"chatcmpl_test".len())
+        .any(|window| window == b"chatcmpl_test"));
     assert!(frame.ends_with(b"data: [DONE]\n\n"));
 }
 

@@ -73,6 +73,17 @@ pub(crate) fn append_v3_openai_chat_relay_sse_done(bytes: &[u8]) -> Vec<u8> {
     frame
 }
 
+pub(crate) fn build_v3_openai_chat_relay_json_sse_frame(
+    value: &Value,
+) -> Result<Vec<u8>, serde_json::Error> {
+    let bytes = serde_json::to_vec(value)?;
+    let mut frame = Vec::with_capacity(bytes.len() + 32);
+    frame.extend_from_slice(b"data: ");
+    frame.extend_from_slice(&bytes);
+    frame.extend_from_slice(b"\n\n");
+    Ok(append_v3_openai_chat_relay_sse_done(&frame))
+}
+
 pub async fn execute_v3_responses_relay_request(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
@@ -294,8 +305,9 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                                 }
                                 V3OpenAiChatRelayClientBody::Json(json) => {
                                     // provider 以 JSON 完成（非 SSE）：包装为 SSE data 帧。
-                                    let bytes = match serde_json::to_vec(&json) {
-                                        Ok(bytes) => bytes,
+                                    let frame =
+                                        match build_v3_openai_chat_relay_json_sse_frame(&json) {
+                                        Ok(frame) => frame,
                                         Err(error) => {
                                             let _ = tx
                                                 .send(v3_sse_error_event_chunk(
@@ -309,11 +321,13 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                                             return;
                                         }
                                     };
-                                    let mut frame = Vec::with_capacity(bytes.len() + 8);
-                                    frame.extend_from_slice(b"data: ");
-                                    frame.extend_from_slice(&bytes);
-                                    frame.extend_from_slice(b"\n\n");
-                                    let _ = tx.send(frame).await;
+                                    if tx.send(frame).await.is_err() {
+                                        return;
+                                    }
+                                    // JSON-to-SSE projection is a complete client
+                                    // response, so it must use the same explicit
+                                    // terminal marker as the native SSE path.
+                                    // A channel close without [DONE] is a silent EOF.
                                     emit_v3_relay_completed_console_after_stream(
                                         &console_context,
                                         output_status,
