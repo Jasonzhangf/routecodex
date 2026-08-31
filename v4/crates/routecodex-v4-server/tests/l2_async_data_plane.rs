@@ -73,7 +73,9 @@ async fn async_admission_assigns_real_request_identity_scope() {
     assert_eq!(fields.len(), 3);
     assert!(fields[0].starts_with("127.0.0.1:0"));
     assert_ne!(fields[1], "0");
-    assert!(fields[2].contains("day-"));
+    let id_parts: Vec<_> = fields[2].split('-').collect();
+    assert!(id_parts.iter().any(|part| part.starts_with("20")));
+    assert!(fields[2].matches('-').count() >= 3);
     stop.cancel();
     task.await.expect("join").expect("clean stop");
 }

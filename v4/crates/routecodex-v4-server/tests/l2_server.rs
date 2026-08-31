@@ -94,12 +94,38 @@ fn request_identity_counter_persists_and_reloads() {
         .next_request_identity("srv-1", "2026-08-16")
         .expect("persist identity");
     assert_eq!(issued.sequence, 1);
+    let id_parts: Vec<_> = issued.request_id.split('-').collect();
+    assert_eq!(id_parts.first().copied(), Some("srv"));
+    assert!(id_parts.iter().any(|part| part.starts_with("2026")));
+    assert!(issued.request_id.ends_with("-1-1"));
     let mut second = V4RequestIdCounter::from_state_file(path.clone()).expect("reload counter");
     let reloaded = second
         .next_request_identity("srv-1", "2026-08-16")
         .expect("continue identity");
     assert_eq!(reloaded.sequence, 2);
     std::fs::remove_file(path).expect("remove test state");
+}
+
+#[test]
+fn request_identity_counter_reads_v3_state_schema_without_server_id() {
+    let path = std::env::temp_dir().join(format!("rccv4-v3-state-{}.json", std::process::id()));
+    std::fs::write(
+        &path,
+        br#"{"version":1,"totalCount":41,"windowCount":9,"windowKey":"20260831","updatedAt":"2026-08-31T00:00:00.000Z"}"#,
+    )
+    .expect("write v3 state");
+    let mut counter = V4RequestIdCounter::from_state_file(path.clone()).expect("load v3 state");
+    let issued = counter
+        .next_request_identity("responses", "20260831")
+        .expect("continue v3 state");
+    assert_eq!(issued.sequence, 10);
+    let state: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).expect("read state")).expect("parse state");
+    assert_eq!(state["totalCount"], 42);
+    assert_eq!(state["windowCount"], 10);
+    assert_eq!(state["windowKey"], "20260831");
+    assert!(state.get("serverId").is_none());
+    std::fs::remove_file(path).expect("remove state");
 }
 
 #[test]
