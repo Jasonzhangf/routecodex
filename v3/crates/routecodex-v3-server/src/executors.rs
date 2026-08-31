@@ -96,7 +96,7 @@ pub(crate) fn responses_relay_output_response(
     } else {
         content_type
     };
-    let mut builder = Response::builder()
+    let builder = Response::builder()
         .status(StatusCode::from_u16(output.status).expect("typed V3 Responses Relay status"))
         .header("content-type", content_type);
     let body = match output.client_body {
@@ -214,6 +214,7 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
     request_id: String,
     failure_session_scope: V3ProviderFailureSessionScope,
     execution_mode: V3HubExecutionMode,
+    request_execution_control: V3RequestExecutionControl,
     console_context: V3ConsoleEmissionContext,
     started_at: Instant,
     front_transport_owns_keepalive: bool,
@@ -239,11 +240,12 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                 tokio::time::interval(tokio::time::Duration::from_millis(keepalive_ms));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             let run = async {
-                execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(
+                execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control(
                 &manifest,
                 input,
                 provider_health,
                 execution_mode,
+                request_execution_control,
             )
             .await
             };
@@ -523,6 +525,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             );
         }
         let relay_trace = handoff.node_trace;
+        let request_execution_control = handoff.request_execution_control;
         // SSE 请求：立即 201 + keepalive 维持连接，后台执行完整 relay 链
         // （客户端连接与 provider 解耦，provider 挂起/慢不影响 client 连接）。
         if payload.get("stream").and_then(Value::as_bool) == Some(true) {
@@ -532,6 +535,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
                 request_id.clone(),
                 provider_failure_session_scope.clone(),
                 V3HubExecutionMode::Relay,
+                request_execution_control,
                 console_context,
                 started_at,
                 true,
@@ -539,7 +543,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             .await;
         }
         let relay_result =
-            execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
+            execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control(
                 &state.manifest,
                 V3OpenAiChatRelayRuntimeInput {
                     server_id: state.server.id.clone(),
@@ -548,6 +552,8 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
                     payload,
                 },
                 state.provider_health.runtime_health(),
+                V3HubExecutionMode::Relay,
+                request_execution_control,
             )
             .await;
         let mut relay_output = match relay_result {
@@ -725,11 +731,15 @@ pub(crate) fn gemini_relay_output_response(
 
 pub(crate) fn anthropic_relay_output_response(
     output: V3AnthropicRelayRuntimeOutput,
-    stream: bool,
 ) -> Response<Body> {
-    let stream = stream && output.error_chain.is_none();
+    let stream = output.client_body.is_sse();
+    let status = output.status;
+    let node_trace = output.node_trace.clone();
+    let error_chain = output.error_chain.clone();
+    let payload = output.into_v3_resp_15_client_payload();
+    let frame = build_v3_server_16_http_frame_from_v3_resp_15(payload, node_trace, error_chain);
     let mut builder = Response::builder()
-        .status(StatusCode::from_u16(output.status).expect("typed V3 Relay status"))
+        .status(StatusCode::from_u16(status).expect("typed V3 Anthropic Relay status"))
         .header(
             "content-type",
             if stream {
@@ -738,23 +748,13 @@ pub(crate) fn anthropic_relay_output_response(
                 "application/json"
             },
         );
-    let body = if stream {
-        match routecodex_v3_runtime::hub_v1::project_v3_anthropic_client_sse_stream(
-            output.client_response,
-        ) {
-            Ok(stream) => v3_client_sse_body(stream, None),
-            Err(error) => {
-                let projected = project_v3_anthropic_relay_runtime_failure(
-                    routecodex_v3_runtime::V3AnthropicRelayRuntimeError::StructuredSse(error),
-                );
-                return anthropic_relay_output_response(projected, false);
-            }
-        }
-    } else {
-        Body::from(
-            serde_json::to_vec(&output.client_response)
-                .expect("typed V3 Anthropic Relay projection"),
-        )
+    let body = match frame.body {
+        V3Server16Body::Sse(client_stream) => v3_live_client_sse_body(client_stream, None),
+        V3Server16Body::CommittedSse(client_stream) => v3_client_sse_body(client_stream, None),
+        V3Server16Body::Json(client_response) => Body::from(
+            serde_json::to_vec(&client_response).expect("typed V3 Anthropic Relay projection"),
+        ),
+        V3Server16Body::Bytes(bytes) => Body::from(bytes),
     };
     builder
         .body(body)

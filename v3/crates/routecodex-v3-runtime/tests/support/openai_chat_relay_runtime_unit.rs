@@ -327,6 +327,13 @@ bind = "127.0.0.1"
 port = 4444
 routing_group = "default"
 
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = { request_max_attempts = 1, attempt_max_bytes = 67108864, attempt_max_frames = 262144, request_max_bytes = 67108864, process_max_bytes = 536870912, residence_timeout_ms = 600000 }
+
 [providers.openai]
 type = "responses"
 base_url = "http://127.0.0.1:9/v1"
@@ -350,5 +357,70 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         .expect("test manifest authoring parses");
         routecodex_v3_config::compile_v3_config_05_manifest(authoring)
             .expect("test manifest compiles")
+    }
+
+    struct ExecutionControlRejectingTransport {
+        sends: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl ResponsesTransport for ExecutionControlRejectingTransport {
+        async fn send(
+            &self,
+            _request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<routecodex_v3_provider_responses::V3ProviderResp14Raw, V3ProviderError> {
+            self.sends
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            panic!("shared request attempt budget must reject before transport.send")
+        }
+    }
+
+    #[tokio::test]
+    async fn execution_control_payload_architecture_openai_chat_relay_handoff_does_not_reset_attempt_budget(
+    ) {
+        std::env::set_var("ROUTECODEX_V3_TEST_KEY", "test-secret");
+        let manifest = test_relay_manifest();
+        let request_execution_control =
+            crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
+                .expect("request execution control");
+        request_execution_control
+            .attempt_budget()
+            .admit_transport_attempt()
+            .expect("Direct attempt before Relay handoff");
+        let transport = ExecutionControlRejectingTransport {
+            sends: std::sync::atomic::AtomicUsize::new(0),
+        };
+
+        let error = execute_v3_openai_chat_relay_runtime_inner(
+            &manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: "test".to_string(),
+                failure_session_scope: V3ProviderFailureSessionScope::new(
+                    "test",
+                    "default",
+                    "shared-openai-chat-attempt-budget",
+                )
+                .expect("session scope"),
+                request_id: "req-shared-openai-chat-attempt-budget".to_string(),
+                payload: json!({
+                    "model": "client-model",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": false
+                }),
+            },
+            &transport,
+            V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+            V3RelayProviderFailureRetryPolicy::default(),
+            V3HubExecutionMode::Relay,
+            Some(request_execution_control),
+        )
+        .await
+        .expect_err("Relay must reject the next transport attempt from the shared budget");
+
+        assert!(matches!(error, V3OpenAiChatRelayRuntimeError::Target(_)));
+        assert_eq!(
+            transport.sends.load(std::sync::atomic::Ordering::Acquire),
+            0
+        );
     }
 }

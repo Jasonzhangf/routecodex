@@ -315,8 +315,6 @@ impl V3TargetInterpreter {
         let mut unavailable = Vec::new();
         let mut eligible = Vec::new();
         let mut near_limit_eligible = Vec::new();
-        let direct_route = expanded.route.pool_id == "direct";
-        let mut direct_fallback: Option<(usize, V3TargetCandidate)> = None;
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
@@ -373,21 +371,7 @@ impl V3TargetInterpreter {
                     candidate,
                     &projection,
                 ));
-                if direct_route && direct_fallback.is_none() && projection.blocked_scopes.is_empty()
-                {
-                    direct_fallback = Some((index, candidate.clone()));
-                }
             }
-        }
-
-        if let Some((index, candidate)) = direct_fallback {
-            return Ok(V3Target10ConcreteProviderSelected {
-                route: expanded.route,
-                candidate,
-                unavailable_candidates: unavailable,
-                attempts: index + 1,
-                default_floor_protected: false,
-            });
         }
         if eligible.is_empty() {
             eligible = near_limit_eligible;

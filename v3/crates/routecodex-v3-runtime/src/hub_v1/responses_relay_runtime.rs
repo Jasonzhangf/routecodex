@@ -95,6 +95,14 @@ impl V3ResponsesRelayProviderHealthHandle {
     pub fn runtime_health(&self) -> V3ProviderFailureRuntimeHealth {
         self.runtime_health.clone()
     }
+
+    pub fn flush_persistence(&self) -> Result<(), String> {
+        self.runtime_health.store().flush_persistence()
+    }
+
+    pub fn persistence_alarm(&self) -> Option<String> {
+        self.runtime_health.store().persistence_alarm()
+    }
 }
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
@@ -159,6 +167,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_stople
         None,
         BTreeSet::new(),
         None,
+        None,
     )
     .await
 }
@@ -198,6 +207,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
         None,
         BTreeSet::new(),
         None,
+        None,
     )
     .await
 }
@@ -214,6 +224,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: BTreeSet<String>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&local_stopless.scope);
     let provider_failure_event_sink = local_stopless.provider_failure_event_sink.clone();
@@ -241,6 +252,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
         Some(initial_expanded),
         request_local_excluded_candidates,
         observability_accumulator,
+        request_execution_control,
     )
     .await
 }
@@ -295,6 +307,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
         initial_expanded,
         BTreeSet::new(),
         None,
+        None,
     )
     .await
 }
@@ -324,6 +337,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: BTreeSet<String>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target(
         manifest,
@@ -335,6 +349,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
         initial_expanded,
         request_local_excluded_candidates,
         observability_accumulator,
+        request_execution_control,
     )
     .await
 }
@@ -372,6 +387,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: BTreeSet<String>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
@@ -386,6 +402,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
             initial_expanded,
             request_local_excluded_candidates,
             observability_accumulator,
+            request_execution_control,
         )
         .await?;
     output.provider_snapshots =
@@ -413,7 +430,8 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
     transport: &T,
     retry_policy: V3ResponsesRelayRetryPolicy,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
@@ -428,6 +446,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         None,
         None,
         BTreeSet::new(),
+        None,
         None,
     )
     .await
@@ -456,6 +475,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         None,
         None,
         BTreeSet::new(),
+        None,
         None,
     )
     .await
@@ -495,6 +515,7 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
         None,
         None,
         BTreeSet::new(),
+        None,
         None,
     )
     .await
@@ -671,6 +692,7 @@ fn payload_input_paired_call_ids(payload: &Value) -> Vec<String> {
 }
 
 fn commit_or_release_responses_local_continuation(
+    _receipt: &crate::nodes::V3AttemptSuccessReceipt,
     local: Option<&V3ResponsesRelayLocalContinuationExecution<'_>>,
     restored_context_ids: &[String],
     canonical_request: &Value,
@@ -756,6 +778,7 @@ fn project_v3_responses_relay_client_body(
     client_response_transport_intent: V3HubTransportIntent,
     finalized_response: Value,
     strip_client_response_id: bool,
+    attempt_budget: crate::nodes::V3AttemptBudget,
 ) -> Result<V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeError> {
     let mut finalized_response = finalized_response;
     if strip_client_response_id {
@@ -764,8 +787,11 @@ fn project_v3_responses_relay_client_body(
     match client_response_transport_intent {
         V3HubTransportIntent::Json => Ok(V3ResponsesRelayClientBody::Json(finalized_response)),
         V3HubTransportIntent::Sse => Ok(V3ResponsesRelayClientBody::Sse(
-            build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(finalized_response)
-                .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?,
+            build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget(
+                finalized_response,
+                attempt_budget,
+            )
+            .map_err(V3ResponsesRelayRuntimeError::ExecutionControlResponse)?,
         )),
     }
 }
@@ -918,10 +944,25 @@ pub(crate) fn extract_v3_runtime_usage_summary(value: &Value) -> Option<V3Runtim
             .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens_details", "cached_read_tokens"]))
             .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens_details", "cache_read_tokens"])),
         cache_creation_input_tokens: read_v3_usage_u64(usage, &["cache_creation_input_tokens"])
-            .or_else(|| read_v3_usage_u64(usage, &["input_tokens_details", "cache_creation_input_tokens"]))
+            .or_else(|| {
+                read_v3_usage_u64(
+                    usage,
+                    &["input_tokens_details", "cache_creation_input_tokens"],
+                )
+            })
             .or_else(|| read_v3_usage_u64(usage, &["input_tokens_details", "cached_write_tokens"]))
-            .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens_details", "cache_creation_input_tokens"]))
-            .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens_details", "cached_creation_input_tokens"])),
+            .or_else(|| {
+                read_v3_usage_u64(
+                    usage,
+                    &["prompt_tokens_details", "cache_creation_input_tokens"],
+                )
+            })
+            .or_else(|| {
+                read_v3_usage_u64(
+                    usage,
+                    &["prompt_tokens_details", "cached_creation_input_tokens"],
+                )
+            }),
     };
     if summary.input_tokens.is_some()
         || summary.output_tokens.is_some()
@@ -936,7 +977,7 @@ pub(crate) fn extract_v3_runtime_usage_summary(value: &Value) -> Option<V3Runtim
     }
 }
 
-pub(crate) fn repair_v3_runtime_input_usage_from_request(
+pub(crate) fn materialize_v3_runtime_input_usage_estimate_from_request(
     response: &mut Value,
     request: &Value,
 ) {
@@ -953,9 +994,7 @@ pub(crate) fn repair_v3_runtime_input_usage_from_request(
     let Some(usage_object) = usage.as_object_mut() else {
         return;
     };
-    let input_tokens = usage_object
-        .get("input_tokens")
-        .and_then(Value::as_u64);
+    let input_tokens = usage_object.get("input_tokens").and_then(Value::as_u64);
     if input_tokens.is_some_and(|tokens| tokens > 0) {
         return;
     }
@@ -963,10 +1002,7 @@ pub(crate) fn repair_v3_runtime_input_usage_from_request(
         "input_tokens".to_string(),
         Value::from(estimated_input_tokens),
     );
-    if let Some(output_tokens) = usage_object
-        .get("output_tokens")
-        .and_then(Value::as_u64)
-    {
+    if let Some(output_tokens) = usage_object.get("output_tokens").and_then(Value::as_u64) {
         usage_object.insert(
             "total_tokens".to_string(),
             Value::from(estimated_input_tokens.saturating_add(output_tokens)),
@@ -979,23 +1015,25 @@ fn read_v3_usage_u64(value: &Value, path: &[&str]) -> Option<u64> {
     for segment in path {
         current = current.get(*segment)?;
     }
-    current.as_u64().or_else(|| {
-        current
-            .as_i64()
-            .and_then(|number| u64::try_from(number).ok())
-    })
-    .or_else(|| {
-        current.as_f64().and_then(|number| {
-            if !number.is_finite() || number < 0.0 {
-                return None;
-            }
-            let rounded = number.round();
-            if (rounded - number).abs() > f64::EPSILON * 16.0 {
-                return None;
-            }
-            u64::try_from(rounded as i128).ok()
+    current
+        .as_u64()
+        .or_else(|| {
+            current
+                .as_i64()
+                .and_then(|number| u64::try_from(number).ok())
         })
-    })
+        .or_else(|| {
+            current.as_f64().and_then(|number| {
+                if !number.is_finite() || number < 0.0 {
+                    return None;
+                }
+                let rounded = number.round();
+                if (rounded - number).abs() > f64::EPSILON * 16.0 {
+                    return None;
+                }
+                u64::try_from(rounded as i128).ok()
+            })
+        })
 }
 
 fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
@@ -1015,6 +1053,16 @@ pub use provider_stream_materialization::{
 use responses_provider_event_codec::*;
 pub fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
     response: Value,
+) -> Result<V3ResponsesRelayClientStream, String> {
+    build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget(
+        response,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+}
+
+pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget(
+    response: Value,
+    attempt_budget: crate::nodes::V3AttemptBudget,
 ) -> Result<V3ResponsesRelayClientStream, String> {
     let _owner = V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER;
     let status = response.get("status").and_then(Value::as_str);
@@ -1105,14 +1153,19 @@ pub fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
         ));
     }
     frames.push(b"data: [DONE]\n\n".to_vec());
-    let mut committed = crate::nodes::V3CommittedClientSseBuilder::new();
+    let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
+        .map_err(|error| error.to_string())?;
     for (index, frame) in frames.into_iter().enumerate() {
-        committed.push(frame)?;
+        committed.push(frame).map_err(|error| error.to_string())?;
         if index == terminal_frame_index {
-            committed.mark_last_frame_as_terminal()?;
+            committed
+                .mark_last_frame_as_terminal()
+                .map_err(|error| error.to_string())?;
         }
     }
-    committed.seal_after_validated_terminal()
+    committed
+        .seal_after_validated_terminal()
+        .map_err(|error| error.to_string())
 }
 
 fn append_v3_responses_client_reasoning_progress_frames(
@@ -1248,7 +1301,7 @@ fn append_v3_responses_client_function_call_progress_frames(
     // it into a 502: native string arguments pass through byte-for-byte;
     // structured arguments are deterministically encoded; an absent field is
     // represented by the protocol's empty initial argument buffer. This does
-    // not infer or repair toolreason fields, and it never changes the command
+    // does not infer or alter toolreason fields, and never changes the command
     // object itself.
     let arguments = match item.get("arguments") {
         Some(Value::String(arguments)) => arguments.clone(),

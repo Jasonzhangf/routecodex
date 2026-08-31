@@ -855,7 +855,7 @@ async fn records(
                     .into_response();
             }
         };
-        let values = match routecodex_v3_config::v3_webui_observability_read_raw_rows(&path) {
+        let values = match routecodex_v3_debug::v3_webui_observability_read_raw_rows(&path) {
             Ok(values) => values,
             Err(error) => {
                 if path.exists() {

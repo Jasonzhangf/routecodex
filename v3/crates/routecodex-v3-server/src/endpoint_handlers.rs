@@ -922,9 +922,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 server_id: state.server.id.clone(),
                 failure_session_scope: provider_failure_session_scope.clone(),
                 request_id: request_id.clone(),
-                toolreason_observation_session_id: Some(
-                    toolreason_observation_session_id.clone(),
-                ),
+                toolreason_observation_session_id: Some(toolreason_observation_session_id.clone()),
                 payload: payload.clone(),
             },
             client_headers,
@@ -1065,7 +1063,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         );
     }
     if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-        let stream = payload.get("stream").and_then(serde_json::Value::as_bool) == Some(true);
         let client_headers = match collect_anthropic_relay_client_headers(&request_headers) {
             Ok(headers) => headers,
             Err(message) => {
@@ -1185,7 +1182,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 );
             }
         }
-        return anthropic_relay_output_response(output, stream);
+        return anthropic_relay_output_response(output);
     }
     if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let output = match execute_v3_gemini_relay_runtime_with_default_transport_provider_health(
@@ -1337,6 +1334,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     plan.expanded.clone(),
                     BTreeSet::new(),
                     None,
+                    None,
                 )
                 .await
                 {
@@ -1389,6 +1387,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     plan.decision.target.clone(),
                     plan.expanded.clone(),
                     BTreeSet::new(),
+                    None,
                     None,
                 )
                 .await
@@ -1445,6 +1444,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 handoff.request_payload.clone(),
                 Some(&handoff.plan),
                 Some(handoff.observability_accumulator),
+                Some(handoff.request_execution_control),
                 Some(provider_failure_event_sink.clone()),
                 Some(route_selection_event_sink.clone()),
                 request_purpose,
@@ -1457,9 +1457,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         &mut frame,
                         handoff.provider_failure_events,
                     );
-                    // Provider failure events describe recovered attempts. They are not a
-                    // terminal client error when the handoff eventually returns 2xx; only the
-                    // Error06/status truth may create error.json.
+                    // Recovered provider failures are not terminal client errors; only the
+                    // Error06/status truth may create error.json after a successful handoff.
                     if frame.status >= 400 || !frame.error_chain.is_empty() {
                         let _ = persist_v3_error_evidence_payload(
                             &state,
@@ -1588,6 +1587,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             responses_protocol_plan
                 .as_ref()
                 .map(V3MetadataCenterExecutionPlan::protocol_plan),
+            None,
             None,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),

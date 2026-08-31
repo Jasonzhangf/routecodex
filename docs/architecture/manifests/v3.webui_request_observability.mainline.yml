@@ -76,11 +76,11 @@ edges:
       consumes:
         - v3.server.internal_observability_projection
       produces:
-        - v3.config.webui_observability_store
+        - v3.observability.webui_store
       side_channel_reads:
         - v3.server.internal_observability_projection
       side_channel_writes:
-        - v3.config.webui_observability_store
+        - v3.observability.webui_store
   - step_id: v3-webui-observability-config
     from_node: V3AdminRequestsPage
     to_node: V3AdminRequestedPorts
@@ -103,10 +103,10 @@ edges:
     split_binding_id: null
     resource_flow:
       consumes:
-        - v3.config.webui_observability_store
+        - v3.observability.webui_store
       produces: []
       side_channel_reads:
-        - v3.config.webui_observability_store
+        - v3.observability.webui_store
       side_channel_writes: []
 canonical_docs:
   - docs/architecture/v3-resource-operation-map.yml

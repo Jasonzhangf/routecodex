@@ -5,7 +5,7 @@
 // request_key so each request is projected once at its latest lifecycle state.
 
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
@@ -36,7 +36,7 @@ pub fn v3_webui_observability_append_row(
 ) -> Result<(), V3WebuiObservabilityStoreError> {
     let row_bytes = serde_json::to_vec(row)
         .map_err(|error| V3WebuiObservabilityStoreError::Encode(error.to_string()))?;
-    let limit = crate::internal::v3_observability_max_record_bytes();
+    let limit = routecodex_v3_config::internal::v3_observability_max_record_bytes();
     if row_bytes.len() as u64 > limit {
         return Err(V3WebuiObservabilityStoreError::RecordTooLarge { limit });
     }
@@ -67,12 +67,22 @@ pub fn v3_webui_observability_append_row(
 pub fn v3_webui_observability_read_rows(
     path: &Path,
 ) -> Result<Vec<Value>, V3WebuiObservabilityStoreError> {
+    v3_webui_observability_read_rows_bounded(path, usize::MAX)
+}
+
+pub fn v3_webui_observability_read_rows_bounded(
+    path: &Path,
+    max_rows: usize,
+) -> Result<Vec<Value>, V3WebuiObservabilityStoreError> {
+    if max_rows == 0 {
+        return Ok(Vec::new());
+    }
     if !path.exists() {
         return Ok(Vec::new());
     }
     let file = fs::File::open(path)?;
     let mut latest_by_key = BTreeMap::<String, Value>::new();
-    let mut order = Vec::<String>::new();
+    let mut order = VecDeque::<String>::new();
     for (line_number, line) in BufReader::new(file).lines().enumerate() {
         let row = decode_observability_row(path, line_number, line?)?;
         let key = row
@@ -85,9 +95,14 @@ pub fn v3_webui_observability_read_rows(
                     line_number + 1
                 ))
             })?;
-        if !latest_by_key.contains_key(key) {
-            order.push(key.to_string());
+        if latest_by_key.contains_key(key) {
+            order.retain(|existing| existing != key);
+        } else if latest_by_key.len() >= max_rows {
+            if let Some(oldest) = order.pop_front() {
+                latest_by_key.remove(&oldest);
+            }
         }
+        order.push_back(key.to_string());
         latest_by_key.insert(key.to_string(), row);
     }
     Ok(order
@@ -165,7 +180,7 @@ fn decode_observability_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal::v3_observability_max_record_bytes;
+    use routecodex_v3_config::internal::v3_observability_max_record_bytes;
     use serde_json::json;
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
@@ -341,6 +356,29 @@ mod tests {
         let error = v3_webui_observability_append_row(&path, &row).unwrap_err();
         assert!(format!("{error}").contains("limit"));
         assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bounded_startup_read_keeps_only_the_most_recent_request_rows() {
+        let dir = temp_dir("bounded-startup");
+        let path = dir.join("records-bounded.jsonl");
+        for request_key in ["r1", "r2", "r3"] {
+            v3_webui_observability_append_row(
+                &path,
+                &json!({
+                    "request_key": request_key,
+                    "event_type": "request.completed",
+                    "result": "success"
+                }),
+            )
+            .unwrap();
+        }
+
+        let rows = v3_webui_observability_read_rows_bounded(&path, 2).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].get("request_key").and_then(Value::as_str), Some("r2"));
+        assert_eq!(rows[1].get("request_key").and_then(Value::as_str), Some("r3"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

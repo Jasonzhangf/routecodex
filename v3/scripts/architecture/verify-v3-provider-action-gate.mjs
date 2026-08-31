@@ -463,7 +463,29 @@ if (text.providerSseJsonCodec.includes('matches!(event_type, "response.completed
   );
 }
 requireOccurrenceCount(text.direct, files.direct, 'drop(provider_action_permit.take());', 3);
-requireText(text.directSse, files.directSse, 'wrap_direct_sse_provider_handoff_stream');
+requireText(
+  text.direct,
+  files.direct,
+  'execute_v3_responses_direct_runtime_kernel_core_resident',
+);
+requireText(
+  text.directSse,
+  files.directSse,
+  'collect_direct_sse_attempt_after_terminal',
+);
+requireText(
+  text.direct,
+  files.direct,
+  'V3AttemptSuccessReceipt::from_sealed_sse_attempt',
+);
+for (const forbidden of [
+  'wrap_direct_sse_provider_handoff_stream',
+  'execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget',
+]) {
+  if (text.direct.includes(forbidden) || text.directSse.includes(forbidden)) {
+    failures.push(`${files.direct} + ${files.directSse}: forbidden removed Direct lifecycle symbol ${forbidden}`);
+  }
+}
 requireOccurrenceCount(
   text.responses,
   files.responses,
@@ -866,8 +888,8 @@ for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-32', 'AbandonRequest', 'Abandoned'],
   ['v3-provider-action-gate-33', 'Permit', 'SuccessObserved'],
   ['v3-provider-action-gate-34', 'SuccessObserved', 'SuccessRecorded'],
-  ['v3-provider-action-gate-35', 'Permit', 'FailureObserved'],
-  ['v3-provider-action-gate-36', 'Abandoned', 'FailureRecorded'],
+  ['v3-provider-action-gate-35', 'Abandoned', 'FailureObserved'],
+  ['v3-provider-action-gate-36', 'FailureObserved', 'FailureRecorded'],
   ['v3-provider-action-gate-37', 'Permit', 'SuccessObserved'],
   ['v3-provider-action-gate-38', 'SuccessObserved', 'SuccessRecorded'],
   ['v3-provider-action-gate-39', 'Permit', 'FailureObserved'],

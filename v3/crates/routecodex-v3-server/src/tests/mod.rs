@@ -1,6 +1,7 @@
 use super::*;
 use crate::webui_observability::V3WebuiObservability;
 use routecodex_v3_error::V3ErrorSourceKind;
+use routecodex_v3_runtime::V3AnthropicRelayClientBody;
 use std::collections::BTreeMap;
 use std::sync::{Mutex as StdMutex, OnceLock};
 
@@ -593,8 +594,9 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
     assert!(terminal["rawSse"]
         .as_str()
         .is_some_and(|value| value.contains("message_stop")));
-    let provider_response_path =
-        root.join(".rcc/codex-samples/openai-responses/ports/5555/terminal-only/provider-response.json");
+    let provider_response_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/terminal-only/provider-response.json",
+    );
     let provider_response: Value =
         serde_json::from_str(&fs::read_to_string(provider_response_path).unwrap()).unwrap();
     assert!(provider_response["rawSse"]
@@ -611,15 +613,16 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
     live_recorder.persist_initial().unwrap();
     let live_response_path =
         root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse/response.json");
-    let live_stream: V3ClientSseStream = Box::pin(futures_util::stream::iter(vec![
-        Ok::<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>(chunk.clone()),
-    ]));
+    let live_stream: V3ClientSseStream =
+        Box::pin(futures_util::stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(chunk.clone())]));
     let mut live_stream = live_recorder.wrap_live(live_stream);
     assert!(live_stream.next().await.is_some());
     assert!(live_stream.next().await.is_none());
-    let live_provider_response_path = root.join(
-        ".rcc/codex-samples/openai-responses/ports/5555/live-sse/provider-response.json",
-    );
+    let live_provider_response_path =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse/provider-response.json");
     let live_provider_response: Value =
         serde_json::from_str(&fs::read_to_string(live_provider_response_path).unwrap()).unwrap();
     assert!(live_provider_response["rawSse"]
@@ -639,9 +642,8 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
         &frame,
     );
     failed_recorder.persist_initial().unwrap();
-    let failed_response_path = root.join(
-        ".rcc/codex-samples/openai-responses/ports/5555/live-sse-failure/response.json",
-    );
+    let failed_response_path =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse-failure/response.json");
     fs::remove_file(&failed_response_path).unwrap();
     fs::create_dir(&failed_response_path).unwrap();
     let failed_stream: V3ClientSseStream = Box::pin(futures_util::stream::empty());
@@ -734,14 +736,7 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
     fs::create_dir_all(&root).unwrap();
     let _home = TestHomeGuard::set(&root);
     let log_file = root.join("server.log");
-    let state = test_v3_listener_state_with_debug(
-        &log_file,
-        5555,
-        true,
-        true,
-        None,
-        false,
-    );
+    let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, false);
     let media = format!("data:image/png;base64,{}", "A".repeat(16_384));
     let mut output = V3ResponsesRelayRuntimeOutput {
         status: 200,
@@ -808,14 +803,8 @@ fn relay_missing_provider_snapshot_does_not_project_client_failure() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let _home = TestHomeGuard::set(&root);
-    let state = test_v3_listener_state_with_debug(
-        &root.join("server.log"),
-        5555,
-        true,
-        true,
-        None,
-        false,
-    );
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, false);
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({"status": "completed"})),
@@ -853,20 +842,15 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let _home = TestHomeGuard::set(&root);
-    let state = test_v3_listener_state_with_debug(
-        &root.join("server.log"),
-        5555,
-        true,
-        true,
-        None,
-        false,
-    );
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, false);
     let output = V3AnthropicRelayRuntimeOutput {
         status: 200,
         client_response: json!({
             "type": "message",
             "content": [{"type": "text", "text": "调用工具 pwd：确认当前工作目录"}]
         }),
+        client_body: V3AnthropicRelayClientBody::Json,
         node_trace: vec!["V3Resp03ToolReason"],
         error_chain: None,
         servertool_followup_required: false,
@@ -904,14 +888,8 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let _home = TestHomeGuard::set(&root);
-    let state = test_v3_listener_state_with_debug(
-        &root.join("server.log"),
-        5555,
-        true,
-        true,
-        None,
-        false,
-    );
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, false);
     let mut output = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
         client_payload: V3Resp15ClientPayload {
             status: 200,
@@ -960,7 +938,10 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
     .is_none());
     assert_eq!(missing.client_payload.status, 200);
     let missing_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/missing-carrier");
-    assert!(!missing_dir.exists(), "server must not fabricate direct artifacts");
+    assert!(
+        !missing_dir.exists(),
+        "server must not fabricate direct artifacts"
+    );
 
     let mut pre_transport_error = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
         client_payload: V3Resp15ClientPayload {
@@ -2252,8 +2233,7 @@ fn realtime_provider_failure_sink_prints_before_final_and_final_dedupes() {
     let provider_error_line = after_realtime
         .lines()
         .find(|line| {
-            line.contains("❌ [provider-error]")
-                && line.contains("target=first[key].gpt-5.5")
+            line.contains("❌ [provider-error]") && line.contains("target=first[key].gpt-5.5")
         })
         .unwrap_or_else(|| {
             panic!("missing provider-error line for failed provider: {after_realtime}")
@@ -2272,9 +2252,7 @@ fn realtime_provider_failure_sink_prints_before_final_and_final_dedupes() {
         "provider failure line must preserve the selected next target without switch labels: {provider_error_line}"
     );
     assert_eq!(
-        after_realtime
-            .matches("target=first[key].gpt-5.5")
-            .count(),
+        after_realtime.matches("target=first[key].gpt-5.5").count(),
         1,
         "one provider switch must emit one failed-provider line: {after_realtime}"
     );
@@ -3322,6 +3300,7 @@ async fn direct_continuation_scope_error_for_stream_request_projects_sse_not_jso
         None,
         None,
         None,
+        None,
         V3RequestPurpose::Conversation,
     )
     .await;
@@ -3691,6 +3670,36 @@ async fn anthropic_sse_projection_error_is_explicit_not_silent_eof() {
     let error = routecodex_v3_runtime::hub_v1::project_v3_anthropic_client_sse_stream(json!({}))
         .expect_err("missing Anthropic events must fail before client stream creation");
     assert!(error.contains("missing events"), "{error}");
+}
+
+#[tokio::test]
+async fn anthropic_relay_output_consumes_typed_sealed_sse_body() {
+    let events = json!([{
+        "event": "message_stop",
+        "data": {"type": "message_stop"}
+    }]);
+    let output = V3AnthropicRelayRuntimeOutput {
+        status: 200,
+        client_response: json!({"events": events.clone()}),
+        client_body: V3AnthropicRelayClientBody::Sse(test_committed_anthropic_sse(events)),
+        node_trace: vec!["V3ServerRespOutbound06ClientFrame"],
+        error_chain: None,
+        servertool_followup_required: false,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+    };
+
+    let response = anthropic_relay_output_response(output);
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "text/event-stream"
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = std::str::from_utf8(&body).unwrap();
+    assert!(body.contains("event: message_stop"), "{body}");
+    assert!(body.contains("\"type\":\"message_stop\""), "{body}");
 }
 
 #[tokio::test]

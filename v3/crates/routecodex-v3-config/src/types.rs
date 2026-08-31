@@ -1,3 +1,4 @@
+use crate::attempt_store::{V3AttemptStorePolicyAuthoringConfig, V3AttemptStorePolicyManifest};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -529,6 +530,8 @@ pub struct V3ServerExecutionAuthoringConfig {
     pub allowed_invocation_sources: Vec<String>,
     pub allowed_transports: Vec<String>,
     pub continuation: V3ContinuationPolicyAuthoringConfig,
+    #[serde(default)]
+    pub attempt_store: V3AttemptStorePolicyAuthoringConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1138,6 +1141,7 @@ pub struct V3ServerExecutionManifest {
     pub allowed_invocation_sources: Vec<String>,
     pub allowed_transports: Vec<String>,
     pub continuation: V3ContinuationPolicyManifest,
+    pub attempt_store: V3AttemptStorePolicyManifest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

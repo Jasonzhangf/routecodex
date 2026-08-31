@@ -12,11 +12,15 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{mpsc, Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+const V3_WEBUI_RECENT_REQUEST_CAPACITY: usize = 10_000;
+const V3_WEBUI_PERSISTENCE_QUEUE_CAPACITY: usize = 1_024;
+const V3_WEBUI_HISTORY_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Unique request key: `<port>:<requestId>`.
 pub(crate) fn build_v3_obs_request_key(port: u16, request_id: &str) -> String {
@@ -229,11 +233,93 @@ pub(crate) struct V3ObsUsageSummary {
 pub(crate) struct V3WebuiObservability {
     inner: Arc<std::sync::Mutex<V3WebuiObservabilityInner>>,
     persistence_path: Option<Arc<std::path::PathBuf>>,
+    persistence_writer: Option<V3WebuiObservabilityPersistenceWriter>,
+    alarm: Arc<RwLock<Option<String>>>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct V3WebuiObservabilityInner {
     requests: BTreeMap<String, V3ObsRequestRow>,
+}
+
+#[derive(Debug)]
+enum V3WebuiObservabilityPersistenceCommand {
+    Append(V3ObsRequestRow),
+    Flush(mpsc::Sender<Result<(), String>>),
+}
+
+#[derive(Debug, Clone)]
+struct V3WebuiObservabilityPersistenceWriter {
+    sender: mpsc::SyncSender<V3WebuiObservabilityPersistenceCommand>,
+    alarm: Arc<RwLock<Option<String>>>,
+}
+
+impl V3WebuiObservabilityPersistenceWriter {
+    fn start(path: PathBuf, alarm: Arc<RwLock<Option<String>>>) -> Self {
+        let (sender, receiver) = mpsc::sync_channel(V3_WEBUI_PERSISTENCE_QUEUE_CAPACITY);
+        let writer_alarm = Arc::clone(&alarm);
+        std::thread::Builder::new()
+            .name("v3-webui-observability-writer".to_string())
+            .spawn(move || {
+                while let Ok(command) = receiver.recv() {
+                    match command {
+                        V3WebuiObservabilityPersistenceCommand::Append(row) => {
+                            if let Err(error) = V3WebuiObservability::append_persisted_row(&path, &row)
+                            {
+                                set_v3_webui_observability_alarm(
+                                    &writer_alarm,
+                                    format!("observability persistence write failed: {error}"),
+                                );
+                            } else if let Ok(mut alarm) = writer_alarm.write() {
+                                *alarm = None;
+                            }
+                        }
+                        V3WebuiObservabilityPersistenceCommand::Flush(receipt) => {
+                            let result = writer_alarm
+                                .read()
+                                .map_err(|error| {
+                                    format!("observability alarm lock poisoned: {error}")
+                                })
+                                .and_then(|alarm| match alarm.as_ref() {
+                                    Some(error) => Err(error.clone()),
+                                    None => Ok(()),
+                                });
+                            let _ = receipt.send(result);
+                        }
+                    }
+                }
+            })
+            .unwrap_or_else(|error| panic!("observability persistence writer start failed: {error}"));
+        Self { sender, alarm }
+    }
+
+    fn enqueue(&self, row: V3ObsRequestRow) {
+        if let Err(error) = self
+            .sender
+            .try_send(V3WebuiObservabilityPersistenceCommand::Append(row))
+        {
+            set_v3_webui_observability_alarm(
+                &self.alarm,
+                format!("observability persistence queue rejected row: {error}"),
+            );
+        }
+    }
+
+    fn flush(&self) -> Result<(), String> {
+        let (receipt_sender, receipt_receiver) = mpsc::channel();
+        self.sender
+            .send(V3WebuiObservabilityPersistenceCommand::Flush(receipt_sender))
+            .map_err(|error| format!("observability persistence writer unavailable: {error}"))?;
+        receipt_receiver
+            .recv()
+            .map_err(|error| format!("observability persistence flush receipt missing: {error}"))?
+    }
+}
+
+fn set_v3_webui_observability_alarm(alarm: &RwLock<Option<String>>, message: String) {
+    if let Ok(mut alarm) = alarm.write() {
+        *alarm = Some(message);
+    }
 }
 
 impl Default for V3WebuiObservability {
@@ -248,15 +334,24 @@ impl V3WebuiObservability {
     }
 
     pub(crate) fn with_persistence_path(path: Option<std::path::PathBuf>) -> Self {
+        let alarm = Arc::new(RwLock::new(None));
+        let persistence_writer = path.as_ref().map(|path| {
+            V3WebuiObservabilityPersistenceWriter::start(path.clone(), Arc::clone(&alarm))
+        });
         Self {
             inner: Arc::new(std::sync::Mutex::new(V3WebuiObservabilityInner::default())),
             persistence_path: path.map(Arc::new),
+            persistence_writer,
+            alarm,
         }
     }
 
     pub(crate) fn load_persisted(path: &std::path::Path) -> Result<Self, String> {
         let handle = Self::with_persistence_path(Some(path.to_path_buf()));
-        let values = routecodex_v3_config::v3_webui_observability_read_rows(path)
+        let values = routecodex_v3_debug::v3_webui_observability_read_rows_bounded(
+            path,
+            V3_WEBUI_RECENT_REQUEST_CAPACITY,
+        )
             .map_err(|error| format!("read observability store {}: {error}", path.display()))?;
         let mut inner = handle
             .inner
@@ -274,6 +369,21 @@ impl V3WebuiObservability {
 
     pub(crate) fn persistence_path(&self) -> Option<PathBuf> {
         self.persistence_path.as_deref().cloned()
+    }
+
+    pub(crate) fn flush_persistence(&self) -> Result<(), String> {
+        match self.persistence_writer.as_ref() {
+            Some(writer) => writer.flush(),
+            None => Ok(()),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn alarm(&self) -> Option<String> {
+        self.alarm
+            .read()
+            .map(|alarm| alarm.clone())
+            .unwrap_or_else(|error| Some(format!("observability alarm lock poisoned: {error}")))
     }
 
     #[cfg(test)]
@@ -351,6 +461,29 @@ impl V3WebuiObservability {
             return Ok(0);
         }
 
+        if !inner.requests.contains_key(request_key)
+            && inner.requests.len() >= V3_WEBUI_RECENT_REQUEST_CAPACITY
+        {
+            if let Some(oldest_terminal_key) = inner
+                .requests
+                .iter()
+                .filter(|(_, row)| row.result.is_some())
+                .min_by_key(|(_, row)| row.updated_epoch_ms)
+                .map(|(key, _)| key.clone())
+            {
+                inner.requests.remove(&oldest_terminal_key);
+            } else {
+                set_v3_webui_observability_alarm(
+                    &self.alarm,
+                    format!(
+                        "observability active request cache reached {} rows",
+                        V3_WEBUI_RECENT_REQUEST_CAPACITY
+                    ),
+                );
+                return Ok(0);
+            }
+        }
+
         let mut row = inner.requests.get(request_key).cloned().unwrap_or_default();
         row.request_key = request_key.to_string();
         row.event_type = event_type_str.clone();
@@ -425,10 +558,11 @@ impl V3WebuiObservability {
             V3ObsEventType::Started => {}
             _ => {}
         }
-        if let Some(path) = self.persistence_path.as_deref() {
-            Self::append_persisted_row(path, &row)?;
+        inner.requests.insert(request_key.to_string(), row.clone());
+        drop(inner);
+        if let Some(writer) = self.persistence_writer.as_ref() {
+            writer.enqueue(row);
         }
-        inner.requests.insert(request_key.to_string(), row);
         Ok(1)
     }
 
@@ -436,9 +570,35 @@ impl V3WebuiObservability {
         path: &std::path::Path,
         row: &V3ObsRequestRow,
     ) -> Result<(), String> {
+        Self::append_persisted_row_with_limit(path, row, V3_WEBUI_HISTORY_MAX_BYTES)
+    }
+
+    fn append_persisted_row_with_limit(
+        path: &std::path::Path,
+        row: &V3ObsRequestRow,
+        max_history_bytes: u64,
+    ) -> Result<(), String> {
         let row = serde_json::to_value(row)
             .map_err(|error| format!("encode observability record failed: {error}"))?;
-        routecodex_v3_config::v3_webui_observability_append_row(path, &row)
+        let next_row_bytes = serde_json::to_vec(&row)
+            .map_err(|error| format!("encode observability record failed: {error}"))?
+            .len() as u64;
+        let current_bytes = std::fs::metadata(path)
+            .map(|metadata| metadata.len())
+            .or_else(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    Ok(0)
+                } else {
+                    Err(error)
+                }
+            })
+            .map_err(|error| format!("read observability store size failed: {error}"))?;
+        if current_bytes.saturating_add(next_row_bytes) > max_history_bytes {
+            return Err(format!(
+                "observability history reached configured {max_history_bytes} byte limit"
+            ));
+        }
+        routecodex_v3_debug::v3_webui_observability_append_row(path, &row)
             .map_err(|error| format!("write observability store failed: {error}"))
     }
 }
@@ -536,6 +696,9 @@ mod tests {
             meta_with_full("r-persist"),
         )
         .unwrap();
+        first
+            .flush_persistence()
+            .expect("terminal persistence flush receipt");
         assert!(path.exists(), "terminal record must be persisted");
         let body = std::fs::read_to_string(&path).unwrap();
         assert!(
@@ -550,6 +713,84 @@ mod tests {
         assert_eq!(row.result.as_deref(), Some("success"));
         assert!(row.duration_ms.is_some());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn persistence_failure_does_not_change_request_projection_truth() {
+        let path = std::env::temp_dir().join(format!(
+            "v3-webui-records-invalid-target-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&path).expect("create directory where JSONL file is expected");
+        let observability = V3WebuiObservability::with_persistence_path(Some(path.clone()));
+        let key = build_v3_obs_request_key(5555, "r-persistence-failure");
+
+        assert_eq!(
+            record(
+                &observability,
+                V3ObsEventType::Completed,
+                &key,
+                scope(5555),
+                meta_with_full("r-persistence-failure"),
+            )
+            .expect("request projection must commit independently of persistence"),
+            1
+        );
+        assert_eq!(
+            observability
+                .rows()
+                .expect("in-memory rows")
+                .get(&key)
+                .and_then(|row| row.result.as_deref()),
+            Some("success")
+        );
+        assert!(observability.flush_persistence().is_err());
+        assert!(observability
+            .alarm()
+            .expect("persistence alarm")
+            .contains("persistence write failed"));
+
+        std::fs::remove_dir_all(&path).expect("remove isolated invalid target");
+    }
+
+    #[test]
+    fn history_byte_limit_is_explicit_and_does_not_change_request_projection_truth() {
+        let observability = V3WebuiObservability::new();
+        let key = build_v3_obs_request_key(5555, "r-history-limit");
+        record(
+            &observability,
+            V3ObsEventType::Completed,
+            &key,
+            scope(5555),
+            meta_with_full("r-history-limit"),
+        )
+        .expect("request projection");
+        let row = observability.rows().expect("rows")[&key].clone();
+        let path = std::env::temp_dir().join(format!(
+            "v3-webui-history-limit-{}-{}.jsonl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+
+        let error = V3WebuiObservability::append_persisted_row_with_limit(&path, &row, 1)
+            .expect_err("history limit must reject before append");
+        assert!(error.contains("history reached configured 1 byte limit"));
+        assert!(!path.exists());
+        assert_eq!(
+            observability
+                .rows()
+                .expect("in-memory rows")
+                .get(&key)
+                .and_then(|row| row.result.as_deref()),
+            Some("success")
+        );
     }
 
     #[test]

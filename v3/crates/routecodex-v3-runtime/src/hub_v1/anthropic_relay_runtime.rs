@@ -81,73 +81,6 @@ impl V3AnthropicRelayClientHeader {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct V3AnthropicRelayRuntimeOutput {
-    pub status: u16,
-    pub client_response: Value,
-    pub node_trace: Vec<&'static str>,
-    pub error_chain: Option<Vec<&'static str>>,
-    pub servertool_followup_required: bool,
-    pub observability: Option<V3RuntimeObservability>,
-    pub stream_observation: Option<V3RuntimeStreamObservation>,
-    pub provider_snapshots: Option<V3RelayProviderSnapshots>,
-}
-
-pub fn project_v3_anthropic_client_sse_stream(
-    client_response: Value,
-) -> Result<crate::nodes::V3CommittedClientSseStream, String> {
-    let events = client_response
-        .get("events")
-        .and_then(Value::as_array)
-        .cloned();
-    let events = events
-        .ok_or_else(|| "typed V3 Anthropic Relay SSE projection is missing events".to_string())?;
-    let terminal_is_valid = events.last().is_some_and(|event| {
-        event.get("event").and_then(Value::as_str) == Some("message_stop")
-            && v3_anthropic_relay_sse_event_semantic(event)
-                .get("type")
-                .and_then(Value::as_str)
-                == Some("message_stop")
-    });
-    if !terminal_is_valid {
-        return Err(
-            "typed V3 Anthropic Relay SSE projection is missing the final message_stop terminal"
-                .to_string(),
-        );
-    }
-    let mut committed = crate::nodes::V3CommittedClientSseBuilder::new();
-    for event in &events {
-        committed.push(build_v3_anthropic_client_sse_event_chunk(event)?)?;
-        if event.get("event").and_then(Value::as_str) == Some("message_stop") {
-            committed.mark_last_frame_as_terminal()?;
-        }
-    }
-    committed.seal_after_validated_terminal()
-}
-
-fn build_v3_anthropic_client_sse_event_chunk(event: &Value) -> Result<Vec<u8>, String> {
-    let (Some(name), Some(data)) = (
-        event.get("event").and_then(Value::as_str),
-        event.get("data"),
-    ) else {
-        return Err("typed V3 Anthropic Relay SSE event is missing event or data".to_string());
-    };
-    let decoded = build_v3_sse_transport_in_02_from_fields(vec![
-        SseField::Named {
-            name: "event".to_string(),
-            value: name.to_string(),
-        },
-        SseField::Named {
-            name: "data".to_string(),
-            value: data.to_string(),
-        },
-    ])
-    .map_err(|error| error.to_string())?;
-    let validated = build_v3_sse_transport_in_03_from_v3_sse_transport_in_02(decoded)
-        .map_err(|error| error.to_string())?;
-    Ok(build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&validated).into_bytes())
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3AnthropicRelayLocalContinuationScope {
     entry_endpoint: String,
@@ -241,6 +174,10 @@ pub enum V3AnthropicRelayRuntimeError {
     ProviderJson(#[from] serde_json::Error),
     #[error("V3 Relay structured SSE projection failed: {0}")]
     StructuredSse(String),
+    #[error("V3 Anthropic request execution control failed: {0}")]
+    ExecutionControlRequest(String),
+    #[error("V3 Anthropic response execution control failed: {0}")]
+    ExecutionControlResponse(String),
     #[error(transparent)]
     LocalContinuation(#[from] V3LocalContinuationError),
     #[error("V3 Anthropic local continuation scope routing group does not match server")]
@@ -618,8 +555,14 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     retry_policy: V3RelayProviderFailureRetryPolicy,
     allow_exhaustion_rescue_probe: bool,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
-    response_hook_profile = response_hook_profile
-        .with_toolreason_observation_request_id(input.request_id.clone());
+    let request_execution_control =
+        crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
+            .map_err(|error| {
+                V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
+            })?;
+    let attempt_budget = request_execution_control.attempt_budget();
+    response_hook_profile =
+        response_hook_profile.with_toolreason_observation_request_id(input.request_id.clone());
     if let Some(session_id) = input.toolreason_observation_session_id.as_deref() {
         response_hook_profile =
             response_hook_profile.with_toolreason_observation_session_id(session_id.to_owned());
@@ -948,6 +891,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
+        attempt_budget.admit_transport_attempt().map_err(|error| {
+            V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
+        })?;
         let transport_result = match tokio::time::timeout(
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
             transport.send(transport_request),
@@ -1126,7 +1072,19 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             continue;
                         }
                     };
+                let client_body = if transport_intent == V3HubTransportIntent::Sse {
+                    V3AnthropicRelayClientBody::Sse(
+                        project_v3_anthropic_client_sse_stream_with_budget(
+                            client_response.clone(),
+                            attempt_budget.clone(),
+                        )
+                        .map_err(V3AnthropicRelayRuntimeError::ExecutionControlResponse)?,
+                    )
+                } else {
+                    V3AnthropicRelayClientBody::Json
+                };
                 record_provider_success_after_resp04(
+                    &crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
                     &provider_health,
                     &input.failure_session_scope,
                     &selected_target_provider_id,
@@ -1155,6 +1113,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 return Ok(V3AnthropicRelayRuntimeOutput {
                     status: 200,
                     client_response,
+                    client_body,
                     node_trace: trace,
                     error_chain: None,
                     servertool_followup_required,
@@ -1310,7 +1269,19 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             continue;
                         }
                     };
+                let client_body = if transport_intent == V3HubTransportIntent::Sse {
+                    V3AnthropicRelayClientBody::Sse(
+                        project_v3_anthropic_client_sse_stream_with_budget(
+                            client_response.clone(),
+                            attempt_budget.clone(),
+                        )
+                        .map_err(V3AnthropicRelayRuntimeError::ExecutionControlResponse)?,
+                    )
+                } else {
+                    V3AnthropicRelayClientBody::Json
+                };
                 record_provider_success_after_resp04(
+                    &crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt(),
                     &provider_health,
                     &input.failure_session_scope,
                     &selected_target_provider_id,
@@ -1339,6 +1310,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 return Ok(V3AnthropicRelayRuntimeOutput {
                     status: 200,
                     client_response,
+                    client_body,
                     node_trace: trace,
                     error_chain: None,
                     servertool_followup_required,
@@ -1601,6 +1573,7 @@ fn commit_or_release_local_continuation(
 }
 
 fn record_provider_success_after_resp04(
+    receipt: &crate::nodes::V3AttemptSuccessReceipt,
     provider_health: &V3ProviderFailureRuntimeHealth,
     failure_session_scope: &V3ProviderFailureSessionScope,
     provider_id: &str,
@@ -1609,6 +1582,7 @@ fn record_provider_success_after_resp04(
 ) -> Result<(), V3AnthropicRelayRuntimeError> {
     provider_health
         .record_provider_success_in_failure_scope(
+            receipt,
             failure_session_scope,
             provider_id,
             Some(auth_alias),

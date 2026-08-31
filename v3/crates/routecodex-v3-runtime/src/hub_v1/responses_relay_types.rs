@@ -42,6 +42,7 @@ pub struct V3ResponsesProtocolDirectHandoff {
     pub node_trace: Vec<&'static str>,
     pub provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     pub observability_accumulator: V3RuntimeObservabilityAccumulator,
+    pub request_execution_control: crate::nodes::V3RequestExecutionControl,
 }
 
 pub enum V3ResponsesRelayDryRunOutcome {
@@ -248,12 +249,18 @@ pub struct V3RuntimeObservability {
 #[derive(Debug, Clone, Default)]
 pub struct V3RuntimeStreamObservation {
     inner: Arc<Mutex<V3RuntimeStreamObservationSnapshot>>,
+    control: Arc<Mutex<V3RuntimeStreamControlState>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3RuntimeSemanticTerminal {
     Success,
     Failure,
+}
+
+#[derive(Debug, Clone, Default)]
+struct V3RuntimeStreamControlState {
+    semantic_terminal: Option<V3RuntimeSemanticTerminal>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -323,6 +330,16 @@ pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
 }
 
 impl V3RuntimeStreamObservation {
+    #[cfg(test)]
+    pub(crate) fn poison_diagnostics_for_test(&self) {
+        let inner = self.inner.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = inner.lock().expect("diagnostics lock");
+            panic!("poison diagnostics for terminal-control isolation test");
+        })
+        .join();
+    }
+
     pub fn snapshot(&self) -> Result<V3RuntimeStreamObservationSnapshot, String> {
         self.inner
             .lock()
@@ -353,23 +370,24 @@ impl V3RuntimeStreamObservation {
     }
 
     pub fn semantic_terminal(&self) -> Result<Option<V3RuntimeSemanticTerminal>, String> {
-        Ok(
-            match self.snapshot()?.response_status.as_deref().map(str::trim) {
-                Some("completed" | "requires_action" | "done") => {
-                    Some(V3RuntimeSemanticTerminal::Success)
-                }
-                Some("failed" | "incomplete" | "cancelled" | "canceled" | "error") => {
-                    Some(V3RuntimeSemanticTerminal::Failure)
-                }
-                _ => None,
-            },
-        )
+        self.control
+            .lock()
+            .map(|control| control.semantic_terminal)
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
     }
 
     pub fn merge_snapshot(
         &self,
         incoming: &V3RuntimeStreamObservationSnapshot,
     ) -> Result<(), String> {
+        if let Some(terminal) =
+            semantic_terminal_from_response_status(incoming.response_status.as_deref())
+        {
+            self.control
+                .lock()
+                .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())?
+                .semantic_terminal = Some(terminal);
+        }
         let mut snapshot = self
             .inner
             .lock()
@@ -455,6 +473,12 @@ impl V3RuntimeStreamObservation {
         if response_status.is_none() && finish_reason.is_none() && usage.is_none() {
             return Ok(());
         }
+        if let Some(terminal) = semantic_terminal_from_response_status(response_status.as_deref()) {
+            self.control
+                .lock()
+                .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())?
+                .semantic_terminal = Some(terminal);
+        }
         let mut snapshot = self
             .inner
             .lock()
@@ -534,6 +558,18 @@ impl V3RuntimeStreamObservation {
         }
         snapshot.timing = Some(timing);
         Ok(())
+    }
+}
+
+fn semantic_terminal_from_response_status(
+    response_status: Option<&str>,
+) -> Option<V3RuntimeSemanticTerminal> {
+    match response_status.map(str::trim) {
+        Some("completed" | "requires_action" | "done") => Some(V3RuntimeSemanticTerminal::Success),
+        Some("failed" | "incomplete" | "cancelled" | "canceled" | "error") => {
+            Some(V3RuntimeSemanticTerminal::Failure)
+        }
+        _ => None,
     }
 }
 
@@ -1272,6 +1308,10 @@ pub enum V3ResponsesRelayRuntimeError {
     ProviderResponseEmpty { provider_id: String },
     #[error("V3 Responses Relay Runtime timing failed: {0}")]
     RuntimeTiming(String),
+    #[error("V3 Responses Relay request execution control failed: {0}")]
+    ExecutionControl(String),
+    #[error("V3 Responses Relay response execution control failed: {0}")]
+    ExecutionControlResponse(String),
     #[error("V3 Responses Relay provider semantic failure {code} status {status}: {message}")]
     ProviderResponseSemanticFailure {
         status: u16,

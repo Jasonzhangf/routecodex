@@ -105,10 +105,19 @@ modules:
   - v3/crates/routecodex-v3-cli/src/init.rs
   - docs/design/RCC_V4_Config_Management_Design_v1.0.md
   allowed_paths:
+  - v3/crates/routecodex-v3-config/src/user_config.rs
+  - v3/crates/routecodex-v3-config/tests/user_config_contract.rs
+  - v3/crates/routecodex-v3-config/src/internal.toml
+  - v3/crates/routecodex-v3-config/src/internal.rs
   - v3/crates/routecodex-v3-config/src/v2_compat.rs
   - v3/crates/routecodex-v3-config/src/store.rs
   - v3/crates/routecodex-v3-config/src/lib.rs
+  - v3/crates/routecodex-v3-cli/src/main.rs
+  - v3/crates/routecodex-v3-cli/tests/user_config_cli.rs
+  - v3/crates/routecodex-v3-lifecycle/src/lib.rs
   - scripts/tests/v3-config-mgmt*
+  - scripts/architecture/verify-v3-simplified-user-config.mjs
+  - scripts/tests/v3-simplified-user-config-red-fixtures.mjs
   forbidden_paths:
   - src
   - sharedmodule/llmswitch-core/rust-core
@@ -116,6 +125,12 @@ modules:
   - v3/crates/routecodex-v3-virtual-router/src
   - v3/crates/routecodex-v3-target/src
   allowed_edges:
+  - from: V3UserConfig01FileSource
+    to: V3UserConfig02RoutingSelectionParsed
+  - from: V3UserConfig02RoutingSelectionParsed
+    to: V3Config02AuthoringParsed
+  - from: V3Config05ManifestPublished
+    to: V3Lifecycle01ValidatedConfig
   - from: V3CliInitCommand01Source
     to: V3ConfigMgmtStore02Core
   - from: V3ConfigMgmtStore02Core

@@ -170,6 +170,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         initial_expanded,
         BTreeSet::new(),
         None,
+        None,
     )
     .await
     {
@@ -308,7 +309,14 @@ pub fn project_v3_responses_relay_runtime_failure(
                 candidates_remaining: 0,
                 source_status: None,
             });
-            error_output(source, projected.status, "none", Vec::new(), observability, 0)
+            error_output(
+                source,
+                projected.status,
+                "none",
+                Vec::new(),
+                observability,
+                0,
+            )
         }
         V3ResponsesRelayRuntimeError::ClientInboundCanonical(message) => {
             let source = routecodex_v3_error::build_v3_error_01_source_raised(
@@ -326,6 +334,15 @@ pub fn project_v3_responses_relay_runtime_failure(
                 "provider_response_sse_event_invalid",
                 message,
                 routecodex_v3_error::V3InternalErrorCode::V3ProviderResp14Raw,
+            );
+            error_output(source, 599, "none", Vec::new(), observability, 0)
+        }
+        V3ResponsesRelayRuntimeError::ExecutionControlResponse(message) => {
+            let source = build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ServerRespOutbound06ClientFrame",
+                "responses_relay_response_execution_control_error",
+                message,
             );
             error_output(source, 599, "none", Vec::new(), observability, 0)
         }

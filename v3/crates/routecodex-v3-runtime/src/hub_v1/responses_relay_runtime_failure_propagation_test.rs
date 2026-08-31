@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn response_execution_control_failure_projects_local_599() {
+    let output = project_v3_responses_relay_runtime_failure(
+        V3ResponsesRelayRuntimeError::ExecutionControlResponse(
+            "request-local replay bytes exhausted".to_string(),
+        ),
+        None,
+    );
+
+    assert_eq!(output.status, 599);
+    let body = match &output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => {
+            panic!("response execution-control failure must project as JSON")
+        }
+    };
+    assert_eq!(
+        body["error"]["code"],
+        "responses_relay_response_execution_control_error"
+    );
+    assert_ne!(body["error"]["code"], "provider_response_sse_event_invalid");
+}
+
+#[test]
 fn relay_runtime_failure_propagates_supplied_observability() {
     let mut observability = V3RuntimeObservability::default();
     observability.entry_protocol = "responses".to_string();

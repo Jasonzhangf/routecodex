@@ -17,7 +17,7 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use serde_json::{json, Value};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::pin::Pin;
 
 pub type V3OpenAiChatClientStream = V3RelayProjectedSseStream;
@@ -76,10 +76,7 @@ impl V3OpenAiChatRelayRuntimeOutput {
         };
         V3Resp15ClientPayload {
             status: self.status,
-            headers: std::collections::BTreeMap::from([(
-                "content-type".to_string(),
-                content_type.to_string(),
-            )]),
+            headers: BTreeMap::from([("content-type".to_string(), content_type.to_string())]),
             body: self.client_body.into_v3_client_body(),
         }
     }
@@ -176,6 +173,25 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
     .await
 }
 
+pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control(
+    manifest: &V3Config05ManifestPublished,
+    input: V3OpenAiChatRelayRuntimeInput,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    execution_mode: V3HubExecutionMode,
+    request_execution_control: crate::nodes::V3RequestExecutionControl,
+) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
+    execute_v3_openai_chat_relay_runtime_inner(
+        manifest,
+        input,
+        crate::default_responses_transport(),
+        provider_health,
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        execution_mode,
+        Some(request_execution_control),
+    )
+    .await
+}
+
 pub async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3OpenAiChatRelayRuntimeInput,
@@ -222,6 +238,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health_and_execu
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
+        None,
     )
     .await
 }
@@ -233,6 +250,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     execution_mode: V3HubExecutionMode,
+    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3OpenAiChatRelayCodec。
@@ -262,6 +280,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         continuation_lookup,
         Vec::new(),
         true,
+        request_execution_control,
     )
     .await
     .map_err(|error| match error {
@@ -549,6 +568,7 @@ impl V3OpenAiChatSseProviderOutcome {
         }
         self.provider_health
             .record_provider_success_in_failure_scope(
+                &crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt(),
                 &self.failure_session_scope,
                 &self.provider_id,
                 Some(&self.auth_alias),
@@ -572,7 +592,6 @@ fn project_sse_stream(
     stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3RelayProjectedSseStream {
-    use futures_util::StreamExt;
     let state = V3OpenAiChatSseState {
         request_id,
         session_id,

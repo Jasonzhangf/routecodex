@@ -1,4 +1,5 @@
 use crate::hooks::{build_v3_provider_error_source, V3HookRegistry};
+use crate::direct_response_hooks::V3DirectResponseCompatBlock;
 use crate::hub_v1::{
     apply_v3_stop_servertool_hook_at_resp03, apply_v3_stopless_request_hook_at_req04,
     apply_v3_tool_call_servertool_hook_at_resp03,
@@ -81,18 +82,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     hook_registry: V3HookRegistry,
     transport: &T,
 ) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget(
+    execute_v3_responses_direct_runtime_kernel_core_resident(
         state,
         manifest,
         raw,
         hook_registry,
         transport,
-        8,
     )
     .await
 }
 
-async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
+async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     T: ResponsesTransport + ?Sized,
 >(
     state: V3ResponsesDirectRuntimeCoreState,
@@ -100,15 +100,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
     raw: V3Server03HttpRequestRaw,
     hook_registry: V3HookRegistry,
     transport: &T,
-    handoff_budget: usize,
 ) -> V3ResponsesDirectRuntimeOutput {
-    let raw_for_sse_handoff = raw.clone();
-    let manifest_for_sse_handoff = manifest.clone();
-    let state_for_sse_handoff = state.clone();
-    let hook_registry_for_sse_handoff = hook_registry;
-    let transport_for_sse_handoff = (handoff_budget > 0)
-        .then(|| transport.handoff_handle())
-        .flatten();
     let accumulator = state
         .observability_accumulator
         .clone()
@@ -133,6 +125,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
         provider_failure_event_sink,
         route_selection_event_sink,
         observability_accumulator: _,
+        request_execution_control,
     } = state;
 
     let mut standardized = match build_v3_req_04_standardized_responses_from_v3_server_03(raw) {
@@ -147,6 +140,23 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
         }
     };
     trace.push("V3Req04StandardizedResponses");
+    let request_execution_control = match request_execution_control {
+        Some(control) => control,
+        None => match crate::nodes::V3RequestExecutionControl::from_manifest(
+            manifest,
+            &standardized.server_id,
+        ) {
+            Ok(control) => control,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3ExecutionAttemptBudget", error),
+                    trace,
+                    &hook_registry,
+                )
+            }
+        },
+    };
+    let attempt_budget = request_execution_control.attempt_budget();
     if let Some(plan_trace) = initial_plan_trace {
         // Router05..Target09 already ran in the Server-side protocol plan;
         // splice those nodes so the client-visible trace stays identical to
@@ -464,7 +474,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
     };
     let standardized_request_id = standardized.request_id.clone();
     let standardized_server_id = standardized.server_id.clone();
-    let commit_route_policy = || -> Result<(), String> {
+    let commit_route_policy = |_receipt: &V3AttemptSuccessReceipt| -> Result<(), String> {
         route_policy_state.commit_request(
             &route_policy_scope,
             &standardized_request_id,
@@ -814,6 +824,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
                 trace,
                 provider_failure_events.clone(),
                 accumulator.with_additional_attempts(send_attempts),
+                request_execution_control,
             );
         }
         if !direct_stopless_control_prepared {
@@ -977,7 +988,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());
 
-        send_attempts = send_attempts.saturating_add(1);
+        send_attempts = match attempt_budget.admit_transport_attempt() {
+            Ok(attempts) => attempts,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3ExecutionAttemptBudget", error),
+                    trace,
+                    &hook_registry,
+                )
+            }
+        };
         if let Err(error) = runtime_timing.start_external() {
             return error_output(
                 runtime_source("V3RuntimeTimingExternal", error),
@@ -1489,204 +1509,183 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
                 }
             }
         }
-        let mut client_sse = None;
-        if matches!(
-            response_projection.attempt_payload.body,
-            V3ProviderAttemptBody::Sse(_)
-        ) {
-            let stream_observation = response_projection
-                .stream_observation
-                .clone()
-                .unwrap_or_default();
-            response_projection.stream_observation = Some(stream_observation.clone());
-            let body = std::mem::replace(
-                &mut response_projection.attempt_payload.body,
-                V3ProviderAttemptBody::Bytes(Vec::new()),
-            );
-            response_projection.attempt_payload.body = match body {
-                V3ProviderAttemptBody::Sse(stream) => {
-                    let projected =
-                        wrap_direct_sse_provider_event_json_observation_stream_with_compat(
-                            stream,
-                            stream_observation.clone(),
-                            runtime_timing.clone(),
-                            crate::shared::v3_strip_client_response_id_enabled_for_server(
-                                manifest,
-                                &standardized.server_id,
-                            ),
-                            retain_response_cipher,
-                            response_projection.compat_plan.provider_protocol,
-                            policy.target.candidate.compatibility_profile.as_deref()
-                                == Some("responses:deepseek-console-go"),
-                            policy.target.candidate.compatibility_profile.as_deref()
-                                == Some("responses:thinking-tags"),
-                            hook_registry.direct_sse_typed_hooks(),
-                            crate::hub_v1::v3_tool_thinking_enabled_for_server(
-                                manifest,
-                                &standardized.server_id,
-                            ),
-                            crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
-                                manifest,
-                                &standardized.server_id,
-                            ),
-                            Some(direct_failure_session_scope.session_id().to_owned()),
-                            Some(standardized.request_id.clone()),
-                            Some(policy.target.candidate.model_id.clone()),
-                            true,
-                        );
-                    let client_stream =
-                        direct_runtime_helpers_stream::commit_direct_sse_attempt_after_terminal(
-                            projected,
-                        );
-                    let client_stream = if let (
-                        false,
-                        V3RemoteContinuationObservation::Streaming { state },
-                        Some(scope),
-                    ) = (
-                        continuation_disabled,
-                        &response_projection.remote_continuation,
-                        continuation_scope.as_ref(),
-                    ) {
-                        wrap_v3_direct_sse_continuation_lifecycle(
-                            client_stream,
-                            state.clone(),
-                            continuation_state.clone(),
-                            Some(scope.clone()),
-                            previous_response_id.clone(),
-                            selected_pin.clone(),
-                            selected_capability_revision.clone(),
-                            now_epoch_ms,
-                        )
-                    } else {
-                        client_stream
-                    };
-                    let failure_scope_for_sse_handoff = direct_failure_session_scope.clone();
-                    let provider_id_for_sse_handoff = policy.target.candidate.provider_id.clone();
-                    let auth_alias_for_sse_handoff = policy.target.candidate.auth_alias.clone();
-                    let model_id_for_sse_handoff = policy.target.candidate.model_id.clone();
-                    let client_stream = match transport_for_sse_handoff.clone() {
-                        Some(transport) => {
-                            let raw = raw_for_sse_handoff.clone();
-                            let manifest = manifest_for_sse_handoff.clone();
-                            let state = state_for_sse_handoff.clone();
-                            let hooks = hook_registry_for_sse_handoff;
-                            let failure_scope = failure_scope_for_sse_handoff.clone();
-                            let provider_id = provider_id_for_sse_handoff.clone();
-                            let auth_alias = auth_alias_for_sse_handoff.clone();
-                            let model_id = model_id_for_sse_handoff.clone();
-                            direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream(
-                                client_stream,
-                                response_projection.compat_plan.provider_protocol,
-                                move |error| {
-                                    let transport = transport.clone();
-                                    let raw = raw.clone();
-                                    let manifest = manifest.clone();
-                                    let mut state = state.clone();
-                                    let failure_scope = failure_scope.clone();
-                                    let provider_id = provider_id.clone();
-                                    let auth_alias = auth_alias.clone();
-                                    let model_id = model_id.clone();
-                                    async move {
-                                        if let Some(health) = state.provider_health.as_ref() {
-                                            health
-                                                .record_post_commit_provider_stream_failure_from_source(
-                                                    &failure_scope,
-                                                    &provider_id,
-                                                    Some(&auth_alias),
-                                                    Some(&model_id),
-                                                    &error,
-                                                )
-                                                .map_err(|message| {
-                                                    build_v3_error_01_source_raised(
-                                                        V3ErrorSourceKind::RuntimeFailure,
-                                                        "V3DirectSseHandoffRuntime",
-                                                        "provider_stream_failure_bookkeeping_failed",
-                                                        message,
-                                                    )
-                                                })?;
-                                        }
-                                        let next = tokio::task::spawn_blocking(move || {
-                                            let runtime =
-                                                tokio::runtime::Builder::new_current_thread()
-                                                    .enable_all()
-                                                    .build()
-                                                    .map_err(|error| error.to_string())?;
-                                            Ok::<_, String>(runtime.block_on(
-                                                execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget(
-                                                    state,
-                                                    &manifest,
-                                                    raw,
-                                                    hooks,
-                                                    transport.as_ref(),
-                                                    handoff_budget.saturating_sub(1),
-                                                ),
-                                            ))
-                                        })
-                                        .await
-                                        .map_err(|error| {
-                                            build_v3_error_01_source_raised(
-                                                V3ErrorSourceKind::RuntimeFailure,
-                                                "V3DirectSseHandoffRuntime",
-                                                "provider_stream_handoff_runtime_join_failed",
-                                                error.to_string(),
-                                            )
-                                        })?
-                                        .map_err(|message| {
-                                            build_v3_error_01_source_raised(
-                                                V3ErrorSourceKind::RuntimeFailure,
-                                                "V3DirectSseHandoffRuntime",
-                                                "provider_stream_handoff_runtime_failed",
-                                                message,
-                                            )
-                                        })?;
-                                        match next.client_payload.body {
-                                            V3ClientBody::Sse(stream) => Ok(Some(stream)),
-                                            V3ClientBody::Json(_)
-                                            | V3ClientBody::Bytes(_)
-                                            | V3ClientBody::CommittedSse(_) => Ok(None),
-                                        }
-                                    }
-                                },
-                                Some(handoff_budget),
-                            )
-                        }
-                        None => {
-                            direct_runtime_helpers_stream::wrap_direct_sse_provider_handoff_stream(
-                                client_stream,
-                                response_projection.compat_plan.provider_protocol,
-                                |error| async move { Err(error) },
-                                Some(0),
-                            )
-                        }
-                    };
-                    drop(provider_action_permit.take());
-                    client_sse = Some(client_stream);
-                    V3ProviderAttemptBody::Bytes(Vec::new())
-                }
-                other => other,
-            };
-        }
         let attempt_body = std::mem::replace(
             &mut response_projection.attempt_payload.body,
             V3ProviderAttemptBody::Bytes(Vec::new()),
         );
-        let committed_client_sse = false;
-        let client_body = match (client_sse, attempt_body) {
-            (Some(stream), V3ProviderAttemptBody::Bytes(bytes)) if bytes.is_empty() => {
-                V3ClientBody::Sse(stream)
-            }
-            (None, V3ProviderAttemptBody::Json(body)) => V3ClientBody::Json(body),
-            (None, V3ProviderAttemptBody::Bytes(body)) => V3ClientBody::Bytes(body),
-            _ => {
-                return error_output(
-                    runtime_source(
-                        "V3DirectResp14ProviderCompat",
-                        "provider attempt did not resolve to one final client body",
-                    ),
-                    trace,
-                    &hook_registry,
+        let committed_client_sse = matches!(&attempt_body, V3ProviderAttemptBody::Sse(_));
+        let (client_body, attempt_success_receipt) = match attempt_body {
+            V3ProviderAttemptBody::Sse(stream) => {
+                let stream_observation = response_projection
+                    .stream_observation
+                    .clone()
+                    .unwrap_or_default();
+                response_projection.stream_observation = Some(stream_observation.clone());
+                let committed = match direct_runtime_helpers_stream::project_and_collect_direct_sse_attempt(
+                    stream, stream_observation, runtime_timing.clone(), manifest,
+                    &standardized.server_id, &standardized.request_id, retain_response_cipher,
+                    &response_projection.compat_plan, &hook_registry, &direct_failure_session_scope,
+                    continuation_disabled, &response_projection.remote_continuation,
+                    continuation_state.clone(), continuation_scope.clone(), previous_response_id.clone(),
+                    selected_pin.clone(), selected_capability_revision.clone(), now_epoch_ms,
+                    attempt_budget.clone(),
                 )
+                .await
+                {
+                    Ok(committed) => committed,
+                    Err(source) if source.source_kind != V3ErrorSourceKind::ProviderFailure => {
+                        if let Err(error) = runtime_timing.finish_external_if_active() {
+                            return error_output(
+                                runtime_source("V3RuntimeTimingExternal", error),
+                                trace,
+                                &hook_registry,
+                            );
+                        }
+                        drop(provider_action_permit.take());
+                        if let Err(error) = release_terminal_failure_locator(
+                            continuation_state.as_deref(),
+                            continuation_scope.as_ref(),
+                            previous_response_id.as_deref(),
+                            &selected_pin,
+                        ) {
+                            return error_output(
+                                runtime_source("V3HubRespContinuation04Committed", error),
+                                trace,
+                                &hook_registry,
+                            );
+                        }
+                        return error_output(source, trace, &hook_registry);
+                    }
+                    Err(source) => {
+                        if let Err(error) = runtime_timing.finish_external_if_active() {
+                            return error_output(
+                                runtime_source("V3RuntimeTimingExternal", error),
+                                trace,
+                                &hook_registry,
+                            );
+                        }
+                        drop(provider_action_permit.take());
+                        let policy_result = match run_v3_direct_provider_failure_policy(
+                            &V3DirectProviderFailurePolicyContext {
+                                failure_session_scope: &direct_failure_session_scope,
+                                provider_health: &provider_health,
+                                run_error: crate::hooks::responses_direct_error_hook,
+                                availability: &availability,
+                                expanded: expanded.as_ref(),
+                                provider_pinned: previous_response_id.is_some(),
+                                now_epoch_ms,
+                            },
+                            &policy.target,
+                            source,
+                            502,
+                            &mut V3DirectProviderFailurePolicyState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                trace: &mut trace,
+                            },
+                        )
+                        .await
+                        {
+                            Ok(result) => result,
+                            Err(source) => return error_output(source, trace, &hook_registry),
+                        };
+                        if let Some(event) = policy_result.event.clone() {
+                            provider_failure_events.push(event.clone());
+                            publish_v3_direct_provider_failure_event(
+                                provider_failure_event_sink.as_ref(),
+                                &policy.target,
+                                "responses",
+                                "sse",
+                                Some(event.status),
+                                &provider_failure_events,
+                                &event,
+                                total_attempts(&accumulator, send_attempts),
+                            );
+                        }
+                        match &policy_result.decision.action {
+                            V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                                if !policy_result.retryable_transient {
+                                    pending_provider_action_recovery = Some(recovery.clone());
+                                }
+                                continue;
+                            }
+                            V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
+                                retry_selected =
+                                    policy_result.retry_selected.map(|selected| *selected);
+                                if !policy_result.retryable_transient {
+                                    pending_provider_action_recovery = Some(recovery.clone());
+                                }
+                                continue;
+                            }
+                            V3Error05ExecutionAction::ProjectTerminal => {
+                                if let Err(error) = release_terminal_failure_locator(
+                                    continuation_state.as_deref(),
+                                    continuation_scope.as_ref(),
+                                    previous_response_id.as_deref(),
+                                    &selected_pin,
+                                ) {
+                                    return error_output(
+                                        runtime_source(
+                                            "V3HubRespContinuation04Committed",
+                                            error,
+                                        ),
+                                        trace,
+                                        &hook_registry,
+                                    );
+                                }
+                                let mut observability = build_v3_direct_runtime_observability(
+                                    &policy.target,
+                                    "responses",
+                                    "sse",
+                                    policy_result.event.as_ref().map(|event| event.status),
+                                    "failed",
+                                    provider_failure_events.clone(),
+                                    false,
+                                );
+                                observability.attempts =
+                                    Some(total_attempts(&accumulator, send_attempts));
+                                let projected =
+                                    V3ErrorHandlingCenter::project_terminal(policy_result.decision);
+                                return projected_error_output_with_observability(
+                                    projected,
+                                    trace,
+                                    Some(observability),
+                                );
+                            }
+                            V3Error05ExecutionAction::ClientDisconnected => {
+                                return projected_error_output_with_observability(
+                                    V3ErrorHandlingCenter::project_terminal(
+                                        policy_result.decision,
+                                    ),
+                                    trace,
+                                    None,
+                                );
+                            }
+                            V3Error05ExecutionAction::RejectNonProviderError => {
+                                return error_output(
+                                    runtime_source(
+                                        "V3Error05ExecutionDecision",
+                                        "provider failure entered a non-provider Error05 lane",
+                                    ),
+                                    trace,
+                                    &hook_registry,
+                                )
+                            }
+                        }
+                    }
+                };
+                drop(provider_action_permit.take());
+                let receipt = V3AttemptSuccessReceipt::from_sealed_sse_attempt(&committed);
+                (V3ClientBody::CommittedSse(committed), receipt)
             }
+            V3ProviderAttemptBody::Json(body) => (
+                V3ClientBody::Json(body),
+                V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
+            ),
+            V3ProviderAttemptBody::Bytes(body) => (
+                V3ClientBody::Bytes(body),
+                V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
+            ),
         };
         let client_payload = V3Resp15ClientPayload {
             status: response_projection.attempt_payload.status,
@@ -1701,6 +1700,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
                 continuation_scope.as_ref(),
             ) {
                 if let Err(projected) = commit_or_release_v3_direct_continuation(
+                    &attempt_success_receipt,
                     continuation_state.as_deref(),
                     scope,
                     &response_projection.remote_continuation,
@@ -1717,6 +1717,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
         }
         if !provider_health_neutral {
             if let Err(source) = record_v3_direct_provider_success(
+                &attempt_success_receipt,
                 &provider_health,
                 &direct_failure_session_scope,
                 &policy.target,
@@ -1725,7 +1726,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget<
                 return error_output(source, trace, &hook_registry);
             }
         }
-        if let Err(error) = commit_route_policy() {
+        if let Err(error) = commit_route_policy(&attempt_success_receipt) {
             return error_output(
                 runtime_source("V3Router06RoutePoolResolved", error),
                 trace,

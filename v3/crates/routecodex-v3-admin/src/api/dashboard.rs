@@ -115,7 +115,7 @@ async fn overview(State(state): State<AppState>) -> Response {
             debug_log,
             server.port,
         );
-        let values = match routecodex_v3_config::v3_webui_observability_read_rows(&path) {
+        let values = match routecodex_v3_debug::v3_webui_observability_read_rows(&path) {
             Ok(values) => values,
             Err(error) => {
                 return (

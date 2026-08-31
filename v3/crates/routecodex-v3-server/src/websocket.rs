@@ -218,6 +218,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                 None,
                 None,
                 None,
+                None,
                 V3RequestPurpose::Conversation,
             )
             .await;
@@ -328,6 +329,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             plan.expanded.clone(),
             BTreeSet::new(),
             None,
+            None,
         )
         .await,
         None => execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(
@@ -356,6 +358,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             .map(|observability| observability.provider_failure_events.clone())
             .unwrap_or_default();
         relay_events.extend(handoff.provider_failure_events);
+        let request_execution_control = handoff.request_execution_control;
         let outcome = execute_responses_direct_server_outcome(
             state,
             headers,
@@ -367,6 +370,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             handoff.request_payload.clone(),
             Some(&handoff.plan),
             Some(handoff.observability_accumulator),
+            Some(request_execution_control),
             None,
             None,
             V3RequestPurpose::Conversation,

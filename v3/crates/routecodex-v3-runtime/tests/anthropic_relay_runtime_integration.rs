@@ -948,6 +948,8 @@ fn manifest(scope: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
         parse_v3_config_02_authoring(
             &r#"
 version = 3
+[pipelines.hub_v1]
+skeleton = "hub_v1"
 [servers.__SCOPE__]
 bind = "127.0.0.1"
 port = 1
@@ -983,6 +985,8 @@ fn manifest_with_two_providers(scope: &str) -> routecodex_v3_config::V3Config05M
         parse_v3_config_02_authoring(
             &r#"
 version = 3
+[pipelines.hub_v1]
+skeleton = "hub_v1"
 [servers.__SCOPE__]
 bind = "127.0.0.1"
 port = 1
@@ -1075,6 +1079,8 @@ async fn anthropic_entry_mode_b_web_search_intercepted_must_fail_fast_not_silent
         parse_v3_config_02_authoring(
             r#"
 version = 3
+[pipelines.hub_v1]
+skeleton = "hub_v1"
 [servers.ws]
 bind = "127.0.0.1"
 port = 1

@@ -1,4 +1,5 @@
-use crate::global_cooldown::{V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass};
+mod persistence;
+
 use crate::key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderSchedulingProjection,
     V3ProviderSchedulingReader,
@@ -7,6 +8,10 @@ use crate::probe_backoff::{adaptive_probe_interval_ms, probe_backoff_ms};
 use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key, V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState,
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+};
+use persistence::{
+    persist_cooldown_state, provider_cooldown_state_path, start_provider_health_persistence,
+    V3ProviderHealthPersistenceWriter,
 };
 use routecodex_v3_config::{V3Config05ManifestPublished, V3ProviderDispositionStepManifest};
 use routecodex_v3_error::{
@@ -207,7 +212,7 @@ impl V3ProviderAvailabilityReader for V3ProviderAvailabilityRegistry {
 
 #[derive(Debug, Default)]
 struct V3ProviderHealthState {
-    persistence: Option<V3ProviderCooldownCoordinator>,
+    persistence: Option<V3ProviderHealthPersistenceWriter>,
     configured_disabled: BTreeSet<String>,
     health_disabled: BTreeSet<String>,
     failure_policies: BTreeMap<String, V3ProviderFailurePolicy>,
@@ -355,20 +360,7 @@ impl V3ProviderHealthStore {
             failure_policies,
             ..V3ProviderHealthState::default()
         };
-        let mut coordinator = persistence_path.map(|path| {
-            V3ProviderCooldownCoordinator::load(path, 5 * 60 * 60_000).unwrap_or_else(|error| {
-                panic!("provider cooldown persistence load failed: {error}")
-            })
-        });
-        if let Some(coordinator) = coordinator.as_mut() {
-            // Durable cooldowns are diagnostic history only. Restart admission
-            // starts with a clean provider health state; in-process failures
-            // repopulate this coordinator through the normal health owner.
-            coordinator
-                .replace_entries(Vec::new())
-                .unwrap_or_else(|error| panic!("provider cooldown startup clear failed: {error}"));
-        }
-        state.persistence = coordinator;
+        state.persistence = start_provider_health_persistence(persistence_path);
         Self {
             state: Arc::new(RwLock::new(state)),
         }
@@ -714,7 +706,7 @@ impl V3ProviderHealthStore {
         if let Some(completion) = completion {
             completion.send_replace(true);
         }
-        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
+        persist_cooldown_state(state);
         Ok(())
     }
 
@@ -756,7 +748,7 @@ impl V3ProviderHealthStore {
                 until_ms,
             );
         }
-        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
+        persist_cooldown_state(state);
         Ok(())
     }
 
@@ -786,7 +778,7 @@ impl V3ProviderHealthStore {
             now_ms,
             blocked_until_ms,
         );
-        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
+        persist_cooldown_state(state);
         let _ = reason;
         Ok(())
     }
@@ -855,7 +847,7 @@ impl V3ProviderHealthStore {
             .adaptive_history
             .get(&key)
             .map_or(0, |history| history.score_generation);
-        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
+        persist_cooldown_state(state);
         Ok(Some(V3ProviderHealthProbePermit::new(
             provider_id.to_string(),
             auth_alias.map(str::to_string),
@@ -889,7 +881,7 @@ impl V3ProviderHealthStore {
             .adaptive_history
             .get(&key)
             .map_or(0, |history| history.score_generation);
-        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
+        persist_cooldown_state(state);
         Ok(Some(V3ProviderHealthProbePermit::new(
             provider_id.to_string(),
             auth_alias.map(str::to_string),
@@ -978,7 +970,7 @@ impl V3ProviderHealthStore {
             now_ms,
             expected_generation,
         );
-        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
+        persist_cooldown_state(state);
         completion.map_err(V3ProviderHealthError::Poisoned)
     }
 
@@ -1025,7 +1017,7 @@ impl V3ProviderHealthStore {
                     probe_state.probe_in_flight = false;
                     probe_state.completion.send_replace(true);
                 }
-                persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
+                persist_cooldown_state(state);
                 return Err(V3ProviderHealthError::Poisoned(format!(
                     "stale provider health probe generation: expected {expected_generation}, current {current_generation}"
                 )));
@@ -1062,7 +1054,7 @@ impl V3ProviderHealthStore {
         // exhausted request to re-open the same failed generation creates a
         // probe storm and keeps the session in select/exhaust churn.
         probe_state.completion.send_replace(true);
-        persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
+        persist_cooldown_state(state);
         Ok(())
     }
 
@@ -1127,8 +1119,9 @@ impl V3ProviderHealthStore {
                 );
             }
         }
-        persist_cooldown_state(&mut state)?;
-        Ok(key_health_projection(&state, &key, now_ms))
+        let projection = key_health_projection(&state, &key, now_ms);
+        persist_cooldown_state(state);
+        Ok(projection)
     }
 
     pub fn record_provider_key_success(
@@ -1474,7 +1467,7 @@ impl V3ProviderHealthStore {
             _ => return Ok(false),
         }
         if removed {
-            persist_cooldown_state(&mut state).map_err(V3ProviderHealthError::Poisoned)?;
+            persist_cooldown_state(state);
         }
         Ok(removed)
     }
@@ -1618,41 +1611,6 @@ fn default_failure_policy_from_manifest(
         until_restart,
         cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
     }
-}
-
-fn provider_cooldown_state_path() -> PathBuf {
-    if let Ok(path) = std::env::var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE") {
-        return PathBuf::from(path);
-    }
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".rcc")
-        .join("state")
-        .join("provider-cooldowns.json")
-}
-
-fn persist_cooldown_state(state: &mut V3ProviderHealthState) -> Result<(), String> {
-    let entries = state
-        .provider_cooldown_probes
-        .iter()
-        .filter_map(|(key, probe)| {
-            Some((
-                crate::global_cooldown::V3ProviderCooldownKey {
-                    provider_id: key.provider_id.clone(),
-                    auth_alias: key.auth_alias.clone(),
-                    model_id: probe.probe_model_id.clone(),
-                    failure_class: V3ProviderCooldownFailureClass::Semantic,
-                },
-                probe.blocked_until_ms?,
-                probe.next_probe_at_ms?,
-            ))
-        })
-        .collect();
-    if let Some(coordinator) = state.persistence.as_mut() {
-        coordinator.replace_entries(entries)?;
-    }
-    Ok(())
 }
 
 impl V3ProviderAvailabilityReader for V3ProviderHealthStore {

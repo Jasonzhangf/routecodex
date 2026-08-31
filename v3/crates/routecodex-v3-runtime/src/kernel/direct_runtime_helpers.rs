@@ -115,6 +115,7 @@ fn record_v3_direct_provider_failure_record(
 }
 
 fn record_v3_direct_provider_success(
+    receipt: &V3AttemptSuccessReceipt,
     provider_health: &V3ProviderFailureRuntimeHealth,
     failure_session_scope: &V3ProviderFailureSessionScope,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
@@ -122,6 +123,7 @@ fn record_v3_direct_provider_success(
 ) -> Result<(), V3Error01SourceRaised> {
     provider_health
         .record_provider_success_in_failure_scope(
+            receipt,
             failure_session_scope,
             &selected.candidate.provider_id,
             Some(&selected.candidate.auth_alias),

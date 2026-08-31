@@ -635,6 +635,7 @@ impl V3ProviderFailureRuntimeHealth {
 
     pub(crate) fn record_provider_success_in_failure_scope(
         &self,
+        _receipt: &crate::nodes::V3AttemptSuccessReceipt,
         failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
         auth_alias: Option<&str>,
