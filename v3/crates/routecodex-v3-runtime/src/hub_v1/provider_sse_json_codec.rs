@@ -82,14 +82,21 @@ pub(crate) fn normalize_v3_provider_sse_json_data_for_event_name(
     fields: &[SseField],
 ) -> Result<String, String> {
     let data = collect_v3_provider_sse_json_data(fields);
-    normalize_v3_provider_sse_json_data_with_event_name(provider_protocol, &data, None)
+    let event_name = fields.iter().find_map(|field| match field {
+        SseField::Named { name, value } if name == "event" => Some(value.as_str()),
+        _ => None,
+    });
+    normalize_v3_provider_sse_json_data_with_event_name(provider_protocol, &data, event_name)
 }
 
 pub(crate) fn normalize_v3_provider_sse_json_data_with_event_name(
     provider_protocol: V3HubProviderWireProtocol,
     data: &str,
-    _event_name: Option<&str>,
+    event_name: Option<&str>,
 ) -> Result<String, String> {
+    if is_v3_provider_sse_keepalive_event_name(event_name) {
+        return Ok(String::new());
+    }
     if provider_protocol != V3HubProviderWireProtocol::Responses {
         return Ok(data.to_owned());
     }
@@ -343,6 +350,15 @@ pub(crate) fn is_v3_provider_sse_keepalive_text(data: &str) -> bool {
             token.as_str(),
             "ping" | "pong" | "keep-alive" | "keepalive" | "heartbeat" | "ok"
         )
+}
+
+fn is_v3_provider_sse_keepalive_event_name(event_name: Option<&str>) -> bool {
+    event_name.map(str::trim).is_some_and(|name| {
+        matches!(
+            name.to_ascii_lowercase().as_str(),
+            "ping" | "pong" | "keep-alive" | "keepalive" | "heartbeat"
+        )
+    })
 }
 
 pub(crate) fn classify_v3_provider_responses_json_event(
@@ -1511,6 +1527,53 @@ mod provider_sse_json_codec_tests {
         assert_eq!(data, r#"{"delta":"recovered"}"#);
         let error = classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
             .expect_err("missing provider JSON type must fail at the codec");
+        assert!(error.contains("requires a non-empty type"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn responses_transport_keepalive_event_is_consumed_before_semantic_classification() {
+        let fields = vec![
+            SseField::Named {
+                name: "event".to_owned(),
+                value: "keepalive".to_owned(),
+            },
+            SseField::Named {
+                name: "data".to_owned(),
+                value: r#"{"heartbeat":true}"#.to_owned(),
+            },
+        ];
+        let data = normalize_v3_provider_sse_json_data_for_event_name(
+            V3HubProviderWireProtocol::Responses,
+            &fields,
+        )
+        .expect("registered transport keepalive must be consumed");
+        assert!(data.is_empty());
+        assert_eq!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
+                .expect("transport keepalive must not enter semantic classification"),
+            None,
+        );
+    }
+
+    #[test]
+    fn unknown_transport_event_still_fails_responses_semantic_classification() {
+        let fields = vec![
+            SseField::Named {
+                name: "event".to_owned(),
+                value: "unknown".to_owned(),
+            },
+            SseField::Named {
+                name: "data".to_owned(),
+                value: r#"{"id":"resp_1"}"#.to_owned(),
+            },
+        ];
+        let data = normalize_v3_provider_sse_json_data_for_event_name(
+            V3HubProviderWireProtocol::Responses,
+            &fields,
+        )
+        .expect("unknown event transport metadata remains observable");
+        let error = classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
+            .expect_err("unknown event payload must remain fail-fast");
         assert!(error.contains("requires a non-empty type"), "unexpected error: {error}");
     }
 
