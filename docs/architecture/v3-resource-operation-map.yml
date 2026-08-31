@@ -2406,6 +2406,7 @@ resources:
     semantic_contract:
       dimensions: [attempt_count, request_resident_bytes, process_resident_bytes, deadline_or_residence]
       admission_order: Reserve byte/frame capacity before append or copy; release exactly once on seal, discard, cancellation, or terminal error.
+      request_scope: Provider transport admission and every Runtime-sealed client replay projection consume the same request-local budget instance; Server may only move the sealed replay and may not construct or reconstruct a budget.
       exhaustion_lane: LocalResourceExhausted in the internal Error chain; never provider ResponseBody and never provider health mutation.
     allowed_writers: [resident_request_controller, AttemptPayloadStore]
     allowed_readers: [resident_request_controller, AttemptPayloadStore, V3Error05ExecutionDecision]
@@ -2500,8 +2501,8 @@ resources:
     owner_node: V3ProviderHealthPersistenceWriter
     identity: [healthStoreId, mutationVersion]
     semantic_contract:
-      current_binding: Health mutation projects immutable entries under the health lock, performs bounded non-blocking enqueue, and the dedicated writer owns replace/serialize/write/rename outside the lock.
-      target_contract: In-memory health mutation produces a versioned delta; a bounded single writer persists outside the global health lock.
+      current_binding: Health mutation projects an immutable persistence ticket under the health lock, consumes and releases the write guard, then performs bounded non-blocking enqueue; the dedicated writer owns replace/serialize/write/rename outside the lock.
+      target_contract: In-memory health mutation produces an immutable ticket; the ticket cannot enqueue until the global health write guard has been consumed.
       durability_failure: explicit_internal_persistence_error_without_provider_penalty
     allowed_writers: [V3ProviderHealthStore]
     allowed_readers: [provider_health_single_writer]

@@ -32,7 +32,7 @@ const design = read('docs/goals/v3-responses-direct-precommit-sse-failure-test-d
 const runtime = read('crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs');
 const directCore = read('crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs');
 const responsesDirectCore = read('crates/routecodex-v3-runtime/src/kernel.rs');
-const nodes = read('crates/routecodex-v3-runtime/src/nodes.rs');
+const attemptStore = read('crates/routecodex-v3-runtime/src/execution_control.rs');
 const tests = read('crates/routecodex-v3-runtime/tests/support/kernel_unit.rs');
 const resourceMap = read('docs/architecture/v3-resource-operation-map.yml', ['../docs/architecture/v3-resource-operation-map.yml']);
 const functionMap = read('docs/architecture/v3-function-map.yml', ['../docs/architecture/v3-function-map.yml']);
@@ -64,11 +64,11 @@ for (const [name, source, markers] of [
     'V3AttemptSuccessReceipt::from_sealed_sse_attempt',
   ]],
   ['Responses direct core', responsesDirectCore, [
-    'collect_direct_sse_attempt_after_terminal',
+    'project_and_collect_direct_sse_attempt',
     'V3ClientBody::CommittedSse(committed)',
     'V3AttemptSuccessReceipt::from_sealed_sse_attempt',
   ]],
-  ['attempt store', nodes, [
+  ['attempt store', attemptStore, [
     'V3CommittedClientSseBuilder',
     'attempt_max_frames',
     'attempt_max_bytes',
@@ -110,7 +110,7 @@ for (const [name, source, forbidden] of [
   ['direct core', directCore, [
     'commit_direct_sse_stream(stream)',
   ]],
-  ['all Direct lifecycle sources', `${runtime}\n${directCore}\n${responsesDirectCore}\n${nodes}`, [
+  ['all Direct lifecycle sources', `${runtime}\n${directCore}\n${responsesDirectCore}\n${attemptStore}`, [
     'V3DirectSseAttemptBuffer',
     'wrap_direct_sse_provider_handoff_stream',
     'commit_direct_sse_attempt_after_terminal',
@@ -122,11 +122,11 @@ for (const [name, source, forbidden] of [
   }
 }
 
-const pushStart = nodes.indexOf('pub(crate) fn push(&mut self, frame: Vec<u8>)');
-const frameLimit = nodes.indexOf('self.frames.len() >= self.limits.attempt_max_frames', pushStart);
-const byteLimit = nodes.indexOf('byte_len > self.limits.attempt_max_bytes', pushStart);
-const reserve = nodes.indexOf('self.reservation.reserve(frame.len())?', pushStart);
-const append = nodes.indexOf('self.frames.push(frame);', pushStart);
+const pushStart = attemptStore.indexOf('pub(crate) fn push(&mut self, frame: Vec<u8>)');
+const frameLimit = attemptStore.indexOf('self.frames.len() >= self.limits.attempt_max_frames', pushStart);
+const byteLimit = attemptStore.indexOf('byte_len > self.limits.attempt_max_bytes', pushStart);
+const reserve = attemptStore.indexOf('self.reservation.reserve(frame.len())?', pushStart);
+const append = attemptStore.indexOf('self.frames.push(frame);', pushStart);
 if (!(pushStart >= 0 && frameLimit > pushStart && byteLimit > frameLimit && reserve > byteLimit && append > reserve)) {
   failures.push('attempt store: byte/frame/request/process admission must precede frame append');
 }

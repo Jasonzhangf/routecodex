@@ -355,6 +355,73 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal(
     ))
 }
 
+pub(crate) async fn project_and_collect_direct_sse_attempt(
+    stream: V3ProviderAttemptSseStream,
+    stream_observation: V3RuntimeStreamObservation,
+    runtime_timing: V3RuntimeTimingState,
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+    request_id: &str,
+    retain_response_cipher: bool,
+    compat_plan: &crate::direct_response_hooks::V3DirectResponseCompatPlan,
+    hook_registry: &V3HookRegistry,
+    failure_session_scope: &V3ProviderFailureSessionScope,
+    continuation_disabled: bool,
+    remote_continuation: &V3RemoteContinuationObservation,
+    continuation_state: Option<Arc<V3ResponsesDirectContinuationState>>,
+    continuation_scope: Option<V3ResponsesDirectContinuationScope>,
+    previous_response_id: Option<String>,
+    selected_pin: V3RemoteContinuationPin,
+    selected_capability_revision: String,
+    now_epoch_ms: u64,
+    attempt_budget: V3AttemptBudget,
+) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
+    let projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
+        stream,
+        stream_observation,
+        runtime_timing,
+        crate::shared::v3_strip_client_response_id_enabled_for_server(manifest, server_id),
+        retain_response_cipher,
+        compat_plan.provider_protocol,
+        compat_plan.has_block(V3DirectResponseCompatBlock::DeepseekConsoleGoResponseShape),
+        compat_plan.has_block(V3DirectResponseCompatBlock::ThinkingTags)
+            && compat_plan.provider_protocol == V3HubProviderWireProtocol::Responses,
+        hook_registry.direct_sse_typed_hooks(),
+        crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id),
+        crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(manifest, server_id),
+        Some(failure_session_scope.session_id().to_owned()),
+        Some(request_id.to_owned()),
+        Some(compat_plan.canonical_model_id.clone()),
+        true,
+    );
+    let client_stream: V3ClientSseStream = Box::pin(projected);
+    let client_stream = if let (
+        false,
+        V3RemoteContinuationObservation::Streaming { state },
+        Some(scope),
+    ) = (continuation_disabled, remote_continuation, continuation_scope.as_ref())
+    {
+        wrap_v3_direct_sse_continuation_lifecycle(
+            client_stream,
+            state.clone(),
+            continuation_state,
+            Some(scope.clone()),
+            previous_response_id,
+            selected_pin,
+            selected_capability_revision,
+            now_epoch_ms,
+        )
+    } else {
+        client_stream
+    };
+    collect_direct_sse_attempt_after_terminal(
+        client_stream,
+        compat_plan.provider_protocol,
+        attempt_budget,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod direct_sse_timing_tests {
     use super::*;

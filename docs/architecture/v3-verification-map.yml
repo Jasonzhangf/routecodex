@@ -3577,12 +3577,17 @@ features:
   owner_kind: rust_v3_execution_control_payload_global_architecture
   owner_scope: One resident request lifecycle owns immutable target plan, cumulative budget, Error05 recovery, bounded Direct/Relay attempt storage, sealed success, and closeout; diagnostics and persistence cannot control or block it.
   owner_modules:
+  - v3/crates/routecodex-v3-config/src/attempt_store.rs
+  - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
   - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
   - v3/crates/routecodex-v3-debug/src/observability_store.rs
@@ -3598,12 +3603,15 @@ features:
   - docs/architecture/v3-runtime-module-registry.yml
   required_positive:
   - Direct and Relay attempts consume one request-level attempt/deadline budget and one immutable target plan.
+  - Responses and Anthropic provider transport admission plus Runtime-sealed client replay consume the same request-local attempt budget; Server only consumes the sealed stream.
+  - Anthropic Runtime exposes JSON versus sealed SSE as a non-optional typed body and Server consumes it exhaustively without panic reconstruction.
   - A real local TCP replacement SSE stream remains readable to protocol terminal on the resident Runtime.
   - Direct and Relay share bounded attempt-store admission for per-attempt, per-request, process-global, and residence/deadline dimensions.
   - Protocol terminal plus successful payload seal issues one typed success receipt consumed by provider health, route policy, continuation, and client commit.
   - Terminal checks read only small control state and remain constant-cost as raw SSE diagnostics grow.
   - Local resource, observation, client cancellation, persistence, upstream, and protocol failures retain distinct typed attribution.
-  - Provider-health and request-ledger persistence mutate memory under a short lock and perform filesystem I/O through an ordered bounded single writer outside that lock.
+  - Provider-health mutation constructs an immutable persistence ticket under its short write lock, consumes the guard before enqueue, and the ordered bounded writer performs filesystem I/O outside that lock.
+  - Request-ledger persistence mutates memory under a short lock and performs filesystem I/O through an ordered bounded single writer outside that lock.
   - Active request and recent terminal caches, history file bytes, and startup history loading all have explicit testable limits.
   required_negative:
   - No SSE wrapper, compat hook, codec, Server handler, or persistence component creates a Tokio Runtime or re-enters a complete request executor.
@@ -3615,6 +3623,8 @@ features:
   - Provider health write locks and listener observability mutexes never cover open, serialize, write, flush, rename, rotation, or history load.
   - Module-boundary scanning cannot discard production code merely because it appears after a test module.
   - Full-attempt gates cannot pass from names, comments, or marker-only implementations.
+  - Server cannot rebuild a request budget from manifest or project a second client replay after Runtime closeout.
+  - Anthropic success cannot be represented as an optional sealed stream that Server unwraps or expects.
   required_red_gates:
   - npm run test:v3-execution-control-payload-architecture-red-fixtures
   - real local TCP handoff fixture fails or hangs when the response stream is bound to a destroyed temporary Runtime
@@ -3627,7 +3637,7 @@ features:
   - npm run verify:v3-execution-control-payload-architecture
   - npm run test:v3-execution-control-payload-architecture-red-fixtures
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime execution_control_payload_architecture -- --nocapture
-  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test execution_control_tcp_handoff -- --nocapture
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib execution_control_payload_architecture_real_tcp_sse_reselection_stays_on_resident_runtime -- --nocapture
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses health_persistence_isolation -- --nocapture
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server observability_persistence_isolation -- --nocapture
   - npm run verify:v3-direct-sse-full-attempt-commit

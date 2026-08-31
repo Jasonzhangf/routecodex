@@ -1,8 +1,17 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
 const runtimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs';
+const repoRoot = [
+  process.cwd(),
+  resolve(process.cwd(), '..'),
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../..'),
+].find((candidate) => existsSync(resolve(candidate, runtimePath)));
+if (!repoRoot) throw new Error('RouteCodex repository root not found');
+const readRepo = (relative) => readFileSync(resolve(repoRoot, relative), 'utf8');
 const hubPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
 const reqTarget06Path = 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs';
 const providerReq09Path = 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs';
@@ -16,23 +25,23 @@ const testPath = 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_
 const designPath = 'docs/goals/v3-anthropic-relay-runtime-integration-test-design.md';
 const manifestPath = 'docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml';
 const callMapPath = 'docs/architecture/v3-mainline-call-map.yml';
-const runtime = readFileSync(runtimePath, 'utf8');
-const hub = readFileSync(hubPath, 'utf8');
+const runtime = readRepo(runtimePath);
+const hub = readRepo(hubPath);
 const requestNodeSurface = [
   hub,
-  readFileSync(reqTarget06Path, 'utf8'),
-  readFileSync(providerReq09Path, 'utf8'),
+  readRepo(reqTarget06Path),
+  readRepo(providerReq09Path),
 ].join('\n');
-const codec = readFileSync(codecPath, 'utf8');
-const providerCompat = readFileSync(providerCompatPath, 'utf8');
-const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8');
-const server = readFileSync(serverPath, 'utf8');
-const serverExecutors = readFileSync(serverExecutorsPath, 'utf8');
-const driver = readFileSync(driverPath, 'utf8');
-const tests = readFileSync(testPath, 'utf8');
-const design = readFileSync(designPath, 'utf8');
-const manifest = YAML.parse(readFileSync(manifestPath, 'utf8'));
-const callMap = YAML.parse(readFileSync(callMapPath, 'utf8'));
+const codec = readRepo(codecPath);
+const providerCompat = readRepo(providerCompatPath);
+const responsesRuntime = readRepo(responsesRuntimePath);
+const server = readRepo(serverPath);
+const serverExecutors = readRepo(serverExecutorsPath);
+const driver = readRepo(driverPath);
+const tests = readRepo(testPath);
+const design = readRepo(designPath);
+const manifest = YAML.parse(readRepo(manifestPath));
+const callMap = YAML.parse(readRepo(callMapPath));
 const failures = [];
 const expectedManifestNodes = [
   'V3ServerValidatedMessagesRequest',
@@ -158,7 +167,10 @@ for (const phrase of [
 requireOrder(runtime, runtimePath, [
   'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(',
   'trace.push("V3HubReqExecution05Planned")',
-  'match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {',
+  'let target_resolution_input = V3RelayProviderTargetResolutionInput {',
+  'resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await',
+  'resolve_v3_relay_target_outcome(target_resolution_input)',
+  'match target_resolution {',
   'build_v3_hub_req_target_06_from_v3_hub_req_execution_05(',
   'trace.push("V3HubReqTarget06Resolved")',
   'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(',

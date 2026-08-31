@@ -1521,64 +1521,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     .clone()
                     .unwrap_or_default();
                 response_projection.stream_observation = Some(stream_observation.clone());
-                let projected =
-                    wrap_direct_sse_provider_event_json_observation_stream_with_compat(
-                        stream,
-                        stream_observation.clone(),
-                        runtime_timing.clone(),
-                        crate::shared::v3_strip_client_response_id_enabled_for_server(
-                            manifest,
-                            &standardized.server_id,
-                        ),
-                        retain_response_cipher,
-                        response_projection.compat_plan.provider_protocol,
-                        response_projection.compat_plan.has_block(
-                            V3DirectResponseCompatBlock::DeepseekConsoleGoResponseShape,
-                        ),
-                        response_projection.compat_plan.has_block(
-                            V3DirectResponseCompatBlock::ThinkingTags,
-                        ) && response_projection.compat_plan.provider_protocol
-                            == V3HubProviderWireProtocol::Responses,
-                        hook_registry.direct_sse_typed_hooks(),
-                        crate::hub_v1::v3_tool_thinking_enabled_for_server(
-                            manifest,
-                            &standardized.server_id,
-                        ),
-                        crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
-                            manifest,
-                            &standardized.server_id,
-                        ),
-                        Some(direct_failure_session_scope.session_id().to_owned()),
-                        Some(standardized.request_id.clone()),
-                        Some(policy.target.candidate.model_id.clone()),
-                        true,
-                    );
-                let client_stream: V3ClientSseStream = Box::pin(projected);
-                let client_stream = if let (
-                    false,
-                    V3RemoteContinuationObservation::Streaming { state },
-                    Some(scope),
-                ) = (
-                    continuation_disabled,
-                    &response_projection.remote_continuation,
-                    continuation_scope.as_ref(),
-                ) {
-                    wrap_v3_direct_sse_continuation_lifecycle(
-                        client_stream,
-                        state.clone(),
-                        continuation_state.clone(),
-                        Some(scope.clone()),
-                        previous_response_id.clone(),
-                        selected_pin.clone(),
-                        selected_capability_revision.clone(),
-                        now_epoch_ms,
-                    )
-                } else {
-                    client_stream
-                };
-                let committed = match direct_runtime_helpers_stream::collect_direct_sse_attempt_after_terminal(
-                    client_stream,
-                    response_projection.compat_plan.provider_protocol,
+                let committed = match direct_runtime_helpers_stream::project_and_collect_direct_sse_attempt(
+                    stream, stream_observation, runtime_timing.clone(), manifest,
+                    &standardized.server_id, &standardized.request_id, retain_response_cipher,
+                    &response_projection.compat_plan, &hook_registry, &direct_failure_session_scope,
+                    continuation_disabled, &response_projection.remote_continuation,
+                    continuation_state.clone(), continuation_scope.clone(), previous_response_id.clone(),
+                    selected_pin.clone(), selected_capability_revision.clone(), now_epoch_ms,
                     attempt_budget.clone(),
                 )
                 .await

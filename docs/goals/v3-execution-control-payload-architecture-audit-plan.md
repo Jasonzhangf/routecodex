@@ -87,7 +87,8 @@
 - `v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs`
 - `v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs`
 - `v3/crates/routecodex-v3-runtime/src/kernel.rs`
-- `v3/crates/routecodex-v3-runtime/src/nodes.rs`
+- `v3/crates/routecodex-v3-runtime/src/execution_control.rs`（request control、budget、attempt store与success receipt唯一实现 owner）
+- `v3/crates/routecodex-v3-runtime/src/nodes.rs`（兼容 re-export，不拥有实现）
 - `v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs`
 - `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs`
 - existing provider failure runtime policy / Error05 consumers
@@ -96,6 +97,7 @@
 ### Provider health persistence
 
 - `v3/crates/routecodex-v3-provider-responses/src/health.rs`
+- `v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs`
 - `v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs`
 - provider health contract/probe/persistence tests
 
@@ -106,6 +108,11 @@
 - `v3/crates/routecodex-v3-debug/src/*` 或 admission 后登记的唯一 storage owner
 - `v3/crates/routecodex-v3-admin/src/api/observability.rs`
 - WebUI/retention/rotation/page query tests
+
+### Config policy
+
+- `v3/crates/routecodex-v3-config/src/attempt_store.rs`
+- `v3/crates/routecodex-v3-config/src/validate.rs`（只消费唯一 policy compiler）
 
 ### Gates/docs
 
@@ -175,7 +182,7 @@
 
 ### Phase 4 — persistence isolation（第四交付批次）
 
-1. provider health mutation在短锁内产生 generation/delta；锁外单 writer coalesce/persist。
+1. provider health mutation在短锁内产生 immutable ticket；persistence owner消费/drop write guard后才enqueue，锁外单 writer coalesce/persist。
 2. 相同 generation/content不重复写；队列、writer error、shutdown flush有显式 receipt。
 3. WebUI request ledger改为 typed event + bounded queue + single writer。
 4. 内存拆 active + bounded recent terminal；历史达到 file hard cap 时 append 前 fail-fast；startup只读 bounded recent window。
@@ -186,7 +193,7 @@
 
 ### Phase 5 — Gate 强化、全链验证、交付
 
-1. full-attempt gate从 marker检查升级为行为/mutation/type gate。
+1. full-attempt gate从 marker检查升级为行为/mutation/type gate，并锁住Responses/Anthropic provider attempt与client replay共用同一request budget、Server不得重建budget。
 2. module gate使用 Rust item-aware scan或正确 test-module span removal；添加“test模块后生产代码”红 fixture。
 3. gate接入 `verify:v3-architecture-ci`、build/install preflight与 CI；缺接线即红。
 4. 运行完整验证栈、global install、唯一 aggregate restart、全部配置端口 health、旧样本/同入口 live replay。
@@ -205,6 +212,8 @@
 - terminal control read allocation/clone counter不随 raw SSE增长。
 - local/observation/persistence/client/provider failure分类与 health side effect矩阵。
 - health generation/coalesce/single writer/queue full/disk failure/shutdown。
+- health persistence ticket必须在enqueue前消费write guard；删除drop或恢复`&mut state`调用的mutation必须红。
+- Responses/Anthropic client replay与provider transport admission共享request/process reservation；独立default/manifest budget mutation必须红。
 - ledger active/recent bounds、file hard cap、bounded startup window、queue full。
 
 ### 6.2 模块黑盒

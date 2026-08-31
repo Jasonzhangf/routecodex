@@ -7,6 +7,10 @@ canonical_docs:
   design: docs/goals/v3-execution-control-payload-architecture-audit-design.md
   plan: docs/goals/v3-execution-control-payload-architecture-audit-plan.md
   goal_prompt: docs/goals/v3-execution-control-payload-architecture-audit-goal-prompt.md
+implementation_owner_files:
+  request_execution_control: v3/crates/routecodex-v3-runtime/src/execution_control.rs
+  attempt_store_policy: v3/crates/routecodex-v3-config/src/attempt_store.rs
+  provider_health_persistence: v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
 entrypoint:
   node_id: V3ExecutionControl01RequestAccepted
   call_map_chain_id: v3.execution_control_payload_architecture
@@ -47,7 +51,7 @@ module_contracts:
     owns: [typed_event_projection, active_request_cache, bounded_recent_terminal_cache, request_ledger_queue]
     forbids: [execution_control, provider_health_control, mutex_held_file_io, unbounded_history_cache]
   config:
-    owns: [storage_path_policy_compilation]
+    owns: [attempt_store_policy_compilation, storage_path_policy_compilation]
     forbids: [runtime_append, runtime_flush, history_rotation, request_hot_path_io]
 budget_contract:
   per_attempt: required
@@ -55,8 +59,15 @@ budget_contract:
   process_global: required
   residence_or_deadline: required
   reserve_before_append_or_copy: true
+  provider_attempt_and_client_replay_share_request_budget: true
+  server_budget_construction: forbidden
   initial_storage: bounded_memory_only
   disk_spill: forbidden
+sealed_replay_body_contract:
+  responses: typed_non_optional
+  anthropic: typed_non_optional
+  server_consumption: exhaustive_match
+  option_stream_with_expect: forbidden
 failure_kinds:
   - Upstream
   - Protocol
@@ -64,6 +75,15 @@ failure_kinds:
   - ObservationFailure
   - PersistenceFailure
   - ClientCancelled
+failure_attribution_contract:
+  responses_client_replay:
+    runtime_variant: ExecutionControlResponse
+    source_kind: RuntimeFailure
+    source_stage: V3ServerRespOutbound06ClientFrame
+    client_status: 599
+    client_code: responses_relay_response_execution_control_error
+    provider_response_classification: forbidden
+    provider_health_mutation: forbidden
 success_receipt_contract:
   issuer: response_semantic_owner_after_protocol_terminal_and_payload_seal
   consumers: [provider_health_success, route_policy_commit, continuation_commit, client_semantic_commit]
@@ -75,6 +95,7 @@ success_receipt_contract:
     - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
     - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+    - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
     - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
 current_runtime_red_bindings: []
 edges:

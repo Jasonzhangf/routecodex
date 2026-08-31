@@ -48,6 +48,8 @@ Resident Tokio Runtime
     -> client replay
 ```
 
+Provider transport admission and client replay are two consumers of the same request-local budget. Responses/Anthropic Relay must pass that existing budget into the Runtime-owned replay builder; Server only consumes the sealed replay and must never reconstruct budget state from manifest or payload.
+
 禁止：
 
 - `spawn_blocking` + `Builder::new_current_thread()` 承载 provider network request/stream；
@@ -196,14 +198,16 @@ struct V3StreamDiagnostics {
 ```text
 request hot path
   -> short health lock: apply mutation + increment generation
-  -> immutable persistence delta/snapshot handle
-  -> unlock
+  -> immutable persistence ticket
+  -> consume/drop write guard
+  -> ticket bounded-enqueue
   -> single writer coalesces and fsync/rename
 ```
 
 要求：
 
 - 磁盘 I/O 绝不发生在 provider health state lock 内；
+- persistence queue/alarm lock与enqueue也不得发生在 provider health state write guard存活期间；
 - 相同内容/generation 不重复写；
 - writer 单 owner、有界队列、coalescing；
 - queue full/persistence failure 显式暴露，不得 silent drop；
@@ -277,7 +281,8 @@ Direct↔Relay 只改变下一个 attempt 的 execution mode/codec plan；不创
 - attempt buffer 使用无 admission 的 `VecDeque<Vec<u8>>`；
 - terminal read 调用 full `snapshot()`；
 - local resource/observation error构造 `V3ProviderError::ResponseBody`；
-- health lock 临界区出现 `fs::write`/`rename`/persistence call；
+- health write guard 存活期间出现 persistence enqueue/alarm lock/`fs::write`/`rename`；
+- Responses/Anthropic client replay重建`process_default`/manifest budget，或Server拥有client replay projector；
 - WebUI record mutex 临界区出现 open/write/flush；
 - Config crate继续拥有 runtime observability append/read；
 - HTTP 200/stream handle直接调用 provider success或 route commit；
@@ -298,6 +303,10 @@ Direct↔Relay 只改变下一个 attempt 的 execution mode/codec plan；不创
 
 ## 8. 当前落地绑定
 
+- request lifecycle、attempt budget/store与success receipt唯一实现 owner：`routecodex-v3-runtime::execution_control`；`nodes.rs` 只保留兼容 re-export。
+- Responses/Anthropic Relay provider send与client replay使用同一request budget；Runtime封存client stream，Server只消费。
+- attempt-store authoring/manifest/default/validation唯一 policy owner：`routecodex-v3-config::attempt_store`；`validate.rs` 只消费 compiler。
+- provider health persistence queue、ticket、writer、projection与flush唯一 owner：`routecodex-v3-provider-responses::health::persistence`；`health.rs` 只保留内存 health truth与mutation，并把write guard交给persistence owner消费后再enqueue。
 - runtime observability store 唯一 owner：`routecodex-v3-debug::observability_store`；Config 只发布 path 与 byte policy。
 - Server writer 在 listener mutex 外 enqueue；Debug append 在写入前执行 record/file byte admission。
 - Admin 只通过 Debug owner 读取 raw/bounded rows，不直接打开 Config-owned runtime store。

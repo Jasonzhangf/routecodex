@@ -1519,9 +1519,7 @@ fn relay_runtime_failure_propagates_supplied_observability() {
     observability.provider_status = Some(598);
 
     let output = project_v3_responses_relay_runtime_failure(
-        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
-            "red-test propagation".to_string(),
-        ),
+        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed("red-test propagation".to_string()),
         Some(observability.clone()),
     );
     assert_eq!(output.status, 598);

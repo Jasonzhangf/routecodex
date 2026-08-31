@@ -96,7 +96,7 @@ pub(crate) fn responses_relay_output_response(
     } else {
         content_type
     };
-    let mut builder = Response::builder()
+    let builder = Response::builder()
         .status(StatusCode::from_u16(output.status).expect("typed V3 Responses Relay status"))
         .header("content-type", content_type);
     let body = match output.client_body {
@@ -731,13 +731,15 @@ pub(crate) fn gemini_relay_output_response(
 
 pub(crate) fn anthropic_relay_output_response(
     output: V3AnthropicRelayRuntimeOutput,
-    stream: bool,
-    manifest: &V3Config05ManifestPublished,
-    server_id: &str,
 ) -> Response<Body> {
-    let stream = stream && output.error_chain.is_none();
+    let stream = output.client_body.is_sse();
+    let status = output.status;
+    let node_trace = output.node_trace.clone();
+    let error_chain = output.error_chain.clone();
+    let payload = output.into_v3_resp_15_client_payload();
+    let frame = build_v3_server_16_http_frame_from_v3_resp_15(payload, node_trace, error_chain);
     let mut builder = Response::builder()
-        .status(StatusCode::from_u16(output.status).expect("typed V3 Relay status"))
+        .status(StatusCode::from_u16(status).expect("typed V3 Anthropic Relay status"))
         .header(
             "content-type",
             if stream {
@@ -746,25 +748,13 @@ pub(crate) fn anthropic_relay_output_response(
                 "application/json"
             },
         );
-    let body = if stream {
-        match routecodex_v3_runtime::hub_v1::project_v3_anthropic_client_sse_stream_from_manifest(
-            manifest,
-            server_id,
-            output.client_response,
-        ) {
-            Ok(stream) => v3_client_sse_body(stream, None),
-            Err(error) => {
-                let projected = project_v3_anthropic_relay_runtime_failure(
-                    routecodex_v3_runtime::V3AnthropicRelayRuntimeError::StructuredSse(error),
-                );
-                return anthropic_relay_output_response(projected, false, manifest, server_id);
-            }
-        }
-    } else {
-        Body::from(
-            serde_json::to_vec(&output.client_response)
-                .expect("typed V3 Anthropic Relay projection"),
-        )
+    let body = match frame.body {
+        V3Server16Body::Sse(client_stream) => v3_live_client_sse_body(client_stream, None),
+        V3Server16Body::CommittedSse(client_stream) => v3_client_sse_body(client_stream, None),
+        V3Server16Body::Json(client_response) => Body::from(
+            serde_json::to_vec(&client_response).expect("typed V3 Anthropic Relay projection"),
+        ),
+        V3Server16Body::Bytes(bytes) => Body::from(bytes),
     };
     builder
         .body(body)

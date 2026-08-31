@@ -1,3 +1,4 @@
+use crate::attempt_store::{V3AttemptStorePolicyAuthoringConfig, V3AttemptStorePolicyManifest};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -531,60 +532,6 @@ pub struct V3ServerExecutionAuthoringConfig {
     pub continuation: V3ContinuationPolicyAuthoringConfig,
     #[serde(default)]
     pub attempt_store: V3AttemptStorePolicyAuthoringConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct V3AttemptStorePolicyAuthoringConfig {
-    #[serde(default = "default_attempt_store_request_max_attempts")]
-    pub request_max_attempts: usize,
-    #[serde(default = "default_attempt_store_attempt_max_bytes")]
-    pub attempt_max_bytes: usize,
-    #[serde(default = "default_attempt_store_attempt_max_frames")]
-    pub attempt_max_frames: usize,
-    #[serde(default = "default_attempt_store_request_max_bytes")]
-    pub request_max_bytes: usize,
-    #[serde(default = "default_attempt_store_process_max_bytes")]
-    pub process_max_bytes: usize,
-    #[serde(default = "default_attempt_store_residence_timeout_ms")]
-    pub residence_timeout_ms: u64,
-}
-
-impl Default for V3AttemptStorePolicyAuthoringConfig {
-    fn default() -> Self {
-        Self {
-            request_max_attempts: default_attempt_store_request_max_attempts(),
-            attempt_max_bytes: default_attempt_store_attempt_max_bytes(),
-            attempt_max_frames: default_attempt_store_attempt_max_frames(),
-            request_max_bytes: default_attempt_store_request_max_bytes(),
-            process_max_bytes: default_attempt_store_process_max_bytes(),
-            residence_timeout_ms: default_attempt_store_residence_timeout_ms(),
-        }
-    }
-}
-
-fn default_attempt_store_request_max_attempts() -> usize {
-    8
-}
-
-fn default_attempt_store_attempt_max_bytes() -> usize {
-    64 * 1024 * 1024
-}
-
-fn default_attempt_store_attempt_max_frames() -> usize {
-    262_144
-}
-
-fn default_attempt_store_request_max_bytes() -> usize {
-    64 * 1024 * 1024
-}
-
-fn default_attempt_store_process_max_bytes() -> usize {
-    512 * 1024 * 1024
-}
-
-fn default_attempt_store_residence_timeout_ms() -> u64 {
-    600_000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1195,16 +1142,6 @@ pub struct V3ServerExecutionManifest {
     pub allowed_transports: Vec<String>,
     pub continuation: V3ContinuationPolicyManifest,
     pub attempt_store: V3AttemptStorePolicyManifest,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3AttemptStorePolicyManifest {
-    pub request_max_attempts: usize,
-    pub attempt_max_bytes: usize,
-    pub attempt_max_frames: usize,
-    pub request_max_bytes: usize,
-    pub process_max_bytes: usize,
-    pub residence_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

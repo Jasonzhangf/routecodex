@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const repo = process.cwd();
-const verifier = resolve(repo, 'scripts/architecture/verify-v3-anthropic-relay-runtime-integration.mjs');
 const runtime = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs';
+const repo = [process.cwd(), resolve(process.cwd(), '..')]
+  .find((candidate) => existsSync(resolve(candidate, runtime)));
+if (!repo) throw new Error('RouteCodex repository root not found');
+const verifier = resolve(repo, 'v3/scripts/architecture/verify-v3-anthropic-relay-runtime-integration.mjs');
 const server = 'v3/crates/routecodex-v3-server/src/executors.rs';
 const driver = 'v3/crates/routecodex-v3-server/src/bin/v3-anthropic-relay-driver.rs';
 const manifest = 'docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml';
@@ -15,6 +17,7 @@ const cases = [
   ['missing Req06 edge', runtime, '    trace.push("V3HubReqTarget06Resolved");', '', /V3HubReqTarget06Resolved/],
   ['fabricated static trace', runtime, '    let mut trace = Vec::with_capacity(17);', '    const SUCCESS_TRACE: [&str; 0] = [];\n    let mut trace = Vec::with_capacity(17);', /SUCCESS_TRACE/],
   ['transport skipped', runtime, 'transport.send(transport_request),', 'transport.skip(transport_request),', /transport\.send/],
+  ['rescue target resolution skipped', runtime, 'resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await', 'resolve_v3_relay_target_outcome(target_resolution_input)', /resolve_v3_relay_target_outcome_with_rescue/],
   ['dynamic hooks', runtime, 'compile_v3_hub_v1_static_registry()', 'std::fs::read_dir(".").unwrap(); compile_v3_hub_v1_static_registry()', /dynamic|read_dir/],
   ['fallback added', runtime, 'let mut trace = Vec::with_capacity(17);', 'let fallback = true; let mut trace = Vec::with_capacity(17);', /fallback/],
   ['P6 extension', runtime, 'let mut trace = Vec::with_capacity(17);', 'let _ = "ResponsesDirect11Policy"; let mut trace = Vec::with_capacity(17);', /ResponsesDirect/],

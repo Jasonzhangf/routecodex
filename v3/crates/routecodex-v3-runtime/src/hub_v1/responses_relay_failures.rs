@@ -150,14 +150,12 @@ pub(crate) fn provider_response_stream_relay_failure(
             terminal_projection: None,
             matched_policy: None,
         },
-        V3ResponsesRelayRuntimeError::ProviderJson(reason) =>
-            provider_response_codec_relay_failure(
-                reason.to_string(),
-                provider_id,
-                observability,
-            ),
-        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(reason) =>
-            provider_response_codec_relay_failure(reason, provider_id, observability),
+        V3ResponsesRelayRuntimeError::ProviderJson(reason) => {
+            provider_response_codec_relay_failure(reason.to_string(), provider_id, observability)
+        }
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(reason) => {
+            provider_response_codec_relay_failure(reason, provider_id, observability)
+        }
         other => provider_runtime_failure(
             provider_response_stream_failure(other, request_id, provider_id)?,
             provider_id,
@@ -493,6 +491,9 @@ mod tests {
             V3ResponsesRelayRuntimeError::ExecutionControl(
                 "request attempt budget exhausted".to_string(),
             ),
+            V3ResponsesRelayRuntimeError::ExecutionControlResponse(
+                "client replay byte budget exhausted".to_string(),
+            ),
             V3ResponsesRelayRuntimeError::RuntimeTiming(
                 "request residence deadline elapsed".to_string(),
             ),
@@ -506,6 +507,7 @@ mod tests {
             assert!(matches!(
                 returned,
                 V3ResponsesRelayRuntimeError::ExecutionControl(_)
+                    | V3ResponsesRelayRuntimeError::ExecutionControlResponse(_)
                     | V3ResponsesRelayRuntimeError::RuntimeTiming(_)
                     | V3ResponsesRelayRuntimeError::LocalContinuationStatePoisoned
                     | V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned
@@ -515,22 +517,32 @@ mod tests {
 
     #[test]
     fn local_response_failures_never_enter_provider_relay_policy() {
-        let returned = match provider_response_stream_relay_failure(
+        for error in [
             V3ResponsesRelayRuntimeError::ExecutionControl(
                 "process-global attempt store exhausted".to_string(),
             ),
-            "req-local",
-            "provider-1",
-            None,
-        ) {
-            Err(error) => error,
-            Ok(_) => panic!("local resource exhaustion must not produce provider failure policy input"),
-        };
+            V3ResponsesRelayRuntimeError::ExecutionControlResponse(
+                "client replay byte budget exhausted".to_string(),
+            ),
+        ] {
+            let returned = match provider_response_stream_relay_failure(
+                error,
+                "req-local",
+                "provider-1",
+                None,
+            ) {
+                Err(error) => error,
+                Ok(_) => panic!(
+                    "local resource exhaustion must not produce provider failure policy input"
+                ),
+            };
 
-        assert!(matches!(
-            returned,
-            V3ResponsesRelayRuntimeError::ExecutionControl(_)
-        ));
+            assert!(matches!(
+                returned,
+                V3ResponsesRelayRuntimeError::ExecutionControl(_)
+                    | V3ResponsesRelayRuntimeError::ExecutionControlResponse(_)
+            ));
+        }
     }
 
     #[test]
@@ -551,5 +563,4 @@ mod tests {
         assert!(failure.terminal_projection.is_some());
         assert_eq!(failure.policy_error_type, "provider_request_compat_error");
     }
-
 }

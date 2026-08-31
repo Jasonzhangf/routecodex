@@ -1,3 +1,4 @@
+mod attempt_store;
 mod defaults;
 mod entry_protocol_validation;
 mod provider_directory;
@@ -17,6 +18,7 @@ mod validate_auth_tests;
 mod validate_debug_tests;
 mod validate_relations;
 
+pub use attempt_store::{V3AttemptStorePolicyAuthoringConfig, V3AttemptStorePolicyManifest};
 pub use store::{
     default_v3_config_path, load_v3_config_snapshot_from_path, v3_webui_observability_store_path,
     V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan,

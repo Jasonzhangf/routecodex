@@ -210,7 +210,11 @@ async fn execution_control_payload_architecture_relay_reselection_returns_typed_
         1
     );
     assert_eq!(
-        transport.provider_ids.lock().expect("provider ids").as_slice(),
+        transport
+            .provider_ids
+            .lock()
+            .expect("provider ids")
+            .as_slice(),
         &["relay_first".to_string()]
     );
 }
@@ -304,7 +308,8 @@ async fn target_protocol_unmapped_field_projects_internal_598_without_switching_
 }
 
 #[tokio::test]
-async fn execution_control_payload_architecture_responses_relay_handoff_does_not_reset_attempt_budget() {
+async fn execution_control_payload_architecture_responses_relay_handoff_does_not_reset_attempt_budget(
+) {
     std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
     std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
     let mut manifest = anthropic_then_openai_chat_manifest();
@@ -371,6 +376,42 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
             .expect("provider ids")
             .is_empty(),
         "budget exhaustion must happen before transport.send"
+    );
+}
+
+#[test]
+fn execution_control_payload_architecture_responses_replay_exhaustion_stays_local() {
+    let mut manifest = anthropic_then_openai_chat_manifest();
+    let attempt_store = &mut manifest
+        .servers
+        .get_mut("test")
+        .and_then(|server| server.execution.as_mut())
+        .expect("test server execution policy")
+        .attempt_store;
+    attempt_store.attempt_max_bytes = 4_096;
+    attempt_store.request_max_bytes = 1;
+    attempt_store.process_max_bytes = 4_096;
+    let request_execution_control =
+        crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
+            .expect("request execution control");
+
+    let error = match project_v3_responses_relay_client_body(
+        V3HubTransportIntent::Sse,
+        json!({"id": "resp-local-resource", "status": "completed", "output": []}),
+        false,
+        request_execution_control.attempt_budget(),
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("client replay must reject the request-local byte ceiling"),
+    };
+
+    assert!(matches!(
+        error,
+        V3ResponsesRelayRuntimeError::ExecutionControlResponse(_)
+    ));
+    assert!(
+        !is_v3_responses_provider_response_failure(&error),
+        "local replay exhaustion must not enter provider retry or health policy"
     );
 }
 

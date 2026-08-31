@@ -1,3 +1,123 @@
+#[derive(Debug)]
+pub enum V3AnthropicRelayClientBody {
+    Json,
+    Sse(crate::nodes::V3CommittedClientSseStream),
+}
+
+impl V3AnthropicRelayClientBody {
+    pub fn is_sse(&self) -> bool {
+        matches!(self, Self::Sse(_))
+    }
+}
+
+#[derive(Debug)]
+pub struct V3AnthropicRelayRuntimeOutput {
+    pub status: u16,
+    pub client_response: Value,
+    pub client_body: V3AnthropicRelayClientBody,
+    pub node_trace: Vec<&'static str>,
+    pub error_chain: Option<Vec<&'static str>>,
+    pub servertool_followup_required: bool,
+    pub observability: Option<V3RuntimeObservability>,
+    pub stream_observation: Option<V3RuntimeStreamObservation>,
+    pub provider_snapshots: Option<V3RelayProviderSnapshots>,
+}
+
+impl V3AnthropicRelayRuntimeOutput {
+    pub fn into_v3_resp_15_client_payload(self) -> crate::nodes::V3Resp15ClientPayload {
+        let content_type = if self.client_body.is_sse() {
+            "text/event-stream"
+        } else {
+            "application/json"
+        };
+        let body = match self.client_body {
+            V3AnthropicRelayClientBody::Json => {
+                crate::nodes::V3ClientBody::Json(self.client_response)
+            }
+            V3AnthropicRelayClientBody::Sse(stream) => {
+                crate::nodes::V3ClientBody::CommittedSse(stream)
+            }
+        };
+        crate::nodes::V3Resp15ClientPayload {
+            status: self.status,
+            headers: BTreeMap::from([("content-type".to_string(), content_type.to_string())]),
+            body,
+        }
+    }
+}
+
+pub fn project_v3_anthropic_client_sse_stream(
+    client_response: Value,
+) -> Result<crate::nodes::V3CommittedClientSseStream, String> {
+    project_v3_anthropic_client_sse_stream_with_budget(
+        client_response,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+}
+
+pub(crate) fn project_v3_anthropic_client_sse_stream_with_budget(
+    client_response: Value,
+    budget: crate::nodes::V3AttemptBudget,
+) -> Result<crate::nodes::V3CommittedClientSseStream, String> {
+    let events = client_response
+        .get("events")
+        .and_then(Value::as_array)
+        .cloned();
+    let events = events
+        .ok_or_else(|| "typed V3 Anthropic Relay SSE projection is missing events".to_string())?;
+    let terminal_is_valid = events.last().is_some_and(|event| {
+        event.get("event").and_then(Value::as_str) == Some("message_stop")
+            && v3_anthropic_relay_sse_event_semantic(event)
+                .get("type")
+                .and_then(Value::as_str)
+                == Some("message_stop")
+    });
+    if !terminal_is_valid {
+        return Err(
+            "typed V3 Anthropic Relay SSE projection is missing the final message_stop terminal"
+                .to_string(),
+        );
+    }
+    let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(budget)
+        .map_err(|error| error.to_string())?;
+    for event in &events {
+        committed
+            .push(build_v3_anthropic_client_sse_event_chunk(event)?)
+            .map_err(|error| error.to_string())?;
+        if event.get("event").and_then(Value::as_str) == Some("message_stop") {
+            committed
+                .mark_last_frame_as_terminal()
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    committed
+        .seal_after_validated_terminal()
+        .map_err(|error| error.to_string())
+}
+
+fn build_v3_anthropic_client_sse_event_chunk(event: &Value) -> Result<Vec<u8>, String> {
+    let (Some(name), Some(data)) = (
+        event.get("event").and_then(Value::as_str),
+        event.get("data"),
+    ) else {
+        return Err("typed V3 Anthropic Relay SSE event is missing event or data".to_string());
+    };
+    let decoded = build_v3_sse_transport_in_02_from_fields(vec![
+        SseField::Named {
+            name: "event".to_string(),
+            value: name.to_string(),
+        },
+        SseField::Named {
+            name: "data".to_string(),
+            value: data.to_string(),
+        },
+    ])
+    .map_err(|error| error.to_string())?;
+    let validated = build_v3_sse_transport_in_03_from_v3_sse_transport_in_02(decoded)
+        .map_err(|error| error.to_string())?;
+    Ok(build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&validated).into_bytes())
+}
+
 pub fn project_v3_anthropic_relay_runtime_failure(
     error: V3AnthropicRelayRuntimeError,
 ) -> V3AnthropicRelayRuntimeOutput {
@@ -6,6 +126,11 @@ pub fn project_v3_anthropic_relay_runtime_failure(
         V3AnthropicRelayRuntimeError::ProviderCompat(error)
             if error.classification() == V3ProviderCompatErrorClassification::RequestPayloadInvalid
     );
+    let internal_status = match &error {
+        V3AnthropicRelayRuntimeError::ExecutionControlRequest(_) => Some(598),
+        V3AnthropicRelayRuntimeError::ExecutionControlResponse(_) => Some(599),
+        _ => None,
+    };
     let source = match error {
         V3AnthropicRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
             V3ErrorSourceKind::ModelNotFound,
@@ -15,10 +140,7 @@ pub fn project_v3_anthropic_relay_runtime_failure(
         ),
         V3AnthropicRelayRuntimeError::ProviderCompat(error) => match error.classification() {
             V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
-                super::provider_compat_boundary_source(
-                    "ProviderRespCompat02ProviderCompat",
-                    &error,
-                )
+                super::provider_compat_boundary_source("ProviderRespCompat02ProviderCompat", &error)
             }
             V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
                 super::provider_request_payload_source("ProviderReqCompat06ProviderCompat", &error)
@@ -30,6 +152,22 @@ pub fn project_v3_anthropic_relay_runtime_failure(
                 error.to_string(),
             ),
         },
+        V3AnthropicRelayRuntimeError::ExecutionControlRequest(message) => {
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ProviderReqOutbound09TransportRequest",
+                "anthropic_relay_request_execution_control_error",
+                message,
+            )
+        }
+        V3AnthropicRelayRuntimeError::ExecutionControlResponse(message) => {
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ServerRespOutbound06ClientFrame",
+                "anthropic_relay_response_execution_control_error",
+                message,
+            )
+        }
         error => build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",
@@ -39,7 +177,7 @@ pub fn project_v3_anthropic_relay_runtime_failure(
     };
     error_output(
         source,
-        if request_payload_invalid { 400 } else { 500 },
+        internal_status.unwrap_or(if request_payload_invalid { 400 } else { 500 }),
         "none",
         Vec::new(),
     )
@@ -105,6 +243,7 @@ fn provider_failure_output(
     V3AnthropicRelayRuntimeOutput {
         status: projected.status,
         client_response: projected.body,
+        client_body: V3AnthropicRelayClientBody::Json,
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
         servertool_followup_required: false,
@@ -124,6 +263,7 @@ fn error_output(
     V3AnthropicRelayRuntimeOutput {
         status: projected.status,
         client_response: projected.body,
+        client_body: V3AnthropicRelayClientBody::Json,
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
         servertool_followup_required: false,

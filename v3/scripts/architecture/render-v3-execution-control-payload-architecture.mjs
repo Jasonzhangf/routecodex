@@ -14,16 +14,29 @@ const moduleRegistryRel = 'docs/architecture/v3-runtime-module-registry.yml';
 const verificationMapRel = 'docs/architecture/v3-verification-map.yml';
 const packageRel = 'v3/package.json';
 const runtimeSourceRootRel = 'v3/crates/routecodex-v3-runtime/src';
+const runtimeExecutionControlRel = `${runtimeSourceRootRel}/execution_control.rs`;
 const runtimeNodesRel = `${runtimeSourceRootRel}/nodes.rs`;
 const providerFailurePolicyRel = `${runtimeSourceRootRel}/provider_failure_runtime_policy.rs`;
 const directContinuationCommitRel = `${runtimeSourceRootRel}/kernel/direct_continuation_commit.rs`;
 const directKernelRel = `${runtimeSourceRootRel}/kernel.rs`;
 const directCoreRel = `${runtimeSourceRootRel}/kernel/v3_direct_core.rs`;
-const providerHealthRel = 'v3/crates/routecodex-v3-provider-responses/src/health.rs';
+const responsesRelayRuntimeRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_runtime.rs`;
+const responsesRelayRuntimeInnerRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_runtime_inner.rs`;
+const responsesRelayTypesRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_types.rs`;
+const responsesRelayFailuresRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_failures.rs`;
+const responsesRelayDryRunRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_dry_run.rs`;
+const anthropicRelayRuntimeRel = `${runtimeSourceRootRel}/hub_v1/anthropic_relay_runtime.rs`;
+const anthropicRelayRuntimeHelpersRel = `${runtimeSourceRootRel}/hub_v1/anthropic_relay_runtime_helpers.rs`;
+const providerHealthStateRel = 'v3/crates/routecodex-v3-provider-responses/src/health.rs';
+const providerHealthPersistenceRel = 'v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs';
 const webuiObservabilityRel = 'v3/crates/routecodex-v3-server/src/webui_observability.rs';
 const observabilityStoreRel = 'v3/crates/routecodex-v3-debug/src/observability_store.rs';
 const configLibRel = 'v3/crates/routecodex-v3-config/src/lib.rs';
+const configAttemptStoreRel = 'v3/crates/routecodex-v3-config/src/attempt_store.rs';
+const configTypesRel = 'v3/crates/routecodex-v3-config/src/types.rs';
+const configValidateRel = 'v3/crates/routecodex-v3-config/src/validate.rs';
 const serverLibRel = 'v3/crates/routecodex-v3-server/src/lib.rs';
+const serverExecutorsRel = 'v3/crates/routecodex-v3-server/src/executors.rs';
 const failures = [];
 
 const readText = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
@@ -67,14 +80,32 @@ function validateContracts() {
   requireValue(manifest.owner_feature_id === 'v3.execution_request_lifecycle', `${manifestRel}: owner_feature_id mismatch`);
   requireValue(array(manifest.current_runtime_red_bindings).length === 0, `${manifestRel}: current runtime-red bindings must be empty`);
   requireValue(manifest.entrypoint?.call_map_chain_id === manifest.lifecycle_id, `${manifestRel}: call-map chain mismatch`);
+  const expectedImplementationOwners = {
+    request_execution_control: runtimeExecutionControlRel,
+    attempt_store_policy: configAttemptStoreRel,
+    provider_health_persistence: providerHealthPersistenceRel,
+  };
+  for (const [owner, rel] of Object.entries(expectedImplementationOwners)) {
+    requireValue(manifest.implementation_owner_files?.[owner] === rel, `${manifestRel}: ${owner} owner mismatch`);
+  }
   requireValue(manifest.budget_contract?.reserve_before_append_or_copy === true, `${manifestRel}: reserve-before-append required`);
+  requireValue(manifest.budget_contract?.provider_attempt_and_client_replay_share_request_budget === true, `${manifestRel}: provider attempt and client replay must share one request budget`);
+  requireValue(manifest.budget_contract?.server_budget_construction === 'forbidden', `${manifestRel}: Server budget construction must be forbidden`);
   requireValue(manifest.budget_contract?.disk_spill === 'forbidden', `${manifestRel}: initial disk spill must be forbidden`);
+  requireValue(manifest.sealed_replay_body_contract?.anthropic === 'typed_non_optional', `${manifestRel}: Anthropic sealed replay body must be typed and non-optional`);
+  requireValue(manifest.sealed_replay_body_contract?.server_consumption === 'exhaustive_match', `${manifestRel}: Server sealed replay consumption must be exhaustive`);
+  requireValue(manifest.sealed_replay_body_contract?.option_stream_with_expect === 'forbidden', `${manifestRel}: optional sealed replay plus expect must be forbidden`);
   for (const dimension of ['per_attempt', 'per_request', 'process_global', 'residence_or_deadline']) {
     requireValue(manifest.budget_contract?.[dimension] === 'required', `${manifestRel}: missing budget ${dimension}`);
   }
   for (const kind of ['Upstream', 'Protocol', 'LocalResourceExhausted', 'ObservationFailure', 'PersistenceFailure', 'ClientCancelled']) {
     requireValue(array(manifest.failure_kinds).includes(kind), `${manifestRel}: missing failure kind ${kind}`);
   }
+  const responsesReplayFailure = manifest.failure_attribution_contract?.responses_client_replay;
+  requireValue(responsesReplayFailure?.runtime_variant === 'ExecutionControlResponse', `${manifestRel}: Responses replay failure variant mismatch`);
+  requireValue(responsesReplayFailure?.source_kind === 'RuntimeFailure' && responsesReplayFailure?.source_stage === 'V3ServerRespOutbound06ClientFrame', `${manifestRel}: Responses replay failure source attribution mismatch`);
+  requireValue(responsesReplayFailure?.client_status === 599 && responsesReplayFailure?.client_code === 'responses_relay_response_execution_control_error', `${manifestRel}: Responses replay failure client projection mismatch`);
+  requireValue(responsesReplayFailure?.provider_response_classification === 'forbidden' && responsesReplayFailure?.provider_health_mutation === 'forbidden', `${manifestRel}: Responses replay failure must remain provider-health neutral`);
   for (const forbidden of ['temporary_runtime', 'stream_wrapper_executor_reentry', 'route_pool_rehit', 'payload_control_reconstruction']) {
     requireValue(array(manifest.module_contracts?.runtime?.forbids).includes(forbidden), `${manifestRel}: runtime forbidden contract missing ${forbidden}`);
   }
@@ -137,12 +168,15 @@ function validateContracts() {
 }
 
 function validateSuccessReceiptSource() {
+  const executionControl = readText(runtimeExecutionControlRel);
   const nodes = readText(runtimeNodesRel);
-  requireValue(nodes.includes('pub struct V3AttemptSuccessReceipt {\n    _runtime_sealed: (),\n}'), `${runtimeNodesRel}: success receipt field must remain private`);
+  requireValue(executionControl.includes('pub struct V3AttemptSuccessReceipt {\n    _runtime_sealed: (),\n}'), `${runtimeExecutionControlRel}: success receipt field must remain private`);
   for (const constructor of ['from_buffered_terminal_attempt', 'from_sealed_sse_attempt', 'from_protocol_terminal_attempt']) {
-    requireValue(nodes.includes(`pub(crate) fn ${constructor}`), `${runtimeNodesRel}: success receipt constructor ${constructor} must remain crate-private`);
-    requireValue(!nodes.includes(`pub fn ${constructor}`), `${runtimeNodesRel}: success receipt constructor ${constructor} must not be public`);
+    requireValue(executionControl.includes(`pub(crate) fn ${constructor}`), `${runtimeExecutionControlRel}: success receipt constructor ${constructor} must remain crate-private`);
+    requireValue(!executionControl.includes(`pub fn ${constructor}`), `${runtimeExecutionControlRel}: success receipt constructor ${constructor} must not be public`);
   }
+  requireValue(nodes.includes('pub use crate::execution_control::{'), `${runtimeNodesRel}: execution-control compatibility re-export missing`);
+  requireValue(!nodes.includes('pub struct V3AttemptSuccessReceipt {'), `${runtimeNodesRel}: aggregate nodes module must not own the success receipt implementation`);
 
   const owners = new Set(array(manifest.success_receipt_contract?.source_owner_files));
   for (const rel of rustFiles(path.join(repoRoot, runtimeSourceRootRel))) {
@@ -180,14 +214,75 @@ function validateRuntimeIsolationSource() {
     requireValue(!source.includes('responses:deepseek-console-go') && !source.includes('responses:thinking-tags'), `${rel}: execution skeleton must not inspect compatibility profile strings`);
   }
 
-  const health = readText(providerHealthRel);
-  const persistenceProjection = health.slice(
-    health.indexOf('fn persist_cooldown_state'),
-    health.indexOf('impl V3ProviderAvailabilityReader for V3ProviderHealthStore'),
+  const healthState = readText(providerHealthStateRel);
+  const healthPersistence = readText(providerHealthPersistenceRel);
+  const persistenceProjection = healthPersistence.slice(
+    healthPersistence.indexOf('pub(super) fn persist_cooldown_state'),
+    healthPersistence.indexOf('impl V3ProviderHealthStore'),
   );
-  requireValue(health.includes('mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY)'), `${providerHealthRel}: bounded single persistence writer missing`);
-  requireValue(persistenceProjection.includes('writer.enqueue(provider_cooldown_persistence_entries(state))'), `${providerHealthRel}: health mutation must enqueue lock-free persistence projection`);
-  requireValue(!persistenceProjection.includes('replace_entries(') && !persistenceProjection.includes('fs::'), `${providerHealthRel}: health persistence projection performs synchronous disk IO`);
+  requireValue(healthPersistence.includes('mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY)'), `${providerHealthPersistenceRel}: bounded single persistence writer missing`);
+  requireValue(healthPersistence.includes('struct V3ProviderHealthPersistenceTicket'), `${providerHealthPersistenceRel}: immutable health persistence ticket missing`);
+  requireValue(persistenceProjection.includes("state: RwLockWriteGuard<'_, V3ProviderHealthState>"), `${providerHealthPersistenceRel}: health persistence owner must consume the write guard`);
+  const healthGuardDrop = persistenceProjection.indexOf('drop(state);');
+  const healthTicketEnqueue = persistenceProjection.indexOf('ticket.enqueue();');
+  requireValue(healthGuardDrop >= 0 && healthTicketEnqueue > healthGuardDrop, `${providerHealthPersistenceRel}: health persistence must enqueue after releasing the write guard`);
+  requireValue(!persistenceProjection.includes('replace_entries(') && !persistenceProjection.includes('fs::'), `${providerHealthPersistenceRel}: health persistence projection performs synchronous disk IO`);
+  requireValue(!healthState.includes('struct V3ProviderHealthPersistenceWriter'), `${providerHealthStateRel}: health state module must not own the persistence writer implementation`);
+  requireValue(!healthState.includes('persist_cooldown_state(&mut state)'), `${providerHealthStateRel}: health mutation must transfer write-guard ownership before persistence enqueue`);
+
+  const responsesRelayRuntime = readText(responsesRelayRuntimeRel);
+  const responsesRelayRuntimeInner = readText(responsesRelayRuntimeInnerRel);
+  const responsesRelayTypes = readText(responsesRelayTypesRel);
+  const responsesRelayFailures = readText(responsesRelayFailuresRel);
+  const responsesRelayDryRun = readText(responsesRelayDryRunRel);
+  const responsesProjectorStart = responsesRelayRuntime.indexOf('fn project_v3_responses_relay_client_body(');
+  const responsesProjectorEnd = responsesRelayRuntime.indexOf('fn v3_responses_relay_now_epoch_ms(', responsesProjectorStart);
+  const responsesProjector = responsesRelayRuntime.slice(responsesProjectorStart, responsesProjectorEnd);
+  requireValue(responsesProjector.includes('attempt_budget: crate::nodes::V3AttemptBudget'), `${responsesRelayRuntimeRel}: Responses client projection must receive the request attempt budget`);
+  requireValue(responsesProjector.includes('build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget(') && !responsesProjector.includes('V3AttemptBudget::process_default()'), `${responsesRelayRuntimeRel}: Responses production client projection must use the caller request budget`);
+  requireValue(responsesProjector.includes('.map_err(V3ResponsesRelayRuntimeError::ExecutionControlResponse)?') && !responsesProjector.includes('.map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?'), `${responsesRelayRuntimeRel}: Responses local replay failure must use response execution-control attribution`);
+  requireValue(responsesRelayTypes.includes('ExecutionControlResponse(String)'), `${responsesRelayTypesRel}: Responses response execution-control variant missing`);
+  const providerFailureClassifierStart = responsesRelayFailures.indexOf('pub(crate) fn is_v3_responses_provider_response_failure(');
+  const providerFailureClassifierEnd = responsesRelayFailures.indexOf('pub(crate) fn provider_response_hook_failure(', providerFailureClassifierStart);
+  requireValue(!responsesRelayFailures.slice(providerFailureClassifierStart, providerFailureClassifierEnd).includes('ExecutionControlResponse'), `${responsesRelayFailuresRel}: Responses local replay failure enters provider response classification`);
+  requireValue(responsesRelayDryRun.includes('V3ResponsesRelayRuntimeError::ExecutionControlResponse(message)') && responsesRelayDryRun.includes('"V3ServerRespOutbound06ClientFrame"') && responsesRelayDryRun.includes('"responses_relay_response_execution_control_error"') && responsesRelayDryRun.includes('error_output(source, 599,'), `${responsesRelayDryRunRel}: Responses local replay failure must project response-stage 599`);
+  const responsesBuilderStart = responsesRelayRuntime.indexOf('pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget(');
+  const responsesBuilderEnd = responsesRelayRuntime.indexOf('fn append_v3_responses_client_reasoning_progress_frames(', responsesBuilderStart);
+  const responsesBuilder = responsesRelayRuntime.slice(responsesBuilderStart, responsesBuilderEnd);
+  requireValue(responsesBuilder.includes('V3CommittedClientSseBuilder::with_budget(attempt_budget)') && !responsesBuilder.includes('V3AttemptBudget::process_default()'), `${responsesRelayRuntimeRel}: Responses sealed replay builder must consume the supplied request budget`);
+  const responsesProductionProjectionCalls = responsesRelayRuntimeInner.match(/project_v3_responses_relay_client_body\([\s\S]{0,420}attempt_budget\.clone\(\)/gu) ?? [];
+  requireValue(responsesProductionProjectionCalls.length >= 2, `${responsesRelayRuntimeInnerRel}: every Responses production projection must reuse the request attempt budget`);
+
+  const anthropicRelayRuntime = readText(anthropicRelayRuntimeRel);
+  const anthropicRelayRuntimeHelpers = readText(anthropicRelayRuntimeHelpersRel);
+  const anthropicRelayRuntimeSurface = `${anthropicRelayRuntime}\n${anthropicRelayRuntimeHelpers}`;
+  const anthropicInnerStart = anthropicRelayRuntime.indexOf('async fn execute_v3_anthropic_relay_runtime_inner');
+  const anthropicInnerEnd = anthropicRelayRuntime.indexOf('fn anthropic_relay_client_headers_as_provider_request_headers(', anthropicInnerStart);
+  const anthropicInner = anthropicRelayRuntime.slice(anthropicInnerStart, anthropicInnerEnd);
+  requireValue(anthropicInner.includes('V3RequestExecutionControl::from_manifest(manifest, &input.server_id)') && anthropicInner.includes('let attempt_budget = request_execution_control.attempt_budget();'), `${anthropicRelayRuntimeRel}: Anthropic Relay must create one request execution control`);
+  const anthropicAttemptAdmission = anthropicInner.search(/attempt_budget\s*\.\s*admit_transport_attempt\(\)/u);
+  const anthropicTransportSend = anthropicInner.indexOf('transport.send(transport_request)');
+  requireValue(anthropicAttemptAdmission >= 0 && anthropicAttemptAdmission < anthropicTransportSend, `${anthropicRelayRuntimeRel}: Anthropic provider send must consume the request transport-attempt budget before network I/O`);
+  const anthropicSuccessProjectionCalls = anthropicInner.match(/project_v3_anthropic_client_sse_stream_with_budget\([\s\S]{0,220}attempt_budget\.clone\(\)/gu) ?? [];
+  requireValue(anthropicSuccessProjectionCalls.length >= 2 && !anthropicInner.includes('V3AttemptBudget::process_default()'), `${anthropicRelayRuntimeRel}: every Anthropic success branch must seal client SSE with the request budget`);
+  requireValue(anthropicRelayRuntimeSurface.includes('pub enum V3AnthropicRelayClientBody') && anthropicRelayRuntimeSurface.includes('pub client_body: V3AnthropicRelayClientBody'), `${anthropicRelayRuntimeHelpersRel}: Anthropic Runtime output must carry a typed non-optional client body`);
+  requireValue(anthropicRelayRuntimeSurface.includes('pub fn into_v3_resp_15_client_payload(self)') && !anthropicRelayRuntimeSurface.includes('pub client_sse_stream: Option<'), `${anthropicRelayRuntimeHelpersRel}: Anthropic Runtime output must make sealed replay body validity unrepresentable`);
+  requireValue(!anthropicRelayRuntimeSurface.includes('project_v3_anthropic_client_sse_stream_from_manifest'), `${anthropicRelayRuntimeHelpersRel}: manifest-derived Anthropic replay budget must be physically removed`);
+
+  const serverExecutors = readText(serverExecutorsRel);
+  const serverAnthropicOutput = serverExecutors.slice(serverExecutors.indexOf('pub(crate) fn anthropic_relay_output_response('));
+  requireValue(serverAnthropicOutput.includes('output.into_v3_resp_15_client_payload()') && serverAnthropicOutput.includes('match frame.body'), `${serverExecutorsRel}: Server must exhaustively consume the Runtime-sealed Anthropic client body`);
+  requireValue(!serverAnthropicOutput.includes('client_sse_stream') && !serverAnthropicOutput.includes('successful Anthropic Runtime SSE output must carry'), `${serverExecutorsRel}: Server must not unwrap or expect an optional Anthropic replay stream`);
+  requireValue(!serverExecutors.includes('project_v3_anthropic_client_sse_stream_from_manifest') && !serverExecutors.includes('V3AttemptBudget::from_manifest'), `${serverExecutorsRel}: Server must not reconstruct execution budget or client replay`);
+
+  const attemptStorePolicy = readText(configAttemptStoreRel);
+  const configTypes = readText(configTypesRel);
+  const configValidate = readText(configValidateRel);
+  requireValue(attemptStorePolicy.includes('pub struct V3AttemptStorePolicyAuthoringConfig'), `${configAttemptStoreRel}: attempt-store authoring policy owner missing`);
+  requireValue(attemptStorePolicy.includes('pub struct V3AttemptStorePolicyManifest'), `${configAttemptStoreRel}: attempt-store manifest policy owner missing`);
+  requireValue(attemptStorePolicy.includes('pub(crate) fn compile_attempt_store_policy('), `${configAttemptStoreRel}: attempt-store policy compiler missing`);
+  requireValue(configValidate.includes('compile_attempt_store_policy(server_id, authoring.attempt_store)?'), `${configValidateRel}: config validation must consume the attempt-store policy compiler`);
+  requireValue(!configTypes.includes('pub struct V3AttemptStorePolicyAuthoringConfig') && !configTypes.includes('pub struct V3AttemptStorePolicyManifest'), `${configTypesRel}: aggregate config types must not own attempt-store policy implementations`);
 
   const webui = readText(webuiObservabilityRel);
   const observabilityStore = readText(observabilityStoreRel);
@@ -226,6 +321,7 @@ function renderMarkdown() {
     `- call map: \`${callMapRel}\``,
     `- module registry: \`${moduleRegistryRel}\``,
     `- verification map: \`${verificationMapRel}\``,
+    ...Object.entries(manifest.implementation_owner_files).map(([name, rel]) => `- implementation owner ${name}: \`${rel}\``),
     '',
     '## Lifecycle',
     '',
@@ -259,6 +355,7 @@ function renderMarkdown() {
     `- Success consumers: ${codeList(manifest.success_receipt_contract.consumers)}`,
     `- Forbidden success evidence: ${codeList(manifest.success_receipt_contract.forbidden_evidence)}`,
     `- Failure kinds: ${codeList(manifest.failure_kinds)}`,
+    `- Responses client replay local failure: \`${manifest.failure_attribution_contract.responses_client_replay.runtime_variant}\` → \`${manifest.failure_attribution_contract.responses_client_replay.client_status}\` / \`${manifest.failure_attribution_contract.responses_client_replay.client_code}\`; provider classification \`${manifest.failure_attribution_contract.responses_client_replay.provider_response_classification}\``,
     '',
     '## Current Runtime-Red Bindings',
     '',

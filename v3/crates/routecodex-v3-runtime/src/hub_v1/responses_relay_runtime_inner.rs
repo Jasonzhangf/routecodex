@@ -192,11 +192,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let attempt_budget = request_execution_control.attempt_budget();
     let mut provider_send_attempts = attempt_budget.transport_attempts();
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
-    let allowed_execution_modes =
-        handle_error_before_resp03!(allowed_execution_modes_for_relay_server(
-            manifest,
-            &input.server_id,
-        ));
+    let allowed_execution_modes = handle_error_before_resp03!(
+        allowed_execution_modes_for_relay_server(manifest, &input.server_id,)
+    );
     let shared_retry_policy = retry_policy.as_shared_policy();
     let provider_failure_health = provider_health.clone();
     let failure_context = V3RelayProviderFailurePolicyContext {
@@ -273,17 +271,17 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 }
             }
         };
-        let protocol_decision = handle_error_before_resp03!(
-            crate::nodes::build_v3_execution_11_protocol_decision_from_v3_target_10(
-                selected.clone(),
-                "responses",
-                &allowed_execution_modes,
-            )
-            .map_err(|source| V3ResponsesRelayRuntimeError::ExecutionControl(format!(
-                "{}: {}",
-                source.code, source.message
-            )))
-        );
+        let protocol_decision =
+            handle_error_before_resp03!(
+                crate::nodes::build_v3_execution_11_protocol_decision_from_v3_target_10(
+                    selected.clone(),
+                    "responses",
+                    &allowed_execution_modes,
+                )
+                .map_err(|source| V3ResponsesRelayRuntimeError::ExecutionControl(
+                    format!("{}: {}", source.code, source.message)
+                ))
+            );
         if matches!(
             protocol_decision.mode,
             crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
@@ -304,10 +302,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     &allowed_execution_modes,
                     protocol_decision.mode,
                 )
-                .map_err(|source| V3ResponsesRelayRuntimeError::ExecutionControl(format!(
-                    "{}: {}",
-                    source.code, source.message
-                )))
+                .map_err(|source| V3ResponsesRelayRuntimeError::ExecutionControl(
+                    format!("{}: {}", source.code, source.message)
+                ))
             );
             let mut handoff_trace = trace.clone();
             handoff_trace.push("V3Target10ConcreteProviderSelected");
@@ -975,6 +972,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         manifest,
                         &input.server_id,
                     ),
+                    attempt_budget.clone(),
                 )?;
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
@@ -1009,12 +1007,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 let provider_value = match provider_value_result {
                     Ok(value) => value,
                     Err(error) => {
-                        let failure = handle_error_before_resp03!(provider_response_stream_relay_failure(
-                            error,
-                            &input.request_id,
-                            &selected_target_provider_id,
-                            Some(selected_observability.clone()),
-                        ));
+                        let failure =
+                            handle_error_before_resp03!(provider_response_stream_relay_failure(
+                                error,
+                                &input.request_id,
+                                &selected_target_provider_id,
+                                Some(selected_observability.clone()),
+                            ));
                         drop(_provider_action_permit.take());
                         let terminal_failure = handle_error_before_resp03!(
                             handle_v3_responses_relay_provider_failure(
@@ -1359,6 +1358,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         manifest,
                         &input.server_id,
                     ),
+                    attempt_budget.clone(),
                 )?;
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,

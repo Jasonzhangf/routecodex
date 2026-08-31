@@ -1310,6 +1310,8 @@ pub enum V3ResponsesRelayRuntimeError {
     RuntimeTiming(String),
     #[error("V3 Responses Relay request execution control failed: {0}")]
     ExecutionControl(String),
+    #[error("V3 Responses Relay response execution control failed: {0}")]
+    ExecutionControlResponse(String),
     #[error("V3 Responses Relay provider semantic failure {code} status {status}: {message}")]
     ProviderResponseSemanticFailure {
         status: u16,

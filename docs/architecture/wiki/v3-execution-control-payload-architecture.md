@@ -17,6 +17,9 @@ One resident request lifecycle owns immutable target planning, cumulative recove
 - call map: `docs/architecture/v3-mainline-call-map.yml`
 - module registry: `docs/architecture/v3-runtime-module-registry.yml`
 - verification map: `docs/architecture/v3-verification-map.yml`
+- implementation owner request_execution_control: `v3/crates/routecodex-v3-runtime/src/execution_control.rs`
+- implementation owner attempt_store_policy: `v3/crates/routecodex-v3-config/src/attempt_store.rs`
+- implementation owner provider_health_persistence: `v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs`
 
 ## Lifecycle
 
@@ -56,6 +59,7 @@ flowchart LR
 - Success consumers: `provider_health_success`, `route_policy_commit`, `continuation_commit`, `client_semantic_commit`
 - Forbidden success evidence: `http_2xx`, `response_headers`, `stream_constructed`, `first_business_frame`, `transport_accepted`
 - Failure kinds: `Upstream`, `Protocol`, `LocalResourceExhausted`, `ObservationFailure`, `PersistenceFailure`, `ClientCancelled`
+- Responses client replay local failure: `ExecutionControlResponse` → `599` / `responses_relay_response_execution_control_error`; provider classification `forbidden`
 
 ## Current Runtime-Red Bindings
 
@@ -84,7 +88,7 @@ Forbids: `execution_control`, `provider_health_control`, `mutex_held_file_io`, `
 
 ### config
 
-Owns: `storage_path_policy_compilation`
+Owns: `attempt_store_policy_compilation`, `storage_path_policy_compilation`
 
 Forbids: `runtime_append`, `runtime_flush`, `history_rotation`, `request_hot_path_io`
 

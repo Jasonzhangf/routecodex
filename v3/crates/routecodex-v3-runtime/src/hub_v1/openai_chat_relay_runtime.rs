@@ -17,7 +17,7 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use serde_json::{json, Value};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::pin::Pin;
 
 pub type V3OpenAiChatClientStream = V3RelayProjectedSseStream;
@@ -76,10 +76,7 @@ impl V3OpenAiChatRelayRuntimeOutput {
         };
         V3Resp15ClientPayload {
             status: self.status,
-            headers: std::collections::BTreeMap::from([(
-                "content-type".to_string(),
-                content_type.to_string(),
-            )]),
+            headers: BTreeMap::from([("content-type".to_string(), content_type.to_string())]),
             body: self.client_body.into_v3_client_body(),
         }
     }
@@ -569,11 +566,9 @@ impl V3OpenAiChatSseProviderOutcome {
         if self.recorded {
             return Ok(());
         }
-        let attempt_success_receipt =
-            crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt();
         self.provider_health
             .record_provider_success_in_failure_scope(
-                &attempt_success_receipt,
+                &crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt(),
                 &self.failure_session_scope,
                 &self.provider_id,
                 Some(&self.auth_alias),
@@ -597,7 +592,6 @@ fn project_sse_stream(
     stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3RelayProjectedSseStream {
-    use futures_util::StreamExt;
     let state = V3OpenAiChatSseState {
         request_id,
         session_id,
