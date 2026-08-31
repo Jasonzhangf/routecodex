@@ -1,7 +1,7 @@
 {
   "architecture_review_id": "v4-cordis-edge-review",
   "artifact_hash": "sha256:ff89c9752a673f852b66556ee1d25ee01e8c4d407304d4e3ba816d9cf6faa39b",
-  "base_artifact_hash": "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593",
+  "base_artifact_hash": "sha256:83728d3d7967db171cfb627301ba8e8d636eaf6015101f70e316a5234c260ea6",
   "base_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
   "candidate_commit": "dbf569de040b34361c980e27849c00726d90d912",
   "change_reason_comment": "Bind edge to current Cordis base-node artifact.",
