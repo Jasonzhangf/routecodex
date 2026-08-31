@@ -43,14 +43,13 @@ pub(crate) fn format_v3_console_human_usage_summary(
 }
 
 fn format_v3_console_cache_summary(usage: &V3RuntimeUsageSummary) -> Option<String> {
-    let cache_read = usage.cache_read_input_tokens;
-    let cached = cache_read.or(usage.cached_tokens)?;
-    let denominator = match (cache_read, usage.input_tokens) {
+    // OpenAI-compatible usage reports cached tokens as a sub-count of input.
+    let (cached, denominator) = if let Some(cached) = usage.cached_tokens {
+        (cached, usage.input_tokens.map(|input| input as f64))
+    } else {
         // Anthropic-compatible usage reports the uncached increment separately.
-        (Some(_), Some(input)) => Some(cached as f64 + input as f64),
-        // OpenAI-compatible usage reports cached tokens as a sub-count of input.
-        (None, Some(input)) if input > 0 => Some(input as f64),
-        _ => None,
+        let cached = usage.cache_read_input_tokens?;
+        (cached, usage.input_tokens.map(|input| cached as f64 + input as f64))
     };
     Some(match denominator {
         Some(denominator) if denominator > 0.0 => {
