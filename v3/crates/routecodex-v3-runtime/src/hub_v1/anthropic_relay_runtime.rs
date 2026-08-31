@@ -965,12 +965,18 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let provider_status = provider_raw.status();
         match provider_raw.into_body() {
             V3ProviderResponseBody::Sse(stream) => {
+                let sse_idle_timeout =
+                    crate::hub_v1::relay_runtime_core::v3_provider_sse_idle_timeout(
+                        manifest,
+                        &selected_target_provider_id,
+                    )
+                    .map_err(V3AnthropicRelayRuntimeError::Target)?;
                 let chunks = match collect_v3_anthropic_relay_provider_sse_chunks(
                     crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
                         &input.request_id,
                         &selected_target_provider_id,
                         stream,
-                        crate::hub_v1::relay_runtime_core::V3_RELAY_SSE_STREAM_IDLE_TIMEOUT,
+                        sse_idle_timeout,
                     ),
                 )
                 .await

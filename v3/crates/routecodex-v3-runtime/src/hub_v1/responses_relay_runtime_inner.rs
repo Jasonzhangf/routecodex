@@ -987,6 +987,12 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 });
             }
             V3ProviderResponseBody::Sse(stream) => {
+                let sse_idle_timeout =
+                    crate::hub_v1::relay_runtime_core::v3_provider_sse_idle_timeout(
+                        manifest,
+                        &selected_target_provider_id,
+                    )
+                    .map_err(V3ResponsesRelayRuntimeError::Target)?;
                 let stream_observation = V3RuntimeStreamObservation::default();
                 let provider_value_result =
                     build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
@@ -995,7 +1001,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             &input.request_id,
                             &selected_target_provider_id,
                             stream,
-                            crate::hub_v1::relay_runtime_core::V3_RELAY_SSE_STREAM_IDLE_TIMEOUT,
+                            sse_idle_timeout,
                         ),
                         &stream_observation,
                         &anthropic_response_projection_context,

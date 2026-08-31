@@ -170,11 +170,7 @@ async fn guard_relay_sse_first_frame(
     }
 }
 
-/// Relay SSE 流"每帧空闲守卫"(独立 relay 路径专用):responses/anthropic relay
-/// 不走本骨架的收集循环,需要本守卫保证 provider SSE 数据挂起(连接保持、无新帧)
-/// 超过 30s 时归一化为 Transport 错误进入 provider 失败链（记录 failure +
-/// reselect 切 provider），而不是让客户端无限等待/无限重试同一挂起 provider。
-/// 语义:任意两帧之间(含首帧)超过窗口即产出 Err 并终止流。
+/// Relay SSE idle guard: a configured window applies between every two frames.
 pub(crate) fn guard_v3_provider_sse_idle(
     request_id: &str,
     provider_id: &str,
@@ -201,8 +197,10 @@ pub(crate) fn guard_v3_provider_sse_idle(
                         Err(V3ProviderError::Transport {
                             request_id: request_id.clone(),
                             provider_id: provider_id.clone(),
-                            reason: "provider SSE stream idle timeout (no frame within 30s)"
-                                .to_string(),
+                            reason: format!(
+                                "provider SSE stream idle timeout (no frame within {}ms)",
+                                idle_timeout.as_millis()
+                            ),
                         }),
                         (stream, true),
                     )),
@@ -282,12 +280,20 @@ mod response_header_timeout_contract_tests {
     }
 }
 
-/// Relay 收集 provider SSE 流时的流空闲上限：首帧已收到、但后续数据挂起
-/// （连接保持、不失败、无新帧）超过该窗口 → 归一化为 Transport 错误进入错误链
-/// （记录 provider failure + reselect 切 provider + 连续失败拉黑），否则客户端
-/// 会无限重试命中同一挂起 provider（半截响应/断流无感知）。
-pub(crate) const V3_RELAY_SSE_STREAM_IDLE_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(30);
+/// The published provider SSE timeout intentionally covers both the first frame
+/// and the maximum inter-frame idle interval for relay streams.
+pub(crate) fn v3_provider_sse_idle_timeout(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+) -> Result<std::time::Duration, String> {
+    manifest.providers.get(provider_id).and_then(|provider| provider.sse_first_frame_timeout_ms)
+        .filter(|timeout_ms| *timeout_ms > 0).map(std::time::Duration::from_millis)
+        .ok_or_else(|| {
+            format!(
+                "published provider SSE first-frame/inter-frame timeout is missing for provider {provider_id}"
+            )
+        })
+}
 use std::fmt;
 
 /// 骨架内部错误（协议入口负责映射到自身错误类型）。
@@ -992,7 +998,8 @@ where
                     request_id,
                     &selected_target_provider_id,
                     guarded_stream,
-                    V3_RELAY_SSE_STREAM_IDLE_TIMEOUT,
+                    v3_provider_sse_idle_timeout(manifest, &selected_target_provider_id)
+                        .map_err(V3RelayCoreError::Target)?,
                 );
                 let stream_observation = V3RuntimeStreamObservation::default();
                 let idle_guarded_stream =
@@ -1435,6 +1442,10 @@ mod tests {
                 assert!(
                     reason.contains("idle timeout"),
                     "hung stream must produce idle timeout transport error, got {reason}"
+                );
+                assert!(
+                    reason.contains("50ms"),
+                    "idle timeout error must report the configured window, got {reason}"
                 );
             }
             other => panic!("hung stream must produce Transport error, got {other:?}"),

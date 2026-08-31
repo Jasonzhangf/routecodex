@@ -106,8 +106,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:cb6111cbbfa6348623d9f489935026efb60a8aaae72d32bbb932faccce22b6e8
-    last_manual_authorization_id: auth-20260824-v3-protocol-fields-debug-error
+    fingerprint: sha256:e813e787f04eb2af0701aabe192183f6a13cf78e721062947981384ecbb0043a
+    last_manual_authorization_id: auth-20260831-v3-debug-error-lock-refresh
   - item_id: chain:v3.sse.transport_boundary
     chain_id: v3.sse.transport_boundary
     status: audited_locked
@@ -139,8 +139,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:cbd2d5a36500918033f01824b210de96de0ab4a54ed25dabb4693795188446ae
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:aff218cb4f8b0ed58e0feb742d4548e1496d1c223d790d5b5412be26a88bc8ce
+    last_manual_authorization_id: auth-20260831-v3-codex-sample-lock-refresh
   - item_id: chain:v3.server.managed_lifecycle
     chain_id: v3.server.managed_lifecycle
     status: audited_locked
@@ -251,8 +251,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:72983e8dc1ea80c42da468ae7500329c6876429633d4314169fdd6052efae3b0
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:f95c3a9aa845e97425fc0ccc7423244d47d49c44652bedef18f77bfdf201dc57
+    last_manual_authorization_id: auth-20260831-v3-anthropic-relay-lock-refresh
   - item_id: chain:v3.responses.websocket_v2.transport_hardening
     chain_id: v3.responses.websocket_v2.transport_hardening
     status: audited_locked
@@ -697,6 +697,27 @@ manual_authorizations:
     reason: "bind-01 callee_symbol corrected from manifest path to manifest lifecycle_id so the anchored review-gate edge passes the symbol-presence check."
     fingerprint_before: sha256:0dede5f24ffddbdddf50f09d922acccec3ed323f8d3dffeb69aa76cb79490a54
     fingerprint_after: sha256:15ecb6de58935a4c1d3bf37386bebcc306968c65398aaf0d284f1549c099d2d6
+  - authorization_id: auth-20260831-v3-codex-sample-lock-refresh
+    item_id: chain:v3.codex_sample_retention_snap_scope
+    approved_by: Jason
+    approved_at: '2026-08-31T09:20:00-07:00'
+    reason: "Jason authorized refreshing the audited lock after pulling the latest origin/main and validating the current mainline caller flow. The chain fingerprint changed from the stale locked value to the current canonical call-map value; no request/response or runtime semantics changed."
+    fingerprint_before: sha256:cbd2d5a36500918033f01824b210de96de0ab4a54ed25dabb4693795188446ae
+    fingerprint_after: sha256:aff218cb4f8b0ed58e0feb742d4548e1496d1c223d790d5b5412be26a88bc8ce
+  - authorization_id: auth-20260831-v3-anthropic-relay-lock-refresh
+    item_id: chain:v3.anthropic_relay.controlled_runtime
+    approved_by: Jason
+    approved_at: '2026-08-31T09:25:00-07:00'
+    reason: "Jason authorized refreshing the audited lock after pulling the latest origin/main and validating the current mainline caller flow. The fingerprint change reflects current canonical caller-map bindings; relay runtime semantics remain unchanged by this lock refresh."
+    fingerprint_before: sha256:72983e8dc1ea80c42da468ae7500329c6876429633d4314169fdd6052efae3b0
+    fingerprint_after: sha256:f95c3a9aa845e97425fc0ccc7423244d47d49c44652bedef18f77bfdf201dc57
+  - authorization_id: auth-20260831-v3-debug-error-lock-refresh
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-08-31T09:25:00-07:00'
+    reason: "Jason authorized refreshing the audited lock after pulling the latest origin/main and validating the current mainline caller flow. The fingerprint change reflects current canonical caller-map bindings; debug/error runtime semantics remain unchanged by this lock refresh."
+    fingerprint_before: sha256:cb6111cbbfa6348623d9f489935026efb60a8aaae72d32bbb932faccce22b6e8
+    fingerprint_after: sha256:e813e787f04eb2af0701aabe192183f6a13cf78e721062947981384ecbb0043a
   - authorization_id: auth-20260812-v3-binding-pending-clearance
     item_id: chain:v3.entry_protocol_endpoint_binding.mainline
     approved_by: Jason
