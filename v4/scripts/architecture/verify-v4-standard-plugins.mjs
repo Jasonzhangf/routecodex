@@ -100,6 +100,12 @@ const REQUIRED_SOURCE = [
 ];
 
 const NODE_PERMISSIONS = new Map([
+  ['V4DirectReq01ClientProtocol', {
+    reads: ['v4.direct.request.client_payload'], writes: [],
+  }],
+  ['V4DirectResp01ProviderRaw', {
+    reads: ['v4.direct.response.provider_raw'], writes: [],
+  }],
   ['V4DirectReq02RelayContainer', {
     reads: [
       'v4.direct.request.client_payload',
@@ -526,8 +532,8 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 32) {
-      failures.push(`${MODULE}: expected 32 active standard descriptors, got ${activeDescriptors.length}`);
+    if (activeDescriptors.length !== 34) {
+      failures.push(`${MODULE}: expected 34 active standard descriptors, got ${activeDescriptors.length}`);
     }
     if (!activeDescriptors.some(
       (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',
