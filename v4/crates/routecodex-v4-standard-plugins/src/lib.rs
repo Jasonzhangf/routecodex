@@ -375,6 +375,8 @@ pub fn standard_allowed_writes() -> Vec<String> {
 /// cannot read another node's data or a wire payload through the M5 surface.
 pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
     match node_id {
+        "V4Error02HostCaptured" | "V4Error03RuntimeClassified" | "V4Error04RouterPolicyApplied"
+        | "V4Error05ExecutionDecision" => vec!["v4.control.error_chain".to_string()],
         "V4ProviderRespInbound01Raw" => vec!["v4.response.provider_raw".to_string()],
         "V4ServerReqInbound01ClientRaw" => vec!["v4.request.normal_payload".to_string()],
         "V4DirectReq03ProviderWire" => {
@@ -444,6 +446,8 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
 /// facts never enter a normal data or wire resource.
 pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
     match node_id {
+        "V4Error02HostCaptured" | "V4Error03RuntimeClassified" | "V4Error04RouterPolicyApplied"
+        | "V4Error05ExecutionDecision" => vec!["v4.control.error_chain".to_string()],
         "V4DirectReq02RelayContainer" => vec!["v4.direct.request.provider_wire".to_string()],
         "V4DirectResp02RelayContainer" => vec!["v4.direct.response.client_payload".to_string()],
         "V4HubReqOutbound06ProviderSemantic" => vec!["v4.request.provider_semantic".to_string()],
@@ -682,6 +686,58 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::ControlOnly,
             PluginPhase::Projection,
             500,
+            vec!["v4.control.error_chain"],
+            vec!["v4.control.error_chain"],
+        ),
+        plugin(
+            "v4.std.error.host_capture",
+            PluginCategory::Error,
+            "V4Error02HostCaptured",
+            "error_source",
+            Some(2),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            310,
+            vec!["v4.control.error_chain"],
+            vec!["v4.control.error_chain"],
+        ),
+        plugin(
+            "v4.std.error.runtime_classify",
+            PluginCategory::Error,
+            "V4Error03RuntimeClassified",
+            "error_classify",
+            Some(3),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            320,
+            vec!["v4.control.error_chain"],
+            vec!["v4.control.error_chain"],
+        ),
+        plugin(
+            "v4.std.error.router_policy",
+            PluginCategory::Error,
+            "V4Error04RouterPolicyApplied",
+            "error_policy",
+            Some(4),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            330,
+            vec!["v4.control.error_chain"],
+            vec!["v4.control.error_chain"],
+        ),
+        plugin(
+            "v4.std.error.execution_decision",
+            PluginCategory::Error,
+            "V4Error05ExecutionDecision",
+            "error_decision",
+            Some(5),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            340,
             vec!["v4.control.error_chain"],
             vec!["v4.control.error_chain"],
         ),
@@ -1110,6 +1166,36 @@ pub(crate) fn error_intake(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+fn error_stage(ctx: &mut ExecCtx<'_>, stage: &str) -> Result<(), String> {
+    let mut chain = ctx
+        .read_control_resource("v4.control.error_chain")
+        .map_err(|error| error.to_string())?
+        .cloned()
+        .ok_or_else(|| format!("error stage {stage} requires typed error chain"))?;
+    let object = chain
+        .as_object_mut()
+        .ok_or_else(|| format!("error stage {stage} requires typed error object"))?;
+    object.insert("stage".to_string(), json!(stage));
+    ctx.write_control_resource("v4.control.error_chain", chain)
+        .map_err(|error| error.to_string())
+}
+
+fn error_host_capture(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    error_stage(ctx, "host_captured")
+}
+
+fn error_runtime_classify(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    error_stage(ctx, "runtime_classified")
+}
+
+fn error_router_policy(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    error_stage(ctx, "router_policy_applied")
+}
+
+fn error_execution_decision(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    error_stage(ctx, "execution_decision")
+}
+
 fn error_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut error_chain = ctx
         .read_control_resource("v4.control.error_chain")
@@ -1342,6 +1428,10 @@ impl StandardHandleRegistry {
             ("v4.std.control.payload_cycle_record", payload_cycle_record),
             ("v4.std.error.typed_intake", error_intake),
             ("v4.std.error.projection_adapter", error_projection),
+            ("v4.std.error.host_capture", error_host_capture),
+            ("v4.std.error.runtime_classify", error_runtime_classify),
+            ("v4.std.error.router_policy", error_router_policy),
+            ("v4.std.error.execution_decision", error_execution_decision),
             ("v4.std.provider.wire_build", protocol_codec),
             ("v4.std.protocol.wire_codec_proto", protocol_codec),
             ("v4.std.chat_process.request_governance", request_governance),
@@ -1458,6 +1548,10 @@ mod tests {
             "v4.std.control.payload_cycle_record",
             "v4.std.error.typed_intake",
             "v4.std.error.projection_adapter",
+            "v4.std.error.host_capture",
+            "v4.std.error.runtime_classify",
+            "v4.std.error.router_policy",
+            "v4.std.error.execution_decision",
             "v4.std.provider.wire_build",
             "v4.std.protocol.wire_codec_proto",
             "v4.std.chat_process.request_governance",
@@ -1469,6 +1563,7 @@ mod tests {
             "v4.std.provider.auth_handle_mock",
             "v4.std.provider.wire_mock",
             "v4.std.provider.transport_mock",
+            "v4.std.provider.transport_validate",
             "v4.std.response.protocol_decode",
             "v4.std.response.frame_build",
             "v4.std.response.provider_compat",
@@ -1497,13 +1592,13 @@ mod tests {
     }
 
     #[test]
-    fn production_compilation_rejects_unbound_nodes() {
+    fn production_compilation_has_no_empty_node_plans() {
         let skeleton = SkeletonPlan::from_contract_json(include_str!(
             "../../../contracts/skeleton-plan.contract.json"
         ))
         .expect("canonical skeleton contract must parse");
-        let error = compile_production_execution_plans(&skeleton)
-            .expect_err("production compilation must not accept an empty node plan");
-        assert!(error.to_string().contains("has no standard plugin binding"));
+        let compiled = compile_production_execution_plans(&skeleton)
+            .expect("every production node must have a real standard plugin binding");
+        assert!(compiled.plans.iter().all(|plan| !plan.entries.is_empty()));
     }
 }
