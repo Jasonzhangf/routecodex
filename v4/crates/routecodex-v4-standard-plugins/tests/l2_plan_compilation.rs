@@ -53,10 +53,10 @@ fn positive_different_nodes_compile_distinct_deterministic_plans() {
     .expect("chat-process plan compiles");
 
     let outbound = compile_standard_plan(
-        "V4ProviderReqCompat07ProviderCompat",
+        "V4ProviderReqOutbound08WirePayload",
         "request_outbound",
-        "request",
-        7,
+        "relay_request",
+        8,
         &["v4.std.provider.wire_build"],
     )
     .expect("outbound plan compiles");
@@ -173,10 +173,10 @@ fn negative_selection_group_multi_active_rejected() {
     alt.descriptor.plugin_id = "v4.std.provider.wire_build_alt".to_string();
     authoring.push(alt);
     let error = compile_authoring(
-        "V4ProviderReqCompat07ProviderCompat",
+        "V4ProviderReqOutbound08WirePayload",
         "request_outbound",
         "request",
-        7,
+        8,
         &authoring,
     )
     .expect_err("two active selection variants must fail");
@@ -258,10 +258,10 @@ fn negative_active_node_role_mismatch_rejected() {
     let authoring = standard_authoring(&["v4.std.provider.wire_build"])
         .expect("standard authoring succeeds for known id");
     let error = compile_authoring(
-        "V4ProviderReqCompat07ProviderCompat",
+        "V4ProviderReqOutbound08WirePayload",
         "request_chat_process",
         "request",
-        7,
+        8,
         &authoring,
     )
     .expect_err("active node role mismatch must fail");
@@ -273,10 +273,10 @@ fn negative_active_node_position_mismatch_rejected() {
     let authoring = standard_authoring(&["v4.std.provider.wire_build"])
         .expect("standard authoring succeeds for known id");
     let error = compile_authoring(
-        "V4ProviderReqCompat07ProviderCompat",
+        "V4ProviderReqOutbound08WirePayload",
         "request_outbound",
         "request",
-        6,
+        7,
         &authoring,
     )
     .expect_err("active node position mismatch must fail");
@@ -305,10 +305,10 @@ fn negative_non_adjacent_provider_semantic_reversal_rejected() {
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.writes = vec!["v4.request.normal_payload".to_string()];
     let error = compile_authoring(
-        "V4ProviderReqCompat07ProviderCompat",
+        "V4ProviderReqOutbound08WirePayload",
         "request_outbound",
         "request",
-        7,
+        8,
         &authoring,
     )
     .expect_err("provider semantic must not reverse into normal payload");

@@ -406,6 +406,10 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.information.provider_protocol".to_string(),
         ],
         "V4ProviderReqCompat07ProviderCompat" => vec!["v4.request.provider_semantic".to_string()],
+        "V4ProviderReqOutbound08WirePayload" => vec![
+            "v4.request.provider_semantic".to_string(),
+            "v4.request.provider_wire_payload".to_string(),
+        ],
         "V4ProviderReqOutbound09TransportRequest" => vec![
             "v4.request.provider_wire_payload".to_string(),
             "v4.config.manifest".to_string(),
@@ -445,6 +449,9 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
         "V4ProviderReqCompat07ProviderCompat" => {
             vec!["v4.request.provider_wire_payload".to_string()]
         }
+        "V4ProviderReqOutbound08WirePayload" => {
+            vec!["v4.request.provider_wire_payload".to_string()]
+        }
         "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_object".to_string()],
         "V4MetadataCenter01ScopeRegistry" => vec!["v4.control.metadata_center".to_string()],
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
@@ -471,9 +478,9 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
     let mut codec = plugin(
         "v4.std.provider.wire_build",
         PluginCategory::Provider,
-        "V4ProviderReqCompat07ProviderCompat",
+        "V4ProviderReqOutbound08WirePayload",
         "request_outbound",
-        Some(7),
+        Some(8),
         PluginKind::Operator,
         PluginEffect::Semantic,
         PluginPhase::Semantic,
@@ -486,9 +493,9 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
     let mut codec_proto = plugin(
         "v4.std.protocol.wire_codec_proto",
         PluginCategory::Protocol,
-        "V4ProviderReqCompat07ProviderCompat",
+        "V4ProviderReqOutbound08WirePayload",
         "request_outbound",
-        Some(7),
+        Some(8),
         PluginKind::Operator,
         PluginEffect::Semantic,
         PluginPhase::Semantic,
@@ -903,12 +910,11 @@ pub fn compile_production_execution_plans(
         "relay_response",
         "error",
     ];
-    const EXCLUDED_PLUGINS: [&str; 7] = [
+    const EXCLUDED_PLUGINS: [&str; 6] = [
         "v4.std.provider.capability_mock",
         "v4.std.provider.auth_handle_mock",
         "v4.std.provider.wire_mock",
         "v4.std.provider.transport_mock",
-        "v4.std.provider.wire_build",
         "v4.std.protocol.wire_codec_proto",
         "v4.std.request.governance",
     ];
