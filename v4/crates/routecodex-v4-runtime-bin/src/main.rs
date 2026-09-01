@@ -1432,6 +1432,7 @@ fn emit_payload_console_events(
             event, request, endpoint, provider, model, stream, status, elapsed,
         ) {
             println!("{line}");
+            let _ = std::io::stdout().flush();
         }
     }
 }
