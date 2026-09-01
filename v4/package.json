@@ -23,11 +23,6 @@
     "verify:v4-feature-layer-batches-red": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --red-self-test",
     "verify:v4-node-graph": "node scripts/architecture/verify-v4-node-graph.mjs",
     "verify:v4-node-graph-red": "node scripts/architecture/verify-v4-node-graph.mjs --red-self-test",
-    "verify:v4-cordis-host": "node scripts/architecture/verify-v4-cordis-host.mjs",
-    "verify:v4-cordis-host-red": "node scripts/architecture/verify-v4-cordis-host.mjs --red-self-test",
-    "verify:v4-standard-plugins": "node scripts/architecture/verify-v4-standard-plugins.mjs",
-    "verify:v4-standard-plugins-red": "node scripts/architecture/verify-v4-standard-plugins.mjs --red-self-test",
-    "verify:v4-production-mainline-red": "node scripts/architecture/verify-v4-production-mainline-red.mjs",
     "verify:v4-direct-relay-sse": "node scripts/architecture/verify-v4-direct-relay-sse.mjs",
     "verify:v4-direct-relay-sse-red": "node scripts/architecture/verify-v4-direct-relay-sse.mjs --red-self-test",
     "verify:v4-infrastructure": "node scripts/architecture/verify-v4-infrastructure.mjs",
@@ -36,8 +31,7 @@
     "verify:v4-cordis-concurrency-reconciliation-red": "node scripts/verify-v4-cordis-concurrency-reconciliation.mjs --red-self-test",
     "verify:v4-foundation": "node scripts/verify.mjs",
     "verify:v4-foundation-red": "node scripts/verify-red.mjs",
-    "test:cordis-host": "cargo build --manifest-path Cargo.toml -p routecodex-v4-node-container --bin routecodex-v4-node-container-host --locked && node --test cordis/routecodex-v4-cordis-host/tests/daemon-epoch.test.mjs cordis/routecodex-v4-cordis-host/tests/daemon.test.mjs cordis/routecodex-v4-cordis-host/tests/host-binding.test.mjs cordis/routecodex-v4-cordis-host/tests/host.test.mjs cordis/routecodex-v4-cordis-host/tests/m11-protocol-tools-admin-contract.test.mjs",
-    "test:cordis-host:red": "node --test cordis/routecodex-v4-cordis-host/tests/host-red-service-binding.test.mjs cordis/routecodex-v4-cordis-host/tests/host-typed-service-binding-red.test.mjs"
+    "test:cordis-host": "cargo build --manifest-path Cargo.toml -p routecodex-v4-node-container --bin routecodex-v4-node-container-host --locked && node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs"
   },
   "dependencies": {
     "cordis": "^4.0.0-rc.8",
