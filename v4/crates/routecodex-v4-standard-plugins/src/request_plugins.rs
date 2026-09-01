@@ -14,6 +14,7 @@ use serde_json::{json, Map, Value};
 use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, StandardPlugin};
 
 pub const REQUEST_NORMALIZE_PLUGIN_ID: &str = "v4.std.request.responses_normalize";
+pub const REQUEST_PROTOCOL_PARSE_PLUGIN_ID: &str = "v4.std.request.protocol_parse";
 
 const CONTROL_KEYS: &[&str] = &[
     "requestId",
@@ -93,6 +94,19 @@ pub(crate) fn request_normalize(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn request_protocol_parse(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let object = require_object(ctx, "request_protocol_parse")?;
+    reject_control(&object)?;
+    if object
+        .get("model")
+        .and_then(Value::as_str)
+        .is_none()
+    {
+        return Err("request_protocol_parse requires model".to_string());
+    }
+    Ok(())
+}
+
 pub(crate) fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = require_object(ctx, "request_governance")?;
     reject_control(&object)?;
@@ -125,6 +139,19 @@ pub(crate) fn wire_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 
 pub(crate) fn descriptors() -> Vec<StandardPlugin> {
     vec![
+        plugin(
+            REQUEST_PROTOCOL_PARSE_PLUGIN_ID,
+            PluginCategory::Protocol,
+            "V4ServerReqInbound01ClientRaw",
+            "request_inbound",
+            Some(1),
+            PluginKind::Operator,
+            PluginEffect::ReadOnly,
+            PluginPhase::Semantic,
+            100,
+            vec!["v4.request.normal_payload"],
+            vec![],
+        ),
         plugin(
             REQUEST_NORMALIZE_PLUGIN_ID,
             PluginCategory::Protocol,
@@ -169,6 +196,7 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
 
 pub(crate) fn handles() -> Vec<(&'static str, fn(&mut ExecCtx<'_>) -> Result<(), String>)> {
     vec![
+        (REQUEST_PROTOCOL_PARSE_PLUGIN_ID, request_protocol_parse),
         (REQUEST_NORMALIZE_PLUGIN_ID, request_normalize),
         ("v4.std.request.governance", request_governance),
         ("v4.std.request.responses_wire_build", wire_build),

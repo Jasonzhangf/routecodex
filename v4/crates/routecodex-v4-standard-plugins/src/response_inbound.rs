@@ -14,6 +14,7 @@ use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, Stand
 
 const PLUGIN_ID: &str = "v4.std.response.protocol_decode";
 const PROVIDER_COMPAT_PLUGIN_ID: &str = "v4.std.response.provider_compat";
+const PROVIDER_RAW_VALIDATE_PLUGIN_ID: &str = "v4.std.response.provider_raw_validate";
 
 pub(crate) fn control_keys() -> &'static [&'static str] {
     &[
@@ -72,6 +73,19 @@ fn normalize_output(value: &Value) -> Result<Value, String> {
 pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
     vec![
         plugin(
+            PROVIDER_RAW_VALIDATE_PLUGIN_ID,
+            PluginCategory::Protocol,
+            "V4ProviderRespInbound01Raw",
+            "response_inbound",
+            Some(1),
+            PluginKind::Validator,
+            PluginEffect::ReadOnly,
+            PluginPhase::Admission,
+            100,
+            vec!["v4.response.provider_raw"],
+            vec![],
+        ),
+        plugin(
             PROVIDER_COMPAT_PLUGIN_ID,
             PluginCategory::Protocol,
             "V4ProviderRespCompat02ProviderCompat",
@@ -101,6 +115,13 @@ pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
             vec!["v4.response.normal_payload"],
         ),
     ]
+}
+
+fn provider_raw_validate(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    if !ctx.read_data().is_object() {
+        return Err("provider raw response must be an object".to_string());
+    }
+    Ok(())
 }
 
 fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -251,6 +272,10 @@ pub(crate) fn protocol_decode_handle() -> (&'static str, fn(&mut ExecCtx<'_>) ->
 pub(crate) fn response_inbound_handles(
 ) -> Vec<(&'static str, fn(&mut ExecCtx<'_>) -> Result<(), String>)> {
     vec![
+        (
+            PROVIDER_RAW_VALIDATE_PLUGIN_ID,
+            provider_raw_validate as fn(&mut ExecCtx<'_>) -> Result<(), String>,
+        ),
         (
             PROVIDER_COMPAT_PLUGIN_ID,
             provider_compat as fn(&mut ExecCtx<'_>) -> Result<(), String>,

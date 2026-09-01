@@ -375,8 +375,18 @@ pub fn standard_allowed_writes() -> Vec<String> {
 /// cannot read another node's data or a wire payload through the M5 surface.
 pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
     match node_id {
+        "V4ProviderRespInbound01Raw" => vec!["v4.response.provider_raw".to_string()],
+        "V4ServerReqInbound01ClientRaw" => vec!["v4.request.normal_payload".to_string()],
+        "V4DirectReq03ProviderWire" => {
+            vec!["v4.direct.request.provider_wire".to_string()]
+        }
         "V4DirectReq01ClientProtocol" => vec!["v4.direct.request.client_payload".to_string()],
         "V4DirectResp01ProviderRaw" => vec!["v4.direct.response.provider_raw".to_string()],
+        "V4DirectResp03ClientProtocol" => vec![
+            "v4.direct.response.client_payload".to_string(),
+            "v4.information.client_protocol".to_string(),
+            "v4.information.provider_protocol".to_string(),
+        ],
         "V4DirectReq02RelayContainer" => vec![
             "v4.direct.request.client_payload".to_string(),
             "v4.information.client_protocol".to_string(),
@@ -791,6 +801,19 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::ReadOnly,
             PluginPhase::Projection,
             550,
+            vec!["v4.request.provider_wire_payload"],
+            vec![],
+        ),
+        plugin(
+            "v4.std.provider.transport_validate",
+            PluginCategory::Provider,
+            "V4ProviderReqOutbound09TransportRequest",
+            "request_outbound",
+            Some(9),
+            PluginKind::Validator,
+            PluginEffect::ReadOnly,
+            PluginPhase::Validation,
+            800,
             vec!["v4.request.provider_wire_payload"],
             vec![],
         ),
@@ -1333,6 +1356,7 @@ impl StandardHandleRegistry {
             ("v4.std.provider.auth_handle_mock", auth_handle_mock),
             ("v4.std.provider.wire_mock", wire_mock),
             ("v4.std.provider.transport_mock", transport_mock),
+            ("v4.std.provider.transport_validate", transport_mock),
         ] {
             handles.insert(id, MockHandle { execute_fn });
         }
@@ -1428,6 +1452,8 @@ mod tests {
             "v4.std.diagnostic.direct_response_payload_console_render",
             "v4.std.diagnostic.timing",
             "v4.std.diagnostic.snapshot_record",
+            "v4.std.direct.request.wire_validate",
+            "v4.std.direct.response.client_validate",
             "v4.std.control.scope_consume",
             "v4.std.control.payload_cycle_record",
             "v4.std.error.typed_intake",
@@ -1446,7 +1472,9 @@ mod tests {
             "v4.std.response.protocol_decode",
             "v4.std.response.frame_build",
             "v4.std.response.provider_compat",
+            "v4.std.response.provider_raw_validate",
             "v4.std.request.responses_normalize",
+            "v4.std.request.protocol_parse",
             "v4.std.request.governance",
             "v4.std.request.responses_wire_build",
             "v4.hook.direct.request",
