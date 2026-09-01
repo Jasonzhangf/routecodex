@@ -1457,17 +1457,19 @@ fn render_payload_console_event(
     // business payload or control side-channel.
     let message = message.trim_start_matches(|ch: char| ch == '\u{1b}' || ch == '[' || ch.is_ascii_digit() || ch == ';' || ch == 'm');
     if message.starts_with("▶ [req]") {
-        Some(format!(
-            "▶ [{}] req={} event=started model={} target={}/{} stream={} chain=req_inbound>req_chatprocess>req_outbound>provider elapsedMs={} transport={}",
+        let headline = diagnostic::format_request(
             endpoint,
-            request.request_id,
+            &request.request_id,
             model,
-            provider,
-            model,
+            &format!("{provider}/{model}"),
+        );
+        let debug = format!(
+            "event=started stream={} chain=req_inbound>req_chatprocess>req_outbound>provider elapsedMs={} transport={}",
             stream,
             elapsed.as_millis(),
             if stream { "sse" } else { "json" }
-        ))
+        );
+        Some(format_console_layered(headline, debug))
     } else if message.starts_with("✅ [resp]") {
         // Streaming response nodes emit empty observations before the terminal
         // client frame.  They carry no user-visible information and must not
@@ -1476,22 +1478,37 @@ fn render_payload_console_event(
         if message.contains("output_items=0") {
             return None;
         }
-        Some(format!(
-            "✅ [{}] req={} event=completed status={} responseStatus=completed finish_reason=stop provider={} model={} chain=provider>resp_inbound>resp_chatprocess>resp_outbound {} elapsedMs={} transport={}",
+        let headline = diagnostic::format_response(
             endpoint,
-            request.request_id,
+            &request.request_id,
             status.unwrap_or(200),
+            model,
+        );
+        let details = message
+            .split_once("output_items=")
+            .map(|(_, rest)| format!("output_items={rest}"))
+            .unwrap_or_else(|| "response".to_string());
+        let debug = format!(
+            "event=completed responseStatus=completed finish_reason=stop provider={} model={} chain=provider>resp_inbound>resp_chatprocess>resp_outbound {} elapsedMs={} transport={}",
             provider,
             model,
-            message
-                .split_once("output_items=")
-                .map(|(_, rest)| format!("output_items={rest}"))
-                .unwrap_or_else(|| "response".to_string()),
+            details,
             elapsed.as_millis(),
             if stream { "sse" } else { "json" }
-        ))
+        );
+        Some(format_console_layered(headline, debug))
     } else {
         None
+    }
+}
+
+fn format_console_layered(headline: String, debug: String) -> String {
+    let color_disabled = std::env::var_os("NO_COLOR").is_some()
+        || matches!(std::env::var("FORCE_COLOR").ok().as_deref(), Some("0"));
+    if color_disabled {
+        format!("{headline}\n\n  {debug}")
+    } else {
+        format!("{headline}\n\n\x1b[2;90m  {debug}\x1b[0m")
     }
 }
 
