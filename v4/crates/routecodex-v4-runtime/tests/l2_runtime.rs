@@ -203,6 +203,7 @@ fn positive_request_chain_produces_wire_and_stable_binding() {
             "v4.std.diagnostic.timing:node.timing:timing observation emitted",
             "v4.std.diagnostic.snapshot_record:node.snapshot:snapshot observation emitted",
             "v4.std.diagnostic.request_payload_console_render:console.payload_ready:▶ [req] model=m stream=false messages=1 tools=0",
+            "v4.std.provider.transport_validate:node.provider_transport_validated:provider wire transport boundary validated",
         ]
     );
     assert_eq!(report.continuation_owner.as_deref(), Some("relay"));

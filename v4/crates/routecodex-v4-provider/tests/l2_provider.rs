@@ -11,6 +11,22 @@ use serde_json::json;
 use std::fs;
 
 #[test]
+fn anthropic_sse_projects_tool_use_start_and_argument_delta() {
+    let start = normalize_provider_sse_frame(
+        "anthropic",
+        b"data: {\"type\":\"content_block_start\",\"content_block\":{\"type\":\"tool_use\",\"id\":\"call-1\",\"name\":\"lookup\"}}\n\n",
+    )
+    .expect("tool start");
+    assert!(String::from_utf8(start).expect("utf8").contains("response.output_item.added"));
+    let delta = normalize_provider_sse_frame(
+        "anthropic",
+        b"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":1}\"}}\n\n",
+    )
+    .expect("tool arguments");
+    assert!(String::from_utf8(delta).expect("utf8").contains("response.function_call_arguments.delta"));
+}
+
+#[test]
 fn session_scoped_availability_positive_and_red() {
     let mut registry = V4Availability01SessionScoped::new();
     registry

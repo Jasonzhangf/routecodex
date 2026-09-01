@@ -1340,11 +1340,26 @@ fn normalize_openai_sse_event(value: &Value) -> Option<Value> {
 
 fn normalize_anthropic_sse_event(value: &Value) -> Option<Value> {
     match value.get("type").and_then(Value::as_str)? {
+        "content_block_start" => value
+            .get("content_block")
+            .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
+            .map(|block| serde_json::json!({
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "function_call",
+                    "call_id": block.get("id").cloned().unwrap_or(Value::Null),
+                    "name": block.get("name").cloned().unwrap_or(Value::Null),
+                    "arguments": ""
+                }
+            })),
         "content_block_delta" => value
-            .get("delta")
-            .and_then(|delta| delta.get("text"))
-            .and_then(Value::as_str)
-            .map(|text| serde_json::json!({"type":"response.output_text.delta","delta":text})),
+            .get("delta").and_then(|delta| {
+                delta.get("text").and_then(Value::as_str)
+                    .map(|text| serde_json::json!({"type":"response.output_text.delta","delta":text}))
+                    .or_else(|| delta.get("partial_json").and_then(Value::as_str).map(|arguments| {
+                        serde_json::json!({"type":"response.function_call_arguments.delta","delta":arguments})
+                    }))
+            }),
         "message_stop" => {
             Some(serde_json::json!({"type":"response.completed","response":{"status":"completed"}}))
         }
