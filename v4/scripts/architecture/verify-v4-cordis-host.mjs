@@ -7,6 +7,7 @@ const sourcePath = path.join(root, 'cordis/routecodex-v4-cordis-host/src/index.m
 const daemonSourcePath = path.join(root, 'cordis/routecodex-v4-cordis-host/src/daemon.mjs');
 const testsPath = path.join(root, 'cordis/routecodex-v4-cordis-host/tests/host.test.mjs');
 const bindingTestsPath = path.join(root, 'cordis/routecodex-v4-cordis-host/tests/host-binding.test.mjs');
+const serviceTestsPath = path.join(root, 'cordis/routecodex-v4-cordis-host/tests/host-service.test.mjs');
 const daemonTestsPath = path.join(root, 'cordis/routecodex-v4-cordis-host/tests/daemon.test.mjs');
 const bindingContractPath = path.join(root, 'contracts/node-container-host-binding.contract.json');
 const ratchetPath = path.join(root, 'contracts/cordis-mainline-ratchet.json');
@@ -34,7 +35,7 @@ const required = [
   '.isolate(',
   'fiber.dispose()',
   'plugin_not_active',
-  'mounted.push({ id: plugin.id, fiber });\n        await fiber.await();',
+  'mounted.push({ id: plugin.id, fiber });\n        try {\n          await fiber.await();',
   'export class CordisBoundNodeHost',
   'export class RustNodeContainerPort',
   'computeNodePluginPlanHash',
@@ -51,6 +52,12 @@ const required = [
   "failure.resource_id === 'v4.node_container.execution_failure'",
   'await this.#port.drain()',
   'await this.#port.status()',
+  'serviceBindings()',
+  "'nodeControl'",
+  "'nodeInformation'",
+  "'nodeDiagnostics'",
+  "'service_not_declared'",
+  'this.#assertTypedServicesReady(plugins);',
   'export function cordisCatalogIdentityKey',
   'export function createCordisPluginFactory',
   'canonical catalog entries are required',
@@ -67,7 +74,7 @@ const forbidden = [
   'async request(op, fields = {})',
 ];
 
-function validate(source, daemonSource, tests, bindingTests, daemonTests, bindingContract, functionMap, mainline, resourceMap) {
+function validate(source, daemonSource, tests, bindingTests, daemonTests, bindingContract, functionMap, mainline, resourceMap, serviceTests = '') {
   const failures = required.filter((token) => !source.includes(token));
   failures.push(...[
     'startCordisHostDaemon',
@@ -80,6 +87,12 @@ function validate(source, daemonSource, tests, bindingTests, daemonTests, bindin
   ].filter((token) => !daemonSource.includes(token)).map((token) => `daemon missing ${token}`));
   if (forbidden.some((token) => source.includes(token))) {
     failures.push('Cordis host contains forbidden synthetic/control pattern');
+  }
+  if (!serviceTests.includes('plugin injecting undeclared service fails before mount')
+      || !serviceTests.includes('declared typed node services are not rejected by the typed-service check')
+      || !serviceTests.includes('typed services remain metadata-only and are not payload fields')
+      || !serviceTests.includes('serviceBindings()')) {
+    failures.push('typed node service binding tests missing');
   }
   if (
     !tests.includes('Context.is(host.context)')
@@ -129,6 +142,9 @@ function validate(source, daemonSource, tests, bindingTests, daemonTests, bindin
     || !bindingContract.execution_rule?.includes('execute_with_plan_hash')
     || !bindingContract.execution_failure_rule?.includes('v4.node_container.execution_failure')
     || !bindingContract.execution_failure_codes?.includes('resource_access_violation')
+    || !bindingContract.service_binding_rule?.includes('nodeControl')
+    || !bindingContract.service_binding_rule?.includes('service_not_declared')
+    || !bindingContract.service_binding_rule?.includes('immutable identity/ownership metadata')
     || !bindingContract.required_tests?.includes('resource access violation retains its typed execution failure code')
     || !bindingContract.required_tests?.includes('real Cordis fibers drive ordered Rust NodePluginPlan execution')
   ) {
@@ -266,6 +282,7 @@ function runSelfTest() {
   const daemonSource = fs.readFileSync(daemonSourcePath, 'utf8');
   const tests = fs.readFileSync(testsPath, 'utf8');
   const bindingTests = fs.readFileSync(bindingTestsPath, 'utf8');
+  const serviceTests = fs.readFileSync(serviceTestsPath, 'utf8');
   const daemonTests = fs.readFileSync(daemonTestsPath, 'utf8');
   const bindingContract = JSON.parse(fs.readFileSync(bindingContractPath, 'utf8'));
   const functionMap = JSON.parse(fs.readFileSync(functionMapPath, 'utf8'));
@@ -278,7 +295,7 @@ function runSelfTest() {
     ['real Cordis import removed', (candidate) => candidate.replace("from 'cordis'", "from 'fake-cordis'")],
     ['real Context removed', (candidate) => candidate.replace('new Context()', 'new FakeContext()')],
     ['failed Fiber tracking moved after await', (candidate) => candidate.replace(
-      'mounted.push({ id: plugin.id, fiber });\n        await fiber.await();',
+      'mounted.push({ id: plugin.id, fiber });\n        try {\n          await fiber.await();',
       'await fiber.await();\n        mounted.push({ id: plugin.id, fiber });',
     )],
     ['generic execution payload surface restored', (candidate) => candidate.replace(
@@ -297,12 +314,20 @@ function runSelfTest() {
       "  'resource_access_violation',\n",
       '',
     )],
+    ['typed service check removed', (candidate) => candidate.replace(
+      '#assertTypedServicesReady(plugins);',
+      '// typed service check removed',
+    )],
+    ['typed service labels removed', (candidate) => candidate.replace(
+      /'nodeControl'/g,
+      "'nodeData'",
+    )],
   ];
   let missed = 0;
   for (const [name, mutate] of cases) {
     const failures = validate(
       mutate(source), daemonSource, tests, bindingTests, daemonTests, bindingContract,
-      functionMap, mainline, resourceMap,
+      functionMap, mainline, resourceMap, serviceTests,
     );
     if (failures.length === 0) {
       console.error(`[v4 cordis host red] ${name}: expected FAIL, got PASS`);
@@ -334,11 +359,13 @@ function runSelfTest() {
     ['fabricated drain projection', source.replace("return { nodeId: this.nodeId, state: status.state, inFlight: status.in_flight };", "return { nodeId: this.nodeId, state: status.state, inFlight: 0 };")],
     ['second in-flight truth added', source.replace('#mounted = false;', '#inFlight = 0;\n  #mounted = false;')],
     ['generic lifecycle field surface restored', source.replace('async #request(message)', 'async request(op, fields = {})')],
+    ['service binding rule removed', source, { ...bindingContract, service_binding_rule: 'node labels only' }],
   ];
-  for (const [name, candidate] of bindingCases) {
+  for (const [name, candidate, contractOverride] of bindingCases) {
+    const candidateContract = contractOverride ?? bindingContract;
     const failures = validate(
-      candidate, daemonSource, tests, bindingTests, daemonTests, bindingContract,
-      functionMap, mainline, resourceMap,
+      candidate, daemonSource, tests, bindingTests, daemonTests, candidateContract,
+      functionMap, mainline, resourceMap, serviceTests,
     );
     if (failures.length === 0) {
       console.error(`[v4 cordis host red] ${name}: expected FAIL, got PASS`);
@@ -363,7 +390,7 @@ function runSelfTest() {
   );
   const executionResourceFailures = validate(
     source, daemonSource, tests, bindingTests, daemonTests, bindingContract, functionMap,
-    executionMaps.mainline, executionMaps.resourceMap,
+    executionMaps.mainline, executionMaps.resourceMap, serviceTests,
   );
   if (executionResourceFailures.length === 0) {
     console.error('[v4 cordis host red] execution failure resource/edge removed: expected FAIL, got PASS');
@@ -390,6 +417,7 @@ const failures = validate(
   JSON.parse(fs.readFileSync(functionMapPath, 'utf8')),
   JSON.parse(fs.readFileSync(mainlinePath, 'utf8')),
   JSON.parse(fs.readFileSync(resourceMapPath, 'utf8')),
+  fs.readFileSync(serviceTestsPath, 'utf8'),
 );
 const ratchet = JSON.parse(fs.readFileSync(ratchetPath, 'utf8'));
 const canonicalDocs = ratchetCanonicalDocs.filter((doc) => fs.existsSync(path.join(root, doc)));

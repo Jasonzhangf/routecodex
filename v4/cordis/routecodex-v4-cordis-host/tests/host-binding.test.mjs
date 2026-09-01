@@ -216,7 +216,9 @@ test('Cordis mount failure fails and disposes the Rust candidate', async (t) => 
   });
   const failing = createNodePlugin(
     entry.plugin_id,
-    Object.assign(() => {}, { inject: ['missingService'] }),
+    () => {
+      throw new Error('cordis mount failure');
+    },
     undefined,
     entry,
   );

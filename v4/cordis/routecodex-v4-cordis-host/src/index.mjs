@@ -410,7 +410,14 @@ export class CordisNodeHost {
     }
     this.nodeId = nodeId;
     this.descriptor = Object.freeze({ ...descriptor });
-    this.services = Object.freeze([...services]);
+    const typedServices = [
+      'nodeControl',
+      'nodeInformation',
+      'nodeDiagnostics',
+    ];
+    this.services = Object.freeze([
+      ...new Set([...typedServices, ...services]),
+    ]);
     this.#root = new Context();
     this.#pipeline = this.#root.extend();
     this.#node = this.#pipeline.extend();
@@ -455,6 +462,10 @@ export class CordisNodeHost {
     return this.#node;
   }
 
+  serviceBindings() {
+    return Object.freeze([...this.services]);
+  }
+
   get fibers() {
     return Object.freeze([...this.#fibers]);
   }
@@ -472,7 +483,14 @@ export class CordisNodeHost {
       for (const plugin of plugins) {
         const fiber = this.#node.plugin(plugin.factory, plugin.config);
         mounted.push({ id: plugin.id, fiber });
-        await fiber.await();
+        try {
+          await fiber.await();
+        } catch (cause) {
+          throw new CordisHostError(
+            'plugin_not_active',
+            `plugin ${plugin.id} did not reach ACTIVE: ${cause?.message ?? cause}`,
+          );
+        }
         if (fiber.state !== FiberState.ACTIVE) {
           throw new CordisHostError(
             'plugin_not_active',
@@ -733,7 +751,12 @@ export class CordisBoundNodeHost extends CordisNodeHost {
     this.#plan = Object.freeze(structuredClone(plan));
   }
 
+  serviceBindings() {
+    return super.serviceBindings();
+  }
+
   async mount(plugins) {
+    this.#assertTypedServicesReady(plugins);
     this.#verifyGraph(plugins);
     const hash = this.#plan.hash;
     await this.#port.declare(this.nodeId, this.#plan, {
@@ -791,6 +814,21 @@ export class CordisBoundNodeHost extends CordisNodeHost {
     }
     const response = await this.#port.executeNode(planHash, input);
     return response.output;
+  }
+
+  #assertTypedServicesReady(plugins) {
+    const declared = new Set(this.serviceBindings());
+    for (const plugin of plugins) {
+      const injected = plugin?.factory?.inject ?? [];
+      for (const service of injected) {
+        if (!declared.has(service)) {
+          throw new CordisHostError(
+            'service_not_declared',
+            `plugin ${plugin?.id ?? '(unknown)'} injects undeclared service ${service}`,
+          );
+        }
+      }
+    }
   }
 
   async drain() {
