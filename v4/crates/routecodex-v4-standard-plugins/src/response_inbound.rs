@@ -15,6 +15,8 @@ use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, Stand
 const PLUGIN_ID: &str = "v4.std.response.protocol_decode";
 const PROVIDER_COMPAT_PLUGIN_ID: &str = "v4.std.response.provider_compat";
 const PROVIDER_RAW_VALIDATE_PLUGIN_ID: &str = "v4.std.response.provider_raw_validate";
+const PROVIDER_SSE_DECODE_PLUGIN_ID: &str = "v4.std.response.sse_frame_boundary";
+const DIRECT_SSE_DECODE_PLUGIN_ID: &str = "v4.std.direct.response.sse_frame_boundary";
 
 pub(crate) fn control_keys() -> &'static [&'static str] {
     &[
@@ -86,6 +88,19 @@ pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
             vec![],
         ),
         plugin(
+            DIRECT_SSE_DECODE_PLUGIN_ID,
+            PluginCategory::Protocol,
+            "V4DirectResp01ProviderRaw",
+            "response_inbound",
+            Some(1),
+            PluginKind::Operator,
+            PluginEffect::Semantic,
+            PluginPhase::Semantic,
+            150,
+            vec!["v4.direct.response.provider_raw"],
+            vec!["v4.direct.response.provider_raw"],
+        ),
+        plugin(
             PROVIDER_COMPAT_PLUGIN_ID,
             PluginCategory::Protocol,
             "V4ProviderRespCompat02ProviderCompat",
@@ -99,6 +114,19 @@ pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
                 "v4.response.provider_raw",
                 "v4.information.provider_protocol",
             ],
+            vec!["v4.response.provider_raw"],
+        ),
+        plugin(
+            PROVIDER_SSE_DECODE_PLUGIN_ID,
+            PluginCategory::Protocol,
+            "V4ProviderRespInbound01Raw",
+            "response_inbound",
+            Some(1),
+            PluginKind::Operator,
+            PluginEffect::Semantic,
+            PluginPhase::Semantic,
+            150,
+            vec!["v4.response.provider_raw"],
             vec!["v4.response.provider_raw"],
         ),
         plugin(
@@ -125,6 +153,14 @@ fn provider_raw_validate(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    if ctx
+        .read_data()
+        .get("_sse_frame")
+        .and_then(Value::as_str)
+        .is_some()
+    {
+        return Ok(());
+    }
     let protocol = ctx
         .read_information_resource("v4.information.provider_protocol")
         .map_err(|error| error.to_string())?
@@ -142,6 +178,23 @@ fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     )
     .map_err(|error| format!("{}: {}", error.code, error.message))?;
     ctx.write_data(normalized)
+        .map_err(|error| error.to_string())
+}
+
+fn provider_sse_decode(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let frame = ctx
+        .read_data()
+        .get("_sse_frame")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "provider SSE frame boundary requires _sse_frame".to_string())?;
+    let decoded = decode_provider_sse_frame(frame.as_bytes())?;
+    let disposition = match decoded.disposition {
+        ProviderSseEventDisposition::Continue => "continue".to_string(),
+        ProviderSseEventDisposition::Completed => "completed".to_string(),
+        ProviderSseEventDisposition::Failed { message } => format!("failed:{message}"),
+    };
+    ctx.emit("provider_sse_disposition", disposition);
+    ctx.write_data(decoded.semantic)
         .map_err(|error| error.to_string())
 }
 
@@ -279,6 +332,14 @@ pub(crate) fn response_inbound_handles(
         (
             PROVIDER_COMPAT_PLUGIN_ID,
             provider_compat as fn(&mut ExecCtx<'_>) -> Result<(), String>,
+        ),
+        (
+            PROVIDER_SSE_DECODE_PLUGIN_ID,
+            provider_sse_decode as fn(&mut ExecCtx<'_>) -> Result<(), String>,
+        ),
+        (
+            DIRECT_SSE_DECODE_PLUGIN_ID,
+            provider_sse_decode as fn(&mut ExecCtx<'_>) -> Result<(), String>,
         ),
         protocol_decode_handle(),
     ]
