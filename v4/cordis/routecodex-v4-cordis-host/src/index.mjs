@@ -400,6 +400,8 @@ export class CordisNodeHost {
   #node;
   #fibers = [];
   #disposed = false;
+  #ready = false;
+  #acquired = new Set();
 
   constructor({ nodeId, services = [], descriptor }) {
     if (!nodeId || !descriptor) {
@@ -414,6 +416,26 @@ export class CordisNodeHost {
     for (const name of nodeServiceLabels(this.services)) {
       this.#node.isolate(name);
     }
+  }
+
+  acquireService(name) {
+    if (this.#disposed) {
+      throw new CordisHostError('service_disposed', `node service ${name} was released on dispose`);
+    }
+    if (!this.#ready) {
+      throw new CordisHostError(
+        'service_not_ready',
+        `node service ${name} is not ready before host mount`,
+      );
+    }
+    if (!this.services.includes(name)) {
+      throw new CordisHostError(
+        'service_not_declared',
+        `node service ${name} is not declared for ${this.nodeId}`,
+      );
+    }
+    this.#acquired.add(name);
+    return Object.freeze({ name });
   }
 
   get context() {
@@ -446,6 +468,7 @@ export class CordisNodeHost {
         }
       }
       this.#fibers = mounted;
+      this.#ready = true;
       return this;
     } catch (error) {
       await this.#disposeFibers(mounted);
@@ -465,6 +488,8 @@ export class CordisNodeHost {
 
   async dispose() {
     if (this.#disposed) return;
+    this.#ready = false;
+    this.#acquired.clear();
     await this.#disposeFibers(this.#fibers);
     this.#fibers = [];
     this.#disposed = true;

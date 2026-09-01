@@ -29,7 +29,7 @@ const CONTROL_KEYS: &[&str] = &[
     "providerId",
 ];
 
-fn reject_control(object: &Map<String, Value>) -> Result<(), String> {
+pub(crate) fn reject_control(object: &Map<String, Value>) -> Result<(), String> {
     for key in CONTROL_KEYS {
         if object.contains_key(*key) {
             return Err(format!("request plugin rejects control field {key}"));

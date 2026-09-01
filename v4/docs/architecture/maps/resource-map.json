@@ -1023,6 +1023,17 @@
       "status": "active"
     },
     {
+      "resource_id": "v4.cordis.node_service",
+      "owner": "routecodex-v4-cordis-host::CordisNodeHost",
+      "truth_store": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "allowed_operations": [
+        "acquire",
+        "release",
+        "dispose"
+      ],
+      "status": "active"
+    },
+    {
       "resource_id": "v4.cordis.host_daemon",
       "owner": "routecodex-v4-cordis-host::CordisNodeHost",
       "truth_store": "cordis/routecodex-v4-cordis-host/src/daemon.mjs",

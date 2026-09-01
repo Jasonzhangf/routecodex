@@ -1189,6 +1189,22 @@
       "resource_id": "v4.transport.sse_frames",
       "path": "crates/routecodex-v4-standard-plugins/src/sse_transport.rs,crates/routecodex-v4-runtime-bin/src/main.rs",
       "status": "verified"
+    },
+    {
+      "from": "routecodex-v4-cordis-host",
+      "to": "routecodex-v4-cordis-host",
+      "owner": "routecodex-v4-cordis-host::CordisNodeHost",
+      "edge_type": "node_service_binding",
+      "caller_feature_id": "v4.cordis.host",
+      "callee_feature_id": "v4.cordis.host",
+      "caller_path": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "callee_path": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "caller_symbols": ["CordisNodeHost::acquireService"],
+      "callee_symbols": ["CordisNodeHost", "CordisNodeHost::dispose"],
+      "symbols": ["CordisNodeHost::acquireService", "CordisNodeHost::dispose"],
+      "resource_id": "v4.cordis.node_service",
+      "path": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "status": "active"
     }
   ]
 }

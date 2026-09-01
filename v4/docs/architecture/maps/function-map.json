@@ -835,7 +835,8 @@
         "RustNodeContainerPort",
         "computeNodePluginPlanHash",
         "createNodePlugin",
-        "CordisHostError"
+        "CordisHostError",
+        "CordisNodeHost::acquireService"
       ],
       "required_gates": [
         "v4_cordis_host_l3_regression",
