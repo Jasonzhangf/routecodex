@@ -182,11 +182,9 @@ fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn provider_sse_decode(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let frame = ctx
-        .read_data()
-        .get("_sse_frame")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "provider SSE frame boundary requires _sse_frame".to_string())?;
+    let Some(frame) = ctx.read_data().get("_sse_frame").and_then(Value::as_str) else {
+        return Ok(());
+    };
     let decoded = decode_provider_sse_frame(frame.as_bytes())?;
     let disposition = match decoded.disposition {
         ProviderSseEventDisposition::Continue => "continue".to_string(),
