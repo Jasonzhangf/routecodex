@@ -116,12 +116,11 @@ fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         "openai-chat" => "chat",
         other => other,
     };
-    let normalized = if ctx
+    let client_protocol = ctx
         .read_information_resource("v4.information.client_protocol")
         .map_err(|error| error.to_string())?
-        .and_then(Value::as_str)
-        .is_some_and(|protocol| matches!(protocol, "openai-chat" | "chat"))
-    {
+        .and_then(Value::as_str);
+    let normalized = if !matches!(client_protocol, Some("openai-responses" | "responses")) {
         routecodex_v4_provider::normalize_provider_response_for_relay(
             provider_protocol,
             ctx.read_data(),
