@@ -1118,7 +1118,7 @@ pub fn normalize_provider_response_with_instructions(
     expected_instructions: Option<&str>,
 ) -> Result<Value, ProviderTransportError> {
     match protocol {
-        "responses" => normalize_responses_response(body, expected_instructions),
+        "responses" => normalize_responses_response(body, expected_instructions, false),
         "openai" | "chat" => normalize_openai_response(body),
         "anthropic" => normalize_anthropic_response(body),
         other => Err(ProviderTransportError {
@@ -1126,6 +1126,19 @@ pub fn normalize_provider_response_with_instructions(
             message: format!("provider protocol {other} has no response normalizer"),
             status: None,
         }),
+    }
+}
+
+/// Relay Responses are projected into another client protocol; provider
+/// instructions remain provider-side data and are not exposed by that client
+/// projection. Direct Responses uses the strict request-bound variant above.
+pub fn normalize_provider_response_for_relay(
+    protocol: &str,
+    body: &Value,
+) -> Result<Value, ProviderTransportError> {
+    match protocol {
+        "responses" => normalize_responses_response(body, None, true),
+        _ => normalize_provider_response(protocol, body),
     }
 }
 
@@ -1137,6 +1150,7 @@ pub fn normalize_provider_response_with_instructions(
 fn normalize_responses_response(
     body: &Value,
     expected_instructions: Option<&str>,
+    allow_relay_instructions: bool,
 ) -> Result<Value, ProviderTransportError> {
     const KNOWN_DIAGNOSTIC_FIELDS: &[&str] = &[
         "chunk_index",
@@ -1157,7 +1171,7 @@ fn normalize_responses_response(
             status: None,
         })?;
     if let Some(value) = object.get("instructions") {
-        if expected_instructions != value.as_str() {
+        if !allow_relay_instructions && expected_instructions != value.as_str() {
             return Err(ProviderTransportError {
                 code: "provider_response_instructions_injected".to_string(),
                 message: "provider Responses instructions must exactly match request instructions".to_string(),
@@ -1186,7 +1200,7 @@ fn normalize_responses_response(
     }
     if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
         if let Some(value) = response.get("instructions") {
-            if expected_instructions != value.as_str() {
+            if !allow_relay_instructions && expected_instructions != value.as_str() {
                 return Err(ProviderTransportError {
                     code: "provider_response_instructions_injected".to_string(),
                     message: "provider Responses instructions must exactly match request instructions".to_string(),
@@ -1248,7 +1262,7 @@ pub fn normalize_provider_sse_frame(
         let event = match protocol {
             "openai" | "chat" => normalize_openai_sse_event(&value),
             "anthropic" => normalize_anthropic_sse_event(&value),
-            "responses" => Some(normalize_responses_response(&value, None)?),
+            "responses" => Some(normalize_responses_response(&value, None, false)?),
             other => {
                 return Err(ProviderTransportError {
                     code: "provider_protocol_unsupported".to_string(),

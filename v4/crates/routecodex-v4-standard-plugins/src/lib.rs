@@ -395,6 +395,7 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         "V4HubRespInbound03Normalized" => vec!["v4.response.provider_raw".to_string()],
         "V4ProviderRespCompat02ProviderCompat" => vec![
             "v4.response.provider_raw".to_string(),
+            "v4.information.client_protocol".to_string(),
             "v4.information.provider_protocol".to_string(),
         ],
         "V4HubRespChatProcess04Governed" => vec!["v4.response.normal_payload".to_string()],
