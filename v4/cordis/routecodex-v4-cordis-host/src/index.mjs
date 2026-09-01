@@ -402,6 +402,7 @@ export class CordisNodeHost {
   #disposed = false;
   #ready = false;
   #acquired = new Set();
+  #releasedServices = new Set();
 
   constructor({ nodeId, services = [], descriptor }) {
     if (!nodeId || !descriptor) {
@@ -434,12 +435,19 @@ export class CordisNodeHost {
         `node service ${name} is not declared for ${this.nodeId}`,
       );
     }
+    const host = this;
     const token = Object.freeze({
       name,
-      nodeId: this.nodeId,
-      isValid: () => this.#ready && this.services.includes(name),
+      nodeId: host.nodeId,
+      isValid() {
+        if (host.#disposed) return false;
+        if (!host.#ready) return false;
+        if (!host.services.includes(name)) return false;
+        if (host.#releasedServices.has(name)) return false;
+        return true;
+      },
     });
-    this.#acquired.add(token);
+    this.#acquired.add(name);
     return token;
   }
 
@@ -493,19 +501,21 @@ export class CordisNodeHost {
 
   async dispose() {
     if (this.#disposed) return;
+    const retained = [...this.#acquired];
     this.#ready = false;
-    const invalidated = [...this.#acquired];
+    for (const name of retained) {
+      this.#releasedServices.add(name);
+    }
     this.#acquired.clear();
     await this.#disposeFibers(this.#fibers);
     this.#fibers = [];
     this.#disposed = true;
-    for (const token of invalidated) {
-      if (token.isValid()) {
-        throw new CordisHostError(
-          'service_not_released',
-          `node service ${token.name} remained valid after dispose`,
-        );
-      }
+    for (const name of retained) {
+      if (this.#releasedServices.has(name)) continue;
+      throw new CordisHostError(
+        'service_not_released',
+        `node service ${name} remained valid after dispose`,
+      );
     }
   }
 
