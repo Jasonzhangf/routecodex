@@ -16,26 +16,8 @@ use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, Stand
 pub const REQUEST_NORMALIZE_PLUGIN_ID: &str = "v4.std.request.responses_normalize";
 pub const REQUEST_PROTOCOL_PARSE_PLUGIN_ID: &str = "v4.std.request.protocol_parse";
 
-const CONTROL_KEYS: &[&str] = &[
-    "requestId",
-    "control",
-    "metadata_center",
-    "error_chain",
-    "route_facts",
-    "target_selection",
-    "debug",
-    "diagnostics",
-    "snapshot",
-    "providerId",
-];
-
 pub(crate) fn reject_control(object: &Map<String, Value>) -> Result<(), String> {
-    for key in CONTROL_KEYS {
-        if object.contains_key(*key) {
-            return Err(format!("request plugin rejects control field {key}"));
-        }
-    }
-    Ok(())
+    super::boundary::reject_control_fields(object)
 }
 
 fn require_object(ctx: &ExecCtx<'_>, name: &str) -> Result<Map<String, Value>, String> {

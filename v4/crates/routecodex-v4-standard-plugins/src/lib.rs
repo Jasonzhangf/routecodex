@@ -29,6 +29,7 @@ use sha2::{Digest, Sha256};
 
 pub mod chat_process;
 pub mod chat_to_responses;
+pub mod boundary;
 pub mod contracts;
 pub mod control;
 pub mod diagnostic;
@@ -1085,7 +1086,7 @@ fn validate_input(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = data
         .as_object()
         .ok_or_else(|| "input validator requires an object".to_string())?;
-    request_plugins::reject_control(object)?;
+    boundary::reject_control_fields(object)?;
     ctx.emit("node.input_validated", "standard input validator");
     Ok(())
 }
@@ -1095,7 +1096,7 @@ fn validate_output(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = data
         .as_object()
         .ok_or_else(|| "output validator requires an object".to_string())?;
-    request_plugins::reject_control(object)?;
+    boundary::reject_control_fields(object)?;
     ctx.emit("node.output_validated", "standard output validator");
     Ok(())
 }
