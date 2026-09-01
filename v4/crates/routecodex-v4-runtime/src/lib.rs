@@ -27,8 +27,7 @@ use routecodex_v4_error::{
 use routecodex_v4_node_container::{ActiveEpochStore, ExecutionEpochBundle};
 use routecodex_v4_skeleton::SkeletonPlan;
 use routecodex_v4_standard_plugins::{
-    response_outbound::{encode_client_error_sse_frame, encode_client_sse_frame},
-    sse_transport::SseTransportFrame,
+    response_outbound::encode_client_error_sse_frame, sse_transport::SseTransportFrame,
     StandardHandleRegistry,
 };
 use serde::{Deserialize, Serialize};
@@ -766,6 +765,7 @@ pub struct InformationView {
     pub provider_protocol: Option<String>,
     pub endpoint: Option<String>,
     pub model: Option<String>,
+    pub stream_terminal: Option<bool>,
 }
 
 fn canonical_protocol_information(protocol: &str) -> Result<&'static str, RuntimeFault> {
@@ -894,8 +894,11 @@ impl ExecutionContext {
         frame: &crate::NodeExecutionFrame,
     ) -> Result<Self, RuntimeFault> {
         let mut context = self.clone();
-        let encoded = serde_json::to_string(&frame.data)
-            .map_err(|error| RuntimeFault::new("execution_frame_data", error.to_string()))?;
+        let encoded = match &frame.data {
+            Value::String(value) => value.clone(),
+            value => serde_json::to_string(value)
+                .map_err(|error| RuntimeFault::new("execution_frame_data", error.to_string()))?,
+        };
         match chain_id {
             "request" | "direct_request" | "relay_request" => {
                 context.data.provider_wire = Some(encoded)
@@ -1699,11 +1702,21 @@ impl ResponseStreamProcessor {
                 "response chain produced no client frame",
             )
         })?;
-        let client_semantic: Value = serde_json::from_str(&client_frame)
-            .map_err(|error| RuntimeFault::new("client_sse_semantic", error.to_string()))?;
-        let encoded = encode_client_sse_frame(&self.entry_protocol, &client_semantic, terminal)
-            .map_err(|error| RuntimeFault::new("client_sse_encode", error))?;
-        let frame = SseTransportFrame::from_complete_bytes(encoded)
+        let encoded_frame = report
+            .trace
+            .iter()
+            .find_map(|entry| {
+                entry
+                    .split_once(":client_sse_frame:")
+                    .map(|(_, value)| value)
+            })
+            .ok_or_else(|| {
+                RuntimeFault::new(
+                    "client_sse_frame_missing",
+                    "response outbound frame plugin produced no transport frame",
+                )
+            })?;
+        let frame = SseTransportFrame::from_complete_bytes(encoded_frame.as_bytes().to_vec())
             .map_err(|error| RuntimeFault::new("client_sse_transport", format!("{error:?}")))?;
         if terminal {
             self.semantic_terminal = true;
@@ -2232,10 +2245,24 @@ impl SkeletonRuntime {
             conversation_scope,
             |ctx| {
                 ctx.data.provider_raw = Some(provider_raw.to_string());
-                ctx.information.protocol = Some(entry_protocol.to_string());
+                let client_protocol = match entry_protocol {
+                    "openai-responses" => "responses",
+                    "openai-chat" => "chat",
+                    other => other,
+                };
+                ctx.information.protocol = Some(client_protocol.to_string());
                 ctx.information.execution_lane = Some(continuation_owner.to_string());
                 ctx.information.client_protocol = Some(entry_protocol.to_string());
                 ctx.information.provider_protocol = Some(provider_protocol.to_string());
+                if provider_raw.contains("response.completed")
+                    || provider_raw.contains("response.failed")
+                    || provider_raw.contains("data:")
+                {
+                    ctx.information.stream_terminal = Some(
+                        provider_raw.contains("response.completed")
+                            || provider_raw.contains("response.failed"),
+                    );
+                }
                 ctx.control.continuation_owner = Some(continuation_owner.to_string());
                 ctx.control.execution_mode = Some(if continuation_owner == "relay" {
                     "relay".to_string()

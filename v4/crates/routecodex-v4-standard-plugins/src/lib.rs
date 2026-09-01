@@ -251,6 +251,10 @@ pub fn standard_resource_registry() -> ResourceRegistry {
                 axis: ResourceAxis::Information,
             },
             ResourceEntry {
+                resource_id: "v4.information.stream_terminal".to_string(),
+                axis: ResourceAxis::Information,
+            },
+            ResourceEntry {
                 resource_id: "v4.control.metadata_center".to_string(),
                 axis: ResourceAxis::Control,
             },
@@ -334,6 +338,7 @@ pub fn standard_allowed_reads() -> Vec<String> {
         "v4.information.execution_lane".to_string(),
         "v4.information.client_protocol".to_string(),
         "v4.information.provider_protocol".to_string(),
+        "v4.information.stream_terminal".to_string(),
         "v4.control.metadata_center".to_string(),
         "v4.control.route_facts".to_string(),
         "v4.control.target_selection".to_string(),
@@ -389,6 +394,8 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.direct.response.client_payload".to_string(),
             "v4.information.client_protocol".to_string(),
             "v4.information.provider_protocol".to_string(),
+            "v4.information.entry_protocol".to_string(),
+            "v4.information.stream_terminal".to_string(),
         ],
         "V4DirectReq02RelayContainer" => vec![
             "v4.direct.request.client_payload".to_string(),
@@ -428,7 +435,11 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.config.manifest".to_string(),
             "v4.secret.provider_auth_handle".to_string(),
         ],
-        "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_wire_payload".to_string()],
+        "V4ServerRespOutbound06ClientFrame" => vec![
+            "v4.response.client_wire_payload".to_string(),
+            "v4.information.entry_protocol".to_string(),
+            "v4.information.stream_terminal".to_string(),
+        ],
         "V4MetadataCenter01ScopeRegistry" => vec!["v4.control.metadata_center".to_string()],
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],

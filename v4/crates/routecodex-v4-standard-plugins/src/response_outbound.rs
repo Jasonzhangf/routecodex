@@ -23,7 +23,11 @@ pub(crate) fn response_outbound_descriptors() -> Vec<StandardPlugin> {
         PluginEffect::Semantic,
         PluginPhase::Projection,
         400,
-        vec!["v4.response.client_wire_payload"],
+        vec![
+            "v4.response.client_wire_payload",
+            "v4.information.entry_protocol",
+            "v4.information.stream_terminal",
+        ],
         vec!["v4.response.client_object"],
     )]
 }
@@ -239,10 +243,37 @@ fn frame_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let data = ctx.read_data();
     let semantic = data
         .as_object()
-        .ok_or_else(|| "frame_build requires an object client semantic".to_string())?;
+        .ok_or_else(|| "frame_build requires an object client semantic".to_string())?
+        .clone();
 
-    reject_control_fields(semantic)?;
-    ctx.write_data(Value::Object(semantic.clone()))
+    reject_control_fields(&semantic)?;
+    let stream_terminal = ctx
+        .read_information_resource("v4.information.stream_terminal")
+        .map_err(|error| error.to_string())?
+        .cloned();
+    if stream_terminal.as_ref().and_then(Value::as_bool).is_none()
+        && !matches!(stream_terminal.as_ref(), Some(Value::Bool(_)))
+    {
+        return ctx
+            .write_data(Value::Object(semantic))
+            .map_err(|error| error.to_string());
+    }
+    let protocol = ctx
+        .read_information_resource("v4.information.entry_protocol")
+        .map_err(|error| error.to_string())?
+        .and_then(Value::as_str)
+        .unwrap_or("responses")
+        .to_string();
+    let terminal = stream_terminal
+        .as_ref()
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let encoded = encode_client_sse_frame(&protocol, &Value::Object(semantic.clone()), terminal)?;
+    ctx.emit(
+        "client_sse_frame",
+        String::from_utf8(encoded).map_err(|error| error.to_string())?,
+    );
+    ctx.write_data(Value::Object(semantic))
         .map_err(|error| error.to_string())
 }
 
