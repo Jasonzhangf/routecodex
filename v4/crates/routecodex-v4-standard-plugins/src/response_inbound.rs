@@ -120,7 +120,7 @@ fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .read_information_resource("v4.information.client_protocol")
         .map_err(|error| error.to_string())?
         .and_then(Value::as_str)
-        == Some("openai-chat")
+        .is_some_and(|protocol| matches!(protocol, "openai-chat" | "chat"))
     {
         routecodex_v4_provider::normalize_provider_response_for_relay(
             provider_protocol,
