@@ -67,3 +67,9 @@ fn projection_stage_is_terminal_and_rejects_reentry() {
     assert_eq!(chain.project("timeout").unwrap().code, "timeout");
     assert!(chain.project("again").is_err());
 }
+
+#[test]
+fn error_stages_publish_independent_checkpoint_facts() {
+    let mut chain = raised_chain();
+    let _checkpoint = chain.stage_checkpoint();
+}
