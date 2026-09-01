@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Red lock: every semantic stage must bind a concrete executable test.
- * This intentionally fails until the 26-stage test matrix is registered.
+ * Semantic parity gate: every semantic stage must bind a concrete executable
+ * test and a non-pending matrix status before this check can pass.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,7 +39,7 @@ const incomplete = entries.filter((entry) =>
   !entry.negative_case ||
   !entry.expected_red_reason ||
   !entry.evidence ||
-  !['behavior_red', 'contract_red', 'environment_blocked'].includes(entry.status),
+  !['behavior_red', 'contract_red', 'environment_blocked', 'covered_green'].includes(entry.status),
 );
 if (incomplete.length > 0) {
   console.error(`RED semantic parity test records incomplete: ${incomplete.length}/26`);
