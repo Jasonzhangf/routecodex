@@ -187,7 +187,7 @@
     },
     {
       "resource_id": "v4.response.client_frame",
-      "owner": "routecodex-v4-runtime::FrameBuild",
+      "owner": "routecodex-v4-runtime::V4ServerRespOutbound06ClientFrame",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
       "allowed_operations": [
         "read",

@@ -272,10 +272,9 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4HubReqInbound02Normalized
   owner_symbols:
-  - ProtocolParse
-  - Normalize
-  - InputValidate
-  - Governance
+  - SkeletonRuntime
+  - ExecutionContext
+  - ExecutionEngine
   identity:
   - requestId
   - endpoint
@@ -303,7 +302,8 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4HubReqOutbound06ProviderSemantic
   owner_symbols:
-  - SemanticProjection
+  - SkeletonRuntime
+  - ExecutionEngine
   identity:
   - requestId
   - targetId
@@ -330,7 +330,8 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4ProviderReqCompat07ProviderCompat
   owner_symbols:
-  - WireBuild
+  - SkeletonRuntime
+  - ExecutionEngine
   identity:
   - requestId
   - providerId
@@ -365,8 +366,9 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4ProviderRespInbound01Raw
   owner_symbols:
-  - FrameParse
-  - JsonParse
+  - parse_responses_provider_payload
+  - ResponseStreamProcessor
+  - SkeletonRuntime
   identity:
   - requestId
   - providerId
@@ -394,7 +396,9 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4HubRespInbound03Normalized
   owner_symbols:
-  - ProtocolDecode
+  - parse_responses_provider_payload
+  - ResponseStreamProcessor
+  - SkeletonRuntime
   identity:
   - requestId
   - endpoint
@@ -420,7 +424,9 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4HubRespOutbound05ClientSemantic
   owner_symbols:
-  - FrameBuild
+  - ResponseStreamProcessor
+  - SkeletonRuntime
+  - ExecutionEngine
   identity:
   - requestId
   - endpoint
@@ -450,7 +456,9 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4ServerRespOutbound06ClientFrame
   owner_symbols:
-  - FrameBuild
+  - ResponseStreamProcessor
+  - SkeletonRuntime
+  - ExecutionEngine
   identity:
   - requestId
   - endpoint
@@ -598,7 +606,9 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4HubReqExecution04Planned
   owner_symbols:
-  - ExecutionPlan
+  - ExecutionContext
+  - ControlView
+  - SkeletonRuntime
   identity:
   - serverId
   - entryProtocol
@@ -630,7 +640,9 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4HubReqTarget05Resolved
   owner_symbols:
-  - ExecutionPlan
+  - ExecutionContext
+  - ControlView
+  - SkeletonRuntime
   identity:
   - requestId
   - serverId
@@ -663,7 +675,9 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4Router07RouteDecisionExit
   owner_symbols:
-  - ExecutionPlan
+  - ExecutionContext
+  - ControlView
+  - SkeletonRuntime
   identity:
   - requestId
   - serverId
