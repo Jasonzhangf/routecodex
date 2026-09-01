@@ -1592,7 +1592,6 @@ pub struct ResponseStreamProcessor {
     continuation_owner: String,
     session_scope: String,
     conversation_scope: String,
-    response_outbound: StandardHandleRegistry,
     semantic_terminal: bool,
     failure_projected: bool,
 }
@@ -1649,7 +1648,6 @@ impl ResponseStreamProcessor {
             continuation_owner: continuation_owner.to_string(),
             session_scope: session_scope.to_string(),
             conversation_scope: conversation_scope.to_string(),
-            response_outbound: StandardHandleRegistry::new(),
             semantic_terminal: false,
             failure_projected: false,
         })
@@ -1698,7 +1696,7 @@ impl ResponseStreamProcessor {
         })?;
         if let Some(message) = disposition.strip_prefix("failed:") {
             return Ok((
-                self.project_failure(RuntimeFault::new(
+                self.project_failure(runtime, RuntimeFault::new(
                     "provider_response_failed",
                     message.to_string(),
                 ))?,
@@ -1758,6 +1756,7 @@ impl ResponseStreamProcessor {
 
     pub fn project_failure(
         &mut self,
+        runtime: &SkeletonRuntime,
         fault: RuntimeFault,
     ) -> Result<ResponseStreamDisposition, RuntimeFault> {
         if self.failure_projected {
@@ -1773,10 +1772,8 @@ impl ResponseStreamProcessor {
                 format!("error chain projection failed: {error:?}"),
             )
         })?;
-        let encoded = self
-            .response_outbound
-            .encode_client_error_sse(&self.entry_protocol, &projection.message)
-            .map_err(|error| RuntimeFault::new("client_sse_error_encode", error))?;
+        let encoded = runtime
+            .encode_client_error_sse(&self.entry_protocol, &projection.message)?;
         let frame = SseTransportFrame::from_complete_bytes(encoded)
             .map_err(|error| RuntimeFault::new("client_sse_transport", format!("{error:?}")))?;
         self.failure_projected = true;
@@ -1805,6 +1802,27 @@ impl SkeletonRuntime {
 
     pub fn plan(&self) -> &SkeletonPlan {
         &self.plan
+    }
+
+    /// Use this runtime's admitted response-outbound registry for client
+    /// error framing; stream processors do not own a duplicate registry.
+    pub fn encode_client_error_sse(
+        &self,
+        entry_protocol: &str,
+        message: &str,
+    ) -> Result<Vec<u8>, RuntimeFault> {
+        self.handle_registry
+            .encode_client_error_sse(entry_protocol, message)
+            .map_err(|error| RuntimeFault::new("client_sse_error_encode", error))
+
+    /// Read-only observability of the exact production plugin set pinned by
+    /// the active epoch. Consumers cannot use this to execute or mutate the
+    /// immutable bundle.
+    pub fn epoch_plugin_ids(&self) -> Vec<String> {
+        self.epoch_store
+            .active_bundle()
+            .map(|bundle| bundle.plugin_ids())
+            .unwrap_or_default()
     }
 
     pub fn prepare_execution_epoch(

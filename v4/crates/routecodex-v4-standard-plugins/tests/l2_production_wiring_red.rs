@@ -62,13 +62,11 @@ fn every_standard_plugin_is_bound_in_production_chain_contract() {
     let by_node = plugin_ids_by_node(&contract);
     let mut missing = Vec::new();
 
-    // Control-center projections, codec alternates, and *_mock descriptors
-    // are not production chain nodes. They have separate owners or are
-    // explicitly ineligible for publication; requiring them in this graph
-    // would turn the red gate into a false positive.
+    // Codec alternates and *_mock descriptors are not production chain nodes.
+    // They have separate owners or are explicitly ineligible for publication;
+    // requiring them in this graph would turn the red gate into a false
+    // positive.
     let side_channel_or_ineligible = [
-        "v4.std.control.scope_consume",
-        "v4.std.control.payload_cycle_record",
         "v4.std.protocol.wire_codec_proto",
         "v4.std.provider.capability_mock",
         "v4.std.provider.auth_handle_mock",

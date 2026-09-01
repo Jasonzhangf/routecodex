@@ -309,14 +309,82 @@ fn relay_request_runs_all_contract_bound_request_plugins() {
         .provider_wire_value
         .expect("provider wire produced");
     assert_eq!(
-        wire["governance"],
-        json!("request_governance"),
-        "chat_process.request_governance must execute in relay_request"
-    );
-    assert_eq!(
         wire["input"][0]["content"],
         json!("hello"),
         "responses_normalize + responses_wire_build must execute in relay_request"
+    );
+}
+
+#[test]
+fn relay_request_governance_plugin_rejects_invalid_tools_shape() {
+    let runtime = active_runtime();
+    let error = runtime
+        .execute_request_json_scoped_for_target_with_lease(
+            r#"{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":{}}"#,
+            "chat",
+            "responses",
+            "m",
+            false,
+            "r-request-governance-red",
+            5555,
+            "session-request-governance",
+            "conversation-request-governance",
+            Some("relay"),
+            None,
+        )
+        .expect_err("request governance must reject non-array tools");
+    assert_eq!(error.code, "execution_engine");
+    assert!(
+        error.message.contains("request_governance"),
+        "failure must identify the governance plugin owner: {}",
+        error.message
+    );
+}
+
+#[test]
+fn active_runtime_epoch_pins_every_production_contract_binding() {
+    let runtime = active_runtime();
+    let contract: serde_json::Value =
+        serde_json::from_str(&contract_json()).expect("contract parses");
+    let production_chains = [
+        "direct_request",
+        "direct_response",
+        "relay_request",
+        "relay_response",
+        "error",
+        "control",
+    ];
+    let mut contract_bindings = contract["chains"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|chain| {
+            chain["chain_id"]
+                .as_str()
+                .map(|id| production_chains.contains(&id))
+                .unwrap_or(false)
+        })
+        .flat_map(|chain| chain["nodes"].as_array().into_iter().flatten())
+        .flat_map(|node| node["plugins"].as_array().into_iter().flatten())
+        .filter_map(|binding| binding["plugin_id"].as_str())
+        .filter(|id| id.starts_with("v4.std."))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    contract_bindings.sort();
+    contract_bindings.dedup();
+
+    let mut epoch_plugins = runtime.epoch_plugin_ids();
+    epoch_plugins.sort();
+    let missing = contract_bindings
+        .iter()
+        .filter(|id| !epoch_plugins.contains(id))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    assert!(
+        missing.is_empty(),
+        "production contract bindings not pinned by active epoch:\n{}",
+        missing.join("\n")
     );
 }
 
@@ -647,7 +715,7 @@ fn response_failed_projects_one_error_without_success_closeout() {
     assert!(!text.contains("[DONE]"));
 
     let duplicate = processor
-        .project_failure(routecodex_v4_runtime::RuntimeFault::new(
+        .project_failure(&runtime, routecodex_v4_runtime::RuntimeFault::new(
             "second_failure",
             "must not project twice",
         ))
