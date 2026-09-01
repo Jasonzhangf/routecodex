@@ -45,6 +45,10 @@ pub(crate) fn direct_model_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), Stri
             "Direct protocol mismatch: client={client_protocol} provider={provider_protocol}"
         ));
     }
+    ctx.emit(
+        "console.payload_ready",
+        super::diagnostic::format_chat_process_payload("request", &Value::Object(value.clone())),
+    );
     ctx.write_data(Value::Object(value))
         .map_err(|error| error.to_string())
 }
@@ -79,6 +83,10 @@ pub(crate) fn direct_response_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), S
             "Direct protocol mismatch: client={client_protocol} provider={provider_protocol}"
         ));
     }
+    ctx.emit(
+        "console.payload_ready",
+        super::diagnostic::format_chat_process_payload("response", &Value::Object(value.clone())),
+    );
     ctx.write_data(Value::Object(value))
         .map_err(|error| error.to_string())
 }

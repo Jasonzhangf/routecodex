@@ -375,6 +375,8 @@ pub fn standard_allowed_writes() -> Vec<String> {
 /// cannot read another node's data or a wire payload through the M5 surface.
 pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
     match node_id {
+        "V4DirectReq01ClientProtocol" => vec!["v4.direct.request.client_payload".to_string()],
+        "V4DirectResp01ProviderRaw" => vec!["v4.direct.response.provider_raw".to_string()],
         "V4DirectReq02RelayContainer" => vec![
             "v4.direct.request.client_payload".to_string(),
             "v4.information.client_protocol".to_string(),
@@ -586,6 +588,32 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginPhase::Observation,
             903,
             vec!["v4.response.normal_payload"],
+            vec![],
+        ),
+        plugin(
+            "v4.std.diagnostic.direct_request_payload_console_render",
+            PluginCategory::Diagnostic,
+            "V4DirectReq01ClientProtocol",
+            "request_inbound",
+            Some(1),
+            PluginKind::Observer,
+            PluginEffect::DiagnosticOnly,
+            PluginPhase::Observation,
+            903,
+            vec!["v4.direct.request.client_payload"],
+            vec![],
+        ),
+        plugin(
+            "v4.std.diagnostic.direct_response_payload_console_render",
+            PluginCategory::Diagnostic,
+            "V4DirectResp01ProviderRaw",
+            "response_inbound",
+            Some(1),
+            PluginKind::Observer,
+            PluginEffect::DiagnosticOnly,
+            PluginPhase::Observation,
+            903,
+            vec!["v4.direct.response.provider_raw"],
             vec![],
         ),
         plugin(
@@ -1278,6 +1306,14 @@ impl StandardHandleRegistry {
                 "v4.std.diagnostic.response_payload_console_render",
                 response_payload_console,
             ),
+            (
+                "v4.std.diagnostic.direct_request_payload_console_render",
+                request_payload_console,
+            ),
+            (
+                "v4.std.diagnostic.direct_response_payload_console_render",
+                response_payload_console,
+            ),
             ("v4.std.control.scope_consume", scope_consume),
             ("v4.std.control.payload_cycle_record", payload_cycle_record),
             ("v4.std.error.typed_intake", error_intake),
@@ -1387,6 +1423,8 @@ mod tests {
             "v4.std.diagnostic.debug_observe",
             "v4.std.diagnostic.request_payload_console_render",
             "v4.std.diagnostic.response_payload_console_render",
+            "v4.std.diagnostic.direct_request_payload_console_render",
+            "v4.std.diagnostic.direct_response_payload_console_render",
             "v4.std.diagnostic.timing",
             "v4.std.diagnostic.snapshot_record",
             "v4.std.control.scope_consume",
