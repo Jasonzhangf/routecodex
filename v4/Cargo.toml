@@ -6,6 +6,7 @@ members = [
   "crates/routecodex-v4-cordis-bridge",
   "crates/routecodex-v4-config",
   "crates/routecodex-v4-control",
+  "crates/routecodex-v4-debug",
   "crates/routecodex-v4-edge",
   "crates/routecodex-v4-error",
   "crates/routecodex-v4-lifecycle",
