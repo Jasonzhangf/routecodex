@@ -72,7 +72,7 @@ export const GATE_INPUT_SETS = {
   ],
 };
 const GATE_MATRIX_HASHES = {
-  architecture: 'sha256:54794c07189ae8f00c26a376e433b171db3ea9c335a7a5346bc398c0b3cda358',
+  architecture: 'sha256:cf8e7fa9a91a53d868681516d7adeafc1de84edcf4cab5d11bf8170dc1cef87d',
   red: 'sha256:465a132dff4f7a183b943b9630fea127909c79b2fb9cfc14bc39a579a2b49d6c',
   packageScripts: 'sha256:36b7f79182f3f55d2ce5efc885880ffe3daa9f25334a2117d4e305d814a96762',
 };
