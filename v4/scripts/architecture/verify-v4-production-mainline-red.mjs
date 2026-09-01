@@ -20,6 +20,9 @@ if (/execute_request_scoped_with_owner\([\s\S]*?\)\s*\.map_err/.test(productionS
 for (const symbol of [
   'project_chat_request_to_responses',
   'build_protocol_wire',
+  'build_retry_wire',
+  'normalize_provider_response_with_instructions',
+  'ResponsesSseStream',
   'select_product_target_with_unavailable',
 ]) {
   if (productionSource.includes(symbol)) failures.push(`RUNTIME_BIN_DIRECT_BUSINESS_HELPER: ${symbol}`);
@@ -30,7 +33,9 @@ if (!runtimeBin.includes('execute_provider_response_scoped')) {
 if (!/execute_provider_response_scoped[\s\S]*?report\.client_frame/.test(productionSource)) {
   failures.push('RESPONSE_JSON_FRAME_DISCARDED: JSON response chain output is not consumed');
 }
-if (!/execute_provider_response_scoped[\s\S]*?report\.client_frame/.test(productionSource.slice(productionSource.indexOf('struct ResponsesSseStream')))) {
+const sseStreamStart = productionSource.indexOf('struct CordisSseTransportStream');
+if (sseStreamStart < 0
+    || !/execute_provider_response_scoped[\s\S]*?report\.client_frame/.test(productionSource.slice(sseStreamStart))) {
   failures.push('RESPONSE_SSE_FRAME_DISCARDED: SSE response chain output is not consumed');
 }
 

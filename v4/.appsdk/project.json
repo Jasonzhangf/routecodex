@@ -203,7 +203,7 @@
       "build": {
         "args": [
           "-c",
-          "cargo build --release -p routecodex-v4-base-node && mkdir -p generated/modules/routecodex-v4-base-node/lib && cp target/release/deps/libroutecodex_v4_base_node-*.rlib generated/modules/routecodex-v4-base-node/lib/libroutecodex_v4_base_node.rlib"
+          "cargo build --release -p routecodex-v4-base-node && mkdir -p generated/modules/routecodex-v4-base-node/lib && cp target/release/libroutecodex_v4_base_node.rlib generated/modules/routecodex-v4-base-node/lib/libroutecodex_v4_base_node.rlib"
         ],
         "program": "sh",
         "working_directory": "."

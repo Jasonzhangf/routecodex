@@ -18,7 +18,7 @@ use routecodex_v4_lifecycle::{
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
-    build_retry_wire, normalize_provider_response_with_instructions, send_anthropic_messages,
+    send_anthropic_messages,
     send_anthropic_messages_streaming, send_openai_chat, send_openai_chat_streaming,
     send_responses, send_responses_streaming, validate_auth_alias, write_provider_profile,
     ProviderInitAuth, ProviderInitOptions, ProviderResponseStream, V4Availability01SessionScoped,
@@ -652,6 +652,40 @@ fn models_response(manifest: &RuntimeConfigManifest) -> HttpResponse {
     )
 }
 
+fn execute_retry_wire(
+    runtime: &Arc<Mutex<SkeletonRuntime>>,
+    request_body: &str,
+    entry_protocol: &str,
+    target: &routecodex_v4_router::SelectedTarget,
+    stream: bool,
+    request_id: &str,
+    port: u16,
+    session_scope: &str,
+    conversation_scope: &str,
+    continuation_owner: &str,
+    lease: &routecodex_v4_runtime::RuntimeLease,
+) -> Result<serde_json::Value, RuntimeFault> {
+    let report = runtime
+        .lock()
+        .map_err(|_| RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"))?
+        .execute_request_json_scoped_for_target_with_lease(
+            request_body,
+            entry_protocol,
+            &target.protocol,
+            &target.wire_model,
+            stream,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            Some(continuation_owner),
+            Some(lease),
+        )?;
+    report
+        .provider_wire_value
+        .ok_or_else(|| RuntimeFault::new("request_wire_missing", "retry request chain produced no provider wire"))
+}
+
 fn route_group_for_request<'a>(
     product: &'a RuntimeProductConfig,
     request: &HttpRequest,
@@ -875,19 +909,7 @@ fn handle_responses(
             598,
         )
     })?;
-    let wire_body = build_retry_wire(
-        &target.protocol,
-        &semantic_body,
-        &target.wire_model,
-        stream_mode,
-    )
-    .map_err(|error| {
-        project_fault(
-            request,
-            RuntimeFault::new(&error.code, error.message),
-            error.status.unwrap_or(598),
-        )
-    })?;
+    let wire_body = semantic_body;
     if stream_mode {
         let mut stream = send_target_streaming(&target, &wire_body).map_err(|error| {
             project_fault(
@@ -925,19 +947,20 @@ fn handle_responses(
                             0,
                             &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
                         ) {
-                            let retry_body = build_retry_wire(
-                                &candidate.protocol,
-                                &wire_body,
-                                &candidate.wire_model,
+                            let retry_body = execute_retry_wire(
+                                runtime,
+                                &String::from_utf8_lossy(&request.body),
+                                entry_protocol,
+                                &candidate,
                                 true,
+                                &request_id,
+                                request.port,
+                                session_scope,
+                                conversation_scope,
+                                &continuation_owner,
+                                &request_lease,
                             )
-                            .map_err(|error| {
-                                project_fault(
-                                    request,
-                                    RuntimeFault::new(&error.code, error.message),
-                                    error.status.unwrap_or(400),
-                                )
-                            })?;
+                            .map_err(|fault| project_fault(request, fault, 598))?;
                             target = candidate;
                             stream =
                                 send_target_streaming(&target, &retry_body).map_err(|error| {
@@ -1005,7 +1028,7 @@ fn handle_responses(
         )
         .map_err(|fault| project_fault(request, fault, 599))?;
         let response_stream =
-            ResponsesSseStream::new(stream, Arc::clone(runtime), response_processor);
+            CordisSseTransportStream::new(stream, Arc::clone(runtime), response_processor);
         return Ok(HttpResponse::streaming(
             client_status,
             "text/event-stream",
@@ -1056,19 +1079,20 @@ fn handle_responses(
                     0,
                     &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
                 ) {
-                    let retry_body = build_retry_wire(
-                        &candidate.protocol,
-                        &wire_body,
-                        &candidate.wire_model,
+                    let retry_body = execute_retry_wire(
+                        runtime,
+                        &String::from_utf8_lossy(&request.body),
+                        entry_protocol,
+                        &candidate,
                         false,
+                        &request_id,
+                        request.port,
+                        session_scope,
+                        conversation_scope,
+                        &continuation_owner,
+                        &request_lease,
                     )
-                    .map_err(|error| {
-                        project_fault(
-                            request,
-                            RuntimeFault::new(&error.code, error.message),
-                            error.status.unwrap_or(400),
-                        )
-                    })?;
+                    .map_err(|fault| project_fault(request, fault, 598))?;
                     target = candidate;
                     reselected = true;
                     raw = send_target_nonstream(&target, &retry_body).map_err(|error| {
@@ -1138,27 +1162,9 @@ fn handle_responses(
             )
         })? {
         ResponsesProviderPayload::Json(value) => {
-            let value = if request.path == "/v1/responses" {
-                let expected_instructions =
-                    body.get("instructions").and_then(|value| value.as_str());
-                normalize_provider_response_with_instructions(
-                    &target.protocol,
-                    &value,
-                    expected_instructions,
-                )
-                .map_err(|error| {
-                    project_provider_fault(
-                        request,
-                        RuntimeFault::new(&error.code, error.message),
-                        502,
-                        manifest.product.as_ref(),
-                        &target.provider_id,
-                        "",
-                    )
-                })?
-            } else {
-                value
-            };
+            // Provider response normalization is owned by the response
+            // inbound NodePluginPlan. Runtime-bin must not perform a second
+            // protocol projection before dispatching the raw semantic value.
             let provider_raw = serde_json::to_string(&value).map_err(|error| {
                 project_fault(
                     request,
@@ -1251,7 +1257,7 @@ impl ProviderSseSource for ProviderResponseStream {
     }
 }
 
-struct ResponsesSseStream<S = ProviderResponseStream> {
+struct CordisSseTransportStream<S = ProviderResponseStream> {
     stream: S,
     runtime: Arc<Mutex<SkeletonRuntime>>,
     processor: ResponseStreamProcessor,
@@ -1260,7 +1266,7 @@ struct ResponsesSseStream<S = ProviderResponseStream> {
     close_after_pending: bool,
 }
 
-impl<S: ProviderSseSource> ResponsesSseStream<S> {
+impl<S: ProviderSseSource> CordisSseTransportStream<S> {
     fn new(
         stream: S,
         runtime: Arc<Mutex<SkeletonRuntime>>,
@@ -1311,7 +1317,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
     }
 }
 
-impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
+impl<S: ProviderSseSource> ResponseStream for CordisSseTransportStream<S> {
     fn next_chunk(&mut self, chunk: &mut Vec<u8>) -> Result<bool, std::io::Error> {
         loop {
             if let Some(frame) = self.egress.pop() {
@@ -1864,7 +1870,7 @@ targets = ["mock"]
             .runtime
     }
 
-    fn stream(chunks: Vec<Result<Vec<u8>, String>>) -> ResponsesSseStream<MockSseSource> {
+    fn stream(chunks: Vec<Result<Vec<u8>, String>>) -> CordisSseTransportStream<MockSseSource> {
         stream_for(chunks, "responses", "direct")
     }
 
@@ -1872,7 +1878,7 @@ targets = ["mock"]
         chunks: Vec<Result<Vec<u8>, String>>,
         entry_protocol: &str,
         continuation_owner: &str,
-    ) -> ResponsesSseStream<MockSseSource> {
+    ) -> CordisSseTransportStream<MockSseSource> {
         stream_for_with_runtime(runtime(), chunks, entry_protocol, continuation_owner)
     }
 
@@ -1881,7 +1887,7 @@ targets = ["mock"]
         chunks: Vec<Result<Vec<u8>, String>>,
         entry_protocol: &str,
         continuation_owner: &str,
-    ) -> ResponsesSseStream<MockSseSource> {
+    ) -> CordisSseTransportStream<MockSseSource> {
         let port = u16::from_ne_bytes([0, 1]);
         let (request_lease, request_scope) = {
             let runtime = runtime.lock().expect("test runtime lock");
@@ -1921,7 +1927,7 @@ targets = ["mock"]
             "conversation-1",
         )
         .expect("test stream processor");
-        ResponsesSseStream::new(
+        CordisSseTransportStream::new(
             MockSseSource {
                 chunks: chunks.into(),
                 wait_result: Ok(()),
