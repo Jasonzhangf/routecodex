@@ -1145,6 +1145,13 @@ fn normalize_responses_response(body: &Value) -> Result<Value, ProviderTransport
             message: "Responses provider JSON must be an object".to_string(),
             status: None,
         })?;
+    if object.contains_key("instructions") {
+        return Err(ProviderTransportError {
+            code: "provider_response_instructions_injected".to_string(),
+            message: "provider Responses instructions must be supplied by the request owner".to_string(),
+            status: None,
+        });
+    }
     if let Some(extra_fields) = object.remove("extra_fields") {
         let Some(extra_fields) = extra_fields.as_object() else {
             return Err(ProviderTransportError {
@@ -1165,6 +1172,13 @@ fn normalize_responses_response(body: &Value) -> Result<Value, ProviderTransport
         }
     }
     if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
+        if response.contains_key("instructions") {
+            return Err(ProviderTransportError {
+                code: "provider_response_instructions_injected".to_string(),
+                message: "provider Responses instructions must be supplied by the request owner".to_string(),
+                status: None,
+            });
+        }
         if let Some(extra_fields) = response.remove("extra_fields") {
             let Some(extra_fields) = extra_fields.as_object() else {
                 return Err(ProviderTransportError {

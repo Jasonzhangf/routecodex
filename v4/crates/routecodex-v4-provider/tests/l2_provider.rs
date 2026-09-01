@@ -322,6 +322,29 @@ fn responses_normalizer_rejects_unknown_gateway_diagnostics() {
 }
 
 #[test]
+fn responses_normalizer_rejects_provider_injected_instructions() {
+    let error = normalize_provider_response(
+        "responses",
+        &json!({"id":"resp-1","status":"completed","instructions":"internal prompt","output":[]}),
+    )
+    .expect_err("provider instructions must not cross the response boundary");
+    assert_eq!(error.code, "provider_response_instructions_injected");
+}
+
+#[test]
+fn responses_sse_normalizer_rejects_provider_injected_instructions() {
+    let error = normalize_provider_sse_frame(
+        "responses",
+        br#"event: response.created
+data: {"type":"response.created","response":{"id":"resp-1","instructions":"internal prompt"}}
+
+"#,
+    )
+    .expect_err("SSE provider instructions must fail at provider boundary");
+    assert_eq!(error.code, "provider_response_instructions_injected");
+}
+
+#[test]
 fn provider_sse_normalizers_project_text_and_terminal_events() {
     let openai = normalize_provider_sse_frame(
         "openai",
