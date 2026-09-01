@@ -1437,7 +1437,7 @@ fn emit_payload_console_events(
 }
 
 fn render_payload_console_event(
-    event: &str,
+    trace_entry: &str,
     request: &HttpRequest,
     endpoint: &str,
     provider: &str,
@@ -1446,7 +1446,7 @@ fn render_payload_console_event(
     status: Option<u16>,
     elapsed: std::time::Duration,
 ) -> Option<String> {
-    let (plugin_id, rest) = event.split_once(':')?;
+    let (plugin_id, rest) = trace_entry.split_once(':')?;
     let (kind, message) = rest.split_once(':')?;
     if !plugin_id.ends_with("payload_console_render") || kind != "console.payload_ready" {
         return None;
@@ -1656,7 +1656,7 @@ mod tests {
             path: "/v1/responses".to_string(),
             headers: Vec::new(),
             body: Vec::new(),
-            request_id: "127.0.0.1:5520-day-test-00000001".to_string(),
+            request_id: "test-server-day-00000001".to_string(),
             server_id: "rccv4".to_string(),
             port: 5520,
         }
@@ -1689,7 +1689,7 @@ mod tests {
             std::time::Duration::from_millis(7),
         )
         .expect("request summary is rendered");
-        assert!(rendered.contains("req=127.0.0.1:5520-day-test-00000001"));
+        assert!(rendered.contains("req=test-server-day-00000001"));
         assert!(rendered.contains("target=cc-sol/gpt-5.5"));
         assert!(rendered.contains("elapsed_ms=7"));
     }
