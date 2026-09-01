@@ -169,6 +169,12 @@ impl V4Config01AuthoringFileSource {
     pub fn source_id(&self) -> &str {
         &self.source_id
     }
+
+    /// Diagnostic-only immutable checkpoint fact for the config source stage.
+    /// It is never used as a config input or compiled into the manifest.
+    pub fn stage_checkpoint(&self) -> String {
+        format!("config.stage.{}", self.source_id)
+    }
 }
 
 #[derive(Debug, Clone)]

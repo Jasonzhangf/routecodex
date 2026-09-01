@@ -97,9 +97,81 @@ pub enum ControlError {
     AlreadyReleased,
     ConsumeAfterRelease,
     ScopeMismatch,
+    InvalidCommand,
     ControlIntoPayload,
     ProtocolMetadataNotControl,
     ControlNotReconstructibleFromPayload,
+}
+
+/// Typed control command accepted by the MetadataCenter owner. The command
+/// cannot be built from arbitrary Value; every variant carries a typed
+/// resource name and a typed value string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ControlCommand {
+    Register {
+        resource: String,
+        value: String,
+        scope: Scope,
+    },
+    Consume {
+        resource: String,
+        scope: Scope,
+    },
+    Release {
+        resource: String,
+        scope: Scope,
+    },
+}
+
+impl ControlCommand {
+    pub fn resource(&self) -> &str {
+        match self {
+            Self::Register { resource, .. }
+            | Self::Consume { resource, .. }
+            | Self::Release { resource, .. } => resource,
+        }
+    }
+
+    pub fn scope(&self) -> &Scope {
+        match self {
+            Self::Register { scope, .. }
+            | Self::Consume { scope, .. }
+            | Self::Release { scope, .. } => scope,
+        }
+    }
+}
+
+/// Immutable fact produced by a committed control command. It is diagnostic
+/// and audit-only; bus subscribers cannot use it to mutate control state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlCommittedEvent {
+    resource: String,
+    operation: MetadataOperation,
+    scope: Scope,
+    sequence: u64,
+    timestamp_ms: u128,
+}
+
+impl ControlCommittedEvent {
+    pub fn resource(&self) -> &str {
+        &self.resource
+    }
+
+    pub fn control_key(&self) -> &str {
+        &self.resource
+    }
+
+    pub fn operation(&self) -> MetadataOperation {
+        self.operation
+    }
+
+    pub fn scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
 }
 
 /// Scope-bound register / consume / release state machine with immutable audit.
@@ -207,6 +279,42 @@ impl MetadataCenter {
         )
     }
 
+    /// Execute a typed control command through the only owner boundary. This
+    /// is the only way a plugin or runtime facade can mutate control state;
+    /// raw String/Value cannot reach MetadataCenter.
+    pub fn commit(&mut self, command: ControlCommand) -> Result<MetadataRecord, ControlError> {
+        if command.scope() != &self.scope {
+            return Err(ControlError::ScopeMismatch);
+        }
+        match command {
+            ControlCommand::Register { resource, value, scope: _ } => {
+                if resource.trim().is_empty() || value.trim().is_empty() {
+                    return Err(ControlError::InvalidCommand);
+                }
+                let signal = ControlSignal::new(
+                    ControlSignalKind::Scope,
+                    &resource,
+                    &value,
+                    self.scope.clone(),
+                    None,
+                );
+                self.register(signal)
+            }
+            ControlCommand::Consume { resource, scope: _ } => {
+                let _ = self.consume(&resource)?;
+                let signal = ControlSignal::new(
+                    ControlSignalKind::Scope,
+                    &resource,
+                    "",
+                    self.scope.clone(),
+                    None,
+                );
+                Ok(self.append_record(MetadataOperation::Consume, signal))
+            }
+            ControlCommand::Release { resource, scope: _ } => self.release(&resource),
+        }
+    }
+
     fn append_record(
         &mut self,
         operation: MetadataOperation,
@@ -224,6 +332,20 @@ impl MetadataCenter {
         };
         self.records.push(record.clone());
         record
+    }
+}
+
+impl MetadataRecord {
+    /// The immutable committed event fact for this audit record. Every record
+    /// is created by a committed command or typed signal transition.
+    pub fn committed_event(&self) -> Option<ControlCommittedEvent> {
+        Some(ControlCommittedEvent {
+            resource: self.control_key.clone(),
+            operation: self.operation,
+            scope: self.scope.clone(),
+            sequence: self.sequence,
+            timestamp_ms: self.timestamp_ms,
+        })
     }
 }
 

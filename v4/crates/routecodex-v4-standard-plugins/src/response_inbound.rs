@@ -218,10 +218,6 @@ pub(crate) fn protocol_decode_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String>
         .map_err(|error| error.to_string())
 }
 
-pub(crate) fn protocol_decode(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    protocol_decode_entry(ctx)
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct DecodedProviderSseFrame {
     pub semantic: Value,

@@ -16,6 +16,24 @@ use routecodex_v4_plugin_plan::{compile_node_plan, AuthoringPlugin, NodePluginPl
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Reject free-form control objects at the typed bridge boundary. Control
+/// state must never be reconstructed from a JSON payload field.
+fn deserialize_control_handle<'de, D>(deserializer: D) -> Result<Value, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| serde::de::Error::custom("control must be an object"))?;
+    if object.is_empty() {
+        return Ok(value);
+    }
+    Err(serde::de::Error::custom(
+        "control must be an empty typed handle; control state cannot be reconstructed from JSON",
+    ))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScopeSessionOperation {
@@ -105,6 +123,7 @@ pub struct DiagnosticFact {
 #[serde(deny_unknown_fields)]
 pub struct NodeExecutionInput {
     pub data: Value,
+    #[serde(deserialize_with = "deserialize_control_handle")]
     pub control: Value,
     pub information: Value,
 }

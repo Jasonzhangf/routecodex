@@ -23,12 +23,20 @@ fn execute(
     container.context_created().unwrap();
     container.plugins_mounted().unwrap();
     container.publish().unwrap();
+    let information = if plugin == "v4.std.request.responses_wire_build" {
+        json!({
+            "client_protocol": if data.get("messages").is_some() { "chat" } else { "responses" },
+            "provider_protocol": "responses"
+        })
+    } else {
+        json!({})
+    };
     let output = container.execute_with_plan_hash(
         &hash,
         NodeExecutionInput {
             data,
             control: json!({}),
-            information: json!({}),
+            information,
         },
         &StandardHandleRegistry::new(),
     );
@@ -84,7 +92,7 @@ fn positive_request_plugins_preserve_adjacent_semantics() {
         "V4HubReqChatProcess03Governed",
         "request_chat_process",
         3,
-        "v4.std.request.governance",
+        "v4.std.chat_process.request_governance",
         normalized,
     )
     .unwrap();
@@ -124,7 +132,7 @@ fn negative_request_plugins_reject_control_leakage_and_invalid_shapes() {
         "V4HubReqChatProcess03Governed",
         "request_chat_process",
         3,
-        "v4.std.request.governance",
+        "v4.std.chat_process.request_governance",
         json!({"messages":[],"tools":{}})
     )
     .is_err());
@@ -164,6 +172,34 @@ fn responses_wire_builder_preserves_protocol_continuation_fields() {
     .expect("wire builder preserves valid Responses fields");
     assert_eq!(wire["previous_response_id"], "resp_previous");
     assert_eq!(wire["store"], true);
+}
+
+#[test]
+fn wire_builder_preserves_chat_shape_for_same_protocol() {
+    let wire = execute_with_information(
+        "V4ProviderReqCompat07ProviderCompat",
+        "request_outbound",
+        7,
+        "v4.std.request.responses_wire_build",
+        json!({"model": "m", "messages": [{"role": "user", "content": "hello"}]}),
+        json!({"client_protocol": "chat", "provider_protocol": "chat"}),
+    )
+    .expect("same-protocol Chat wire must remain Chat-shaped");
+    assert_eq!(wire["messages"][0]["content"], "hello");
+    assert!(wire.get("input").is_none());
+}
+
+#[test]
+fn wire_builder_rejects_missing_protocol_side_channel() {
+    assert!(execute_with_information(
+        "V4ProviderReqCompat07ProviderCompat",
+        "request_outbound",
+        7,
+        "v4.std.request.responses_wire_build",
+        json!({"model": "m", "messages": []}),
+        json!({}),
+    )
+    .is_err());
 }
 
 #[test]

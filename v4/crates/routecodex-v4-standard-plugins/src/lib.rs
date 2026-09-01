@@ -425,10 +425,16 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.information.client_protocol".to_string(),
             "v4.information.provider_protocol".to_string(),
         ],
-        "V4ProviderReqCompat07ProviderCompat" => vec!["v4.request.provider_semantic".to_string()],
+        "V4ProviderReqCompat07ProviderCompat" => vec![
+            "v4.request.provider_semantic".to_string(),
+            "v4.information.client_protocol".to_string(),
+            "v4.information.provider_protocol".to_string(),
+        ],
         "V4ProviderReqOutbound08WirePayload" => vec![
             "v4.request.provider_semantic".to_string(),
             "v4.request.provider_wire_payload".to_string(),
+            "v4.information.client_protocol".to_string(),
+            "v4.information.provider_protocol".to_string(),
         ],
         "V4ProviderReqOutbound09TransportRequest" => vec![
             "v4.request.provider_wire_payload".to_string(),
@@ -474,10 +480,7 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
             "v4.control.metadata_center".to_string(),
         ],
         "V4HubRespOutbound05ClientSemantic" => vec!["v4.response.client_wire_payload".to_string()],
-        "V4ProviderReqCompat07ProviderCompat" => {
-            vec!["v4.request.provider_wire_payload".to_string()]
-        }
-        "V4ProviderReqOutbound08WirePayload" => {
+        "V4ProviderReqCompat07ProviderCompat" | "V4ProviderReqOutbound08WirePayload" => {
             vec!["v4.request.provider_wire_payload".to_string()]
         }
         "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_object".to_string()],
@@ -513,7 +516,11 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
         PluginEffect::Semantic,
         PluginPhase::Semantic,
         200,
-        vec!["v4.request.provider_semantic"],
+        vec![
+            "v4.request.provider_semantic",
+            "v4.information.client_protocol",
+            "v4.information.provider_protocol",
+        ],
         vec!["v4.request.provider_wire_payload"],
     );
     codec.descriptor.selection_group = Some("provider_wire_codec".to_string());
@@ -758,19 +765,6 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
         codec,
         codec_proto,
         plugin(
-            "v4.std.chat_process.request_governance",
-            PluginCategory::ChatProcess,
-            "V4HubReqChatProcess03Governed",
-            "request_chat_process",
-            Some(3),
-            PluginKind::Operator,
-            PluginEffect::Semantic,
-            PluginPhase::Semantic,
-            300,
-            vec!["v4.request.normal_payload"],
-            vec!["v4.request.normal_payload"],
-        ),
-        plugin(
             "v4.std.chat_process.response_governance",
             PluginCategory::ChatProcess,
             "V4HubRespChatProcess04Governed",
@@ -1004,13 +998,12 @@ pub fn compile_production_execution_plans(
         "error",
         "control",
     ];
-    const EXCLUDED_PLUGINS: [&str; 6] = [
+    const EXCLUDED_PLUGINS: [&str; 5] = [
         "v4.std.provider.capability_mock",
         "v4.std.provider.auth_handle_mock",
         "v4.std.provider.wire_mock",
         "v4.std.provider.transport_mock",
         "v4.std.protocol.wire_codec_proto",
-        "v4.std.request.governance",
     ];
 
     let plugins = standard_plugins();
@@ -1077,11 +1070,11 @@ pub fn compile_production_execution_plans(
     })
 }
 
-struct MockHandle {
+struct StandardHandle {
     execute_fn: fn(&mut ExecCtx<'_>) -> Result<(), String>,
 }
 
-impl PluginHandle for MockHandle {
+impl PluginHandle for StandardHandle {
     fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
         (self.execute_fn)(ctx)
     }
@@ -1231,14 +1224,6 @@ fn protocol_codec(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut data = ctx.read_data().clone();
     if let Some(object) = data.as_object_mut() {
         object.insert("codec".to_string(), json!("mock"));
-    }
-    ctx.write_data(data).map_err(|error| error.to_string())
-}
-
-fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut data = ctx.read_data().clone();
-    if let Some(object) = data.as_object_mut() {
-        object.insert("governance".to_string(), json!("request_governance"));
     }
     ctx.write_data(data).map_err(|error| error.to_string())
 }
@@ -1408,7 +1393,7 @@ fn transport_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 /// Registry of typed handles for every standard plugin. One immutable handle
 /// per plugin id; unknown ids fail fast through the bridge.
 pub struct StandardHandleRegistry {
-    handles: HashMap<&'static str, MockHandle>,
+    handles: HashMap<&'static str, StandardHandle>,
 }
 
 impl StandardHandleRegistry {
@@ -1455,7 +1440,6 @@ impl StandardHandleRegistry {
                 request_plugins::wire_build,
             ),
             ("v4.std.protocol.wire_codec_proto", protocol_codec),
-            ("v4.std.chat_process.request_governance", request_governance),
             (
                 "v4.std.chat_process.response_governance",
                 response_governance,
@@ -1469,19 +1453,19 @@ impl StandardHandleRegistry {
             ("v4.std.provider.transport_mock", transport_mock),
             ("v4.std.provider.transport_validate", transport_mock),
         ] {
-            handles.insert(id, MockHandle { execute_fn });
+            handles.insert(id, StandardHandle { execute_fn });
         }
         for (id, execute_fn) in response_inbound::response_inbound_handles() {
-            handles.insert(id, MockHandle { execute_fn });
+            handles.insert(id, StandardHandle { execute_fn });
         }
         for (id, execute_fn) in response_outbound::response_outbound_handles() {
-            handles.insert(id, MockHandle { execute_fn });
+            handles.insert(id, StandardHandle { execute_fn });
         }
         for (id, execute_fn) in request_plugins::handles() {
-            handles.insert(id, MockHandle { execute_fn });
+            handles.insert(id, StandardHandle { execute_fn });
         }
         for (id, execute_fn) in model_hooks::handles() {
-            handles.insert(id, MockHandle { execute_fn });
+            handles.insert(id, StandardHandle { execute_fn });
         }
         Self { handles }
     }
@@ -1490,6 +1474,16 @@ impl StandardHandleRegistry {
         self.handles
             .get(plugin_id)
             .map(|handle| handle as &dyn PluginHandle)
+    }
+
+    /// Encode a client-visible SSE error through the response-outbound
+    /// plugin owner. Runtime orchestration must not call the codec directly.
+    pub fn encode_client_error_sse(
+        &self,
+        entry_protocol: &str,
+        message: &str,
+    ) -> Result<Vec<u8>, String> {
+        response_outbound::encode_client_error_sse_frame(entry_protocol, message)
     }
 }
 
@@ -1593,7 +1587,6 @@ mod tests {
             "v4.std.direct.response.sse_frame_boundary",
             "v4.std.request.responses_normalize",
             "v4.std.request.protocol_parse",
-            "v4.std.request.governance",
             "v4.std.request.responses_wire_build",
             "v4.hook.direct.request",
             "v4.hook.relay.request",

@@ -84,8 +84,8 @@ function validatePhysicalSources(sourceInputs, failures) {
     failures.push(failure('WIRE_CONTROL_REJECTION_SOURCE',
       'provider/client response boundaries must reject control fields before projection'));
   }
-  const providerWirePair = 'vec!["v4.request.provider_semantic"],\n        vec!["v4.request.provider_wire_payload"]';
-  if (sourceInputs.standardPlugins.split(providerWirePair).length - 1 !== 2
+  const providerWirePair = /vec!\["v4\.request\.provider_semantic"\],[\s\S]{0,500}?vec!\["v4\.request\.provider_wire_payload"\]/g;
+  if ((sourceInputs.standardPlugins.match(providerWirePair) ?? []).length !== 2
       || sourceInputs.standardPlugins.includes('write_control_resource("v4.request.provider_wire_payload"')
       || sourceInputs.standardPlugins.includes('write_control_resource("v4.response.client_wire_payload"')) {
     failures.push(failure('PROVIDER_WIRE_SOURCE_BINDING',

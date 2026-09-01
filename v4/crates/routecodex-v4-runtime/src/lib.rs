@@ -27,8 +27,7 @@ use routecodex_v4_error::{
 use routecodex_v4_node_container::{ActiveEpochStore, ExecutionEpochBundle};
 use routecodex_v4_skeleton::SkeletonPlan;
 use routecodex_v4_standard_plugins::{
-    response_outbound::encode_client_error_sse_frame, sse_transport::SseTransportFrame,
-    StandardHandleRegistry,
+    sse_transport::SseTransportFrame, StandardHandleRegistry,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -40,12 +39,17 @@ use std::fmt;
 
 mod control_resources;
 mod execution_engine;
+mod node_service;
 
 pub mod request_port;
 pub mod response_error_port;
 
 pub use control_resources::*;
 pub use execution_engine::{ExecutionEngine, ExecutionError, NodeExecutionFrame, NodeOutcome};
+pub use node_service::{
+    ImmutableDataCarrier, ImmutableDiagnosticCarrier, ImmutableInformationCarrier,
+    NodeServiceRegistry, ServiceError, ServiceLifecycle,
+};
 // Single source of truth: `PluginKind` is owned by routecodex-v4-plugin-contract
 // (v4/contracts/node-plugin.contract.json kinds). The runtime never defines a
 // second plugin-kind taxonomy; it only re-exports the contract type.
@@ -962,12 +966,16 @@ impl ExecutionContext {
         context.control.continuation_restored = control.continuation_restored;
         context.information = serde_json::from_value(frame.information.clone())
             .map_err(|error| RuntimeFault::new("execution_frame_information", error.to_string()))?;
-        context.diagnostic.trace.extend(
-            frame
-                .events
-                .iter()
-                .map(|event| format!("{}:{}:{}", event.plugin_id, event.kind, event.message)),
-        );
+        for event in &frame.events {
+            if event.kind == "stage.checkpoint" {
+                context.diagnostic.trace.push(event.message.clone());
+            } else {
+                context.diagnostic.trace.push(format!(
+                    "{}:{}:{}",
+                    event.plugin_id, event.kind, event.message
+                ));
+            }
+        }
         Ok(context)
     }
 
@@ -1688,7 +1696,7 @@ impl ResponseStreamProcessor {
         })?;
         if let Some(message) = disposition.strip_prefix("failed:") {
             return Ok((
-                self.project_failure(RuntimeFault::new(
+                self.project_failure(runtime, RuntimeFault::new(
                     "provider_response_failed",
                     message.to_string(),
                 ))?,
@@ -1748,6 +1756,7 @@ impl ResponseStreamProcessor {
 
     pub fn project_failure(
         &mut self,
+        runtime: &SkeletonRuntime,
         fault: RuntimeFault,
     ) -> Result<ResponseStreamDisposition, RuntimeFault> {
         if self.failure_projected {
@@ -1763,8 +1772,8 @@ impl ResponseStreamProcessor {
                 format!("error chain projection failed: {error:?}"),
             )
         })?;
-        let encoded = encode_client_error_sse_frame(&self.entry_protocol, &projection.message)
-            .map_err(|error| RuntimeFault::new("client_sse_error_encode", error))?;
+        let encoded = runtime
+            .encode_client_error_sse(&self.entry_protocol, &projection.message)?;
         let frame = SseTransportFrame::from_complete_bytes(encoded)
             .map_err(|error| RuntimeFault::new("client_sse_transport", format!("{error:?}")))?;
         self.failure_projected = true;
@@ -1793,6 +1802,28 @@ impl SkeletonRuntime {
 
     pub fn plan(&self) -> &SkeletonPlan {
         &self.plan
+    }
+
+    /// Use this runtime's admitted response-outbound registry for client
+    /// error framing; stream processors do not own a duplicate registry.
+    pub fn encode_client_error_sse(
+        &self,
+        entry_protocol: &str,
+        message: &str,
+    ) -> Result<Vec<u8>, RuntimeFault> {
+        self.handle_registry
+            .encode_client_error_sse(entry_protocol, message)
+            .map_err(|error| RuntimeFault::new("client_sse_error_encode", error))
+    }
+
+    /// Read-only observability of the exact production plugin set pinned by
+    /// the active epoch. Consumers cannot use this to execute or mutate the
+    /// immutable bundle.
+    pub fn epoch_plugin_ids(&self) -> Vec<String> {
+        self.epoch_store
+            .active_bundle()
+            .map(|bundle| bundle.plugin_ids())
+            .unwrap_or_default()
     }
 
     pub fn prepare_execution_epoch(

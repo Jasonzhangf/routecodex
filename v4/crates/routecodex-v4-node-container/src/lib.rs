@@ -759,6 +759,25 @@ impl ExecutionEpochBundle {
         self.acquire()
     }
 
+    /// Read-only observability of the exact plugin set pinned by this epoch.
+    /// This is not an execution input; consumers cannot substitute or mutate
+    /// the immutable bundle through this accessor.
+    pub fn plugin_ids(&self) -> Vec<String> {
+        let nodes = self.inner.nodes.lock().expect("epoch nodes lock poisoned");
+        nodes
+            .as_ref()
+            .into_iter()
+            .flat_map(|nodes| nodes.iter())
+            .flat_map(|node| {
+                node.container
+                    .plan()
+                    .entries
+                    .iter()
+                    .map(|entry| entry.plugin_id.clone())
+            })
+            .collect()
+    }
+
     fn acquire(&self) -> Result<EpochLease, EpochError> {
         let state = self.inner.state.lock().expect("epoch state lock poisoned");
         if *state != ExecutionEpochState::Active {

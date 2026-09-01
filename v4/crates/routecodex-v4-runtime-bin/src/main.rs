@@ -1309,10 +1309,15 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
     }
 
     fn enqueue_runtime_failure(&mut self, fault: RuntimeFault) -> Result<(), std::io::Error> {
-        let disposition = self
-            .processor
-            .project_failure(fault)
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        let disposition = {
+            let runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| std::io::Error::other("response runtime lock poisoned"))?;
+            self.processor
+                .project_failure(&runtime, fault)
+                .map_err(|error| std::io::Error::other(error.to_string()))?
+        };
         self.enqueue_disposition(disposition)
     }
 }

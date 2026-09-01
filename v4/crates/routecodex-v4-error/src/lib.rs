@@ -214,6 +214,15 @@ impl ErrorChain {
         &self.scope
     }
 
+    /// Diagnostic-only immutable checkpoint fact for the current error stage.
+    /// It is never read back into routing, retry, cooldown or payload logic.
+    pub fn stage_checkpoint(&self) -> String {
+        match self.current_stage() {
+            Some(stage) => format!("error.stage.{}", stage_name(stage)),
+            None => "error.stage.idle".to_string(),
+        }
+    }
+
     /// `V4Error01SourceRaised`. First operation only; raise twice is red.
     pub fn raise(
         &mut self,
@@ -465,4 +474,15 @@ fn now_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0)
+}
+
+fn stage_name(stage: ErrorStage) -> &'static str {
+    match stage {
+        ErrorStage::SourceRaised => "source_raised",
+        ErrorStage::HostCaptured => "host_captured",
+        ErrorStage::RuntimeClassified => "runtime_classified",
+        ErrorStage::RouterPolicyApplied => "router_policy_applied",
+        ErrorStage::ExecutionDecision => "execution_decision",
+        ErrorStage::ClientProjected => "client_projected",
+    }
 }

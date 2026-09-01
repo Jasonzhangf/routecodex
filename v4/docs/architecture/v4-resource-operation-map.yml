@@ -231,6 +231,8 @@ resources:
   - V4DirectResp03ClientProtocol
   - V4HubReqInbound02Normalized
   - V4HubReqOutbound06ProviderSemantic
+  - V4ProviderReqCompat07ProviderCompat
+  - V4ProviderReqOutbound08WirePayload
   - V4HubRespOutbound05ClientSemantic
   forbidden_writers:
   - SseIngressPlugin
@@ -254,6 +256,9 @@ resources:
   - V4DirectReq02RelayContainer
   - V4DirectResp02RelayContainer
   - V4DirectResp03ClientProtocol
+  - V4HubReqOutbound06ProviderSemantic
+  - V4ProviderReqCompat07ProviderCompat
+  - V4ProviderReqOutbound08WirePayload
   - V4HubReqOutbound06ProviderSemantic
   - V4ProviderReqCompat07ProviderCompat
   - V4ProviderRespCompat02ProviderCompat
