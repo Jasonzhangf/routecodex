@@ -35,7 +35,7 @@ lines.once('line', () => {
       request_id: 'host-1',
       state: 'accepting',
       in_flight: 0,
-      output: { data: {}, control: {}, diagnostics: [] },
+      output: { data: {}, control: {}, information: {}, diagnostics: [] },
     })}\n`);
     return;
   }

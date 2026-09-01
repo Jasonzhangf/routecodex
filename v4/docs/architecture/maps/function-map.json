@@ -927,6 +927,8 @@
         "CordisBoundNodeHost::executeNode",
         "CordisBoundNodeHost::drain",
         "CordisBoundNodeHost::dispose",
+        "CordisBoundNodeHost::serviceBindings",
+        "CordisBoundNodeHost::assertTypedServicesReady",
         "RustNodeContainerPort::declare",
         "RustNodeContainerPort::executeNode",
         "RustNodeContainerPort::status"
@@ -937,7 +939,9 @@
       "required_gates": [
         "v4_cordis_host_l3_regression",
         "v4_parity_gate_cordis_host",
-        "v4_parity_gate_cordis_host_red"
+        "v4_parity_gate_cordis_host_red",
+        "v4_cordis_host_typed_service_positive",
+        "v4_cordis_host_typed_service_red"
       ]
     },
     {

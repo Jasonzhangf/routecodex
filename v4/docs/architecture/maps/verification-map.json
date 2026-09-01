@@ -1278,6 +1278,79 @@
     ,{"gate_id":"v4_runtime_006_response_error_boundary","status":"active","owner_module_id":"routecodex-v4-runtime","feature_ids":["V4-RUNTIME-006"],"command":"cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_ports --locked","argv":["cargo","test","--manifest-path","Cargo.toml","-p","routecodex-v4-runtime","--test","l2_ports","--locked"],"producer":{"adapter":"cargo","identity":"v4_runtime_006_response_error_boundary"},"evidence_role":"boundary_audit","input_paths":["crates/routecodex-v4-runtime/src/response_error_port.rs"]}
     ,{"gate_id":"v4_runtime_006_response_error_plane","status":"active","owner_module_id":"routecodex-v4-runtime","feature_ids":["V4-RUNTIME-006"],"command":"cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_ports --locked","argv":["cargo","test","--manifest-path","Cargo.toml","-p","routecodex-v4-runtime","--test","l2_ports","--locked"],"producer":{"adapter":"cargo","identity":"v4_runtime_006_response_error_plane"},"evidence_role":"plane_isolation","input_paths":["crates/routecodex-v4-runtime/src/response_error_port.rs","crates/routecodex-v4-runtime/tests/l2_ports.rs"]}
     ,{
+    {
+      "gate_id":"v4_control_event_arc_positive",
+      "status":"active",
+      "owner_module_id":"routecodex-v4-governance",
+      "feature_ids":["V4-CONTROL-EVENT-ARC-001"],
+      "command":"node scripts/architecture/verify-v4-control-event-arc.mjs",
+      "argv":["node","scripts/architecture/verify-v4-control-event-arc.mjs"],
+      "producer":{"adapter":"node","identity":"v4_control_event_arc_positive"},
+      "evidence_role":"positive",
+      "input_paths":["contracts/v4-control-event-registry.json","contracts/v4-data-ownership-registry.json","crates/routecodex-v4-control/src/lib.rs","crates/routecodex-v4-runtime/src/lib.rs","scripts/architecture/verify-v4-control-event-arc.mjs"],
+      "required_for":["source_green","routecodex-v4-governance:architecture_stable"]
+    },
+    {
+      "gate_id":"v4_control_event_arc_red",
+      "status":"active",
+      "owner_module_id":"routecodex-v4-governance",
+      "feature_ids":["V4-CONTROL-EVENT-ARC-001"],
+      "command":"node scripts/architecture/verify-v4-control-event-arc.mjs --red-self-test",
+      "argv":["node","scripts/architecture/verify-v4-control-event-arc.mjs","--red-self-test"],
+      "producer":{"adapter":"node","identity":"v4_control_event_arc_red"},
+      "evidence_role":"red_gate",
+      "input_paths":["crates/routecodex-v4-control/tests/l2_control_event_arc_red.rs","crates/routecodex-v4-runtime/tests/l2_immutable_arc_red.rs","scripts/architecture/verify-v4-control-event-arc.mjs"],
+      "required_for":["source_green","routecodex-v4-governance:architecture_stable"]
+    },
+    {
+      "gate_id":"v4_runtime_carrier_service_positive",
+      "status":"active",
+      "owner_module_id":"routecodex-v4-runtime",
+      "feature_ids":["V4-CONTROL-EVENT-ARC-001"],
+      "command":"cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_carrier_service_red --locked",
+      "argv":["cargo","test","--manifest-path","Cargo.toml","-p","routecodex-v4-runtime","--test","l2_carrier_service_red","--locked"],
+      "producer":{"adapter":"cargo","identity":"v4_runtime_carrier_service_positive"},
+      "evidence_role":"positive",
+      "input_paths":["crates/routecodex-v4-runtime/src/lib.rs","crates/routecodex-v4-runtime/src/execution_engine.rs","crates/routecodex-v4-runtime/tests/l2_carrier_service_red.rs"],
+      "required_for":["source_green","V4-CONTROL-EVENT-ARC-001:architecture_stable"]
+    },
+    {
+      "gate_id":"v4_runtime_carrier_service_red",
+      "status":"active",
+      "owner_module_id":"routecodex-v4-runtime",
+      "feature_ids":["V4-CONTROL-EVENT-ARC-001"],
+      "command":"cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_carrier_service_red --locked",
+      "argv":["cargo","test","--manifest-path","Cargo.toml","-p","routecodex-v4-runtime","--test","l2_carrier_service_red","--locked"],
+      "producer":{"adapter":"cargo","identity":"v4_runtime_carrier_service_red"},
+      "evidence_role":"red_gate",
+      "input_paths":["crates/routecodex-v4-runtime/src/lib.rs","crates/routecodex-v4-runtime/tests/l2_carrier_service_red.rs"],
+      "required_for":["source_green","V4-CONTROL-EVENT-ARC-001:architecture_stable"]
+    },
+    {
+      "gate_id":"v4_cordis_host_typed_service_positive",
+      "status":"active",
+      "owner_module_id":"routecodex-v4-cordis-host",
+      "feature_ids":["V4-CONTROL-EVENT-ARC-001"],
+      "command":"node --test cordis/routecodex-v4-cordis-host/tests/host-service.test.mjs",
+      "argv":["node","--test","cordis/routecodex-v4-cordis-host/tests/host-service.test.mjs"],
+      "producer":{"adapter":"node","identity":"v4_cordis_host_typed_service_positive"},
+      "evidence_role":"positive",
+      "input_paths":["cordis/routecodex-v4-cordis-host/src/index.mjs","cordis/routecodex-v4-cordis-host/tests/host-service.test.mjs"],
+      "required_for":["source_green","V4-CONTROL-EVENT-ARC-001:architecture_stable"]
+    },
+    {
+      "gate_id":"v4_cordis_host_typed_service_red",
+      "status":"active",
+      "owner_module_id":"routecodex-v4-cordis-host",
+      "feature_ids":["V4-CONTROL-EVENT-ARC-001"],
+      "command":"node --test cordis/routecodex-v4-cordis-host/tests/host-service.test.mjs",
+      "argv":["node","--test","cordis/routecodex-v4-cordis-host/tests/host-service.test.mjs"],
+      "producer":{"adapter":"node","identity":"v4_cordis_host_typed_service_red"},
+      "evidence_role":"red_gate",
+      "input_paths":["cordis/routecodex-v4-cordis-host/src/index.mjs","cordis/routecodex-v4-cordis-host/tests/host-service.test.mjs"],
+      "required_for":["source_green","V4-CONTROL-EVENT-ARC-001:architecture_stable"]
+    },
+    {
       "gate_id": "v4_cordis_concurrency_reconciliation",
       "status": "active",
       "owner_module_id": "routecodex-v4-governance",
