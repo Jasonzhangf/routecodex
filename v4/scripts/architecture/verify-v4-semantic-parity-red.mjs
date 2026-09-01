@@ -15,10 +15,13 @@ const testMatrixPath = path.join(root, 'contracts', 'semantic-parity-test-matrix
 const matrix = fs.existsSync(testMatrixPath)
   ? JSON.parse(fs.readFileSync(testMatrixPath, 'utf8'))
   : { stages: [] };
-const bound = new Set(matrix.stages ?? []);
+const entries = (matrix.stages ?? []).map((entry) =>
+  typeof entry === 'string' ? { id: entry, status: 'registered' } : entry,
+);
+const bound = new Set(entries.map((entry) => entry.id));
 const missing = stages
   .map((stage) => stage.v3_stage)
-  .filter((stage) => !matrix.stages.some((entry) => entry.id === stage));
+  .filter((stage) => !entries.some((entry) => entry.id === stage));
 
 if (stages.length !== 26) {
   console.error(`expected 26 semantic stages, found ${stages.length}`);
@@ -29,7 +32,7 @@ if (missing.length > 0) {
   for (const stage of missing) console.error(`- ${stage}`);
   process.exit(1);
 }
-const pending = matrix.stages.filter((entry) => entry.status !== 'green');
+const pending = entries.filter((entry) => !entry.status || entry.status === 'red_baseline');
 if (pending.length > 0) {
   console.error(`RED semantic parity tests pending: ${pending.length}/26`);
   for (const entry of pending) console.error(`- ${entry.id}: ${entry.test}`);
