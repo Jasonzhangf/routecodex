@@ -1,1 +1,10 @@
-{"goal_id":"goal-routecodex-v4-foundation","issue_id":"routecodex-v4-foundation","raw_request":"以 V3 为行为基线，在 v4/ 内建立更高工程质量的 RouteCodex 基础框架：明确职责分离、物理分离数据面与控制面、提高性能、减少重复代码、固化流程和配置，并将 provider 差异收敛为配置与 action 算子。","understood_objective":"V4 不另起业务语义，而是审计 V3 的可复用部分、重构边界和必须删除部分，再建立独立 Rust 基础框架。V3 只读、只验证，V4 通过明确的 typed contracts、共享 owner、配置编译和 action operators 逐步替换稳定模块。","acceptance_criteria":["V3 仍是行为兼容基线且本阶段不修改 V3。","V3 可复用、需重写、需删除、仅作 legacy 的部分都有审计结论。","V4 明确 data/control plane 物理边界和 typed stage contracts。","共享语义只有一个 owner，provider 差异只能通过配置或 action operators 表达。","V4 基础框架独立编译、测试、verify，并可按 AppSDK 生命周期逐模块迁移。"],"non_goals":["不修改 V3 runtime。","不进行线上流量切换。","不把 V3 实现直接复制到 V4。","不在 V4 core pipeline 增加 provider-specific 分支。"],"assumptions":["V3 在迁移期间保持可运行并作为行为基线。","V4 runtime entry 和发布流程在基础合同验证后单独设计。"],"ambiguities":[],"questions":[],"status":"confirmed","confirmed_by":"Jason","confirmed_at":"2026-08-13T00:00:00Z","created_at":"2026-08-13T00:00:00Z"}
+{
+  "goal_id":"goal-routecodex-v4-governance-reset-resume",
+  "issue_id":"routecodex-v4-governance-reset-resume",
+  "raw_request":"将 RouteCodex v4 从旧 AppSDK governance 收敛到 AppSDK 0.1.6 新治理面，保留业务源码、Protected 与历史证据。",
+  "understood_objective":"在独立 clean owner worktree 中完成旧治理 reset、0.1.6 pin-lock、maps/resource/function/mainline/verification 绑定、verify 与 compile；不修改业务实现。",
+  "acceptance_criteria":["AppSDK 0.1.6 sdk.lock 与官方 binary 绑定","旧 .appsdk-control/generated/active 临时状态已由官方 reset 清理且 Protected 保留","新 governance maps 与 module contract 可解析","appsdk verify 与 appsdk compile 通过"],
+  "non_goals":["不修改 v3 或 v4 业务源码","不修改 protected/Active 历史","不接管其他 worker worktree、claim、daemon 或进程"],
+  "assumptions":["当前项目根为 v4","Collab v1 根目录继续作为独立历史控制面，不并入 AppSDK records"],
+  "ambiguities":[],"questions":[],"status":"confirmed","confirmed_by":"Jason","confirmed_at":"2026-09-01T08:55:00Z","created_at":"2026-09-01T08:55:00Z"
+}

@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "preparation_id": "prepare-routecodex-v4-governance-reset-20260901",
+  "status": "confirmed",
+  "objective": "将 RouteCodex v4 从旧 AppSDK governance 收敛到 AppSDK 0.1.6 新治理面，保留业务源码、Protected 与历史证据。",
+  "change_kind": "project_refactor",
+  "project_root": ".",
+  "legacy_roots": [".appsdk/**", ".appsdk-control/**", "generated/**", "active/**"],
+  "new_roots": [".appsdk/**", ".appsdk-control/**", "generated/**", "active/**"],
+  "protected_roots": ["protected/**"],
+  "runtime_forbidden_roots": ["generated/**", "active/**", "protected/**"],
+  "boundary": {
+    "allowed_paths": [".appsdk/**", ".appsdk-control/**", "generated/**", "active/**"],
+    "forbidden_paths": ["protected/**", "crates/**", "src/**"],
+    "payload_control_separation": "confirmed: control resources never enter business request/response/provider payload"
+  },
+  "acceptance_criteria": [],
+  "non_goals": [],
+  "assumptions": [],
+  "questions": [
+    {"question_id":"scope-kind","question":"Is this a new project, module refactor, project refactor, or debug task?","status":"open"},
+    {"question_id":"project-root","question":"Which relative directory is the new AppSDK project root?","status":"open"},
+    {"question_id":"legacy-boundary","question":"Which existing directories remain read-only and outside the new project?","status":"open"},
+    {"question_id":"new-boundary","question":"Which directories may the new project create or modify?","status":"open"}
+  ],
+  "confirmed_by": "Jason",
+  "confirmed_at": "2026-09-01T08:50:00Z",
+  "created_at": "2026-01-01T00:00:00Z"
+}
