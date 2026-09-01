@@ -288,6 +288,39 @@ fn relay_request_chat_to_responses_is_plugin_owned() {
 }
 
 #[test]
+fn relay_request_runs_all_contract_bound_request_plugins() {
+    let runtime = active_runtime();
+    let report = runtime
+        .execute_request_json_scoped_for_target_with_lease(
+            r#"{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":[]}"#,
+            "chat",
+            "responses",
+            "m",
+            false,
+            "r-all-request-plugins",
+            5555,
+            "session-all-request",
+            "conversation-all-request",
+            Some("relay"),
+            None,
+        )
+        .expect("relay request with full contract plugin set runs");
+    let wire = report
+        .provider_wire_value
+        .expect("provider wire produced");
+    assert_eq!(
+        wire["governance"],
+        json!("request_governance"),
+        "chat_process.request_governance must execute in relay_request"
+    );
+    assert_eq!(
+        wire["input"][0]["content"],
+        json!("hello"),
+        "responses_normalize + responses_wire_build must execute in relay_request"
+    );
+}
+
+#[test]
 fn one_admission_lease_survives_request_provider_response_to_terminal() {
     let runtime = active_runtime();
     let lease = runtime

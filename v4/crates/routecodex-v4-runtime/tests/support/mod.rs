@@ -17,7 +17,12 @@ pub fn active_runtime(contract_json: &str) -> SkeletonRuntime {
         .filter(|chain| {
             matches!(
                 chain.chain_id.as_str(),
-                "direct_request" | "direct_response" | "relay_request" | "relay_response" | "error"
+                "direct_request"
+                    | "direct_response"
+                    | "relay_request"
+                    | "relay_response"
+                    | "error"
+                    | "control"
             )
         })
     {
@@ -26,11 +31,9 @@ pub fn active_runtime(contract_json: &str) -> SkeletonRuntime {
                 .iter()
                 .filter(|descriptor| descriptor.node_selector.node_id == node.node_id)
                 .filter(|descriptor| {
-                    descriptor.plugin_id != "v4.std.chat_process.request_governance"
-                        && descriptor.plugin_id != "v4.std.protocol.wire_codec_proto"
+                    descriptor.plugin_id != "v4.std.protocol.wire_codec_proto"
+                        && descriptor.plugin_id != "v4.std.request.governance"
                         && !descriptor.plugin_id.ends_with("_mock")
-                        && !(chain.chain_id == "relay_request"
-                            && descriptor.plugin_id.starts_with("v4.std.request.responses_"))
                 })
                 .map(|descriptor| descriptor.plugin_id.as_str())
                 .collect::<Vec<_>>();
