@@ -107,7 +107,7 @@ const NODE_PERMISSIONS = new Map([
     reads: ['v4.direct.request.provider_wire'], writes: [],
   }],
   ['V4DirectResp01ProviderRaw', {
-    reads: ['v4.direct.response.provider_raw'], writes: [],
+    reads: ['v4.direct.response.provider_raw'], writes: ['v4.direct.response.provider_raw'],
   }],
   ['V4DirectReq02RelayContainer', {
     reads: [
@@ -153,7 +153,7 @@ const NODE_PERMISSIONS = new Map([
     writes: ['v4.response.provider_raw'],
   }],
   ['V4ProviderRespInbound01Raw', {
-    reads: ['v4.response.provider_raw'], writes: [],
+    reads: ['v4.response.provider_raw'], writes: ['v4.response.provider_raw'],
   }],
   ['V4HubRespChatProcess04Governed', {
     reads: ['v4.response.normal_payload'],
@@ -569,8 +569,8 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 43) {
-      failures.push(`${MODULE}: expected 43 active standard descriptors, got ${activeDescriptors.length}`);
+    if (activeDescriptors.length !== 45) {
+      failures.push(`${MODULE}: expected 45 active standard descriptors, got ${activeDescriptors.length}`);
     }
     if (!activeDescriptors.some(
       (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',
