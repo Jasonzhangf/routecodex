@@ -27,8 +27,7 @@ use routecodex_v4_error::{
 use routecodex_v4_node_container::{ActiveEpochStore, ExecutionEpochBundle};
 use routecodex_v4_skeleton::SkeletonPlan;
 use routecodex_v4_standard_plugins::{
-    response_outbound::encode_client_error_sse_frame, sse_transport::SseTransportFrame,
-    StandardHandleRegistry,
+    sse_transport::SseTransportFrame, StandardHandleRegistry,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1584,6 +1583,7 @@ pub struct ResponseStreamProcessor {
     continuation_owner: String,
     session_scope: String,
     conversation_scope: String,
+    response_outbound: StandardHandleRegistry,
     semantic_terminal: bool,
     failure_projected: bool,
 }
@@ -1640,6 +1640,7 @@ impl ResponseStreamProcessor {
             continuation_owner: continuation_owner.to_string(),
             session_scope: session_scope.to_string(),
             conversation_scope: conversation_scope.to_string(),
+            response_outbound: StandardHandleRegistry::new(),
             semantic_terminal: false,
             failure_projected: false,
         })
@@ -1763,7 +1764,9 @@ impl ResponseStreamProcessor {
                 format!("error chain projection failed: {error:?}"),
             )
         })?;
-        let encoded = encode_client_error_sse_frame(&self.entry_protocol, &projection.message)
+        let encoded = self
+            .response_outbound
+            .encode_client_error_sse(&self.entry_protocol, &projection.message)
             .map_err(|error| RuntimeFault::new("client_sse_error_encode", error))?;
         let frame = SseTransportFrame::from_complete_bytes(encoded)
             .map_err(|error| RuntimeFault::new("client_sse_transport", format!("{error:?}")))?;

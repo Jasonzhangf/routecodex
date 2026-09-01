@@ -1498,6 +1498,16 @@ impl StandardHandleRegistry {
             .get(plugin_id)
             .map(|handle| handle as &dyn PluginHandle)
     }
+
+    /// Encode a client-visible SSE error through the response-outbound
+    /// plugin owner. Runtime orchestration must not call the codec directly.
+    pub fn encode_client_error_sse(
+        &self,
+        entry_protocol: &str,
+        message: &str,
+    ) -> Result<Vec<u8>, String> {
+        response_outbound::encode_client_error_sse_frame(entry_protocol, message)
+    }
 }
 
 impl Default for StandardHandleRegistry {
