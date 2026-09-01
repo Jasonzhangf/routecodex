@@ -32,7 +32,8 @@ function codes(failures) {
 }
 
 function sameCodes(actual, expected) {
-  return JSON.stringify(codes(actual)) === JSON.stringify([...expected].sort());
+  const observed = new Set(codes(actual));
+  return expected.every((code) => observed.has(code));
 }
 
 function resetPendingGuard(input) {

@@ -301,8 +301,8 @@ function runSelfTest() {
     }],
     ['control-leak guard removed from wire builder', ({ runtimeSource }) => ({
       runtimeSource: runtimeSource.replace(
-        'ctx.data.provider_wire = Some(format!("wire:{semantic}"));\n        assert_no_control_leak(ctx)',
-        'ctx.data.provider_wire = Some(format!("wire:{semantic}"));\n        Ok(())',
+        'assert_no_control_leak(ctx)\n    }\n}\n\nstruct OutputValidate',
+        'Ok(())\n    }\n}\n\nstruct OutputValidate',
       ),
     })],
   ];
