@@ -327,6 +327,24 @@ function checkMainlineEdges(mainlinePath = path.join(v4Root, 'docs/architecture/
   allowedOwners.add('routecodex-v4-standard-plugins::compile_standard_plan');
   allowedOwners.add('routecodex-v4-standard-plugins::StandardHandleRegistry');
   allowedOwners.add('routecodex-v4-cli-plugin::run');
+  // Current Cordis v4 mainline edges use symbol-qualified owners. Keep the
+  // allowlist explicit so an unregistered symbol remains fail-fast.
+  for (const owner of [
+    'routecodex-v4-standard-plugins::RelayRequestOutboundHook',
+    'routecodex-v4-provider::RelayRequestCodec',
+    'routecodex-v4-provider::NativeProviderTransport',
+    'routecodex-v4-provider::RelayResponseCodec',
+    'routecodex-v4-standard-plugins::RelayResponseHook',
+    'routecodex-v4-standard-plugins::RelayResponseOutboundHook',
+    'v4.execution_epoch_control_port',
+    'routecodex-v4-runtime::RuntimeLease',
+    'routecodex-v4-runtime::ExecutionEngine',
+    'v4.direct.relay_container',
+    'v4.hook.direct.request_response',
+    'v4.hook.relay.request_response',
+    'v4.transport.sse_plugin',
+    'v4.runtime.sse_response_pipeline',
+  ]) allowedOwners.add(owner);
   const pathExists = (candidate) => {
     const trimmed = candidate.trim();
     const concrete = trimmed.endsWith('/**') ? trimmed.slice(0, -3) : trimmed;
