@@ -790,10 +790,10 @@ function runSelfTest() {
     }],
     ['node permission broadened', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat07ProviderCompat" => {\n'
+        '"V4ProviderReqCompat07ProviderCompat" | "V4ProviderReqOutbound08WirePayload" => {\n'
           + '            vec!["v4.request.provider_wire_payload".to_string()]\n'
           + '        }',
-        '"V4ProviderReqCompat07ProviderCompat" => {\n'
+        '"V4ProviderReqCompat07ProviderCompat" | "V4ProviderReqOutbound08WirePayload" => {\n'
           + '            vec![\n'
           + '                "v4.request.provider_wire_payload".to_string(),\n'
           + '                "v4.request.normal_payload".to_string(),\n'
