@@ -477,6 +477,8 @@ fn req04_tool_thinking_requires_true_model_self_report_without_request_identity_
     for description in [native_description, custom_description] {
         assert!(description.contains("自身当前真实的模型 ID"));
         assert!(description.contains("不得复制或推导"));
+        assert!(description.contains("不得读取或依据本轮上下文推断"));
+        assert!(description.contains("无法确定时不得猜测"));
         assert!(!description.contains("client-route-alias"));
         assert!(!description.contains("request-identity-must-not-be-model-id"));
     }
@@ -492,10 +494,25 @@ fn req04_tool_thinking_guidance_requires_model_self_report_in_both_protocols() {
     ] {
         assert!(guidance.contains("必须填写你自身当前真实的模型 ID"));
         assert!(guidance.contains("不得复制或推导"));
+        assert!(guidance.contains("不得读取或依据本轮上下文推断"));
+        assert!(guidance.contains("无法确定时不得猜测"));
         assert!(guidance.contains("request_id"));
         assert!(guidance.contains("provider-bound wire model"));
         assert!(!guidance.contains("逐字原样填写"));
         assert!(!guidance.contains("精确填写本次 provider-bound wire model"));
+    }
+}
+
+#[test]
+fn req04_tool_thinking_guidance_requires_structured_diagnostics_not_prose() {
+    for guidance in [
+        V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE,
+        V3_TOOL_THINKING_ANTHROPIC_GUIDANCE,
+    ] {
+        assert!(guidance.contains("必须返回原生"));
+        assert!(guidance.contains("普通回答仍可使用自然语言"));
+        assert!(guidance.contains("不得用自然语言替代工具参数中的 `model_id` 或 `goal_alignment_confidence` 字段"));
+        assert!(guidance.contains("必须是 0 到 100 的整数"));
     }
 }
 
