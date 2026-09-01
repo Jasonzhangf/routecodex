@@ -939,17 +939,12 @@ pub fn compile_production_execution_plans(
                 .filter(|plugin| !EXCLUDED_PLUGINS.contains(&plugin.plugin_id.as_str()))
                 .collect::<Vec<_>>();
             let plan = if selected.is_empty() {
-                let mut plan = NodePluginPlan {
-                    node_id: node.node_id.clone(),
-                    position: node.position,
-                    role_id: node.role_id.clone(),
-                    chain: chain_id.to_string(),
-                    entries: Vec::new(),
-                    selection_groups: Vec::new(),
-                    hash: String::new(),
-                };
-                plan.hash = plan.plan_hash();
-                plan
+                return Err(routecodex_v4_plugin_plan::PlanError::NodeContractInvalid {
+                    reason: format!(
+                        "production node {} on {} has no standard plugin binding",
+                        node.node_id, chain_id
+                    ),
+                });
             } else {
                 let authoring = selected
                     .iter()
@@ -1471,5 +1466,16 @@ mod tests {
         for plugin in standard_plugins() {
             assert!(registry.contains(&plugin.plugin_id));
         }
+    }
+
+    #[test]
+    fn production_compilation_rejects_unbound_nodes() {
+        let skeleton = SkeletonPlan::from_contract_json(include_str!(
+            "../../../contracts/skeleton-plan.contract.json"
+        ))
+        .expect("canonical skeleton contract must parse");
+        let error = compile_production_execution_plans(&skeleton)
+            .expect_err("production compilation must not accept an empty node plan");
+        assert!(error.to_string().contains("has no standard plugin binding"));
     }
 }
