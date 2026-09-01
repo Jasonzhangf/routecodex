@@ -12,11 +12,6 @@ version = 3
 [pipelines.hub_v1]
 skeleton = "hub_v1"
 
-[servers.primary]
-bind = "127.0.0.1"
-port = 4444
-routing_group = "primary"
-
 [providers.cc-sol]
 type = "responses"
 base_url = "https://cc.invalid/v1"
