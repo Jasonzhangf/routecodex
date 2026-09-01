@@ -425,7 +425,12 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.information.client_protocol".to_string(),
             "v4.information.provider_protocol".to_string(),
         ],
-        "V4ProviderReqCompat07ProviderCompat" | "V4ProviderReqOutbound08WirePayload" => vec![
+        "V4ProviderReqCompat07ProviderCompat" => vec![
+            "v4.request.provider_semantic".to_string(),
+            "v4.information.client_protocol".to_string(),
+            "v4.information.provider_protocol".to_string(),
+        ],
+        "V4ProviderReqOutbound08WirePayload" => vec![
             "v4.request.provider_semantic".to_string(),
             "v4.request.provider_wire_payload".to_string(),
             "v4.information.client_protocol".to_string(),
@@ -476,11 +481,7 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
         ],
         "V4HubRespOutbound05ClientSemantic" => vec!["v4.response.client_wire_payload".to_string()],
         "V4ProviderReqCompat07ProviderCompat" | "V4ProviderReqOutbound08WirePayload" => {
-            vec![
-                "v4.request.provider_wire_payload".to_string(),
-                "v4.information.client_protocol".to_string(),
-                "v4.information.provider_protocol".to_string(),
-            ]
+            vec!["v4.request.provider_wire_payload".to_string()]
         }
         "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_object".to_string()],
         "V4MetadataCenter01ScopeRegistry" => vec!["v4.control.metadata_center".to_string()],
