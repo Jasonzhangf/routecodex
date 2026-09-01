@@ -1,3 +1,5 @@
+#![cfg(feature = "red-fixtures")]
+
 use routecodex_v4_config::{build_v4_config_04_from_v4_config_03, compile_authoring, parse_v4_config_02_from_v4_config_01, publish_v4_config_05_from_v4_config_04, validate_v4_config_03_from_v4_config_02, V4Config01AuthoringFileSource};
 
 const VALID: &str = r#"
