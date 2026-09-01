@@ -1814,6 +1814,7 @@ impl SkeletonRuntime {
         self.handle_registry
             .encode_client_error_sse(entry_protocol, message)
             .map_err(|error| RuntimeFault::new("client_sse_error_encode", error))
+    }
 
     /// Read-only observability of the exact production plugin set pinned by
     /// the active epoch. Consumers cannot use this to execute or mutate the
