@@ -1451,6 +1451,10 @@ fn render_payload_console_event(
     if !plugin_id.ends_with("payload_console_render") || kind != "console.payload_ready" {
         return None;
     }
+    // TTY diagnostics may prefix the payload summary with ANSI color codes.
+    // Normalize only the diagnostic presentation carrier; never touch the
+    // business payload or control side-channel.
+    let message = message.trim_start_matches(|ch: char| ch == '\u{1b}' || ch == '[' || ch.is_ascii_digit() || ch == ';' || ch == 'm');
     if message.starts_with("▶ [req]") {
         Some(format!(
             "▶ [{}] req={} event=started model={} target={}/{} stream={} chain=req_inbound>req_chatprocess>req_outbound>provider elapsedMs={} transport={}",
@@ -1711,6 +1715,19 @@ mod tests {
         assert!(rendered.contains("req=test-server-day-00000001"));
         assert!(rendered.contains("target=cc-sol/gpt-5.5"));
         assert!(rendered.contains("elapsedMs=7"));
+
+        let tty_request_event = "v4.std.diagnostic.request_payload_console_render:console.payload_ready:\u{1b}[36m▶ [req] model=gpt-5.5 stream=true messages=1 tools=0\u{1b}[0m";
+        assert!(render_payload_console_event(
+            tty_request_event,
+            &request,
+            "responses",
+            "cc-sol",
+            "gpt-5.5",
+            true,
+            None,
+            std::time::Duration::from_millis(8),
+        )
+        .is_some());
     }
 
     fn test_manifest() -> RuntimeConfigManifest {

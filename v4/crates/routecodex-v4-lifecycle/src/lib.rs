@@ -327,6 +327,11 @@ pub fn start_managed(
                 // using this invocation's stdout/stderr. In-place exec
                 // restart belongs to the explicit `restart` command.
                 release_for_foreground(paths, timeout)?;
+                // The child removes its control socket immediately after the
+                // lifecycle record.  Wait for both declarations to disappear
+                // before admitting the replacement, otherwise a fast `start`
+                // can report AlreadyManaged while the old PID is exiting.
+                wait_until(timeout, || !paths.control_socket.exists())?;
             }
             ManagedStatus {
                 state,
