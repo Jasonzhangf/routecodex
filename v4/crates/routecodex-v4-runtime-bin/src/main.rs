@@ -1453,7 +1453,7 @@ fn render_payload_console_event(
     }
     if message.starts_with("▶ [req]") {
         Some(format!(
-            "▶ [{}] req={} event=started model={} target={}/{} stream={} route=default chain=req_inbound>req_chatprocess>req_outbound>provider elapsedMs={} transport={}",
+            "▶ [{}] req={} event=started model={} target={}/{} stream={} chain=req_inbound>req_chatprocess>req_outbound>provider elapsedMs={} transport={}",
             endpoint,
             request.request_id,
             model,
@@ -1468,7 +1468,7 @@ fn render_payload_console_event(
             return None;
         }
         Some(format!(
-            "✅ [{}] req={} event=completed status={} responseStatus=completed finish_reason=stop provider={} model={} {} elapsedMs={} transport={}",
+            "✅ [{}] req={} event=completed status={} responseStatus=completed finish_reason=stop provider={} model={} chain=provider>resp_inbound>resp_chatprocess>resp_outbound {} elapsedMs={} transport={}",
             endpoint,
             request.request_id,
             status.unwrap_or(200),
