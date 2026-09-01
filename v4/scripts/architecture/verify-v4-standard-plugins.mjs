@@ -184,6 +184,12 @@ const NODE_PERMISSIONS = new Map([
   ['V4HubReqTarget05Resolved', {
     reads: ['v4.control.route_facts'], writes: ['v4.control.target_selection'],
   }],
+  ['V4Router05RequestClassified', {
+    reads: ['v4.control.route_facts'], writes: [],
+  }],
+  ['V4Router06SelectionPlan', {
+    reads: ['v4.control.target_selection'], writes: [],
+  }],
 ]);
 
 const PLUGIN_DESCRIPTOR_RE = /plugin\(\s*(?:"([^"]+)"|([A-Z][A-Z0-9_]*))\s*,\s*PluginCategory::[A-Za-z]+\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*Some\((\d+)\)\s*,[\s\S]*?vec!\[([^\]]*)\]\s*,\s*vec!\[([^\]]*)\]\s*,\s*\)/g;
@@ -520,8 +526,8 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 30) {
-      failures.push(`${MODULE}: expected 30 active standard descriptors, got ${activeDescriptors.length}`);
+    if (activeDescriptors.length !== 32) {
+      failures.push(`${MODULE}: expected 32 active standard descriptors, got ${activeDescriptors.length}`);
     }
     if (!activeDescriptors.some(
       (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',
