@@ -74,7 +74,6 @@ fn every_standard_plugin_is_bound_in_production_chain_contract() {
         "v4.std.provider.auth_handle_mock",
         "v4.std.provider.wire_mock",
         "v4.std.provider.transport_mock",
-        "v4.std.request.governance",
     ];
     for plugin in standard_plugins()
         .into_iter()
@@ -168,4 +167,27 @@ fn compiled_production_plans_cover_every_runtime_node() {
         .filter(|plugin_id| plugin_id.starts_with("v4.std."))
         .count();
     assert!(bound_plugins > 2, "production wiring must not collapse to two plugin entries");
+}
+
+#[test]
+fn request_chat_process_has_executable_governance_handle() {
+    let contract = production_contract();
+    let skeleton = SkeletonPlan::from_contract_json(
+        &serde_json::to_string(&contract).expect("contract serializes"),
+    )
+    .expect("production skeleton compiles");
+    let compiled = compile_production_execution_plans(&skeleton)
+        .expect("production plans compile");
+    let plan = compiled
+        .plans
+        .iter()
+        .find(|plan| plan.node_id == "V4HubReqChatProcess03Governed")
+        .expect("request Chat Process plan must exist");
+    assert!(
+        plan.entries.iter().any(|entry| {
+            entry.plugin_id == "v4.std.chat_process.request_governance"
+                && !matches!(entry.effect, routecodex_v4_plugin_contract::PluginEffect::DiagnosticOnly)
+        }),
+        "request Chat Process must execute governance through its plugin handle"
+    );
 }

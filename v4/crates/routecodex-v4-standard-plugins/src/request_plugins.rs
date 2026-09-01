@@ -207,7 +207,7 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
             vec![],
         ),
         plugin(
-            "v4.std.request.governance",
+            "v4.std.chat_process.request_governance",
             PluginCategory::ChatProcess,
             "V4HubReqChatProcess03Governed",
             "request_chat_process",
@@ -243,7 +243,7 @@ pub(crate) fn handles() -> Vec<(&'static str, fn(&mut ExecCtx<'_>) -> Result<(),
     vec![
         (REQUEST_PROTOCOL_PARSE_PLUGIN_ID, request_protocol_parse),
         (REQUEST_NORMALIZE_PLUGIN_ID, request_normalize),
-        ("v4.std.request.governance", request_governance),
+        ("v4.std.chat_process.request_governance", request_governance),
         ("v4.std.request.responses_wire_build", wire_build),
     ]
 }

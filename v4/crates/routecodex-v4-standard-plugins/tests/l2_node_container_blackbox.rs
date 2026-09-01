@@ -51,7 +51,6 @@ fn publish_container(mut container: NodeContainer) -> NodeContainer {
 
 fn request_data() -> Value {
     json!({
-        "requestId": "req-1",
         "messages": [{"role": "user", "content": "hello"}]
     })
 }
@@ -78,10 +77,11 @@ fn positive_blackbox_execute_standard_plan_through_node_container() {
         )
         .expect("standard plan executes through typed bridge");
 
-    // Data carries the deterministic governance marker only; control markers
+    // Governance validates and preserves the normal payload; control markers
     // stay in the control side channel.
     let data = output.data.as_object().expect("data is object");
-    assert_eq!(data["governance"], json!("request_governance"));
+    assert_eq!(data["messages"][0]["content"], json!("hello"));
+    assert!(data.get("governance").is_none(), "governance state never enters data");
     assert!(data.get("control").is_none(), "control never enters data");
     assert!(
         data.get("metadata_center").is_none(),
