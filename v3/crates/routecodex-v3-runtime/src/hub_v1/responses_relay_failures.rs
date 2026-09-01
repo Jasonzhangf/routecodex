@@ -92,12 +92,16 @@ pub(crate) fn provider_runtime_failure(
     } else {
         "provider_runtime_error".to_string()
     };
+    let status = if terminal_projection.is_some() {
+        499
+    } else {
+        match &error {
+            V3ProviderError::HttpStatus { response } => response.status,
+            _ => 502,
+        }
+    };
     V3ResponsesRelayProviderFailure {
-        status: if terminal_projection.is_some() {
-            499
-        } else {
-            502
-        },
+        status,
         policy_error_type,
         policy_error_message: policy_error_message.clone(),
         provider_id: provider_id.to_string(),

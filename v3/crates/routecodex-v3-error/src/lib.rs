@@ -607,6 +607,15 @@ fn internal_client_status(source: &V3Error01SourceRaised) -> u16 {
     }
 }
 
+fn provider_client_status(source: &V3Error01SourceRaised) -> u16 {
+    source
+        .external_error
+        .as_ref()
+        .and_then(|external| external.status)
+        .filter(|status| *status == 429)
+        .unwrap_or(502)
+}
+
 fn client_error_message(source: &V3Error01SourceRaised) -> String {
     match source.source_kind {
         // Provider/runtime text is diagnostic side-channel data.  It may contain
@@ -922,7 +931,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         V3ErrorSourceKind::PathNotFound => 404,
         V3ErrorSourceKind::ModelNotFound => 404,
         V3ErrorSourceKind::PendingEndpoint => 501,
-        V3ErrorSourceKind::ProviderFailure => 502,
+        V3ErrorSourceKind::ProviderFailure => provider_client_status(source),
         V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => 400,
         V3ErrorSourceKind::TargetPoolExhausted => 503,
         V3ErrorSourceKind::RuntimeFailure => internal_client_status(source),

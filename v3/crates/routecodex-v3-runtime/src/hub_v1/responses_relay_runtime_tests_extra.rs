@@ -232,8 +232,8 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
     );
 
     assert_eq!(
-        output.status, 502,
-        "Error06 terminal exhaustion projection owns the client status after all provider candidates are exhausted"
+        output.status, 429,
+        "Error06 terminal exhaustion projection preserves the upstream provider status"
     );
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
@@ -262,6 +262,27 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
     );
     assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
     assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
+}
+
+#[test]
+fn provider_runtime_http_status_preserves_upstream_429_for_policy_projection() {
+    let failure = super::responses_relay_failures::provider_runtime_failure(
+        V3ProviderError::HttpStatus {
+            response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
+                request_id: "req-429".to_string(),
+                provider_id: "goaichat".to_string(),
+                status: 429,
+                headers: Vec::new(),
+                body: br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
+                body_read_failure: None,
+            }),
+        },
+        "goaichat",
+        None,
+    );
+
+    assert_eq!(failure.status, 429);
+    assert_eq!(failure.policy_error_type, "provider_runtime_error");
 }
 
 fn test_provider_request(

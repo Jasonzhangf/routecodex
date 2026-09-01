@@ -1254,8 +1254,8 @@ message_mode = "code_only"
         .terminal_projection
         .expect("default-floor exhausted 429 must be terminal");
     assert_eq!(
-        projection.status, 502,
-        "provider terminal projection must remain 502 regardless of configured project status"
+        projection.status, 429,
+        "recoverable provider HTTP 429 must preserve its external status"
     );
     assert_eq!(
         projection.body["error"]["code"], "E_PATH_RATE_LIMIT",
