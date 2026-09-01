@@ -188,7 +188,8 @@ fn positive_request_chain_produces_wire_and_stable_binding() {
         .as_ref()
         .expect("provider wire produced");
     assert_eq!(wire["model"], "m");
-    assert_eq!(wire["messages"][0]["content"], "hello");
+    assert_eq!(wire["input"][0]["content"], "hello");
+    assert_eq!(wire["protocol"], "responses");
     assert_eq!(wire["stream"], false);
     assert_eq!(
         report.binding,
@@ -198,11 +199,20 @@ fn positive_request_chain_produces_wire_and_stable_binding() {
     assert_eq!(
         report.trace,
         vec![
+            "request.inbound_normalize",
+            "request.continuation_classify",
             "v4.std.contract.input_validate:node.input_validated:standard input validator",
+            "request.chat_process",
             "v4.std.diagnostic.debug_observe:node.debug_observe:debug observation emitted",
             "v4.std.diagnostic.timing:node.timing:timing observation emitted",
             "v4.std.diagnostic.snapshot_record:node.snapshot:snapshot observation emitted",
             "v4.std.diagnostic.request_payload_console_render:console.payload_ready:▶ [req] model=m stream=false messages=1 tools=0",
+            "request.execution_plan",
+            "request.route_facts",
+            "request.target_resolve",
+            "request.provider_semantic",
+            "request.wire_build",
+            "request.transport",
             "v4.std.provider.transport_validate:node.provider_transport_validated:provider wire transport boundary validated",
         ]
     );

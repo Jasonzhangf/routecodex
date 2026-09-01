@@ -40,12 +40,17 @@ use std::fmt;
 
 mod control_resources;
 mod execution_engine;
+mod node_service;
 
 pub mod request_port;
 pub mod response_error_port;
 
 pub use control_resources::*;
 pub use execution_engine::{ExecutionEngine, ExecutionError, NodeExecutionFrame, NodeOutcome};
+pub use node_service::{
+    ImmutableDataCarrier, ImmutableDiagnosticCarrier, ImmutableInformationCarrier,
+    NodeServiceRegistry, ServiceError, ServiceLifecycle,
+};
 // Single source of truth: `PluginKind` is owned by routecodex-v4-plugin-contract
 // (v4/contracts/node-plugin.contract.json kinds). The runtime never defines a
 // second plugin-kind taxonomy; it only re-exports the contract type.
@@ -962,12 +967,16 @@ impl ExecutionContext {
         context.control.continuation_restored = control.continuation_restored;
         context.information = serde_json::from_value(frame.information.clone())
             .map_err(|error| RuntimeFault::new("execution_frame_information", error.to_string()))?;
-        context.diagnostic.trace.extend(
-            frame
-                .events
-                .iter()
-                .map(|event| format!("{}:{}:{}", event.plugin_id, event.kind, event.message)),
-        );
+        for event in &frame.events {
+            if event.kind == "stage.checkpoint" {
+                context.diagnostic.trace.push(event.message.clone());
+            } else {
+                context.diagnostic.trace.push(format!(
+                    "{}:{}:{}",
+                    event.plugin_id, event.kind, event.message
+                ));
+            }
+        }
         Ok(context)
     }
 

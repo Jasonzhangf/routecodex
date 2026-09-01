@@ -27,7 +27,6 @@ pub fn active_runtime(contract_json: &str) -> SkeletonRuntime {
                 .filter(|descriptor| descriptor.node_selector.node_id == node.node_id)
                 .filter(|descriptor| {
                     descriptor.plugin_id != "v4.std.chat_process.request_governance"
-                        && descriptor.plugin_id != "v4.std.provider.wire_build"
                         && descriptor.plugin_id != "v4.std.protocol.wire_codec_proto"
                         && !descriptor.plugin_id.ends_with("_mock")
                         && !(chain.chain_id == "relay_request"
