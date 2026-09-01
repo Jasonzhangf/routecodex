@@ -757,20 +757,20 @@ function runSelfTest() {
     }],
     ['retired node selector reintroduced', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat07ProviderCompat",\n        "request_outbound",',
+        '"V4ProviderReqOutbound08WirePayload",\n        "request_outbound",',
         '"V4ProviderReqCompat06Compat",\n        "request_outbound",',
       );
     }],
     ['active node role mismatch reintroduced', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat07ProviderCompat",\n        "request_outbound",',
-        '"V4ProviderReqCompat07ProviderCompat",\n        "request_chat_process",',
+        '"V4ProviderReqOutbound08WirePayload",\n        "request_outbound",',
+        '"V4ProviderReqOutbound08WirePayload",\n        "request_chat_process",',
       );
     }],
     ['active node position mismatch reintroduced', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat07ProviderCompat",\n        "request_outbound",\n        Some(7),',
-        '"V4ProviderReqCompat07ProviderCompat",\n        "request_outbound",\n        Some(6),',
+        '"V4ProviderReqOutbound08WirePayload",\n        "request_outbound",\n        Some(8),',
+        '"V4ProviderReqOutbound08WirePayload",\n        "request_outbound",\n        Some(7),',
       );
     }],
     ['provider semantic reversal reintroduced', (state) => {
