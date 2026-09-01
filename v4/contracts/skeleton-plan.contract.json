@@ -15,7 +15,7 @@
   },
   "manifest_hash": "sha256:pending-config-v2-manifest",
   "plan_epoch": 2,
-  "plan_hash": "sha256:78b1a225ca3039cab5b4f15035d653f5998c410c33e4dadbc3190af13c5d100b",
+  "plan_hash": "sha256:21519488d70d238d260d47086ba7a0a5f2d77d63d5fc4f2f2db084f3e3bb5599",
   "direct_protocol_contract": {
     "same_protocol": true,
     "mismatch": "fail_fast"
@@ -141,7 +141,7 @@
         {"node_id": "V4Error01SourceRaised", "chain": "error", "position": 1, "role_id": "error_source", "terminal": false, "kernel": true, "plugins": [
           {"plugin_id": "v4.std.error.typed_intake", "effects": ["control"]}
         ]},
-        {"node_id": "V4Error02HostCaptured", "chain": "error", "position": 2, "role_id": "error_source", "terminal": false, "kernel": false, "plugins": []},
+        {"node_id": "V4Error02HostCaptured", "chain": "error", "position": 2, "role_id": "error_source", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.std.error.host_capture", "effects": ["control"]}]},
         {"node_id": "V4Error03RuntimeClassified", "chain": "error", "position": 3, "role_id": "error_classify", "terminal": false, "kernel": false, "plugins": [
           {"plugin_id": "v4.std.error.runtime_classify", "effects": ["control"]}
         ]},
