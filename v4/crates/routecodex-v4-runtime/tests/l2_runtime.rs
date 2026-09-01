@@ -410,6 +410,12 @@ fn one_admission_lease_survives_request_provider_response_to_terminal() {
         )
         .expect("request through admitted lease");
     assert_eq!(request.request_id, "r-lease-lifecycle");
+    assert!(request
+        .trace
+        .iter()
+        .any(|entry| entry.starts_with("v4.hook.direct.request:plugin.executed:")),
+        "request must carry a typed plugin execution witness, trace={:?}", request.trace
+    );
     assert_eq!(lease.snapshot().in_flight_leases, 1);
     let response = runtime
         .execute_provider_response_scoped_with_lease(
