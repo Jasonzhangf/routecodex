@@ -58,6 +58,11 @@ fn minimal_user_config_parses_ordered_provider_model_tiers() {
         r#"
 version = 3
 
+[servers.primary]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "primary"
+
 [route_groups.primary.default]
 tiers = [
   [{ use = "cc-sol/gpt-5.6-sol" }],
@@ -100,6 +105,11 @@ fn projection_uses_first_outer_tier_as_highest_priority_and_equalizes_omitted_we
         r#"
 version = 3
 
+[servers.primary]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "primary"
+
 [route_groups.primary.default]
 tiers = [
   [{ use = "cc-sol/gpt-5.6-sol" }],
@@ -134,6 +144,11 @@ fn projection_rejects_unknown_provider_model_before_compiler_entry() {
     let parsed = parse_v3_user_config_02_routing(
         r#"
 version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "primary"
 
 [route_groups.primary.default]
 tiers = [[{ use = "missing/model" }]]
@@ -287,7 +302,7 @@ fn standalone_store_resolves_provider_directory_and_publishes_manifest() {
     fs::create_dir_all(&provider_dir).unwrap();
     fs::write(
         root.join("config.toml"),
-        "version = 3\n[route_groups.primary.default]\ntiers = [[{ use = \"cc-sol/gpt-5.6-sol\" }]]\n",
+        "version = 3\n[servers.primary]\nbind = \"127.0.0.1\"\nport = 4444\nrouting_group = \"primary\"\n[route_groups.primary.default]\ntiers = [[{ use = \"cc-sol/gpt-5.6-sol\" }]]\n",
     )
     .unwrap();
     fs::write(
@@ -342,7 +357,10 @@ fn embedded_internal_user_config_topology_is_typed_and_provider_free() {
     let internal = routecodex_v3_config::internal::v3_internal_user_config_authoring();
     assert!(internal.providers.is_empty());
     assert!(internal.forwarders.is_empty());
-    assert_eq!(internal.servers.len(), 2);
+    assert!(
+        internal.servers.is_empty(),
+        "internal.toml must not declare servers or listener ports"
+    );
     assert!(internal.route_groups.contains_key("routecodex_v3_4444"));
     assert!(internal.route_groups.contains_key("responses_v3_7777"));
     assert!(!internal.route_groups.contains_key("anthropic_v3_10000"));
@@ -548,7 +566,9 @@ fn normalize_runtime_manifest(
 }
 
 fn project_default_tier(tier: &str) -> routecodex_v3_config::V3Config02AuthoringParsed {
-    let raw = format!("version = 3\n[route_groups.primary.default]\ntiers = [{tier}]");
+    let raw = format!(
+        "version = 3\n[servers.primary]\nbind = \"127.0.0.1\"\nport = 4444\nrouting_group = \"primary\"\n[route_groups.primary.default]\ntiers = [{tier}]"
+    );
     let user = parse_v3_user_config_02_routing(&raw).unwrap();
     let base = parse_v3_config_02_authoring(INTERNAL_BASE).unwrap();
     project_v3_user_config_03_authoring(user, base, &provider_catalogue()).unwrap()
