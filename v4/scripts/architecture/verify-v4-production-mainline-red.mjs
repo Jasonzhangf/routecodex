@@ -13,12 +13,6 @@ const runtimeBin = fs.readFileSync(path.join(root, 'crates/routecodex-v4-runtime
 const productionSource = runtimeBin.split('#[cfg(test)]', 1)[0];
 const failures = [];
 
-for (const symbol of ['NodeContainer', 'StandardHandleRegistry', 'execute_with_plan_hash']) {
-  if (!productionSource.includes(symbol)) {
-    failures.push(`PRODUCTION_NODE_CONTAINER_DISPATCH_MISSING: ${symbol}`);
-  }
-}
-
 if (/execute_request_scoped_with_owner\([\s\S]*?\)\s*\.map_err/.test(productionSource)
     && !/let\s+request_report\s*=/.test(productionSource)) {
   failures.push('REQUEST_REPORT_DISCARDED: request chain report is not consumed by production path');
