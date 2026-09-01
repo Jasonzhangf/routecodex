@@ -2370,6 +2370,39 @@ fn provider_attempt_failure_does_not_close_webui_request_before_terminal_error()
 }
 
 #[test]
+fn openai_chat_relay_does_not_accept_sse_before_terminal_provider_outcome() {
+    let source = include_str!("../executors.rs");
+    assert!(
+        !source.contains("v3_openai_chat_relay_sse_accept_response("),
+        "OpenAI Chat Relay must not commit an SSE response before provider outcome"
+    );
+    assert!(
+        !source.contains("append_v3_openai_chat_relay_sse_done(&data_frame)"),
+        "Error06 must not be hand-wrapped as a Chat completion data frame"
+    );
+}
+
+#[test]
+fn openai_chat_relay_terminal_error_keeps_http_error_projection() {
+    let output = routecodex_v3_runtime::V3OpenAiChatRelayRuntimeOutput {
+        status: 502,
+        client_body: routecodex_v3_runtime::V3OpenAiChatRelayClientBody::Json(json!({
+            "error": {"code": "provider_pool_exhausted", "message": "provider unavailable"}
+        })),
+        node_trace: vec!["V3Error06ClientProjected"],
+        error_chain: Some(vec!["V3Error01SourceRaised", "V3Error06ClientProjected"]),
+        error_class: Some("provider_failure"),
+        error_detail: Some("provider unavailable".to_string()),
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+    };
+    let response = openai_chat_relay_output_response(output, None, Duration::from_secs(1));
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(response.headers()["content-type"], "application/json");
+}
+
+#[test]
 fn cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_lines() {
     let log_file = test_v3_console_log_file("provider-cooldown-transition");
     let _ = std::fs::remove_file(&log_file);
