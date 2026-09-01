@@ -95,3 +95,9 @@ fn manifest_stage_publishes_only_valid_registry() {
     let registry = build_v4_config_04_from_v4_config_03(validated).unwrap();
     assert!(publish_v4_config_05_from_v4_config_04(registry).is_ok());
 }
+
+#[test]
+fn config_stages_publish_independent_checkpoint_fact() {
+    let source = V4Config01AuthoringFileSource::new("red", VALID);
+    let _checkpoint = source.stage_checkpoint();
+}
