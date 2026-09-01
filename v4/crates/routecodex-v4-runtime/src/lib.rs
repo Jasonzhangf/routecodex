@@ -87,6 +87,25 @@ pub fn build_responses_wire_request(
             "selected provider wire model is empty",
         ));
     }
+    for key in [
+        "requestId",
+        "control",
+        "metadata_center",
+        "error_chain",
+        "route_facts",
+        "target_selection",
+        "debug",
+        "diagnostics",
+        "snapshot",
+        "providerId",
+    ] {
+        if object.contains_key(key) {
+            return Err(RuntimeFault::new(
+                "provider_wire_control_leak",
+                format!("provider wire contains internal control field {key}"),
+            ));
+        }
+    }
     object.insert("model".to_string(), Value::String(wire_model.to_string()));
     object.insert("stream".to_string(), Value::Bool(stream));
     let body = serde_json::to_vec(&body)
