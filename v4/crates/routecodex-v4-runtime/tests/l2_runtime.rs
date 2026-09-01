@@ -250,6 +250,34 @@ fn responses_entry_runs_direct_lane_without_relay_projection() {
 }
 
 #[test]
+fn relay_request_chat_to_responses_is_plugin_owned() {
+    let runtime = active_runtime();
+    let report = runtime
+        .execute_request_json_scoped_for_target_with_lease(
+            r#"{"model":"m","messages":[{"role":"user","content":"hello"}],"max_tokens":8}"#,
+            "chat",
+            "responses",
+            "m",
+            false,
+            "r-chat-responses-plugin",
+            5555,
+            "session-chat-responses",
+            "conversation-chat-responses",
+            Some("relay"),
+            None,
+        )
+        .expect("chat to Responses request chain runs");
+    let wire = report.provider_wire_value.expect("provider wire produced");
+    assert_eq!(wire["input"][0]["content"], "hello");
+    assert!(wire.get("messages").is_none());
+    assert_eq!(wire["max_output_tokens"], 8);
+    assert!(report
+        .trace
+        .iter()
+        .all(|entry| !entry.contains("build_retry_wire")));
+}
+
+#[test]
 fn one_admission_lease_survives_request_provider_response_to_terminal() {
     let runtime = active_runtime();
     let lease = runtime
