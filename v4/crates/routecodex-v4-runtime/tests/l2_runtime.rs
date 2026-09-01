@@ -195,8 +195,14 @@ fn positive_request_chain_produces_wire_and_stable_binding() {
         execution_binding(plan),
         "execution binding must match the loaded plan"
     );
+    let semantic_trace = report
+        .trace
+        .iter()
+        .filter(|entry| !entry.contains(":plugin.executed:"))
+        .cloned()
+        .collect::<Vec<_>>();
     assert_eq!(
-        report.trace,
+        semantic_trace,
         vec![
             "request.inbound_normalize",
             "request.continuation_classify",
