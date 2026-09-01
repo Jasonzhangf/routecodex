@@ -262,6 +262,48 @@ resources:
   - SseIngressPlugin
   - SseEgressPlugin
   binding_status: anchored
+- resource_id: v4.information.entry_protocol
+  axis: information
+  verification_gate:
+  - v4_direct_relay_sse
+  - v4_direct_relay_sse_red
+  - v4_parity_gate_execution_binding
+  resource_kind: client_protocol
+  lifecycle: v4.pipeline.admission
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols:
+  - InformationView
+  allowed_writers:
+  - V4Runtime01MainlineKernel
+  allowed_readers:
+  - V4DirectResp03ClientProtocol
+  - V4ServerRespOutbound06ClientFrame
+  forbidden_writers:
+  - SseIngressPlugin
+  - SseEgressPlugin
+  binding_status: anchored
+- resource_id: v4.information.stream_terminal
+  axis: information
+  verification_gate:
+  - v4_direct_relay_sse
+  - v4_direct_relay_sse_red
+  - v4_parity_gate_execution_binding
+  resource_kind: stream_terminal
+  lifecycle: v4.pipeline.response
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols:
+  - InformationView
+  allowed_writers:
+  - V4Runtime01MainlineKernel
+  allowed_readers:
+  - V4DirectResp03ClientProtocol
+  - V4ServerRespOutbound06ClientFrame
+  forbidden_writers:
+  - SseIngressPlugin
+  - SseEgressPlugin
+  binding_status: anchored
 - resource_id: v4.request.normal_payload
   axis: data
   verification_gate:

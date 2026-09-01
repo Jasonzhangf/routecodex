@@ -80,7 +80,7 @@ function validatePhysicalSources(sourceInputs, failures) {
       || !sourceInputs.responseInbound.includes('reject_control_fields(raw)?;')
       || (sourceInputs.responseOutbound.match(/reject_control_fields\(/g) ?? []).length !== 2
       || !sourceInputs.responseOutbound.includes('reject_control_fields(object)?;')
-      || !sourceInputs.responseOutbound.includes('reject_control_fields(semantic)?;')) {
+      || !sourceInputs.responseOutbound.includes('reject_control_fields(&semantic)?;')) {
     failures.push(failure('WIRE_CONTROL_REJECTION_SOURCE',
       'provider/client response boundaries must reject control fields before projection'));
   }

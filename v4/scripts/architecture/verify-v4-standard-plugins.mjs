@@ -130,6 +130,8 @@ const NODE_PERMISSIONS = new Map([
       'v4.direct.response.client_payload',
       'v4.information.client_protocol',
       'v4.information.provider_protocol',
+      'v4.information.entry_protocol',
+      'v4.information.stream_terminal',
     ],
     writes: [],
   }],
@@ -191,7 +193,12 @@ const NODE_PERMISSIONS = new Map([
     writes: [],
   }],
   ['V4ServerRespOutbound06ClientFrame', {
-    reads: ['v4.response.client_wire_payload'], writes: ['v4.response.client_object'],
+    reads: [
+      'v4.response.client_wire_payload',
+      'v4.information.entry_protocol',
+      'v4.information.stream_terminal',
+    ],
+    writes: ['v4.response.client_object'],
   }],
   ['V4MetadataCenter01ScopeRegistry', {
     reads: ['v4.control.metadata_center'], writes: ['v4.control.metadata_center'],
