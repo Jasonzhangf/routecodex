@@ -283,7 +283,7 @@ function runSelfTest() {
       'await fiber.await();\n        mounted.push({ id: plugin.id, fiber });',
     )],
     ['generic execution payload surface restored', (candidate) => candidate.replace(
-      "const allowedKeys = new Set(['data', 'control']);",
+      "const allowedKeys = new Set(['data', 'control', 'information']);",
       "const allowedKeys = new Set(['payload']);",
     )],
     ['executeNode surface removed', (candidate) => candidate.replace(
