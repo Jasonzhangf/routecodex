@@ -30,7 +30,7 @@
   "previous_active_version": "active-v4",
   "promotion_id": "v4-cordis-edge-promotion",
   "promotion_record_hash": "sha256:ee587e1406d4631ed52df76655ab04024e5e2a056a5d0b41a10ad77ce2392bdc",
-  "public_api_hash": "sha256:4a715f6ce89f9fa0e2a3d2b9eb20496f0420969cb81b7b599401f07de72871d",
+  "public_api_hash": "sha256:4a715f6ce89f9fae0e2a3d2b9eb20496f0420969cb81b7b599401f07de72871d",
   "regression_report_hash": "sha256:7e79bec3721326198435b3a5e47a12bac4632eadec94729b22a0b4e7470fab11",
   "regression_report_id": "v4-cordis-edge-regression-current",
   "review_id": "v4-cordis-edge-review",

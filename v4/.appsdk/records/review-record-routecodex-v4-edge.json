@@ -30,7 +30,7 @@
     "resource_map_hash": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
     "verification_map_hash": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230"
   },
-  "v4_product_map_root": "docs/architecture/maps",
+  "v4_product_map_root": ".appsdk/maps",
   "verdict": "pass",
   "verification_map_hash": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230"
 }
