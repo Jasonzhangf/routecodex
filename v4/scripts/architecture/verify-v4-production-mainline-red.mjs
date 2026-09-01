@@ -33,7 +33,9 @@ if (!runtimeBin.includes('execute_provider_response_scoped')) {
 if (!/execute_provider_response_scoped[\s\S]*?report\.client_frame/.test(productionSource)) {
   failures.push('RESPONSE_JSON_FRAME_DISCARDED: JSON response chain output is not consumed');
 }
-if (!/execute_provider_response_scoped[\s\S]*?report\.client_frame/.test(productionSource.slice(productionSource.indexOf('struct ResponsesSseStream')))) {
+const sseStreamStart = productionSource.indexOf('struct CordisSseTransportStream');
+if (sseStreamStart < 0
+    || !/execute_provider_response_scoped[\s\S]*?report\.client_frame/.test(productionSource.slice(sseStreamStart))) {
   failures.push('RESPONSE_SSE_FRAME_DISCARDED: SSE response chain output is not consumed');
 }
 

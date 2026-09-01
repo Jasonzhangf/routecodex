@@ -1028,7 +1028,7 @@ fn handle_responses(
         )
         .map_err(|fault| project_fault(request, fault, 599))?;
         let response_stream =
-            ResponsesSseStream::new(stream, Arc::clone(runtime), response_processor);
+            CordisSseTransportStream::new(stream, Arc::clone(runtime), response_processor);
         return Ok(HttpResponse::streaming(
             client_status,
             "text/event-stream",
@@ -1257,7 +1257,7 @@ impl ProviderSseSource for ProviderResponseStream {
     }
 }
 
-struct ResponsesSseStream<S = ProviderResponseStream> {
+struct CordisSseTransportStream<S = ProviderResponseStream> {
     stream: S,
     runtime: Arc<Mutex<SkeletonRuntime>>,
     processor: ResponseStreamProcessor,
@@ -1266,7 +1266,7 @@ struct ResponsesSseStream<S = ProviderResponseStream> {
     close_after_pending: bool,
 }
 
-impl<S: ProviderSseSource> ResponsesSseStream<S> {
+impl<S: ProviderSseSource> CordisSseTransportStream<S> {
     fn new(
         stream: S,
         runtime: Arc<Mutex<SkeletonRuntime>>,
@@ -1317,7 +1317,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
     }
 }
 
-impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
+impl<S: ProviderSseSource> ResponseStream for CordisSseTransportStream<S> {
     fn next_chunk(&mut self, chunk: &mut Vec<u8>) -> Result<bool, std::io::Error> {
         loop {
             if let Some(frame) = self.egress.pop() {
@@ -1870,7 +1870,7 @@ targets = ["mock"]
             .runtime
     }
 
-    fn stream(chunks: Vec<Result<Vec<u8>, String>>) -> ResponsesSseStream<MockSseSource> {
+    fn stream(chunks: Vec<Result<Vec<u8>, String>>) -> CordisSseTransportStream<MockSseSource> {
         stream_for(chunks, "responses", "direct")
     }
 
@@ -1878,7 +1878,7 @@ targets = ["mock"]
         chunks: Vec<Result<Vec<u8>, String>>,
         entry_protocol: &str,
         continuation_owner: &str,
-    ) -> ResponsesSseStream<MockSseSource> {
+    ) -> CordisSseTransportStream<MockSseSource> {
         stream_for_with_runtime(runtime(), chunks, entry_protocol, continuation_owner)
     }
 
@@ -1887,7 +1887,7 @@ targets = ["mock"]
         chunks: Vec<Result<Vec<u8>, String>>,
         entry_protocol: &str,
         continuation_owner: &str,
-    ) -> ResponsesSseStream<MockSseSource> {
+    ) -> CordisSseTransportStream<MockSseSource> {
         let port = u16::from_ne_bytes([0, 1]);
         let (request_lease, request_scope) = {
             let runtime = runtime.lock().expect("test runtime lock");
@@ -1927,7 +1927,7 @@ targets = ["mock"]
             "conversation-1",
         )
         .expect("test stream processor");
-        ResponsesSseStream::new(
+        CordisSseTransportStream::new(
             MockSseSource {
                 chunks: chunks.into(),
                 wait_result: Ok(()),
