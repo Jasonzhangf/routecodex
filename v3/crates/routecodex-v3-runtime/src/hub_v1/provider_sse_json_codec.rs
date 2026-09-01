@@ -94,55 +94,21 @@ pub(crate) fn normalize_v3_provider_sse_json_data_with_event_name(
     data: &str,
     event_name: Option<&str>,
 ) -> Result<String, String> {
+    if is_v3_provider_sse_keepalive_event_name(event_name) {
+        return Ok(String::new());
+    }
     if provider_protocol != V3HubProviderWireProtocol::Responses {
         return Ok(data.to_owned());
     }
     let Some(mut event) = parse_v3_provider_sse_json_data(data)? else {
         return Ok(data.to_owned());
     };
-    let payload_event_name = event
-        .as_object()
-        .and_then(|object| {
-            object
-                .get("event")
-                .and_then(Value::as_str)
-                .or_else(|| object.get("event_name").and_then(Value::as_str))
-                .or_else(|| object.get("type").and_then(Value::as_str))
-        })
-        .map(ToOwned::to_owned);
-    let effective_event_name = event_name.map(ToOwned::to_owned).or(payload_event_name);
-    let arguments_normalized = normalize_v3_responses_function_call_arguments_for_event(
-        &mut event,
-        effective_event_name.as_deref(),
-    )?;
-    let Some(object) = event.as_object_mut() else {
-        return Ok(data.to_owned());
-    };
-    let event_name = effective_event_name.as_deref();
-    let Some(event_name) = event_name else {
-        if arguments_normalized {
-            return serde_json::to_string(&event).map_err(|error| error.to_string());
-        }
-        return Ok(data.to_owned());
-    };
-    if !event_name.starts_with("response.") {
-        if arguments_normalized {
-            return serde_json::to_string(&event).map_err(|error| error.to_string());
-        }
-        return Ok(data.to_owned());
+    let arguments_normalized = normalize_v3_responses_function_call_arguments(&mut event)?;
+    if arguments_normalized {
+        serde_json::to_string(&event).map_err(|error| error.to_string())
+    } else {
+        Ok(data.to_owned())
     }
-    if object
-        .get("type")
-        .and_then(Value::as_str)
-        .is_some_and(|value| !value.trim().is_empty())
-    {
-        if arguments_normalized {
-            return serde_json::to_string(&event).map_err(|error| error.to_string());
-        }
-        return Ok(data.to_owned());
-    }
-    object.insert("type".to_owned(), Value::String(event_name.to_owned()));
-    serde_json::to_string(&event).map_err(|error| error.to_string())
 }
 
 pub(crate) fn normalize_v3_responses_function_call_arguments(
@@ -384,6 +350,15 @@ pub(crate) fn is_v3_provider_sse_keepalive_text(data: &str) -> bool {
             token.as_str(),
             "ping" | "pong" | "keep-alive" | "keepalive" | "heartbeat" | "ok"
         )
+}
+
+fn is_v3_provider_sse_keepalive_event_name(event_name: Option<&str>) -> bool {
+    event_name.map(str::trim).is_some_and(|name| {
+        matches!(
+            name.to_ascii_lowercase().as_str(),
+            "ping" | "pong" | "keep-alive" | "keepalive" | "heartbeat"
+        )
+    })
 }
 
 pub(crate) fn classify_v3_provider_responses_json_event(
@@ -1533,7 +1508,7 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
-    fn responses_event_name_recovers_missing_json_type_before_precommit() {
+    fn responses_event_name_does_not_supply_missing_json_type_before_precommit() {
         let fields = vec![
             SseField::Named {
                 name: "event".to_owned(),
@@ -1548,28 +1523,72 @@ mod provider_sse_json_codec_tests {
             V3HubProviderWireProtocol::Responses,
             &fields,
         )
-        .expect("registered SSE event name must recover missing type");
-        assert_eq!(
-            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
-                .expect("recovered Responses frame must classify"),
-            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
-        );
-        assert!(data.contains(r#""type":"response.output_text.delta""#));
+        .expect("transport event metadata must be ignored");
+        assert_eq!(data, r#"{"delta":"recovered"}"#);
+        let error = classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
+            .expect_err("missing provider JSON type must fail at the codec");
+        assert!(error.contains("requires a non-empty type"), "unexpected error: {error}");
     }
 
     #[test]
-    fn responses_payload_event_field_recovers_missing_json_type() {
+    fn responses_transport_keepalive_event_is_consumed_before_semantic_classification() {
+        let fields = vec![
+            SseField::Named {
+                name: "event".to_owned(),
+                value: "keepalive".to_owned(),
+            },
+            SseField::Named {
+                name: "data".to_owned(),
+                value: r#"{"heartbeat":true}"#.to_owned(),
+            },
+        ];
+        let data = normalize_v3_provider_sse_json_data_for_event_name(
+            V3HubProviderWireProtocol::Responses,
+            &fields,
+        )
+        .expect("registered transport keepalive must be consumed");
+        assert!(data.is_empty());
+        assert_eq!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
+                .expect("transport keepalive must not enter semantic classification"),
+            None,
+        );
+    }
+
+    #[test]
+    fn unknown_transport_event_still_fails_responses_semantic_classification() {
+        let fields = vec![
+            SseField::Named {
+                name: "event".to_owned(),
+                value: "unknown".to_owned(),
+            },
+            SseField::Named {
+                name: "data".to_owned(),
+                value: r#"{"id":"resp_1"}"#.to_owned(),
+            },
+        ];
+        let data = normalize_v3_provider_sse_json_data_for_event_name(
+            V3HubProviderWireProtocol::Responses,
+            &fields,
+        )
+        .expect("unknown event transport metadata remains observable");
+        let error = classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
+            .expect_err("unknown event payload must remain fail-fast");
+        assert!(error.contains("requires a non-empty type"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn responses_payload_event_field_does_not_supply_missing_json_type() {
         let data = normalize_v3_provider_sse_json_data_with_event_name(
             V3HubProviderWireProtocol::Responses,
             r#"{"event":"response.output_text.delta","delta":"recovered"}"#,
             None,
         )
-        .expect("registered payload event name must recover missing type");
-        assert_eq!(
-            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
-                .expect("recovered Responses frame must classify"),
-            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
-        );
+        .expect("JSON normalization must preserve the missing type");
+        assert_eq!(data, r#"{"event":"response.output_text.delta","delta":"recovered"}"#);
+        let error = classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
+            .expect_err("missing provider JSON type must fail at the codec");
+        assert!(error.contains("requires a non-empty type"), "unexpected error: {error}");
     }
 
     #[test]

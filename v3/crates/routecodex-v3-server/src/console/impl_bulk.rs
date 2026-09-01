@@ -1,6 +1,4 @@
-use crate::webui_observability::{
-    build_v3_obs_request_key, V3ObsEventType, V3ObsRequestMeta, V3ObsScope,
-};
+use crate::webui_observability::V3ObsEventType;
 use crate::*;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -44,161 +42,12 @@ pub(crate) fn build_v3_console_emission_context(
     context
 }
 
-// Typed WebUI projection helper: emits a lifecycle event to the shared
-// V3WebuiObservability handle carried by the listener state. This is a typed
-// side-channel projection, never a payload mutation.
-fn build_v3_webui_meta_for_context(
-    context: &V3ConsoleEmissionContext,
-    observability: &V3RuntimeObservability,
-) -> V3ObsRequestMeta {
-    V3ObsRequestMeta {
-        request_id: context.request_identity.request_id.clone(),
-        endpoint: context.endpoint.clone(),
-        model: observability
-            .model_id
-            .clone()
-            .or_else(|| observability.wire_model.clone()),
-        route: Some(resolve_v3_console_route_projection(observability).label),
-        routing_group: observability.routing_group_id.clone(),
-        pool: observability.pool_id.clone(),
-        provider_id: observability.provider_id.clone(),
-        auth_alias: observability.auth_alias.clone(),
-        provider_type: observability.provider_type.clone(),
-        wire_model: observability.wire_model.clone(),
-        provider: observability
-            .provider_key
-            .clone()
-            .or_else(|| observability.provider_id.clone()),
-        entry_protocol: Some(context.entry_protocol.clone()),
-        execution_mode: Some(observability.execution_mode.clone()),
-        transport: Some(observability.transport.clone()),
-        provider_status: observability.provider_status,
-        response_status: observability.response_status.clone(),
-        finish_reason: observability.finish_reason.clone(),
-        error_category: None,
-        error_detail: None,
-    }
-}
-
-// Explicit failure surface for the WebUI projection: projection/transport
-// errors must be reported, never silently swallowed.
-pub(crate) fn emit_v3_webui_projection_failure(context: &V3ConsoleEmissionContext, error: &str) {
-    let line = format_v3_console_timed_content(
-        "[webui-observability]",
-        &format!(
-            "req={} error={}",
-            context.request_identity.request_id, error
-        ),
-    );
-    append_v3_human_console_line(&context.state, &line);
-    eprintln!("{line}");
-}
-
-pub(crate) fn record_v3_webui_event_for_context(
-    context: &V3ConsoleEmissionContext,
-    event_type: V3ObsEventType,
-    observability: &V3RuntimeObservability,
-) -> Result<u64, String> {
-    let request_key = build_v3_obs_request_key(
-        context.state.server.port,
-        &context.request_identity.request_id,
-    );
-    let scope = V3ObsScope {
-        port: context.state.server.port,
-        workdir: context.identity.project_path.clone(),
-        session: Some(context.identity.session_id.clone()),
-    };
-    let meta = build_v3_webui_meta_for_context(context, observability);
-    context.state.webui_observability.record_observed(
-        event_type,
-        &request_key,
-        scope,
-        meta,
-        observability,
-    )
-}
-
-fn v3_obs_error_fields_from_error_body(
-    error_class: &'static str,
-    detail: Option<&str>,
-) -> (Option<String>, Option<String>) {
-    (
-        Some(error_class.to_string()),
-        Some(detail.unwrap_or(error_class).to_string()),
-    )
-}
-
-/// Project an already-terminal Error06 into the WebUI side-channel. The caller
-/// owns the client projection; this function must never alter it.
-pub(crate) fn record_v3_webui_projected_runtime_failure_for_context(
-    context: &V3ConsoleEmissionContext,
-    error_class: &'static str,
-    error_detail: Option<&str>,
-    status: u16,
-    transport: &'static str,
-) -> Result<u64, String> {
-    let request_key = build_v3_obs_request_key(
-        context.state.server.port,
-        &context.request_identity.request_id,
-    );
-    let scope = V3ObsScope {
-        port: context.state.server.port,
-        workdir: context.identity.project_path.clone(),
-        session: Some(context.identity.session_id.clone()),
-    };
-    let (error_category, error_detail) =
-        v3_obs_error_fields_from_error_body(error_class, error_detail);
-    let meta = V3ObsRequestMeta {
-        request_id: context.request_identity.request_id.clone(),
-        endpoint: context.endpoint.clone(),
-        entry_protocol: Some(context.entry_protocol.clone()),
-        execution_mode: Some("relay".to_string()),
-        transport: Some(transport.to_string()),
-        provider_status: Some(status),
-        response_status: Some("error".to_string()),
-        finish_reason: Some("error".to_string()),
-        route: Some("-".to_string()),
-        error_category,
-        error_detail,
-        ..Default::default()
-    };
-    context.state.webui_observability.record_observed(
-        V3ObsEventType::Failed,
-        &request_key,
-        scope,
-        meta,
-        &V3RuntimeObservability::default(),
-    )
-}
-
-// Started projection: uses only scope + identity (route/model/provider unknown
-// until routing). Same typed side-channel as the rest of the projection.
-fn record_v3_webui_started_for_context(context: &V3ConsoleEmissionContext) -> Result<u64, String> {
-    let request_key = build_v3_obs_request_key(
-        context.state.server.port,
-        &context.request_identity.request_id,
-    );
-    let scope = V3ObsScope {
-        port: context.state.server.port,
-        workdir: context.identity.project_path.clone(),
-        session: Some(context.identity.session_id.clone()),
-    };
-    let meta = V3ObsRequestMeta {
-        request_id: context.request_identity.request_id.clone(),
-        endpoint: context.endpoint.clone(),
-        model: None,
-        route: Some("-".to_string()),
-        provider: None,
-        entry_protocol: Some(context.entry_protocol.clone()),
-        execution_mode: None,
-        transport: None,
-        ..Default::default()
-    };
-    context
-        .state
-        .webui_observability
-        .record(V3ObsEventType::Started, &request_key, scope, meta)
-}
+// WebUI projection helpers (build_v3_webui_meta_for_context,
+// emit_v3_webui_projection_failure, record_v3_webui_event_for_context,
+// record_v3_webui_error_for_context, record_v3_webui_started_for_context,
+// record_v3_webui_provider_failure) now live in console/impl_webui_projection.rs.
+// They are the single ingress path used by every V3 listener; calling them
+// elsewhere is a module-boundary violation.
 
 pub(crate) fn emit_v3_provider_observability_console_lines(
     context: &V3ConsoleEmissionContext,
@@ -210,14 +59,27 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
     let identity = context.identity.clone();
     let route = resolve_v3_console_route_projection(observability);
     for event in &observability.provider_failure_events {
+        let already_projected = context
+            .realtime_provider_failure_event_keys
+            .lock()
+            .expect("V3 console provider-failure dedupe mutex poisoned")
+            .contains(&format_v3_provider_failure_console_event_key(event));
         emit_v3_provider_failure_console_event(context, observability, event);
+        if !already_projected {
+            record_v3_webui_provider_failure(context, observability, event);
+        }
         if event.health_state == "cooldown" {
             context
                 .state
                 .realtime_cooled_provider_keys
                 .lock()
                 .expect("V3 console cooled-provider mutex poisoned")
-                .insert(event.provider_key.clone());
+                .insert(
+                    event.provider_key.clone(),
+                    event
+                        .cooldown_until_ms
+                        .expect("V3 cooldown observation missing cooldown deadline"),
+                );
         }
     }
     if let Some(provider_key) = observability.provider_key.as_deref() {
@@ -225,8 +87,8 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
             .provider_failure_events
             .iter()
             .any(|event| event.provider_key == provider_key && event.health_state == "cooldown");
-        let recovered = if same_observation_is_still_cooldown {
-            false
+        let recovered_next_probe_at_ms = if same_observation_is_still_cooldown {
+            None
         } else {
             context
                 .state
@@ -235,13 +97,13 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
                 .expect("V3 console cooled-provider mutex poisoned")
                 .remove(provider_key)
         };
-        if recovered {
+        if let Some(next_probe_at_ms) = recovered_next_probe_at_ms {
             let content = format_v3_console_timed_content(
                 "[provider-recovered]",
                 &format!(
-                    "req={} provider={} reason=cooldown_expired",
-                    context.request_identity.request_id,
-                    format_v3_console_provider_target(observability)
+                    "{} next probe at {}",
+                    format_v3_console_provider_target(observability),
+                    format_v3_console_probe_time(next_probe_at_ms)
                 ),
             );
             let human_prefix = format_v3_console_human_prefix_for_observability(
@@ -260,6 +122,23 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
             eprintln!("{line}");
         }
     }
+}
+
+fn format_v3_console_probe_time(epoch_ms: u64) -> String {
+    let seconds = (epoch_ms / 1000) as libc::time_t;
+    let millis = epoch_ms % 1000;
+    let timestamp = format_v3_tm(seconds, false)
+        .expect("V3 cooldown observation probe deadline must be formatable");
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        timestamp.year,
+        timestamp.month,
+        timestamp.day,
+        timestamp.hour,
+        timestamp.minute,
+        timestamp.second,
+        millis
+    )
 }
 
 pub(crate) fn build_v3_route_selection_event_sink(
@@ -319,14 +198,10 @@ pub(crate) fn build_v3_provider_failure_event_sink(
     let context = context.clone();
     Arc::new(move |observability, event| {
         emit_v3_provider_failure_console_event(&context, observability, event);
-        // Typed WebUI projection: provider attempt failed (typed side-channel).
-        if let Err(error) = record_v3_webui_event_for_context(
-            &context,
-            V3ObsEventType::ProviderAttemptFailed,
-            observability,
-        ) {
-            emit_v3_webui_projection_failure(&context, &error);
-        }
+        // Typed WebUI projection: persist the raw HTTP status (e.g. 502/503)
+        // into the non-terminal attempt event so error facets and the requests
+        // table show it without closing the request lifecycle.
+        record_v3_webui_provider_failure(&context, observability, event);
         // Typed WebUI projection: provider switched (mirrors the console
         // switch_provider discriminator; only when a next provider was chosen).
         if event.action == "switch_provider" && event.next_provider_key.is_some() {
@@ -425,31 +300,17 @@ pub(crate) fn format_v3_provider_failure_console_content(
         .as_deref()
         .map(format_v3_console_provider_key_label)
         .unwrap_or_else(|| "-".to_string());
-    let mut fields = if event.action == "switch_provider" && event.next_provider_key.is_some() {
-        format!(
-            "req={} [switch to:{}] [switch from:{}] model={} result={} causeStatus={} failures={} health={}",
-            request_id,
-            next,
-            provider,
-            event.model_id,
-            event.action,
-            event.status,
-            event.failure_count,
-            event.health_state
-        )
-    } else {
-        format!(
-            "req={} target={} model={} result={} next={} causeStatus={} failures={} health={}",
-            request_id,
-            provider,
-            event.model_id,
-            event.action,
-            next,
-            event.status,
-            event.failure_count,
-            event.health_state
-        )
-    };
+    let mut fields = format!(
+        "req={} target={} model={} result={} next={} causeStatus={} failures={} health={}",
+        request_id,
+        provider,
+        event.model_id,
+        event.action,
+        next,
+        event.status,
+        event.failure_count,
+        event.health_state
+    );
     if let Some(cooldown_until_ms) = event.cooldown_until_ms {
         fields.push_str(&format!(" cooldownUntilMs={cooldown_until_ms}"));
     }
@@ -493,19 +354,13 @@ pub(crate) fn colorize_v3_provider_failure_console_content(
         .map(format_v3_console_provider_key_label)
         .unwrap_or_else(|| "-".to_string());
     let mut colorized = content.to_string();
-    for token in [
-        format!("[switch from:{provider}]"),
-        format!("target={provider}"),
-    ] {
+    for token in [format!("target={provider}")] {
         colorized = colorized.replace(
             &token,
             &format!("{ANSI_ERROR_TEXT_WHITE}{token}{ANSI_ERROR_RED}"),
         );
     }
-    if event.next_provider_key.is_some() {
-        let token = format!("[switch to:{target}]");
-        colorized = colorized.replace(&token, &format!("{ANSI_RESET}{token}{ANSI_ERROR_RED}"));
-    } else if target != "-" {
+    if target != "-" {
         let token = format!("next={target}");
         colorized = colorized.replace(&token, &format!("{ANSI_RESET}{token}{ANSI_ERROR_RED}"));
     }
@@ -854,8 +709,12 @@ fn emit_v3_runtime_observability_contract_or_warning(
             &route.label,
         );
         emit_v3_colorized_request_console_line(
-            &context.state, &content, &content, context.identity.color_key.as_deref(),
-            &prefix, &context.identity.session_id,
+            &context.state,
+            &content,
+            &content,
+            context.identity.color_key.as_deref(),
+            &prefix,
+            &context.identity.session_id,
         );
     } else {
         emit_v3_runtime_observability_contract_failure(context, observability, error);
@@ -974,9 +833,18 @@ pub(crate) fn emit_v3_observability_console_lines(
     if include_usage {
         let elapsed = started_at.elapsed();
         emit_v3_stopless_console_line(context, observability);
-        let terminal = v3_webui_terminal_event_for_response(status, observability);
-        if let Err(error) = record_v3_webui_event_for_context(context, terminal, observability) {
-            emit_v3_webui_projection_failure(context, &error);
+        let terminal_event = v3_webui_terminal_event_for_response(status, observability);
+        if terminal_event == V3ObsEventType::Completed {
+            if let Err(error) =
+                record_v3_webui_event_for_context(context, V3ObsEventType::Completed, observability)
+            {
+                emit_v3_webui_projection_failure(context, &error);
+            }
+        }
+        if terminal_event == V3ObsEventType::Failed {
+            if let Err(error) = record_v3_webui_error_for_context(context, status, None) {
+                emit_v3_webui_projection_failure(context, &error);
+            }
         }
         if should_emit_v3_request_complete_console_line(status, observability) {
             if let Err(error) = emit_v3_request_complete_console_line(
@@ -1011,20 +879,16 @@ pub(crate) fn emit_v3_direct_frame_console_lines(
             identity.project_path.as_deref(),
         );
     }
-    let observability = observability?;
     let is_sse = matches!(
         frame.body,
         V3Server16Body::Sse(_) | V3Server16Body::CommittedSse(_)
     );
+    let default_observability = crate::V3RuntimeObservability::default();
+    let error_observability = observability.as_ref().unwrap_or(&default_observability);
     // Typed WebUI projection: terminal for non-SSE frames (Completed/Failed).
     // SSE streams defer terminal ownership to their console finalizer so the
     // final outcome (Completed/Failed/Cancelled) reflects stream closeout.
-    if !is_sse {
-        let terminal = v3_webui_terminal_event_for_response(frame.status, &observability);
-        if let Err(error) = record_v3_webui_event_for_context(context, terminal, &observability) {
-            emit_v3_webui_projection_failure(context, &error);
-        }
-    }
+    let observability = observability?;
     emit_v3_observability_console_lines(
         context,
         frame.status,
@@ -1129,6 +993,15 @@ impl V3SseConsoleFinalizer {
             );
             return;
         }
+        if let Err(error) =
+            emit_v3_toolreason_console_line(&self.context, Some(&self.stream_observation))
+        {
+            emit_v3_runtime_observability_contract_failure(
+                &self.context,
+                &self.observability,
+                error,
+            );
+        }
         self.emit_relay_sse_complete_console_lines();
     }
 
@@ -1163,6 +1036,15 @@ impl V3SseConsoleFinalizer {
             &mut self.observability,
             Some(&self.stream_observation),
         ) {
+            emit_v3_runtime_observability_contract_failure(
+                &self.context,
+                &self.observability,
+                error,
+            );
+        }
+        if let Err(error) =
+            emit_v3_toolreason_console_line(&self.context, Some(&self.stream_observation))
+        {
             emit_v3_runtime_observability_contract_failure(
                 &self.context,
                 &self.observability,
@@ -1285,7 +1167,8 @@ impl V3DirectSseConsoleFinalizer {
         merge_v3_runtime_stream_observation(
             &mut self.observability,
             self.stream_observation.as_ref(),
-        )
+        )?;
+        emit_v3_toolreason_console_line(&self.context, self.stream_observation.as_ref())
     }
 
     pub(crate) fn emit_direct_sse_failure_console_line(
@@ -1316,6 +1199,11 @@ pub(crate) fn emit_v3_post_commit_sse_source_console_line_for_context(
         &projected.chain,
         Some(&projected.body),
     );
+    if let Err(error) =
+        record_v3_webui_error_for_context(context, projected.status, Some(&projected.body))
+    {
+        emit_v3_webui_projection_failure(context, &error);
+    }
 }
 
 pub(crate) fn merge_v3_runtime_stream_observation(
@@ -1337,6 +1225,36 @@ pub(crate) fn merge_v3_runtime_stream_observation(
             observability.timing = snapshot.timing;
         }
     }
+    Ok(())
+}
+
+pub(crate) fn emit_v3_toolreason_console_line(
+    context: &V3ConsoleEmissionContext,
+    observation: Option<&V3RuntimeStreamObservation>,
+) -> Result<(), String> {
+    let Some(observation) = observation else {
+        return Ok(());
+    };
+    let snapshot = observation.snapshot()?;
+    let Some(toolreason) = snapshot.toolreason else {
+        return Ok(());
+    };
+    let line = format!(
+        "TOOLREASON {} source={} stage={} session_id={} request_id={} tool={} confidence={} thinking={} model={}",
+        toolreason.status,
+        toolreason.source,
+        toolreason.stage,
+        toolreason.session_id.as_deref().unwrap_or("<missing>"),
+        toolreason.request_id.as_deref().unwrap_or("<missing>"),
+        toolreason.tool,
+        toolreason
+            .confidence
+            .map_or("<missing>".to_string(), |value| value.to_string()),
+        toolreason.reason.as_deref().unwrap_or("<missing>"),
+        toolreason.model_id.as_deref().unwrap_or("<missing>"),
+    );
+    append_v3_human_console_line(&context.state, &line);
+    eprintln!("{line}");
     Ok(())
 }
 
@@ -1714,31 +1632,5 @@ pub(crate) fn parse_v3_console_provider_key(
         ),
         [provider] => (Some((*provider).to_string()), None, None),
         [] => (None, None, None),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn projected_typed_error_carries_classification_and_detail() {
-        let (category, detail) = v3_obs_error_fields_from_error_body(
-            "target_pool",
-            Some("selected target exhausted after [provider:model:capability_mismatch]"),
-        );
-        assert_eq!(category.as_deref(), Some("target_pool"));
-        assert_eq!(
-            detail.as_deref(),
-            Some("selected target exhausted after [provider:model:capability_mismatch]")
-        );
-    }
-
-    #[test]
-    fn projected_missing_detail_uses_error_classification() {
-        let (category, detail) = v3_obs_error_fields_from_error_body("provider_http_429", None);
-        assert_eq!(category.as_deref(), Some("provider_http_429"));
-        assert_eq!(detail.as_deref(), Some("provider_http_429"));
     }
 }

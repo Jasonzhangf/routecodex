@@ -82,8 +82,8 @@ cooldown_ms = 900000
 model = "client-model"
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "first", model = "test", key = "key", priority = 1 },
-  { kind = "provider_model", provider = "second", model = "test", key = "key", priority = 2 }
+  { kind = "provider_model", provider = "first", model = "test", key = "key", priority = 2 },
+  { kind = "provider_model", provider = "second", model = "test", key = "key", priority = 1 }
 ]
 
 [route_groups.default.pools.default]
@@ -130,8 +130,8 @@ wire_name = "wire-chat"
 model = "client-model"
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "first", model = "test", key = "key", priority = 1 },
-  { kind = "provider_model", provider = "chat", model = "test", key = "key", priority = 2 }
+  { kind = "provider_model", provider = "first", model = "test", key = "key", priority = 2 },
+  { kind = "provider_model", provider = "chat", model = "test", key = "key", priority = 1 }
 ]
 
 [route_groups.default.pools.default]

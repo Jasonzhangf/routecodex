@@ -1,9 +1,11 @@
 mod impl_bulk;
 mod impl_display;
 mod impl_format;
+mod impl_webui_projection;
 pub(crate) use impl_bulk::*;
 pub(crate) use impl_display::*;
 pub(crate) use impl_format::*;
+pub(crate) use impl_webui_projection::*;
 
 use serde_json::Value;
 

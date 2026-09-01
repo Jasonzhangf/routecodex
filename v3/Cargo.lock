@@ -1132,6 +1132,7 @@ dependencies = [
  "reqwest",
  "routecodex-v3-config",
  "routecodex-v3-config-mgmt",
+ "routecodex-v3-debug",
  "serde",
  "serde_json",
  "sha2",
@@ -1149,7 +1150,9 @@ dependencies = [
  "reqwest",
  "routecodex-v3-config",
  "routecodex-v3-config-mgmt",
+ "routecodex-v3-debug",
  "routecodex-v3-lifecycle",
+ "routecodex-v3-runtime",
  "routecodex-v3-server",
  "serde_json",
  "servertool-core",
@@ -1187,6 +1190,7 @@ dependencies = [
  "routecodex-v3-config",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

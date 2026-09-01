@@ -174,6 +174,7 @@ pub trait V3DirectProtocolCodec {
     /// 协议控制面：响应后的提交/释放（responses 的 continuation commit；
     /// chat 等默认无）。
     fn commit_after_response(
+        _receipt: &crate::nodes::V3AttemptSuccessReceipt,
         control: &Self::Control,
         manifest: &routecodex_v3_config::V3Config05ManifestPublished,
         server_id: &str,
@@ -182,6 +183,7 @@ pub trait V3DirectProtocolCodec {
         trace: &mut Vec<&'static str>,
     ) -> Result<(), V3Error01SourceRaised> {
         let _ = (
+            _receipt,
             control,
             manifest,
             server_id,

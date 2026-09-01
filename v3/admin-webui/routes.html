@@ -1,331 +1,341 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RouteCodex — Routes</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111827'/%3E%3Cpath d='M9 23 23 9M9 9l14 14' stroke='%235b8cff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/styles.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/styles.css">
+  <title>Routes — RouteCodex</title>
 </head>
 <body>
 <header>
-  <div class="brand">Route<span class="accent">Codex</span></div>
-  <nav aria-label="Primary">
-    <a href="/">Dashboard</a>
-    <a href="/routes.html" class="active">Routes</a>
-    <a href="/providers.html">Providers</a>
-    <a href="/requests.html">Requests</a>
-  </nav>
+  <div class="brand">RouteCodex <span class="accent">V3</span></div>
+  <nav id="nav" aria-label="Primary navigation"></nav>
   <div class="spacer"></div>
-  <button class="btn" id="validate-btn" type="button">Validate</button>
-  <button class="btn primary" id="save-btn" type="button">Save</button>
-  <button class="btn primary" id="reload-btn" type="button">Reload</button>
+  <span class="route-save-state" id="save-state">Saved</span>
+  <button class="btn" id="discard-btn" disabled>Discard</button>
+  <button class="btn primary" id="save-btn" disabled>Save routes</button>
 </header>
-<main>
-  <h1>Routes</h1>
-  <div class="sub">Port → Route Pool → Route Tier → Provider Member</div>
-  <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
-  <div class="panel">
-    <div class="tree" id="route-tree"><div class="loading">loading…</div></div>
+<main class="routes-page">
+  <section class="routes-intro" aria-labelledby="routes-title">
+    <div>
+      <p class="eyebrow">Routing</p>
+      <h1 id="routes-title">Choose what runs first</h1>
+      <p class="sub">Tier 1 is tried first. Put alternatives in the same tier to share traffic; add lower tiers as backups.</p>
+    </div>
+    <button class="btn" id="validate-btn">Validate</button>
+  </section>
+
+  <div class="status-bar info" id="status-bar" role="status" aria-live="polite">Loading routes…</div>
+
+  <div class="routes-toolbar" aria-label="Route filters">
+    <label for="search-filter">Find a pool or model</label>
+    <input id="search-filter" type="search" placeholder="Search pools, providers, or models" autocomplete="off">
   </div>
+
+  <div class="route-group-tabs" id="group-tabs" role="tablist" aria-label="Route groups"></div>
+  <section id="route-tree" class="route-editor" aria-busy="true"></section>
 </main>
 
-<div class="drawer-backdrop" id="drawer-backdrop"></div>
-<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
-  <button class="btn close" id="drawer-close" type="button" aria-label="Close editor">✕</button>
-  <h2 id="drawer-title">Edit</h2>
-  <div id="drawer-body"></div>
-  <div class="actions">
-    <button class="btn" id="drawer-delete" type="button" style="display:none">Delete</button>
-    <div style="flex:1"></div>
-    <button class="btn" id="drawer-cancel" type="button">Cancel</button>
-    <button class="btn primary" id="drawer-save" type="button">Save</button>
-  </div>
-</div>
+<dialog id="provider-picker" class="route-picker" aria-labelledby="picker-title">
+  <form method="dialog" class="route-picker-shell">
+    <div class="route-picker-head">
+      <div>
+        <p class="eyebrow">Provider pool</p>
+        <h2 id="picker-title">Add a provider and model</h2>
+      </div>
+      <button class="icon-btn" value="cancel" aria-label="Close provider picker">×</button>
+    </div>
+    <label class="route-picker-search" for="picker-filter">Search providers and models</label>
+    <input id="picker-filter" type="search" autocomplete="off" placeholder="e.g. opencode or gpt-5">
+    <div id="picker-list" class="route-picker-list" role="radiogroup" aria-label="Available provider models"></div>
+    <div class="actions">
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn primary" id="picker-confirm" value="default" disabled>Add model</button>
+    </div>
+  </form>
+</dialog>
 
 <script src="/app.embedded.txt"></script>
 <script>
-let groups = [];
+const state = {
+  groups: [],
+  baseline: "",
+  activeGroup: null,
+  query: "",
+  providers: null,
+  pickerTarget: null,
+  pickerSelected: null,
+  busy: false,
+};
 
-async function load() {
-  try {
-    const data = await api("/api/routes");
-    groups = data.groups;
-    render();
-  } catch (error) {
-    showStatus("err", `load routes failed: ${error.message}`);
-  }
+const tree = document.getElementById("route-tree");
+const statusBar = document.getElementById("status-bar");
+const saveButton = document.getElementById("save-btn");
+const discardButton = document.getElementById("discard-btn");
+const saveState = document.getElementById("save-state");
+const picker = document.getElementById("provider-picker");
+
+function esc(value) {
+  const node = document.createElement("span");
+  node.textContent = String(value ?? "");
+  return node.innerHTML;
 }
 
-function render() {
-  const tree = document.getElementById("route-tree");
-  tree.innerHTML = "";
-  if (!groups.length) {
-    tree.appendChild(el("div", "loading", "no route groups configured"));
+function snapshot() {
+  return JSON.stringify(state.groups);
+}
+
+function isDirty() {
+  return state.baseline !== "" && snapshot() !== state.baseline;
+}
+
+function setBusy(busy, label) {
+  state.busy = busy;
+  tree.setAttribute("aria-busy", String(busy));
+  saveButton.disabled = busy || !isDirty();
+  discardButton.disabled = busy || !isDirty();
+  if (label) saveState.textContent = label;
+}
+
+function announce(kind, message) {
+  statusBar.className = `status-bar ${kind}`;
+  statusBar.textContent = message;
+}
+
+function markDirty() {
+  saveState.textContent = "Unsaved changes";
+  saveButton.disabled = false;
+  discardButton.disabled = false;
+  announce("info", "Changes are local until you save.");
+}
+
+function currentGroup() {
+  return state.groups.find(group => group.group_id === state.activeGroup) || null;
+}
+
+function renderTabs() {
+  const tabs = document.getElementById("group-tabs");
+  if (!state.activeGroup && state.groups.length) state.activeGroup = state.groups[0].group_id;
+  tabs.innerHTML = state.groups.map(group => {
+    const active = group.group_id === state.activeGroup;
+    return `<button class="route-group-tab" role="tab" aria-selected="${active}" tabindex="${active ? 0 : -1}" data-group="${esc(group.group_id)}">${esc(group.group_id)}</button>`;
+  }).join("");
+  tabs.querySelectorAll("[data-group]").forEach(button => {
+    button.addEventListener("click", () => {
+      state.activeGroup = button.dataset.group;
+      renderTabs();
+      renderRoutes();
+    });
+  });
+}
+
+function memberMatches(member, query) {
+  return !query || member.use.toLowerCase().includes(query);
+}
+
+function renderRoutes() {
+  const group = currentGroup();
+  const query = state.query.trim().toLowerCase();
+  if (!group) {
+    tree.innerHTML = `<div class="route-empty"><h2>No route groups</h2><p>Run <code>rccv3 init</code> after adding a provider.</p></div>`;
+    tree.setAttribute("aria-busy", "false");
     return;
   }
-  for (const group of groups) {
-    const groupNode = el("div", "tree-node collapsed");
-    const head = el("div", "head");
-    head.appendChild(el("span", "caret", "▾"));
-    head.appendChild(el("span", "tag", group.group_id));
-    head.appendChild(el("span", "meta", `${group.ports.length} port${group.ports.length === 1 ? "" : "s"}`));
-    head.addEventListener("click", () => groupNode.classList.toggle("collapsed"));
-    groupNode.appendChild(head);
-    const children = el("div", "tree-children");
-    for (const port of group.ports) {
-      const portNode = el("div", "tree-node collapsed");
-      const portHead = el("div", "head");
-      portHead.appendChild(el("span", "caret", "▾"));
-      portHead.appendChild(el("span", "tag", `Port ${port.port}`));
-      portHead.appendChild(el("span", "meta", `${port.server_id} · ${port.pools.length} pools`));
-      const actions = el("div", "actions");
-      const addPool = el("button", "btn", "+ Pool");
-      addPool.addEventListener("click", (event) => { event.stopPropagation(); openPoolDrawer(group, port, null); });
-      actions.appendChild(addPool);
-      portHead.appendChild(actions);
-      portHead.addEventListener("click", () => portNode.classList.toggle("collapsed"));
-      portNode.appendChild(portHead);
-      const portChildren = el("div", "tree-children");
-      for (const pool of port.pools) {
-        portChildren.appendChild(renderPool(group, port, pool));
-      }
-      portNode.appendChild(portChildren);
-      children.appendChild(portNode);
-    }
-    groupNode.appendChild(children);
-    tree.appendChild(groupNode);
+  const pools = group.pools.filter(pool =>
+    !query || pool.name.toLowerCase().includes(query) ||
+    pool.tiers.some(tier => tier.members.some(member => memberMatches(member, query)))
+  );
+  if (!pools.length) {
+    tree.innerHTML = `<div class="route-empty"><h2>No matching routes</h2><p>Try another provider, model, or pool name.</p></div>`;
+    tree.setAttribute("aria-busy", "false");
+    return;
+  }
+  tree.innerHTML = pools.map(pool => {
+    const poolIndex = group.pools.indexOf(pool);
+    const tiers = pool.tiers.map((tier, tierIndex) => renderTier(pool, poolIndex, tier, tierIndex)).join("");
+    return `<article class="route-pool-card">
+      <div class="route-pool-head">
+        <div><p class="eyebrow">Pool</p><h2>${esc(pool.name)}</h2></div>
+        <button class="btn" data-action="add-tier" data-pool="${poolIndex}">Add backup tier</button>
+      </div>
+      <div class="route-tier-list">${tiers}</div>
+    </article>`;
+  }).join("");
+  tree.setAttribute("aria-busy", "false");
+}
+
+function renderTier(pool, poolIndex, tier, tierIndex) {
+  const members = tier.members.map((member, memberIndex) => {
+    const [provider, ...modelParts] = member.use.split("/");
+    const model = modelParts.join("/");
+    const showWeight = tier.members.length > 1;
+    return `<div class="route-member">
+      <div class="route-member-name"><strong>${esc(provider)}</strong><span>${esc(model)}</span></div>
+      ${showWeight ? `<label class="route-weight">Weight<span class="sr-only"> for ${esc(member.use)}</span><input type="number" min="1" step="1" inputmode="numeric" placeholder="Equal" value="${member.weight ?? ""}" data-action="weight" data-pool="${poolIndex}" data-tier="${tierIndex}" data-member="${memberIndex}"></label>` : ""}
+      <button class="icon-btn danger" data-action="remove-member" data-pool="${poolIndex}" data-tier="${tierIndex}" data-member="${memberIndex}" ${tier.members.length === 1 ? "disabled" : ""} aria-label="Remove ${esc(member.use)}">×</button>
+    </div>`;
+  }).join("");
+  return `<section class="route-tier" aria-labelledby="tier-${poolIndex}-${tierIndex}">
+    <div class="route-tier-head">
+      <div><span class="route-tier-number">${tierIndex + 1}</span><h3 id="tier-${poolIndex}-${tierIndex}">Tier ${tierIndex + 1}</h3><span class="muted">${tierIndex === 0 ? "First choice" : "Backup"}</span></div>
+      <div class="route-tier-actions">
+        <button class="icon-btn" data-action="tier-up" data-pool="${poolIndex}" data-tier="${tierIndex}" ${tierIndex === 0 ? "disabled" : ""} aria-label="Move tier up">↑</button>
+        <button class="icon-btn" data-action="tier-down" data-pool="${poolIndex}" data-tier="${tierIndex}" ${tierIndex === pool.tiers.length - 1 ? "disabled" : ""} aria-label="Move tier down">↓</button>
+        <button class="icon-btn danger" data-action="remove-tier" data-pool="${poolIndex}" data-tier="${tierIndex}" ${pool.tiers.length === 1 ? "disabled" : ""} aria-label="Remove tier">×</button>
+      </div>
+    </div>
+    <div class="route-members">${members}</div>
+    <button class="route-add-member" data-action="add-member" data-pool="${poolIndex}" data-tier="${tierIndex}">+ Add model to this tier</button>
+  </section>`;
+}
+
+function poolFrom(target) {
+  return currentGroup()?.pools[Number(target.dataset.pool)];
+}
+
+tree.addEventListener("click", event => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  const pool = poolFrom(button);
+  if (!pool) return;
+  const tierIndex = Number(button.dataset.tier);
+  if (button.dataset.action === "tier-up" || button.dataset.action === "tier-down") {
+    const next = tierIndex + (button.dataset.action === "tier-up" ? -1 : 1);
+    [pool.tiers[tierIndex], pool.tiers[next]] = [pool.tiers[next], pool.tiers[tierIndex]];
+    markDirty(); renderRoutes(); return;
+  }
+  if (button.dataset.action === "remove-tier" && pool.tiers.length > 1) {
+    pool.tiers.splice(tierIndex, 1); markDirty(); renderRoutes(); return;
+  }
+  if (button.dataset.action === "remove-member") {
+    const tier = pool.tiers[tierIndex];
+    if (tier.members.length > 1) tier.members.splice(Number(button.dataset.member), 1);
+    markDirty(); renderRoutes(); return;
+  }
+  if (button.dataset.action === "add-tier") openPicker(Number(button.dataset.pool), null);
+  if (button.dataset.action === "add-member") openPicker(Number(button.dataset.pool), tierIndex);
+});
+
+tree.addEventListener("change", event => {
+  if (event.target.dataset.action !== "weight") return;
+  const pool = poolFrom(event.target);
+  const member = pool?.tiers[Number(event.target.dataset.tier)]?.members[Number(event.target.dataset.member)];
+  if (!member) return;
+  member.weight = event.target.value === "" ? null : Number(event.target.value);
+  markDirty();
+});
+
+async function providerModels() {
+  if (state.providers) return state.providers;
+  const providers = await api("/api/providers");
+  const details = await Promise.all(providers.map(provider => api(`/api/providers/${encodeURIComponent(provider.id)}`)));
+  state.providers = details.filter(detail => detail?.config?.provider?.enabled !== false).flatMap(detail =>
+    Object.keys(detail?.config?.provider?.models || {}).map(model => ({ use: `${detail.id}/${model}` }))
+  ).sort((a, b) => a.use.localeCompare(b.use));
+  return state.providers;
+}
+
+async function openPicker(poolIndex, tierIndex) {
+  state.pickerTarget = { poolIndex, tierIndex };
+  state.pickerSelected = null;
+  document.getElementById("picker-filter").value = "";
+  document.getElementById("picker-list").innerHTML = '<div class="route-picker-state">Loading provider models…</div>';
+  document.getElementById("picker-confirm").disabled = true;
+  picker.showModal();
+  try {
+    await providerModels();
+    renderPicker("");
+    document.getElementById("picker-filter").focus();
+  } catch (error) {
+    document.getElementById("picker-list").innerHTML = `<div class="route-picker-state error">Could not load providers: ${esc(error.message)}</div>`;
   }
 }
 
-function renderPool(group, port, pool) {
-  const node = el("div", "tree-node collapsed");
-  const head = el("div", "head");
-  head.appendChild(el("span", "caret", "▾"));
-  head.appendChild(el("span", "tag", pool.name));
-  head.appendChild(el("span", "meta", `strategy ${pool.selection_strategy} · ${pool.tiers.length} tier${pool.tiers.length === 1 ? "" : "s"}`));
-  const actions = el("div", "actions");
-  const addTier = el("button", "btn", "+ Tier");
-  addTier.addEventListener("click", (event) => { event.stopPropagation(); openTierDrawer(group, port, pool, null); });
-  actions.appendChild(addTier);
-  head.appendChild(actions);
-  head.addEventListener("click", () => node.classList.toggle("collapsed"));
-  head.addEventListener("dblclick", (event) => { event.stopPropagation(); openPoolDrawer(group, port, pool); });
-  node.appendChild(head);
-  const children = el("div", "tree-children");
-  for (const tier of pool.tiers) {
-    const tierNode = el("div", "tree-node collapsed");
-    const tierHead = el("div", "head");
-    tierHead.appendChild(el("span", "caret", "▾"));
-    tierHead.appendChild(el("span", "tag", `Tier ${tier.priority}`));
-    tierHead.appendChild(el("span", "meta", `${tier.members.length} member${tier.members.length === 1 ? "" : "s"}`));
-    const tierActions = el("div", "actions");
-    const addMember = el("button", "btn", "+ Member");
-    addMember.addEventListener("click", (event) => { event.stopPropagation(); openMemberDrawer(group, port, pool, tier, null); });
-    tierActions.appendChild(addMember);
-    tierHead.appendChild(tierActions);
-    tierHead.addEventListener("click", () => tierNode.classList.toggle("collapsed"));
-    tierHead.addEventListener("dblclick", (event) => { event.stopPropagation(); openTierDrawer(group, port, pool, tier); });
-    tierNode.appendChild(tierHead);
-    const memberChildren = el("div", "tree-children");
-    for (const member of tier.members) {
-      const row = el("div", "member-row");
-      row.appendChild(el("span", "provider", member.provider || member.kind));
-      row.appendChild(el("span", "model", member.model || ""));
-      if (member.key) row.appendChild(el("span", "meta", `[${member.key}]`));
-      if (member.weight !== undefined && member.weight !== null) row.appendChild(el("span", "weight", `w=${member.weight}`));
-      const rowActions = el("div", "actions");
-      const editBtn = el("button", "btn", "Edit");
-      editBtn.addEventListener("click", (event) => { event.stopPropagation(); openMemberDrawer(group, port, pool, tier, member); });
-      rowActions.appendChild(editBtn);
-      row.appendChild(rowActions);
-      memberChildren.appendChild(row);
-    }
-    tierNode.appendChild(memberChildren);
-    children.appendChild(tierNode);
+function renderPicker(query) {
+  const normalized = query.trim().toLowerCase();
+  const candidates = (state.providers || []).filter(item => !normalized || item.use.toLowerCase().includes(normalized));
+  const list = document.getElementById("picker-list");
+  if (!candidates.length) {
+    list.innerHTML = '<div class="route-picker-state">No provider models match.</div>';
+    return;
   }
-  node.appendChild(children);
-  return node;
+  list.innerHTML = candidates.map(item => `<label class="route-picker-option"><input type="radio" name="provider-model" value="${esc(item.use)}"><span>${esc(item.use)}</span></label>`).join("");
 }
 
-function openPoolDrawer(group, port, pool) {
-  const isNew = !pool;
-  const draft = pool ? { ...pool, tiers: pool.tiers.map((tier) => ({ ...tier, members: tier.members.map((m) => ({ ...m })) })) } : { name: "", selection_strategy: "priority", match_rule: null, tiers: [] };
-  const title = isNew ? "New Pool" : `Pool ${draft.name}`;
-  openDrawer(title, () => {
-    const body = document.getElementById("drawer-body");
-    body.innerHTML = "";
-    body.appendChild(field("name", "Name", draft.name, (value) => { draft.name = value; }));
-    body.appendChild(selectField("selection_strategy", "Strategy", ["priority", "weighted", "round_robin"], draft.selection_strategy, (value) => { draft.selection_strategy = value; }));
-    setDrawerSave(async () => {
-      if (!draft.name.trim()) { showStatus("err", "pool name is required"); return; }
-      if (isNew) {
-        port.pools.push(draft);
-      } else {
-        const index = port.pools.findIndex((candidate) => candidate.name === pool.name);
-        if (index >= 0) port.pools[index] = draft;
-      }
-      render();
-      closeDrawer();
-      showStatus("info", "edits staged — Save to commit");
-    });
-    setDrawerDelete(isNew ? null : () => {
-      port.pools = port.pools.filter((candidate) => candidate.name !== pool.name);
-      render();
-      closeDrawer();
-      showStatus("info", "edits staged — Save to commit");
-    });
-  });
-}
-
-function openTierDrawer(group, port, pool, tier) {
-  const isNew = !tier;
-  const draft = tier ? { ...tier, members: tier.members.map((m) => ({ ...m })) } : { priority: 1, members: [] };
-  const title = isNew ? "New Tier" : `Tier ${draft.priority}`;
-  openDrawer(title, () => {
-    const body = document.getElementById("drawer-body");
-    body.innerHTML = "";
-    body.appendChild(field("priority", "Priority", String(draft.priority), (value) => { draft.priority = parseInt(value, 10) || 0; }));
-    setDrawerSave(async () => {
-      if (isNew) {
-        pool.tiers.push(draft);
-        pool.tiers.sort((a, b) => a.priority - b.priority);
-      } else {
-        const index = pool.tiers.findIndex((candidate) => candidate.priority === tier.priority);
-        if (index >= 0) pool.tiers[index] = draft;
-        pool.tiers.sort((a, b) => a.priority - b.priority);
-      }
-      render();
-      closeDrawer();
-      showStatus("info", "edits staged — Save to commit");
-    });
-    setDrawerDelete(isNew ? null : () => {
-      pool.tiers = pool.tiers.filter((candidate) => candidate.priority !== tier.priority);
-      render();
-      closeDrawer();
-      showStatus("info", "edits staged — Save to commit");
-    });
-  });
-}
-
-function openMemberDrawer(group, port, pool, tier, member) {
-  const isNew = !member;
-  const draft = member ? { ...member } : { kind: "provider_model", provider: "", model: "", key: "", priority: tier.priority, weight: null };
-  const title = isNew ? "New Member" : `Member ${member.provider || member.kind}`;
-  openDrawer(title, () => {
-    const body = document.getElementById("drawer-body");
-    body.innerHTML = "";
-    body.appendChild(field("provider", "Provider", draft.provider || "", (value) => { draft.provider = value; }));
-    body.appendChild(field("model", "Model", draft.model || "", (value) => { draft.model = value; }));
-    body.appendChild(field("key", "Key alias", draft.key || "", (value) => { draft.key = value; }));
-    body.appendChild(field("priority", "Priority (tier)", String(draft.priority), (value) => { draft.priority = parseInt(value, 10) || 0; }));
-    body.appendChild(field("weight", "Weight (weighted strategy)", draft.weight === null || draft.weight === undefined ? "" : String(draft.weight), (value) => { draft.weight = value === "" ? null : (parseInt(value, 10) || 0); }));
-    setDrawerSave(async () => {
-      if (!draft.provider.trim()) { showStatus("err", "provider is required"); return; }
-      const memberData = {
-        kind: draft.kind || "provider_model",
-        provider: draft.provider,
-        model: draft.model || undefined,
-        key: draft.key || undefined,
-        priority: draft.priority,
-        weight: draft.weight,
-      };
-      if (isNew) {
-        tier.members.push(memberData);
-      } else {
-        const index = tier.members.findIndex((candidate) => candidate === member);
-        if (index >= 0) tier.members[index] = memberData;
-      }
-      render();
-      closeDrawer();
-      showStatus("info", "edits staged — Save to commit");
-    });
-    setDrawerDelete(isNew ? null : () => {
-      tier.members = tier.members.filter((candidate) => candidate !== member);
-      render();
-      closeDrawer();
-      showStatus("info", "edits staged — Save to commit");
-    });
-  });
-}
-
-function field(id, label, value, onChange) {
-  const wrapper = el("div", "field");
-  const labelNode = el("label", null, label);
-  labelNode.htmlFor = id;
-  wrapper.appendChild(labelNode);
-  const input = el("input");
-  input.id = id;
-  input.value = value;
-  input.addEventListener("input", (event) => onChange(event.target.value));
-  wrapper.appendChild(input);
-  return wrapper;
-}
-
-function selectField(id, label, options, value, onChange) {
-  const wrapper = el("div", "field");
-  const labelNode = el("label", null, label);
-  labelNode.htmlFor = id;
-  wrapper.appendChild(labelNode);
-  const select = el("select");
-  select.id = id;
-  for (const option of options) {
-    const optionNode = el("option", null, option);
-    if (option === value) optionNode.selected = true;
-    select.appendChild(optionNode);
+document.getElementById("picker-filter").addEventListener("input", event => renderPicker(event.target.value));
+document.getElementById("picker-list").addEventListener("change", event => {
+  state.pickerSelected = event.target.value;
+  document.getElementById("picker-confirm").disabled = false;
+});
+picker.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    picker.close("cancel");
   }
-  select.addEventListener("change", (event) => onChange(event.target.value));
-  wrapper.appendChild(select);
-  return wrapper;
+});
+picker.addEventListener("close", () => {
+  if (picker.returnValue !== "default" || !state.pickerSelected) return;
+  const pool = currentGroup()?.pools[state.pickerTarget.poolIndex];
+  if (!pool) return;
+  const duplicate = pool.tiers.some(tier => tier.members.some(member => member.use === state.pickerSelected));
+  if (duplicate) {
+    announce("err", `${state.pickerSelected} is already in this pool.`);
+    return;
+  }
+  const member = { use: state.pickerSelected, weight: null };
+  if (state.pickerTarget.tierIndex == null) pool.tiers.push({ members: [member] });
+  else pool.tiers[state.pickerTarget.tierIndex].members.push(member);
+  markDirty(); renderRoutes();
+});
+
+async function load() {
+  setBusy(true, "Loading");
+  announce("info", "Loading routes…");
+  try {
+    const data = await api("/api/routes");
+    state.groups = data.groups || [];
+    state.baseline = snapshot();
+    state.activeGroup = state.groups[0]?.group_id || null;
+    renderTabs(); renderRoutes();
+    announce("ok", "Routes loaded. Tier 1 is tried first.");
+    setBusy(false, "Saved");
+  } catch (error) {
+    tree.innerHTML = `<div class="route-empty error"><h2>Routes could not load</h2><p>${esc(error.message)}</p><button class="btn" id="retry-load">Try again</button></div>`;
+    document.getElementById("retry-load")?.addEventListener("click", load);
+    announce("err", `Load failed: ${error.message}`);
+    setBusy(false, "Load failed");
+  }
 }
 
-let drawerSave = null;
-let drawerDelete = null;
-
-function openDrawer(title, build) {
-  document.getElementById("drawer-title").textContent = title;
-  build();
-  document.getElementById("drawer-delete").style.display = drawerDelete ? "inline-block" : "none";
-  openPanel();
-}
-
-function closeDrawer() {
-  drawerSave = null;
-  drawerDelete = null;
-  closePanel();
-}
-
-function setDrawerSave(handler) { drawerSave = handler; }
-function setDrawerDelete(handler) { drawerDelete = handler; }
-
-document.getElementById("drawer-cancel").addEventListener("click", closeDrawer);
-document.getElementById("drawer-save").addEventListener("click", () => { if (drawerSave) drawerSave(); });
-document.getElementById("drawer-delete").addEventListener("click", () => { if (drawerDelete) drawerDelete(); });
-
+document.getElementById("search-filter").addEventListener("input", event => {
+  state.query = event.target.value; renderRoutes();
+});
 document.getElementById("validate-btn").addEventListener("click", async () => {
+  setBusy(true, "Validating"); announce("info", "Validating routes…");
   try {
-    const result = await api("/api/routes/validate", { method: "POST", body: JSON.stringify({ groups, reason: "validate" }) });
-    showStatus(result.ok ? "ok" : "err", result.ok ? "configuration valid" : `invalid: ${result.error}`);
-  } catch (error) {
-    showStatus("err", `validate failed: ${error.message}`);
-  }
+    const result = await api("/api/routes/validate", { method: "POST", body: JSON.stringify({ groups: state.groups, reason: "webui validate" }) });
+    announce(result.ok ? "ok" : "err", result.ok ? "Configuration is valid." : `Invalid configuration: ${result.error}`);
+  } catch (error) { announce("err", `Validation failed: ${error.message}`); }
+  finally { setBusy(false, isDirty() ? "Unsaved changes" : "Saved"); }
 });
-
-document.getElementById("save-btn").addEventListener("click", async () => {
-  const button = document.getElementById("save-btn");
-  button.disabled = true;
+saveButton.addEventListener("click", async () => {
+  setBusy(true, "Saving"); announce("info", "Validating and saving routes…");
   try {
-    const result = await api("/api/routes", { method: "PUT", body: JSON.stringify({ groups, reason: "webui routes update" }) });
-    groups = result.groups;
-    render();
-    showStatus("ok", `saved — revision #${result.revision_seq}${result.backup ? ` · backup ${result.backup.split("/").pop()}` : ""}. Press Reload to apply.`);
-  } catch (error) {
-    showStatus("err", `save failed: ${error.message}`);
-  } finally {
-    button.disabled = false;
-  }
+    const result = await api("/api/routes", { method: "PUT", body: JSON.stringify({ groups: state.groups, reason: "webui routes update" }) });
+    state.groups = result.groups; state.baseline = snapshot();
+    renderTabs(); renderRoutes();
+    announce("ok", `Routes saved as revision #${result.revision_seq}.`);
+    setBusy(false, "Saved");
+  } catch (error) { announce("err", `Save failed: ${error.message}`); setBusy(false, "Save failed"); }
 });
+discardButton.addEventListener("click", () => {
+  state.groups = JSON.parse(state.baseline); renderTabs(); renderRoutes();
+  announce("info", "Unsaved changes discarded."); setBusy(false, "Saved");
+});
+window.addEventListener("beforeunload", event => { if (isDirty()) { event.preventDefault(); event.returnValue = ""; } });
 
+const navItems = [["/", "Dashboard"], ["/routes.html", "Routes"], ["/providers.html", "Providers"], ["/requests.html", "Requests"]];
+document.getElementById("nav").innerHTML = navItems.map(([href, label]) => `<a href="${href}"${href === "/routes.html" ? ' class="active" aria-current="page"' : ""}>${label}</a>`).join("");
 load();
 </script>
 </body>

@@ -2,6 +2,8 @@ use crate::hub_v1::{
     V3ServerToolCenter, V3ServerToolCenterKey, V3ServerToolInstanceState, V3ServerToolName,
 };
 
+const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ResponsesDirectContinuationScope {
     key: V3RemoteContinuationScopeKey,
@@ -137,7 +139,9 @@ impl V3ResponsesDirectStoplessControlState {
             .map_err(|error| error.to_string())
     }
 
-    fn web_search_center_key(scope: &V3ResponsesDirectStoplessControlScope) -> V3ServerToolCenterKey {
+    fn web_search_center_key(
+        scope: &V3ResponsesDirectStoplessControlScope,
+    ) -> V3ServerToolCenterKey {
         let key = &scope.key;
         V3ServerToolCenterKey {
             tool_name: V3ServerToolName::WebSearch,
@@ -209,9 +213,7 @@ impl V3ResponsesDirectStoplessControlState {
     }
 
     pub fn is_empty(&self) -> Result<bool, String> {
-        self.center
-            .is_empty()
-            .map_err(|error| error.to_string())
+        self.center.is_empty().map_err(|error| error.to_string())
     }
 }
 
@@ -236,9 +238,11 @@ impl V3ResponsesDirectContinuationState {
     ) -> Result<bool, crate::remote_continuation::V3RemoteContinuationError> {
         self.store
             .lock()
-            .map_err(|error| crate::remote_continuation::V3RemoteContinuationError::Codec {
-                message: error.to_string(),
-            })
+            .map_err(
+                |error| crate::remote_continuation::V3RemoteContinuationError::Codec {
+                    message: error.to_string(),
+                },
+            )
             .and_then(
                 |store| match store.load_for_req03(response_id, &scope.key, now_epoch_ms) {
                     Ok(_) => Ok(true),
@@ -365,6 +369,7 @@ struct V3ResponsesDirectRuntimeCoreState {
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
     initial_request_local_excluded_candidates: BTreeSet<String>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    request_execution_control: Option<V3RequestExecutionControl>,
     // Node trace the protocol plan already executed for this request; the
     // kernel splices it in instead of re-running Router05..Target09.
     initial_plan_trace: Option<Vec<&'static str>>,
@@ -388,6 +393,7 @@ impl V3ResponsesDirectRuntimeCoreState {
             initial_expanded: None,
             initial_request_local_excluded_candidates: BTreeSet::new(),
             observability_accumulator: None,
+            request_execution_control: None,
             initial_plan_trace: None,
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
@@ -413,6 +419,7 @@ impl V3ResponsesDirectRuntimeCoreState {
             initial_expanded: None,
             initial_request_local_excluded_candidates: BTreeSet::new(),
             observability_accumulator: None,
+            request_execution_control: None,
             initial_plan_trace: None,
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
@@ -483,11 +490,21 @@ impl V3ResponsesDirectRuntimeCoreState {
         self.observability_accumulator = accumulator;
         self
     }
+
+    fn with_request_execution_control(
+        mut self,
+        control: Option<V3RequestExecutionControl>,
+    ) -> Self {
+        self.request_execution_control = control;
+        self
+    }
 }
 
 #[derive(Debug)]
 pub struct V3ResponsesDirectRuntimeOutput {
     pub client_payload: V3Resp15ClientPayload,
+    pub provider_request_snapshot: Option<serde_json::Value>,
+    pub provider_response_snapshot: Option<serde_json::Value>,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
     pub observability: Option<V3RuntimeObservability>,
@@ -503,6 +520,7 @@ pub struct V3ResponsesProtocolRelayHandoff {
     pub node_trace: Vec<&'static str>,
     pub provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     pub observability_accumulator: V3RuntimeObservabilityAccumulator,
+    pub request_execution_control: V3RequestExecutionControl,
 }
 
 #[derive(Debug, Clone)]

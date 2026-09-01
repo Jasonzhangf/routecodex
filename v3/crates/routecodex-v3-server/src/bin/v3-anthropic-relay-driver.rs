@@ -52,6 +52,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(Value::as_str)
                     .unwrap_or("fixture")
             ),
+            toolreason_observation_session_id: None,
             payload: client_request,
         },
     )

@@ -20,6 +20,7 @@ pub const INTERNAL_CONFIG_TOML: &str = include_str!("internal.toml");
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InternalConfig {
+    user_config_base_toml: String,
     #[serde(default)]
     model_families: BTreeMap<String, ModelFamily>,
     #[serde(default)]
@@ -30,6 +31,42 @@ struct InternalConfig {
     debug_samples: DebugSamples,
     #[serde(default)]
     error_handling: ErrorHandling,
+    #[serde(default)]
+    observability: Observability,
+}
+
+pub fn v3_internal_user_config_authoring() -> crate::V3Config02AuthoringParsed {
+    static AUTHORING: LazyLock<crate::V3Config02AuthoringParsed> = LazyLock::new(|| {
+        let authoring = crate::parse_v3_config_02_authoring(&INTERNAL_CONFIG.user_config_base_toml)
+            .expect("internal.toml user_config_base_toml must be valid V3 Config02 authoring");
+        assert_eq!(authoring.version, 3);
+        assert!(
+            authoring.providers.is_empty(),
+            "internal user-config base must not contain provider truth"
+        );
+        assert!(
+            authoring.forwarders.is_empty(),
+            "internal user-config base must not contain provider forwarders"
+        );
+        for server in authoring.servers.values() {
+            let group = authoring
+                .route_groups
+                .get(&server.routing_group)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "internal user-config server references missing route group {}",
+                        server.routing_group
+                    )
+                });
+            assert!(
+                group.pools.contains_key("default"),
+                "internal user-config route group {} must contain default pool",
+                server.routing_group
+            );
+        }
+        authoring
+    });
+    AUTHORING.clone()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +172,17 @@ struct HiddenModels {
     exact: Vec<String>,
     #[serde(default)]
     prefixes: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Observability {
+    #[serde(default = "default_max_record_bytes")]
+    max_record_bytes: u64,
+}
+
+fn default_max_record_bytes() -> u64 {
+    100 * 1024 * 1024
 }
 
 static INTERNAL_CONFIG: LazyLock<InternalConfig> = LazyLock::new(|| {
@@ -381,6 +429,11 @@ pub fn v3_error_sample_skip_statuses() -> &'static [u16] {
     &INTERNAL_CONFIG.debug_samples.error_sample_skip_statuses
 }
 
+/// Maximum serialized bytes for one persisted WebUI observability record.
+pub fn v3_observability_max_record_bytes() -> u64 {
+    INTERNAL_CONFIG.observability.max_record_bytes
+}
+
 pub fn is_v3_gpt_family_model(model_id: &str) -> bool {
     let normalized = normalized_model_id(model_id);
     let Some(family) = INTERNAL_CONFIG.model_families.get(GPT_FAMILY_KEY) else {
@@ -401,6 +454,7 @@ mod tests {
     fn debug_sample_policy_is_internal_and_defaulted() {
         assert!(v3_error_samples_only());
         assert_eq!(v3_error_sample_skip_statuses(), &[401, 402, 403, 429, 503]);
+        assert_eq!(v3_observability_max_record_bytes(), 100 * 1024 * 1024);
     }
 
     #[test]

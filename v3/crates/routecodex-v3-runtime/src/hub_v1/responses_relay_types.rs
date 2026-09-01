@@ -42,6 +42,7 @@ pub struct V3ResponsesProtocolDirectHandoff {
     pub node_trace: Vec<&'static str>,
     pub provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     pub observability_accumulator: V3RuntimeObservabilityAccumulator,
+    pub request_execution_control: crate::nodes::V3RequestExecutionControl,
 }
 
 pub enum V3ResponsesRelayDryRunOutcome {
@@ -189,6 +190,13 @@ pub struct V3RuntimeUsageSummary {
     pub output_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
     pub cached_tokens: Option<u64>,
+    /// Anthropic/MiniMax/glm-5.3 cache read (cached prompt hit). Distinct from
+    /// `cached_tokens`, which is the OpenAI/Responses sub-count of input and
+    /// historically collapsed Anthropic read+creation into one number.
+    pub cache_read_input_tokens: Option<u64>,
+    /// Anthropic cache write (creation). Tracked separately so admin/UI can
+    /// show it without folding it into the hit denominator.
+    pub cache_creation_input_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -218,6 +226,7 @@ pub struct V3RuntimeObservability {
     pub execution_mode: String,
     pub transport: String,
     pub routing_group_id: Option<String>,
+    pub route_classification_reason: Option<String>,
     pub pool_id: Option<String>,
     pub provider_id: Option<String>,
     pub auth_alias: Option<String>,
@@ -240,12 +249,18 @@ pub struct V3RuntimeObservability {
 #[derive(Debug, Clone, Default)]
 pub struct V3RuntimeStreamObservation {
     inner: Arc<Mutex<V3RuntimeStreamObservationSnapshot>>,
+    control: Arc<Mutex<V3RuntimeStreamControlState>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3RuntimeSemanticTerminal {
     Success,
     Failure,
+}
+
+#[derive(Debug, Clone, Default)]
+struct V3RuntimeStreamControlState {
+    semantic_terminal: Option<V3RuntimeSemanticTerminal>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -256,6 +271,24 @@ pub struct V3RuntimeStreamObservationSnapshot {
     pub timing: Option<V3RuntimeTimingSummary>,
     pub typed_object_types: Vec<String>,
     pub provider_raw_sse: String,
+    pub post_commit_error: Option<String>,
+    /// Observation failures stay on the runtime side-channel.  They must not
+    /// disappear silently and must never be mistaken for provider failure.
+    pub observation_error: Option<String>,
+    pub toolreason: Option<V3RuntimeToolreasonObservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3RuntimeToolreasonObservation {
+    pub status: String,
+    pub source: String,
+    pub stage: String,
+    pub session_id: Option<String>,
+    pub request_id: Option<String>,
+    pub tool: String,
+    pub reason: Option<String>,
+    pub confidence: Option<u8>,
+    pub model_id: Option<String>,
 }
 
 pub(crate) struct V3ResponsesRelayProviderFailure {
@@ -297,6 +330,16 @@ pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
 }
 
 impl V3RuntimeStreamObservation {
+    #[cfg(test)]
+    pub(crate) fn poison_diagnostics_for_test(&self) {
+        let inner = self.inner.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = inner.lock().expect("diagnostics lock");
+            panic!("poison diagnostics for terminal-control isolation test");
+        })
+        .join();
+    }
+
     pub fn snapshot(&self) -> Result<V3RuntimeStreamObservationSnapshot, String> {
         self.inner
             .lock()
@@ -304,28 +347,47 @@ impl V3RuntimeStreamObservation {
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())
     }
 
+    pub(crate) fn record_post_commit_error(&self, error: &str) -> Result<(), String> {
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        snapshot.post_commit_error = Some(error.to_string());
+        Ok(())
+    }
+
+    pub(crate) fn record_observation_error(&self, error: &str) -> Result<(), String> {
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        snapshot.observation_error = Some(error.to_string());
+        Ok(())
+    }
+
     pub(crate) fn has_semantic_terminal(&self) -> Result<bool, String> {
         Ok(self.semantic_terminal()?.is_some())
     }
 
     pub fn semantic_terminal(&self) -> Result<Option<V3RuntimeSemanticTerminal>, String> {
-        Ok(
-            match self.snapshot()?.response_status.as_deref().map(str::trim) {
-                Some("completed" | "requires_action" | "done") => {
-                    Some(V3RuntimeSemanticTerminal::Success)
-                }
-                Some("failed" | "incomplete" | "cancelled" | "canceled" | "error") => {
-                    Some(V3RuntimeSemanticTerminal::Failure)
-                }
-                _ => None,
-            },
-        )
+        self.control
+            .lock()
+            .map(|control| control.semantic_terminal)
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
     }
 
     pub fn merge_snapshot(
         &self,
         incoming: &V3RuntimeStreamObservationSnapshot,
     ) -> Result<(), String> {
+        if let Some(terminal) =
+            semantic_terminal_from_response_status(incoming.response_status.as_deref())
+        {
+            self.control
+                .lock()
+                .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())?
+                .semantic_terminal = Some(terminal);
+        }
         let mut snapshot = self
             .inner
             .lock()
@@ -348,6 +410,27 @@ impl V3RuntimeStreamObservation {
         if !incoming.provider_raw_sse.is_empty() {
             snapshot.provider_raw_sse = incoming.provider_raw_sse.clone();
         }
+        if incoming.post_commit_error.is_some() {
+            snapshot.post_commit_error = incoming.post_commit_error.clone();
+        }
+        if incoming.observation_error.is_some() {
+            snapshot.observation_error = incoming.observation_error.clone();
+        }
+        if incoming.toolreason.is_some() {
+            snapshot.toolreason = incoming.toolreason.clone();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn record_toolreason(
+        &self,
+        observation: V3RuntimeToolreasonObservation,
+    ) -> Result<(), String> {
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        snapshot.toolreason = Some(observation);
         Ok(())
     }
 
@@ -389,6 +472,12 @@ impl V3RuntimeStreamObservation {
         });
         if response_status.is_none() && finish_reason.is_none() && usage.is_none() {
             return Ok(());
+        }
+        if let Some(terminal) = semantic_terminal_from_response_status(response_status.as_deref()) {
+            self.control
+                .lock()
+                .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())?
+                .semantic_terminal = Some(terminal);
         }
         let mut snapshot = self
             .inner
@@ -469,6 +558,18 @@ impl V3RuntimeStreamObservation {
         }
         snapshot.timing = Some(timing);
         Ok(())
+    }
+}
+
+fn semantic_terminal_from_response_status(
+    response_status: Option<&str>,
+) -> Option<V3RuntimeSemanticTerminal> {
+    match response_status.map(str::trim) {
+        Some("completed" | "requires_action" | "done") => Some(V3RuntimeSemanticTerminal::Success),
+        Some("failed" | "incomplete" | "cancelled" | "canceled" | "error") => {
+            Some(V3RuntimeSemanticTerminal::Failure)
+        }
+        _ => None,
     }
 }
 
@@ -1207,6 +1308,10 @@ pub enum V3ResponsesRelayRuntimeError {
     ProviderResponseEmpty { provider_id: String },
     #[error("V3 Responses Relay Runtime timing failed: {0}")]
     RuntimeTiming(String),
+    #[error("V3 Responses Relay request execution control failed: {0}")]
+    ExecutionControl(String),
+    #[error("V3 Responses Relay response execution control failed: {0}")]
+    ExecutionControlResponse(String),
     #[error("V3 Responses Relay provider semantic failure {code} status {status}: {message}")]
     ProviderResponseSemanticFailure {
         status: u16,

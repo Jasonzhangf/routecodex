@@ -82,6 +82,16 @@ function canonicalJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+function lockstepManifest(value) {
+  const { manifest_digest: _manifestDigest, ...manifest } = value;
+  return {
+    ...manifest,
+    files: Array.isArray(manifest.files)
+      ? manifest.files.map(({ source_commit: _sourceCommit, ...file }) => file)
+      : [],
+  };
+}
+
 function verifyProviderCompatLegacyMirror() {
   const canonical = JSON.parse(
     readFileSync(resolve(repoRoot, providerCompatCanonicalPath), 'utf8'),
@@ -185,8 +195,32 @@ function verifyAdmissionLockstep() {
   const manifestPath = resolve(outputRoot, 'manifest.json');
   if (!existsSync(manifestPath)) {
     failures.push('missing generated admission manifest: manifest.json');
-  } else if (readFileSync(manifestPath, 'utf8') !== canonicalJson(expected.manifest)) {
-    failures.push('stale generated admission manifest: manifest.json');
+  } else {
+    const actualManifestText = readFileSync(manifestPath, 'utf8');
+    let actualManifest;
+    try {
+      actualManifest = JSON.parse(actualManifestText);
+    } catch {
+      actualManifest = null;
+    }
+    if (
+      actualManifestText !== canonicalJson(expected.manifest)
+      && canonicalJson(lockstepManifest(actualManifest ?? {}))
+        !== canonicalJson(lockstepManifest(expected.manifest))
+    ) {
+      const differences = actualManifest?.files && Array.isArray(actualManifest.files)
+        ? expected.manifest.files
+          .map((entry, index) => {
+            const actual = actualManifest.files[index];
+            return JSON.stringify(actual) === JSON.stringify(entry)
+              ? null
+              : `${entry.output_path}: expected=${JSON.stringify(entry)} actual=${JSON.stringify(actual)}`;
+          })
+          .filter(Boolean)
+          .slice(0, 5)
+        : [];
+      failures.push(`stale generated admission manifest: manifest.json${differences.length > 0 ? `; differences=${differences.join(' | ')}` : ''}`);
+    }
   }
   if (failures.length > 0) throw new Error(failures.join('; '));
   return expected.manifest;

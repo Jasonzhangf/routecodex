@@ -17,7 +17,7 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use serde_json::{json, Value};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::pin::Pin;
 
 pub type V3OpenAiChatClientStream = V3RelayProjectedSseStream;
@@ -76,10 +76,7 @@ impl V3OpenAiChatRelayRuntimeOutput {
         };
         V3Resp15ClientPayload {
             status: self.status,
-            headers: std::collections::BTreeMap::from([(
-                "content-type".to_string(),
-                content_type.to_string(),
-            )]),
+            headers: BTreeMap::from([("content-type".to_string(), content_type.to_string())]),
             body: self.client_body.into_v3_client_body(),
         }
     }
@@ -176,6 +173,25 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
     .await
 }
 
+pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control(
+    manifest: &V3Config05ManifestPublished,
+    input: V3OpenAiChatRelayRuntimeInput,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    execution_mode: V3HubExecutionMode,
+    request_execution_control: crate::nodes::V3RequestExecutionControl,
+) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
+    execute_v3_openai_chat_relay_runtime_inner(
+        manifest,
+        input,
+        crate::default_responses_transport(),
+        provider_health,
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        execution_mode,
+        Some(request_execution_control),
+    )
+    .await
+}
+
 pub async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3OpenAiChatRelayRuntimeInput,
@@ -222,6 +238,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health_and_execu
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
+        None,
     )
     .await
 }
@@ -233,6 +250,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     execution_mode: V3HubExecutionMode,
+    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3OpenAiChatRelayCodec。
@@ -262,6 +280,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         continuation_lookup,
         Vec::new(),
         true,
+        request_execution_control,
     )
     .await
     .map_err(|error| match error {
@@ -468,11 +487,11 @@ struct V3OpenAiChatRelayTypedSemanticHook<'a> {
 }
 
 impl V3OpenAiChatSseSemanticHook for V3OpenAiChatRelayTypedSemanticHook<'_> {
-    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>) {
-        let _ = self
-            .observation
-            .record_typed_object_type("openai_chat", &input.protocol.object);
+    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>) -> Result<(), String> {
+        self.observation
+            .record_typed_object_type("openai_chat", &input.protocol.object)?;
         self.catalog.notify_chat(input);
+        Ok(())
     }
 
     fn rewrite(
@@ -549,6 +568,7 @@ impl V3OpenAiChatSseProviderOutcome {
         }
         self.provider_health
             .record_provider_success_in_failure_scope(
+                &crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt(),
                 &self.failure_session_scope,
                 &self.provider_id,
                 Some(&self.auth_alias),
@@ -572,7 +592,6 @@ fn project_sse_stream(
     stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3RelayProjectedSseStream {
-    use futures_util::StreamExt;
     let state = V3OpenAiChatSseState {
         request_id,
         session_id,
@@ -804,13 +823,20 @@ fn enqueue_sse_client_chunks(
             catalog: compile_v3_hub_relay_response_hooks().typed_sse_catalog(),
         };
         let mut semantic = semantic;
-        apply_v3_openai_chat_sse_semantic_hook(
+        apply_v3_openai_chat_sse_semantic_hook_with_observation(
             &mut semantic,
             &transport_object,
             &protocol,
             &mut semantic_hook,
+            Some(&state.stream_observation),
         )
         .map_err(|error| error.to_string())?;
+        // Usage 必须经唯一观测入口写入 stream_observation；最终由
+        // merge_v3_runtime_stream_observation 合并进 observability.usage。
+        state
+            .stream_observation
+            .record_provider_event_json(&semantic.to_normalized_value())
+            .map_err(|error| error.to_string())?;
         let projected_payload = project_v3_openai_chat_sse_chunk_json(&semantic);
         let client_payload = project_sse_event_payload(
             state.request_id.as_str(),
@@ -871,7 +897,7 @@ fn project_responses_sse_as_openai_chat_stream(
     web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
-    _stream_observation: V3RuntimeStreamObservation,
+    stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3RelayProjectedSseStream {
     use futures_util::StreamExt;
@@ -889,6 +915,7 @@ fn project_responses_sse_as_openai_chat_stream(
             VecDeque::<Vec<u8>>::new(),
             false,
             false,
+            stream_observation,
             compatibility_profile,
             web_search_execution_mode,
             web_search_center_state,
@@ -904,6 +931,7 @@ fn project_responses_sse_as_openai_chat_stream(
             mut pending,
             mut done_seen,
             mut finished,
+            stream_observation,
             compatibility_profile,
             web_search_execution_mode,
             web_search_center_state,
@@ -926,6 +954,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                 pending,
                                 done_seen,
                                 finished,
+                                stream_observation,
                                 compatibility_profile,
                                 web_search_execution_mode,
                                 web_search_center_state,
@@ -962,6 +991,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                     pending,
                                     done_seen,
                                     finished,
+                                    stream_observation,
                                     compatibility_profile,
                                     web_search_execution_mode,
                                     web_search_center_state,
@@ -993,6 +1023,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                     pending,
                                     done_seen,
                                     finished,
+                                    stream_observation,
                                     compatibility_profile,
                                     web_search_execution_mode,
                                     web_search_center_state,
@@ -1080,6 +1111,11 @@ fn project_responses_sse_as_openai_chat_stream(
                                 .and_then(Value::as_str)
                                 .unwrap_or_default()
                                 .to_string();
+                            // 统一 usage 观测入口：Responses SSE 事件也必须写入
+                            // stream_observation，避免转译为 Chat SSE 后丢失 usage。
+                            stream_observation
+                                .record_provider_event_json(&event)
+                                .map_err(|error| error.to_string())?;
                             for mut payload in transducer.push_event(event)? {
                                 if tool_thinking_enabled {
                                     crate::hub_v1::collect_v3_responses_sse_tool_name_at_resp03(
@@ -1151,6 +1187,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                         pending,
                                         done_seen,
                                         finished,
+                                        stream_observation,
                                         compatibility_profile,
                                         web_search_execution_mode,
                                         web_search_center_state,
@@ -1174,6 +1211,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                         pending,
                                         done_seen,
                                         finished,
+                                        stream_observation,
                                         compatibility_profile,
                                         web_search_execution_mode,
                                         web_search_center_state,
@@ -1194,6 +1232,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                     pending,
                                     done_seen,
                                     finished,
+                                    stream_observation,
                                     compatibility_profile,
                                     web_search_execution_mode,
                                     web_search_center_state,
@@ -1259,50 +1298,9 @@ fn openai_chat_provider_http_failure(
     }
 }
 
-fn provider_failure_output(
-    failure: V3RelayProviderFailure,
-    mut trace: Vec<&'static str>,
-) -> V3OpenAiChatRelayRuntimeOutput {
-    let projected = failure
-        .terminal_projection
-        .expect("terminal OpenAI Chat provider failure must carry typed Error06 projection");
-    let error_class = projected.error_class;
-    let error_detail = projected.error_detail.clone();
-    trace.push("V3Error06ClientProjected");
-    V3OpenAiChatRelayRuntimeOutput {
-        status: projected.status,
-        client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
-        node_trace: trace,
-        error_chain: Some(projected.chain.to_vec()),
-        error_class: Some(error_class),
-        error_detail: Some(error_detail),
-        observability: None,
-        stream_observation: None,
-        provider_snapshots: None,
-    }
-}
-
-fn error_output(
-    source: routecodex_v3_error::V3Error01SourceRaised,
-    status: u16,
-    provider_id: &str,
-    mut trace: Vec<&'static str>,
-) -> V3OpenAiChatRelayRuntimeOutput {
-    let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
-    let error_class = projected.error_class;
-    let error_detail = projected.error_detail.clone();
-    V3OpenAiChatRelayRuntimeOutput {
-        status: projected.status,
-        client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
-        node_trace: trace,
-        error_chain: Some(projected.chain.to_vec()),
-        error_class: Some(error_class),
-        error_detail: Some(error_detail),
-        observability: None,
-        stream_observation: None,
-        provider_snapshots: None,
-    }
-}
+#[path = "openai_chat_relay_failure_output.rs"]
+mod openai_chat_relay_failure_output;
+use openai_chat_relay_failure_output::{error_output, provider_failure_output};
 
 /// OpenAI Chat relay 协议 codec：协议差异的唯一收敛面（骨架驱动）。
 pub struct V3OpenAiChatRelayCodec;

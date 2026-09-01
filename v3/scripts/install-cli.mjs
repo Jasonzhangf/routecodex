@@ -5,7 +5,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import './bump-version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const v3Root = path.resolve(__dirname, '..');
@@ -307,6 +306,7 @@ function installAliasAtomic(aliasPath, binaryPath) {
 }
 
 async function main() {
+  await import('./bump-version.mjs');
   return withOwnedV3CargoTarget(async (build) => {
     const sourceBin = await buildV3Cli(build);
     copyExecutableAtomic(sourceBin, repoBin);

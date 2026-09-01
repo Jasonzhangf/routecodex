@@ -4,6 +4,30 @@
 use super::*;
 
 #[test]
+fn resp03_records_typed_toolreason_observation_for_relay_missing_and_ok() {
+    let observation = V3RuntimeStreamObservation::default();
+    let missing = serde_json::json!({
+        "output": [{"type":"function_call","name":"exec","arguments":"{\"cmd\":\"pwd\"}"}]
+    });
+    record_v3_toolreason_observation_at_resp03(
+        &missing, &observation, Some("s"), Some("r"), Some("m"),
+    ).expect("missing observation");
+    let snapshot = observation.snapshot().expect("snapshot");
+    assert_eq!(snapshot.toolreason.as_ref().map(|v| v.status.as_str()), Some("MISSING"));
+    assert_eq!(snapshot.toolreason.as_ref().map(|v| v.stage.as_str()), Some("resp03_json"));
+
+    let ok = serde_json::json!({
+        "output": [{"type":"function_call","name":"exec","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认目录\"}"}]
+    });
+    record_v3_toolreason_observation_at_resp03(
+        &ok, &observation, Some("s"), Some("r2"), Some("m"),
+    ).expect("ok observation");
+    let snapshot = observation.snapshot().expect("snapshot");
+    assert_eq!(snapshot.toolreason.as_ref().map(|v| v.status.as_str()), Some("OK"));
+    assert_eq!(snapshot.toolreason.as_ref().and_then(|v| v.reason.as_deref()), Some("确认目录"));
+}
+
+#[test]
 fn resp03_json_fields_are_removed_and_projected_without_changing_openai_arguments() {
     let mut payload = json!({
         "choices":[{"message":{
@@ -82,6 +106,91 @@ fn resp03_completed_response_strips_and_creates_one_reasoning_item() {
         "调用工具 pwd：确认当前工作目录"
     );
     assert!(reason_emitted);
+}
+
+#[test]
+fn resp03_json_toolreason_projects_one_standalone_visible_text_message() {
+    let mut payload = json!({
+        "output": [{
+            "type": "function_call",
+            "call_id": "call_visible_text",
+            "name": "pwd",
+            "arguments": "{\"reason\":\"确认当前工作目录\"}"
+        }]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    let output = payload["output"].as_array().expect("Responses output");
+    let visible = output
+        .iter()
+        .find(|item| item["type"] == "message")
+        .expect("toolreason must become a normal visible message");
+    assert_eq!(visible["role"], "assistant");
+    assert_eq!(
+        visible["content"],
+        json!([{"type":"output_text","text":"调用工具 pwd：确认当前工作目录"}])
+    );
+    assert_eq!(
+        output
+            .iter()
+            .filter(|item| item["type"] == "message")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn resp03_json_ordinary_tool_call_does_not_project_visible_text_message() {
+    let mut payload = json!({
+        "output": [{
+            "type": "function_call",
+            "call_id": "call_without_reason",
+            "name": "pwd",
+            "arguments": "{\"cmd\":\"pwd\"}"
+        }]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    assert!(
+        payload["output"]
+            .as_array()
+            .expect("Responses output")
+            .iter()
+            .all(|item| item["type"] != "message"),
+        "ordinary tool calls must not gain a synthetic visible message"
+    );
+}
+
+#[test]
+fn resp03_toolreason_visible_text_message_reaches_anthropic_text_block() {
+    let mut payload = json!({
+        "id": "resp_relay_visible_text",
+        "output": [{
+            "type": "function_call",
+            "call_id": "call_relay_visible_text",
+            "name": "pwd",
+            "arguments": "{\"reason\":\"确认当前工作目录\"}"
+        }]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    let message =
+        crate::hub_v1::anthropic_relay_runtime_codec::project_v3_responses_json_as_anthropic_message(
+            &payload,
+        )
+        .expect("canonical Responses payload must project to Anthropic");
+
+    assert_eq!(
+        message["content"]
+            .as_array()
+            .expect("Anthropic content")
+            .iter()
+            .find(|part| part["type"] == "text")
+            .and_then(|part| part["text"].as_str()),
+        Some("调用工具 pwd：确认当前工作目录")
+    );
 }
 
 #[test]
@@ -187,7 +296,13 @@ fn resp03_responses_json_projects_only_into_reasoning_summary() {
         "调用工具 rcc_probe：确认探针结果"
     );
     assert!(payload.get("reasoning_content").is_none());
-    assert_eq!(payload["output"][1]["arguments"], "{\"value\":\"x\"}");
+    let function_call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .expect("function call");
+    assert_eq!(function_call["arguments"], "{\"value\":\"x\"}");
 }
 
 #[test]
@@ -673,15 +788,18 @@ fn resp03_phase1_reason_only_projects_without_optional_diagnostics() {
         },
     );
 
-    assert_eq!(
-        payload["output"][1]["input"],
-        "*** Begin Patch\n*** End Patch"
-    );
+    let tool_call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call")
+        .expect("custom tool call");
+    assert_eq!(tool_call["input"], "*** Begin Patch\n*** End Patch");
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],
         "调用工具 apply_patch：应用用户要求的最小补丁"
     );
-    assert!(payload["output"][1].get("reason").is_none());
+    assert!(tool_call.get("reason").is_none());
     assert!(payload.get("reasoning_content").is_none());
 }
 
@@ -707,12 +825,18 @@ fn resp03_custom_tool_wrapper_strips_only_toolreason_fields_and_preserves_raw_in
         },
     );
 
-    assert_eq!(payload["output"][1]["input"], raw_patch);
-    assert!(payload["output"][1].get("reason").is_none());
-    assert!(payload["output"][1]
+    let tool_call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call")
+        .expect("custom tool call");
+    assert_eq!(tool_call["input"], raw_patch);
+    assert!(tool_call.get("reason").is_none());
+    assert!(tool_call
         .get("goal_alignment_confidence")
         .is_none());
-    assert!(payload["output"][1].get("model_id").is_none());
+    assert!(tool_call.get("model_id").is_none());
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],
         "调用工具 apply_patch：写入最小补丁验证 custom tool"
@@ -743,7 +867,13 @@ fn resp03_custom_tool_wrapper_model_mismatch_still_projects_and_preserves_raw_in
     );
 
     assert_ne!(payload, before);
-    assert_eq!(payload["output"][1]["input"], raw_patch);
+    let tool_call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call")
+        .expect("custom tool call");
+    assert_eq!(tool_call["input"], raw_patch);
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],
         "调用工具 apply_patch：写入最小补丁验证 custom tool"
@@ -776,12 +906,18 @@ fn resp03_custom_tool_nested_json_wrapper_projects_reason_and_restores_native_in
         },
     );
 
-    assert_eq!(payload["output"][1]["input"], raw_patch);
-    assert!(payload["output"][1].get("reason").is_none());
-    assert!(payload["output"][1]
+    let tool_call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call")
+        .expect("custom tool call");
+    assert_eq!(tool_call["input"], raw_patch);
+    assert!(tool_call.get("reason").is_none());
+    assert!(tool_call
         .get("goal_alignment_confidence")
         .is_none());
-    assert!(payload["output"][1].get("model_id").is_none());
+    assert!(tool_call.get("model_id").is_none());
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],
         "调用工具 apply_patch：更新用户指定文件"
@@ -809,6 +945,139 @@ fn resp03_custom_tool_malformed_nested_wrapper_is_left_byte_semantically_unchang
     );
 
     assert_eq!(payload, before);
+}
+
+#[test]
+fn resp03_apply_patch_double_encoded_wrapper_restores_native_patch_bytes() {
+    let raw_patch = "*** Begin Patch\n*** Update File: src/example.txt\n-old\n+new\n*** End Patch";
+    let inner_wrapper = serde_json::to_string(&json!({
+        "input": raw_patch,
+        "reason": "更新用户指定文件",
+        "goal_alignment_confidence": 100,
+        "model_id": "x-preview-f-free"
+    }))
+    .expect("inner wrapper must serialize");
+    let double_encoded_input =
+        serde_json::to_string(&inner_wrapper).expect("double encoded wrapper must serialize");
+
+    let mut payload = json!({
+        "output":[{"type":"custom_tool_call","call_id":"call_double_encoded",
+            "name":"apply_patch","input":double_encoded_input}]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("x-preview-f-free"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-double-encoded"),
+            request_id: Some("request-double-encoded"),
+        },
+    );
+
+    // After Chat Process projects reason into a summary item, the double-encoded
+    // wrapper must be unwrapped so the tool call's input is exactly the native
+    // patch bytes, not a JSON-encoded JSON-encoded string.
+    assert_eq!(
+        payload["output"].as_array().map(|a| a.len()),
+        Some(3),
+        "reason from the nested wrapper must project into a summary item"
+    );
+    assert_eq!(
+        payload["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "custom_tool_call")
+            .expect("custom tool call")["input"],
+        raw_patch,
+        "double-encoded wrapper must be normalized back to native patch bytes"
+    );
+    let tool_call = payload["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call")
+        .expect("custom tool call");
+    assert!(tool_call.get("reason").is_none());
+    assert!(tool_call
+        .get("goal_alignment_confidence")
+        .is_none());
+    assert!(tool_call.get("model_id").is_none());
+    assert_eq!(
+        payload["output"][0]["summary"][0]["text"],
+        "调用工具 apply_patch：更新用户指定文件"
+    );
+}
+
+#[test]
+fn resp03_apply_patch_double_encoded_duplicate_inner_key_is_not_recovered() {
+    let raw_patch = "*** Begin Patch\n*** Update File: src/example.txt\n-old\n+new\n*** End Patch";
+    let ambiguous_inner_wrapper = format!(
+        "{{\"input\":{},\"input\":{},\"reason\":\"更新用户指定文件\",\"model_id\":\"x-preview-f-free\"}}",
+        serde_json::to_string(raw_patch).expect("patch must serialize"),
+        serde_json::to_string("*** Begin Patch\n*** End Patch").expect("patch must serialize")
+    );
+    let double_encoded_input =
+        serde_json::to_string(&ambiguous_inner_wrapper).expect("wrapper must serialize");
+    let mut payload = json!({
+        "output":[{"type":"custom_tool_call","call_id":"call_double_duplicate",
+            "name":"apply_patch","input":double_encoded_input}]
+    });
+    let before = payload.clone();
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("x-preview-f-free"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-double-duplicate"),
+            request_id: Some("request-double-duplicate"),
+        },
+    );
+
+    assert_eq!(
+        payload, before,
+        "ambiguous inner wrapper must remain unchanged rather than guessing a duplicate key"
+    );
+}
+
+#[test]
+fn resp03_apply_patch_absolute_header_is_preserved_for_executor_failure() {
+    let raw_patch = "*** Begin Patch\n*** Update File: /Volumes/extension/code/zterm/remote-tab-audit.ts\n-const x = 1;\n+const x = 2;\n*** End Patch";
+    let mut payload = json!({
+        "output":[{"type":"custom_tool_call","call_id":"call_absolute_header",
+            "name":"apply_patch","input":raw_patch}]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("x-preview-f-free"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-absolute-header"),
+            request_id: Some("request-absolute-header"),
+        },
+    );
+
+    // Raw patch without wrapper does not trigger reasoning projection, so output
+    // stays at its original length; Chat Process must preserve absolute header bytes.
+    assert_eq!(
+        payload["output"].as_array().map(|a| a.len()),
+        Some(1),
+        "raw patch path must not inject reasoning summary"
+    );
+    let projected_input = payload["output"][0]["input"]
+        .as_str()
+        .expect("input must be a string after projection");
+    assert_eq!(
+        projected_input, raw_patch,
+        "absolute header must be preserved byte-for-byte"
+    );
+    assert!(projected_input.contains("/Volumes/extension/code/zterm/"));
 }
 
 #[test]

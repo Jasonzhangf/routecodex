@@ -14,6 +14,8 @@ pub const DIRECT_MODEL_HOOK_PLUGIN_ID: &str = "v4.hook.direct.request";
 pub const RELAY_MODEL_HOOK_PLUGIN_ID: &str = "v4.hook.relay.request";
 pub const DIRECT_RESPONSE_HOOK_PLUGIN_ID: &str = "v4.hook.direct.response";
 pub const RELAY_RESPONSE_HOOK_PLUGIN_ID: &str = "v4.hook.relay.response";
+pub const DIRECT_REQUEST_WIRE_VALIDATE_PLUGIN_ID: &str = "v4.std.direct.request.wire_validate";
+pub const DIRECT_RESPONSE_CLIENT_VALIDATE_PLUGIN_ID: &str = "v4.std.direct.response.client_validate";
 
 fn object(ctx: &ExecCtx<'_>, name: &str) -> Result<serde_json::Map<String, Value>, String> {
     ctx.read_data()
@@ -83,6 +85,31 @@ pub(crate) fn direct_response_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), S
         .map_err(|error| error.to_string())
 }
 
+pub(crate) fn direct_request_wire_validate(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let value = object(ctx, "direct_request_wire_validate")?;
+    value
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|model| !model.trim().is_empty())
+        .ok_or_else(|| "direct_request_wire_validate requires model".to_string())?;
+    ctx.emit("direct.request.wire_validated", "direct provider wire validated");
+    Ok(())
+}
+
+pub(crate) fn direct_response_client_validate(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let value = object(ctx, "direct_response_client_validate")?;
+    let _ = value;
+    let client_protocol = information_string(ctx, "v4.information.client_protocol")?;
+    let provider_protocol = information_string(ctx, "v4.information.provider_protocol")?;
+    if client_protocol != provider_protocol {
+        return Err(format!(
+            "Direct protocol mismatch: client={client_protocol} provider={provider_protocol}"
+        ));
+    }
+    ctx.emit("direct.response.client_validated", "direct client response validated");
+    Ok(())
+}
+
 pub(crate) fn relay_response_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let value = object(ctx, "relay_response_projection")?;
     let client_protocol = information_string(ctx, "v4.information.client_protocol")?;
@@ -103,6 +130,36 @@ pub(crate) fn relay_response_projection(ctx: &mut ExecCtx<'_>) -> Result<(), Str
 
 pub(crate) fn descriptors() -> Vec<StandardPlugin> {
     vec![
+        plugin(
+            DIRECT_RESPONSE_CLIENT_VALIDATE_PLUGIN_ID,
+            PluginCategory::Protocol,
+            "V4DirectResp03ClientProtocol",
+            "response_outbound",
+            Some(3),
+            PluginKind::Validator,
+            PluginEffect::ReadOnly,
+            PluginPhase::Validation,
+            800,
+            vec![
+                "v4.direct.response.client_payload",
+                "v4.information.client_protocol",
+                "v4.information.provider_protocol",
+            ],
+            vec![],
+        ),
+        plugin(
+            DIRECT_REQUEST_WIRE_VALIDATE_PLUGIN_ID,
+            PluginCategory::Protocol,
+            "V4DirectReq03ProviderWire",
+            "request_outbound",
+            Some(3),
+            PluginKind::Validator,
+            PluginEffect::ReadOnly,
+            PluginPhase::Validation,
+            800,
+            vec!["v4.direct.request.provider_wire"],
+            vec![],
+        ),
         plugin(
             DIRECT_MODEL_HOOK_PLUGIN_ID,
             PluginCategory::Protocol,
@@ -176,6 +233,8 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
 
 pub(crate) fn handles() -> Vec<(&'static str, fn(&mut ExecCtx<'_>) -> Result<(), String>)> {
     vec![
+        (DIRECT_RESPONSE_CLIENT_VALIDATE_PLUGIN_ID, direct_response_client_validate),
+        (DIRECT_REQUEST_WIRE_VALIDATE_PLUGIN_ID, direct_request_wire_validate),
         (DIRECT_MODEL_HOOK_PLUGIN_ID, direct_model_passthrough),
         (RELAY_MODEL_HOOK_PLUGIN_ID, relay_model_projection),
         (DIRECT_RESPONSE_HOOK_PLUGIN_ID, direct_response_passthrough),

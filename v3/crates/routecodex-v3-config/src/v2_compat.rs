@@ -729,7 +729,7 @@ fn compile_v2_provider_models(
                         .max_context_tokens
                         .or(model.context_window)
                         .or(model.max_context),
-                    context_token_estimate_scale_bps: 10_000,
+                    context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                     features: model.features,
                 },
             )
@@ -1086,6 +1086,9 @@ defaultModel = "model"
 [provider.auth]
 type = "apikey"
 apiKey = "test-key"
+
+[provider.models.model]
+contextTokenEstimateScaleBps = 17000
 "#,
         )
         .expect("parse");
@@ -1123,18 +1126,28 @@ defaultModel = "model"
 [provider.auth]
 type = "apikey"
 apiKey = "test-key"
+
+[provider.models.model]
+contextTokenEstimateScaleBps = 17000
 "#,
         )
         .expect("write");
 
         let mut referenced_models: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        referenced_models.insert("test-provider".to_string(), BTreeSet::new());
+        referenced_models.insert(
+            "test-provider".to_string(),
+            BTreeSet::from(["model".to_string()]),
+        );
         let (providers, _sources) = compile_v2_provider_directory(&tmp, &referenced_models)
             .expect("compile v2 provider dir");
         let authoring = providers.get("test-provider").expect("provider compiled");
         assert_eq!(
             authoring.request_timeout_ms, 900_000,
             "V2→V3 end-to-end: timeout=900_000 must land in request_timeout_ms (was silently dropped)"
+        );
+        assert_eq!(
+            authoring.models["model"].context_token_estimate_scale_bps, 17_000,
+            "V2→V3 end-to-end: provider model context scale must not be dropped"
         );
         std::fs::remove_dir_all(&tmp).ok();
 

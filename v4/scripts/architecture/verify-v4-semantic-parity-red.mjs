@@ -32,6 +32,20 @@ if (missing.length > 0) {
   for (const stage of missing) console.error(`- ${stage}`);
   process.exit(1);
 }
+const incomplete = entries.filter((entry) =>
+  !entry.owner ||
+  !entry.test_path ||
+  !entry.positive_case ||
+  !entry.negative_case ||
+  !entry.expected_red_reason ||
+  !entry.evidence ||
+  !['behavior_red', 'contract_red', 'environment_blocked'].includes(entry.status),
+);
+if (incomplete.length > 0) {
+  console.error(`RED semantic parity test records incomplete: ${incomplete.length}/26`);
+  for (const entry of incomplete) console.error(`- ${entry.id}`);
+  process.exit(1);
+}
 const pending = entries.filter((entry) => !entry.status || entry.status === 'red_baseline');
 if (pending.length > 0) {
   console.error(`RED semantic parity tests pending: ${pending.length}/26`);

@@ -1810,8 +1810,8 @@ chains:
   - step_id: v3-runtime-timing-11
     from_node: V3RuntimeTimingExternalComplete
     to_node: V3RuntimeTimingTerminal
-    caller_symbol: wrap_direct_sse_provider_outcome_stream
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    caller_symbol: wrap_direct_sse_provider_event_json_observation_stream_with_compat
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
     callee_symbol: finish_runtime
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
     owner_feature_id: v3.runtime_timing_observability
@@ -1831,8 +1831,8 @@ chains:
   - step_id: v3-runtime-timing-12
     from_node: V3RuntimeTimingTerminal
     to_node: V3RuntimeTimingStreamObservation
-    caller_symbol: wrap_direct_sse_provider_outcome_stream
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    caller_symbol: wrap_direct_sse_provider_event_json_observation_stream_with_compat
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
     callee_symbol: record_timing
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
     owner_feature_id: v3.runtime_timing_observability

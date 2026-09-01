@@ -315,18 +315,12 @@ impl V3TargetInterpreter {
         let mut unavailable = Vec::new();
         let mut eligible = Vec::new();
         let mut near_limit_eligible = Vec::new();
-        let direct_route = expanded.route.pool_id == "direct";
-        let default_pool_route = expanded.route.pool_id == "default";
-        let mut direct_fallback: Option<(usize, V3TargetCandidate)> = None;
-        let mut default_floor_fallback: Option<(usize, V3TargetCandidate)> = None;
-        let mut saw_non_context_candidate = false;
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
                     "{}:{}:{}:capability_mismatch",
                     candidate.provider_id, candidate.auth_alias, candidate.model_id
                 ));
-                saw_non_context_candidate = true;
                 continue;
             }
             let mut near_limit = false;
@@ -334,40 +328,37 @@ impl V3TargetInterpreter {
                 context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
             {
                 unavailable.push(reason);
-                if !(default_pool_route && candidate.default_pool_member) {
-                    continue;
-                }
+                continue;
             } else if let Some(reason) =
                 context_window_near_limit_reason(expanded.route.request_input_tokens, candidate)
             {
                 unavailable.push(reason);
-                saw_non_context_candidate = true;
                 near_limit = true;
-            } else {
-                saw_non_context_candidate = true;
             }
+            // Earlier route tiers have precedence over later/default tiers.
+            // Keep that precedence while candidate priority itself is ordered
+            // descending (larger configured values win).
             let route_tier_index = Self::route_tier_index(&expanded.route, candidate);
-            let effective_priority = (route_tier_index as i32)
-                .saturating_mul(1_000_000)
-                .saturating_add(candidate.priority);
-            let projection = scheduling.scheduling_projection(
+            let route_tier_rank = expanded
+                .route
+                .target_plan
+                .len()
+                .saturating_sub(route_tier_index);
+            let route_priority = (route_tier_rank as i32).saturating_mul(1_000_000);
+            let mut projection = scheduling.scheduling_projection(
                 &candidate.provider_id,
                 &candidate.auth_alias,
                 &candidate.model_id,
-                effective_priority,
+                candidate.priority,
                 candidate.weight,
                 now_ms,
             );
+            projection.effective_priority =
+                route_priority.saturating_add(projection.effective_priority);
             if projection.available {
                 if context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
                     .is_some()
                 {
-                    if default_floor_fallback.is_none() {
-                        default_floor_fallback = Some((index, candidate.clone()));
-                    }
-                    if direct_route && direct_fallback.is_none() {
-                        direct_fallback = Some((index, candidate.clone()));
-                    }
                     continue;
                 }
                 if near_limit {
@@ -380,41 +371,16 @@ impl V3TargetInterpreter {
                     candidate,
                     &projection,
                 ));
-                if direct_route && direct_fallback.is_none() && projection.blocked_scopes.is_empty()
-                {
-                    direct_fallback = Some((index, candidate.clone()));
-                }
             }
-        }
-
-        if let Some((index, candidate)) = direct_fallback {
-            return Ok(V3Target10ConcreteProviderSelected {
-                route: expanded.route,
-                candidate,
-                unavailable_candidates: unavailable,
-                attempts: index + 1,
-                default_floor_protected: false,
-            });
         }
         if eligible.is_empty() {
             eligible = near_limit_eligible;
         }
-        let Some(min_priority) = eligible
+        let Some(max_priority) = eligible
             .iter()
-            .map(|(_, _, projection)| projection.priority)
-            .min()
+            .map(|(_, _, projection)| projection.effective_priority)
+            .max()
         else {
-            if !direct_route && (saw_non_context_candidate || expanded.candidates.len() == 1) {
-                if let Some((index, candidate)) = default_floor_fallback {
-                    return Ok(V3Target10ConcreteProviderSelected {
-                        route: expanded.route,
-                        candidate,
-                        unavailable_candidates: unavailable,
-                        attempts: index + 1,
-                        default_floor_protected: true,
-                    });
-                }
-            }
             return Err(V3TargetExhaustion {
                 route: Box::new(expanded.route),
                 attempted_candidates: unavailable,
@@ -422,7 +388,7 @@ impl V3TargetInterpreter {
         };
         let mut tier = eligible
             .into_iter()
-            .filter(|(_, _, projection)| projection.priority == min_priority)
+            .filter(|(_, _, projection)| projection.effective_priority == max_priority)
             .collect::<Vec<_>>();
         let total_weight = tier
             .iter()

@@ -33,6 +33,22 @@ fn log_v3_toolreason_observation_at_resp03_with_context_and_expected_model(
 ) {
     let (status, fields) =
         classify_v3_toolreason_observation_at_resp03_with_expected_model(reason, expected_model_id);
+    log_classified_v3_toolreason_observation_at_resp03(
+        tool_name,
+        stage,
+        context,
+        status,
+        fields.as_ref(),
+    );
+}
+
+fn log_classified_v3_toolreason_observation_at_resp03(
+    tool_name: &str,
+    stage: &str,
+    context: V3ToolreasonObservationContext<'_>,
+    status: V3ToolreasonObservationStatus,
+    fields: Option<&V3ToolreasonFields>,
+) {
     let (label, color) = match status {
         V3ToolreasonObservationStatus::Ok => ("OK", "42"),
         V3ToolreasonObservationStatus::Missing => ("MISSING", "43"),
@@ -44,15 +60,12 @@ fn log_v3_toolreason_observation_at_resp03_with_context_and_expected_model(
         context.session_id.unwrap_or("<missing>"),
         context.request_id.unwrap_or("<missing>"),
         fields
-            .as_ref()
             .and_then(|value| value.goal_alignment_confidence)
             .map_or("<missing>".to_string(), |value| value.to_string()),
         fields
-            .as_ref()
             .map(|value| compact_v3_toolreason_observation_text(&value.reason))
             .unwrap_or_else(|| "<missing>".to_string()),
         fields
-            .as_ref()
             .and_then(|value| value.model_id.as_deref())
             .unwrap_or("<missing>"),
     );
@@ -138,12 +151,14 @@ pub(crate) fn audit_v3_toolreason_dry_run_payloads(
     provider_response: &Value,
 ) -> Value {
     let provider_text = provider_request.to_string();
-    // Phase 1 request coverage is authorized by the required field only.
-    // Confidence and model_id are optional diagnostics; their absence must
-    // never turn a valid reason-only request into a false injection failure.
-    let request_guidance_present = provider_text.contains("reason");
-    let optional_diagnostics_present =
+    // Provider-facing guidance is intentionally stricter than Resp03
+    // compatibility: all three fields must reach the wire contract even
+    // though a reason-only provider response remains acceptable.
+    let request_reason_guidance_present = provider_text.contains("reason");
+    let request_required_diagnostics_present =
         provider_text.contains("goal_alignment_confidence") && provider_text.contains("model_id");
+    let request_guidance_present =
+        request_reason_guidance_present && request_required_diagnostics_present;
     let mut tool_call_count = 0usize;
     let mut toolreason_count = 0usize;
     collect_v3_toolreason_dry_run_counts(
@@ -163,7 +178,8 @@ pub(crate) fn audit_v3_toolreason_dry_run_payloads(
         "original_request_present": !original_request.is_null(),
         "provider_request_present": !provider_request.is_null(),
         "request_guidance_present": request_guidance_present,
-        "optional_diagnostics_present": optional_diagnostics_present,
+        "request_reason_guidance_present": request_reason_guidance_present,
+        "request_required_diagnostics_present": request_required_diagnostics_present,
         "provider_response_present": !provider_response.is_null(),
         "provider_response_tool_call_count": tool_call_count,
         "provider_response_toolreason_count": toolreason_count,
@@ -374,6 +390,15 @@ fn v3_custom_tool_thinking_wrapper_at_resp03(
         return None;
     }
     let wrapper = serde_json::from_str::<Value>(raw_input).ok()?;
+    let wrapper = match wrapper {
+        Value::String(encoded_wrapper) => {
+            if json_object_has_duplicate_keys_at_resp03(&encoded_wrapper) {
+                return None;
+            }
+            serde_json::from_str::<Value>(&encoded_wrapper).ok()?
+        }
+        wrapper => wrapper,
+    };
     let wrapper = wrapper.as_object()?;
     let fields = parse_v3_tool_thinking_fields_from_object_at_resp03(wrapper).ok()?;
     let native_input = wrapper.get("input")?.as_str()?.to_string();
@@ -416,13 +441,7 @@ fn strip_v3_tool_thinking_fields_from_object_at_resp03(
         if object.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
             if let Some((_fields, native_input)) = v3_custom_tool_thinking_wrapper_at_resp03(object)
             {
-                if object
-                    .get("input")
-                    .and_then(Value::as_str)
-                    .is_some_and(|input| input.trim_start().starts_with('{'))
-                {
-                    object.insert("input".to_string(), Value::String(native_input));
-                }
+                object.insert("input".to_string(), Value::String(native_input));
                 object.remove("reason");
                 object.remove("goal_alignment_confidence");
                 object.remove("model_id");
@@ -555,6 +574,95 @@ fn emit_v3_toolreason_observation_at_resp03_with_expected_model(
         expected_model_id,
     );
     *emitted = true;
+}
+
+fn emit_v3_toolreason_observation_at_resp03_with_expected_model_and_stream_observation(
+    tool_name: &str,
+    reason: Option<&str>,
+    stage: &str,
+    emitted: &mut bool,
+    context: V3ToolreasonObservationContext<'_>,
+    expected_model_id: Option<&str>,
+    stream_observation: &crate::hub_v1::V3RuntimeStreamObservation,
+) -> Result<(), String> {
+    if *emitted {
+        return Ok(());
+    }
+    if let Some(request_id) = context.request_id {
+        if !claim_v3_toolreason_turn_observation(request_id) {
+            *emitted = true;
+            return Ok(());
+        }
+    }
+    let (status, fields) =
+        classify_v3_toolreason_observation_at_resp03_with_expected_model(reason, expected_model_id);
+    let status_label = match status {
+        V3ToolreasonObservationStatus::Ok => "OK",
+        V3ToolreasonObservationStatus::Missing => "MISSING",
+        V3ToolreasonObservationStatus::Invalid => "INVALID",
+        V3ToolreasonObservationStatus::Misplaced => "MISPLACED",
+    };
+    stream_observation.record_toolreason(crate::hub_v1::V3RuntimeToolreasonObservation {
+        status: status_label.to_string(),
+        source: "provider_raw_tool_arguments".to_string(),
+        stage: stage.to_string(),
+        session_id: context.session_id.map(str::to_string),
+        request_id: context.request_id.map(str::to_string),
+        tool: tool_name.to_string(),
+        reason: fields.as_ref().map(|value| value.reason.clone()),
+        confidence: fields
+            .as_ref()
+            .and_then(|value| value.goal_alignment_confidence),
+        model_id: fields.as_ref().and_then(|value| value.model_id.clone()),
+    })?;
+    log_classified_v3_toolreason_observation_at_resp03(
+        tool_name,
+        stage,
+        context,
+        status,
+        fields.as_ref(),
+    );
+    *emitted = true;
+    Ok(())
+}
+
+fn emit_v3_toolreason_observation_at_resp03_with_optional_stream_observation(
+    tool_name: &str,
+    reason: Option<&str>,
+    stage: &str,
+    emitted: &mut bool,
+    context: V3ToolreasonObservationContext<'_>,
+    expected_model_id: Option<&str>,
+    stream_observation: Option<&crate::hub_v1::V3RuntimeStreamObservation>,
+    observation_error: &mut Option<String>,
+) {
+    if observation_error.is_some() {
+        return;
+    }
+    if let Some(stream_observation) = stream_observation {
+        if let Err(error) =
+            emit_v3_toolreason_observation_at_resp03_with_expected_model_and_stream_observation(
+                tool_name,
+                reason,
+                stage,
+                emitted,
+                context,
+                expected_model_id,
+                stream_observation,
+            )
+        {
+            *observation_error = Some(error);
+        }
+    } else {
+        emit_v3_toolreason_observation_at_resp03_with_expected_model(
+            tool_name,
+            reason,
+            stage,
+            emitted,
+            context,
+            expected_model_id,
+        );
+    }
 }
 
 /// Resp03 may be re-entered while one provider attempt is normalized through
@@ -2129,6 +2237,7 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
                         }),
                     );
                 }
+                append_v3_toolreason_visible_text_item_at_resp03(output, &reasoning);
             }
         }
     }
@@ -2355,6 +2464,54 @@ fn observe_v3_toolreason_json_at_resp03_with_context(
             expected_model_id,
         );
     }
+}
+
+pub(crate) fn record_v3_toolreason_observation_at_resp03(
+    payload: &Value,
+    observation: &crate::hub_v1::V3RuntimeStreamObservation,
+    session_id: Option<&str>,
+    request_id: Option<&str>,
+    expected_model_id: Option<&str>,
+) -> Result<(), String> {
+    let Some((tool, raw)) = first_v3_tool_thinking_object_at_resp03(payload) else {
+        return Ok(());
+    };
+    let (status, fields) = classify_v3_toolreason_observation_at_resp03_with_expected_model(
+        Some(&raw),
+        expected_model_id,
+    );
+    let status = match status {
+        V3ToolreasonObservationStatus::Ok => "OK",
+        V3ToolreasonObservationStatus::Missing => "MISSING",
+        V3ToolreasonObservationStatus::Invalid => "INVALID",
+        V3ToolreasonObservationStatus::Misplaced => "MISPLACED",
+    };
+    observation.record_toolreason(crate::hub_v1::V3RuntimeToolreasonObservation {
+        status: status.to_string(),
+        source: "provider_raw_tool_arguments".to_string(),
+        stage: "resp03_json".to_string(),
+        session_id: session_id.map(str::to_string),
+        request_id: request_id.map(str::to_string),
+        tool: tool.clone(),
+        reason: fields.as_ref().map(|value| value.reason.clone()),
+        confidence: fields
+            .as_ref()
+            .and_then(|value| value.goal_alignment_confidence),
+        model_id: fields.as_ref().and_then(|value| value.model_id.clone()),
+    })?;
+    let mut emitted = false;
+    emit_v3_toolreason_observation_at_resp03_with_expected_model(
+        &tool,
+        Some(&raw),
+        "resp03_json",
+        &mut emitted,
+        V3ToolreasonObservationContext {
+            session_id,
+            request_id,
+        },
+        expected_model_id,
+    );
+    Ok(())
 }
 
 fn first_v3_tool_thinking_object_at_resp03(value: &Value) -> Option<(String, String)> {
@@ -2780,6 +2937,38 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
     argument_buffers: Option<&mut Vec<String>>,
     expected_model_id: Option<&str>,
 ) {
+    let mut observation_error = None;
+    map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_expected_model_and_stream_observation(
+        payload,
+        enabled,
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        project_to_client,
+        session_id,
+        request_id,
+        argument_buffers,
+        expected_model_id,
+        None,
+        &mut observation_error,
+    );
+    debug_assert!(observation_error.is_none());
+}
+
+pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_expected_model_and_stream_observation(
+    payload: &mut Value,
+    enabled: bool,
+    tool_names: &[String],
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    project_to_client: bool,
+    session_id: Option<&str>,
+    request_id: Option<&str>,
+    argument_buffers: Option<&mut Vec<String>>,
+    expected_model_id: Option<&str>,
+    stream_observation: Option<&crate::hub_v1::V3RuntimeStreamObservation>,
+    observation_error: &mut Option<String>,
+) {
     if !enabled {
         return;
     }
@@ -2794,6 +2983,8 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
             request_id,
             argument_buffers,
             expected_model_id,
+            stream_observation,
+            observation_error,
         );
         return;
     }
@@ -2943,7 +3134,7 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
             } else {
                 tool_label
             };
-            emit_v3_toolreason_observation_at_resp03_with_expected_model(
+            emit_v3_toolreason_observation_at_resp03_with_optional_stream_observation(
                 &tool_label,
                 response_raw_reason.as_deref(),
                 "resp03_direct_sse",
@@ -2953,6 +3144,8 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
                     request_id,
                 },
                 expected_model_id,
+                stream_observation,
+                observation_error,
             );
         }
         return;
@@ -2985,7 +3178,7 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
                         .unwrap_or_else(|| tool_names.to_vec());
                     let reasoning =
                         format_toolreason_reasoning_from_reason(&tool_label, &fields.reason);
-                    emit_v3_toolreason_observation_at_resp03_with_expected_model(
+                    emit_v3_toolreason_observation_at_resp03_with_optional_stream_observation(
                         &format_toolreason_tool_label(&tool_label),
                         raw_tool_reason.as_deref(),
                         "resp03_direct_sse",
@@ -2995,6 +3188,8 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
                             request_id,
                         },
                         expected_model_id,
+                        stream_observation,
+                        observation_error,
                     );
                     if project_to_client {
                         if let Some(reasoning) = reasoning {
@@ -3023,7 +3218,7 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
                         .as_deref()
                         .and_then(|reason| format_toolreason_reasoning(tool_names, reason));
                     let tool_label = format_toolreason_tool_label(tool_names);
-                    emit_v3_toolreason_observation_at_resp03_with_expected_model(
+                    emit_v3_toolreason_observation_at_resp03_with_optional_stream_observation(
                         &tool_label,
                         pending_raw.as_deref(),
                         "resp03_direct_sse",
@@ -3033,6 +3228,8 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
                             request_id,
                         },
                         expected_model_id,
+                        stream_observation,
+                        observation_error,
                     );
                     if project_to_client {
                         if let Some(reasoning) = reasoning {
@@ -3068,7 +3265,7 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
             // observation as MISSING and block the real client projection.
             if tool_name.is_some() {
                 let tool_label = format_toolreason_tool_label(tool_names);
-                emit_v3_toolreason_observation_at_resp03_with_expected_model(
+                emit_v3_toolreason_observation_at_resp03_with_optional_stream_observation(
                     &tool_label,
                     item_reason_raw.as_deref(),
                     "resp03_direct_sse",
@@ -3078,6 +3275,8 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_
                         request_id,
                     },
                     expected_model_id,
+                    stream_observation,
+                    observation_error,
                 );
                 if project_to_client {
                     if let Some(reasoning) = item_reasoning {
@@ -3113,6 +3312,7 @@ fn map_v3_openai_chat_toolreason_chunk_at_resp03(
     request_id: Option<&str>,
     argument_buffers: Option<&mut Vec<String>>,
 ) {
+    let mut observation_error = None;
     map_v3_openai_chat_toolreason_chunk_at_resp03_with_expected_model(
         payload,
         tool_names,
@@ -3123,7 +3323,10 @@ fn map_v3_openai_chat_toolreason_chunk_at_resp03(
         request_id,
         argument_buffers,
         None,
+        None,
+        &mut observation_error,
     );
+    debug_assert!(observation_error.is_none());
 }
 
 fn map_v3_openai_chat_toolreason_chunk_at_resp03_with_expected_model(
@@ -3136,6 +3339,8 @@ fn map_v3_openai_chat_toolreason_chunk_at_resp03_with_expected_model(
     request_id: Option<&str>,
     mut argument_buffers: Option<&mut Vec<String>>,
     expected_model_id: Option<&str>,
+    stream_observation: Option<&crate::hub_v1::V3RuntimeStreamObservation>,
+    observation_error: &mut Option<String>,
 ) {
     let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
         return;
@@ -3214,7 +3419,7 @@ fn map_v3_openai_chat_toolreason_chunk_at_resp03_with_expected_model(
                 }
                 if fields.is_some() && status == V3ToolreasonObservationStatus::Ok {
                     let tool_label = format_toolreason_tool_label(tool_names);
-                    emit_v3_toolreason_observation_at_resp03_with_expected_model(
+                    emit_v3_toolreason_observation_at_resp03_with_optional_stream_observation(
                         &tool_label,
                         Some(&raw_parameter),
                         "resp03_relay_sse",
@@ -3224,6 +3429,8 @@ fn map_v3_openai_chat_toolreason_chunk_at_resp03_with_expected_model(
                             request_id,
                         },
                         expected_model_id,
+                        stream_observation,
+                        observation_error,
                     );
                 }
                 if project_to_client
@@ -3444,9 +3651,28 @@ pub(crate) fn finalize_v3_toolreason_observation_at_resp03_with_expected_model(
     context: V3ToolreasonObservationContext<'_>,
     expected_model_id: Option<&str>,
 ) {
+    finalize_v3_toolreason_observation_at_resp03_with_expected_model_and_stream_observation(
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        context,
+        expected_model_id,
+        None,
+    )
+    .expect("Toolreason finalization without a stream observation cannot fail");
+}
+
+pub(crate) fn finalize_v3_toolreason_observation_at_resp03_with_expected_model_and_stream_observation(
+    tool_names: &[String],
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    context: V3ToolreasonObservationContext<'_>,
+    expected_model_id: Option<&str>,
+    stream_observation: Option<&crate::hub_v1::V3RuntimeStreamObservation>,
+) -> Result<(), String> {
     let has_pending_reason = pending_reasons.iter().any(Option::is_some);
     if *reason_emitted || (tool_names.is_empty() && !has_pending_reason) {
-        return;
+        return Ok(());
     }
     let reason = pending_reasons.iter_mut().find_map(Option::take);
     let tool_label = format_toolreason_tool_label(tool_names);
@@ -3455,17 +3681,31 @@ pub(crate) fn finalize_v3_toolreason_observation_at_resp03_with_expected_model(
     } else {
         tool_label
     };
-    emit_v3_toolreason_observation_at_resp03_with_expected_model(
-        &tool_label,
-        reason.as_deref().and_then(|reason| {
-            let reason = reason.trim();
-            (!reason.is_empty()).then_some(reason)
-        }),
-        "resp03_direct_sse",
-        reason_emitted,
-        context,
-        expected_model_id,
-    );
+    let reason = reason.as_deref().and_then(|reason| {
+        let reason = reason.trim();
+        (!reason.is_empty()).then_some(reason)
+    });
+    if let Some(stream_observation) = stream_observation {
+        emit_v3_toolreason_observation_at_resp03_with_expected_model_and_stream_observation(
+            &tool_label,
+            reason,
+            "resp03_direct_sse",
+            reason_emitted,
+            context,
+            expected_model_id,
+            stream_observation,
+        )?;
+    } else {
+        emit_v3_toolreason_observation_at_resp03_with_expected_model(
+            &tool_label,
+            reason,
+            "resp03_direct_sse",
+            reason_emitted,
+            context,
+            expected_model_id,
+        );
+    }
+    Ok(())
 }
 
 fn find_v3_sse_frame_end_at_resp03(buffer: &[u8]) -> Option<(usize, usize)> {
@@ -3798,6 +4038,34 @@ fn append_v3_toolreason_reasoning_item_at_resp03(
     );
 }
 
+fn append_v3_toolreason_visible_text_item_at_resp03(output: &mut Vec<Value>, reasoning: &str) {
+    if output.iter().any(|item| {
+        item.get("type").and_then(Value::as_str) == Some("message")
+            && item.get("role").and_then(Value::as_str) == Some("assistant")
+            && item.pointer("/content/0/type").and_then(Value::as_str) == Some("output_text")
+            && item.pointer("/content/0/text").and_then(Value::as_str) == Some(reasoning)
+    }) {
+        return;
+    }
+    let insert_at = output
+        .iter()
+        .position(|item| {
+            matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("function_call" | "tool_call" | "custom_tool_call")
+            )
+        })
+        .unwrap_or(output.len());
+    output.insert(
+        insert_at,
+        json!({
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": reasoning}]
+        }),
+    );
+}
+
 pub(crate) fn build_v3_toolreason_reasoning_done_projection_at_resp03(
     payload: &Value,
 ) -> Option<String> {
@@ -3837,13 +4105,31 @@ pub(crate) fn build_v3_toolreason_visible_text_sse_events_at_resp03(
         .and_then(Value::as_str)
         .map(|id| format!("rcc_reason_{id}"))
         .unwrap_or_else(|| "rcc_reason_tool_call".to_string());
+    let visible_item_id = format!("{item_id}_text");
+    let visible_output_index = output_index
+        .as_u64()
+        .map(|index| json!(index.saturating_add(1)))
+        .unwrap_or_else(|| output_index.clone());
+    let visible_message = json!({
+        "id": visible_item_id.clone(),
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": reasoning}]
+    });
     let events = [
         json!({"type":"response.output_item.added","output_index":output_index.clone(),"item":{"id":item_id.clone(),"type":"reasoning","status":"in_progress","summary":[]}}),
         json!({"type":"response.reasoning_summary_part.added","output_index":output_index.clone(),"item_id":item_id.clone(),"summary_index":0,"part":{"type":"summary_text","text":""}}),
         json!({"type":"response.reasoning_summary_text.delta","output_index":output_index.clone(),"item_id":item_id.clone(),"summary_index":0,"delta":reasoning}),
         json!({"type":"response.reasoning_summary_text.done","output_index":output_index.clone(),"item_id":item_id.clone(),"summary_index":0,"text":reasoning}),
         json!({"type":"response.reasoning_summary_part.done","output_index":output_index.clone(),"item_id":item_id.clone(),"summary_index":0,"part":{"type":"summary_text","text":reasoning}}),
-        json!({"type":"response.output_item.done","output_index":output_index,"item":{"id":item_id,"type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":reasoning}]}}),
+        json!({"type":"response.output_item.done","output_index":output_index.clone(),"item":{"id":item_id,"type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":reasoning}]}}),
+        json!({"type":"response.output_item.added","output_index":visible_output_index.clone(),"item":{"id":visible_item_id.clone(),"type":"message","status":"in_progress","role":"assistant","content":[]}}),
+        json!({"type":"response.content_part.added","output_index":visible_output_index.clone(),"item_id":visible_item_id.clone(),"content_index":0,"part":{"type":"output_text","text":""}}),
+        json!({"type":"response.output_text.delta","output_index":visible_output_index.clone(),"item_id":visible_item_id.clone(),"content_index":0,"delta":reasoning}),
+        json!({"type":"response.output_text.done","output_index":visible_output_index.clone(),"item_id":visible_item_id.clone(),"content_index":0,"text":reasoning}),
+        json!({"type":"response.content_part.done","output_index":visible_output_index.clone(),"item_id":visible_item_id,"content_index":0,"part":{"type":"output_text","text":reasoning}}),
+        json!({"type":"response.output_item.done","output_index":visible_output_index,"item":visible_message}),
     ];
     let mut output = String::new();
     for event in events {
@@ -4364,7 +4650,8 @@ mod tests {
         assert_eq!(audit["provider_response_tool_call_count"], 1);
         assert_eq!(audit["provider_response_toolreason_count"], 1);
         assert_eq!(audit["request_guidance_present"], true);
-        assert_eq!(audit["optional_diagnostics_present"], true);
+        assert_eq!(audit["request_reason_guidance_present"], true);
+        assert_eq!(audit["request_required_diagnostics_present"], true);
 
         let reason_only_provider_request = json!({"tools": [{"description": "reason"}]});
         let reason_only_audit = audit_v3_toolreason_dry_run_payloads(
@@ -4372,9 +4659,14 @@ mod tests {
             &reason_only_provider_request,
             &response,
         );
-        assert_eq!(reason_only_audit["diagnosis"], "raw_contract_present");
-        assert_eq!(reason_only_audit["request_guidance_present"], true);
-        assert_eq!(reason_only_audit["optional_diagnostics_present"], false);
+        assert_eq!(reason_only_audit["diagnosis"], "request_injection_missing");
+        assert_eq!(reason_only_audit["request_guidance_present"], false);
+        assert_eq!(reason_only_audit["request_reason_guidance_present"], true);
+        assert_eq!(
+            reason_only_audit["request_required_diagnostics_present"],
+            false
+        );
+        assert_eq!(reason_only_audit["provider_response_toolreason_count"], 1);
 
         let missing = audit_v3_toolreason_dry_run_payloads(
             &request,
@@ -4406,6 +4698,28 @@ mod tests {
         );
         assert_eq!(
             classify_v3_toolreason_observation_at_resp03(Some(&reasons[0])).0,
+            V3ToolreasonObservationStatus::Ok
+        );
+    }
+
+    #[test]
+    fn resp03_toolreason_reason_length_is_not_a_hard_rejection() {
+        let accepted_reason = "确认当前工作目录并继续执行用户请求";
+        let accepted = serde_json::json!({
+            "reason": accepted_reason,
+            "goal_alignment_confidence": 100
+        });
+        assert_eq!(
+            classify_v3_toolreason_observation_at_resp03(Some(&accepted.to_string())).0,
+            V3ToolreasonObservationStatus::Ok
+        );
+
+        let rejected = serde_json::json!({
+            "reason": "这是一段超过五十字符上限的工具调用说明，用于锁定无效合同",
+            "goal_alignment_confidence": 100
+        });
+        assert_eq!(
+            classify_v3_toolreason_observation_at_resp03(Some(&rejected.to_string())).0,
             V3ToolreasonObservationStatus::Ok
         );
     }

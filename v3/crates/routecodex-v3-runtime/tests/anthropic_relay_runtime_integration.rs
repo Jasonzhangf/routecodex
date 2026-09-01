@@ -39,7 +39,7 @@ impl ResponsesTransport for JsonTransport {
                 "status":"completed",
                 "output":[
                     {"type":"reasoning","summary":[{"type":"summary_text","text":"Need lookup"}]},
-                    {"type":"function_call","call_id":"call_json_1","name":"lookup","arguments":"{\"q\":\"alpha\"}"}
+                    {"type":"function_call","call_id":"call_json_1","name":"lookup","arguments":"{\"q\":\"alpha\",\"reason\":\"查找 alpha\",\"goal_alignment_confidence\":100,\"model_id\":\"responses-wire-model\"}"}
                 ]
             }))
             .unwrap(),
@@ -194,6 +194,7 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
             )
             .expect("test provider failure session scope"),
             request_id: "req-json".into(),
+            toolreason_observation_session_id: Some("rcc-session:request:req-json".into()),
             payload: json!({
                 "model":"claude-client-alias",
                 "messages":[{"role":"user","content":"Lookup alpha"}],
@@ -225,6 +226,20 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
         .contains(&"ProviderRespCompat02ProviderCompat"));
     assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
     assert_eq!(output.client_response["stop_reason"], "tool_use");
+    let toolreason = output
+        .stream_observation
+        .as_ref()
+        .unwrap()
+        .snapshot()
+        .unwrap()
+        .toolreason
+        .unwrap();
+    assert_eq!(toolreason.status, "OK");
+    assert_eq!(toolreason.reason.as_deref(), Some("查找 alpha"));
+    assert_eq!(
+        toolreason.session_id.as_deref(),
+        Some("rcc-session:request:req-json")
+    );
 }
 
 #[tokio::test]
@@ -250,6 +265,7 @@ async fn anthropic_responses_field_parity_request_matrix() {
             )
             .expect("test provider failure session scope"),
             request_id: "req-anthropic-field-matrix".into(),
+            toolreason_observation_session_id: None,
             payload: json!({
                 "model":"claude-client-alias",
                 "system":"system alpha\n\nsystem beta",
@@ -374,6 +390,7 @@ async fn anthropic_structured_system_extension_is_not_silently_flattened_for_res
             )
             .expect("test provider failure session scope"),
             request_id: "req-anthropic-structured-system-unmapped".into(),
+            toolreason_observation_session_id: None,
             payload: json!({
                 "model":"claude-client-alias",
                 "system":[{
@@ -559,6 +576,7 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
                 )
                 .expect("test provider failure session scope"),
                 request_id: "req-provider-reselect".into(),
+                toolreason_observation_session_id: None,
                 payload: json!({
                     "model":"claude-client-alias",
                     "messages":[{"role":"user","content":"use the available provider"}],
@@ -611,6 +629,7 @@ async fn provider_error_enters_error01_06_without_success_projection() {
             )
             .expect("test provider failure session scope"),
             request_id: "req-error".into(),
+            toolreason_observation_session_id: None,
             payload: json!({"model":"claude-client-alias","messages":[{"role":"user","content":"fail"}],"stream":false}),
         },
         &ErrorTransport,
@@ -834,6 +853,7 @@ async fn responses_sse_projects_anthropic_thinking_from_resp04_finalized_truth()
             )
             .expect("test provider failure session scope"),
             request_id: "req-thinking-sse".into(),
+            toolreason_observation_session_id: None,
             payload: json!({
                 "model":"claude-client-alias",
                 "messages":[{"role":"user","content":"think"}],
@@ -887,6 +907,7 @@ async fn responses_sse_without_terminal_fails_before_anthropic_success_projectio
             )
             .expect("test provider failure session scope"),
             request_id: "req-thinking-no-terminal".into(),
+            toolreason_observation_session_id: None,
             payload: json!({
                 "model":"claude-client-alias",
                 "messages":[{"role":"user","content":"think"}],
@@ -927,6 +948,8 @@ fn manifest(scope: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
         parse_v3_config_02_authoring(
             &r#"
 version = 3
+[pipelines.hub_v1]
+skeleton = "hub_v1"
 [servers.__SCOPE__]
 bind = "127.0.0.1"
 port = 1
@@ -962,6 +985,8 @@ fn manifest_with_two_providers(scope: &str) -> routecodex_v3_config::V3Config05M
         parse_v3_config_02_authoring(
             &r#"
 version = 3
+[pipelines.hub_v1]
+skeleton = "hub_v1"
 [servers.__SCOPE__]
 bind = "127.0.0.1"
 port = 1
@@ -1027,6 +1052,7 @@ async fn anthropic_unknown_direct_provider_model_returns_model_not_found() {
             )
             .expect("test provider failure session scope"),
             request_id: "req-anthropic-404".into(),
+            toolreason_observation_session_id: None,
             payload: json!({
                 "model":"controlled.unknown-model",
                 "messages":[{"role":"user","content":"ping"}],
@@ -1053,6 +1079,8 @@ async fn anthropic_entry_mode_b_web_search_intercepted_must_fail_fast_not_silent
         parse_v3_config_02_authoring(
             r#"
 version = 3
+[pipelines.hub_v1]
+skeleton = "hub_v1"
 [servers.ws]
 bind = "127.0.0.1"
 port = 1
@@ -1132,6 +1160,7 @@ targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key
             )
             .expect("scope"),
             request_id: "anthropic-mode-b-ws-1".into(),
+            toolreason_observation_session_id: None,
             payload,
         },
         &WebSearchTransport,

@@ -375,8 +375,20 @@ pub fn standard_allowed_writes() -> Vec<String> {
 /// cannot read another node's data or a wire payload through the M5 surface.
 pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
     match node_id {
+        "V4Error02HostCaptured" | "V4Error03RuntimeClassified" | "V4Error04RouterPolicyApplied"
+        | "V4Error05ExecutionDecision" => vec!["v4.control.error_chain".to_string()],
+        "V4ProviderRespInbound01Raw" => vec!["v4.response.provider_raw".to_string()],
+        "V4ServerReqInbound01ClientRaw" => vec!["v4.request.normal_payload".to_string()],
+        "V4DirectReq03ProviderWire" => {
+            vec!["v4.direct.request.provider_wire".to_string()]
+        }
         "V4DirectReq01ClientProtocol" => vec!["v4.direct.request.client_payload".to_string()],
         "V4DirectResp01ProviderRaw" => vec!["v4.direct.response.provider_raw".to_string()],
+        "V4DirectResp03ClientProtocol" => vec![
+            "v4.direct.response.client_payload".to_string(),
+            "v4.information.client_protocol".to_string(),
+            "v4.information.provider_protocol".to_string(),
+        ],
         "V4DirectReq02RelayContainer" => vec![
             "v4.direct.request.client_payload".to_string(),
             "v4.information.client_protocol".to_string(),
@@ -434,6 +446,8 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
 /// facts never enter a normal data or wire resource.
 pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
     match node_id {
+        "V4Error02HostCaptured" | "V4Error03RuntimeClassified" | "V4Error04RouterPolicyApplied"
+        | "V4Error05ExecutionDecision" => vec!["v4.control.error_chain".to_string()],
         "V4DirectReq02RelayContainer" => vec!["v4.direct.request.provider_wire".to_string()],
         "V4DirectResp02RelayContainer" => vec!["v4.direct.response.client_payload".to_string()],
         "V4HubReqOutbound06ProviderSemantic" => vec!["v4.request.provider_semantic".to_string()],
@@ -675,6 +689,58 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             vec!["v4.control.error_chain"],
             vec!["v4.control.error_chain"],
         ),
+        plugin(
+            "v4.std.error.host_capture",
+            PluginCategory::Error,
+            "V4Error02HostCaptured",
+            "error_source",
+            Some(2),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            310,
+            vec!["v4.control.error_chain"],
+            vec!["v4.control.error_chain"],
+        ),
+        plugin(
+            "v4.std.error.runtime_classify",
+            PluginCategory::Error,
+            "V4Error03RuntimeClassified",
+            "error_classify",
+            Some(3),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            320,
+            vec!["v4.control.error_chain"],
+            vec!["v4.control.error_chain"],
+        ),
+        plugin(
+            "v4.std.error.router_policy",
+            PluginCategory::Error,
+            "V4Error04RouterPolicyApplied",
+            "error_policy",
+            Some(4),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            330,
+            vec!["v4.control.error_chain"],
+            vec!["v4.control.error_chain"],
+        ),
+        plugin(
+            "v4.std.error.execution_decision",
+            PluginCategory::Error,
+            "V4Error05ExecutionDecision",
+            "error_decision",
+            Some(5),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            340,
+            vec!["v4.control.error_chain"],
+            vec!["v4.control.error_chain"],
+        ),
         codec,
         codec_proto,
         plugin(
@@ -791,6 +857,19 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::ReadOnly,
             PluginPhase::Projection,
             550,
+            vec!["v4.request.provider_wire_payload"],
+            vec![],
+        ),
+        plugin(
+            "v4.std.provider.transport_validate",
+            PluginCategory::Provider,
+            "V4ProviderReqOutbound09TransportRequest",
+            "request_outbound",
+            Some(9),
+            PluginKind::Validator,
+            PluginEffect::ReadOnly,
+            PluginPhase::Validation,
+            800,
             vec!["v4.request.provider_wire_payload"],
             vec![],
         ),
@@ -940,17 +1019,12 @@ pub fn compile_production_execution_plans(
                 .filter(|plugin| !EXCLUDED_PLUGINS.contains(&plugin.plugin_id.as_str()))
                 .collect::<Vec<_>>();
             let plan = if selected.is_empty() {
-                let mut plan = NodePluginPlan {
-                    node_id: node.node_id.clone(),
-                    position: node.position,
-                    role_id: node.role_id.clone(),
-                    chain: chain_id.to_string(),
-                    entries: Vec::new(),
-                    selection_groups: Vec::new(),
-                    hash: String::new(),
-                };
-                plan.hash = plan.plan_hash();
-                plan
+                return Err(routecodex_v4_plugin_plan::PlanError::NodeContractInvalid {
+                    reason: format!(
+                        "production node {} on {} has no standard plugin binding",
+                        node.node_id, chain_id
+                    ),
+                });
             } else {
                 let authoring = selected
                     .iter()
@@ -1091,6 +1165,36 @@ pub(crate) fn error_intake(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     object.insert("kind".to_string(), json!("keyless_mock"));
     ctx.write_control_resource("v4.control.error_chain", error_chain)
         .map_err(|error| error.to_string())
+}
+
+fn error_stage(ctx: &mut ExecCtx<'_>, stage: &str) -> Result<(), String> {
+    let mut chain = ctx
+        .read_control_resource("v4.control.error_chain")
+        .map_err(|error| error.to_string())?
+        .cloned()
+        .ok_or_else(|| format!("error stage {stage} requires typed error chain"))?;
+    let object = chain
+        .as_object_mut()
+        .ok_or_else(|| format!("error stage {stage} requires typed error object"))?;
+    object.insert("stage".to_string(), json!(stage));
+    ctx.write_control_resource("v4.control.error_chain", chain)
+        .map_err(|error| error.to_string())
+}
+
+fn error_host_capture(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    error_stage(ctx, "host_captured")
+}
+
+fn error_runtime_classify(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    error_stage(ctx, "runtime_classified")
+}
+
+fn error_router_policy(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    error_stage(ctx, "router_policy_applied")
+}
+
+fn error_execution_decision(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    error_stage(ctx, "execution_decision")
 }
 
 fn error_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -1325,6 +1429,10 @@ impl StandardHandleRegistry {
             ("v4.std.control.payload_cycle_record", payload_cycle_record),
             ("v4.std.error.typed_intake", error_intake),
             ("v4.std.error.projection_adapter", error_projection),
+            ("v4.std.error.host_capture", error_host_capture),
+            ("v4.std.error.runtime_classify", error_runtime_classify),
+            ("v4.std.error.router_policy", error_router_policy),
+            ("v4.std.error.execution_decision", error_execution_decision),
             ("v4.std.provider.wire_build", protocol_codec),
             ("v4.std.protocol.wire_codec_proto", protocol_codec),
             ("v4.std.chat_process.request_governance", request_governance),
@@ -1339,6 +1447,7 @@ impl StandardHandleRegistry {
             ("v4.std.provider.auth_handle_mock", auth_handle_mock),
             ("v4.std.provider.wire_mock", wire_mock),
             ("v4.std.provider.transport_mock", transport_mock),
+            ("v4.std.provider.transport_validate", transport_mock),
         ] {
             handles.insert(id, MockHandle { execute_fn });
         }
@@ -1434,10 +1543,16 @@ mod tests {
             "v4.std.diagnostic.direct_response_payload_console_render",
             "v4.std.diagnostic.timing",
             "v4.std.diagnostic.snapshot_record",
+            "v4.std.direct.request.wire_validate",
+            "v4.std.direct.response.client_validate",
             "v4.std.control.scope_consume",
             "v4.std.control.payload_cycle_record",
             "v4.std.error.typed_intake",
             "v4.std.error.projection_adapter",
+            "v4.std.error.host_capture",
+            "v4.std.error.runtime_classify",
+            "v4.std.error.router_policy",
+            "v4.std.error.execution_decision",
             "v4.std.provider.wire_build",
             "v4.std.protocol.wire_codec_proto",
             "v4.std.chat_process.request_governance",
@@ -1449,10 +1564,13 @@ mod tests {
             "v4.std.provider.auth_handle_mock",
             "v4.std.provider.wire_mock",
             "v4.std.provider.transport_mock",
+            "v4.std.provider.transport_validate",
             "v4.std.response.protocol_decode",
             "v4.std.response.frame_build",
             "v4.std.response.provider_compat",
+            "v4.std.response.provider_raw_validate",
             "v4.std.request.responses_normalize",
+            "v4.std.request.protocol_parse",
             "v4.std.request.governance",
             "v4.std.request.responses_wire_build",
             "v4.hook.direct.request",
@@ -1472,5 +1590,16 @@ mod tests {
         for plugin in standard_plugins() {
             assert!(registry.contains(&plugin.plugin_id));
         }
+    }
+
+    #[test]
+    fn production_compilation_has_no_empty_node_plans() {
+        let skeleton = SkeletonPlan::from_contract_json(include_str!(
+            "../../../contracts/skeleton-plan.contract.json"
+        ))
+        .expect("canonical skeleton contract must parse");
+        let compiled = compile_production_execution_plans(&skeleton)
+            .expect("every production node must have a real standard plugin binding");
+        assert!(compiled.plans.iter().all(|plan| !plan.entries.is_empty()));
     }
 }

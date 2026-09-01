@@ -13,13 +13,17 @@ impl V3ProviderFailureRuntimeHealth {
         let mut identities = BTreeSet::new();
         let mut probes = Vec::new();
         for candidate in &expanded.candidates {
-            let identity = format!("{}:{}", candidate.provider_id, candidate.auth_alias);
+            let identity = (
+                &candidate.provider_id,
+                &candidate.auth_alias,
+                &candidate.model_id,
+            );
             if !identities.insert(identity) {
                 continue;
             }
-            let acquired = self
+            let permit = self
                 .store
-                .try_acquire_provider_cooldown_rescue_probe(
+                .acquire_provider_cooldown_rescue_probe(
                     &candidate.provider_id,
                     Some(&candidate.auth_alias),
                     Some(&candidate.model_id),
@@ -29,8 +33,9 @@ impl V3ProviderFailureRuntimeHealth {
             let provider_id = candidate.provider_id.clone();
             let auth_alias = candidate.auth_alias.clone();
             let model_id = candidate.model_id.clone();
-            let target = acquired
-                .then(|| {
+            let target = permit
+                .as_ref()
+                .map(|_| {
                     build_v3_provider_global_probe_target(
                         manifest,
                         &provider_id,
@@ -40,7 +45,7 @@ impl V3ProviderFailureRuntimeHealth {
                 })
                 .transpose();
             probes.push(async move {
-                if !acquired {
+                let Some(permit) = permit else {
                     return health
                         .store
                         .wait_for_provider_cooldown_probe_completion(
@@ -50,7 +55,7 @@ impl V3ProviderFailureRuntimeHealth {
                         )
                         .await
                         .map_err(|error| error.to_string());
-                }
+                };
                 let result = match target {
                     Ok(Some(target)) => probe_v3_provider_global_target(target).await,
                     Ok(None) => Err(format!(
@@ -61,21 +66,23 @@ impl V3ProviderFailureRuntimeHealth {
                 match result {
                     Ok(()) => health
                         .store
-                        .complete_provider_cooldown_probe_success_at(
+                        .complete_provider_cooldown_probe_success_at_generation(
                             &provider_id,
                             Some(&auth_alias),
                             Some(&model_id),
                             v3_relay_provider_policy_now_epoch_ms()?,
+                            Some(permit.expected_generation()),
                         )
                         .map_err(|error| error.to_string()),
                     Err(_error) => {
                         health
                             .store
-                            .complete_provider_cooldown_probe_failure(
+                            .complete_provider_cooldown_probe_failure_at_generation(
                                 &provider_id,
                                 Some(&auth_alias),
                                 Some(&model_id),
                                 v3_relay_provider_policy_now_epoch_ms()?,
+                                Some(permit.expected_generation()),
                             )
                             .map_err(|store_error| store_error.to_string())?;
                         Ok(())

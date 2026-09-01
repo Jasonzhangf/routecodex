@@ -106,8 +106,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:cb6111cbbfa6348623d9f489935026efb60a8aaae72d32bbb932faccce22b6e8
-    last_manual_authorization_id: auth-20260824-v3-protocol-fields-debug-error
+    fingerprint: sha256:e813e787f04eb2af0701aabe192183f6a13cf78e721062947981384ecbb0043a
+    last_manual_authorization_id: auth-20260831-v3-debug-error-lock-refresh
   - item_id: chain:v3.sse.transport_boundary
     chain_id: v3.sse.transport_boundary
     status: audited_locked
@@ -115,13 +115,13 @@ locked_items:
     locked_at: '2026-07-24T12:00:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md#sse-edge-sop
-    fingerprint: sha256:911b8d1042b6d4d3c813308446d32b869d82eff6eaaac7dbdc5d8af3a22843b6
-    last_manual_authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-sse
+    fingerprint: sha256:15a4d27494d94a69aca744218bfb150880934ec8039e1befd2b02b478d2dc2bc
+    last_manual_authorization_id: auth-20260827-v3-sse-client-provider-decoupling-lock-refresh
   - item_id: chain:v3.global_binary_install
     chain_id: v3.global_binary_install
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-08-29T20:40:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     fingerprint: sha256:34c3f3e588a97ae6902a1ff6ebcc2dad7b8e05d855c661bcf11f76b489908158
     last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-global-install
@@ -139,8 +139,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:cbd2d5a36500918033f01824b210de96de0ab4a54ed25dabb4693795188446ae
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:aff218cb4f8b0ed58e0feb742d4548e1496d1c223d790d5b5412be26a88bc8ce
+    last_manual_authorization_id: auth-20260831-v3-codex-sample-lock-refresh
   - item_id: chain:v3.server.managed_lifecycle
     chain_id: v3.server.managed_lifecycle
     status: audited_locked
@@ -187,8 +187,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:b0a19bb8282dff4ee8cb82e683a26e2487713dfe2a656ce3995cc06d86cdbdd3
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:8f264f0aee7ba9dc5e5d463e3edcf0eaa23f4ccff94fbc753da6130fbc293a30
+    last_manual_authorization_id: auth-20260827-v3-sse-closeout-map-sync
   - item_id: chain:v3.protocol.anthropic.characterization
     chain_id: v3.protocol.anthropic.characterization
     status: audited_locked
@@ -251,8 +251,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:72983e8dc1ea80c42da468ae7500329c6876429633d4314169fdd6052efae3b0
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:f95c3a9aa845e97425fc0ccc7423244d47d49c44652bedef18f77bfdf201dc57
+    last_manual_authorization_id: auth-20260831-v3-anthropic-relay-lock-refresh
   - item_id: chain:v3.responses.websocket_v2.transport_hardening
     chain_id: v3.responses.websocket_v2.transport_hardening
     status: audited_locked
@@ -427,16 +427,16 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:968849c3f1b4306c9c70f93f5547411ca8a28bd80f75895dc479c87d0673ddb1
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:4c8c2ea7aa25177f91e2aba4567095a335b513c267b8e20fee4c37ca372a8eba
+    last_manual_authorization_id: auth-20260827-v3-sse-client-provider-decoupling-timing-owner-map-refresh
   - item_id: chain:v3.responses_session_admission
     chain_id: v3.responses_session_admission
     status: audited_locked
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:3b53f2fc2ecbf364c634c6189346d1362257557d9ee030091000526ebbf08555
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:c5c8a71571158b98b2a0e58861ebf375f5936728ce41d79161943cafc4c28d00
+    last_manual_authorization_id: auth-20260827-v3-sse-session-admission-contract
   - item_id: chain:v3.sse.http_keepalive_boundary
     chain_id: v3.sse.http_keepalive_boundary
     status: audited_locked
@@ -451,16 +451,16 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:3c8d46790fab4b8241fe9f8b0357f2ff8023ab81985426bdca969c422af953cd
-    last_manual_authorization_id: auth-20260823-v3-provider-adaptive-health-action-gate
+    fingerprint: sha256:6969ab703d50e0f71f8fdf68ddb7eac38f971c64105ef9a4467a29b539d6413c
+    last_manual_authorization_id: auth-20260830-v3-execution-control-provider-action
   - item_id: chain:v3.build_test_artifact_budget
     chain_id: v3.build_test_artifact_budget
     status: audited_locked
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:d0074891924aa83d4c4d5e8d75615af66bf4a0293cbbde7def9981d106786a46
-    last_manual_authorization_id: auth-20260816-v3-independent-build-isolation
+    fingerprint: sha256:ce962682d064d945b7cf6c96b5cbca13b9b46073670714f7e222173185fdc168
+    last_manual_authorization_id: auth-20260827-v3-sse-closeout-map-sync-build
   - item_id: chain:v3.route_classifier.facts_classification
     chain_id: v3.route_classifier.facts_classification
     status: audited_locked
@@ -489,11 +489,60 @@ locked_items:
     chain_id: v3.provider_global_subscription_probe
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-08-29T20:40:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:4015c43636de22ea0b61ad6cc0604f5b21bbde3178fbf2af5d242de8369f076c
-    last_manual_authorization_id: auth-20260823-v3-provider-adaptive-health-global-probe
+    fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
+    last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
 manual_authorizations:
+  - authorization_id: auth-20260829-v3-health-scheduler-failback
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-29T20:40:00-07:00'
+    reason: "Jason explicitly requested repairing the audited provider health scheduler without fallback. This refresh locks one typed probe permit owner, generation-guarded success/failure completion, protocol-semantic probe success, and atomic recovery of score/streak/delta/cooldown state; health remains a provider-owned side-channel and configured priority remains unchanged."
+    fingerprint_before: sha256:4015c43636de22ea0b61ad6cc0604f5b21bbde3178fbf2af5d242de8369f076c
+    fingerprint_after: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
+  - authorization_id: auth-20260830-v3-execution-control-provider-global
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-30T07:31:41-07:00'
+    reason: "Jason authorized syncing the latest main and integrating the execution-control lifecycle changes; provider-global health persistence remains the same owner and the lock is refreshed against the rebased caller map."
+    fingerprint_before: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
+    fingerprint_after: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
+  - authorization_id: auth-20260827-v3-sse-session-admission-contract
+    item_id: chain:v3.responses_session_admission
+    approved_by: Jason
+    approved_at: '2026-08-27T19:10:00-07:00'
+    reason: "Jason authorized the SSE/client connection audit to use the verified listener-local async Responses session admission contract: same-scope requests wait for exact response-body permit release, contention does not project HTTP 409, and canonical maps, manifest, verification, and wiki must reflect the async owner."
+    fingerprint_before: sha256:3b53f2fc2ecbf364c634c6189346d1362257557d9ee030091000526ebbf08555
+    fingerprint_after: sha256:c5c8a71571158b98b2a0e58861ebf375f5936728ce41d79161943cafc4c28d00
+  - authorization_id: auth-20260827-v3-sse-closeout-map-sync
+    item_id: chain:v3.hub_pipeline.v1.relay_response_source_slice
+    approved_by: Jason
+    approved_at: '2026-08-27T18:30:00-07:00'
+    reason: "Jason authorized the SSE/client connection decoupling audit and architecture-compliant repair. This refresh records the verified canonical relay response source slice after resource-flow and provider-event boundary synchronization; no locked runtime topology is intentionally changed."
+    fingerprint_before: sha256:b0a19bb8282dff4ee8cb82e683a26e2487713dfe2a656ce3995cc06d86cdbdd3
+    fingerprint_after: sha256:8f264f0aee7ba9dc5e5d463e3edcf0eaa23f4ccff94fbc753da6130fbc293a30
+  - authorization_id: auth-20260827-v3-sse-closeout-map-sync-provider-action
+    item_id: chain:v3.provider_action_gate.mainline
+    approved_by: Jason
+    approved_at: '2026-08-27T18:30:00-07:00'
+    reason: "Jason authorized the SSE/client connection decoupling audit and architecture-compliant repair. This refresh records the verified provider-action gate after its source ownership and manifest bindings were synchronized to the current typed SSE boundary; provider policy semantics remain owned by the provider-failure claim."
+    fingerprint_before: sha256:3c8d46790fab4b8241fe9f8b0357f2ff8023ab81985426bdca969c422af953cd
+    fingerprint_after: sha256:fe71d0220bfc597c445299aa478b6e7735ae9d6d69e634ba162c08a1fb8e3702
+  - authorization_id: auth-20260830-v3-execution-control-provider-action
+    item_id: chain:v3.provider_action_gate.mainline
+    approved_by: Jason
+    approved_at: '2026-08-30T07:31:41-07:00'
+    reason: "Jason explicitly authorized refreshing the provider-action gate lock for the V3 execution-control architecture repair. The new fingerprint binds Direct provider-action admission, failure recording, and success recording to the resident executor and pre-commit full-attempt lifecycle; the removed handoff-budget executor and post-commit Direct stream-failure edge remain forbidden."
+    fingerprint_before: sha256:fe71d0220bfc597c445299aa478b6e7735ae9d6d69e634ba162c08a1fb8e3702
+    fingerprint_after: sha256:6969ab703d50e0f71f8fdf68ddb7eac38f971c64105ef9a4467a29b539d6413c
+  - authorization_id: auth-20260827-v3-sse-closeout-map-sync-build
+    item_id: chain:v3.build_test_artifact_budget
+    approved_by: Jason
+    approved_at: '2026-08-27T18:30:00-07:00'
+    reason: "Jason authorized the SSE/client connection decoupling audit and architecture-compliant repair. This refresh records the verified build/test artifact budget after canonical admission regeneration; it does not broaden the build contract or alter runtime behavior."
+    fingerprint_before: sha256:d0074891924aa83d4c4d5e8d75615af66bf4a0293cbbde7def9981d106786a46
+    fingerprint_after: sha256:ce962682d064d945b7cf6c96b5cbca13b9b46073670714f7e222173185fdc168
   - authorization_id: auth-20260823-v3-provider-adaptive-health-terminal-merge
     item_id: chain:v3.responses_provider_event.terminal_merge
     approved_by: Jason
@@ -648,6 +697,27 @@ manual_authorizations:
     reason: "bind-01 callee_symbol corrected from manifest path to manifest lifecycle_id so the anchored review-gate edge passes the symbol-presence check."
     fingerprint_before: sha256:0dede5f24ffddbdddf50f09d922acccec3ed323f8d3dffeb69aa76cb79490a54
     fingerprint_after: sha256:15ecb6de58935a4c1d3bf37386bebcc306968c65398aaf0d284f1549c099d2d6
+  - authorization_id: auth-20260831-v3-codex-sample-lock-refresh
+    item_id: chain:v3.codex_sample_retention_snap_scope
+    approved_by: Jason
+    approved_at: '2026-08-31T09:20:00-07:00'
+    reason: "Jason authorized refreshing the audited lock after pulling the latest origin/main and validating the current mainline caller flow. The chain fingerprint changed from the stale locked value to the current canonical call-map value; no request/response or runtime semantics changed."
+    fingerprint_before: sha256:cbd2d5a36500918033f01824b210de96de0ab4a54ed25dabb4693795188446ae
+    fingerprint_after: sha256:aff218cb4f8b0ed58e0feb742d4548e1496d1c223d790d5b5412be26a88bc8ce
+  - authorization_id: auth-20260831-v3-anthropic-relay-lock-refresh
+    item_id: chain:v3.anthropic_relay.controlled_runtime
+    approved_by: Jason
+    approved_at: '2026-08-31T09:25:00-07:00'
+    reason: "Jason authorized refreshing the audited lock after pulling the latest origin/main and validating the current mainline caller flow. The fingerprint change reflects current canonical caller-map bindings; relay runtime semantics remain unchanged by this lock refresh."
+    fingerprint_before: sha256:72983e8dc1ea80c42da468ae7500329c6876429633d4314169fdd6052efae3b0
+    fingerprint_after: sha256:f95c3a9aa845e97425fc0ccc7423244d47d49c44652bedef18f77bfdf201dc57
+  - authorization_id: auth-20260831-v3-debug-error-lock-refresh
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-08-31T09:25:00-07:00'
+    reason: "Jason authorized refreshing the audited lock after pulling the latest origin/main and validating the current mainline caller flow. The fingerprint change reflects current canonical caller-map bindings; debug/error runtime semantics remain unchanged by this lock refresh."
+    fingerprint_before: sha256:cb6111cbbfa6348623d9f489935026efb60a8aaae72d32bbb932faccce22b6e8
+    fingerprint_after: sha256:e813e787f04eb2af0701aabe192183f6a13cf78e721062947981384ecbb0043a
   - authorization_id: auth-20260812-v3-binding-pending-clearance
     item_id: chain:v3.entry_protocol_endpoint_binding.mainline
     approved_by: Jason
@@ -928,3 +998,24 @@ manual_authorizations:
     reason: "Jason instructed removal of the legacy red-zone carrier. Debug/error source registration now binds to real protocol fields while error control remains in the Error chain and debug remains side-channel evidence; no runtime error ownership changed."
     fingerprint_before: sha256:3a62cd4e24df96130d7a9892f027608a4c10bd32e404481e18aa5896330849f2
     fingerprint_after: sha256:cb6111cbbfa6348623d9f489935026efb60a8aaae72d32bbb932faccce22b6e8
+  - authorization_id: auth-20260827-v3-sse-client-provider-decoupling-lock-refresh
+    item_id: chain:v3.sse.transport_boundary
+    approved_by: Jason
+    approved_at: '2026-08-27T19:45:00-07:00'
+    reason: "Jason authorized the SSE/client/provider decoupling audit and repair. The transport boundary map now binds the current server relay request owner and keeps SSE transport opaque; no provider semantic decision is moved into SSE or client transport. The audited fingerprint is refreshed after the canonical caller-flow render."
+    fingerprint_before: sha256:911b8d1042b6d4d3c813308446d32b869d82eff6eaaac7dbdc5d8af3a22843b6
+    fingerprint_after: sha256:15a4d27494d94a69aca744218bfb150880934ec8039e1befd2b02b478d2dc2bc
+  - authorization_id: auth-20260827-v3-sse-client-provider-decoupling-timing-lock-refresh
+    item_id: chain:v3.runtime_timing_observability.mainline
+    approved_by: Jason
+    approved_at: '2026-08-27T19:45:00-07:00'
+    reason: "Jason authorized the SSE/client/provider decoupling audit and repair. The runtime timing chain now binds the current Direct provider-event observation owner after the retired direct_sse_provider_outcome implementation was removed; timing remains a side-channel and the audited fingerprint is refreshed after source/map verification."
+    fingerprint_before: sha256:968849c3f1b4306c9c70f93f5547411ca8a28bd80f75895dc479c87d0673ddb1
+    fingerprint_after: sha256:995ef01b98afce37513a230ff4e8771ba78180f4edc25415c162f5a9767aaa92
+  - authorization_id: auth-20260827-v3-sse-client-provider-decoupling-timing-owner-map-refresh
+    item_id: chain:v3.runtime_timing_observability.mainline
+    approved_by: Jason
+    approved_at: '2026-08-27T19:50:00-07:00'
+    reason: "Jason authorized the SSE/client/provider decoupling audit and repair. The global and V3 timing maps now bind the same current Direct SSE timing owner and file after the retired implementation was removed; the audited fingerprint is refreshed after source and map synchronization."
+    fingerprint_before: sha256:968849c3f1b4306c9c70f93f5547411ca8a28bd80f75895dc479c87d0673ddb1
+    fingerprint_after: sha256:4c8c2ea7aa25177f91e2aba4567095a335b513c267b8e20fee4c37ca372a8eba

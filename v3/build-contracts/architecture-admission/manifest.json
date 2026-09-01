@@ -18,14 +18,14 @@
     {
       "output_path": "repo/.github/workflows/release.yml",
       "source_path": ".github/workflows/release.yml",
-      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
-      "sha256": "80c1ba4148d7e2dd4a1aa584e005c7bb95df86b88ae6723784ad05e05e30ca01"
+      "source_commit": "bf50eb89472997c507b3b844651edef47576466a",
+      "sha256": "2aa39b981acc5e33495274129a2095761686b96caa1650d483b17eb6060daf2b"
     },
     {
       "output_path": "repo/.github/workflows/test.yml",
       "source_path": ".github/workflows/test.yml",
-      "source_commit": "61eb7acec0368e5b2d7e6d963a8ddb48cde0d99c",
-      "sha256": "8a65603352b270808e94a275e6a162a16aa2cd489725197dc96f0ce9efe5ed2f"
+      "source_commit": "aad79d9316935c622e50084bf583bef546833a9b",
+      "sha256": "84af797545bea3df62db42e662bf48d9d95b57d4d57a46c25c1d54e67c781f20"
     },
     {
       "output_path": "repo/docs/architecture/README.md",
@@ -90,8 +90,8 @@
     {
       "output_path": "repo/docs/architecture/mainline-call-map.yml",
       "source_path": "docs/architecture/mainline-call-map.yml",
-      "source_commit": "b2f5c5231df7aca3f5d6f5c781e19c6bad5ea5ce",
-      "sha256": "b476095fd650e56f52b2d8507f537457e49a4b0cdae1c2aaf7497580b7640147"
+      "source_commit": "76090d38801931580cabdb365a9cbbc625246284",
+      "sha256": "bd86a7d4c72cfbc66402a57e216926804a9c6d76c047b57435bc9177b021f97c"
     },
     {
       "output_path": "repo/docs/architecture/mainline-manifests/architecture.repository_filesystem.mainline.yml",
@@ -472,6 +472,12 @@
       "sha256": "6253fd1cf95a7e82ce188c05a0d51d1af282177a8d68ba7961dd16141bf3a7c8"
     },
     {
+      "output_path": "repo/docs/architecture/manifests/v3.execution_control_payload_architecture.mainline.yml",
+      "source_path": "docs/architecture/manifests/v3.execution_control_payload_architecture.mainline.yml",
+      "source_commit": "34e9368f283b944a419b0773327060ccb28fea95",
+      "sha256": "11571c1ddf680dfe711e4e34646d366384be56cdb45eaec1b6cffe569d033f78"
+    },
+    {
       "output_path": "repo/docs/architecture/manifests/v3.gemini.codec_characterization.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.gemini.codec_characterization.mainline.yml",
       "source_commit": "30e34044eae7f027621fb391178f7bb802b6d259",
@@ -516,8 +522,8 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.live_provider_compat.parity.yml",
       "source_path": "docs/architecture/manifests/v3.live_provider_compat.parity.yml",
-      "source_commit": "00123160c7d24beb2d803f860c5693fddea13fe8",
-      "sha256": "2f6c8b1757385a69fa3b1de3632be687b8f6e5dd03c0db6fb133080dd051e504"
+      "source_commit": "190c5e23fb19c30f44d0f4990fffb69df88e0e09",
+      "sha256": "3e5f52a4538d3c37f38c252b3b2da0d019d5bc2454615d0835fc13921592b149"
     },
     {
       "output_path": "repo/docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml",
@@ -558,8 +564,8 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.provider_action_gate.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.provider_action_gate.mainline.yml",
-      "source_commit": "01294387dd7749f3d030253c38d860a58159756b",
-      "sha256": "750f9d25363f8d96c4f984801da60e395ae9fed048028bcb9a3c13eeaf2ba57c"
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
+      "sha256": "e040b2461e50f607d19e5e1cc7a593a8999742ad3640ccd612c01069c223b2cd"
     },
     {
       "output_path": "repo/docs/architecture/manifests/v3.provider_directory_config.mainline.yml",
@@ -570,8 +576,8 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.provider_global_subscription_probe.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.provider_global_subscription_probe.mainline.yml",
-      "source_commit": "b4298160844a8b2cba74900d36c4ec687ecf3c5a",
-      "sha256": "17d577bda6b81bb9410b37ac50a6d080372d472f42208f484c04fb5ca2c116b5"
+      "source_commit": "08ec6fe95f81a5cdcbd849c1c70a1909ed0c1d3a",
+      "sha256": "02b169cd115ec6fec11cd9d3f199a80feed1049a8d220f28c4edbef0053e187f"
     },
     {
       "output_path": "repo/docs/architecture/manifests/v3.resp03_tool_governance_gap_closeout.mainline.yml",
@@ -654,8 +660,8 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.webui_request_observability.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.webui_request_observability.mainline.yml",
-      "source_commit": "290594ba8cbd27572f0c18fd8894845c7741f3a9",
-      "sha256": "6986bc1612d962de5873f45837db8f9d5e1755c3f4e16e305fae34ad9b6689ee"
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
+      "sha256": "092f619de08c375d44118e905508fedd676074b1db4a068f2c3f73a6da32590d"
     },
     {
       "output_path": "repo/docs/architecture/manifests/vr.hit_log_projection.mainline.yml",
@@ -696,14 +702,14 @@
     {
       "output_path": "repo/docs/architecture/no-fallback-diff-rules.json",
       "source_path": "docs/architecture/no-fallback-diff-rules.json",
-      "source_commit": "63cc68ef5b0a5ecc6b621ad19a39bbc614883d4b",
-      "sha256": "5c6f26970b1d61f54663be8f52975935dd76cf75308647b05fa7c3ddf24519f7"
+      "source_commit": "9a28cff6d2d1ba83a9f411a42f3dc6c5eb67b8c3",
+      "sha256": "0632d1ebe2c1a25548d0edc84024c57a4fa3e8e9bb94155b4847d48637435fee"
     },
     {
       "output_path": "repo/docs/architecture/repository-filesystem-module-registry.yml",
       "source_path": "docs/architecture/repository-filesystem-module-registry.yml",
-      "source_commit": "453e7916d32012fbcad9237321a7b91b3eef64f7",
-      "sha256": "ff04f9268dc158088f1c5719d707cc12ee8d504db0b5da0824f42763c53fc19b"
+      "source_commit": "6a19fe25b62e8851ba9a8248588212ed1727fbb3",
+      "sha256": "607a2d6e778422d786edbeb53743393697e0d153f5a8cf232cd4422982a832a3"
     },
     {
       "output_path": "repo/docs/architecture/resource-global-coverage-report.json",
@@ -780,8 +786,8 @@
     {
       "output_path": "repo/docs/architecture/v3-architecture-audit-locks.yml",
       "source_path": "docs/architecture/v3-architecture-audit-locks.yml",
-      "source_commit": "b2f5c5231df7aca3f5d6f5c781e19c6bad5ea5ce",
-      "sha256": "be99dbb0a6ae913f589636276c18a6171e8c47b2c59ee5a8de9e4c4e44a2ee80"
+      "source_commit": "7f26de4f0efe754df1b97aff930e3f46d597e3eb",
+      "sha256": "e874c3baa56540349ecc16a8c31cf1590293d95e91bf4d6aa06a8fa3fe8441b1"
     },
     {
       "output_path": "repo/docs/architecture/v3-build-tool-module-registry.yml",
@@ -798,8 +804,8 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "fa7cef2484607b9156ccac71ede566ea3f46a645",
-      "sha256": "d39e1d7ab3a43a0698da51a2fb14178b7b9a6438359c05d91b1b72cde7b602a5"
+      "source_commit": "04919bd6d84f8b7e42e7a6f02f0d99552dbb33f6",
+      "sha256": "5e1564f03d3bc800449a8ee08b07166c5a8ca0b550141cfd37251b9396b93503"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -810,26 +816,26 @@
     {
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
-      "source_commit": "9526a98aa61722d36a49ab2f8bde4feb82bb0227",
-      "sha256": "52aec33a4b967321187f2ee1700880d2201f7b5158f80959850c5c588db77b7e"
+      "source_commit": "04919bd6d84f8b7e42e7a6f02f0d99552dbb33f6",
+      "sha256": "edf4cb6174860e982961ce60670261eee703ea81c2be4725b3ecfc0824490571"
     },
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "9526a98aa61722d36a49ab2f8bde4feb82bb0227",
-      "sha256": "b566d9fe636f635a51dbae71f9b30ce329f557bff7454dc349e05df469b2b63d"
+      "source_commit": "04919bd6d84f8b7e42e7a6f02f0d99552dbb33f6",
+      "sha256": "a6a7ffc4f09e8e65c2146f4321503e83d053213a7573e2a87cbbc8c676ac0077"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
       "source_path": "docs/architecture/v3-runtime-module-registry.yml",
-      "source_commit": "290594ba8cbd27572f0c18fd8894845c7741f3a9",
-      "sha256": "ff59f437a4a2ce256b136299f648b6e6260872cf2e646adbae23d6c7d9e15859"
+      "source_commit": "34e9368f283b944a419b0773327060ccb28fea95",
+      "sha256": "6b0d280841ada852327cdf07763633fc5d5800f3fa359496026b88db4f813494"
     },
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "fa7cef2484607b9156ccac71ede566ea3f46a645",
-      "sha256": "d9565279bd4fb7ac69a662b95a9b4dff90e42003c9978d8307e03ccc8a20cc2c"
+      "source_commit": "37436db5a53e27da19fa2c30e682cedffcc696e7",
+      "sha256": "beb73c21d39704639966d6167f142ada8fc739a15bf548bb3edad347c2e57288"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -1000,6 +1006,12 @@
       "sha256": "185996a212e178be886fade3c6c726543b2ac0f1686ea55640296122940c566e"
     },
     {
+      "output_path": "repo/docs/architecture/wiki/html/v3-execution-control-payload-architecture.html",
+      "source_path": "docs/architecture/wiki/html/v3-execution-control-payload-architecture.html",
+      "source_commit": "34e9368f283b944a419b0773327060ccb28fea95",
+      "sha256": "a77fa993f7ea8e8327774462946283c482fc33302ce0bd975bd0eb9b34b7efa4"
+    },
+    {
       "output_path": "repo/docs/architecture/wiki/html/v3-gemini-relay-controlled-runtime.html",
       "source_path": "docs/architecture/wiki/html/v3-gemini-relay-controlled-runtime.html",
       "source_commit": "16a80fa54ccdea27d4274d9cb976677db469e84d",
@@ -1008,8 +1020,8 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
-      "source_commit": "b2f5c5231df7aca3f5d6f5c781e19c6bad5ea5ce",
-      "sha256": "370eba4efcdecd2d9b92c371a24423b28272cc1c1e2ba563dc1c2a2d7465ebf7"
+      "source_commit": "7f26de4f0efe754df1b97aff930e3f46d597e3eb",
+      "sha256": "d14ebc20e94154a5d907033e1a6abbc75e097ff3d6552ff2b603dc4259f08e9f"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-skeleton-sop.html",
@@ -1222,6 +1234,12 @@
       "sha256": "3d0988f04ca9a545b9383a19fa8b1569cb28f7ecc83be64965d3e1afc04d963c"
     },
     {
+      "output_path": "repo/docs/architecture/wiki/v3-execution-control-payload-architecture.md",
+      "source_path": "docs/architecture/wiki/v3-execution-control-payload-architecture.md",
+      "source_commit": "34e9368f283b944a419b0773327060ccb28fea95",
+      "sha256": "18fb6bbe4fb196aabd9d22bcd8c3db9aa3dc108289570da9db8c1fa42f97d398"
+    },
+    {
       "output_path": "repo/docs/architecture/wiki/v3-gemini-codec-characterization.md",
       "source_path": "docs/architecture/wiki/v3-gemini-codec-characterization.md",
       "source_commit": "496feedd16beb84aaf80e46c0ebba31ec6f5312d",
@@ -1266,8 +1284,8 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
-      "source_commit": "b2f5c5231df7aca3f5d6f5c781e19c6bad5ea5ce",
-      "sha256": "8efbd9c05b2cb2b2e201ee72903d2a6a852726dc929423ef2358ba8e0a7821d4"
+      "source_commit": "7f26de4f0efe754df1b97aff930e3f46d597e3eb",
+      "sha256": "b5879ede8ae8750da54403e0aae9fbe97da1609ee064041699edb429b6f287ea"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-skeleton-sop.md",
@@ -1308,8 +1326,8 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-provider-action-gate.md",
       "source_path": "docs/architecture/wiki/v3-provider-action-gate.md",
-      "source_commit": "fe6b7e5188e284baed0d7ba8de82ae50f941fe95",
-      "sha256": "a279bad0eb80698ea5b4481b6ce48a341ac4fb2128bfab1f11ad7a2d84ba6092"
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
+      "sha256": "8de4cba6f8e0603daa64832701987202c8cdea139470bdd294cf47d1086ea81c"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-provider-directory-config.md",
@@ -1530,8 +1548,8 @@
     {
       "output_path": "repo/docs/design/v3-provider-health-scoring-cooldown-design.md",
       "source_path": "docs/design/v3-provider-health-scoring-cooldown-design.md",
-      "source_commit": "4be4f93f0f9c3c75b557984bd1742294247b2eab",
-      "sha256": "3cbd89c64d3de824057a164f7b2e4e608462a9a2b26bbfa07b657348af6770da"
+      "source_commit": "04919bd6d84f8b7e42e7a6f02f0d99552dbb33f6",
+      "sha256": "720104eee349d1a1cd674e269ea3a8382b358e22fc6483e3c71c8ab43b0a4925"
     },
     {
       "output_path": "repo/docs/design/v3-routecodex-runtime-resource-contract.md",
@@ -2070,14 +2088,14 @@
     {
       "output_path": "repo/docs/goals/v3-console-human-readable-layering-plan.md",
       "source_path": "docs/goals/v3-console-human-readable-layering-plan.md",
-      "source_commit": "5086093c67d3ec15d0b49295b9bc78c70c899e2a",
-      "sha256": "da16fa152551b0c8e7c24703ad1760aad600b9838b1a132187f983c96ed91290"
+      "source_commit": "addeae561d756e25f62fc12c737fbba36b153414",
+      "sha256": "1eef3bb95a1a38995f378298f5611b191a3fa41d0a30bf1bc1dc68f2563ec080"
     },
     {
       "output_path": "repo/docs/goals/v3-console-human-readable-layering-test-design.md",
       "source_path": "docs/goals/v3-console-human-readable-layering-test-design.md",
-      "source_commit": "5086093c67d3ec15d0b49295b9bc78c70c899e2a",
-      "sha256": "38845ff52e64b02859899025233038b559ae37dbac8a44217f9ba908d49c847b"
+      "source_commit": "addeae561d756e25f62fc12c737fbba36b153414",
+      "sha256": "b72cac9af994e8957942fed85855bde8b8f714753e38ad2a51fa24b67c7fe75d"
     },
     {
       "output_path": "repo/docs/goals/v3-console-request-count-visibility-test-design.md",
@@ -2132,6 +2150,30 @@
       "source_path": "docs/goals/v3-error-envelope-clippy-size-test-design.md",
       "source_commit": "5086093c67d3ec15d0b49295b9bc78c70c899e2a",
       "sha256": "010e35690e353cc78cd139e93de6d162099713d6b1631928b57687a32382ae5b"
+    },
+    {
+      "output_path": "repo/docs/goals/v3-execution-control-payload-architecture-audit-design.md",
+      "source_path": "docs/goals/v3-execution-control-payload-architecture-audit-design.md",
+      "source_commit": "34e9368f283b944a419b0773327060ccb28fea95",
+      "sha256": "3e9e623a036d4ca11f553a868b2b9bebf4c61ac498aafbd5171a0ed03d82dd5c"
+    },
+    {
+      "output_path": "repo/docs/goals/v3-execution-control-payload-architecture-audit-goal-prompt.md",
+      "source_path": "docs/goals/v3-execution-control-payload-architecture-audit-goal-prompt.md",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
+      "sha256": "3b7ee27a9fca8a72e6721e12e1bd66ffcb85e4179ef493f67d6134160d5b0707"
+    },
+    {
+      "output_path": "repo/docs/goals/v3-execution-control-payload-architecture-audit-plan.md",
+      "source_path": "docs/goals/v3-execution-control-payload-architecture-audit-plan.md",
+      "source_commit": "34e9368f283b944a419b0773327060ccb28fea95",
+      "sha256": "db3f1c44dd0ab6918255bb054a2413e4dc7599bc42fd18a2f4dbc390c2213b6a"
+    },
+    {
+      "output_path": "repo/docs/goals/v3-execution-control-payload-architecture-audit-problem.md",
+      "source_path": "docs/goals/v3-execution-control-payload-architecture-audit-problem.md",
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
+      "sha256": "7275d3a8ee4a6933156973eb473fcd4691559fda6d2d14eb361a05c98f85dd9e"
     },
     {
       "output_path": "repo/docs/goals/v3-foundation-implementation-order.md",
@@ -2310,8 +2352,14 @@
     {
       "output_path": "repo/docs/goals/v3-managed-server-lifecycle-test-design.md",
       "source_path": "docs/goals/v3-managed-server-lifecycle-test-design.md",
-      "source_commit": "16860bdb38baba9ed4e9d9949cc132149c1b6e6e",
-      "sha256": "1ef45a119374af2455bf4c53dc72900f625a34a2c1bcb778345211e199363af2"
+      "source_commit": "6a19fe25b62e8851ba9a8248588212ed1727fbb3",
+      "sha256": "fa8e02099376a92e085a23d4754072753e216d482e2bbfafe987e5655506b9ba"
+    },
+    {
+      "output_path": "repo/docs/goals/v3-merge-local-dirty-and-commit-plan.md",
+      "source_path": "docs/goals/v3-merge-local-dirty-and-commit-plan.md",
+      "source_commit": "76090d38801931580cabdb365a9cbbc625246284",
+      "sha256": "fb5f67a13dd3970935c04863eedad30f7bfed6ea9373ce00a0d3bf9d08243f9f"
     },
     {
       "output_path": "repo/docs/goals/v3-models-capability-catalog-test-design.md",
@@ -2418,8 +2466,8 @@
     {
       "output_path": "repo/docs/goals/v3-provider-health-scoring-cooldown-plan.md",
       "source_path": "docs/goals/v3-provider-health-scoring-cooldown-plan.md",
-      "source_commit": "4be4f93f0f9c3c75b557984bd1742294247b2eab",
-      "sha256": "f4e727d81f58ca70dd1ad701b1213875cc4c8ee689de3e6d1f5d9226bfd3d48e"
+      "source_commit": "04919bd6d84f8b7e42e7a6f02f0d99552dbb33f6",
+      "sha256": "e419a5b5c38df130007a8811c30b15c7427ce06052b726936d7f95cf822bf234"
     },
     {
       "output_path": "repo/docs/goals/v3-provider-response-error-policy-test-design.md",
@@ -2638,6 +2686,18 @@
       "sha256": "3a05a24170525bb6f1a0e98b90ddf9df1491009b4869ed8fabd4dac4ed90e7c1"
     },
     {
+      "output_path": "repo/docs/goals/v3-simplified-config-parallel-parser-and-cutover-plan.md",
+      "source_path": "docs/goals/v3-simplified-config-parallel-parser-and-cutover-plan.md",
+      "source_commit": "6a19fe25b62e8851ba9a8248588212ed1727fbb3",
+      "sha256": "8a5aeb295b89cb349e908668ea1ee93b94d07fd5a0ebe0909373a74af1c5a5fb"
+    },
+    {
+      "output_path": "repo/docs/goals/v3-simplified-config-test-design.md",
+      "source_path": "docs/goals/v3-simplified-config-test-design.md",
+      "source_commit": "6a19fe25b62e8851ba9a8248588212ed1727fbb3",
+      "sha256": "cd1f75ffd59883dab38d97153e6ab525c434b00214dbac5a1748f8a848735215"
+    },
+    {
       "output_path": "repo/docs/goals/v3-skeleton-and-table-driven-codec-plan.md",
       "source_path": "docs/goals/v3-skeleton-and-table-driven-codec-plan.md",
       "source_commit": "d8f7ae5e78107b25f2282318662399d3d40408cf",
@@ -2670,8 +2730,8 @@
     {
       "output_path": "repo/docs/goals/v3-sse-transient-no-provider-cooldown-test-design.md",
       "source_path": "docs/goals/v3-sse-transient-no-provider-cooldown-test-design.md",
-      "source_commit": "fe6b7e5188e284baed0d7ba8de82ae50f941fe95",
-      "sha256": "a3974226b84d0b2f8653d14f03cc4553d7c3ff1b73bc23141237cbf074aa686a"
+      "source_commit": "dae61b45c1e04f11635bc89d49904b83271dad2a",
+      "sha256": "cc337e74a110ae6a3e6d57755e0ecad9f88b48a99cbf7cd0455d1f05ef296487"
     },
     {
       "output_path": "repo/docs/goals/v3-sse-transport-core-extraction-plan.md",
@@ -2736,8 +2796,8 @@
     {
       "output_path": "repo/docs/goals/v3-tool-thinking-hook-plan.md",
       "source_path": "docs/goals/v3-tool-thinking-hook-plan.md",
-      "source_commit": "8cac78876a6127eaeb0eabd6d022c13d2d7c8b4e",
-      "sha256": "a06da0e4db7bb2c7bc0c960ec7df3237f0ab602af1a0ba57d7b5f1b993baf905"
+      "source_commit": "37436db5a53e27da19fa2c30e682cedffcc696e7",
+      "sha256": "c4485e32e5ebe7ecdb5e26f853347fd52d65a92677c798f41c778b9816818ec0"
     },
     {
       "output_path": "repo/docs/goals/v3-v2-effort-regression-matrix.md",
@@ -2754,14 +2814,14 @@
     {
       "output_path": "repo/docs/goals/v3-virtual-router-full-function-plan.md",
       "source_path": "docs/goals/v3-virtual-router-full-function-plan.md",
-      "source_commit": "b4f302263d3049fccf8bfc91a55e86f14b80fb80",
-      "sha256": "1bd97a755bbee0d2fb9c4aa6953f1bc19cafe2d1a5e0c9fe0449d297b20385c7"
+      "source_commit": "157cf1026f49a39fd79a203d0168c41eeb43efcd",
+      "sha256": "9c48befdb264c5208ed8e3ce67e9a610a31ff2f37bedaa673c5f44185cbff8e2"
     },
     {
       "output_path": "repo/docs/goals/v3-virtual-router-target-interpreter-plan.md",
       "source_path": "docs/goals/v3-virtual-router-target-interpreter-plan.md",
-      "source_commit": "09c7779c843a44962d3faa44713db1d2f0798588",
-      "sha256": "074493e268b6bbc6ccc1ce02c9deb003d2351619c2701da73034932a13cb7b32"
+      "source_commit": "157cf1026f49a39fd79a203d0168c41eeb43efcd",
+      "sha256": "8b6efb793de7c431e5547d329bdbfb52ccc52e459dba46f338db71dbf470b86c"
     },
     {
       "output_path": "repo/docs/goals/v3-vr-target-protocol-execution-decision-sop.md",
@@ -2938,5 +2998,5 @@
       "sha256": "5cc420540dffe755ef55174e73198b28d7b0142769fd3fbae89c5c8016250e79"
     }
   ],
-  "manifest_digest": "af4105f8d3a5a8e35fe5d6e6af86b0187c33eb8358706a4b3280b5833c0be6d2"
+  "manifest_digest": "94790118b8f2134966efea1f9c45124031e30e4689dc59cbd5ce99f2d4aa6e6a"
 }

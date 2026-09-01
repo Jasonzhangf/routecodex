@@ -15,7 +15,7 @@ const files = {
   directHelpers: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
   directUnitTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests.rs',
   directExactPinTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
-  directSse: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs',
+  directSse: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs',
   providerSseJsonCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs',
   responses: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
@@ -241,11 +241,11 @@ for (const token of [
   'pub fn abandon_admission(',
   'pub fn commit_terminal_admission(',
   'V3ProviderActionRecoveryTransition',
-  'state.next_admission_at =\n                            now + Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS);',
+  'state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());',
 ]) {
   requireText(text.gate, files.gate, token);
 }
-requireText(text.gate, files.gate, 'active_lane_generation');
+requireText(text.gate, files.gate, 'admitted_generation');
 const recordProviderSuccessBody = findFunctionBody(
   text.gate,
   'V3ProviderActionGate::record_provider_success',
@@ -439,8 +439,9 @@ requireText(
 requireText(
   text.responsesCodec,
   files.responsesCodec,
-  'Some("response.completed") => {',
+  'V3ResponsesSseTerminalState::Completed',
 );
+requireText(text.responsesCodec, files.responsesCodec, '| "response.done"');
 requireText(
   text.providerSseJsonCodec,
   files.providerSseJsonCodec,
@@ -462,12 +463,29 @@ if (text.providerSseJsonCodec.includes('matches!(event_type, "response.completed
   );
 }
 requireOccurrenceCount(text.direct, files.direct, 'drop(provider_action_permit.take());', 3);
-requireOccurrenceCount(
+requireText(
+  text.direct,
+  files.direct,
+  'execute_v3_responses_direct_runtime_kernel_core_resident',
+);
+requireText(
   text.directSse,
   files.directSse,
-  'drop(self._provider_action_permit.take());',
-  1,
+  'collect_direct_sse_attempt_after_terminal',
 );
+requireText(
+  text.direct,
+  files.direct,
+  'V3AttemptSuccessReceipt::from_sealed_sse_attempt',
+);
+for (const forbidden of [
+  'wrap_direct_sse_provider_handoff_stream',
+  'execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget',
+]) {
+  if (text.direct.includes(forbidden) || text.directSse.includes(forbidden)) {
+    failures.push(`${files.direct} + ${files.directSse}: forbidden removed Direct lifecycle symbol ${forbidden}`);
+  }
+}
 requireOccurrenceCount(
   text.responses,
   files.responses,
@@ -567,12 +585,17 @@ for (const testName of requiredGateTests) {
   assertRustTest(text.gateTests, files.gateTests, testName);
 }
 for (const token of [
-  'post_commit_sse_failure_closes_action_lane_without_blocking_a_fresh_request',
-  'terminal_sse_recovery_does_not_block_a_fresh_request',
-  'active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds',
+  'sse_provider_attempt_is_not_committed_before_provider_terminal',
+  'sse_done_before_terminal_fails_and_terminal_without_done_succeeds',
+  'terminal_sse_attempt_commits_after_eof_and_releases_a_fresh_request',
 ]) {
   assertRustTest(text.openaiChatTests, files.openaiChatTests, token);
-  assertRustTest(text.geminiTests, files.geminiTests, token);
+}
+for (const testName of [
+  'sse_client_disconnect_is_health_neutral_and_never_enters_action_wait',
+  'validated_terminal_sse_releases_action_lane_for_a_fresh_request',
+]) {
+  assertRustTest(text.geminiTests, files.geminiTests, testName);
 }
 assertRustTest(
   text.openaiChatTests,
@@ -596,9 +619,9 @@ for (const token of [
   assertRustTest(text.responsesRelayUnitTests, files.responsesRelayUnitTests, token);
 }
 for (const token of [
-  'direct_post_commit_malformed_sse_records_failure_but_fresh_request_bypasses_recovery',
-  'direct_post_commit_response_failed_records_failure_but_fresh_request_bypasses_recovery',
-  'direct_terminal_sse_recovery_does_not_block_a_fresh_request',
+  'malformed_sse_attempt_never_commits_partial_bytes_and_fresh_request_remains_independent',
+  'failed_terminal_sse_attempt_never_commits_partial_bytes_and_exhausts_to_error06',
+  'terminal_sse_success_seals_replay_without_blocking_a_fresh_request',
 ]) {
   assertRustTest(text.directSseTests, files.directSseTests, token);
 }
@@ -641,8 +664,8 @@ requireText(
   'provider failure projection requires caller-owned route/default availability proof',
 );
 for (const token of [
-  'direct_sse_console_closeout_abruptly_closes_without_fabricating_error06',
-  'relay_sse_body_abrupt_failure_projects_standard_error_event',
+  'direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish',
+  'io_sse_body_internal_error_is_explicit_599_not_silent_eof',
 ]) {
   requireText(text.serverTests, files.serverTests, token);
 }
@@ -865,8 +888,8 @@ for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-32', 'AbandonRequest', 'Abandoned'],
   ['v3-provider-action-gate-33', 'Permit', 'SuccessObserved'],
   ['v3-provider-action-gate-34', 'SuccessObserved', 'SuccessRecorded'],
-  ['v3-provider-action-gate-35', 'Permit', 'FailureObserved'],
-  ['v3-provider-action-gate-36', 'Abandoned', 'FailureRecorded'],
+  ['v3-provider-action-gate-35', 'Abandoned', 'FailureObserved'],
+  ['v3-provider-action-gate-36', 'FailureObserved', 'FailureRecorded'],
   ['v3-provider-action-gate-37', 'Permit', 'SuccessObserved'],
   ['v3-provider-action-gate-38', 'SuccessObserved', 'SuccessRecorded'],
   ['v3-provider-action-gate-39', 'Permit', 'FailureObserved'],
@@ -895,16 +918,22 @@ try {
 } catch (error) {
   failures.push(`package.json: JSON parse failed: ${error.message}`);
 }
-const commands = {
-  'test:v3-provider-action-gate': 'CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture',
-  'verify:v3-provider-action-gate': 'node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-provider-action-gate.mjs',
-  'test:v3-provider-action-gate-red-fixtures': 'node scripts/tests/v3-provider-action-gate-red-fixtures.mjs',
-};
+const commands = process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1'
+  ? {
+      'test:v3-provider-action-gate': 'CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture',
+      'verify:v3-provider-action-gate': 'node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-provider-action-gate.mjs',
+      'test:v3-provider-action-gate-red-fixtures': 'node scripts/tests/v3-provider-action-gate-red-fixtures.mjs',
+    }
+  : {
+      'test:v3-provider-action-gate': 'CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-error && CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture',
+      'verify:v3-provider-action-gate': 'node v3/scripts/architecture/verify-v3-provider-action-gate.mjs',
+      'test:v3-provider-action-gate-red-fixtures': 'npm --prefix v3 run test:v3-provider-action-gate-red-fixtures',
+    };
 for (const [name, command] of Object.entries(commands)) {
   if (packageJson.scripts?.[name] !== command) failures.push(`package.json: script ${name} must equal ${command}`);
 }
 for (const scriptName of ['verify:v3-architecture-docs', 'build:v3-cli']) {
-  if (!String(packageJson.scripts?.[scriptName] || '').includes('npm run verify:v3-provider-action-gate')) {
+if (!String(packageJson.scripts?.[scriptName] || '').includes('npm run verify:v3-provider-action-gate')) {
     failures.push(`package.json: ${scriptName} must run npm run verify:v3-provider-action-gate`);
   }
 }

@@ -92,29 +92,23 @@ fn record_v3_direct_provider_failure_record(
     let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(
         source.clone(),
     );
+    let action =
+        routecodex_v3_error::build_v3_provider_failure_action_from_v3_error_02(&classified);
     provider_health
-        .record_provider_global_health_for_classified_error(
-            failure_session_scope,
-            &selected.candidate.provider_id,
-            Some(&selected.candidate.auth_alias),
-            Some(&selected.candidate.model_id),
-            &classified,
-            now_epoch_ms,
-        )
-        .map_err(|error| runtime_source("V3ProviderGlobalHealthStateMutated", error))?;
-    provider_health
-        .record_provider_failure_record(
+        .record_provider_failure_record_with_action(
             failure_session_scope,
             &selected.candidate.provider_id,
             Some(&selected.candidate.auth_alias),
             Some(&selected.candidate.model_id),
             Some(&source.message),
             now_epoch_ms,
+            &action,
         )
         .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))
 }
 
 fn record_v3_direct_provider_success(
+    receipt: &V3AttemptSuccessReceipt,
     provider_health: &V3ProviderFailureRuntimeHealth,
     failure_session_scope: &V3ProviderFailureSessionScope,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
@@ -122,6 +116,7 @@ fn record_v3_direct_provider_success(
 ) -> Result<(), V3Error01SourceRaised> {
     provider_health
         .record_provider_success_in_failure_scope(
+            receipt,
             failure_session_scope,
             &selected.candidate.provider_id,
             Some(&selected.candidate.auth_alias),
@@ -644,6 +639,7 @@ pub(crate) fn build_v3_direct_runtime_observability(
         execution_mode: "direct".to_string(),
         transport: transport.to_string(),
         routing_group_id: Some(selected.route.routing_group_id.clone()),
+        route_classification_reason: Some(selected.route.route_classification_reason.clone()),
         pool_id: Some(selected.route.pool_id.clone()),
         provider_id: Some(selected.candidate.provider_id.clone()),
         auth_alias: Some(selected.candidate.auth_alias.clone()),

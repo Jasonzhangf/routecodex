@@ -13,31 +13,68 @@ fn v3_front_chunk_is_transport_keepalive(bytes: &[u8]) -> bool {
 }
 
 fn v3_front_json_body_to_sse_frame(bytes: &[u8]) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(bytes.len() + 8);
-    frame.extend_from_slice(b"data: ");
-    frame.extend_from_slice(bytes);
-    frame.extend_from_slice(b"\n\n");
-    frame
+    let value = match serde_json::from_slice::<Value>(bytes) {
+        Ok(value) => value,
+        Err(error) => {
+            let projected = project_v3_post_commit_sse_source(
+                raise_v3_sse_runtime_failure(
+                    "V3ServerRespOutbound05ClientFrame",
+                    "front_error06_body_parse_failed",
+                    error.to_string(),
+                ),
+                599,
+            );
+            return v3_front_projected_error_sse_frame(projected);
+        }
+    };
+    let error = value.get("error").cloned().unwrap_or(value);
+    let event = json!({
+        "type": "response.failed",
+        "response": {"status": "failed", "error": error}
+    });
+    format!("event: response.failed\ndata: {event}\n\ndata: [DONE]\n\n").into_bytes()
+}
+
+fn v3_front_projected_error_sse_frame(
+    projected: routecodex_v3_error::V3Error06ClientProjected,
+) -> Vec<u8> {
+    let error = projected
+        .body
+        .get("error")
+        .cloned()
+        .unwrap_or(projected.body);
+    let event = json!({
+        "type": "response.failed",
+        "response": {"status": "failed", "error": error}
+    });
+    match serde_json::to_vec(&event) {
+        Ok(bytes) => {
+            let mut frame = b"event: response.failed\ndata: ".to_vec();
+            frame.extend_from_slice(&bytes);
+            frame.extend_from_slice(b"\n\n");
+            frame
+        }
+        Err(_) => b"event: response.failed\ndata: {\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"front_error06_serialization_failed\"}},\"type\":\"response.failed\"}\n\ndata: [DONE]\n\n".to_vec(),
+    }
+}
+
+fn record_v3_front_client_disconnect() {
+    // Client disconnect is a complete Error01→Error06, health-neutral receipt.
+    // The receipt is intentionally client-suppressed after the transport closes;
+    // it must not trigger provider retry, reroute, or a synthetic client frame.
+    let receipt = project_v3_post_commit_sse_source(raise_v3_sse_client_disconnect(), 499);
+    eprintln!("V3 client disconnect Error06 client-suppressed receipt: {receipt:?}");
 }
 
 pub(crate) fn v3_front_sse_worker_panic_frame(message: &str) -> Vec<u8> {
-    let frame = build_v3_server_16_http_frame_from_v3_error_06(project_v3_post_commit_sse_source(
+    v3_front_projected_error_sse_frame(project_v3_post_commit_sse_source(
         raise_v3_sse_runtime_failure(
             "V3ServerRespOutbound05ClientFrame",
             "front_sse_worker_panicked",
             message,
         ),
         599,
-    ));
-    let V3Server16Body::Json(value) = frame.body else {
-        panic!("Front worker panic must project JSON Error06 body");
-    };
-    let bytes = serde_json::to_vec(&value).expect("typed Front worker panic Error06 projection");
-    let mut sse_frame = Vec::with_capacity(bytes.len() + 24);
-    sse_frame.extend_from_slice(b"data: ");
-    sse_frame.extend_from_slice(&bytes);
-    sse_frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
-    sse_frame
+    ))
 }
 
 pub(crate) async fn pending_endpoint_after_responses_admission(
@@ -144,30 +181,26 @@ impl V3FrontSseAcceptSkeleton {
                                 emitted_response_frame = true;
                             }
                             if tx.send(Ok(bytes.to_vec())).await.is_err() {
+                                record_v3_front_client_disconnect();
                                 return;
                             }
                         }
                         Err(error) => {
-                            let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                                project_v3_post_commit_sse_source(
-                                    raise_v3_sse_runtime_failure(
-                                        "V3ServerRespOutbound05ClientFrame",
-                                        "front_sse_response_body_failed",
-                                        error.to_string(),
-                                    ),
-                                    599,
+                            let projected = project_v3_post_commit_sse_source(
+                                raise_v3_sse_runtime_failure(
+                                    "V3ServerRespOutbound05ClientFrame",
+                                    "front_sse_response_body_failed",
+                                    error.to_string(),
                                 ),
+                                599,
                             );
-                            let V3Server16Body::Json(value) = frame.body else {
-                                panic!("Front response failure must project JSON Error06 body");
-                            };
-                            let bytes = serde_json::to_vec(&value)
-                                .expect("typed Front response Error06 projection");
-                            let mut sse_frame = Vec::with_capacity(bytes.len() + 8);
-                            sse_frame.extend_from_slice(b"data: ");
-                            sse_frame.extend_from_slice(&bytes);
-                            sse_frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
-                            let _ = tx.send(Ok(sse_frame)).await;
+                            if tx
+                                .send(Ok(v3_front_projected_error_sse_frame(projected)))
+                                .await
+                                .is_err()
+                            {
+                                record_v3_front_client_disconnect();
+                            }
                             return;
                         }
                     }
@@ -179,33 +212,30 @@ impl V3FrontSseAcceptSkeleton {
                         .await
                         .is_err()
                     {
+                        record_v3_front_client_disconnect();
                         return;
                     }
                     if tx.send(Ok(b"data: [DONE]\n\n".to_vec())).await.is_err() {
+                        record_v3_front_client_disconnect();
                         return;
                     }
                 }
                 if !emitted_response_frame {
-                    let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                        project_v3_post_commit_sse_source(
-                            raise_v3_sse_runtime_failure(
-                                "V3ServerRespOutbound05ClientFrame",
-                                "front_sse_response_empty",
-                                "Front SSE response ended without a response frame",
-                            ),
-                            599,
+                    let projected = project_v3_post_commit_sse_source(
+                        raise_v3_sse_runtime_failure(
+                            "V3ServerRespOutbound05ClientFrame",
+                            "front_sse_response_empty",
+                            "Front SSE response ended without a response frame",
                         ),
+                        599,
                     );
-                    let V3Server16Body::Json(value) = frame.body else {
-                        panic!("Front empty response must project JSON Error06 body");
-                    };
-                    let bytes = serde_json::to_vec(&value)
-                        .expect("typed Front empty response Error06 projection");
-                    let mut sse_frame = Vec::with_capacity(bytes.len() + 8);
-                    sse_frame.extend_from_slice(b"data: ");
-                    sse_frame.extend_from_slice(&bytes);
-                    sse_frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
-                    let _ = tx.send(Ok(sse_frame)).await;
+                    if tx
+                        .send(Ok(v3_front_projected_error_sse_frame(projected)))
+                        .await
+                        .is_err()
+                    {
+                        record_v3_front_client_disconnect();
+                    }
                 }
             };
             if let Err(payload) = AssertUnwindSafe(worker).catch_unwind().await {
@@ -214,16 +244,28 @@ impl V3FrontSseAcceptSkeleton {
                     .copied()
                     .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
                     .unwrap_or("Front SSE worker panicked");
-                let _ = panic_tx
+                if panic_tx
                     .send(Ok(v3_front_sse_worker_panic_frame(message)))
-                    .await;
+                    .await
+                    .is_err()
+                {
+                    record_v3_front_client_disconnect();
+                }
             }
         });
         let client_stream = futures_util::stream::unfold(rx, |mut rx| async move {
             rx.recv().await.map(|item| (item, rx))
         });
         let body = v3_io_sse_body(Box::pin(client_stream), Some(keepalive_interval));
-        if let Some(identity) = front_connection_identity { front_transport_broker.front_socket(identity).map(|socket| socket.set_exec_closeout_frame(v3_responses_sse_error_event_chunk(503, "server_restart_in_progress", "RouteCodex restarted before this response completed"))); }
+        if let Some(identity) = front_connection_identity {
+            front_transport_broker.front_socket(identity).map(|socket| {
+                socket.set_exec_closeout_frame(v3_responses_sse_error_event_chunk(
+                    503,
+                    "server_restart_in_progress",
+                    "RouteCodex restarted before this response completed",
+                ))
+            });
+        }
         Response::builder()
             .status(axum::http::StatusCode::OK)
             .header("content-type", "text/event-stream")
@@ -260,6 +302,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         Err(response) => return *response,
     };
     let request_id = request_identity.request_id.clone();
+    let toolreason_observation_session_id =
+        resolve_v3_console_log_identity_from_parts(&request_headers, &payload, &request_id)
+            .session_id;
     let responses_entry_facts = (entry_protocol == "responses")
         .then(|| V3ResponsesContinuationEntryFacts::project(&payload));
     let execution_id = state.debug.next_execution_id(&state.server.id);
@@ -320,6 +365,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         V3ErrorProjectionConsoleInput {
                             endpoint: &path,
                             request_id: &request_id,
+                            entry_protocol: &entry_protocol,
+                            session_id: None,
                             status: frame.status,
                             error_chain: &frame.error_chain,
                             body: match &frame.body {
@@ -374,6 +421,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     V3ErrorProjectionConsoleInput {
                         endpoint: &path,
                         request_id: &request_id,
+                        entry_protocol: &entry_protocol,
+                        session_id: None,
                         status: frame.status,
                         error_chain: &frame.error_chain,
                         body: match &frame.body {
@@ -605,18 +654,16 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         }
     }
-    if execution_mode == V3EntryProtocolExecutionMode::Relay {
-        if let Some(response) = capture_v3_live_raw_request(
-            &state,
-            &trace_scope,
-            &entry_protocol,
-            execution_mode,
-            &path,
-            &request_id,
-            &payload,
-        ) {
-            return response;
-        }
+    if let Some(response) = capture_v3_live_raw_request(
+        &state,
+        &trace_scope,
+        &entry_protocol,
+        execution_mode,
+        &path,
+        &request_id,
+        &payload,
+    ) {
+        return response;
     }
     let snapshot_session_id = if entry_protocol == "responses" {
         match start_v3_live_snapshot_session(&state, &trace_scope) {
@@ -875,6 +922,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 server_id: state.server.id.clone(),
                 failure_session_scope: provider_failure_session_scope.clone(),
                 request_id: request_id.clone(),
+                toolreason_observation_session_id: Some(toolreason_observation_session_id.clone()),
                 payload: payload.clone(),
             },
             client_headers,
@@ -939,35 +987,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
             };
         if output.error_chain.is_some() {
-            let console_context = build_v3_console_emission_context(
-                &state,
-                &entry_protocol,
-                &path,
-                &request_identity,
-                &request_headers,
-                &payload,
-            );
-            if let Err(error) = record_v3_webui_projected_runtime_failure_for_context(
-                &console_context,
-                output
-                    .error_class
-                    .expect("terminal Error06 output must carry Error02 classification"),
-                Some(
-                    output
-                        .error_detail
-                        .as_deref()
-                        .expect("terminal Error06 output must carry source detail"),
-                ),
-                output.status,
-                "json",
-            ) {
-                emit_v3_webui_projection_failure(&console_context, &error);
-            }
             if let Some(response) = emit_relay_error_chain_if_any(
                 &state,
                 &trace_scope,
+                &entry_protocol,
                 &path,
                 &request_id,
+                snapshot_session_id.as_deref(),
                 output.status,
                 output.error_chain.as_deref(),
                 openai_chat_error_body_for_console(&output.client_body),
@@ -1037,7 +1063,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         );
     }
     if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-        let stream = payload.get("stream").and_then(serde_json::Value::as_bool) == Some(true);
         let client_headers = match collect_anthropic_relay_client_headers(&request_headers) {
             Ok(headers) => headers,
             Err(message) => {
@@ -1056,6 +1081,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 server_id: state.server.id.clone(),
                 failure_session_scope: provider_failure_session_scope.clone(),
                 request_id: request_id.clone(),
+                toolreason_observation_session_id: Some(
+                    toolreason_observation_session_id.clone(),
+                ),
                 payload: payload.clone(),
             },
             client_headers,
@@ -1069,8 +1097,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         if let Some(response) = emit_relay_error_chain_if_any(
             &state,
             &trace_scope,
+            &entry_protocol,
             &path,
             &request_id,
+            snapshot_session_id.as_deref(),
             output.status,
             output.error_chain.as_deref(),
             Some(&output.client_response),
@@ -1088,6 +1118,15 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         ) {
             return response;
         }
+        if let Some(response) = capture_v3_anthropic_relay_response(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &output,
+        ) {
+            return response;
+        }
         let console_payload = payload.clone();
         let console_context = build_v3_console_emission_context(
             &state,
@@ -1097,17 +1136,53 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             &request_headers,
             &console_payload,
         );
-        if let Some(observability) = output.observability.as_ref() {
-            emit_v3_observability_console_lines(
-                &console_context,
-                output.status,
-                &output.node_trace,
+        if let Some(observability) = output.observability.as_mut() {
+            if let Err(error) = merge_v3_runtime_stream_observation(
                 observability,
-                started_at,
-                output.stream_observation.is_none(),
+                output.stream_observation.as_ref(),
+            ) {
+                emit_v3_runtime_observability_contract_failure(
+                    &console_context,
+                    observability,
+                    error,
+                );
+            }
+        }
+        if let Err(error) =
+            emit_v3_toolreason_console_line(&console_context, output.stream_observation.as_ref())
+        {
+            emit_v3_runtime_observability_contract_failure(
+                &console_context,
+                output
+                    .observability
+                    .as_ref()
+                    .unwrap_or(&V3RuntimeObservability::default()),
+                error,
             );
         }
-        return anthropic_relay_output_response(output, stream);
+        if let Some(observability) = output.observability.as_ref() {
+            let mut console_observability = observability.clone();
+            if let Err(error) = merge_v3_runtime_stream_observation(
+                &mut console_observability,
+                output.stream_observation.as_ref(),
+            ) {
+                emit_v3_runtime_observability_contract_failure(
+                    &console_context,
+                    &console_observability,
+                    error,
+                );
+            } else {
+                emit_v3_observability_console_lines(
+                    &console_context,
+                    output.status,
+                    &output.node_trace,
+                    &console_observability,
+                    started_at,
+                    true,
+                );
+            }
+        }
+        return anthropic_relay_output_response(output);
     }
     if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let output = match execute_v3_gemini_relay_runtime_with_default_transport_provider_health(
@@ -1129,8 +1204,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         if let Some(response) = emit_relay_error_chain_if_any(
             &state,
             &trace_scope,
+            &entry_protocol,
             &path,
             &request_id,
+            snapshot_session_id.as_deref(),
             output.status,
             output.error_chain.as_deref(),
             gemini_error_body_for_console(&output.client_body),
@@ -1257,6 +1334,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     plan.expanded.clone(),
                     BTreeSet::new(),
                     None,
+                    None,
                 )
                 .await
                 {
@@ -1267,7 +1345,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         );
                         output
                     }
-                    Err(error) => project_v3_responses_relay_runtime_failure(error),
+                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
                 },
                 None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots(
                     &state.manifest,
@@ -1289,7 +1367,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 .await
                 {
                     Ok(output) => output,
-                    Err(error) => project_v3_responses_relay_runtime_failure(error),
+                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
                 },
             }
         } else {
@@ -1310,6 +1388,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     plan.expanded.clone(),
                     BTreeSet::new(),
                     None,
+                    None,
                 )
                 .await
                 {
@@ -1320,7 +1399,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         );
                         output
                     }
-                    Err(error) => project_v3_responses_relay_runtime_failure(error),
+                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
                 },
                 None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input(
                     &state.manifest,
@@ -1338,7 +1417,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 .await
                 {
                     Ok(output) => output,
-                    Err(error) => project_v3_responses_relay_runtime_failure(error),
+                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
                 },
             }
         };
@@ -1365,6 +1444,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 handoff.request_payload.clone(),
                 Some(&handoff.plan),
                 Some(handoff.observability_accumulator),
+                Some(handoff.request_execution_control),
                 Some(provider_failure_event_sink.clone()),
                 Some(route_selection_event_sink.clone()),
                 request_purpose,
@@ -1377,9 +1457,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         &mut frame,
                         handoff.provider_failure_events,
                     );
-                    // Provider failure events describe recovered attempts. They are not a
-                    // terminal client error when the handoff eventually returns 2xx; only the
-                    // Error06/status truth may create error.json.
+                    // Recovered provider failures are not terminal client errors; only the
+                    // Error06/status truth may create error.json after a successful handoff.
                     if frame.status >= 400 || !frame.error_chain.is_empty() {
                         let _ = persist_v3_error_evidence_payload(
                             &state,
@@ -1434,6 +1513,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     }
                     let stream_console_finalizer =
                         emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
+                    let frame =
+                        project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
                     return responses_direct_output_response_with_console(
                         frame,
                         stream_console_finalizer,
@@ -1506,6 +1587,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             responses_protocol_plan
                 .as_ref()
                 .map(V3MetadataCenterExecutionPlan::protocol_plan),
+            None,
             None,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
@@ -1775,90 +1857,9 @@ pub(crate) fn merge_v3_relay_handoff_provider_failure_events_into_direct_frame(
     observability.provider_failure_events = merged;
 }
 
-pub(crate) fn allocate_v3_console_request_id(
-    state: &Arc<V3ListenerState>,
-    endpoint: &str,
-    payload: Option<&Value>,
-) -> Result<String, Box<Response<Body>>> {
-    allocate_v3_console_request_identity(state, endpoint, payload)
-        .map(|identity| identity.request_id)
-}
-
-pub(crate) fn allocate_v3_console_request_identity(
-    state: &Arc<V3ListenerState>,
-    endpoint: &str,
-    payload: Option<&Value>,
-) -> Result<V3AllocatedRequestIdentity, Box<Response<Body>>> {
-    next_v3_console_request_identity(state, endpoint, payload).map_err(|message| {
-        let output = project_v3_debug_failure(
-            "V3RequestIdCounter01Allocated",
-            V3DebugError::MalformedFixture(message),
-        );
-        emit_v3_error_console_line_for_state(
-            state,
-            endpoint,
-            "request-id-unavailable",
-            output.status,
-            &output.error_chain,
-            Some(&output.body),
-            None,
-        );
-        Box::new(foundation_output_response(output))
-    })
-}
-
-pub(crate) fn next_v3_console_request_identity(
-    state: &V3ListenerState,
-    endpoint: &str,
-    payload: Option<&Value>,
-) -> Result<V3AllocatedRequestIdentity, String> {
-    let entry = format_v3_request_id_entry(endpoint);
-    let provider = "router";
-    let model = format_v3_request_id_token(
-        payload
-            .and_then(|value| value.get("model"))
-            .and_then(Value::as_str)
-            .unwrap_or("unknown"),
-    );
-    state
-        .request_counter
-        .lock()
-        .map_err(|_| "V3 request id counter lock is poisoned".to_string())?
-        .next_request_identity(&entry, provider, &model)
-}
-
-pub(crate) fn format_v3_request_id_entry(endpoint: &str) -> String {
-    let raw = endpoint.to_ascii_lowercase();
-    if raw.contains("/v1/responses") {
-        "openai-responses".to_string()
-    } else if raw.contains("/v1/messages") || raw.contains("/anthropic") {
-        "anthropic-messages".to_string()
-    } else {
-        "openai-chat".to_string()
-    }
-}
-
-pub(crate) fn format_v3_request_id_token(value: &str) -> String {
-    let mut token: String = value
-        .trim()
-        .chars()
-        .filter(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '-')
-        })
-        .collect();
-    if token
-        .chars()
-        .next()
-        .is_some_and(|character| !character.is_ascii_alphabetic())
-    {
-        token.remove(0);
-    }
-    if token.is_empty() {
-        "unknown".to_string()
-    } else {
-        token
-    }
-}
+#[path = "request_identity.rs"]
+mod request_identity;
+pub(crate) use request_identity::*;
 
 #[cfg(test)]
 mod front_sse_contract_tests {
@@ -1872,7 +1873,7 @@ mod front_sse_contract_tests {
         let frame = v3_front_sse_worker_panic_frame("worker panic");
         assert_eq!(
             frame,
-            b"data: {\"error\":{\"code\":\"front_sse_worker_panicked\",\"message\":\"worker panic\"}}\n\ndata: [DONE]\n\n"
+            b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"front_sse_worker_panicked\",\"message\":\"worker panic\"},\"status\":\"failed\"},\"type\":\"response.failed\"}\n\n"
         );
     }
 
@@ -1888,11 +1889,19 @@ mod front_sse_contract_tests {
     }
 
     #[test]
-    fn front_json_error_is_projected_as_one_sse_data_frame() {
+    fn front_json_error_is_projected_as_one_sse_failure_terminal() {
         assert_eq!(
             v3_front_json_body_to_sse_frame(br#"{"error":{"code":"internal"}}"#),
-            b"data: {\"error\":{\"code\":\"internal\"}}\n\n"
+            b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"internal\"},\"status\":\"failed\"},\"type\":\"response.failed\"}\n\ndata: [DONE]\n\n"
         );
+    }
+
+    #[test]
+    fn malformed_error06_body_enters_typed_projection_without_front_json_error() {
+        let frame = v3_front_json_body_to_sse_frame(b"not-json");
+        let text = String::from_utf8(frame).expect("SSE frame is UTF-8");
+        assert!(text.contains("front_error06_body_parse_failed"));
+        assert!(!text.contains("front_json_error"));
     }
 
     #[test]

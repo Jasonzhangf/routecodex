@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static PERSIST_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const SCHEMA_VERSION: u32 = 1;
 const PROBE_RETRY_INTERVAL_MS: u64 = 60_000;
@@ -142,7 +145,11 @@ impl V3ProviderCooldownCoordinator {
                 .collect(),
         })
         .map_err(|error| format!("encode provider cooldown state: {error}"))?;
-        let temp = self.path.with_extension("json.tmp");
+        let temp = self.path.with_extension(format!(
+            "json.tmp.{}.{}",
+            std::process::id(),
+            PERSIST_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
         fs::write(&temp, bytes)
             .map_err(|error| format!("write provider cooldown state: {error}"))?;
         fs::rename(&temp, &self.path)
@@ -171,6 +178,19 @@ impl V3ProviderCooldownCoordinator {
             .iter()
             .map(|(key, entry)| (key.clone(), entry.blocked_until_ms, entry.next_probe_at_ms))
             .collect()
+    }
+
+    /// Preserve cooldown deadlines across restart, but always begin a fresh
+    /// startup probe cycle for every persisted entry.
+    pub fn reset_probe_schedule_for_startup(&mut self) -> Result<(), String> {
+        if self.entries.is_empty() {
+            return Ok(());
+        }
+        for entry in self.entries.values_mut() {
+            entry.next_probe_at_ms = 0;
+            entry.probe_in_flight = false;
+        }
+        self.persist()
     }
 
     pub fn replace_entries(

@@ -6,8 +6,9 @@ struct RewriteChatHook {
 }
 
 impl V3OpenAiChatSseSemanticHook for RewriteChatHook {
-    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>) {
+    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>) -> Result<(), String> {
         self.notified = input.protocol.object == "chat.completion.chunk";
+        Ok(())
     }
 
     fn rewrite(

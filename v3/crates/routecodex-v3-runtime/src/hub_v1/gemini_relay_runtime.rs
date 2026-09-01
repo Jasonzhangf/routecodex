@@ -219,6 +219,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
         continuation_lookup,
         Vec::new(),
         true,
+        None,
     )
     .await
     .map_err(|error| match error {
@@ -602,8 +603,11 @@ impl V3GeminiSseProviderOutcome {
         if self.recorded {
             return Ok(());
         }
+        let attempt_success_receipt =
+            crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt();
         self.provider_health
             .record_provider_success_in_failure_scope(
+                &attempt_success_receipt,
                 &self.failure_session_scope,
                 &self.provider_id,
                 Some(&self.auth_alias),

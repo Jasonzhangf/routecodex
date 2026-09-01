@@ -1,6 +1,7 @@
 use super::*;
 use crate::webui_observability::V3WebuiObservability;
 use routecodex_v3_error::V3ErrorSourceKind;
+use routecodex_v3_runtime::V3AnthropicRelayClientBody;
 use std::collections::BTreeMap;
 use std::sync::{Mutex as StdMutex, OnceLock};
 
@@ -215,7 +216,8 @@ fn test_v3_listener_state_with_debug(
             manifest.debug.codex_samples,
             routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
             routecodex_v3_config::internal::v3_error_samples_only()
-                && !manifest.debug.full_codex_sampling,
+                && !manifest.debug.full_codex_sampling
+                && !manifest.debug.codex_samples,
         )),
         responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
         responses_direct_stopless_control: Arc::new(
@@ -226,7 +228,7 @@ fn test_v3_listener_state_with_debug(
         ),
         responses_relay_stopless_control: Arc::new(V3ResponsesRelayStoplessControlState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
-        realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
+        realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
         request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
         front_transport_broker: V3FrontTransportBroker::new(1),
@@ -515,7 +517,7 @@ async fn direct_live_sse_provider_error_projects_responses_failed_without_provid
     assert!(text.contains("event: response.failed"), "{text}");
     assert!(text.contains("internal_response_stream_error"), "{text}");
     assert!(!text.contains("provider secret detail"), "{text}");
-    assert!(!text.contains("[DONE]"), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
 }
 
 #[tokio::test]
@@ -537,6 +539,18 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
         true,
     );
     let chunk = b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec();
+    let provider_observation = test_runtime_stream_observation_from_provider_event_json(json!({
+        "type": "response.output_text.delta",
+        "delta": "provider"
+    }));
+    provider_observation
+        .merge_snapshot(&routecodex_v3_runtime::V3RuntimeStreamObservationSnapshot {
+            provider_raw_sse:
+                "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\"}\n\n"
+                    .to_string(),
+            ..Default::default()
+        })
+        .unwrap();
     let frame = V3Server16HttpFrame {
         status: 200,
         content_type: "text/event-stream".to_string(),
@@ -547,7 +561,7 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
         error_body: None,
         node_trace: vec!["V3Server16HttpFrame"],
         observability: None,
-        stream_observation: None,
+        stream_observation: Some(provider_observation),
     };
     let recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
         Arc::clone(&state),
@@ -580,6 +594,66 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
     assert!(terminal["rawSse"]
         .as_str()
         .is_some_and(|value| value.contains("message_stop")));
+    let provider_response_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/terminal-only/provider-response.json",
+    );
+    let provider_response: Value =
+        serde_json::from_str(&fs::read_to_string(provider_response_path).unwrap()).unwrap();
+    assert!(provider_response["rawSse"]
+        .as_str()
+        .is_some_and(|value| value.contains("response.output_text.delta")));
+
+    let live_recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
+        Arc::clone(&state),
+        "responses".to_string(),
+        "/v1/responses".to_string(),
+        "live-sse".to_string(),
+        &frame,
+    );
+    live_recorder.persist_initial().unwrap();
+    let live_response_path =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse/response.json");
+    let live_stream: V3ClientSseStream =
+        Box::pin(futures_util::stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(chunk.clone())]));
+    let mut live_stream = live_recorder.wrap_live(live_stream);
+    assert!(live_stream.next().await.is_some());
+    assert!(live_stream.next().await.is_none());
+    let live_provider_response_path =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse/provider-response.json");
+    let live_provider_response: Value =
+        serde_json::from_str(&fs::read_to_string(live_provider_response_path).unwrap()).unwrap();
+    assert!(live_provider_response["rawSse"]
+        .as_str()
+        .is_some_and(|value| value.contains("response.output_text.delta")));
+    let live_response: Value =
+        serde_json::from_str(&fs::read_to_string(live_response_path).unwrap()).unwrap();
+    assert!(live_response["rawSse"]
+        .as_str()
+        .is_some_and(|value| value.contains("message_stop")));
+
+    let failed_recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
+        Arc::clone(&state),
+        "responses".to_string(),
+        "/v1/responses".to_string(),
+        "live-sse-failure".to_string(),
+        &frame,
+    );
+    failed_recorder.persist_initial().unwrap();
+    let failed_response_path =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse-failure/response.json");
+    fs::remove_file(&failed_response_path).unwrap();
+    fs::create_dir(&failed_response_path).unwrap();
+    let failed_stream: V3ClientSseStream = Box::pin(futures_util::stream::empty());
+    let mut failed_stream = failed_recorder.wrap_live(failed_stream);
+    let failure = failed_stream
+        .next()
+        .await
+        .expect("capture failure must become a stream error")
+        .expect_err("terminal persistence failure must not be swallowed");
+    assert_eq!(failure.code, "codex_sample_persistence_failed");
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -662,14 +736,7 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
     fs::create_dir_all(&root).unwrap();
     let _home = TestHomeGuard::set(&root);
     let log_file = root.join("server.log");
-    let state = test_v3_listener_state_with_debug(
-        &log_file,
-        5555,
-        true,
-        true,
-        Some("provider-request,provider-response".to_string()),
-        false,
-    );
+    let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, false);
     let media = format!("data:image/png;base64,{}", "A".repeat(16_384));
     let mut output = V3ResponsesRelayRuntimeOutput {
         status: 200,
@@ -723,6 +790,220 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
         "consumed debug payload must be released after persistence"
     );
 
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn relay_missing_provider_snapshot_does_not_project_client_failure() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-relay-missing-provider-snapshot-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, false);
+    let output = V3ResponsesRelayRuntimeOutput {
+        status: 200,
+        client_body: V3ResponsesRelayClientBody::Json(json!({"status": "completed"})),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+    let mut snapshots = Some(routecodex_v3_runtime::V3RelayProviderSnapshots {
+        provider_request: None,
+        provider_response: None,
+    });
+    assert!(capture_v3_relay_provider_snapshots(
+        &state,
+        "responses",
+        "/v1/responses",
+        "relay-missing-provider",
+        &mut snapshots,
+    )
+    .is_none());
+    assert_eq!(output.status, 200);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-anthropic-client-response-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, false);
+    let output = V3AnthropicRelayRuntimeOutput {
+        status: 200,
+        client_response: json!({
+            "type": "message",
+            "content": [{"type": "text", "text": "调用工具 pwd：确认当前工作目录"}]
+        }),
+        client_body: V3AnthropicRelayClientBody::Json,
+        node_trace: vec!["V3Resp03ToolReason"],
+        error_chain: None,
+        servertool_followup_required: false,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+    };
+
+    assert!(capture_v3_anthropic_relay_response(
+        &state,
+        "anthropic",
+        "/v1/messages",
+        "anthropic-client-response",
+        &output,
+    )
+    .is_none());
+
+    let response_path = root.join(
+        ".rcc/codex-samples/anthropic-messages/ports/5555/anthropic-client-response/response.json",
+    );
+    let response = fs::read_to_string(response_path).unwrap();
+    assert!(response.contains("调用工具 pwd：确认当前工作目录"));
+    assert!(response.contains("V3Resp03ToolReason"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn responses_direct_provider_snapshots_require_typed_carrier() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-direct-provider-snapshot-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, false);
+    let mut output = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
+        client_payload: V3Resp15ClientPayload {
+            status: 200,
+            headers: BTreeMap::new(),
+            body: V3ClientBody::Json(json!({
+                "output": [{"type": "message", "content": [{
+                    "type": "output_text",
+                    "text": "调用工具 pwd：确认当前工作目录"
+                }]}]
+            })),
+        },
+        provider_request_snapshot: Some(json!({"body": {"tools": [{"name": "pwd"}]}})),
+        provider_response_snapshot: Some(json!({"body": {"output": [{"type": "function_call"}]}})),
+        node_trace: vec![
+            "V3Transport13ResponsesHttpRequest",
+            "V3ProviderResp14Raw",
+            "V3DirectResp15ClientPayload",
+        ],
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        protocol_relay_handoff: None,
+    };
+    assert!(capture_v3_responses_direct_provider_snapshots(
+        &state,
+        "responses",
+        "/v1/responses",
+        "typed-carrier",
+        &mut output,
+    )
+    .is_none());
+    let sample_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/typed-carrier");
+    assert!(sample_dir.join("provider-request.json").is_file());
+    assert!(sample_dir.join("provider-response.json").is_file());
+    assert!(output.provider_request_snapshot.is_none());
+    assert!(output.provider_response_snapshot.is_none());
+
+    let mut missing = output;
+    assert!(capture_v3_responses_direct_provider_snapshots(
+        &state,
+        "responses",
+        "/v1/responses",
+        "missing-carrier",
+        &mut missing,
+    )
+    .is_none());
+    assert_eq!(missing.client_payload.status, 200);
+    let missing_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/missing-carrier");
+    assert!(
+        !missing_dir.exists(),
+        "server must not fabricate direct artifacts"
+    );
+
+    let mut pre_transport_error = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
+        client_payload: V3Resp15ClientPayload {
+            status: 598,
+            headers: BTreeMap::new(),
+            body: V3ClientBody::Json(json!({"error": {"code": "original_error"}})),
+        },
+        provider_request_snapshot: None,
+        provider_response_snapshot: None,
+        node_trace: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        error_chain: Some(vec!["V3Error01SourceRaised", "V3Error06ClientProjected"]),
+        observability: None,
+        stream_observation: None,
+        protocol_relay_handoff: None,
+    };
+    assert!(capture_v3_responses_direct_provider_snapshots(
+        &state,
+        "responses",
+        "/v1/responses",
+        "pre-transport-error",
+        &mut pre_transport_error,
+    )
+    .is_none());
+    assert_eq!(pre_transport_error.client_payload.status, 598);
+    assert!(matches!(
+        pre_transport_error.client_payload.body,
+        V3ClientBody::Json(ref body) if body["error"]["code"] == "original_error"
+    ));
+    pre_transport_error.node_trace = vec!["V3Transport13ResponsesHttpRequest"];
+    assert!(capture_v3_responses_direct_provider_snapshots(
+        &state,
+        "responses",
+        "/v1/responses",
+        "post-transport-error",
+        &mut pre_transport_error,
+    )
+    .is_none());
+    assert_eq!(pre_transport_error.client_payload.status, 598);
+
+    let mut streaming_missing_carrier = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
+        client_payload: V3Resp15ClientPayload {
+            status: 200,
+            headers: BTreeMap::new(),
+            body: V3ClientBody::Json(json!({"output": []})),
+        },
+        provider_request_snapshot: None,
+        provider_response_snapshot: None,
+        node_trace: vec!["V3Transport13ResponsesHttpRequest"],
+        error_chain: None,
+        observability: None,
+        stream_observation: Some(V3RuntimeStreamObservation::default()),
+        protocol_relay_handoff: None,
+    };
+    assert!(capture_v3_responses_direct_provider_snapshots(
+        &state,
+        "responses",
+        "/v1/responses",
+        "streaming-missing-carrier",
+        &mut streaming_missing_carrier,
+    )
+    .is_none());
+    assert_eq!(streaming_missing_carrier.client_payload.status, 200);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -793,6 +1074,7 @@ fn test_direct_observability(
         execution_mode: "direct".to_string(),
         transport: "json".to_string(),
         routing_group_id: Some("coding".to_string()),
+        route_classification_reason: Some("direct:model-binding".to_string()),
         pool_id: Some("direct".to_string()),
         provider_id: Some("second".to_string()),
         auth_alias: Some("key".to_string()),
@@ -813,6 +1095,8 @@ fn test_direct_observability(
             output_tokens: Some(2),
             total_tokens: Some(12),
             cached_tokens: Some(5),
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
         }),
         timing: Some(V3RuntimeTimingSummary {
             runtime_total: std::time::Duration::from_millis(25),
@@ -890,6 +1174,8 @@ fn usage_summary_prints_cache_hit_rate() {
         output_tokens: Some(822),
         total_tokens: Some(60_664),
         cached_tokens: Some(41_984),
+        cache_read_input_tokens: None,
+        cache_creation_input_tokens: None,
     };
     assert_eq!(
         format_v3_console_usage_summary(Some(&summary)),
@@ -898,20 +1184,22 @@ fn usage_summary_prints_cache_hit_rate() {
 }
 
 #[test]
-fn usage_summary_adds_separately_reported_cache_reads_to_input_and_total() {
+fn usage_summary_preserves_raw_input_and_total_with_separate_cache_read() {
     let summary = V3RuntimeUsageSummary {
         input_tokens: Some(184),
         output_tokens: Some(448),
         total_tokens: Some(632),
-        cached_tokens: Some(147_840),
+        cached_tokens: None,
+        cache_read_input_tokens: Some(147_840),
+        cache_creation_input_tokens: None,
     };
     assert_eq!(
         format_v3_console_usage_summary(Some(&summary)),
-        "usage_in=148024 usage_out=448 usage_cache=147840/148024(99.9%) usage_total=148472"
+        "usage_in=184 usage_out=448 usage_cache=147840/148024(99.9%) usage_total=632"
     );
     assert_eq!(
         format_v3_console_human_usage_summary(Some(&summary)).as_deref(),
-        Some("usage_in=148024 usage_out=448 usage_cache=147840/148024(99.9%) usage_total=148472")
+        Some("usage_in=184 usage_out=448 usage_cache=147840/148024(99.9%) usage_total=632")
     );
 }
 
@@ -922,6 +1210,8 @@ fn usage_summary_does_not_add_cache_already_in_input_tokens() {
         output_tokens: Some(822),
         total_tokens: Some(60_664),
         cached_tokens: Some(41_984),
+        cache_read_input_tokens: None,
+        cache_creation_input_tokens: None,
     };
     assert_eq!(
         format_v3_console_usage_summary(Some(&summary)),
@@ -936,6 +1226,8 @@ fn usage_summary_preserves_no_cache_and_missing_usage_fields() {
         output_tokens: Some(3),
         total_tokens: Some(15),
         cached_tokens: None,
+        cache_read_input_tokens: None,
+        cache_creation_input_tokens: None,
     };
     assert_eq!(
         format_v3_console_usage_summary(Some(&no_cache)),
@@ -959,10 +1251,12 @@ fn usage_summary_extracts_cached_read_hit_tokens() {
         }
     }))
     .expect("usage summary");
-    assert_eq!(summary.cached_tokens, Some(41_984));
+    assert_eq!(summary.cache_read_input_tokens, Some(41_984));
+    assert_eq!(summary.cache_creation_input_tokens, Some(7));
+    assert_eq!(summary.cached_tokens, None);
     assert_eq!(
         format_v3_console_usage_summary(Some(&summary)),
-        "usage_in=59842 usage_out=822 usage_cache=41984/59842(70.2%) usage_total=60664"
+        "usage_in=59842 usage_out=822 usage_cache=41984/101826(41.2%) usage_total=60664"
     );
 }
 
@@ -1264,21 +1558,36 @@ fn console_human_prefix_is_bright_while_debug_stays_dim() {
         "human prefix must not use debug gray: {colored:?}"
     );
     assert!(
-        !colored
-            .split("\n\n")
-            .next()
-            .expect("human line")
-            .contains(ANSI_DEBUG_DIM),
+        !colored[..colored.find(ANSI_RESET).expect("human color reset")].contains(ANSI_DEBUG_DIM),
         "human line must not contain debug gray: {colored:?}"
     );
     assert!(
-        colored.contains(&format!("\n\n{ANSI_DEBUG_DIM}")),
+        colored.contains(&format!("{ANSI_RESET}{ANSI_DEBUG_DIM}")),
         "diagnostic layer must stay dim: {colored:?}"
     );
 }
 
 #[test]
-fn console_plain_layer_has_one_blank_separator_and_one_diagnostic_line() {
+fn console_layered_block_is_compact_by_default() {
+    let block =
+        V3ConsoleLayeredBlock::new("", "headline", "req=req-1 event=completed", "session-1");
+    let colored = strip_test_ansi(&colorize_v3_layered_console_line(
+        block,
+        ANSI_REQUEST_CYAN,
+        ANSI_DEBUG_DIM,
+    ));
+    let plain = format_v3_console_layered_block_plain(block);
+
+    assert!(!colored.contains("\n\n"), "{colored:?}");
+    assert!(!plain.contains("\n\n"), "{plain:?}");
+    assert!(colored.contains("headline"), "{colored:?}");
+    assert!(colored.contains("event=completed"), "{colored:?}");
+    assert!(plain.contains("headline"), "{plain:?}");
+    assert!(plain.contains("event=completed"), "{plain:?}");
+}
+
+#[test]
+fn console_plain_layer_keeps_diagnostic_on_the_same_line() {
     let prefix = format_v3_console_human_prefix(
         "5520",
         "/v1/responses",
@@ -1294,16 +1603,17 @@ fn console_plain_layer_has_one_blank_separator_and_one_diagnostic_line() {
     ));
 
     let lines = plain.lines().collect::<Vec<_>>();
-    assert_eq!(lines.len(), 3, "{plain:?}");
+    assert_eq!(lines.len(), 1, "{plain:?}");
     assert!(lines[0].contains("▶ [/v1/responses]"), "{plain:?}");
-    assert!(lines[1].is_empty(), "{plain:?}");
     let expected_scope = align_v3_console_display_width(
         "[sessionID:session-1]",
         V3_CONSOLE_DEBUG_SCOPE_COLUMN_WIDTH,
     );
     assert_eq!(
-        lines[2],
-        format!("  {expected_scope} req=req-1 event=started providerSwitchReason=pool:longcontext")
+        lines[0],
+        format!(
+            "{prefix} ▶ [/v1/responses] 13:27:35 route=longcontext  {expected_scope} req=req-1 event=started providerSwitchReason=pool:longcontext"
+        )
     );
 }
 
@@ -1341,7 +1651,7 @@ fn console_machine_fields_start_at_one_column_across_session_lengths() {
     ));
 
     let columns = [&short, &long, &oversized_plain, &oversized_color].map(|block| {
-        let debug = block.lines().nth(2).expect("diagnostic line");
+        let debug = block.lines().next().expect("diagnostic line");
         let req = debug.find("req=").expect("machine field");
         v3_console_display_width(&debug[..req])
     });
@@ -1363,13 +1673,12 @@ fn startup_console_uses_the_same_layered_builder() {
     let block = strip_test_ansi(&format_v3_startup_console_block(&[]));
 
     let lines = block.lines().collect::<Vec<_>>();
-    assert_eq!(lines.len(), 3, "{block:?}");
+    assert_eq!(lines.len(), 1, "{block:?}");
     assert!(lines[0].contains("[server:startup"), "{block}");
     assert!(lines[0].contains("✅ [RouteCodexV3]"), "{block}");
-    assert!(lines[1].is_empty(), "{block:?}");
-    assert!(lines[2].contains("event=started"), "{block}");
-    assert!(lines[2].contains("version="), "{block}");
-    assert!(lines[2].contains("binary="), "{block}");
+    assert!(lines[0].contains("event=started"), "{block}");
+    assert!(lines[0].contains("version="), "{block}");
+    assert!(lines[0].contains("binary="), "{block}");
 }
 
 #[test]
@@ -1655,6 +1964,20 @@ fn console_color_identity_reads_reasonix_root_session_id() {
 }
 
 #[test]
+fn toolreason_observation_identity_matches_console_request_fallback() {
+    let identity = resolve_v3_console_log_identity_from_parts(
+        &HeaderMap::new(),
+        &serde_json::json!({}),
+        "anthropic-messages-request-42",
+    );
+
+    assert_eq!(
+        identity.session_id,
+        "rcc-session:request:anthropic-messages-request-42"
+    );
+}
+
+#[test]
 fn console_color_identity_uses_injected_project_when_session_is_absent() {
     let payload = serde_json::json!({
         "model": "deepseek-v4-flash",
@@ -1784,19 +2107,13 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
     };
     let error_content = format_v3_provider_failure_console_content("req-provider-switch", &event);
     assert!(error_content.contains("❌ [provider-error]"));
-    assert!(error_content.contains("[switch to:minimax[key1].MiniMax-M3]"));
-    assert!(error_content.contains("[switch from:limited[key1].gpt-5.5]"));
+    assert!(error_content.contains("target=limited[key1].gpt-5.5"));
+    assert!(error_content.contains("next=minimax[key1].MiniMax-M3"));
+    assert!(!error_content.contains("[switch to:"));
+    assert!(!error_content.contains("[switch from:"));
     assert!(error_content.contains("result=switch_provider"));
     assert!(
-        error_content
-            .find("[switch to:minimax[key1].MiniMax-M3]")
-            .unwrap()
-            < error_content.find("causeStatus=502").unwrap()
-    );
-    assert!(
-        error_content
-            .find("[switch from:limited[key1].gpt-5.5]")
-            .unwrap()
+        error_content.find("target=limited[key1].gpt-5.5").unwrap()
             < error_content.find("causeStatus=502").unwrap()
     );
     assert!(error_content.contains("failures=3"));
@@ -1816,10 +2133,10 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
 
     let inline_colored = colorize_v3_provider_failure_console_content(&error_content, &event);
     assert!(inline_colored.contains(&format!(
-        "{ANSI_ERROR_TEXT_WHITE}[switch from:limited[key1].gpt-5.5]{ANSI_ERROR_RED}"
+        "{ANSI_ERROR_TEXT_WHITE}target=limited[key1].gpt-5.5{ANSI_ERROR_RED}"
     )));
     assert!(inline_colored.contains(&format!(
-        "{ANSI_RESET}[switch to:minimax[key1].MiniMax-M3]{ANSI_ERROR_RED}"
+        "{ANSI_RESET}next=minimax[key1].MiniMax-M3{ANSI_ERROR_RED}"
     )));
     assert!(inline_colored.contains(&format!(
         "{ANSI_ERROR_TEXT_WHITE}causeStatus=502{ANSI_ERROR_RED}"
@@ -1828,8 +2145,8 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
         "{ANSI_ERROR_TEXT_WHITE}externalCode=TRANSPORT_ERROR{ANSI_ERROR_RED}"
     )));
     assert!(
-        colored.contains(&format!("\n\n{ANSI_DEBUG_DIM}")),
-        "provider error diagnostic line must be dim gray: {colored:?}"
+        colored.contains(&format!("{ANSI_RESET}{ANSI_DEBUG_DIM}")),
+        "provider error diagnostic layer must be dim gray: {colored:?}"
     );
 
     let terminal_event = V3RuntimeProviderFailureObservation {
@@ -1931,8 +2248,7 @@ fn realtime_provider_failure_sink_prints_before_final_and_final_dedupes() {
     let provider_error_line = after_realtime
         .lines()
         .find(|line| {
-            line.contains("❌ [provider-error]")
-                && line.contains("[switch from:first[key].gpt-5.5]")
+            line.contains("❌ [provider-error]") && line.contains("target=first[key].gpt-5.5")
         })
         .unwrap_or_else(|| {
             panic!("missing provider-error line for failed provider: {after_realtime}")
@@ -1946,13 +2262,12 @@ fn realtime_provider_failure_sink_prints_before_final_and_final_dedupes() {
         "provider failure line must not be displayed under the next provider target: {provider_error_line}"
     );
     assert!(
-        provider_error_line.contains("[switch to:second[key].gpt-5.5]"),
-        "provider failure line must label the selected next provider: {provider_error_line}"
+        provider_error_line.contains("next=second[key].gpt-5.5")
+            && !provider_error_line.contains("[switch "),
+        "provider failure line must preserve the selected next target without switch labels: {provider_error_line}"
     );
     assert_eq!(
-        after_realtime
-            .matches("[switch from:first[key].gpt-5.5]")
-            .count(),
+        after_realtime.matches("target=first[key].gpt-5.5").count(),
         1,
         "one provider switch must emit one failed-provider line: {after_realtime}"
     );
@@ -1978,6 +2293,78 @@ fn realtime_provider_failure_sink_prints_before_final_and_final_dedupes() {
         after_final.matches("❌ [provider-error]").count(),
         realtime_provider_errors,
         "final observability must not reprint realtime provider-error blocks: {after_final}"
+    );
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[test]
+fn provider_attempt_failure_does_not_close_webui_request_before_terminal_error() {
+    let log_file = test_v3_console_log_file("provider-failure-nonterminal-lifecycle");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 7777);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-provider-nonterminal",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let sink = build_v3_provider_failure_event_sink(&context);
+    let first = test_provider_failure_observation();
+    let first_observability = test_direct_observability(vec![first.clone()]);
+    sink(&first_observability, &first);
+
+    let row = state
+        .webui_observability
+        .rows()
+        .unwrap()
+        .remove("7777:req-provider-nonterminal")
+        .expect("provider attempt row");
+    assert_eq!(
+        row.result, None,
+        "provider attempt must remain non-terminal"
+    );
+    assert_eq!(row.failed_attempts, 1);
+    assert!(
+        row.meta.error_category.is_some(),
+        "attempt keeps error code"
+    );
+
+    let mut second = first.clone();
+    second.provider_key = "second:key:gpt-5.5".to_string();
+    second.next_provider_key = None;
+    second.action = "provider_exhausted".to_string();
+    sink(&test_direct_observability(vec![second.clone()]), &second);
+    let row = state
+        .webui_observability
+        .rows()
+        .unwrap()
+        .remove("7777:req-provider-nonterminal")
+        .expect("provider retry row");
+    assert_eq!(row.result, None, "all attempts precede terminal Error06");
+    assert_eq!(row.failed_attempts, 2);
+    assert!(
+        !std::fs::read_to_string(&log_file)
+            .unwrap()
+            .contains("already terminal; refusing request.provider_attempt_failed"),
+        "provider attempts must not be projected after a premature terminal row"
+    );
+
+    let body = json!({"error":{"code":"provider_pool_exhausted","message":"exhausted"}});
+    record_v3_webui_error_for_context(&context, 502, Some(&body)).unwrap();
+    let row = state
+        .webui_observability
+        .rows()
+        .unwrap()
+        .remove("7777:req-provider-nonterminal")
+        .expect("terminal error row");
+    assert_eq!(row.result.as_deref(), Some("error"));
+    assert_eq!(row.failed_attempts, 2);
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("provider_pool_exhausted")
     );
     let _ = std::fs::remove_file(&log_file);
 }
@@ -2033,11 +2420,40 @@ fn cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_line
         1,
         "cooldown recovery must be logged once when the provider is selected again: {log}"
     );
+    let recovery_line = log
+        .lines()
+        .find(|line| line.contains("[provider-recovered]"))
+        .expect("cooldown recovery line must be present");
+    assert!(
+        recovery_line.contains("first[key].gpt-5.5 next probe at ")
+            && recovery_line.contains("1970-01-01T00:15:00.000Z"),
+        "cooldown recovery must expose only the formatted provider and probe time: {recovery_line}"
+    );
+    assert!(
+        !recovery_line.contains("req=")
+            && !recovery_line.contains("reason=cooldown_expired")
+            && !recovery_line.contains("nextProbeAtMs="),
+        "cooldown recovery must not expose diagnostic labels: {recovery_line}"
+    );
     assert!(
         !log.contains("provider-filtered") && !log.contains("provider-unavailable"),
         "cooldown must not emit a per-request filtered/unavailable line: {log}"
     );
     let _ = std::fs::remove_file(&log_file);
+}
+
+#[test]
+fn background_probe_cycle_failures_are_not_human_console_output() {
+    let source = include_str!("../lib.rs");
+
+    assert!(source.contains("run_due_provider_health_probes"));
+    assert_eq!(source.matches("run_due_provider_health_probes").count(), 2);
+    assert!(!source.contains("run_due_global_subscription_probes"));
+    assert!(!source.contains("run_due_provider_key_health_probes"));
+    assert!(!source.contains("provider persistent startup probe cycle failed"));
+    assert!(!source.contains("provider persistent startup key probe cycle failed"));
+    assert!(!source.contains("adaptive provider cooldown probe cycle failed"));
+    assert!(!source.contains("provider persistent key probe cycle failed"));
 }
 
 #[test]
@@ -2074,9 +2490,9 @@ fn routed_observability_emits_exactly_one_request_block() {
         "the single human request headline must carry endpoint and routed truth: {log}"
     );
     assert_eq!(
-        log.matches("\n\n").count(),
+        log.matches("▶ [/v1/responses]").count(),
         1,
-        "the request must emit one block with one blank separator: {log}"
+        "the request must emit one physical request block: {log}"
     );
     assert!(!log.contains("[pending"), "{log}");
     let _ = std::fs::remove_file(&log_file);
@@ -2109,9 +2525,8 @@ fn nonstream_relay_terminal_projects_webui_success_and_failure() {
         true,
     );
 
-    let snapshot = state.webui_observability.snapshot(0).unwrap();
-    let row = snapshot
-        .requests
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
         .get("4444:req-nonstream-success")
         .expect("terminal nonstream request row");
     assert_eq!(row.result.as_deref(), Some("success"));
@@ -2137,9 +2552,8 @@ fn nonstream_relay_terminal_projects_webui_success_and_failure() {
         true,
     );
 
-    let snapshot = state.webui_observability.snapshot(0).unwrap();
-    let row = snapshot
-        .requests
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
         .get("4444:req-nonstream-failure")
         .expect("terminal nonstream failure row");
     assert_eq!(row.result.as_deref(), Some("error"));
@@ -2705,10 +3119,87 @@ fn recovered_provider_attempts_do_not_create_terminal_client_error_truth() {
     assert!(!v3_output_has_terminal_client_error(200, None));
     assert!(!v3_output_has_terminal_client_error(200, Some(&[])));
     assert!(v3_output_has_terminal_client_error(502, None));
-    assert!(v3_output_has_terminal_client_error(
+    assert!(!v3_output_has_terminal_client_error(
         200,
         Some(&["V3Error06ClientProjected"]),
     ));
+}
+
+#[test]
+fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-recovered-provider-snapshot-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        4444,
+        false,
+        false,
+        None,
+        false,
+    );
+    let provider_failure = routecodex_v3_runtime::V3RuntimeProviderFailureObservation {
+        provider_key: "provider.key.model".to_string(),
+        provider_id: "provider".to_string(),
+        model_id: "model".to_string(),
+        message: "synthetic provider attempt failure".to_string(),
+        ..Default::default()
+    };
+    let mut recovered = V3ResponsesRelayRuntimeOutput {
+        status: 200,
+        client_body: V3ResponsesRelayClientBody::Json(json!({"status": "completed"})),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: Some(V3RuntimeObservability {
+            provider_failure_events: vec![provider_failure],
+            ..Default::default()
+        }),
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+    assert!(
+        capture_v3_responses_relay_provider_snapshots(
+            &state,
+            "responses",
+            "/v1/responses",
+            "recovered-provider-attempt",
+            &mut recovered,
+        )
+        .is_none(),
+        "a recovered HTTP 200 must not fabricate a missing-carrier failure"
+    );
+
+    let mut terminal_failure = V3ResponsesRelayRuntimeOutput {
+        status: 502,
+        client_body: V3ResponsesRelayClientBody::Json(json!({})),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+    assert!(
+        capture_v3_responses_relay_provider_snapshots(
+            &state,
+            "responses",
+            "/v1/responses",
+            "terminal-provider-attempt",
+            &mut terminal_failure,
+        )
+        .is_none(),
+        "missing diagnostic carrier must not manufacture a client failure"
+    );
+
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -2762,10 +3253,41 @@ async fn direct_stream_request_error06_projects_sse_error_not_json() {
             assert!(text.contains("event: response.failed"), "{text}");
             assert!(text.contains("HTTP_429"), "{text}");
             assert!(text.contains("Rate limited by upstream provider"), "{text}");
-            assert!(!text.contains("[DONE]"), "{text}");
+            assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
         }
         other => panic!("stream request Error06 must project SSE body, got {other:?}"),
     }
+}
+
+#[test]
+fn direct_stream_error_projection_response_uses_error_channel() {
+    let frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {
+                "code": "target_pool_exhausted",
+                "message": "34 candidates unavailable"
+            }
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "V3Error06ClientProjected",
+        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        error_body: None,
+        node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
+        observability: None,
+        stream_observation: None,
+    };
+
+    let response = responses_direct_output_response(
+        project_v3_responses_direct_stream_error_frame_if_requested(frame, true),
+        None,
+    );
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "text/event-stream"
+    );
 }
 
 #[tokio::test]
@@ -2789,6 +3311,7 @@ async fn direct_continuation_scope_error_for_stream_request_projects_sse_not_jso
             "previous_response_id":"never_committed",
             "input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]
         }),
+        None,
         None,
         None,
         None,
@@ -2940,7 +3463,7 @@ fn error_projection_appends_human_console_failure_line() {
         ),
         responses_relay_stopless_control: Arc::new(V3ResponsesRelayStoplessControlState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
-        realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
+        realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
         request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
         front_transport_broker: V3FrontTransportBroker::new(1),
@@ -2957,6 +3480,8 @@ fn error_projection_appends_human_console_failure_line() {
         V3ErrorProjectionConsoleInput {
             endpoint: "/v1/responses",
             request_id: "req-error-console",
+            entry_protocol: "responses",
+            session_id: None,
             status: 500,
             error_chain: &routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS,
             body: Some(&json!({
@@ -2970,6 +3495,13 @@ fn error_projection_appends_human_console_failure_line() {
     );
 
     assert!(response.is_none());
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
+        .get(&format!("{}:req-error-console", state.server.port))
+        .expect("Error06 projection must create a WebUI request row");
+    assert_eq!(row.result.as_deref(), Some("error"));
+    assert_eq!(row.meta.provider_status, Some(500));
+    assert_eq!(row.meta.error_category.as_deref(), Some("runtime_error"));
     let log = std::fs::read_to_string(&log_file).unwrap();
     let plain_log = strip_test_ansi(&log);
     assert!(
@@ -3010,8 +3542,8 @@ fn stopless_console_activation_requires_action_stop_and_uses_fixed_orange() {
         "stopless console line must use fixed orange color: {colored:?}"
     );
     assert!(
-        colored.contains(&format!("\n\n{ANSI_DEBUG_DIM}")),
-        "stopless diagnostic line must be dim gray: {colored:?}"
+        colored.contains(&format!("{ANSI_RESET}{ANSI_DEBUG_DIM}")),
+        "stopless diagnostic layer must be dim gray: {colored:?}"
     );
     assert!(colored.contains("hook="));
     assert!(colored.contains("reasoningStop"));
@@ -3042,10 +3574,46 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
     assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
 }
 
+#[tokio::test]
+async fn responses_relay_json_error_projects_failure_terminal_with_done() {
+    let output = V3ResponsesRelayRuntimeOutput {
+        status: 598,
+        client_body: V3ResponsesRelayClientBody::Json(json!({
+            "error": {
+                "code": "provider_request_payload_invalid",
+                "message": "UnmappedOutboundFields target_protocol=anthropic paths=$.request.text.output_config.format.name"
+            }
+        })),
+        node_trace: vec!["V3HubReqChatProcess04Governed", "V3Error06ClientProjected"],
+        error_chain: Some(vec!["V3Error01SourceRaised", "V3Error06ClientProjected"]),
+        observability: None,
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+
+    let response = responses_relay_output_response(output, None, None, true);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(text.starts_with("event: response.failed\n"), "{text}");
+    assert!(text.contains("provider_request_payload_invalid"), "{text}");
+    assert!(text.contains("UnmappedOutboundFields"), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+}
+
 #[test]
 fn relay_chat_sse_json_projection_has_explicit_terminal_marker() {
-    let frame =
-        append_v3_openai_chat_relay_sse_done(b"data: {\"id\":\"chatcmpl_test\",\"choices\":[]}");
+    let frame = build_v3_openai_chat_relay_json_sse_frame(&json!({
+        "id": "chatcmpl_test",
+        "choices": []
+    }))
+    .expect("JSON relay SSE projection");
+    assert!(frame.starts_with(b"data: {"));
+    assert!(frame[..frame.len() - b"\n\ndata: [DONE]\n\n".len()]
+        .windows(b"chatcmpl_test".len())
+        .any(|window| window == b"chatcmpl_test"));
     assert!(frame.ends_with(b"data: [DONE]\n\n"));
 }
 
@@ -3141,7 +3709,7 @@ async fn responses_live_sse_error_emits_responses_failed_terminal() {
     let error = std::str::from_utf8(&error).unwrap();
     assert!(error.starts_with("event: response.failed\n"), "{error}");
     assert!(error.contains("internal_response_stream_error"), "{error}");
-    assert!(!error.contains("[DONE]"), "{error}");
+    assert!(error.ends_with("data: [DONE]\n\n"), "{error}");
     assert!(
         client.next().await.is_none(),
         "terminal event must close the body"
@@ -3153,6 +3721,36 @@ async fn anthropic_sse_projection_error_is_explicit_not_silent_eof() {
     let error = routecodex_v3_runtime::hub_v1::project_v3_anthropic_client_sse_stream(json!({}))
         .expect_err("missing Anthropic events must fail before client stream creation");
     assert!(error.contains("missing events"), "{error}");
+}
+
+#[tokio::test]
+async fn anthropic_relay_output_consumes_typed_sealed_sse_body() {
+    let events = json!([{
+        "event": "message_stop",
+        "data": {"type": "message_stop"}
+    }]);
+    let output = V3AnthropicRelayRuntimeOutput {
+        status: 200,
+        client_response: json!({"events": events.clone()}),
+        client_body: V3AnthropicRelayClientBody::Sse(test_committed_anthropic_sse(events)),
+        node_trace: vec!["V3ServerRespOutbound06ClientFrame"],
+        error_chain: None,
+        servertool_followup_required: false,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+    };
+
+    let response = anthropic_relay_output_response(output);
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "text/event-stream"
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = std::str::from_utf8(&body).unwrap();
+    assert!(body.contains("event: message_stop"), "{body}");
+    assert!(body.contains("\"type\":\"message_stop\""), "{body}");
 }
 
 #[tokio::test]

@@ -7,7 +7,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 pub mod sample_store;
+pub mod observability_store;
 
+pub use observability_store::{
+    v3_webui_observability_append_row, v3_webui_observability_read_raw_rows,
+    v3_webui_observability_read_rows, v3_webui_observability_read_rows_bounded,
+    V3WebuiObservabilityStoreError, V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION,
+};
 pub use sample_store::{V3CodexSampleStore, V3_CODEX_SAMPLE_REQUEST_RETENTION};
 
 pub const V3_DEFAULT_SNAPSHOT_STAGE_SELECTOR: &str =
@@ -590,9 +596,8 @@ impl V3DebugRuntime {
     fn write_sink(&self, event: &V3DebugEventProjection) -> V3DebugResult<()> {
         let line =
             serde_json::to_string(event).map_err(|error| V3DebugError::Sink(error.to_string()))?;
-        if self.config.log_console {
-            println!("{line}");
-        }
+        // Node events are internal debug evidence. Human-readable console
+        // output is emitted explicitly through append_human_console_line.
         if let Some(path) = self.config.log_file.as_deref() {
             let mut file = open_log_file_for_append(path)?;
             writeln!(file, "{line}").map_err(|error| V3DebugError::Sink(error.to_string()))?;

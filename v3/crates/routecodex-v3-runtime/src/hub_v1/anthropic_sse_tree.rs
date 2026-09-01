@@ -291,6 +291,18 @@ impl V3AnthropicSseReducerState {
         let index = protocol
             .index
             .ok_or(V3AnthropicSseTreeError::IndexRequired)?;
+        // Some Anthropic-compatible gateways emit a reasoning signature before
+        // the corresponding content_block_start. It carries no standalone
+        // business content; consume it without inventing a block, then keep
+        // strict ordering for every delta that carries content.
+        if !self.blocks.contains_key(&index)
+            && event
+                .pointer("/delta/type")
+                .and_then(Value::as_str)
+                == Some("signature_delta")
+        {
+            return Ok(());
+        }
         let block = self
             .blocks
             .get_mut(&index)
@@ -755,6 +767,25 @@ mod tests {
         }
         assert_eq!(state.blocks[&1].input_json, "{\"x\":1}");
         assert_eq!(state.usage.as_ref().unwrap().output_tokens, Some(2));
+    }
+
+    #[test]
+    fn signature_delta_before_block_start_is_ignored_as_compatibility_tail() {
+        let mut state = V3AnthropicSseReducerState::default();
+        state
+            .apply_event(&json!({
+                "type":"message_start",
+                "message":{"id":"m1","role":"assistant","content":[]}
+            }))
+            .unwrap();
+        state
+            .apply_event(&json!({
+                "type":"content_block_delta",
+                "index":0,
+                "delta":{"type":"signature_delta","signature":"sig"}
+            }))
+            .unwrap();
+        assert!(state.blocks.is_empty());
     }
     #[test]
     fn lifecycle_and_error_are_explicit() {

@@ -499,8 +499,7 @@ fn insert_v3_deepseek_interleaved_tool_segment_reasoning(body: &mut Value) {
         // reasoning item。Console Go 仍会把该 call 转成 thinking assistant turn，
         // 缺失 reasoning_text 会被 DeepSeek 400；单空格是该协议接受的最小非缺失
         // 表示，不伪造上一轮 reasoning，也不跨 user 边界继承旧文本。
-        let is_user_message = input[index].get("type").and_then(Value::as_str)
-            == Some("message")
+        let is_user_message = input[index].get("type").and_then(Value::as_str) == Some("message")
             && input[index].get("role").and_then(Value::as_str) == Some("user");
         if is_user_message && next_is_call {
             input.insert(

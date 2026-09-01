@@ -107,10 +107,10 @@ action = { select_route_pool = "compact" }
 [route_groups.routecodex_v3_4444.pools.default]
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
-  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 2 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4 },
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 100 },
+  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 90 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 80 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 70 },
 ]
 
 [route_groups.routecodex_v3_4444.pools.compact]
@@ -118,8 +118,8 @@ route_object = "compact-default"
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses" }
 targets = [
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 1 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 2 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 100 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 90 },
 ]
 
 # multimodal / web_search 请求最高优先级路由到 MiniMax-M3（支持
@@ -130,26 +130,26 @@ targets = [
 selection = { strategy = "priority" }
 match = { precedence = 0, required_capabilities = ["multimodal"] }
 targets = [
-  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 2 },
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 100 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 90 },
 ]
 
 [route_groups.routecodex_v3_4444.pools.web_search]
 selection = { strategy = "priority" }
 match = { precedence = 20, required_capabilities = ["web_search"] }
 targets = [
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 1 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 2 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 100 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 90 },
 ]
 
 [route_groups.routecodex_v3_4444.pools.search]
 selection = { strategy = "priority" }
 match = { precedence = 21, entry_protocol = "responses" }
 targets = [
-  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
-  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 2 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4 },
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 100 },
+  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 90 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 80 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 70 },
 ]
 
 # thinking / coding 请求路由到 deepseek-v4-flash（本地推理优先；不依赖
@@ -160,40 +160,40 @@ targets = [
 selection = { strategy = "priority" }
 match = { precedence = 2, entry_protocol = "responses" }
 targets = [
-  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
-  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 2 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4 },
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 100 },
+  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 90 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 80 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 70 },
 ]
 
 [route_groups.routecodex_v3_4444.pools.coding]
 selection = { strategy = "priority" }
 match = { precedence = 3, entry_protocol = "responses" }
 targets = [
-  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
-  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 2 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4 },
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 100 },
+  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 90 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 80 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 70 },
 ]
 
 [route_groups.routecodex_v3_4444.pools.tools]
 selection = { strategy = "priority" }
 match = { precedence = 30, required_capabilities = ["tools"] }
 targets = [
-  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
-  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 2 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4 },
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 100 },
+  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 90 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 80 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 70 },
 ]
 
 [route_groups.routecodex_v3_4444.pools.longcontext]
 selection = { strategy = "priority" }
 match = { precedence = 1, min_input_tokens = 180000 }
 targets = [
-  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 1 },
-  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 2 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4 },
+  { kind = "provider_model", provider = "qwen-q4-huihui-local", model = "Huihui-Qwen3.8-27B-abliterated-oQ4e-mtp", priority = 100 },
+  { kind = "provider_model", provider = "deepseek-v4-local", model = "DeepSeek-V4-Flash-0731-oQ4e-mtp", priority = 90 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 80 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 70 },
 ]
 
 [debug]
@@ -259,16 +259,6 @@ targets = [
   { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 1, weight = 1 },
 ]
 
-[route_groups.responses_v3_7777.pools.anthropic_entry]
-selection = { strategy = "priority" }
-match = { precedence = 100, entry_protocol = "anthropic" }
-targets = [
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 2, weight = 1 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 3, weight = 1 },
-  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 4, weight = 1 },
-  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 5, weight = 1 },
-]
-
 # === 7777: Ox Alpha is explicit-model only while broad SSE compatibility is unstable ===
 [route_groups.responses_v3_7777.pools.ox_alpha_direct]
 selection = { strategy = "priority" }
@@ -281,84 +271,84 @@ targets = [
 selection = { strategy = "priority" }
 match = { precedence = 1, entry_protocol = "responses", min_input_tokens = 180000 }
 targets = [
-  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 2, weight = 1 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3, weight = 1 },
-  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 4, weight = 1 },
-  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 5, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 100, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 80, weight = 1 },
 ]
 
 [route_groups.responses_v3_7777.pools.thinking]
 selection = { strategy = "weighted" }
 match = { precedence = 2, entry_protocol = "responses", required_capabilities = ["thinking"] }
 targets = [
-  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 1, weight = 1 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 2, weight = 1 },
-  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 3, weight = 1 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4, weight = 1 },
-  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 5, weight = 1 },
-  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 6, weight = 1 },
+  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 100, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 100, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 80, weight = 1 },
 ]
 
 [route_groups.responses_v3_7777.pools.coding]
 selection = { strategy = "weighted" }
 match = { precedence = 3, entry_protocol = "responses", required_capabilities = ["coding"] }
 targets = [
-  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 1, weight = 1 },
-  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 1, weight = 1 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3, weight = 1 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4, weight = 1 },
-  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 5, weight = 1 },
-  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 6, weight = 1 },
+  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 100, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 100, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 80, weight = 1 },
 ]
 
 [route_groups.responses_v3_7777.pools.multimodal]
 selection = { strategy = "weighted" }
 match = { precedence = 0, entry_protocol = "responses", required_capabilities = ["multimodal"] }
 targets = [
-  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 1, weight = 1 },
-  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 1, weight = 1 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 3, weight = 1 },
+  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 100, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 90, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 80, weight = 1 },
 ]
 
 [route_groups.responses_v3_7777.pools.web_search]
 selection = { strategy = "weighted" }
 match = { precedence = 20, entry_protocol = "responses", required_capabilities = ["web_search"] }
 targets = [
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 3, weight = 1 },
-  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 4, weight = 1 },
-  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 5, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 80, weight = 1 },
 ]
 
 [route_groups.responses_v3_7777.pools.search]
 selection = { strategy = "weighted" }
 match = { precedence = 21, entry_protocol = "responses" }
 targets = [
-  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 1, weight = 1 },
-  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 1, weight = 1 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 3, weight = 1 },
-  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 4, weight = 1 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 5, weight = 1 },
+  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 100, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 90, weight = 1 },
 ]
 
 [route_groups.responses_v3_7777.pools.tools]
 selection = { strategy = "weighted" }
 match = { precedence = 30, required_capabilities = ["tools"] }
 targets = [
-  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 1, weight = 1 },
-  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 1, weight = 1 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 3, weight = 1 },
-  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 4, weight = 1 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 5, weight = 1 },
+  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", priority = 100, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 90, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 80, weight = 1 },
 ]
 
 [route_groups.responses_v3_7777.pools.default]
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 2, weight = 1 },
-  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 3, weight = 1 },
-  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 4, weight = 1 },
-  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 5, weight = 1 },
-  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 6, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go-zen", model = "x-preview-f-free", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 90, weight = 1 },
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", priority = 80, weight = 1 },
+  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 80, weight = 1 },
 ]
 
 [servers.toolreason_test_10000]

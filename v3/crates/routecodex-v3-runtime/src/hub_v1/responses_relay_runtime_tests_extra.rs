@@ -6,12 +6,57 @@ use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
+fn zero_input_usage_uses_request_tiktoken_estimate() {
+    let request = json!({
+        "model": "gpt-5.5",
+        "input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]
+    });
+    let mut response = json!({
+        "status": "requires_action",
+        "usage": {"input_tokens": 0, "output_tokens": 3, "total_tokens": 3}
+    });
+    materialize_v3_runtime_input_usage_estimate_from_request(&mut response, &request);
+    assert_eq!(response["usage"]["input_tokens"], 2);
+    assert_eq!(response["usage"]["total_tokens"], 5);
+}
+
+#[test]
+fn nonzero_provider_input_usage_is_preserved() {
+    let request = json!({
+        "model": "gpt-5.5",
+        "input": [{"type":"message","role":"user","content":"hello"}]
+    });
+    let mut response = json!({
+        "status": "completed",
+        "usage": {"input_tokens": 345678, "output_tokens": 3, "total_tokens": 345681}
+    });
+    materialize_v3_runtime_input_usage_estimate_from_request(&mut response, &request);
+    assert_eq!(response["usage"]["input_tokens"], 345678);
+    assert_eq!(response["usage"]["total_tokens"], 345681);
+}
+
+#[test]
+fn missing_usage_gets_request_tiktoken_input_estimate() {
+    let request = json!({
+        "model": "gpt-5.5",
+        "input": [{"type":"message","role":"user","content":"hello"}]
+    });
+    let mut response = json!({"status": "completed"});
+    materialize_v3_runtime_input_usage_estimate_from_request(&mut response, &request);
+    assert_eq!(response["usage"]["input_tokens"], 2);
+    assert!(response["usage"].get("total_tokens").is_none());
+}
+
+#[test]
 fn explicit_target_exhaustion_projection_is_compact() {
     let output =
-            project_v3_responses_relay_runtime_failure(V3ResponsesRelayRuntimeError::Target(
-                "selected target exhausted after [\"routecodex:key1:deepseek-v4-flash:availability(cooldown)\"]"
-                    .to_string(),
-            ));
+            project_v3_responses_relay_runtime_failure(
+                V3ResponsesRelayRuntimeError::Target(
+                    "selected target exhausted after [\"routecodex:key1:deepseek-v4-flash:availability(cooldown)\"]"
+                        .to_string(),
+                ),
+                None,
+            );
 
     assert_eq!(output.status, 503);
     let body = match &output.client_body {
@@ -42,6 +87,7 @@ fn explicit_target_exhaustion_projection_is_compact() {
 fn non_target_runtime_failure_remains_runtime_error() {
     let output = project_v3_responses_relay_runtime_failure(
         V3ResponsesRelayRuntimeError::StaticRegistry("registry unavailable".to_string()),
+        None,
     );
 
     assert_eq!(output.status, 598);
@@ -71,12 +117,13 @@ fn non_target_runtime_failure_remains_runtime_error() {
 }
 
 #[test]
-fn client_inbound_reasoning_effort_validation_failure_projects_http_400() {
+fn client_inbound_reasoning_effort_validation_failure_projects_client_400() {
     let output = project_v3_responses_relay_runtime_failure(
         V3ResponsesRelayRuntimeError::ClientInboundCanonical(
             "Responses inbound canonicalization failed: Responses reasoning.effort has an invalid value"
                 .to_string(),
         ),
+        None,
     );
 
     assert_eq!(output.status, 400);
@@ -98,21 +145,22 @@ fn client_inbound_reasoning_effort_validation_failure_projects_http_400() {
 }
 
 #[test]
-fn provider_response_projection_failure_is_not_client_invalid_request() {
+fn provider_response_projection_failure_projects_internal_599() {
     let output = project_v3_responses_relay_runtime_failure(
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             "Anthropic provider response projection failed".to_string(),
         ),
+        None,
     );
 
-    assert_eq!(output.status, 598);
+    assert_eq!(output.status, 599);
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => {
             panic!("provider response projection failure must project as JSON")
         }
     };
-    assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
+    assert_eq!(body["error"]["code"], "provider_response_sse_event_invalid");
     assert_ne!(body["error"]["code"], "invalid_responses_request");
 }
 
@@ -122,6 +170,7 @@ fn internal_web_search_canonicalization_failure_is_not_client_invalid_request() 
         V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
             "servertool followup canonicalization failed".to_string(),
         ),
+        None,
     );
 
     assert_eq!(output.status, 598);
@@ -183,8 +232,8 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
     );
 
     assert_eq!(
-        output.status, 502,
-        "Error06 terminal exhaustion projection owns the client status after all provider candidates are exhausted"
+        output.status, 429,
+        "Error06 terminal exhaustion projection preserves the upstream provider status"
     );
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
@@ -213,6 +262,27 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
     );
     assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
     assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
+}
+
+#[test]
+fn provider_runtime_http_status_preserves_upstream_429_for_policy_projection() {
+    let failure = super::responses_relay_failures::provider_runtime_failure(
+        V3ProviderError::HttpStatus {
+            response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
+                request_id: "req-429".to_string(),
+                provider_id: "goaichat".to_string(),
+                status: 429,
+                headers: Vec::new(),
+                body: br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
+                body_read_failure: None,
+            }),
+        },
+        "goaichat",
+        None,
+    );
+
+    assert_eq!(failure.status, 429);
+    assert_eq!(failure.policy_error_type, "provider_runtime_error");
 }
 
 fn test_provider_request(
@@ -503,7 +573,8 @@ async fn provider_sse_empty_body_classifies_as_provider_response_empty() {
         other => panic!("expected ProviderResponseEmpty, got {other:?}"),
     }
     assert!(is_v3_responses_provider_response_failure(&error));
-    let typed = provider_response_stream_failure(error, "req-empty", "glmrelay_anthropic");
+    let typed = provider_response_stream_failure(error, "req-empty", "glmrelay_anthropic")
+        .expect("provider response empty attribution");
     match typed {
         V3ProviderError::ResponseBody { reason, .. } => {
             assert!(reason.contains("provider response body is empty"));
@@ -1444,4 +1515,79 @@ fn web_search_state_machine_advances_to_search_result_captured_via_hop() {
         .transition_to(V3WebSearchCenterPhase::SearchInFlight, "backwards")
         .expect_err("terminal captured must not move backwards");
     assert!(error.contains("invalid web_search ServerTool transition"));
+}
+
+#[test]
+fn relay_runtime_failure_propagates_supplied_observability() {
+    // Red guard: project_v3_responses_relay_runtime_failure 之前对所有
+    // source raised 路径都丢弃 observability。本次修复后调用方可显式
+    // 传入 Some(observability)，要求 output.observability 字段保留同一对象。
+    // 反向：传 None 必须不引入新的 payload 字段；不破坏 Error06 控制面
+    // 隔离（仍输出 JSON error body，error_chain 写齐）。
+    let mut observability = V3RuntimeObservability::default();
+    observability.entry_protocol = "responses".to_string();
+    observability.execution_mode = "relay".to_string();
+    observability.transport = "json".to_string();
+    observability.routing_group_id = Some("group-a".to_string());
+    observability.pool_id = Some("pool-a".to_string());
+    observability.provider_id = Some("provider-x".to_string());
+    observability.provider_key = Some("provider-x:key1:model-y".to_string());
+    observability.model_id = Some("model-y".to_string());
+    observability.wire_model = Some("model-y".to_string());
+    observability.provider_type = Some("openai_responses".to_string());
+    observability.attempts = Some(1);
+    observability.response_status = Some("error".to_string());
+    observability.provider_status = Some(598);
+
+    let output = project_v3_responses_relay_runtime_failure(
+        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed("red-test propagation".to_string()),
+        Some(observability.clone()),
+    );
+    assert_eq!(output.status, 598);
+    let propagated = output
+        .observability
+        .as_ref()
+        .expect("explicit observability must be retained through relay failure projection");
+    assert_eq!(propagated.entry_protocol, observability.entry_protocol);
+    assert_eq!(propagated.routing_group_id, observability.routing_group_id);
+    assert_eq!(propagated.provider_id, observability.provider_id);
+    assert_eq!(propagated.provider_key, observability.provider_key);
+    assert_eq!(propagated.model_id, observability.model_id);
+    assert_eq!(propagated.wire_model, observability.wire_model);
+    assert_eq!(propagated.provider_status, observability.provider_status);
+    assert_eq!(
+        propagated.response_status.as_deref(),
+        Some("error"),
+        "responses_relay_failures::error_output must overwrite response_status to 'error'"
+    );
+    let body = match &output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => {
+            panic!("runtime failure must project as JSON")
+        }
+    };
+    assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
+    assert_eq!(
+        body["error"]["message"],
+        "web_search local search hop failed: red-test propagation"
+    );
+    assert!(
+        body["error"].get("stage").is_none()
+            && body["error"].get("class").is_none()
+            && body["error"].get("decision").is_none()
+            && body["error"].get("target_exhausted").is_none()
+            && body["error"].get("candidates_remaining").is_none()
+            && body["error"].get("error_node").is_none(),
+        "Error06 body must not carry control-plane fields even when observability is supplied: {}",
+        body["error"]
+    );
+
+    let none_output = project_v3_responses_relay_runtime_failure(
+        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed("no-obs".to_string()),
+        None,
+    );
+    assert!(
+        none_output.observability.is_none(),
+        "no observability input must keep output.observability None to preserve previous behavior"
+    );
 }

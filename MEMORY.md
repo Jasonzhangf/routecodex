@@ -5824,3 +5824,5 @@ Tags: #v3 #restart #keepalive #InvalidHTTPResponse #front-closeout #request-cycl
 - Every payload change belongs to a registered Direct/Relay request/response hook or its adjacent protocol codec. Direct is same-protocol and fail-fast on mismatch. Relay keeps client and provider protocols independently typed; neither may infer the other from payload.
 - Required regression proof: SSE semantic-write red gate, Direct/Relay hook cross-mount red gates, typed lane/protocol carrier tests, and real Direct/Relay JSON+SSE replay from the globally installed `rccv4`.
 Tags: #v4 #cordis #direct #relay #sse #node-container #hook-owner
+# 2026-09-01 V4 takeover correction
+- Production plugin wiring must be judged from the real Cordis execution path, not descriptor/contract or mock trace gates. `runtime-bin::PipelineHandler` currently executes the Rust engine with a skeleton-derived bundle, while direct provider/client/SSE semantics remain in `runtime-bin`/provider; empty node plans can therefore make contracts green without production dispatch. Treat this as an architecture failure requiring production NodePluginPlan dispatch and live `/v1/responses` evidence.

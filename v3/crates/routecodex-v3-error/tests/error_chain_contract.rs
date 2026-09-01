@@ -44,7 +44,7 @@ fn project_exhausted_provider(
 }
 
 #[test]
-fn error_handling_center_owns_error01_06_and_projects_provider_failure_as_502() {
+fn error_handling_center_owns_error01_06_and_projects_provider_429_as_429() {
     let source = build_v3_error_01_source_raised_external(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderReqOutbound09TransportRequest",
@@ -67,7 +67,7 @@ fn error_handling_center_owns_error01_06_and_projects_provider_failure_as_502() 
         Some(429),
     );
 
-    assert_eq!(projected.status, 502);
+    assert_eq!(projected.status, 429);
     assert_eq!(projected.body["error"]["code"], "rate_limit_error");
     assert!(
         projected.body["error"].get("error_node").is_none()
@@ -305,7 +305,7 @@ fn external_provider_429_projects_external_link_without_internal_code() {
         None,
     );
 
-    assert_eq!(projected.status, 502);
+    assert_eq!(projected.status, 429);
     assert_eq!(projected.body["error"]["code"], "provider_http_429");
     assert!(
         projected.body["error"].get("external_error").is_none(),

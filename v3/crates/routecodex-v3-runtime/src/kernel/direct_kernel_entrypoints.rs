@@ -62,6 +62,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
     now_epoch_ms: u64,
     initial_plan: &V3ResponsesProtocolExecutionPlan,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    request_execution_control: Option<V3RequestExecutionControl>,
 ) -> V3ResponsesDirectRuntimeOutput {
     let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
@@ -75,7 +76,8 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
         .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
         .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
         .with_initial_plan(initial_plan)
-        .with_observability_accumulator(observability_accumulator),
+        .with_observability_accumulator(observability_accumulator)
+        .with_request_execution_control(request_execution_control),
         manifest,
         raw,
         hook_registry,
