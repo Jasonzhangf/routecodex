@@ -1464,7 +1464,11 @@ fn render_payload_console_event(
             if stream { "sse" } else { "json" }
         ))
     } else if message.starts_with("✅ [resp]") {
-        if message.contains("output_items=0") && !message.contains("usage=") {
+        // Streaming response nodes emit empty observations before the terminal
+        // client frame.  They carry no user-visible information and must not
+        // become one console line per chunk; the terminal report below remains
+        // the single response summary.
+        if message.contains("output_items=0") {
             return None;
         }
         Some(format!(
@@ -1677,6 +1681,19 @@ mod tests {
             true,
             Some(200),
             std::time::Duration::from_millis(4),
+        )
+        .is_none());
+        let empty_with_usage =
+            "v4.std.diagnostic.response_payload_console_render:console.payload_ready:✅ [resp] model=- output_items=0 usage=12+0=12";
+        assert!(render_payload_console_event(
+            empty_with_usage,
+            &request,
+            "responses",
+            "cc-sol",
+            "gpt-5.5",
+            true,
+            Some(200),
+            std::time::Duration::from_millis(5),
         )
         .is_none());
         let request_event = "v4.std.diagnostic.request_payload_console_render:console.payload_ready:▶ [req] model=gpt-5.5 stream=true messages=1 tools=0";
