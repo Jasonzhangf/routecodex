@@ -1,13 +1,14 @@
 //! RED tests: every standard plugin must be reachable through the production
 //! chain contract (`v4/contracts/skeleton-plan.contract.json`).
 //!
-//! Current baseline intentionally fails: `standard_plugins()` registers 29
-//! typed handles, but production chains still bind runtime-local plugin ids
-//! (`normalize`, `governance`, `wire_build`, ...) instead of the immutable
-//! `v4.std.*` plugin ids. These tests lock that wiring gap as behavior_red
-//! before any implementation is changed.
+//! These tests lock the production contract: every published node plan must
+//! carry its immutable `v4.std.*` bindings and every binding must resolve to a
+//! runtime handle. A narrow two-plan runtime must fail this suite.
 
-use routecodex_v4_standard_plugins::{standard_plugins, StandardHandleRegistry};
+use routecodex_v4_skeleton::SkeletonPlan;
+use routecodex_v4_standard_plugins::{
+    compile_production_execution_plans, standard_plugins, StandardHandleRegistry,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
@@ -118,4 +119,53 @@ fn production_contract_has_no_duplicate_standard_plugin_binding() {
         duplicates.is_empty(),
         "standard plugin ids bound to multiple production nodes: {duplicates:?}"
     );
+}
+
+#[test]
+fn every_compiled_production_entry_has_a_runtime_handle() {
+    let contract = production_contract();
+    let skeleton = SkeletonPlan::from_contract_json(
+        &serde_json::to_string(&contract).expect("contract serializes"),
+    )
+    .expect("production skeleton compiles");
+    let compiled = compile_production_execution_plans(&skeleton)
+        .expect("production plans compile");
+    let registry = StandardHandleRegistry::new();
+    let mut missing = Vec::new();
+    for plan in compiled.plans {
+        for entry in plan.entries {
+            if registry.get_handle(&entry.plugin_id).is_none() {
+                missing.push(format!("{} -> {}", plan.node_id, entry.plugin_id));
+            }
+        }
+    }
+    assert!(missing.is_empty(), "compiled production entries lack handles: {missing:?}");
+}
+
+#[test]
+fn compiled_production_plans_cover_every_runtime_node() {
+    let contract = production_contract();
+    let skeleton = SkeletonPlan::from_contract_json(
+        &serde_json::to_string(&contract).expect("contract serializes"),
+    )
+    .expect("production skeleton compiles");
+    let compiled = compile_production_execution_plans(&skeleton)
+        .expect("production plans compile");
+    let expected_nodes = skeleton
+        .chains
+        .iter()
+        .filter(|chain| matches!(
+            chain.chain_id.as_str(),
+            "direct_request" | "direct_response" | "relay_request" | "relay_response" | "error" | "control"
+        ))
+        .map(|chain| chain.nodes.len())
+        .sum::<usize>();
+    assert_eq!(compiled.plans.len(), expected_nodes);
+    let bound_plugins = compiled
+        .plans
+        .iter()
+        .flat_map(|plan| plan.entries.iter().map(|entry| entry.plugin_id.as_str()))
+        .filter(|plugin_id| plugin_id.starts_with("v4.std."))
+        .count();
+    assert!(bound_plugins > 2, "production wiring must not collapse to two plugin entries");
 }

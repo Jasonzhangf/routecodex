@@ -127,15 +127,49 @@ pub(crate) fn wire_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "wire_build requires model".to_string())?;
-    if !object.contains_key("input") {
-        if object.contains_key("messages") {
-            object = project_chat_request_to_responses(&Value::Object(object))?
-                .as_object()
-                .cloned()
-                .ok_or_else(|| "chat-to-Responses projection must return object".to_string())?;
-        } else {
-            return Err("wire_build requires input".to_string());
+    let client_protocol = ctx
+        .read_information_resource("v4.information.client_protocol")
+        .map_err(|error| error.to_string())?
+        .and_then(Value::as_str)
+        .ok_or_else(|| "wire_build requires client protocol information".to_string())?
+        .to_string();
+    let provider_protocol = ctx
+        .read_information_resource("v4.information.provider_protocol")
+        .map_err(|error| error.to_string())?
+        .and_then(Value::as_str)
+        .ok_or_else(|| "wire_build requires provider protocol information".to_string())?
+        .to_string();
+    let client_protocol = match client_protocol.as_str() {
+        "openai-chat" | "chat" => "chat",
+        "openai-responses" | "responses" => "responses",
+        other => return Err(format!("unsupported client protocol {other}")),
+    };
+    let provider_protocol = match provider_protocol.as_str() {
+        "openai-chat" | "chat" => "chat",
+        "openai-responses" | "responses" => "responses",
+        other => return Err(format!("unsupported provider protocol {other}")),
+    };
+    match (client_protocol, provider_protocol) {
+        ("chat", "responses") => {
+            if object.contains_key("messages") {
+                object = project_chat_request_to_responses(&Value::Object(object))?
+                    .as_object()
+                    .cloned()
+                    .ok_or_else(|| "chat-to-Responses projection must return object".to_string())?;
+            } else if !object.contains_key("input") {
+                return Err("Chat-to-Responses wire requires messages or input".to_string());
+            }
         }
+        ("chat", "chat") if !object.contains_key("messages") => {
+            return Err("chat wire requires messages".to_string());
+        }
+        ("responses", "responses") if !object.contains_key("input") => {
+            return Err("Responses wire requires input".to_string());
+        }
+        ("responses", "chat") => {
+            return Err("Responses-to-Chat wire projection is not registered".to_string());
+        }
+        _ => {}
     }
     // Preserve the complete protocol business envelope. Responses fields such
     // as previous_response_id and store are client/provider payload semantics,
@@ -195,7 +229,11 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
             PluginEffect::Semantic,
             PluginPhase::Projection,
             100,
-            vec!["v4.request.provider_semantic"],
+            vec![
+                "v4.request.provider_semantic",
+                "v4.information.client_protocol",
+                "v4.information.provider_protocol",
+            ],
             vec!["v4.request.provider_wire_payload"],
         ),
     ]
