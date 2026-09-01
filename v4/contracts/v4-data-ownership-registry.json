@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "registry_id": "v4-data-ownership-registry",
+  "status": "active",
+  "owner": "routecodex-v4-runtime",
+  "carrier_type": "ImmutableBytes",
+  "ownership": "Arc<[u8]>",
+  "resources": [
+    {"resource_id":"v4.request.immutable","type":"ImmutableRequest","owner":"routecodex-v4-runtime","release_point":"request_cycle_terminal","copy_budget":1},
+    {"resource_id":"v4.response.immutable","type":"ImmutableResponse","owner":"routecodex-v4-runtime","release_point":"client_projection_terminal","copy_budget":1},
+    {"resource_id":"v4.response.provider_raw.immutable","type":"ImmutableProviderRaw","owner":"routecodex-v4-runtime","release_point":"resp_inbound_complete","copy_budget":1},
+    {"resource_id":"v4.request.provider_semantic.immutable","type":"ImmutableSemantic","owner":"routecodex-v4-runtime","release_point":"provider_wire_build","copy_budget":1},
+    {"resource_id":"v4.request.provider_wire.immutable","type":"ImmutableWireBytes","owner":"routecodex-v4-runtime","release_point":"transport_complete","copy_budget":1},
+    {"resource_id":"v4.continuation.immutable","type":"ImmutableContinuationSnapshot","owner":"routecodex-v4-runtime","release_point":"next_req_chatprocess_restore","copy_budget":1}
+  ],
+  "forbidden": ["Arc<Mutex<Value>>", "shared_mutable_payload", "payload_reconstructs_control"]
+}

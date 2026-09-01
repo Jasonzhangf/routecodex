@@ -1,6 +1,8 @@
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::{
-    ControlError, ControlSignal, ControlSignalKind, MetadataCenter, MetadataOperation, PayloadGate,
+    ControlError, ControlEvent, ControlEventBus, ControlEventKind, ControlEventRegistry,
+    ControlSignal, ControlSignalKind, DeliveryPolicy, MetadataCenter, MetadataOperation,
+    PayloadGate,
 };
 
 fn scope_a() -> Scope {
@@ -223,4 +225,29 @@ fn control_blackbox_public_api_regression() {
     assert!(center.is_released("scope:entry"));
     assert!(gate.write_control(&signal).is_err());
     assert_eq!(gate.leak_attempts().count(), 1);
+}
+
+#[test]
+fn control_event_observation_lifecycle_is_ordered_and_acknowledged() {
+    let scope = scope_a();
+    let mut bus = ControlEventBus::new(scope.clone(), ControlEventRegistry::standard());
+    let event = ControlEvent::diagnostic(
+        "event-positive-1",
+        ControlEventKind::Observation,
+        "runtime",
+        "debug",
+        "V4Debug05EventLedgerRecorded",
+        scope,
+        1,
+        "cause-positive-1",
+        DeliveryPolicy::Synchronous,
+        true,
+        false,
+        "debug-release",
+    )
+    .unwrap();
+    bus.publish(event).unwrap();
+    assert_eq!(bus.events().count(), 1);
+    bus.ack("event-positive-1", "debug").unwrap();
+    bus.release("event-positive-1").unwrap();
 }

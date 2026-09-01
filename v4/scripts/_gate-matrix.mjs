@@ -35,6 +35,7 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-standard-plugins.mjs',
   'verify-v4-cli-plugin.mjs',
   'verify-v4-real-runtime-admission.mjs',
+  'verify-v4-control-event-arc.mjs',
 ];
 
 export const RED_SUITES = [
@@ -58,6 +59,7 @@ export const RED_SUITES = [
   ['verify-v4-standard-plugins.mjs', '--red-self-test'],
   ['verify-v4-cli-plugin.mjs', '--red-self-test'],
   ['verify-v4-real-runtime-admission.mjs', '--red-self-test'],
+  ['verify-v4-control-event-arc.mjs', '--red-self-test'],
 ];
 
 export const CONSUMER_REGRESSIONS = [

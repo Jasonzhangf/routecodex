@@ -1164,6 +1164,26 @@
     },
     {
       "function_id":"v4.governance.feature_layer_product_lockstep","status":"active","feature_id":"V4-LAYER-GATE-001","owner":"routecodex-v4-governance","entry_symbols":["validateSourceGreenClaims"],"resource_ids":["v4.governance.feature_layer_product_lockstep"],"source_paths":["scripts/architecture/lib/feature-layer-batch-source.mjs"],"required_gates":["v4_feature_layer_batches","v4_feature_layer_batches_self_test","v4_feature_layer_batches_boundary","v4_feature_layer_batches_red"]
+    },
+    {
+      "function_id":"v4.control.event_bus",
+      "status":"active",
+      "feature_id":"V4-CONTROL-EVENT-ARC-001",
+      "owner":"routecodex-v4-control",
+      "entry_symbols":["ControlEvent","ControlEventBus","ControlEventRegistry","ControlEventError","ControlEventBus::publish","ControlEventBus::ack","ControlEventBus::release"],
+      "resource_ids":["v4.control.event_bus"],
+      "source_paths":["crates/routecodex-v4-control/src/lib.rs","crates/routecodex-v4-control/tests/l2_control.rs","crates/routecodex-v4-control/tests/l2_control_event_arc_red.rs"],
+      "required_gates":["v4_control_event_arc_positive","v4_control_event_arc_red"]
+    },
+    {
+      "function_id":"v4.data.immutable_arc_carriers",
+      "status":"active",
+      "feature_id":"V4-CONTROL-EVENT-ARC-001",
+      "owner":"routecodex-v4-runtime",
+      "entry_symbols":["ImmutableBytes","ImmutableRequest","ImmutableResponse","ImmutableProviderRaw","ImmutableSemantic","ImmutableWireBytes","ImmutableContinuationSnapshot"],
+      "resource_ids":["v4.data.immutable_arc_carriers"],
+      "source_paths":["crates/routecodex-v4-runtime/src/lib.rs","crates/routecodex-v4-runtime/tests/l2_immutable_arc_red.rs"],
+      "required_gates":["v4_control_event_arc_positive","v4_control_event_arc_red"]
     }
   ]
 }

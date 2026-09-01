@@ -13,6 +13,205 @@ pub enum ControlSignalKind {
     Scope,
 }
 
+/// Registered event classes are diagnostic/control observations only. Decision
+/// owners still return typed decisions directly; this transport cannot decide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ControlEventKind {
+    Observation,
+    Timing,
+    NodeLifecycle,
+    RouteHit,
+    ProviderAttempt,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryPolicy {
+    Synchronous,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlEvent {
+    pub event_id: String,
+    pub kind: ControlEventKind,
+    pub producer: String,
+    pub consumer: String,
+    pub owner_node: String,
+    pub scope: Scope,
+    pub sequence: u64,
+    pub causality_id: String,
+    pub delivery: DeliveryPolicy,
+    pub ack_required: bool,
+    pub terminal: bool,
+    pub release_point: String,
+}
+
+impl ControlEvent {
+    #[allow(clippy::too_many_arguments)]
+    pub fn diagnostic(
+        event_id: &str,
+        kind: ControlEventKind,
+        producer: &str,
+        consumer: &str,
+        owner_node: &str,
+        scope: Scope,
+        sequence: u64,
+        causality_id: &str,
+        delivery: DeliveryPolicy,
+        ack_required: bool,
+        terminal: bool,
+        release_point: &str,
+    ) -> Result<Self, ControlEventError> {
+        if event_id.trim().is_empty()
+            || producer.trim().is_empty()
+            || consumer.trim().is_empty()
+            || owner_node.trim().is_empty()
+            || causality_id.trim().is_empty()
+            || release_point.trim().is_empty()
+            || sequence == 0
+        {
+            return Err(ControlEventError::InvalidEnvelope);
+        }
+        if terminal && !ack_required {
+            return Err(ControlEventError::TerminalAckRequired);
+        }
+        Ok(Self {
+            event_id: event_id.to_string(),
+            kind,
+            producer: producer.to_string(),
+            consumer: consumer.to_string(),
+            owner_node: owner_node.to_string(),
+            scope,
+            sequence,
+            causality_id: causality_id.to_string(),
+            delivery,
+            ack_required,
+            terminal,
+            release_point: release_point.to_string(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlEventError {
+    InvalidEnvelope,
+    TerminalAckRequired,
+    DuplicateEvent,
+    SequenceGap,
+    ScopeMismatch,
+    OwnerAcknowledgementRequired,
+    UnknownEvent,
+    WrongOwner,
+    DuplicateTerminal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EventState {
+    acknowledged: bool,
+    released: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ControlEventRegistry {
+    kinds: std::collections::BTreeSet<ControlEventKind>,
+}
+
+impl ControlEventRegistry {
+    pub fn standard() -> Self {
+        Self {
+            kinds: [
+                ControlEventKind::Observation,
+                ControlEventKind::Timing,
+                ControlEventKind::NodeLifecycle,
+                ControlEventKind::RouteHit,
+                ControlEventKind::ProviderAttempt,
+            ]
+            .into_iter()
+            .collect(),
+        }
+    }
+
+    fn contains(&self, kind: ControlEventKind) -> bool {
+        self.kinds.contains(&kind)
+    }
+}
+
+/// Synchronous, scope-bound transport for observation events. It validates
+/// monotonic sequence and owner acknowledgement; it never produces routing or
+/// health decisions and cannot be used as a fire-and-forget decision bus.
+#[derive(Debug, Clone)]
+pub struct ControlEventBus {
+    scope: Scope,
+    registry: ControlEventRegistry,
+    events: HashMap<String, (ControlEvent, EventState)>,
+    next_sequence: u64,
+}
+
+impl ControlEventBus {
+    pub fn new(scope: Scope, registry: ControlEventRegistry) -> Self {
+        Self {
+            scope,
+            registry,
+            events: HashMap::new(),
+            next_sequence: 0,
+        }
+    }
+
+    pub fn publish(&mut self, event: ControlEvent) -> Result<(), ControlEventError> {
+        if !self.registry.contains(event.kind) {
+            return Err(ControlEventError::UnknownEvent);
+        }
+        if event.scope != self.scope {
+            return Err(ControlEventError::ScopeMismatch);
+        }
+        if self.events.contains_key(&event.event_id) {
+            return Err(ControlEventError::DuplicateEvent);
+        }
+        if event.sequence != self.next_sequence + 1 {
+            return Err(ControlEventError::SequenceGap);
+        }
+        self.next_sequence = event.sequence;
+        self.events.insert(
+            event.event_id.clone(),
+            (event, EventState { acknowledged: false, released: false }),
+        );
+        Ok(())
+    }
+
+    pub fn ack(&mut self, event_id: &str, owner: &str) -> Result<(), ControlEventError> {
+        let (event, state) = self
+            .events
+            .get_mut(event_id)
+            .ok_or(ControlEventError::UnknownEvent)?;
+        if event.consumer != owner && event.owner_node != owner {
+            return Err(ControlEventError::WrongOwner);
+        }
+        if event.terminal && state.acknowledged {
+            return Err(ControlEventError::DuplicateTerminal);
+        }
+        state.acknowledged = true;
+        Ok(())
+    }
+
+    pub fn release(&mut self, event_id: &str) -> Result<(), ControlEventError> {
+        let (_, state) = self
+            .events
+            .get_mut(event_id)
+            .ok_or(ControlEventError::UnknownEvent)?;
+        if !state.acknowledged {
+            return Err(ControlEventError::OwnerAcknowledgementRequired);
+        }
+        if state.released {
+            return Err(ControlEventError::DuplicateTerminal);
+        }
+        state.released = true;
+        Ok(())
+    }
+
+    pub fn events(&self) -> impl Iterator<Item = &ControlEvent> {
+        self.events.values().map(|(event, _)| event)
+    }
+}
+
 /// A typed control signal bound to a closed-loop scope.
 ///
 /// The type carries no generic JSON value: only `kind`, typed key, value hash

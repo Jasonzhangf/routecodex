@@ -21,6 +21,8 @@
     "verify:v4-feature-layer-batches-admission": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission",
     "verify:v4-feature-layer-batches-boundary": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --boundary-self-test",
     "verify:v4-feature-layer-batches-red": "node scripts/architecture/verify-v4-feature-layer-batches.mjs --red-self-test",
+    "verify:v4-control-event-arc": "node scripts/architecture/verify-v4-control-event-arc.mjs",
+    "verify:v4-control-event-arc-red": "node scripts/architecture/verify-v4-control-event-arc.mjs --red-self-test",
     "verify:v4-node-graph": "node scripts/architecture/verify-v4-node-graph.mjs",
     "verify:v4-node-graph-red": "node scripts/architecture/verify-v4-node-graph.mjs --red-self-test",
     "verify:v4-infrastructure": "node scripts/architecture/verify-v4-infrastructure.mjs",

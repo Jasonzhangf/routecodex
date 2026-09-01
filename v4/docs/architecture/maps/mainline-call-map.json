@@ -1050,6 +1050,32 @@
       "callee_feature_id": "v4.servertool.cli_projection",
       "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
       "status": "active"
+    },
+    {
+      "from": "routecodex-v4-control",
+      "to": "routecodex-v4-debug",
+      "owner": "routecodex-v4-control::ControlEventBus",
+      "edge_type": "typed_diagnostic_event_transport",
+      "caller_feature_id": "V4-CONTROL-EVENT-ARC-001",
+      "callee_feature_id": "v4.debug.observer",
+      "caller_symbols":["ControlEventBus::publish","ControlEventBus::ack","ControlEventBus::release"],
+      "callee_symbols":["DebugRuntime::record_node_event"],
+      "resource_id":"v4.control.event_bus",
+      "path":"crates/routecodex-v4-control/src/lib.rs",
+      "status":"active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-runtime",
+      "owner":"routecodex-v4-runtime::ImmutableBytes",
+      "edge_type":"immutable_adjacent_carrier_clone",
+      "caller_feature_id":"V4-CONTROL-EVENT-ARC-001",
+      "callee_feature_id":"V4-CONTROL-EVENT-ARC-001",
+      "caller_symbols":["ImmutableBytes::from_bytes"],
+      "callee_symbols":["ImmutableRequest","ImmutableResponse","ImmutableProviderRaw","ImmutableSemantic","ImmutableWireBytes","ImmutableContinuationSnapshot"],
+      "resource_id":"v4.data.immutable_arc_carriers",
+      "path":"crates/routecodex-v4-runtime/src/lib.rs",
+      "status":"active"
     }
   ]
 }

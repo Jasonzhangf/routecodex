@@ -9,6 +9,8 @@ import { run } from './_common.mjs';
 
 run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
 // V4-LAYER-PREFLIGHT-END
+run('node scripts/architecture/verify-v4-control-event-arc.mjs');
+run('node scripts/architecture/verify-v4-control-event-arc.mjs --red-self-test');
 run('node scripts/test.mjs');
 run('node scripts/verify.mjs');
 run('node scripts/verify-red.mjs');

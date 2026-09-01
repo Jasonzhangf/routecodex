@@ -301,6 +301,92 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
+- resource_id: v4.control.event_bus
+  axis: control
+  verification_gate:
+  - v4_control_event_arc_positive
+  - v4_control_event_arc_red
+  resource_kind: typed_event_transport
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-control
+  owner_node: ControlEventBus
+  owner_symbols:
+  - ControlEvent
+  - ControlEventBus
+  - ControlEventRegistry
+  - ControlEventError
+  identity:
+  - eventId
+  - requestId
+  - pipelineId
+  - port
+  - sessionScope
+  - conversationScope
+  - sequence
+  - causalityId
+  semantic_contract:
+    synchronous_delivery: true
+    scope_bound: true
+    monotonic_sequence: true
+    owner_ack_before_release: true
+    terminal_once: true
+    decision_owner_is_not_transport: true
+    never_normal_payload: true
+    never_provider_wire: true
+    never_client_wire: true
+  allowed_writers:
+  - ControlEventBus::publish
+  - ControlEventBus::ack
+  - ControlEventBus::release
+  allowed_readers:
+  - developer_diagnostics
+  - ControlEventBus
+  forbidden_writers:
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  - V4ServerFrame
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.data.immutable_arc_carriers
+  axis: data
+  verification_gate:
+  - v4_control_event_arc_positive
+  - v4_control_event_arc_red
+  resource_kind: immutable_data_carrier
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: ImmutableBytes
+  owner_symbols:
+  - ImmutableBytes
+  identity:
+  - requestId
+  - pipelineId
+  - targetId
+  - providerId
+  - modelId
+  semantic_contract:
+    ownership: Arc<[u8]>
+    immutable: true
+    clone_is_handle_only: true
+    copy_budget: 1
+    no_shared_mutable_json: true
+    payload_reconstructs_control: false
+  allowed_writers:
+  - ImmutableBytes::from_bytes
+  allowed_readers:
+  - ImmutableRequest
+  - ImmutableResponse
+  - ImmutableProviderRaw
+  - ImmutableSemantic
+  - ImmutableWireBytes
+  - ImmutableContinuationSnapshot
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4DebugSnapshotLedger
+  may_enter_provider_body: true
+  may_enter_client_body: true
+  binding_status: anchored
 - resource_id: v4.control.metadata_center
   axis: control
   verification_gate:

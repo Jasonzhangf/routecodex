@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "registry_id": "v4-control-event-registry",
+  "status": "active",
+  "owner": "routecodex-v4-control",
+  "transport": "ControlEventBus",
+  "delivery_policies": ["synchronous"],
+  "required_fields": [
+    "event_id", "event_kind", "producer", "consumer", "owner_node",
+    "request_id", "pipeline_id", "port", "session", "conversation",
+    "attempt", "sequence", "causality_id", "delivery_policy",
+    "ack_required", "terminal", "release_point"
+  ],
+  "event_kinds": [
+    {"kind":"observation","owner":"routecodex-v4-debug","decision":false},
+    {"kind":"timing","owner":"routecodex-v4-debug","decision":false},
+    {"kind":"node_lifecycle","owner":"routecodex-v4-lifecycle","decision":false},
+    {"kind":"route_hit","owner":"routecodex-v4-router","decision":false},
+    {"kind":"provider_attempt","owner":"routecodex-v4-provider","decision":false}
+  ],
+  "invariants": [
+    "scope_bound", "monotonic_sequence", "causality_bound",
+    "owner_ack_before_release", "duplicate_rejected", "terminal_once",
+    "decision_owner_is_synchronous_direct_contract"
+  ]
+}

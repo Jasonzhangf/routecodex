@@ -1,6 +1,6 @@
 # V4 Data / Control Plane Boundary Contract
 
-状态：`design`（合同已定，红测与实现未落地）
+状态：`active`（控制事件与 immutable Arc 基础合同已落地；完整运行时迁移仍按专项计划推进）
 
 ## 目标
 
@@ -120,4 +120,6 @@ V4 从第一行实现开始就锁定数据面与控制面的物理隔离，并�
 3. `v4-resource-operation-map.yml` 中相关资源的 `binding_status` 从 `design` 改为 `anchored`。
 4. 新增或迁移模块在进入 Playground review 前先通过本边界合同的模块越界审查。
 
-机器可读合同见 `v4/contracts/data-control-boundary.contract.json`。
+机器可读合同见 `v4/contracts/data-control-boundary.contract.json`。控制事件与数据所有权专项合同见
+`v4/contracts/v4-control-event-registry.json`、`v4/contracts/v4-data-ownership-registry.json`，
+由 `verify-v4-control-event-arc.mjs` 及其红测入口接入 V4 `verify:ci`。
