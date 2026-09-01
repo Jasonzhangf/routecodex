@@ -33,6 +33,8 @@ export const GATE_INPUT_SETS = {
     'contracts/active-link/frozen-consumer-registry.json',
     'contracts/feature-completion-layer-batches.manifest.json',
     GATE_INPUT_CONTRACT_PATH,
+    'contracts/v4-control-event-registry.json',
+    'contracts/v4-data-ownership-registry.json',
     'docs/goals/v4-feature-completion-plan.md',
     'package-lock.json',
     'package.json',
@@ -50,6 +52,7 @@ export const GATE_INPUT_SETS = {
     'scripts/architecture/lib/feature-layer-batch-source.mjs',
     'scripts/architecture/verify-v4-feature-layer-batches.mjs',
     'scripts/architecture/verify-v4-plane-isolation.mjs',
+    'scripts/architecture/verify-v4-control-event-arc.mjs',
     'scripts/build.mjs',
     'scripts/compile-real-runtime-manifest.mjs',
     'scripts/install-rccv4.mjs',
@@ -72,9 +75,9 @@ export const GATE_INPUT_SETS = {
   ],
 };
 const GATE_MATRIX_HASHES = {
-  architecture: 'sha256:cd3e240f83926cb2e5c4ff495dacfc5cd60f790bae02a967a8e4c68a028e1bf8',
-  red: 'sha256:465a132dff4f7a183b943b9630fea127909c79b2fb9cfc14bc39a579a2b49d6c',
-  packageScripts: 'sha256:4037eda3c523c0def4f0d5ad1c6bd3fe39169c6001cb3357790e6fc3624499f5',
+  architecture: 'sha256:0ddebc6325ad06282e0adffd7ae302b0d5699ba860695be2a78cbc670b2bf111',
+  red: 'sha256:945dae272af0044244400fc34a8632c570447a2828056a4a0c11dd9428d5de20',
+  packageScripts: 'sha256:c6478ebafb34869df34c4a8ea16245a47e6d2ed32ed3da85fdf004e948bd2820',
 };
 const PREFLIGHT_PREFIXES = new Map([
   ['build', ['buildSource', 'sha256:fb028d2b084eeb78e4afc9d45c954af15536ecc47379660a4a6dc5ccd42461b5', 'BUILD_PREFLIGHT_BINDING']],
