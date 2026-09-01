@@ -86,8 +86,6 @@ enum Command {
         bind: String,
         #[arg(long)]
         port: Option<u16>,
-        #[arg(long)]
-        routing_group: Option<String>,
     },
     #[command(hide = true)]
     Server {
@@ -218,7 +216,6 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             model,
             bind,
             port,
-            routing_group,
         } => {
             let config_path = resolve_user_config_path(config)?;
             init::run_init(&init::InitOptions {
@@ -228,7 +225,6 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 model,
                 bind: Some(bind),
                 port,
-                routing_group,
             })?;
         }
         Command::Servertool {

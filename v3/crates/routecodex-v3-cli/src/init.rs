@@ -2,8 +2,8 @@
 // `rccv3 init` only selects an existing provider/model and writes minimal config.toml.
 
 use routecodex_v3_config::{
-    internal::v3_internal_user_config_authoring, V3ServerAuthoringConfig,
     V3UserConfig02RoutingSelectionParsed, V3UserRouteMember, V3UserRoutePool,
+    V3UserServerAuthoringConfig,
 };
 use routecodex_v3_config_mgmt::{list_provider_ids, read_provider_file, ConfigMgmtStore};
 use std::collections::BTreeMap;
@@ -16,7 +16,6 @@ pub struct InitOptions {
     pub model: Option<String>,
     pub bind: Option<String>,
     pub port: Option<u16>,
-    pub routing_group: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +62,6 @@ pub fn run_init(options: &InitOptions) -> Result<(), String> {
         &choice.model,
         options.bind.as_deref(),
         options.port,
-        options.routing_group.as_deref(),
     )?;
     ConfigMgmtStore::new(&options.config_path)
         .commit_user_routing_with_backup(&selection, "init", "rcc init")
@@ -162,19 +160,7 @@ fn minimal_user_config(
     model: &str,
     bind: Option<&str>,
     port: Option<u16>,
-    routing_group: Option<&str>,
 ) -> Result<V3UserConfig02RoutingSelectionParsed, String> {
-    let internal = v3_internal_user_config_authoring();
-    let routing_group = match routing_group {
-        Some(group) if internal.route_groups.contains_key(group) => group.to_string(),
-        Some(group) => return Err(format!("unknown route group {group:?}")),
-        None => internal
-            .route_groups
-            .keys()
-            .next()
-            .cloned()
-            .ok_or_else(|| "internal config declares no route groups".to_string())?,
-    };
     let port = port.ok_or_else(|| {
         "init requires --port because listener ports belong to user config.toml".to_string()
     })?;
@@ -185,30 +171,14 @@ fn minimal_user_config(
     if bind.is_empty() {
         return Err("init --bind must not be empty".to_string());
     }
-    let route_groups = internal
-        .route_groups
-        .keys()
-        .map(|group_id| {
-            (
-                group_id.clone(),
-                BTreeMap::from([(
-                    "default".to_string(),
-                    V3UserRoutePool {
-                        tiers: vec![vec![V3UserRouteMember::new(provider, model, None)]],
-                    },
-                )]),
-            )
-        })
-        .collect();
     Ok(V3UserConfig02RoutingSelectionParsed {
         version: 3,
         servers: BTreeMap::from([(
             "default".to_string(),
-            V3ServerAuthoringConfig {
+            V3UserServerAuthoringConfig {
                 enabled: true,
                 bind: bind.to_string(),
                 port,
-                routing_group: routing_group.clone(),
                 endpoints: vec![
                     "responses".to_string(),
                     "anthropic".to_string(),
@@ -218,9 +188,14 @@ fn minimal_user_config(
                 features: BTreeMap::new(),
                 execution: None,
                 expose_models: Vec::new(),
+                routes: BTreeMap::from([(
+                    "default".to_string(),
+                    V3UserRoutePool {
+                        tiers: vec![vec![V3UserRouteMember::new(provider, model, None)]],
+                    },
+                )]),
             },
         )]),
-        route_groups,
     })
 }
 

@@ -180,7 +180,7 @@ fn exact_filename_selection_never_retries_the_other_config_owner() {
         .expect("reject legacy shape under user filename");
     assert!(!rejected.status.success());
     let stderr = String::from_utf8_lossy(&rejected.stderr);
-    assert!(stderr.contains("unknown field `providers`"), "{stderr}");
+    assert!(stderr.contains("unknown field `routing_group`"), "{stderr}");
 
     let legacy_filename = root.path().join("config.v3.toml");
     write_legacy_config(&legacy_filename);
@@ -217,12 +217,7 @@ fn config_check_without_explicit_path_uses_home_config_toml() {
 [servers.primary]
 bind = "127.0.0.1"
 port = 4444
-routing_group = "routecodex_v3_4444"
-
-[route_groups.responses_v3_7777.default]
-tiers = [[{ use = "p1/m1" }]]
-
-[route_groups.routecodex_v3_4444.default]
+[servers.primary.routes.default]
 tiers = [[{ use = "p1/m1" }]]
 "#,
     )

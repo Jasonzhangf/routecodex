@@ -380,14 +380,12 @@ supportsStreaming = true
 [servers.routecodex_v3_4444]
 bind = "127.0.0.1"
 port = 4444
-routing_group = "routecodex_v3_4444"
+[servers.routecodex_v3_4444.routes.default]
+tiers = [[{ use = "p1/m1" }]]
 [servers.responses_v3_7777]
 bind = "127.0.0.1"
 port = 7777
-routing_group = "responses_v3_7777"
-[route_groups.routecodex_v3_4444.default]
-tiers = [[{ use = "p1/m1" }]]
-[route_groups.responses_v3_7777.default]
+[servers.responses_v3_7777.routes.default]
 tiers = [[{ use = "p1/m1" }]]
 "#,
     )

@@ -1,6 +1,6 @@
 // feature_id: v3.config_mgmt_route_view
 // Route 配置管理视图模型：Port -> Route Pool -> Route Tier -> Provider Member。
-// 该视图是 config.v3.toml authoring 的投影/编辑面；V3 runtime 路由语义
+// 该视图是 config.toml server-local route authoring 的投影/编辑面；V3 runtime 路由语义
 // （priority 分层、weight 加权）保持唯一真源，本模块不改变路由算法，
 // 只把 targets 数组按 priority 分组呈现为 tier 并原样写回。
 use routecodex_v3_config::{
@@ -56,7 +56,8 @@ pub struct RouteGroupView {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UserRouteGroupView {
-    pub group_id: String,
+    pub server_id: String,
+    pub port: u16,
     pub pools: Vec<UserRoutePoolView>,
 }
 
@@ -82,11 +83,13 @@ pub fn user_route_groups_from_selection(
     selection: &V3UserConfig02RoutingSelectionParsed,
 ) -> Vec<UserRouteGroupView> {
     selection
-        .route_groups
+        .servers
         .iter()
-        .map(|(group_id, pools)| UserRouteGroupView {
-            group_id: group_id.clone(),
-            pools: pools
+        .map(|(server_id, server)| UserRouteGroupView {
+            server_id: server_id.clone(),
+            port: server.port,
+            pools: server
+                .routes
                 .iter()
                 .map(|(name, pool)| UserRoutePoolView {
                     name: name.clone(),
@@ -113,14 +116,15 @@ pub fn apply_user_route_group_view(
     selection: &mut V3UserConfig02RoutingSelectionParsed,
     group: &UserRouteGroupView,
 ) -> Result<(), String> {
-    let pools = selection
-        .route_groups
-        .get_mut(&group.group_id)
-        .ok_or_else(|| format!("unknown route group {:?}", group.group_id))?;
+    let server = selection
+        .servers
+        .get_mut(&group.server_id)
+        .ok_or_else(|| format!("unknown server {:?}", group.server_id))?;
     for pool in &group.pools {
-        let target = pools
+        let target = server
+            .routes
             .get_mut(&pool.name)
-            .ok_or_else(|| format!("unknown route pool {}.{}", group.group_id, pool.name))?;
+            .ok_or_else(|| format!("unknown route pool {}.{}", group.server_id, pool.name))?;
         target.tiers = pool
             .tiers
             .iter()
@@ -211,7 +215,7 @@ pub fn pool_view_from_authoring(name: &str, pool: &V3RoutePoolAuthoringConfig) -
     }
 }
 
-/// 把视图写回 authoring：同步 route_groups 中全部 pool targets。
+/// 把视图写回 server-local routes 中全部 pool targets。
 /// 只改写 targets（及 selection/match 若视图携带），不触碰无关字段。
 pub fn apply_route_group_view_to_authoring(
     authoring: &mut V3Config02AuthoringParsed,

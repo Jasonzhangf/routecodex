@@ -89,10 +89,10 @@ const cases = [
       ...sources,
       userSource: sources.userSource.replace(
         'pub version: u16,',
-        'pub version: u16,\n    pub servers: String,',
+        'pub version: u16,\n    pub route_groups: String,',
       ),
     }),
-    diagnostic: /must not expose internal field servers/u,
+    diagnostic: /must not expose internal field route_groups/u,
   },
   {
     name: 'payload metadata leakage',

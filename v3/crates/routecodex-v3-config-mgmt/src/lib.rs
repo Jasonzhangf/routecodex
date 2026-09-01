@@ -2,7 +2,7 @@
 //!
 //! 职责边界：
 //! - CLI、WebUI、Runtime 的统一配置操作入口（解析/生成/校验/原子写/备份/修订）。
-//! - Provider 文件（config.v2.toml）、Route 配置（config.v3.toml route_groups）、
+//! - Provider 文件（config.v2.toml）、Route 配置（config.toml server-local routes）、
 //!   Forwarder 段（config.v3.toml forwarders）的构建与解析。
 //! - 不改变路由算法；runtime 语义真源仍为 routecodex-v3-config 编译链。
 pub mod forwarder;

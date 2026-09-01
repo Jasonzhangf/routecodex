@@ -28,6 +28,7 @@ pub use user_config::{
     generate_v3_user_config_02_routing, parse_v3_user_config_02_routing,
     project_v3_user_config_03_authoring, V3UserConfig01FileSource,
     V3UserConfig02RoutingSelectionParsed, V3UserConfigStore, V3UserRouteMember, V3UserRoutePool,
+    V3UserServerAuthoringConfig,
 };
 
 use std::collections::{BTreeMap, BTreeSet};

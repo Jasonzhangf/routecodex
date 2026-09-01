@@ -24,13 +24,13 @@ async fn get_routes(
             error.to_string(),
         )
     })?;
-    let groups = user_route_groups_from_selection(&selection);
-    Ok(Json(serde_json::json!({ "groups": groups })))
+    let servers = user_route_groups_from_selection(&selection);
+    Ok(Json(serde_json::json!({ "servers": servers })))
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct RoutesUpdateRequest {
-    pub groups: Vec<UserRouteGroupView>,
+    pub servers: Vec<UserRouteGroupView>,
     pub reason: Option<String>,
 }
 
@@ -39,7 +39,7 @@ pub struct RoutesUpdateResult {
     pub ok: bool,
     pub backup: Option<String>,
     pub revision_seq: u64,
-    pub groups: Vec<UserRouteGroupView>,
+    pub servers: Vec<UserRouteGroupView>,
 }
 
 async fn put_routes(
@@ -52,7 +52,7 @@ async fn put_routes(
             error.to_string(),
         )
     })?;
-    for group in &request.groups {
+    for group in &request.servers {
         apply_user_route_group_view(&mut selection, group)
             .map_err(|error| (axum::http::StatusCode::BAD_REQUEST, error))?;
     }
@@ -64,7 +64,7 @@ async fn put_routes(
             request.reason.as_deref().unwrap_or("webui routes update"),
         )
         .map_err(|error| (axum::http::StatusCode::BAD_REQUEST, error.to_string()))?;
-    let groups = user_route_groups_from_selection(&selection);
+    let servers = user_route_groups_from_selection(&selection);
     Ok(Json(RoutesUpdateResult {
         ok: true,
         backup: outcome
@@ -72,7 +72,7 @@ async fn put_routes(
             .as_ref()
             .map(|path| path.display().to_string()),
         revision_seq: outcome.revision.seq,
-        groups,
+        servers,
     }))
 }
 
@@ -80,7 +80,7 @@ async fn put_routes(
 pub struct RoutesValidateResult {
     pub ok: bool,
     pub error: Option<String>,
-    pub groups: Vec<UserRouteGroupView>,
+    pub servers: Vec<UserRouteGroupView>,
 }
 
 async fn validate_routes(
@@ -93,16 +93,16 @@ async fn validate_routes(
             return Json(RoutesValidateResult {
                 ok: false,
                 error: Some(error.to_string()),
-                groups: Vec::new(),
+                servers: Vec::new(),
             });
         }
     };
-    for group in &request.groups {
+    for group in &request.servers {
         if let Err(error) = apply_user_route_group_view(&mut selection, group) {
             return Json(RoutesValidateResult {
                 ok: false,
                 error: Some(error),
-                groups: Vec::new(),
+                servers: Vec::new(),
             });
         }
     }
@@ -110,12 +110,12 @@ async fn validate_routes(
         Ok(_) => Json(RoutesValidateResult {
             ok: true,
             error: None,
-            groups: user_route_groups_from_selection(&selection),
+            servers: user_route_groups_from_selection(&selection),
         }),
         Err(error) => Json(RoutesValidateResult {
             ok: false,
             error: Some(error.to_string()),
-            groups: Vec::new(),
+            servers: Vec::new(),
         }),
     }
 }
