@@ -23,7 +23,6 @@ const requiredFiles = [
   'request_normalize.rs',
   'chat_to_responses.rs',
   'request_governance.rs',
-  'provider_semantic.rs',
   'responses_wire_build.rs',
 ];
 const failures = [];

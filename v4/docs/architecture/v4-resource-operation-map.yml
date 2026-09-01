@@ -228,6 +228,7 @@ resources:
   allowed_readers:
   - V4DirectReq02RelayContainer
   - V4DirectResp02RelayContainer
+  - V4DirectResp03ClientProtocol
   - V4HubReqInbound02Normalized
   - V4HubReqOutbound06ProviderSemantic
   - V4HubRespOutbound05ClientSemantic
@@ -252,6 +253,7 @@ resources:
   allowed_readers:
   - V4DirectReq02RelayContainer
   - V4DirectResp02RelayContainer
+  - V4DirectResp03ClientProtocol
   - V4HubReqOutbound06ProviderSemantic
   - V4ProviderReqCompat07ProviderCompat
   - V4ProviderRespCompat02ProviderCompat
@@ -283,6 +285,7 @@ resources:
   allowed_readers:
   - V4HubReqChatProcess03Governed
   - V4HubReqOutbound06ProviderSemantic
+  - V4ServerReqInbound01ClientRaw
   forbidden_writers:
   - V4ControlMetadataCenter
   - V4DebugSnapshotLedger
@@ -789,6 +792,10 @@ resources:
   - V4Error05ExecutionDecision
   - V4Error06ClientProjected
   allowed_readers:
+  - V4Error02HostCaptured
+  - V4Error03RuntimeClassified
+  - V4Error04RouterPolicyApplied
+  - V4Error05ExecutionDecision
   - V4Target07OpaqueTarget
   - V4ServerFrame
   - V4Error06ClientProjected
