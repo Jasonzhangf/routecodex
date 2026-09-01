@@ -1453,21 +1453,22 @@ fn render_payload_console_event(
     }
     if message.starts_with("▶ [req]") {
         Some(format!(
-            "▶ [{}] req={} model={} target={}/{} stream={} elapsed_ms={}",
+            "▶ [{}] req={} event=started model={} target={}/{} stream={} route=default chain=req_inbound>req_chatprocess>req_outbound>provider elapsedMs={} transport={}",
             endpoint,
             request.request_id,
             model,
             provider,
             model,
             stream,
-            elapsed.as_millis()
+            elapsed.as_millis(),
+            if stream { "sse" } else { "json" }
         ))
     } else if message.starts_with("✅ [resp]") {
         if message.contains("output_items=0") && !message.contains("usage=") {
             return None;
         }
         Some(format!(
-            "✅ [{}] req={} status={} provider={} model={} {} elapsed_ms={}",
+            "✅ [{}] req={} event=completed status={} responseStatus=completed finish_reason=stop provider={} model={} {} elapsedMs={} transport={}",
             endpoint,
             request.request_id,
             status.unwrap_or(200),
@@ -1477,7 +1478,8 @@ fn render_payload_console_event(
                 .split_once("output_items=")
                 .map(|(_, rest)| format!("output_items={rest}"))
                 .unwrap_or_else(|| "response".to_string()),
-            elapsed.as_millis()
+            elapsed.as_millis(),
+            if stream { "sse" } else { "json" }
         ))
     } else {
         None
@@ -1691,7 +1693,7 @@ mod tests {
         .expect("request summary is rendered");
         assert!(rendered.contains("req=test-server-day-00000001"));
         assert!(rendered.contains("target=cc-sol/gpt-5.5"));
-        assert!(rendered.contains("elapsed_ms=7"));
+        assert!(rendered.contains("elapsedMs=7"));
     }
 
     fn test_manifest() -> RuntimeConfigManifest {
