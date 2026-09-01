@@ -27,7 +27,6 @@ use routecodex_v4_error::{
 use routecodex_v4_node_container::{ActiveEpochStore, ExecutionEpochBundle};
 use routecodex_v4_skeleton::SkeletonPlan;
 use routecodex_v4_standard_plugins::{
-    response_inbound::{decode_provider_sse_frame, ProviderSseEventDisposition},
     response_outbound::{encode_client_error_sse_frame, encode_client_sse_frame},
     sse_transport::SseTransportFrame,
     StandardHandleRegistry,
@@ -1658,19 +1657,12 @@ impl ResponseStreamProcessor {
                 "provider emitted a semantic frame after stream terminal",
             ));
         }
-        let decoded = decode_provider_sse_frame(frame.as_bytes())
-            .map_err(|error| RuntimeFault::new("provider_sse_decode", error))?;
-        if let ProviderSseEventDisposition::Failed { message } = decoded.disposition {
-            return Ok((
-                self.project_failure(RuntimeFault::new("provider_response_failed", message))?,
-                None,
-            ));
-        }
-        let terminal = matches!(decoded.disposition, ProviderSseEventDisposition::Completed);
-        let provider_semantic = serde_json::to_string(&decoded.semantic)
-            .map_err(|error| RuntimeFault::new("provider_sse_encode", error.to_string()))?;
+        let provider_frame = serde_json::json!({
+            "_sse_frame": String::from_utf8(frame.as_bytes().to_vec())
+                .map_err(|error| RuntimeFault::new("provider_sse_decode", error.to_string()))?
+        });
         let report = runtime.execute_provider_response_scoped_for_target_with_lease(
-            &provider_semantic,
+            &provider_frame.to_string(),
             self.request_lease.request_id(),
             self.port,
             &self.session_scope,
@@ -1680,6 +1672,27 @@ impl ResponseStreamProcessor {
             &self.continuation_owner,
             Some(&self.request_lease),
         )?;
+        let disposition = report.trace.iter().find_map(|entry| {
+            entry
+                .split_once(":provider_sse_disposition:")
+                .map(|(_, value)| value)
+        });
+        let disposition = disposition.ok_or_else(|| {
+            RuntimeFault::new(
+                "provider_sse_disposition_missing",
+                "response inbound SSE plugin produced no disposition",
+            )
+        })?;
+        if let Some(message) = disposition.strip_prefix("failed:") {
+            return Ok((
+                self.project_failure(RuntimeFault::new(
+                    "provider_response_failed",
+                    message.to_string(),
+                ))?,
+                None,
+            ));
+        }
+        let terminal = disposition == "completed";
         let client_frame = report.client_frame.clone().ok_or_else(|| {
             RuntimeFault::new(
                 "response_frame_missing",
