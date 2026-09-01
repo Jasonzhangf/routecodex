@@ -35,6 +35,7 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-cordis-host.mjs',
   'verify-v4-node-container.mjs',
   'verify-v4-standard-plugins.mjs',
+  'verify-v4-control-event-arc.mjs',
   'verify-v4-cli-plugin.mjs',
   'verify-v4-real-runtime-admission.mjs',
   'verify-v4-production-mainline-red.mjs',
@@ -71,6 +72,7 @@ export const RED_SUITES = [
   ['verify-v4-cordis-host.mjs', '--red-self-test'],
   ['verify-v4-node-container.mjs', '--red-self-test'],
   ['verify-v4-standard-plugins.mjs', '--red-self-test'],
+  ['verify-v4-control-event-arc.mjs', '--red-self-test'],
   ['verify-v4-cli-plugin.mjs', '--red-self-test'],
   ['verify-v4-real-runtime-admission.mjs', '--red-self-test'],
 ];

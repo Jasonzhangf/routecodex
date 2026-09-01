@@ -1167,6 +1167,28 @@
       "required_for": ["routecodex-v4-governance:architecture_stable"]
     },
     {
+      "gate_id": "v4_parity_gate_control_event_arc",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-LAYER-GATE-001"],
+      "command": "node scripts/architecture/verify-v4-control-event-arc.mjs",
+      "argv": ["node", "scripts/architecture/verify-v4-control-event-arc.mjs"],
+      "producer": {"adapter": "node", "identity": "v4_parity_gate_control_event_arc"},
+      "evidence_role": null,
+      "required_for": ["routecodex-v4-governance:architecture_stable"]
+    },
+    {
+      "gate_id": "v4_parity_gate_control_event_arc_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-LAYER-GATE-001"],
+      "command": "node scripts/architecture/verify-v4-control-event-arc.mjs --red-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-control-event-arc.mjs", "--red-self-test"],
+      "producer": {"adapter": "node", "identity": "v4_parity_gate_control_event_arc_red"},
+      "evidence_role": null,
+      "required_for": ["routecodex-v4-governance:architecture_stable"]
+    },
+    {
       "gate_id": "v4_parity_differential_positive",
       "status": "active",
       "owner_module_id": "routecodex-v4-governance",
