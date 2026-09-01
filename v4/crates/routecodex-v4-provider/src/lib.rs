@@ -1109,8 +1109,16 @@ pub fn normalize_provider_response(
     protocol: &str,
     body: &Value,
 ) -> Result<Value, ProviderTransportError> {
+    normalize_provider_response_with_instructions(protocol, body, None)
+}
+
+pub fn normalize_provider_response_with_instructions(
+    protocol: &str,
+    body: &Value,
+    expected_instructions: Option<&str>,
+) -> Result<Value, ProviderTransportError> {
     match protocol {
-        "responses" => normalize_responses_response(body),
+        "responses" => normalize_responses_response(body, expected_instructions),
         "openai" | "chat" => normalize_openai_response(body),
         "anthropic" => normalize_anthropic_response(body),
         other => Err(ProviderTransportError {
@@ -1126,7 +1134,10 @@ pub fn normalize_provider_response(
 /// part of the Responses client semantic payload and must never cross the
 /// provider boundary. Unknown envelope members fail closed so a new control
 /// field cannot silently become client-visible business data.
-fn normalize_responses_response(body: &Value) -> Result<Value, ProviderTransportError> {
+fn normalize_responses_response(
+    body: &Value,
+    expected_instructions: Option<&str>,
+) -> Result<Value, ProviderTransportError> {
     const KNOWN_DIAGNOSTIC_FIELDS: &[&str] = &[
         "chunk_index",
         "dropped_compat_plugin_params",
@@ -1145,12 +1156,14 @@ fn normalize_responses_response(body: &Value) -> Result<Value, ProviderTransport
             message: "Responses provider JSON must be an object".to_string(),
             status: None,
         })?;
-    if object.contains_key("instructions") {
-        return Err(ProviderTransportError {
-            code: "provider_response_instructions_injected".to_string(),
-            message: "provider Responses instructions must be supplied by the request owner".to_string(),
-            status: None,
-        });
+    if let Some(value) = object.get("instructions") {
+        if expected_instructions != value.as_str() {
+            return Err(ProviderTransportError {
+                code: "provider_response_instructions_injected".to_string(),
+                message: "provider Responses instructions must exactly match request instructions".to_string(),
+                status: None,
+            });
+        }
     }
     if let Some(extra_fields) = object.remove("extra_fields") {
         let Some(extra_fields) = extra_fields.as_object() else {
@@ -1172,12 +1185,14 @@ fn normalize_responses_response(body: &Value) -> Result<Value, ProviderTransport
         }
     }
     if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
-        if response.contains_key("instructions") {
-            return Err(ProviderTransportError {
-                code: "provider_response_instructions_injected".to_string(),
-                message: "provider Responses instructions must be supplied by the request owner".to_string(),
-                status: None,
-            });
+        if let Some(value) = response.get("instructions") {
+            if expected_instructions != value.as_str() {
+                return Err(ProviderTransportError {
+                    code: "provider_response_instructions_injected".to_string(),
+                    message: "provider Responses instructions must exactly match request instructions".to_string(),
+                    status: None,
+                });
+            }
         }
         if let Some(extra_fields) = response.remove("extra_fields") {
             let Some(extra_fields) = extra_fields.as_object() else {
@@ -1233,7 +1248,7 @@ pub fn normalize_provider_sse_frame(
         let event = match protocol {
             "openai" | "chat" => normalize_openai_sse_event(&value),
             "anthropic" => normalize_anthropic_sse_event(&value),
-            "responses" => Some(normalize_responses_response(&value)?),
+            "responses" => Some(normalize_responses_response(&value, None)?),
             other => {
                 return Err(ProviderTransportError {
                     code: "provider_protocol_unsupported".to_string(),

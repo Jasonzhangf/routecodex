@@ -18,7 +18,7 @@ use routecodex_v4_lifecycle::{
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
-    build_retry_wire, normalize_provider_response, send_anthropic_messages,
+    build_retry_wire, normalize_provider_response_with_instructions, send_anthropic_messages,
     send_anthropic_messages_streaming, send_openai_chat, send_openai_chat_streaming,
     send_responses, send_responses_streaming, validate_auth_alias,
     write_provider_profile, ProviderInitAuth, ProviderInitOptions, ProviderResponseStream,
@@ -1129,7 +1129,13 @@ fn handle_responses(
             )
         })? {
         ResponsesProviderPayload::Json(value) => {
-            let value = normalize_provider_response(&target.protocol, &value).map_err(|error| {
+            let expected_instructions = body.get("instructions").and_then(|value| value.as_str());
+            let value = normalize_provider_response_with_instructions(
+                &target.protocol,
+                &value,
+                expected_instructions,
+            )
+            .map_err(|error| {
                 project_provider_fault(
                     request,
                     RuntimeFault::new(&error.code, error.message),
