@@ -291,7 +291,6 @@
         "standard_node_allowed_writes",
         "register_standard_library",
         "compile_standard_plan",
-        "protocol_decode",
         "response_governance",
         "tool_harvest",
         "direct_response_passthrough",
