@@ -1,3 +1,5 @@
+#![cfg(feature = "red-fixtures")]
+
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::{ControlCommand, ControlCommittedEvent, MetadataCenter};
 

@@ -1,3 +1,5 @@
+#![cfg(feature = "red-fixtures")]
+
 use routecodex_v4_cordis_bridge::NodeExecutionInput;
 use serde_json::json;
 

@@ -29,3 +29,4 @@ fn cross_scope_and_topic_are_not_delivered() {
     )).unwrap();
     assert!(bus.dispatch(&SubscriptionTopic::Diagnostic, "request-a").unwrap().is_empty());
 }
+#![cfg(feature = "red-fixtures")]

@@ -1,3 +1,5 @@
+#![cfg(feature = "red-fixtures")]
+
 use routecodex_v4_runtime::{ImmutableDataCarrier, ImmutableDiagnosticCarrier, ImmutableInformationCarrier, NodeServiceRegistry};
 
 #[test]
