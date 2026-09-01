@@ -1228,14 +1228,6 @@ fn protocol_codec(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     ctx.write_data(data).map_err(|error| error.to_string())
 }
 
-fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut data = ctx.read_data().clone();
-    if let Some(object) = data.as_object_mut() {
-        object.insert("governance".to_string(), json!("request_governance"));
-    }
-    ctx.write_data(data).map_err(|error| error.to_string())
-}
-
 pub(crate) fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     ctx.read_data()
         .as_object()
@@ -1448,7 +1440,6 @@ impl StandardHandleRegistry {
                 request_plugins::wire_build,
             ),
             ("v4.std.protocol.wire_codec_proto", protocol_codec),
-            ("v4.std.chat_process.request_governance", request_governance),
             (
                 "v4.std.chat_process.response_governance",
                 response_governance,
