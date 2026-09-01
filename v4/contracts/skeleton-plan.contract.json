@@ -15,7 +15,7 @@
   },
   "manifest_hash": "sha256:pending-config-v2-manifest",
   "plan_epoch": 2,
-  "plan_hash": "sha256:69b9e8755dcc79bccb687fbc686876bb51273b9f7333c5e65ba45e9d5bddb8eb",
+  "plan_hash": "sha256:78b1a225ca3039cab5b4f15035d653f5998c410c33e4dadbc3190af13c5d100b",
   "direct_protocol_contract": {
     "same_protocol": true,
     "mismatch": "fail_fast"
@@ -90,7 +90,7 @@
       "nodes": [
         {"node_id": "V4ServerReqInbound01ClientRaw", "chain": "relay_request", "position": 1, "role_id": "request_inbound", "terminal": false, "kernel": true, "plugins": [{"plugin_id": "v4.std.request.protocol_parse", "effects": ["semantic"]}]},
         {"node_id": "V4HubReqInbound02Normalized", "chain": "relay_request", "position": 2, "role_id": "request_inbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.std.request.responses_normalize", "effects": ["semantic"]}, {"plugin_id": "v4.std.contract.input_validate", "effects": ["validation"]}]},
-        {"node_id": "V4HubReqChatProcess03Governed", "chain": "relay_request", "position": 3, "role_id": "request_chat_process", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.std.chat_process.request_governance", "effects": ["semantic"]}]},
+        {"node_id": "V4HubReqChatProcess03Governed", "chain": "relay_request", "position": 3, "role_id": "request_chat_process", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.std.chat_process.request_governance", "effects": ["semantic"]}, {"plugin_id": "v4.std.diagnostic.debug_observe", "effects": ["diagnostic"]}, {"plugin_id": "v4.std.diagnostic.timing", "effects": ["diagnostic"]}, {"plugin_id": "v4.std.diagnostic.snapshot_record", "effects": ["diagnostic"]}, {"plugin_id": "v4.std.diagnostic.request_payload_console_render", "effects": ["diagnostic"]}]},
         {"node_id": "V4HubReqExecution04Planned", "chain": "relay_request", "position": 4, "role_id": "request_execution", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.std.routing.route_facts_producer", "effects": ["control"]}]},
         {"node_id": "V4HubReqTarget05Resolved", "chain": "relay_request", "position": 5, "role_id": "request_execution", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.std.routing.route_facts_consumer", "effects": ["control"]}]},
         {"node_id": "V4HubReqOutbound06ProviderSemantic", "chain": "relay_request", "position": 6, "role_id": "request_outbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.hook.relay.request", "effects": ["semantic"]}]},
@@ -119,8 +119,8 @@
         {"node_id": "V4ProviderRespInbound01Raw", "chain": "relay_response", "position": 1, "role_id": "response_inbound", "terminal": false, "kernel": true, "plugins": [{"plugin_id": "v4.std.response.provider_raw_validate", "effects": ["validation"]}]},
         {"node_id": "V4ProviderRespCompat02ProviderCompat", "chain": "relay_response", "position": 2, "role_id": "response_inbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.std.response.provider_compat", "effects": ["semantic"]}]},
         {"node_id": "V4HubRespInbound03Normalized", "chain": "relay_response", "position": 3, "role_id": "response_inbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.std.response.protocol_decode", "effects": ["semantic"]}]},
-        {"node_id": "V4HubRespChatProcess04Governed", "chain": "relay_response", "position": 4, "role_id": "response_chat_process", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.std.chat_process.response_governance", "effects": ["semantic"]}, {"plugin_id": "v4.std.chat_process.tool_harvest", "effects": ["semantic"]}]},
-        {"node_id": "V4HubRespOutbound05ClientSemantic", "chain": "relay_response", "position": 5, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.hook.relay.response", "effects": ["semantic"]}]},
+        {"node_id": "V4HubRespChatProcess04Governed", "chain": "relay_response", "position": 4, "role_id": "response_chat_process", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.std.chat_process.response_governance", "effects": ["semantic"]}, {"plugin_id": "v4.std.chat_process.tool_harvest", "effects": ["semantic"]}, {"plugin_id": "v4.std.diagnostic.response_payload_console_render", "effects": ["diagnostic"]}]},
+        {"node_id": "V4HubRespOutbound05ClientSemantic", "chain": "relay_response", "position": 5, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.std.contract.output_validate", "effects": ["validation"]}, {"plugin_id": "v4.hook.relay.response", "effects": ["semantic"]}]},
         {"node_id": "V4ServerRespOutbound06ClientFrame", "chain": "relay_response", "position": 6, "role_id": "response_outbound", "terminal": true, "kernel": false, "plugins": [{"plugin_id": "v4.std.response.frame_build", "effects": ["semantic"]}]}
       ],
       "edges": [

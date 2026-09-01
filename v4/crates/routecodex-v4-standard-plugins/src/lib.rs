@@ -982,12 +982,13 @@ pub struct ProductionExecutionPlans {
 pub fn compile_production_execution_plans(
     skeleton: &SkeletonPlan,
 ) -> Result<ProductionExecutionPlans, routecodex_v4_plugin_plan::PlanError> {
-    const PRODUCTION_CHAINS: [&str; 5] = [
+    const PRODUCTION_CHAINS: [&str; 6] = [
         "direct_request",
         "direct_response",
         "relay_request",
         "relay_response",
         "error",
+        "control",
     ];
     const EXCLUDED_PLUGINS: [&str; 6] = [
         "v4.std.provider.capability_mock",
