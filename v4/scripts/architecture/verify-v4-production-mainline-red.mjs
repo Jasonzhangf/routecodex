@@ -20,6 +20,7 @@ if (/execute_request_scoped_with_owner\([\s\S]*?\)\s*\.map_err/.test(productionS
 }
 for (const symbol of [
   'project_chat_request_to_responses',
+  'parse_responses_provider_payload',
   'build_protocol_wire',
   'build_retry_wire',
   'normalize_provider_response_with_instructions',

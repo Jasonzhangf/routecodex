@@ -172,9 +172,23 @@ fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         "openai-chat" => "chat",
         other => other,
     };
+    // HTTP transport hands this plugin a raw envelope. Parsing and provider
+    // protocol normalization belong to this response-inbound owner, never to
+    // runtime-bin orchestration.
+    let raw = ctx.read_data();
+    let semantic = if let Some(body) = raw
+        .get("_provider_http_body")
+        .and_then(Value::as_str)
+    {
+        serde_json::from_str(body).map_err(|error| {
+            format!("provider response JSON decode failed: {error}")
+        })?
+    } else {
+        raw.clone()
+    };
     let normalized = routecodex_v4_provider::normalize_provider_response_for_relay(
         provider_protocol,
-        ctx.read_data(),
+        &semantic,
     )
     .map_err(|error| format!("{}: {}", error.code, error.message))?;
     ctx.write_data(normalized)

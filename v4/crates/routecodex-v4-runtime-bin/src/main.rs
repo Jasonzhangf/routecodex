@@ -27,9 +27,8 @@ use routecodex_v4_router::{
     apply_product_error_policy, select_product_target_excluding, select_target,
 };
 use routecodex_v4_runtime::{
-    parse_responses_provider_payload, project_runtime_fault, project_runtime_fault_with_policy,
-    ResponseStreamDisposition, ResponseStreamProcessor, ResponsesProviderPayload, RuntimeFault,
-    SkeletonRuntime,
+    project_runtime_fault, project_runtime_fault_with_policy, ResponseStreamDisposition,
+    ResponseStreamProcessor, RuntimeFault, SkeletonRuntime,
 };
 use routecodex_v4_server::{
     AsyncHttpHandler, AsyncHttpServer, HttpHandler, HttpRequest, HttpResponse, ResponseStream,
@@ -1150,28 +1149,25 @@ fn handle_responses(
                 &target.provider_id,
             );
     }
-    match parse_responses_provider_payload(raw.status, &raw.content_type, &raw.body, false)
-        .map_err(|fault| {
-            project_provider_fault(
-                request,
-                fault,
-                if raw.status == 0 { 502 } else { raw.status },
-                manifest.product.as_ref(),
-                &target.provider_id,
-                String::from_utf8_lossy(&raw.body).as_ref(),
-            )
-        })? {
-        ResponsesProviderPayload::Json(value) => {
-            // Provider response normalization is owned by the response
-            // inbound NodePluginPlan. Runtime-bin must not perform a second
-            // protocol projection before dispatching the raw semantic value.
-            let provider_raw = serde_json::to_string(&value).map_err(|error| {
-                project_fault(
-                    request,
-                    RuntimeFault::new("provider_json_encode", error.to_string()),
-                    500,
-                )
-            })?;
+    if raw.content_type.to_ascii_lowercase().contains("text/event-stream") {
+        return Err(project_fault(
+            request,
+            RuntimeFault::new(
+                "provider_sse_unexpected",
+                "non-stream Responses transport returned SSE payload",
+            ),
+            502,
+        ));
+    }
+    // Keep the complete provider response as a raw transport envelope. The
+    // response inbound NodePluginPlan owns JSON parsing and protocol
+    // normalization; runtime-bin must not decode provider semantics here.
+    let provider_raw = serde_json::json!({
+        "_provider_http_status": raw.status,
+        "_provider_http_content_type": raw.content_type,
+        "_provider_http_body": String::from_utf8_lossy(&raw.body),
+    })
+    .to_string();
             let report = runtime
                 .lock()
                 .map_err(|_| {
@@ -1230,16 +1226,6 @@ fn handle_responses(
             );
             let _ = std::io::stdout().flush();
             Ok(json_response(client_status, projected))
-        }
-        ResponsesProviderPayload::Sse(_) => Err(project_fault(
-            request,
-            RuntimeFault::new(
-                "provider_sse_unexpected",
-                "non-stream Responses transport returned SSE payload",
-            ),
-            502,
-        )),
-    }
 }
 
 trait ProviderSseSource: Send {
