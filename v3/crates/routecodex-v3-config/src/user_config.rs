@@ -245,6 +245,9 @@ pub fn project_v3_user_config_03_authoring(
             )));
         }
     }
+    // internal.toml must not declare servers or bind/port; listeners are
+    // user-only runtime configuration that projects into the final authoring.
+    debug_assert!(internal.servers.is_empty());
     for (group_id, user_pools) in user.route_groups {
         let internal_group = internal.route_groups.get(&group_id).ok_or_else(|| {
             validation(format!(
@@ -274,19 +277,7 @@ pub fn project_v3_user_config_03_authoring(
         }
     }
 
-    for ((group_id, pool_id), targets) in projected_targets {
-        let pool = internal
-            .route_groups
-            .get_mut(&group_id)
-            .and_then(|group| group.pools.get_mut(&pool_id))
-            .expect("validated route group and pool must remain present");
-        pool.selection = V3SelectionPolicy {
-            strategy: V3SelectionStrategy::Priority,
-        };
-        pool.targets = targets;
-    }
-
-    let combined_servers = user.servers.clone();
+    let mut combined_servers = user.servers.clone();
     if combined_servers.is_empty() {
         return Err(validation(
             "user config must declare at least one [servers.<id>] block with bind and port",
@@ -310,6 +301,19 @@ pub fn project_v3_user_config_03_authoring(
             )));
         }
     }
+
+    for ((group_id, pool_id), targets) in projected_targets {
+        let pool = internal
+            .route_groups
+            .get_mut(&group_id)
+            .and_then(|group| group.pools.get_mut(&pool_id))
+            .expect("validated route group and pool must remain present");
+        pool.selection = V3SelectionPolicy {
+            strategy: V3SelectionStrategy::Priority,
+        };
+        pool.targets = targets;
+    }
+
     internal.servers = combined_servers;
 
     Ok(internal)

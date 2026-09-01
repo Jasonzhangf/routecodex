@@ -5852,3 +5852,12 @@ Tags: #v4 #cordis #workflow-correction #evidence-first
 - Provider Health owns score, streak, rolling deltas, cooldown, probe backoff, generation, and atomic probe completion. Runtime owns one scheduled/rescue probe orchestration path; Server only schedules it; Target consumes read-only availability and configured priority. A stale permit may release its waiter but must not mutate a newer health epoch.
 - Probe success starts a clean health epoch: score 1000, empty delta window, reset streak/backoff, cooldown removed, generation advanced. Business cooldown and `next_probe_at` are independent; 503 is a three-count recoverable error; HTTP 2xx is insufficient without a valid protocol terminal.
 - Installed `0.90.4739` passed build/install/aggregate restart and live Responses smoke on 7777; AGY review `v3-health-scheduler-failback-20260830` passed with no findings. Production fault-injection replay remains intentionally absent because no cooldown entry existed and mutating live config/health or driving repeated provider failures was not authorized.
+
+### 2026-08-31 Responses inbound normalization / outbound whitelist boundary
+- Responses protocol fields are normalized at ReqInbound into registered semantic Chat extensions without lossy deletion; each provider outbound codec consumes only its target-protocol whitelist and raises `UnmappedOutboundFields` for unsupported nested fields. Do not couple field handling to MiniMax/provider special cases, SSE, handler, or client projection.
+Tags: #responses #req-inbound #outbound-whitelist #fail-fast #no-silent-strip
+
+### 2026-08-31 V4 governance ownership correction
+- Trigger: repeated V4 turns treated AppSDK migration drift as a reason to stop and report instead of repairing the governance records and recovery path in the v4-cordis tree.
+- Future rule: governance recovery is part of the master task. On any AppSDK mismatch, inspect the canonical lifecycle implementation and repair the project-owned records/transaction state in an isolated worktree; do not hand the governance blocker back to Jason or repeat unchanged status reports.
+Tags: #v4 #appsdk #governance #workflow-correction
