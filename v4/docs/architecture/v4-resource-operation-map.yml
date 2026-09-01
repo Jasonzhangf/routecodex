@@ -3065,17 +3065,23 @@ resources:
   - v4_plugin_contract_red
   - v4_plugin_request_boundary
   - v4_plugin_request_plane
+  - v4_plugin_response_boundary
+  - v4_plugin_response_plane
   resource_kind: control_boundary
   lifecycle: v4.plugin.standard_library
   owner_crate: routecodex-v4-standard-plugins
   owner_node: V4HubReqInbound02Normalized
   owner_symbols:
   - reject_control_fields
+  - reject_response_control_fields
   allowed_writers:
   - V4HubReqInbound02Normalized
+  - V4HubRespOutbound05ClientSemantic
   allowed_readers:
   - V4HubReqInbound02Normalized
   - V4HubReqChatProcess03Governed
+  - V4HubRespOutbound05ClientSemantic
+  - V4HubRespInbound03Normalized
   forbidden_writers:
   - V4ControlMetadataCenter
   may_enter_provider_body: false

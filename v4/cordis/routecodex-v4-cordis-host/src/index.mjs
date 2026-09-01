@@ -434,8 +434,13 @@ export class CordisNodeHost {
         `node service ${name} is not declared for ${this.nodeId}`,
       );
     }
-    this.#acquired.add(name);
-    return Object.freeze({ name });
+    const token = Object.freeze({
+      name,
+      nodeId: this.nodeId,
+      isValid: () => this.#ready && this.services.includes(name),
+    });
+    this.#acquired.add(token);
+    return token;
   }
 
   get context() {
@@ -489,10 +494,19 @@ export class CordisNodeHost {
   async dispose() {
     if (this.#disposed) return;
     this.#ready = false;
+    const invalidated = [...this.#acquired];
     this.#acquired.clear();
     await this.#disposeFibers(this.#fibers);
     this.#fibers = [];
     this.#disposed = true;
+    for (const token of invalidated) {
+      if (token.isValid()) {
+        throw new CordisHostError(
+          'service_not_released',
+          `node service ${token.name} remained valid after dispose`,
+        );
+      }
+    }
   }
 
   async #disposeFibers(fibers) {

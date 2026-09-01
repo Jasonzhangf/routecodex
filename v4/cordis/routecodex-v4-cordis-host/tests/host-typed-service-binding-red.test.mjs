@@ -9,6 +9,10 @@ test('typed node service is acquired only when ready and released on dispose', a
     descriptor: { nodeId: 'node-a', planHash: 'plan-a' },
   });
   assert.throws(() => host.acquireService('nodeControl'), /ready|mounted|active/);
+  await host.mount([]);
+  const token = host.acquireService('nodeControl');
+  assert.equal(token.isValid(), true);
   await host.dispose();
+  assert.equal(token.isValid(), false);
   assert.throws(() => host.acquireService('nodeControl'), /disposed|stale|released/);
 });
