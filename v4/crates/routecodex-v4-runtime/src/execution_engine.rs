@@ -14,41 +14,26 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::fmt;
 
-/// Stable mapping from a production chain node to the semantic stages whose
-/// checkpoints the node completes. This is observability-only and is emitted
-/// as diagnostic facts; it is never written into business data or control.
+/// Production stage checkpoints emitted by the node execution owner. These
+/// are diagnostic facts only; they never enter business data or control.
 fn stage_ids_for_node(chain: &str, node_id: &str) -> &'static [&'static str] {
     match (chain, node_id) {
-        ("relay_request", "V4ServerReqInbound01ClientRaw") => {
-            &["request.inbound_normalize"]
-        }
-        ("relay_request", "V4HubReqInbound02Normalized") => {
-            &["request.continuation_classify"]
-        }
+        ("relay_request", "V4ServerReqInbound01ClientRaw") => &["request.inbound_normalize"],
+        ("relay_request", "V4HubReqInbound02Normalized") => &["request.continuation_classify"],
         ("relay_request", "V4HubReqChatProcess03Governed") => &["request.chat_process"],
         ("relay_request", "V4HubReqExecution04Planned") => {
             &["request.execution_plan", "request.route_facts"]
         }
         ("relay_request", "V4HubReqTarget05Resolved") => &["request.target_resolve"],
-        ("relay_request", "V4HubReqOutbound06ProviderSemantic") => {
-            &["request.provider_semantic"]
-        }
-        ("relay_request", "V4ProviderReqCompat07ProviderCompat") => &[],
+        ("relay_request", "V4HubReqOutbound06ProviderSemantic") => &["request.provider_semantic"],
         ("relay_request", "V4ProviderReqOutbound08WirePayload") => &["request.wire_build"],
-        ("relay_request", "V4ProviderReqOutbound09TransportRequest") => {
-            &["request.transport"]
-        }
-        ("relay_response", "V4ProviderRespInbound01Raw") => {
-            &["response.provider_inbound"]
-        }
-        ("relay_response", "V4ProviderRespCompat02ProviderCompat") => &[],
+        ("relay_request", "V4ProviderReqOutbound09TransportRequest") => &["request.transport"],
+        ("relay_response", "V4ProviderRespInbound01Raw") => &["response.provider_inbound"],
         ("relay_response", "V4HubRespInbound03Normalized") => &["response.normalize"],
         ("relay_response", "V4HubRespChatProcess04Governed") => {
             &["response.response_process", "response.continuation_commit"]
         }
-        ("relay_response", "V4HubRespOutbound05ClientSemantic") => {
-            &["response.client_projection"]
-        }
+        ("relay_response", "V4HubRespOutbound05ClientSemantic") => &["response.client_projection"],
         ("relay_response", "V4ServerRespOutbound06ClientFrame") => &["response.frame"],
         _ => &[],
     }
@@ -246,9 +231,8 @@ impl ExecutionEngine {
                     format!("execution path revisited node {node_id}"),
                 )));
             }
-            let stage_ids = stage_ids_for_node(chain, &node_id);
             let mut events = frame.events;
-            for stage_id in stage_ids {
+            for stage_id in stage_ids_for_node(chain, &node_id) {
                 events.push(DiagnosticFact {
                     kind: "stage.checkpoint".to_string(),
                     plugin_id: "routecodex-v4-runtime".to_string(),
