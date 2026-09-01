@@ -605,7 +605,7 @@ fn response_failed_projects_one_error_without_success_closeout() {
     assert!(!text.contains("[DONE]"));
 
     let duplicate = processor
-        .project_failure(routecodex_v4_runtime::RuntimeFault::new(
+        .project_failure(&runtime, routecodex_v4_runtime::RuntimeFault::new(
             "second_failure",
             "must not project twice",
         ))
