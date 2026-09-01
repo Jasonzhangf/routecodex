@@ -268,11 +268,13 @@ fn frame_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .as_ref()
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let encoded = encode_client_sse_frame(&protocol, &Value::Object(semantic), terminal)?;
-    ctx.write_data(Value::String(
+    let encoded = encode_client_sse_frame(&protocol, &Value::Object(semantic.clone()), terminal)?;
+    ctx.emit(
+        "client_sse_frame",
         String::from_utf8(encoded).map_err(|error| error.to_string())?,
-    ))
-    .map_err(|error| error.to_string())
+    );
+    ctx.write_data(Value::Object(semantic))
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn frame_build_handle() -> (&'static str, fn(&mut ExecCtx<'_>) -> Result<(), String>) {

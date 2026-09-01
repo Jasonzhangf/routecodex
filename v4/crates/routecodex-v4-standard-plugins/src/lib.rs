@@ -394,6 +394,8 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.direct.response.client_payload".to_string(),
             "v4.information.client_protocol".to_string(),
             "v4.information.provider_protocol".to_string(),
+            "v4.information.entry_protocol".to_string(),
+            "v4.information.stream_terminal".to_string(),
         ],
         "V4DirectReq02RelayContainer" => vec![
             "v4.direct.request.client_payload".to_string(),

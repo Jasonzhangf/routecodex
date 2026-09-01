@@ -1702,7 +1702,21 @@ impl ResponseStreamProcessor {
                 "response chain produced no client frame",
             )
         })?;
-        let frame = SseTransportFrame::from_complete_bytes(client_frame.into_bytes())
+        let encoded_frame = report
+            .trace
+            .iter()
+            .find_map(|entry| {
+                entry
+                    .split_once(":client_sse_frame:")
+                    .map(|(_, value)| value)
+            })
+            .ok_or_else(|| {
+                RuntimeFault::new(
+                    "client_sse_frame_missing",
+                    "response outbound frame plugin produced no transport frame",
+                )
+            })?;
+        let frame = SseTransportFrame::from_complete_bytes(encoded_frame.as_bytes().to_vec())
             .map_err(|error| RuntimeFault::new("client_sse_transport", format!("{error:?}")))?;
         if terminal {
             self.semantic_terminal = true;
@@ -2231,7 +2245,12 @@ impl SkeletonRuntime {
             conversation_scope,
             |ctx| {
                 ctx.data.provider_raw = Some(provider_raw.to_string());
-                ctx.information.protocol = Some(entry_protocol.to_string());
+                let client_protocol = match entry_protocol {
+                    "openai-responses" => "responses",
+                    "openai-chat" => "chat",
+                    other => other,
+                };
+                ctx.information.protocol = Some(client_protocol.to_string());
                 ctx.information.execution_lane = Some(continuation_owner.to_string());
                 ctx.information.client_protocol = Some(entry_protocol.to_string());
                 ctx.information.provider_protocol = Some(provider_protocol.to_string());

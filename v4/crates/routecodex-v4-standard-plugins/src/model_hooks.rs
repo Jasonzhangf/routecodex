@@ -15,7 +15,8 @@ pub const RELAY_MODEL_HOOK_PLUGIN_ID: &str = "v4.hook.relay.request";
 pub const DIRECT_RESPONSE_HOOK_PLUGIN_ID: &str = "v4.hook.direct.response";
 pub const RELAY_RESPONSE_HOOK_PLUGIN_ID: &str = "v4.hook.relay.response";
 pub const DIRECT_REQUEST_WIRE_VALIDATE_PLUGIN_ID: &str = "v4.std.direct.request.wire_validate";
-pub const DIRECT_RESPONSE_CLIENT_VALIDATE_PLUGIN_ID: &str = "v4.std.direct.response.client_validate";
+pub const DIRECT_RESPONSE_CLIENT_VALIDATE_PLUGIN_ID: &str =
+    "v4.std.direct.response.client_validate";
 
 fn object(ctx: &ExecCtx<'_>, name: &str) -> Result<serde_json::Map<String, Value>, String> {
     ctx.read_data()
@@ -92,7 +93,10 @@ pub(crate) fn direct_request_wire_validate(ctx: &mut ExecCtx<'_>) -> Result<(), 
         .and_then(Value::as_str)
         .filter(|model| !model.trim().is_empty())
         .ok_or_else(|| "direct_request_wire_validate requires model".to_string())?;
-    ctx.emit("direct.request.wire_validated", "direct provider wire validated");
+    ctx.emit(
+        "direct.request.wire_validated",
+        "direct provider wire validated",
+    );
     Ok(())
 }
 
@@ -106,7 +110,30 @@ pub(crate) fn direct_response_client_validate(ctx: &mut ExecCtx<'_>) -> Result<(
             "Direct protocol mismatch: client={client_protocol} provider={provider_protocol}"
         ));
     }
-    ctx.emit("direct.response.client_validated", "direct client response validated");
+    let stream_terminal = ctx
+        .read_information_resource("v4.information.stream_terminal")
+        .map_err(|error| error.to_string())?
+        .and_then(Value::as_bool);
+    if let Some(terminal) = stream_terminal {
+        let entry_protocol = ctx
+            .read_information_resource("v4.information.entry_protocol")
+            .map_err(|error| error.to_string())?
+            .and_then(Value::as_str)
+            .unwrap_or("responses");
+        let encoded = super::response_outbound::encode_client_sse_frame(
+            entry_protocol,
+            &Value::Object(value.clone()),
+            terminal,
+        )?;
+        ctx.emit(
+            "client_sse_frame",
+            String::from_utf8(encoded).map_err(|error| error.to_string())?,
+        );
+    }
+    ctx.emit(
+        "direct.response.client_validated",
+        "direct client response validated",
+    );
     Ok(())
 }
 
@@ -144,6 +171,8 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
                 "v4.direct.response.client_payload",
                 "v4.information.client_protocol",
                 "v4.information.provider_protocol",
+                "v4.information.entry_protocol",
+                "v4.information.stream_terminal",
             ],
             vec![],
         ),
@@ -233,8 +262,14 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
 
 pub(crate) fn handles() -> Vec<(&'static str, fn(&mut ExecCtx<'_>) -> Result<(), String>)> {
     vec![
-        (DIRECT_RESPONSE_CLIENT_VALIDATE_PLUGIN_ID, direct_response_client_validate),
-        (DIRECT_REQUEST_WIRE_VALIDATE_PLUGIN_ID, direct_request_wire_validate),
+        (
+            DIRECT_RESPONSE_CLIENT_VALIDATE_PLUGIN_ID,
+            direct_response_client_validate,
+        ),
+        (
+            DIRECT_REQUEST_WIRE_VALIDATE_PLUGIN_ID,
+            direct_request_wire_validate,
+        ),
         (DIRECT_MODEL_HOOK_PLUGIN_ID, direct_model_passthrough),
         (RELAY_MODEL_HOOK_PLUGIN_ID, relay_model_projection),
         (DIRECT_RESPONSE_HOOK_PLUGIN_ID, direct_response_passthrough),
