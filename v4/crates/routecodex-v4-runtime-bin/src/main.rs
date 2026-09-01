@@ -1449,7 +1449,9 @@ fn render_payload_console_event(
 ) -> Option<String> {
     let (plugin_id, rest) = trace_entry.split_once(':')?;
     let (kind, message) = rest.split_once(':')?;
-    if !plugin_id.ends_with("payload_console_render") || kind != "console.payload_ready" {
+    let direct_hook = matches!(plugin_id, "v4.hook.direct.request" | "v4.hook.direct.response");
+    if (!(plugin_id.ends_with("payload_console_render") || direct_hook)
+        || kind != "console.payload_ready") {
         return None;
     }
     // TTY diagnostics may prefix the payload summary with ANSI color codes.
@@ -1744,6 +1746,18 @@ mod tests {
             true,
             None,
             std::time::Duration::from_millis(8),
+        )
+        .is_some());
+        let direct_request_event = "v4.hook.direct.request:console.payload_ready:▶ [req] model=gpt-5.5 stream=false messages=1 tools=0";
+        assert!(render_payload_console_event(
+            direct_request_event,
+            &request,
+            "responses",
+            "cc-sol",
+            "gpt-5.5",
+            false,
+            None,
+            std::time::Duration::from_millis(9),
         )
         .is_some());
     }
