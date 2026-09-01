@@ -140,6 +140,30 @@ fn positive_response_chat_process_plan_compiles() {
 }
 
 #[test]
+fn positive_responses_direct_console_observers_are_bound() {
+    let request = compile_standard_plan(
+        "V4DirectReq01ClientProtocol",
+        "request_inbound",
+        "direct_request",
+        1,
+        &["v4.std.diagnostic.direct_request_payload_console_render"],
+    )
+    .expect("direct Responses request console plan compiles");
+    let response = compile_standard_plan(
+        "V4DirectResp01ProviderRaw",
+        "response_inbound",
+        "direct_response",
+        1,
+        &["v4.std.diagnostic.direct_response_payload_console_render"],
+    )
+    .expect("direct Responses response console plan compiles");
+    assert!(request.verify());
+    assert!(response.verify());
+    assert_eq!(request.entries[0].plugin_id, "v4.std.diagnostic.direct_request_payload_console_render");
+    assert_eq!(response.entries[0].plugin_id, "v4.std.diagnostic.direct_response_payload_console_render");
+}
+
+#[test]
 fn negative_selection_group_multi_active_rejected() {
     let mut authoring = standard_authoring(&["v4.std.provider.wire_build"])
         .expect("standard authoring succeeds for known id");
