@@ -628,7 +628,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginCategory::Control,
             "V4MetadataCenter01ScopeRegistry",
             "control_center",
-            Some(0),
+            Some(1),
             PluginKind::Control,
             PluginEffect::ControlOnly,
             PluginPhase::Control,
@@ -641,7 +641,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginCategory::Control,
             "V4PayloadCycleRegistry",
             "control_center",
-            Some(0),
+            Some(2),
             PluginKind::Control,
             PluginEffect::ControlOnly,
             PluginPhase::Control,
@@ -897,18 +897,19 @@ pub struct ProductionExecutionPlans {
     pub artifact_set_hash: String,
 }
 
-/// Compile the five production execution lanes from the canonical skeleton.
+/// Compile the six production execution lanes from the canonical skeleton.
 /// SSE remains outside this JSON semantic graph; mock and superseded plugin
 /// variants are never eligible for publication.
 pub fn compile_production_execution_plans(
     skeleton: &SkeletonPlan,
 ) -> Result<ProductionExecutionPlans, routecodex_v4_plugin_plan::PlanError> {
-    const PRODUCTION_CHAINS: [&str; 5] = [
+    const PRODUCTION_CHAINS: [&str; 6] = [
         "direct_request",
         "direct_response",
         "relay_request",
         "relay_response",
         "error",
+        "control",
     ];
     const EXCLUDED_PLUGINS: [&str; 6] = [
         "v4.std.provider.capability_mock",

@@ -51,7 +51,7 @@ fn compiles_deterministic_secret_free_runtime_manifest() {
 }
 
 #[test]
-fn runtime_manifest_contains_digest_bound_five_lane_execution_epoch() {
+fn runtime_manifest_contains_digest_bound_six_lane_execution_epoch() {
     let manifest =
         compile_runtime_config(&config(""), Some(Path::new("/tmp/v4"))).expect("compile");
     let candidate = manifest
@@ -65,6 +65,7 @@ fn runtime_manifest_contains_digest_bound_five_lane_execution_epoch() {
     assert_eq!(
         pipelines.keys().map(String::as_str).collect::<Vec<_>>(),
         vec![
+            "control",
             "direct_request",
             "direct_response",
             "error",
