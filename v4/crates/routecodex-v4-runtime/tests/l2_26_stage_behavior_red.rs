@@ -1,3 +1,5 @@
+#![cfg(feature = "red-fixtures")]
+
 //! Independent Cordis parity red tests.
 //!
 //! Each case executes the real mock transport entry and checks one semantic
