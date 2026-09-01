@@ -20,6 +20,7 @@ pub const INTERNAL_CONFIG_TOML: &str = include_str!("internal.toml");
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InternalConfig {
+    #[serde(default)]
     user_config_base_toml: String,
     #[serde(default)]
     model_families: BTreeMap<String, ModelFamily>,
@@ -48,22 +49,10 @@ pub fn v3_internal_user_config_authoring() -> crate::V3Config02AuthoringParsed {
             authoring.forwarders.is_empty(),
             "internal user-config base must not contain provider forwarders"
         );
-        for server in authoring.servers.values() {
-            let group = authoring
-                .route_groups
-                .get(&server.routing_group)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "internal user-config server references missing route group {}",
-                        server.routing_group
-                    )
-                });
-            assert!(
-                group.pools.contains_key("default"),
-                "internal user-config route group {} must contain default pool",
-                server.routing_group
-            );
-        }
+        assert!(
+            authoring.servers.is_empty(),
+            "internal.toml must not declare servers or listener ports"
+        );
         authoring
     });
     AUTHORING.clone()

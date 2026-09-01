@@ -20,10 +20,12 @@ pub struct V3UserConfig01FileSource {
     pub raw_toml: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct V3UserConfig02RoutingSelectionParsed {
     pub version: u16,
+    #[serde(default)]
+    pub servers: BTreeMap<String, crate::V3ServerAuthoringConfig>,
     pub route_groups: BTreeMap<String, BTreeMap<String, V3UserRoutePool>>,
 }
 
@@ -243,15 +245,6 @@ pub fn project_v3_user_config_03_authoring(
             )));
         }
     }
-    for server in internal.servers.values() {
-        if !declared_groups.contains(&server.routing_group) {
-            return Err(validation(format!(
-                "user config must declare internally enabled route group {:?}",
-                server.routing_group
-            )));
-        }
-    }
-
     for (group_id, user_pools) in user.route_groups {
         let internal_group = internal.route_groups.get(&group_id).ok_or_else(|| {
             validation(format!(
@@ -292,6 +285,32 @@ pub fn project_v3_user_config_03_authoring(
         };
         pool.targets = targets;
     }
+
+    let combined_servers = user.servers.clone();
+    if combined_servers.is_empty() {
+        return Err(validation(
+            "user config must declare at least one [servers.<id>] block with bind and port",
+        ));
+    }
+    for (server_id, server) in &combined_servers {
+        if server.bind.trim().is_empty() {
+            return Err(validation(format!(
+                "user config server {server_id} bind is empty"
+            )));
+        }
+        if server.port == 0 {
+            return Err(validation(format!(
+                "user config server {server_id} port must be non-zero"
+            )));
+        }
+        if !internal.route_groups.contains_key(&server.routing_group) {
+            return Err(validation(format!(
+                "user config server {server_id} references unknown route group {:?}",
+                server.routing_group
+            )));
+        }
+    }
+    internal.servers = combined_servers;
 
     Ok(internal)
 }

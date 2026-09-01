@@ -377,6 +377,14 @@ supportsStreaming = true
     fs::write(
         &path,
         r#"version = 3
+[servers.routecodex_v3_4444]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "routecodex_v3_4444"
+[servers.responses_v3_7777]
+bind = "127.0.0.1"
+port = 7777
+routing_group = "responses_v3_7777"
 [route_groups.routecodex_v3_4444.default]
 tiers = [[{ use = "p1/m1" }]]
 [route_groups.responses_v3_7777.default]
@@ -397,7 +405,7 @@ tiers = [[{ use = "p1/m1" }]]
 
     let saved = fs::read_to_string(&path).expect("saved user config");
     assert!(saved.contains("weight = 7"));
-    assert!(!saved.contains("servers"));
+    assert!(saved.contains("servers"));
     assert!(!saved.contains("priority"));
     assert_eq!(store.read_user_routing().unwrap(), selection);
 }
