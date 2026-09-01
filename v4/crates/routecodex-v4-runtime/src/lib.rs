@@ -142,29 +142,12 @@ pub fn parse_responses_provider_payload(
     }
     let value: Value = serde_json::from_slice(body)
         .map_err(|error| RuntimeFault::new("provider_json_parse", error.to_string()))?;
-    let object = value.as_object().ok_or_else(|| {
+    value.as_object().ok_or_else(|| {
         RuntimeFault::new(
             "provider_json_shape",
             "Responses provider JSON must be an object",
         )
     })?;
-    let response_status = object
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if response_status != "completed" {
-        return Err(RuntimeFault::new(
-            "provider_json_not_terminal",
-            format!("Responses provider JSON terminal status must be completed, got {response_status:?}"),
-        ));
-    }
-    let response_error = object.get("error").filter(|value| !value.is_null());
-    if let Some(error) = response_error {
-        return Err(RuntimeFault::new(
-            "provider_response_failed",
-            format!("Responses provider JSON returned a failed response: {error}"),
-        ));
-    }
     if !value.is_object() {
         return Err(RuntimeFault::new(
             "provider_json_shape",
@@ -1087,17 +1070,9 @@ pub struct RuntimeRegistries<'a> {
     pub payload_cycle: &'a mut PayloadCycleRegistry,
 }
 
-trait RuntimeOperator: Send + Sync {
-    fn plugin_id(&self) -> &'static str;
-    fn kind(&self) -> PluginKind;
-    fn execute(
-        &self,
-        ctx: &mut ExecutionContext,
-        registries: &mut RuntimeRegistries<'_>,
-    ) -> Result<(), RuntimeFault>;
-}
-
-struct ProtocolParse;
+/* legacy runtime-local operators removed: production execution is owned by
+ * NodeContainer/NodePluginPlan and dispatched through PluginHandle. */
+/*
 impl RuntimeOperator for ProtocolParse {
     fn plugin_id(&self) -> &'static str {
         "protocol_parse"
@@ -1527,6 +1502,7 @@ impl RuntimeOperator for FrameBuild {
         assert_no_control_leak(ctx)
     }
 }
+*/
 
 /// Result of one chain execution: bound identity + produced wire + control
 /// facts + diagnostic trace.
