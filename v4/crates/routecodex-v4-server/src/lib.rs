@@ -103,21 +103,23 @@ pub trait HttpHandler {
 /// Records are diagnostic side-channel data; request/response payloads never
 /// flow through this store.
 pub fn persist_request_record(request: &HttpRequest, status: u16) -> Result<(), String> {
-    persist_request_record_fields(
+    persist_request_record_fields_with_duration(
         &request.request_id,
         &request.server_id,
         request.port,
         &request.path,
         status,
+        0,
     )
 }
 
-fn persist_request_record_fields(
+fn persist_request_record_fields_with_duration(
     request_id: &str,
     server_id: &str,
     port: u16,
     endpoint: &str,
     status: u16,
+    duration_ms: u64,
 ) -> Result<(), String> {
     let home = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
@@ -143,7 +145,7 @@ fn persist_request_record_fields(
         "started_epoch_ms": now,
         "updated_epoch_ms": now,
         "finished_epoch_ms": now,
-        "duration_ms": 0,
+        "duration_ms": duration_ms,
         "meta": {
             "request_id": request_id,
             "endpoint": endpoint,
@@ -277,6 +279,7 @@ async fn serve_async_connection<H: AsyncHttpHandler>(
     request_identity: RequestIdentity,
     port: u16,
 ) -> Result<(), std::io::Error> {
+    let started_at = std::time::Instant::now();
     let mut request_bytes = Vec::with_capacity(4096);
     let header_end = loop {
         let mut chunk = [0u8; 4096];
@@ -430,12 +433,13 @@ async fn serve_async_connection<H: AsyncHttpHandler>(
     } else if stream.write_all(&response.body).await.is_err() {
         cancellation.cancel();
     }
-    persist_request_record_fields(
+    persist_request_record_fields_with_duration(
         &record_request_id,
         &record_server_id,
         record_port,
         &record_endpoint,
         response.status,
+        started_at.elapsed().as_millis() as u64,
     )
         .map_err(|error| std::io::Error::other(format!("request record persistence failed: {error}")))?;
     Ok(())
@@ -578,6 +582,7 @@ fn serve_connection<H: HttpHandler>(
     request_identity: RequestIdentity,
     port: u16,
 ) -> Result<(), ConnectionError> {
+    let started_at = std::time::Instant::now();
     let request = match read_request(&mut stream) {
         Ok(request) => request,
         Err(ConnectionError::ClientDisconnected) => {
@@ -598,7 +603,15 @@ fn serve_connection<H: HttpHandler>(
     let response = handler.handle(request.clone());
     let status = response.status;
     write_response(&mut stream, response)?;
-    persist_request_record(&request, status).map_err(ConnectionError::Request)
+    persist_request_record_fields_with_duration(
+        &request.request_id,
+        &request.server_id,
+        request.port,
+        &request.path,
+        status,
+        started_at.elapsed().as_millis() as u64,
+    )
+    .map_err(ConnectionError::Request)
 }
 
 fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, ConnectionError> {
