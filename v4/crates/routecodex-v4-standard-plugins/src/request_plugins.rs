@@ -15,7 +15,6 @@ use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, Stand
 
 pub const REQUEST_NORMALIZE_PLUGIN_ID: &str = "v4.std.request.responses_normalize";
 pub const REQUEST_PROTOCOL_PARSE_PLUGIN_ID: &str = "v4.std.request.protocol_parse";
-pub const REQUEST_CHAT_TO_RESPONSES_PLUGIN_ID: &str = "v4.std.request.chat_to_responses";
 
 const CONTROL_KEYS: &[&str] = &[
     "requestId",
@@ -120,37 +119,24 @@ pub(crate) fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-pub(crate) fn chat_to_responses(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let client_protocol = ctx
-        .read_information_resource("v4.information.client_protocol")
-        .map_err(|error| error.to_string())?
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let provider_protocol = ctx
-        .read_information_resource("v4.information.provider_protocol")
-        .map_err(|error| error.to_string())?
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    if client_protocol.as_deref() == Some("chat")
-        && provider_protocol.as_deref() == Some("responses")
-    {
-        let projected = project_chat_request_to_responses(ctx.read_data())?;
-        ctx.write_data(projected).map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
 pub(crate) fn wire_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let object = require_object(ctx, "wire_build")?;
+    let mut object = require_object(ctx, "wire_build")?;
     reject_control(&object)?;
     object
         .get("model")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "wire_build requires model".to_string())?;
-    object
-        .get("input")
-        .ok_or_else(|| "wire_build requires input".to_string())?;
+    if !object.contains_key("input") {
+        if object.contains_key("messages") {
+            object = project_chat_request_to_responses(&Value::Object(object))?
+                .as_object()
+                .cloned()
+                .ok_or_else(|| "chat-to-Responses projection must return object".to_string())?;
+        } else {
+            return Err("wire_build requires input".to_string());
+        }
+    }
     // Preserve the complete protocol business envelope. Responses fields such
     // as previous_response_id and store are client/provider payload semantics,
     // not runtime control state, and must not be silently discarded.
@@ -187,23 +173,6 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
             vec![],
         ),
         plugin(
-            REQUEST_CHAT_TO_RESPONSES_PLUGIN_ID,
-            PluginCategory::Protocol,
-            "V4HubReqInbound02Normalized",
-            "request_inbound",
-            Some(2),
-            PluginKind::Operator,
-            PluginEffect::Semantic,
-            PluginPhase::Projection,
-            150,
-            vec![
-                "v4.request.normal_payload",
-                "v4.information.client_protocol",
-                "v4.information.provider_protocol",
-            ],
-            vec!["v4.request.normal_payload"],
-        ),
-        plugin(
             "v4.std.request.governance",
             PluginCategory::ChatProcess,
             "V4HubReqChatProcess03Governed",
@@ -236,7 +205,6 @@ pub(crate) fn handles() -> Vec<(&'static str, fn(&mut ExecCtx<'_>) -> Result<(),
     vec![
         (REQUEST_PROTOCOL_PARSE_PLUGIN_ID, request_protocol_parse),
         (REQUEST_NORMALIZE_PLUGIN_ID, request_normalize),
-        (REQUEST_CHAT_TO_RESPONSES_PLUGIN_ID, chat_to_responses),
         ("v4.std.request.governance", request_governance),
         ("v4.std.request.responses_wire_build", wire_build),
     ]
