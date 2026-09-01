@@ -73,7 +73,12 @@ function collectDeclaredSymbols(crate) {
       if (entry.isDirectory()) {
         walk(full);
       } else if (entry.name.endsWith('.rs')) {
-        const source = fs.readFileSync(full, 'utf8');
+        // Declarations must come from compilable Rust items.  Archived
+        // comments are historical evidence, not live owner symbols.
+        const source = fs
+          .readFileSync(full, 'utf8')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/(^|\s)\/\/.*$/gm, '$1');
         for (const match of source.matchAll(DECL_RE)) {
           const symbol = match[2];
           if (symbol) {

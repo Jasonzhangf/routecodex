@@ -271,6 +271,7 @@ fn relay_request_chat_to_responses_is_plugin_owned() {
     assert_eq!(wire["input"][0]["content"], "hello");
     assert!(wire.get("messages").is_none());
     assert_eq!(wire["max_output_tokens"], 8);
+    assert!(wire.get("codec").is_none(), "production wire must not use mock codec handle");
     assert!(report
         .trace
         .iter()

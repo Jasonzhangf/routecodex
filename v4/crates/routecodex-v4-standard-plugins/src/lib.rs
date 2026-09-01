@@ -1433,7 +1433,13 @@ impl StandardHandleRegistry {
             ("v4.std.error.runtime_classify", error_runtime_classify),
             ("v4.std.error.router_policy", error_router_policy),
             ("v4.std.error.execution_decision", error_execution_decision),
-            ("v4.std.provider.wire_build", protocol_codec),
+            // Production provider wire construction is owned by the request
+            // wire-build plugin.  The old protocol_codec handle only added a
+            // mock `codec` field and was a false production binding.
+            (
+                "v4.std.provider.wire_build",
+                request_plugins::wire_build,
+            ),
             ("v4.std.protocol.wire_codec_proto", protocol_codec),
             ("v4.std.chat_process.request_governance", request_governance),
             (
@@ -1601,5 +1607,16 @@ mod tests {
         let compiled = compile_production_execution_plans(&skeleton)
             .expect("every production node must have a real standard plugin binding");
         assert!(compiled.plans.iter().all(|plan| !plan.entries.is_empty()));
+        let expected_nodes = skeleton
+            .chains
+            .iter()
+            .filter(|chain| chain.chain_id != "config")
+            .map(|chain| chain.nodes.len())
+            .sum::<usize>();
+        assert_eq!(compiled.plans.len(), expected_nodes);
+        assert!(compiled
+            .plans
+            .iter()
+            .all(|plan| plan.entries.iter().all(|entry| !entry.plugin_id.is_empty())));
     }
 }
