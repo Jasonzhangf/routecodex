@@ -1760,6 +1760,21 @@ mod tests {
             std::time::Duration::from_millis(9),
         )
         .is_some());
+        let direct_response_event =
+            "v4.std.diagnostic.direct_response_payload_console_render:console.payload_ready:✅ [resp] model=gpt-5.5 output_items=1 usage=4+2=6";
+        let rendered = render_payload_console_event(
+            direct_response_event,
+            &request,
+            "/v1/responses",
+            "cc-sol",
+            "gpt-5.5",
+            false,
+            Some(200),
+            std::time::Duration::from_millis(10),
+        )
+        .expect("direct Responses response summary is rendered");
+        assert!(rendered.contains("[/v1/responses]"));
+        assert!(rendered.contains("responseStatus=completed"));
     }
 
     fn test_manifest() -> RuntimeConfigManifest {
