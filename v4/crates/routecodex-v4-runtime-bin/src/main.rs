@@ -875,19 +875,7 @@ fn handle_responses(
             598,
         )
     })?;
-    let wire_body = build_retry_wire(
-        &target.protocol,
-        &semantic_body,
-        &target.wire_model,
-        stream_mode,
-    )
-    .map_err(|error| {
-        project_fault(
-            request,
-            RuntimeFault::new(&error.code, error.message),
-            error.status.unwrap_or(598),
-        )
-    })?;
+    let wire_body = semantic_body;
     if stream_mode {
         let mut stream = send_target_streaming(&target, &wire_body).map_err(|error| {
             project_fault(
