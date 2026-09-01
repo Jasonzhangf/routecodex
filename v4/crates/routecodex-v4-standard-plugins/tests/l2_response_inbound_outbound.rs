@@ -27,7 +27,9 @@ fn execute(
 ) -> Result<Value, NodeContainerError> {
     let plan = compile_standard_plan(
         node_id,
-        if node_id == "V4HubRespInbound03Normalized" {
+        if node_id == "V4HubRespInbound03Normalized"
+            || node_id == "V4ProviderRespCompat02ProviderCompat"
+        {
             "response_inbound"
         } else {
             "response_outbound"
@@ -79,6 +81,27 @@ fn protocol_decode_preserves_provider_business_response() {
         json!({}),
     )
     .unwrap();
+    assert_eq!(decoded, response);
+}
+
+#[test]
+fn provider_compat_decodes_raw_http_envelope_inside_response_plan() {
+    let response = json!({
+        "id": "resp-raw-1",
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": "hello"}]}]
+    });
+    let decoded = execute(
+        "V4ProviderRespCompat02ProviderCompat",
+        2,
+        "v4.std.response.provider_compat",
+        json!({
+            "_provider_http_status": 200,
+            "_provider_http_content_type": "application/json",
+            "_provider_http_body": response.to_string()
+        }),
+        json!({"provider_protocol": "openai-responses"}),
+    )
+    .expect("raw provider envelope must be decoded by response plugin");
     assert_eq!(decoded, response);
 }
 
