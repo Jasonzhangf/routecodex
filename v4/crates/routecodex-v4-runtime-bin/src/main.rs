@@ -1129,7 +1129,7 @@ fn handle_responses(
             )
         })? {
         ResponsesProviderPayload::Json(value) => {
-            let value = if entry_protocol == "responses" {
+            let value = if request.path == "/v1/responses" {
                 let expected_instructions =
                     body.get("instructions").and_then(|value| value.as_str());
                 normalize_provider_response_with_instructions(
