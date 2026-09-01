@@ -8,6 +8,9 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[features]
+red-fixtures = []
+
 [dependencies]
 routecodex-v4-base-node = { path = "../routecodex-v4-base-node" }
 [dev-dependencies]
