@@ -84,7 +84,6 @@ pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
             vec![
                 "v4.response.provider_raw",
                 "v4.information.provider_protocol",
-                "v4.information.client_protocol",
             ],
             vec!["v4.response.provider_raw"],
         ),
@@ -116,18 +115,10 @@ fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         "openai-chat" => "chat",
         other => other,
     };
-    let client_protocol = ctx
-        .read_information_resource("v4.information.client_protocol")
-        .map_err(|error| error.to_string())?
-        .and_then(Value::as_str);
-    let normalized = if !matches!(client_protocol, Some("openai-responses" | "responses")) {
-        routecodex_v4_provider::normalize_provider_response_for_relay(
-            provider_protocol,
-            ctx.read_data(),
-        )
-    } else {
-        routecodex_v4_provider::normalize_provider_response(provider_protocol, ctx.read_data())
-    }
+    let normalized = routecodex_v4_provider::normalize_provider_response_for_relay(
+        provider_protocol,
+        ctx.read_data(),
+    )
     .map_err(|error| format!("{}: {}", error.code, error.message))?;
     ctx.write_data(normalized)
         .map_err(|error| error.to_string())
