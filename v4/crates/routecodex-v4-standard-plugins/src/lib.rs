@@ -765,19 +765,6 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
         codec,
         codec_proto,
         plugin(
-            "v4.std.chat_process.request_governance",
-            PluginCategory::ChatProcess,
-            "V4HubReqChatProcess03Governed",
-            "request_chat_process",
-            Some(3),
-            PluginKind::Operator,
-            PluginEffect::Semantic,
-            PluginPhase::Semantic,
-            300,
-            vec!["v4.request.normal_payload"],
-            vec!["v4.request.normal_payload"],
-        ),
-        plugin(
             "v4.std.chat_process.response_governance",
             PluginCategory::ChatProcess,
             "V4HubRespChatProcess04Governed",
@@ -1011,13 +998,12 @@ pub fn compile_production_execution_plans(
         "error",
         "control",
     ];
-    const EXCLUDED_PLUGINS: [&str; 6] = [
+    const EXCLUDED_PLUGINS: [&str; 5] = [
         "v4.std.provider.capability_mock",
         "v4.std.provider.auth_handle_mock",
         "v4.std.provider.wire_mock",
         "v4.std.provider.transport_mock",
         "v4.std.protocol.wire_codec_proto",
-        "v4.std.request.governance",
     ];
 
     let plugins = standard_plugins();
@@ -1242,14 +1228,6 @@ fn protocol_codec(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     ctx.write_data(data).map_err(|error| error.to_string())
 }
 
-fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut data = ctx.read_data().clone();
-    if let Some(object) = data.as_object_mut() {
-        object.insert("governance".to_string(), json!("request_governance"));
-    }
-    ctx.write_data(data).map_err(|error| error.to_string())
-}
-
 pub(crate) fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     ctx.read_data()
         .as_object()
@@ -1462,7 +1440,6 @@ impl StandardHandleRegistry {
                 request_plugins::wire_build,
             ),
             ("v4.std.protocol.wire_codec_proto", protocol_codec),
-            ("v4.std.chat_process.request_governance", request_governance),
             (
                 "v4.std.chat_process.response_governance",
                 response_governance,
@@ -1610,7 +1587,6 @@ mod tests {
             "v4.std.direct.response.sse_frame_boundary",
             "v4.std.request.responses_normalize",
             "v4.std.request.protocol_parse",
-            "v4.std.request.governance",
             "v4.std.request.responses_wire_build",
             "v4.hook.direct.request",
             "v4.hook.relay.request",

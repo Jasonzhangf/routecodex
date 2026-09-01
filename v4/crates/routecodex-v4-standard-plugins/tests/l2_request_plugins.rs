@@ -92,7 +92,7 @@ fn positive_request_plugins_preserve_adjacent_semantics() {
         "V4HubReqChatProcess03Governed",
         "request_chat_process",
         3,
-        "v4.std.request.governance",
+        "v4.std.chat_process.request_governance",
         normalized,
     )
     .unwrap();
@@ -132,7 +132,7 @@ fn negative_request_plugins_reject_control_leakage_and_invalid_shapes() {
         "V4HubReqChatProcess03Governed",
         "request_chat_process",
         3,
-        "v4.std.request.governance",
+        "v4.std.chat_process.request_governance",
         json!({"messages":[],"tools":{}})
     )
     .is_err());
