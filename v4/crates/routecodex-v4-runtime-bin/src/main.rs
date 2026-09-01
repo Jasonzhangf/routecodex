@@ -18,7 +18,7 @@ use routecodex_v4_lifecycle::{
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
-    build_retry_wire, send_anthropic_messages,
+    send_anthropic_messages,
     send_anthropic_messages_streaming, send_openai_chat, send_openai_chat_streaming,
     send_responses, send_responses_streaming, validate_auth_alias, write_provider_profile,
     ProviderInitAuth, ProviderInitOptions, ProviderResponseStream, V4Availability01SessionScoped,
@@ -652,6 +652,40 @@ fn models_response(manifest: &RuntimeConfigManifest) -> HttpResponse {
     )
 }
 
+fn execute_retry_wire(
+    runtime: &Arc<Mutex<SkeletonRuntime>>,
+    request_body: &str,
+    entry_protocol: &str,
+    target: &routecodex_v4_router::SelectedTarget,
+    stream: bool,
+    request_id: &str,
+    port: u16,
+    session_scope: &str,
+    conversation_scope: &str,
+    continuation_owner: &str,
+    lease: &routecodex_v4_runtime::RuntimeLease,
+) -> Result<serde_json::Value, RuntimeFault> {
+    let report = runtime
+        .lock()
+        .map_err(|_| RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"))?
+        .execute_request_json_scoped_for_target_with_lease(
+            request_body,
+            entry_protocol,
+            &target.protocol,
+            &target.wire_model,
+            stream,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            Some(continuation_owner),
+            Some(lease),
+        )?;
+    report
+        .provider_wire_value
+        .ok_or_else(|| RuntimeFault::new("request_wire_missing", "retry request chain produced no provider wire"))
+}
+
 fn route_group_for_request<'a>(
     product: &'a RuntimeProductConfig,
     request: &HttpRequest,
@@ -913,19 +947,20 @@ fn handle_responses(
                             0,
                             &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
                         ) {
-                            let retry_body = build_retry_wire(
-                                &candidate.protocol,
-                                &wire_body,
-                                &candidate.wire_model,
+                            let retry_body = execute_retry_wire(
+                                runtime,
+                                &String::from_utf8_lossy(&request.body),
+                                entry_protocol,
+                                &candidate,
                                 true,
+                                &request_id,
+                                request.port,
+                                session_scope,
+                                conversation_scope,
+                                &continuation_owner,
+                                &request_lease,
                             )
-                            .map_err(|error| {
-                                project_fault(
-                                    request,
-                                    RuntimeFault::new(&error.code, error.message),
-                                    error.status.unwrap_or(400),
-                                )
-                            })?;
+                            .map_err(|fault| project_fault(request, fault, 598))?;
                             target = candidate;
                             stream =
                                 send_target_streaming(&target, &retry_body).map_err(|error| {
@@ -1044,19 +1079,20 @@ fn handle_responses(
                     0,
                     &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
                 ) {
-                    let retry_body = build_retry_wire(
-                        &candidate.protocol,
-                        &wire_body,
-                        &candidate.wire_model,
+                    let retry_body = execute_retry_wire(
+                        runtime,
+                        &String::from_utf8_lossy(&request.body),
+                        entry_protocol,
+                        &candidate,
                         false,
+                        &request_id,
+                        request.port,
+                        session_scope,
+                        conversation_scope,
+                        &continuation_owner,
+                        &request_lease,
                     )
-                    .map_err(|error| {
-                        project_fault(
-                            request,
-                            RuntimeFault::new(&error.code, error.message),
-                            error.status.unwrap_or(400),
-                        )
-                    })?;
+                    .map_err(|fault| project_fault(request, fault, 598))?;
                     target = candidate;
                     reselected = true;
                     raw = send_target_nonstream(&target, &retry_body).map_err(|error| {
