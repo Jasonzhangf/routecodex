@@ -1129,22 +1129,27 @@ fn handle_responses(
             )
         })? {
         ResponsesProviderPayload::Json(value) => {
-            let expected_instructions = body.get("instructions").and_then(|value| value.as_str());
-            let value = normalize_provider_response_with_instructions(
-                &target.protocol,
-                &value,
-                expected_instructions,
-            )
-            .map_err(|error| {
-                project_provider_fault(
-                    request,
-                    RuntimeFault::new(&error.code, error.message),
-                    502,
-                    manifest.product.as_ref(),
-                    &target.provider_id,
-                    "",
+            let value = if entry_protocol == "responses" {
+                let expected_instructions =
+                    body.get("instructions").and_then(|value| value.as_str());
+                normalize_provider_response_with_instructions(
+                    &target.protocol,
+                    &value,
+                    expected_instructions,
                 )
-            })?;
+                .map_err(|error| {
+                    project_provider_fault(
+                        request,
+                        RuntimeFault::new(&error.code, error.message),
+                        502,
+                        manifest.product.as_ref(),
+                        &target.provider_id,
+                        "",
+                    )
+                })?
+            } else {
+                value
+            };
             let provider_raw = serde_json::to_string(&value).map_err(|error| {
                 project_fault(
                     request,
