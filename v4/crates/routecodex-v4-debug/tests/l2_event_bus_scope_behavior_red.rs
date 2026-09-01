@@ -1,3 +1,4 @@
+#![cfg(feature = "red-fixtures")]
 use routecodex_v4_debug::{SubscriptionTopic, V4Debug02BusSubscription};
 
 #[test]

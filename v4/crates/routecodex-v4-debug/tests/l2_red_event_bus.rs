@@ -1,3 +1,4 @@
+#![cfg(feature = "red-fixtures")]
 use routecodex_v4_debug::{DiagnosticEventEnvelope, ReadOnlySubscriberView, SubscriptionTopic, V4Debug02BusSubscription};
 
 #[test]
@@ -29,4 +30,3 @@ fn cross_scope_and_topic_are_not_delivered() {
     )).unwrap();
     assert!(bus.dispatch(&SubscriptionTopic::Diagnostic, "request-a").unwrap().is_empty());
 }
-#![cfg(feature = "red-fixtures")]
