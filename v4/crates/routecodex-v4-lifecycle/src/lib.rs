@@ -360,6 +360,10 @@ pub fn start_managed(
         } else {
             Stdio::from(open_log(paths)?)
         });
+    // Keep the managed child independent from the invoking shell. The parent
+    // command may return immediately in detached mode; a separate process
+    // group prevents shell teardown from terminating the listener.
+    command.process_group(0);
     append_spawn_options(&mut command, options);
     let mut child = command
         .spawn()
