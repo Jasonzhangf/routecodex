@@ -15,6 +15,7 @@ pub struct V3Config02AuthoringParsed {
     pub version: u16,
     #[serde(default)]
     pub pipelines: V3PipelinesAuthoringConfig,
+    #[serde(default)]
     pub servers: BTreeMap<String, V3ServerAuthoringConfig>,
     #[serde(default)]
     pub providers: BTreeMap<String, V3ProviderAuthoringConfig>,
@@ -504,7 +505,7 @@ pub struct V3Config03SchemaValidated {
     pub authoring: V3Config02AuthoringParsed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct V3ServerAuthoringConfig {
     #[serde(default = "default_true")]
@@ -523,7 +524,7 @@ pub struct V3ServerAuthoringConfig {
     pub expose_models: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct V3ServerExecutionAuthoringConfig {
     pub allowed_modes: Vec<String>,
@@ -534,7 +535,7 @@ pub struct V3ServerExecutionAuthoringConfig {
     pub attempt_store: V3AttemptStorePolicyAuthoringConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct V3ContinuationPolicyAuthoringConfig {
     pub allowed_owners: Vec<String>,

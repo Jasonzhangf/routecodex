@@ -63,6 +63,8 @@ fn init_interactive_and_noninteractive_write_the_same_minimal_user_config() {
             noninteractive_config.to_str().unwrap(),
             "--provider",
             "p1",
+            "--port",
+            "4444",
         ])
         .output()
         .expect("noninteractive init");
@@ -73,7 +75,13 @@ fn init_interactive_and_noninteractive_write_the_same_minimal_user_config() {
     );
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3"))
-        .args(["init", "--config", interactive_config.to_str().unwrap()])
+        .args([
+            "init",
+            "--config",
+            interactive_config.to_str().unwrap(),
+            "--port",
+            "4444",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -96,7 +104,7 @@ fn init_interactive_and_noninteractive_write_the_same_minimal_user_config() {
     assert_eq!(explicit, prompted);
     let raw = std::fs::read_to_string(&noninteractive_config).unwrap();
     assert!(!raw.contains("providers"));
-    assert!(!raw.contains("servers"));
+    assert!(raw.contains("[servers.default]"));
     assert!(!raw.contains("priority"));
     assert!(noninteractive
         .path()
@@ -131,6 +139,8 @@ fn server_status_loads_exact_config_toml_through_the_user_config_owner() {
             config.to_str().unwrap(),
             "--provider",
             "p1",
+            "--port",
+            "4444",
         ])
         .output()
         .expect("create config");
@@ -170,7 +180,7 @@ fn exact_filename_selection_never_retries_the_other_config_owner() {
         .expect("reject legacy shape under user filename");
     assert!(!rejected.status.success());
     let stderr = String::from_utf8_lossy(&rejected.stderr);
-    assert!(stderr.contains("unknown field `servers`"), "{stderr}");
+    assert!(stderr.contains("unknown field `providers`"), "{stderr}");
 
     let legacy_filename = root.path().join("config.v3.toml");
     write_legacy_config(&legacy_filename);
@@ -204,6 +214,11 @@ fn config_check_without_explicit_path_uses_home_config_toml() {
         config_root.join("config.toml"),
         r#"version = 3
 
+[servers.primary]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "routecodex_v3_4444"
+
 [route_groups.responses_v3_7777.default]
 tiers = [[{ use = "p1/m1" }]]
 
@@ -224,7 +239,7 @@ tiers = [[{ use = "p1/m1" }]]
         "{}",
         String::from_utf8_lossy(&checked.stderr)
     );
-    assert!(String::from_utf8_lossy(&checked.stdout).contains("config ok: version=3 servers=2"));
+    assert!(String::from_utf8_lossy(&checked.stdout).contains("config ok: version=3 servers=1"));
 }
 
 #[test]
@@ -239,6 +254,8 @@ fn init_rejects_unknown_model_and_preserves_existing_config_without_force() {
             config.to_str().unwrap(),
             "--provider",
             "p1",
+            "--port",
+            "4444",
             "--model",
             "missing",
         ])
@@ -254,6 +271,8 @@ fn init_rejects_unknown_model_and_preserves_existing_config_without_force() {
             config.to_str().unwrap(),
             "--provider",
             "p1",
+            "--port",
+            "4444",
         ])
         .output()
         .expect("create config");
@@ -266,6 +285,8 @@ fn init_rejects_unknown_model_and_preserves_existing_config_without_force() {
             config.to_str().unwrap(),
             "--provider",
             "p1",
+            "--port",
+            "4444",
         ])
         .output()
         .expect("repeat init");

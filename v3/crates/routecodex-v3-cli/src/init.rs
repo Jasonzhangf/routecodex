@@ -2,11 +2,11 @@
 // `rccv3 init` only selects an existing provider/model and writes minimal config.toml.
 
 use routecodex_v3_config::{
-    internal::v3_internal_user_config_authoring, V3UserConfig02RoutingSelectionParsed,
-    V3UserRouteMember, V3UserRoutePool,
+    internal::v3_internal_user_config_authoring, V3ServerAuthoringConfig,
+    V3UserConfig02RoutingSelectionParsed, V3UserRouteMember, V3UserRoutePool,
 };
 use routecodex_v3_config_mgmt::{list_provider_ids, read_provider_file, ConfigMgmtStore};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::io::{self, Write};
 
 pub struct InitOptions {
@@ -14,6 +14,9 @@ pub struct InitOptions {
     pub force: bool,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub bind: Option<String>,
+    pub port: Option<u16>,
+    pub routing_group: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +58,13 @@ pub fn run_init(options: &InitOptions) -> Result<(), String> {
         options.provider.as_deref(),
         options.model.as_deref(),
     )?;
-    let selection = minimal_user_config(&choice.provider, &choice.model);
+    let selection = minimal_user_config(
+        &choice.provider,
+        &choice.model,
+        options.bind.as_deref(),
+        options.port,
+        options.routing_group.as_deref(),
+    )?;
     ConfigMgmtStore::new(&options.config_path)
         .commit_user_routing_with_backup(&selection, "init", "rcc init")
         .map_err(|error| error.to_string())?;
@@ -148,30 +157,71 @@ fn select_provider_model(
     })
 }
 
-fn minimal_user_config(provider: &str, model: &str) -> V3UserConfig02RoutingSelectionParsed {
+fn minimal_user_config(
+    provider: &str,
+    model: &str,
+    bind: Option<&str>,
+    port: Option<u16>,
+    routing_group: Option<&str>,
+) -> Result<V3UserConfig02RoutingSelectionParsed, String> {
     let internal = v3_internal_user_config_authoring();
-    let groups = internal
-        .servers
-        .values()
-        .filter(|server| server.enabled)
-        .map(|server| server.routing_group.clone())
-        .collect::<BTreeSet<_>>();
-    let route_groups = groups
-        .into_iter()
+    let routing_group = match routing_group {
+        Some(group) if internal.route_groups.contains_key(group) => group.to_string(),
+        Some(group) => return Err(format!("unknown route group {group:?}")),
+        None => internal
+            .route_groups
+            .keys()
+            .next()
+            .cloned()
+            .ok_or_else(|| "internal config declares no route groups".to_string())?,
+    };
+    let port = port.ok_or_else(|| {
+        "init requires --port because listener ports belong to user config.toml".to_string()
+    })?;
+    if port == 0 {
+        return Err("init --port must be non-zero".to_string());
+    }
+    let bind = bind.unwrap_or("127.0.0.1").trim();
+    if bind.is_empty() {
+        return Err("init --bind must not be empty".to_string());
+    }
+    let route_groups = internal
+        .route_groups
+        .keys()
         .map(|group_id| {
-            let pools = BTreeMap::from([(
-                "default".to_string(),
-                V3UserRoutePool {
-                    tiers: vec![vec![V3UserRouteMember::new(provider, model, None)]],
-                },
-            )]);
-            (group_id, pools)
+            (
+                group_id.clone(),
+                BTreeMap::from([(
+                    "default".to_string(),
+                    V3UserRoutePool {
+                        tiers: vec![vec![V3UserRouteMember::new(provider, model, None)]],
+                    },
+                )]),
+            )
         })
         .collect();
-    V3UserConfig02RoutingSelectionParsed {
+    Ok(V3UserConfig02RoutingSelectionParsed {
         version: 3,
+        servers: BTreeMap::from([(
+            "default".to_string(),
+            V3ServerAuthoringConfig {
+                enabled: true,
+                bind: bind.to_string(),
+                port,
+                routing_group: routing_group.clone(),
+                endpoints: vec![
+                    "responses".to_string(),
+                    "anthropic".to_string(),
+                    "gemini".to_string(),
+                    "openai_chat".to_string(),
+                ],
+                features: BTreeMap::new(),
+                execution: None,
+                expose_models: Vec::new(),
+            },
+        )]),
         route_groups,
-    }
+    })
 }
 
 fn prompt(message: &str) -> Result<String, String> {
