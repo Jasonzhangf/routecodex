@@ -14,6 +14,31 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::fmt;
 
+/// Production stage checkpoints emitted by the node execution owner. These
+/// are diagnostic facts only; they never enter business data or control.
+fn stage_ids_for_node(chain: &str, node_id: &str) -> &'static [&'static str] {
+    match (chain, node_id) {
+        ("relay_request", "V4ServerReqInbound01ClientRaw") => &["request.inbound_normalize"],
+        ("relay_request", "V4HubReqInbound02Normalized") => &["request.continuation_classify"],
+        ("relay_request", "V4HubReqChatProcess03Governed") => &["request.chat_process"],
+        ("relay_request", "V4HubReqExecution04Planned") => {
+            &["request.execution_plan", "request.route_facts"]
+        }
+        ("relay_request", "V4HubReqTarget05Resolved") => &["request.target_resolve"],
+        ("relay_request", "V4HubReqOutbound06ProviderSemantic") => &["request.provider_semantic"],
+        ("relay_request", "V4ProviderReqOutbound08WirePayload") => &["request.wire_build"],
+        ("relay_request", "V4ProviderReqOutbound09TransportRequest") => &["request.transport"],
+        ("relay_response", "V4ProviderRespInbound01Raw") => &["response.provider_inbound"],
+        ("relay_response", "V4HubRespInbound03Normalized") => &["response.normalize"],
+        ("relay_response", "V4HubRespChatProcess04Governed") => {
+            &["response.response_process", "response.continuation_commit"]
+        }
+        ("relay_response", "V4HubRespOutbound05ClientSemantic") => &["response.client_projection"],
+        ("relay_response", "V4ServerRespOutbound06ClientFrame") => &["response.frame"],
+        _ => &[],
+    }
+}
+
 /// The request-local frame crossing adjacent nodes.  Data and control are
 /// separate fields by type and are never merged into a metadata/payload blob.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -206,6 +231,14 @@ impl ExecutionEngine {
                     format!("execution path revisited node {node_id}"),
                 )));
             }
+            let mut events = frame.events;
+            for stage_id in stage_ids_for_node(chain, &node_id) {
+                events.push(DiagnosticFact {
+                    kind: "stage.checkpoint".to_string(),
+                    plugin_id: "routecodex-v4-runtime".to_string(),
+                    message: (*stage_id).to_string(),
+                });
+            }
             let output = lease
                 .execute(
                     &node_id,
@@ -217,7 +250,6 @@ impl ExecutionEngine {
                     registry,
                 )
                 .map_err(|error| ExecutionError::LeaseUnavailable(error.to_string()))?;
-            let mut events = frame.events;
             events.extend(output.diagnostics);
             frame = NodeExecutionFrame::with_side_channels(
                 output.data,
