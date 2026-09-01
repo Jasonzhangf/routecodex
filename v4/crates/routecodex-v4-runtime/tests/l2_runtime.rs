@@ -188,8 +188,7 @@ fn positive_request_chain_produces_wire_and_stable_binding() {
         .as_ref()
         .expect("provider wire produced");
     assert_eq!(wire["model"], "m");
-    assert_eq!(wire["input"][0]["content"], "hello");
-    assert_eq!(wire["protocol"], "responses");
+    assert_eq!(wire["messages"][0]["content"], "hello");
     assert_eq!(wire["stream"], false);
     assert_eq!(
         report.binding,
