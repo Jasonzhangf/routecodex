@@ -1,5 +1,5 @@
 {
-  "bundle_digest": "sha256:55f22b7f9edf468ca19ce4b759eef55a6385b4f16388d4b908a230b9c5d5434a",
+  "bundle_digest": "sha256:0681d689b16389cd42591e2a82e2a84a87aa28e321c18127f0c8532e5a106124",
   "manifest_digest": "sha256:7d2b1ddb54d95f73fe4af5ce5a744def24eaa3f9371db6de3ea98ff7f5861710",
   "resources": [
     {
@@ -34,7 +34,7 @@
     },
     {
       "class": "contracts",
-      "digest": "sha256:ddc8937a00a841de964dbbc038c021aaf6a5ee1cd4b9d9800c08f12c30776bab",
+      "digest": "sha256:1650f58333fa49fcd80a24b0d6f0b50d1c7aa5825c68d0aaaee493f18c7275d9",
       "path": ".appsdk/contracts/maps/mainline-call-map.json",
       "source": "contracts/maps/mainline-call-map.json"
     },
@@ -46,7 +46,7 @@
     },
     {
       "class": "contracts",
-      "digest": "sha256:7c0ba575bf9ad3afeb53f3564979db95cd68208b35e72d9451a502c95d4c9aba",
+      "digest": "sha256:6d44bfc34e0f8b1310691e500a434dbc6243972a8951f806d02c3aeb9cf3c8c4",
       "path": ".appsdk/contracts/migrations/sdk-0.1.5-to-0.1.6.json",
       "source": "contracts/migrations/sdk-0.1.5-to-0.1.6.json"
     },
@@ -196,7 +196,7 @@
     },
     {
       "class": "docs",
-      "digest": "sha256:04a2ef7a7712364df63d198a0c2381ae1a256dbb8113c38dd9955bc75aa027a0",
+      "digest": "sha256:bcded833d2edf7dadc44ed242bc1dfaee5bfba0f3eb5d2dc26a368eae8ed8969",
       "path": ".appsdk/docs/design/appsdk-project-integration.md",
       "source": "docs/design/appsdk-project-integration.md"
     },
@@ -220,13 +220,13 @@
     },
     {
       "class": "rules",
-      "digest": "sha256:f26821b99e10c764e096629222232b799d43846a763aa8c1126ddf0c0c3ebe55",
+      "digest": "sha256:cc173da7e02d53439aade24f1b84d4fd4008c49c47ed3f91152e518facfc0138",
       "path": ".appsdk/rules/appsdk-project-governance.md",
       "source": "skills/appsdk-project-governance/SKILL.md"
     },
     {
       "class": "skills",
-      "digest": "sha256:f26821b99e10c764e096629222232b799d43846a763aa8c1126ddf0c0c3ebe55",
+      "digest": "sha256:cc173da7e02d53439aade24f1b84d4fd4008c49c47ed3f91152e518facfc0138",
       "path": ".appsdk/skills/appsdk-project-governance/SKILL.md",
       "source": "skills/appsdk-project-governance/SKILL.md"
     }
