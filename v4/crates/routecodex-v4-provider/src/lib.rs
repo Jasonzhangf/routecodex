@@ -1242,6 +1242,24 @@ pub fn normalize_provider_sse_frame(
     protocol: &str,
     frame: &[u8],
 ) -> Result<Vec<u8>, ProviderTransportError> {
+    normalize_provider_sse_frame_with_lane(protocol, frame, false)
+}
+
+/// Relay SSE may carry provider-owned Responses instructions while the
+/// client entry is Chat; strict instruction binding belongs to direct
+/// Responses runtime validation, not transport framing.
+pub fn normalize_provider_sse_frame_for_relay(
+    protocol: &str,
+    frame: &[u8],
+) -> Result<Vec<u8>, ProviderTransportError> {
+    normalize_provider_sse_frame_with_lane(protocol, frame, true)
+}
+
+fn normalize_provider_sse_frame_with_lane(
+    protocol: &str,
+    frame: &[u8],
+    allow_relay_instructions: bool,
+) -> Result<Vec<u8>, ProviderTransportError> {
     let text = std::str::from_utf8(frame).map_err(|error| ProviderTransportError {
         code: "provider_sse_utf8".to_string(),
         message: error.to_string(),
@@ -1266,7 +1284,11 @@ pub fn normalize_provider_sse_frame(
         let event = match protocol {
             "openai" | "chat" => normalize_openai_sse_event(&value),
             "anthropic" => normalize_anthropic_sse_event(&value),
-            "responses" => Some(normalize_responses_response(&value, None, false)?),
+            "responses" => Some(normalize_responses_response(
+                &value,
+                None,
+                allow_relay_instructions,
+            )?),
             other => {
                 return Err(ProviderTransportError {
                     code: "provider_protocol_unsupported".to_string(),

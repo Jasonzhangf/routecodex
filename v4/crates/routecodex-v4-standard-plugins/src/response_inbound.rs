@@ -166,7 +166,7 @@ pub enum ProviderSseEventDisposition {
 /// Adjacent provider protocol codec. Transport framing is already complete;
 /// this owner parses one Responses event into its semantic object.
 pub fn decode_provider_sse_frame(frame: &[u8]) -> Result<DecodedProviderSseFrame, String> {
-    let normalized = routecodex_v4_provider::normalize_provider_sse_frame("responses", frame)
+    let normalized = routecodex_v4_provider::normalize_provider_sse_frame_for_relay("responses", frame)
         .map_err(|error| {
             if error.code == "provider_sse_malformed" {
                 format!("provider SSE data is invalid JSON: {}", error.message)
