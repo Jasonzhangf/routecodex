@@ -1096,7 +1096,7 @@ fn validate_output(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = data
         .as_object()
         .ok_or_else(|| "output validator requires an object".to_string())?;
-    boundary::reject_control_fields(object)?;
+    boundary::reject_response_control_fields(object)?;
     ctx.emit("node.output_validated", "standard output validator");
     Ok(())
 }

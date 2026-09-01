@@ -220,7 +220,7 @@ fn client_sse_codec_rejects_control_plane_fields_before_projection() {
         true,
     )
     .expect_err("client SSE projection must reject control leakage");
-    assert!(error.contains("rejects control/debug field route_facts"));
+    assert!(error.contains("standard boundary rejects control field route_facts"));
 }
 
 #[test]

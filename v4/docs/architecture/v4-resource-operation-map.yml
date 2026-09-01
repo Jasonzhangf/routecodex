@@ -3064,6 +3064,7 @@ resources:
   verification_gate:
   - v4_plugin_contract_red
   - v4_plugin_request_boundary
+  - v4_plugin_request_plane
   resource_kind: control_boundary
   lifecycle: v4.plugin.standard_library
   owner_crate: routecodex-v4-standard-plugins

@@ -18,33 +18,8 @@ const PROVIDER_RAW_VALIDATE_PLUGIN_ID: &str = "v4.std.response.provider_raw_vali
 const PROVIDER_SSE_DECODE_PLUGIN_ID: &str = "v4.std.response.sse_frame_boundary";
 const DIRECT_SSE_DECODE_PLUGIN_ID: &str = "v4.std.direct.response.sse_frame_boundary";
 
-pub(crate) fn control_keys() -> &'static [&'static str] {
-    &[
-        "control",
-        "metadata_center",
-        "error_chain",
-        "route_facts",
-        "target_selection",
-        "payload_cycle",
-        "stopless_state",
-        "side_channel",
-        "record_ledger",
-        "debug",
-        "diagnostics",
-        "snapshot",
-        "extra_fields",
-    ]
-}
-
 pub(crate) fn reject_control_fields(object: &serde_json::Map<String, Value>) -> Result<(), String> {
-    for key in control_keys() {
-        if object.contains_key(*key) {
-            return Err(format!(
-                "rejects control/debug field {key} in response data"
-            ));
-        }
-    }
-    Ok(())
+    super::boundary::reject_response_control_fields(object)
 }
 
 fn normalize_output(value: &Value) -> Result<Value, String> {

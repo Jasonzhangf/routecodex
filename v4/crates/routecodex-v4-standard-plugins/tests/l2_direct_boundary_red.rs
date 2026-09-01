@@ -11,16 +11,15 @@ use serde_json::{json, Value};
 
 fn execute(
     node_id: &str,
+    role_id: &str,
+    chain_id: &str,
     position: u32,
     plugin_id: &str,
     data: Value,
     information: Value,
 ) -> Result<routecodex_v4_cordis_bridge::NodeExecutionOutput, NodeContainerError> {
-    let plan = compile_standard_plan(node_id, "request_outbound", "direct_request", position, &[plugin_id])
-        .unwrap_or_else(|_| {
-            compile_standard_plan(node_id, "response_outbound", "direct_response", position, &[plugin_id])
-                .expect("direct boundary plan compiles")
-        });
+    let plan = compile_standard_plan(node_id, role_id, chain_id, position, &[plugin_id])
+        .expect("direct boundary plan compiles for its declared lane");
     let hash = plan.plan_hash();
     let bindings = PlanBindings {
         graph_hash: hash.clone(),
@@ -50,6 +49,8 @@ fn positive_direct_request_wire_validate_preserves_wire_payload() {
     let payload = json!({"model":"m","input":"hello"});
     let output = execute(
         "V4DirectReq03ProviderWire",
+        "request_outbound",
+        "direct_request",
         3,
         "v4.std.direct.request.wire_validate",
         payload.clone(),
@@ -69,6 +70,8 @@ fn positive_direct_request_wire_validate_preserves_wire_payload() {
 fn negative_direct_request_wire_validate_rejects_missing_model() {
     let error = execute(
         "V4DirectReq03ProviderWire",
+        "request_outbound",
+        "direct_request",
         3,
         "v4.std.direct.request.wire_validate",
         json!({"input":"hello"}),
@@ -86,6 +89,8 @@ fn positive_direct_response_client_validate_preserves_payload_and_emits_fact() {
     let payload = json!({"type":"response.output_text.delta","id":"resp-1","delta":"hi"});
     let output = execute(
         "V4DirectResp03ClientProtocol",
+        "response_outbound",
+        "direct_response",
         3,
         "v4.std.direct.response.client_validate",
         payload.clone(),
@@ -104,6 +109,8 @@ fn positive_direct_response_client_validate_preserves_payload_and_emits_fact() {
 fn negative_direct_response_client_validate_rejects_protocol_mismatch() {
     let error = execute(
         "V4DirectResp03ClientProtocol",
+        "response_outbound",
+        "direct_response",
         3,
         "v4.std.direct.response.client_validate",
         json!({"id":"resp-1"}),
