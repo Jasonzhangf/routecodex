@@ -401,6 +401,7 @@ fn information_resource_key(resource_id: &str) -> Option<&'static str> {
         "v4.information.execution_lane" => Some("execution_lane"),
         "v4.information.client_protocol" => Some("client_protocol"),
         "v4.information.provider_protocol" => Some("provider_protocol"),
+        "v4.information.stream_terminal" => Some("stream_terminal"),
         _ => None,
     }
 }
