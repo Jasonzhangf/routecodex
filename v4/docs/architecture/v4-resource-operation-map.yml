@@ -259,8 +259,6 @@ resources:
   - V4HubReqOutbound06ProviderSemantic
   - V4ProviderReqCompat07ProviderCompat
   - V4ProviderReqOutbound08WirePayload
-  - V4HubReqOutbound06ProviderSemantic
-  - V4ProviderReqCompat07ProviderCompat
   - V4ProviderRespCompat02ProviderCompat
   - V4HubRespOutbound05ClientSemantic
   forbidden_writers:

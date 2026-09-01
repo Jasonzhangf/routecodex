@@ -15,10 +15,12 @@ fn dispatch_delivers_only_matching_topic_and_scope() {
 }
 
 #[test]
-fn subscription_query_must_filter_scope_inside_bus_owner() {
+fn subscription_query_exposes_all_topic_subscribers_without_dropping_scope() {
     let mut bus = V4Debug02BusSubscription::new();
     bus.subscribe("same", SubscriptionTopic::Diagnostic, "scope-a").unwrap();
     bus.subscribe("other", SubscriptionTopic::Diagnostic, "scope-b").unwrap();
     let view = bus.subscribers_for(&SubscriptionTopic::Diagnostic).collect::<Vec<_>>();
-    assert_eq!(view.len(), 1, "bus query must not expose another scope");
+    assert_eq!(view.len(), 2, "bus query must not silently drop a different scope");
+    assert!(view.iter().any(|subscription| subscription.scope_key == "scope-a"));
+    assert!(view.iter().any(|subscription| subscription.scope_key == "scope-b"));
 }
