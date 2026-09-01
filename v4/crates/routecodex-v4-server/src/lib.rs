@@ -103,12 +103,28 @@ pub trait HttpHandler {
 /// Records are diagnostic side-channel data; request/response payloads never
 /// flow through this store.
 pub fn persist_request_record(request: &HttpRequest, status: u16) -> Result<(), String> {
+    persist_request_record_fields(
+        &request.request_id,
+        &request.server_id,
+        request.port,
+        &request.path,
+        status,
+    )
+}
+
+fn persist_request_record_fields(
+    request_id: &str,
+    server_id: &str,
+    port: u16,
+    endpoint: &str,
+    status: u16,
+) -> Result<(), String> {
     let home = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
         .ok_or_else(|| "HOME is required for request record persistence".to_string())?;
     let path = home
         .join(".rcc/logs")
-        .join(format!("server-v4-{}.request-records.jsonl", request.port));
+        .join(format!("server-v4-{port}.request-records.jsonl"));
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -122,20 +138,20 @@ pub fn persist_request_record(request: &HttpRequest, status: u16) -> Result<(), 
         "error"
     };
     let row = serde_json::json!({
-        "request_key": format!("{}:{}", request.port, request.request_id),
+        "request_key": format!("{port}:{request_id}"),
         "event_type": if result == "success" { "request.completed" } else { "request.failed" },
         "started_epoch_ms": now,
         "updated_epoch_ms": now,
         "finished_epoch_ms": now,
         "duration_ms": 0,
         "meta": {
-            "request_id": request.request_id,
-            "endpoint": request.path,
+            "request_id": request_id,
+            "endpoint": endpoint,
             "response_status": if result == "success" { "completed" } else { "error" },
             "provider_status": status,
             "finish_reason": if result == "success" { "stop" } else { "error" }
         },
-        "scope": { "port": request.port, "session": request.server_id },
+        "scope": { "port": port, "session": server_id },
         "result": result,
         "attempts": 1,
         "failed_attempts": if result == "success" { 0 } else { 1 },
@@ -344,6 +360,10 @@ async fn serve_async_connection<H: AsyncHttpHandler>(
         server_id: request_identity.server_id,
         port,
     };
+    let record_request_id = request.request_id.clone();
+    let record_server_id = request.server_id.clone();
+    let record_endpoint = request.path.clone();
+    let record_port = request.port;
     let cancellation = server_stop.child_token();
     let response = handler.handle_async(request, cancellation.clone()).await;
     let streaming = response.stream.is_some();
@@ -410,6 +430,14 @@ async fn serve_async_connection<H: AsyncHttpHandler>(
     } else if stream.write_all(&response.body).await.is_err() {
         cancellation.cancel();
     }
+    persist_request_record_fields(
+        &record_request_id,
+        &record_server_id,
+        record_port,
+        &record_endpoint,
+        response.status,
+    )
+        .map_err(|error| std::io::Error::other(format!("request record persistence failed: {error}")))?;
     Ok(())
 }
 

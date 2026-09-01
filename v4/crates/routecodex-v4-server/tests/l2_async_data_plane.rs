@@ -110,6 +110,26 @@ async fn async_server_binds_and_stops_without_blocking_accept() {
     task.await.expect("join").expect("clean stop");
 }
 
+#[tokio::test]
+async fn async_admission_persists_request_record_after_response() {
+    let server = AsyncHttpServer::bind("127.0.0.1:0").await.expect("bind");
+    let address = server.local_address().expect("address");
+    let port = address.rsplit(':').next().expect("port").parse::<u16>().expect("port");
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(server.run_until(Arc::new(Handler), stop.clone()));
+    let response = request(address, "/persist").await;
+    assert!(response.starts_with("HTTP/1.1 200"));
+    let path = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .expect("HOME")
+        .join(".rcc/logs")
+        .join(format!("server-v4-{port}.request-records.jsonl"));
+    let records = std::fs::read_to_string(path).expect("async request record");
+    assert!(records.contains("/persist"));
+    stop.cancel();
+    task.await.expect("join").expect("clean stop");
+}
+
 struct OneChunk {
     sent: bool,
 }
