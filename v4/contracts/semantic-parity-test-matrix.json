@@ -1,0 +1,31 @@
+{
+  "status": "red_baseline",
+  "stages": [
+    {"id":"request.inbound_normalize","test":"request_inbound_normalize"},
+    {"id":"request.continuation_classify","test":"request_continuation_classify"},
+    {"id":"request.chat_process","test":"request_chat_process"},
+    {"id":"request.execution_plan","test":"request_execution_plan"},
+    {"id":"request.route_facts","test":"request_route_facts"},
+    {"id":"request.target_resolve","test":"request_target_resolve"},
+    {"id":"request.provider_semantic","test":"request_provider_semantic"},
+    {"id":"request.wire_build","test":"request_wire_build"},
+    {"id":"request.transport","test":"request_transport"},
+    {"id":"response.provider_inbound","test":"response_provider_inbound"},
+    {"id":"response.normalize","test":"response_normalize"},
+    {"id":"response.response_process","test":"response_response_process"},
+    {"id":"response.continuation_commit","test":"response_continuation_commit"},
+    {"id":"response.client_projection","test":"response_client_projection"},
+    {"id":"response.frame","test":"response_frame"},
+    {"id":"error.source","test":"error_source"},
+    {"id":"error.capture","test":"error_capture"},
+    {"id":"error.classify","test":"error_classify"},
+    {"id":"error.policy","test":"error_policy"},
+    {"id":"error.decision","test":"error_decision"},
+    {"id":"error.projection","test":"error_projection"},
+    {"id":"config.authoring","test":"config_authoring"},
+    {"id":"config.parse","test":"config_parse"},
+    {"id":"config.validate","test":"config_validate"},
+    {"id":"config.registry","test":"config_registry"},
+    {"id":"config.manifest","test":"config_manifest"}
+  ]
+}
