@@ -180,12 +180,13 @@ pub fn materialize_execution_epoch_bundle(
     if candidate.nodes.is_empty() {
         return Err(MaterializationError::InvalidIdentity("nodes".to_string()));
     }
-    const PRODUCTION_CHAINS: [&str; 5] = [
+    const PRODUCTION_CHAINS: [&str; 6] = [
         "direct_request",
         "direct_response",
         "relay_request",
         "relay_response",
         "error",
+        "control",
     ];
     for chain in PRODUCTION_CHAINS {
         let expected = candidate

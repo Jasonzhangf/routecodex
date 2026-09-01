@@ -247,7 +247,7 @@ fn negative_scope_consume_rejects_non_object_control() {
         "V4MetadataCenter01ScopeRegistry",
         "control_center",
         "control",
-        0,
+        1,
         &["v4.std.control.scope_consume"],
     )
     .expect("scope plan compiles");
@@ -288,7 +288,7 @@ fn positive_scope_consume_records_object_control_carrier() {
         "V4MetadataCenter01ScopeRegistry",
         "control_center",
         "control",
-        0,
+        1,
         &["v4.std.control.scope_consume"],
     )
     .expect("scope plan compiles");
@@ -412,7 +412,7 @@ fn negative_scope_consume_rejects_missing_metadata_center() {
         "V4MetadataCenter01ScopeRegistry",
         "control_center",
         "control",
-        0,
+        1,
         "v4.std.control.scope_consume",
         "metadata center",
     );
@@ -424,7 +424,7 @@ fn negative_payload_cycle_record_rejects_missing_payload_cycle() {
         "V4PayloadCycleRegistry",
         "control_center",
         "control",
-        0,
+        2,
         "v4.std.control.payload_cycle_record",
         "payload cycle",
     );

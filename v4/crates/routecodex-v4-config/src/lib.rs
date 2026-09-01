@@ -1229,7 +1229,11 @@ fn compile_runtime_execution_epoch(
     let mut pipelines = serde_json::Map::new();
     let mut entrypoints = serde_json::Map::new();
     let mut nodes = Vec::new();
-    for chain in skeleton.chains.iter().filter(|chain| chain.chain_id != "config") {
+    for chain in skeleton
+        .chains
+        .iter()
+        .filter(|chain| chain.chain_id != "config")
+    {
         let node_ids = chain
             .nodes
             .iter()
@@ -1280,6 +1284,10 @@ fn compile_runtime_execution_epoch(
                     "v4.response.client_object",
                 ),
                 "error" => ("v4.control.error_chain", "v4.control.error_chain"),
+                "control" => (
+                    "v4.control.metadata_center",
+                    "v4.lifecycle.payload_cycle",
+                ),
                 other => {
                     return Err(RuntimeConfigError::ExecutionEpoch(format!(
                         "unsupported production chain {other}"

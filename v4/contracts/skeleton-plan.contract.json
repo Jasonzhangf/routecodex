@@ -15,7 +15,7 @@
   },
   "manifest_hash": "sha256:pending-config-v2-manifest",
   "plan_epoch": 2,
-  "plan_hash": "sha256:21519488d70d238d260d47086ba7a0a5f2d77d63d5fc4f2f2db084f3e3bb5599",
+  "plan_hash": "sha256:25c0d0ebf2f61543de668ba9b1c3a22c8763749654810e374bf374f7fbe46aa0",
   "direct_protocol_contract": {
     "same_protocol": true,
     "mismatch": "fail_fast"
@@ -200,6 +200,24 @@
         {"node_id": "V4Config03SchemaValidated", "semantic": "validated", "owner": "routecodex-v4-config::validate_v4_config_03_from_v4_config_02"},
         {"node_id": "V4Config04ResourceRegistryBuilt", "semantic": "registry_built", "owner": "routecodex-v4-config::build_v4_config_04_from_v4_config_03"},
         {"node_id": "V4Config05ManifestPublished", "semantic": "manifest_published", "owner": "routecodex-v4-config::publish_v4_config_05_from_v4_config_04"}
+      ]
+    },
+    {
+      "chain_id": "control",
+      "nodes": [
+        {"node_id": "V4MetadataCenter01ScopeRegistry", "chain": "control", "position": 1, "role_id": "control_center", "terminal": false, "kernel": true, "plugins": [
+          {"plugin_id": "v4.std.control.scope_consume", "effects": ["control"]}
+        ]},
+        {"node_id": "V4PayloadCycleRegistry", "chain": "control", "position": 2, "role_id": "control_center", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "v4.std.control.payload_cycle_record", "effects": ["control"]}
+        ]}
+      ],
+      "edges": [
+        {"from": "V4MetadataCenter01ScopeRegistry", "to": "V4PayloadCycleRegistry", "direction": "forward"}
+      ],
+      "checkpoints": [
+        {"node_id": "V4MetadataCenter01ScopeRegistry", "semantic": "scope_consume_terminal", "owner": "routecodex-v4-control::MetadataCenter::scope_consume"},
+        {"node_id": "V4PayloadCycleRegistry", "semantic": "payload_cycle_record_terminal", "owner": "routecodex-v4-runtime::PayloadCycleRegistry::record"}
       ]
     }
   ]

@@ -55,6 +55,7 @@ fn candidate() -> Value {
     let relay_request = plan("relay-request-1", "relay_request", 1);
     let relay_response = plan("relay-response-1", "relay_response", 1);
     let error = plan("error-1", "error", 1);
+    let control = plan("control-1", "control", 1);
     json!({
         "schema_version": 1,
         "candidate_id": "candidate-1",
@@ -68,21 +69,24 @@ fn candidate() -> Value {
             "direct_response": "direct-response-1",
             "relay_request": "relay-request-1",
             "relay_response": "relay-response-1",
-            "error": "error-1"
+            "error": "error-1",
+            "control": "control-1"
         },
         "pipelines": {
             "direct_request": ["direct-request-1"],
             "direct_response": ["direct-response-1"],
             "relay_request": ["relay-request-1"],
             "relay_response": ["relay-response-1"],
-            "error": ["error-1"]
+            "error": ["error-1"],
+            "control": ["control-1"]
         },
         "nodes": [
             {"node_id": "direct-request-1", "plan_hash": direct_request.hash, "input_resource": "direct.request.in", "output_resource": "direct.request.out", "allowed_edges": {}, "plan": direct_request},
             {"node_id": "direct-response-1", "plan_hash": direct_response.hash, "input_resource": "direct.response.in", "output_resource": "direct.response.out", "allowed_edges": {}, "plan": direct_response},
             {"node_id": "relay-request-1", "plan_hash": relay_request.hash, "input_resource": "relay.request.in", "output_resource": "relay.request.out", "allowed_edges": {}, "plan": relay_request},
             {"node_id": "relay-response-1", "plan_hash": relay_response.hash, "input_resource": "relay.response.in", "output_resource": "relay.response.out", "allowed_edges": {}, "plan": relay_response},
-            {"node_id": "error-1", "plan_hash": error.hash, "input_resource": "error.in", "output_resource": "error.out", "allowed_edges": {}, "plan": error}
+            {"node_id": "error-1", "plan_hash": error.hash, "input_resource": "error.in", "output_resource": "error.out", "allowed_edges": {}, "plan": error},
+            {"node_id": "control-1", "plan_hash": control.hash, "input_resource": "control.in", "output_resource": "control.out", "allowed_edges": {}, "plan": control}
         ],
         "policies": {
             "direct_same_protocol": true,
@@ -103,6 +107,7 @@ fn exact_compiled_candidate_materializes_in_cordis_order() {
     assert_eq!(lease.entrypoint("relay_request").unwrap(), "relay-request-1");
     assert_eq!(lease.entrypoint("relay_response").unwrap(), "relay-response-1");
     assert_eq!(lease.entrypoint("error").unwrap(), "error-1");
+    assert_eq!(lease.entrypoint("control").unwrap(), "control-1");
 }
 
 #[test]

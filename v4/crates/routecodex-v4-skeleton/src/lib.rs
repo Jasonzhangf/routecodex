@@ -321,7 +321,7 @@ mod tests {
         .expect("contract file");
         let plan = SkeletonPlan::from_contract_json(&json).expect("real contract must load");
         assert_eq!(plan.skeleton_version, SKELETON_VERSION);
-        assert_eq!(plan.chains.len(), 6);
+        assert_eq!(plan.chains.len(), 7);
         assert!(plan.verify().is_ok());
     }
 

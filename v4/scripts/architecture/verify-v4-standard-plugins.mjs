@@ -103,6 +103,9 @@ const NODE_PERMISSIONS = new Map([
   ['V4DirectReq01ClientProtocol', {
     reads: ['v4.direct.request.client_payload'], writes: [],
   }],
+  ['V4DirectReq03ProviderWire', {
+    reads: ['v4.direct.request.provider_wire'], writes: [],
+  }],
   ['V4DirectResp01ProviderRaw', {
     reads: ['v4.direct.response.provider_raw'], writes: [],
   }],
@@ -122,6 +125,17 @@ const NODE_PERMISSIONS = new Map([
     ],
     writes: ['v4.direct.response.client_payload'],
   }],
+  ['V4DirectResp03ClientProtocol', {
+    reads: [
+      'v4.direct.response.client_payload',
+      'v4.information.client_protocol',
+      'v4.information.provider_protocol',
+    ],
+    writes: [],
+  }],
+  ['V4ServerReqInbound01ClientRaw', {
+    reads: ['v4.request.normal_payload'], writes: [],
+  }],
   ['V4HubReqInbound02Normalized', {
     reads: ['v4.request.normal_payload'], writes: [],
   }],
@@ -137,6 +151,9 @@ const NODE_PERMISSIONS = new Map([
       'v4.information.provider_protocol',
     ],
     writes: ['v4.response.provider_raw'],
+  }],
+  ['V4ProviderRespInbound01Raw', {
+    reads: ['v4.response.provider_raw'], writes: [],
   }],
   ['V4HubRespChatProcess04Governed', {
     reads: ['v4.response.normal_payload'],
@@ -183,6 +200,18 @@ const NODE_PERMISSIONS = new Map([
     reads: ['v4.lifecycle.payload_cycle'], writes: ['v4.lifecycle.payload_cycle'],
   }],
   ['V4Error01SourceRaised', {
+    reads: ['v4.control.error_chain'], writes: ['v4.control.error_chain'],
+  }],
+  ['V4Error02HostCaptured', {
+    reads: ['v4.control.error_chain'], writes: ['v4.control.error_chain'],
+  }],
+  ['V4Error03RuntimeClassified', {
+    reads: ['v4.control.error_chain'], writes: ['v4.control.error_chain'],
+  }],
+  ['V4Error04RouterPolicyApplied', {
+    reads: ['v4.control.error_chain'], writes: ['v4.control.error_chain'],
+  }],
+  ['V4Error05ExecutionDecision', {
     reads: ['v4.control.error_chain'], writes: ['v4.control.error_chain'],
   }],
   ['V4Error06ClientProjected', {
@@ -241,9 +270,13 @@ function functionBody(source, functionName) {
 function parseNodePermissionFunction(source, functionName) {
   const body = functionBody(source, functionName);
   const permissions = new Map();
-  const armPattern = /"([^"]+)"\s*=>\s*(?:\{\s*(vec!\[[\s\S]*?\]|Vec::new\(\))\s*\}|(vec!\[[\s\S]*?\]|Vec::new\(\))\s*,)/g;
+  const armPattern = /((?:"[^"]+"\s*\|\s*)*"[^"]+")\s*=>\s*(?:\{\s*(vec!\[[\s\S]*?\]|Vec::new\(\))\s*\}|(vec!\[[\s\S]*?\]|Vec::new\(\))\s*,)/g;
   for (const match of body.matchAll(armPattern)) {
-    permissions.set(match[1], parseStringVector(match[2] ?? match[3]));
+    const nodeIds = [...match[1].matchAll(/"([^"]+)"/g)].map((node) => node[1]);
+    const permissionSet = parseStringVector(match[2] ?? match[3]);
+    for (const nodeId of nodeIds) {
+      permissions.set(nodeId, permissionSet);
+    }
   }
   return permissions;
 }
@@ -536,8 +569,8 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 34) {
-      failures.push(`${MODULE}: expected 34 active standard descriptors, got ${activeDescriptors.length}`);
+    if (activeDescriptors.length !== 43) {
+      failures.push(`${MODULE}: expected 43 active standard descriptors, got ${activeDescriptors.length}`);
     }
     if (!activeDescriptors.some(
       (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',

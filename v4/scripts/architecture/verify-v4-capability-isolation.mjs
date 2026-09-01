@@ -61,19 +61,19 @@ if (routeDecision) {
   }
 }
 const providerSemantic = byId.get('v4.request.provider_semantic');
-if (providerSemantic) {
-  const readers = new Set(providerSemantic.allowed_readers ?? []);
-  if (readers.size !== 1 || !readers.has('V4ProviderReqCompat06Compat')) {
-    failures.push('resource map: V4ProviderReqCompat06Compat must be the only reader of provider semantic');
+  if (providerSemantic) {
+    const readers = new Set(providerSemantic.allowed_readers ?? []);
+    if (readers.size !== 2 || !readers.has('V4ProviderReqCompat07ProviderCompat') || !readers.has('V4ProviderReqOutbound08WirePayload')) {
+      failures.push('resource map: provider semantic must only be read by adjacent outbound compat/wire nodes');
+    }
   }
-}
-const providerWire = byId.get('v4.request.provider_wire_payload');
-if (providerWire) {
-  const readers = new Set(providerWire.allowed_readers ?? []);
-  if (readers.size !== 1 || !readers.has('V4ProviderSseOut07WireBoundary')) {
-    failures.push('resource map: V4ProviderSseOut07WireBoundary must be the only reader of provider wire payload');
+  const providerWire = byId.get('v4.request.provider_wire_payload');
+  if (providerWire) {
+    const readers = new Set(providerWire.allowed_readers ?? []);
+    if (readers.size !== 2 || !readers.has('V4ProviderReqOutbound08WirePayload') || !readers.has('V4ProviderReqOutbound09TransportRequest')) {
+      failures.push('resource map: provider wire payload must only be read by adjacent outbound wire/transport nodes');
+    }
   }
-}
 
 if (failures.length > 0) {
   console.error('[v4_parity_gate_capability_isolation] FAIL');
