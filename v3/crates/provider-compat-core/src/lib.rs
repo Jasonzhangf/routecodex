@@ -1286,7 +1286,7 @@ fn collect_json_candidates(text: &str) -> Vec<String> {
             }
         }
     }
-    if candidates.is_empty() && (text.contains("tool_calls") || text.contains("\"name\"")) {
+    if candidates.is_empty() && text.contains("tool_calls") {
         let mut index = 0usize;
         while index < text.len() {
             let Some(ch) = text[index..].chars().next() else {
@@ -1576,12 +1576,48 @@ fn harvest_text_tool_calls(payload: Value) -> Result<Value, String> {
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or(0);
+    reject_malformed_text_tool_envelope(root)?;
     if choices_len > 0 {
         harvest_chat_choices_in_place(root);
     } else {
         harvest_responses_output_in_place(root);
     }
     Ok(payload)
+}
+
+fn reject_malformed_text_tool_envelope(root: &Map<String, Value>) -> Result<(), String> {
+    let mut text = String::new();
+    for value in root.values() {
+        collect_response_text(value, &mut text);
+    }
+    let has_tool_marker = text.contains("<invoke")
+        || text.contains("</invoke>")
+        || text.contains("<tool_call")
+        || text.contains("</tool_call>");
+    if has_tool_marker && parse_text_tool_calls(&text).is_empty() {
+        return Err("malformed text tool-call envelope".to_string());
+    }
+    Ok(())
+}
+
+fn collect_response_text(value: &Value, text: &mut String) {
+    match value {
+        Value::String(value) => {
+            text.push_str(value);
+            text.push('\n');
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_response_text(value, text);
+            }
+        }
+        Value::Object(object) => {
+            for value in object.values() {
+                collect_response_text(value, text);
+            }
+        }
+        _ => {}
+    }
 }
 
 const CC_DIAGNOSTIC_ROUTING_MARKER: &str = "检测到请求较复杂已自动路由到硬推理模型";
@@ -1813,6 +1849,32 @@ mod tests {
                 .unwrap_or(""),
             "{\"cmd\":\"pwd\"}"
         );
+    }
+
+    #[test]
+    fn minimax_response_profile_rejects_malformed_text_tool_envelope() {
+        let input = ReqOutboundCompatInput {
+            payload: json!({
+                "object": "response",
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{
+                        "type": "output_text",
+                        "text": "<get_goal></invoke></tool_call>"
+                    }]
+                }]
+            }),
+            adapter_context: AdapterContext {
+                compatibility_profile: Some("chat:minimax".to_string()),
+                provider_protocol: Some("openai-responses".to_string()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        };
+        let error = run_resp_inbound_stage3_compat(input)
+            .expect_err("malformed tool syntax must fail fast");
+        assert!(error.contains("malformed text tool-call envelope"));
     }
 
     #[test]
@@ -2132,5 +2194,41 @@ mod tests {
             result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
             "exec_command"
         );
+    }
+
+    #[test]
+    fn minimax_response_profile_does_not_harvest_ordinary_anthropic_wrapper_text() {
+        let wrapper = r#"{"name":"probe","arguments":"{\"cmd\":\"ping\",\"reason\":\"执行 ping 命令进行探测\"}"}"#;
+        let input = ReqOutboundCompatInput {
+            payload: json!({
+                "id":"resp_ordinary_wrapper",
+                "status":"completed",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":wrapper}]
+                }]
+            }),
+            adapter_context: AdapterContext {
+                compatibility_profile: Some("chat:minimax".to_string()),
+                provider_protocol: Some("openai-responses".to_string()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        };
+
+        let result = run_resp_inbound_stage3_compat(input).unwrap();
+        assert_eq!(result.payload["output"][0]["type"], "message");
+        assert_eq!(result.payload["output"][0]["content"][0]["text"], wrapper);
+        assert!(result.payload["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| {
+                !matches!(
+                    item["type"].as_str(),
+                    Some("function_call" | "custom_tool_call" | "tool_call")
+                )
+            }));
     }
 }

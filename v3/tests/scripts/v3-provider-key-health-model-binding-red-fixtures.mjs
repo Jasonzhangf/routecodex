@@ -12,7 +12,7 @@ async function runMutation(mutate) {
   await cp(join(sourceRoot, 'docs'), join(root, 'docs'), { recursive: true });
   await cp(join(sourceRoot, 'v3'), join(root, 'v3'), {
     recursive: true,
-    filter: (source) => !source.includes('/target/'),
+    filter: (source) => !source.includes('/target/') && !source.includes('/build-control/'),
   });
   await mutate(root);
   return spawnSync(process.execPath, [script.pathname], {

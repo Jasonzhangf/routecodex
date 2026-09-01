@@ -24,11 +24,53 @@ fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
     let guidance = payload["tools"][0]["description"].as_str().unwrap();
     assert!(guidance.contains("工具调用协议（只适用于本轮工具调用"));
     assert!(guidance.contains("工具参数 JSON 对象本层"));
-    assert!(guidance.contains("Anthropic 的 `input`、Responses/Chat 的 `arguments`"));
+    assert!(guidance.contains("Responses/Chat 的 `arguments`"));
+    assert!(!guidance.contains("Anthropic native"));
+    assert!(!guidance.contains("tool_use.input"));
+    assert!(guidance.contains("不超过 50 个字符"));
     assert!(guidance.contains("goal_alignment_confidence"));
     assert!(guidance.contains("model_id"));
-    assert!(guidance.contains("可选字段不要用占位值"));
+    assert!(guidance.contains("必须同时填写"));
+    assert!(!guidance.contains("可选"));
+    assert!(!guidance.contains("如提供"));
     assert_eq!(payload["tools"][1]["description"], "internal");
+    assert!(payload["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("不超过 50 个字符"));
+}
+
+#[test]
+fn req04_tool_thinking_keeps_apply_patch_raw_and_outside_reason_contract() {
+    let mut payload = json!({
+        "tools": [{
+            "type":"custom",
+            "name":"apply_patch",
+            "description":"Apply one raw patch string",
+            "format":{"type":"grammar","syntax":"lark","definition":"start: patch"}
+        }, {
+            "type":"function",
+            "name":"pwd",
+            "description":"Show the current directory",
+            "parameters":{"type":"object","properties":{}}
+        }]
+    });
+
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject");
+
+    let apply_patch = &payload["tools"][0];
+    assert_eq!(apply_patch["type"], "custom");
+    assert_eq!(apply_patch["name"], "apply_patch");
+    assert!(!apply_patch.to_string().contains("\"reason\""));
+    assert!(!apply_patch
+        .to_string()
+        .contains("工具调用协议（只适用于本轮工具调用"));
+
+    let pwd = &payload["tools"][1];
+    assert!(pwd
+        .to_string()
+        .contains("工具调用协议（只适用于本轮工具调用"));
 }
 
 #[test]
@@ -115,6 +157,19 @@ fn req04_tool_thinking_guidance_is_not_injected_twice() {
 }
 
 #[test]
+fn req04_tool_thinking_guidance_mounts_anthropic_system_prompt() {
+    let mut payload = json!({
+        "system": "existing system",
+        "tools": [{"name":"exec","description":"run","input_schema":{"type":"object"}}]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject");
+    let system = payload["system"].as_str().unwrap();
+    assert!(system.starts_with("existing system\n\n"));
+    assert!(system.contains("不超过 50 个字符"));
+}
+
+#[test]
 fn req04_tool_thinking_injects_into_canonical_chat_system_message() {
     let mut payload = json!({
         "messages": [
@@ -125,7 +180,7 @@ fn req04_tool_thinking_injects_into_canonical_chat_system_message() {
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject into canonical chat system");
-    let content = payload["tools"][0]["description"].as_str().unwrap();
+    let content = payload["messages"][0]["content"].as_str().unwrap();
     assert!(content.contains("工具调用协议（只适用于本轮工具调用"));
     assert_eq!(payload["messages"].as_array().unwrap().len(), 2);
 }
@@ -169,7 +224,7 @@ fn req04_tool_thinking_injects_only_current_system_message() {
         .as_str()
         .unwrap()
         .contains("工具调用协议"));
-    assert!(!payload["messages"][2]["content"]
+    assert!(payload["messages"][2]["content"]
         .as_str()
         .unwrap()
         .contains("工具调用协议"));
@@ -232,6 +287,13 @@ fn req04_tool_thinking_reaches_anthropic_wire_system_field() {
         "wire: {wire}"
     );
     assert!(
+        wire["system"]
+            .as_str()
+            .unwrap()
+            .contains("不超过 50 个字符"),
+        "wire: {wire}"
+    );
+    assert!(
         tool_description.contains("goal_alignment_confidence"),
         "wire: {wire}"
     );
@@ -249,6 +311,10 @@ fn req04_tool_thinking_injects_anthropic_tool_list_and_parameter_schema() {
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject into Anthropic system");
+    assert!(payload["system"]
+        .as_str()
+        .unwrap()
+        .contains("不超过 50 个字符"));
     assert!(payload["tools"][0]["description"]
         .as_str()
         .unwrap()
@@ -268,10 +334,10 @@ fn req04_tool_thinking_injects_anthropic_tool_list_and_parameter_schema() {
     assert!(required
         .iter()
         .any(|value| value.as_str() == Some("reason")));
-    assert!(!required
+    assert!(required
         .iter()
         .any(|value| value.as_str() == Some("goal_alignment_confidence")));
-    assert!(!required
+    assert!(required
         .iter()
         .any(|value| value.as_str() == Some("model_id")));
 }
@@ -301,12 +367,12 @@ fn req04_tool_thinking_injects_every_present_native_schema_shape() {
             .is_some_and(|required| required
                 .iter()
                 .any(|value| value.as_str() == Some("reason"))));
-        assert!(!schema["required"]
+        assert!(schema["required"]
             .as_array()
             .is_some_and(|required| required
                 .iter()
                 .any(|value| value.as_str() == Some("goal_alignment_confidence"))));
-        assert!(!schema["required"]
+        assert!(schema["required"]
             .as_array()
             .is_some_and(|required| required
                 .iter()
@@ -340,6 +406,14 @@ fn req04_tool_thinking_recurses_into_namespace_tools_before_provider_flattening(
     assert!(schema["required"]
         .as_array()
         .is_some_and(|required| required.iter().any(|value| value == "reason")));
+    assert!(schema["required"]
+        .as_array()
+        .is_some_and(|required| required
+            .iter()
+            .any(|value| value == "goal_alignment_confidence")));
+    assert!(schema["required"]
+        .as_array()
+        .is_some_and(|required| required.iter().any(|value| value == "model_id")));
 }
 
 #[test]
@@ -347,7 +421,7 @@ fn req04_tool_thinking_custom_tool_compiles_provider_wrapper() {
     let mut payload = json!({
         "tools": [{
             "type": "custom",
-            "name": "apply_patch",
+            "name": "custom_text_tool",
             "description": "raw patch",
             "format": {"type":"text"}
         }]
@@ -355,7 +429,7 @@ fn req04_tool_thinking_custom_tool_compiles_provider_wrapper() {
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("custom tool guidance must inject");
     assert_eq!(payload["tools"][0]["type"], "function");
-    assert_eq!(payload["tools"][0]["function"]["name"], "apply_patch");
+    assert_eq!(payload["tools"][0]["function"]["name"], "custom_text_tool");
     let parameters = &payload["tools"][0]["function"]["parameters"];
     assert_eq!(parameters["properties"]["input"]["type"], "string");
     assert_eq!(parameters["properties"]["reason"]["type"], "string");
@@ -365,6 +439,64 @@ fn req04_tool_thinking_custom_tool_compiles_provider_wrapper() {
     assert!(parameters["required"]
         .as_array()
         .is_some_and(|required| required.iter().any(|value| value == "reason")));
+    assert!(parameters["required"]
+        .as_array()
+        .is_some_and(|required| required
+            .iter()
+            .any(|value| value == "goal_alignment_confidence")));
+    assert!(parameters["required"]
+        .as_array()
+        .is_some_and(|required| required.iter().any(|value| value == "model_id")));
+}
+
+#[test]
+fn req04_tool_thinking_requires_true_model_self_report_without_request_identity_binding() {
+    let mut payload = json!({
+        "model": "client-route-alias",
+        "request_id": "request-identity-must-not-be-model-id",
+        "tools": [{
+            "type": "function",
+            "name": "pwd",
+            "parameters": {"type":"object","properties":{}}
+        }, {
+            "type": "custom",
+            "name": "custom_text_tool",
+            "format": {"type":"text"}
+        }]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject");
+    let native_description = payload["tools"][0]["parameters"]["properties"]["model_id"]
+        ["description"]
+        .as_str()
+        .expect("model_id description");
+    let custom_description = payload["tools"][1]["function"]["parameters"]["properties"]
+        ["model_id"]["description"]
+        .as_str()
+        .expect("custom model_id description");
+    for description in [native_description, custom_description] {
+        assert!(description.contains("自身当前真实的模型 ID"));
+        assert!(description.contains("不得复制或推导"));
+        assert!(!description.contains("client-route-alias"));
+        assert!(!description.contains("request-identity-must-not-be-model-id"));
+    }
+    let payload_text = payload.to_string();
+    assert!(!payload_text.contains("<本次 provider-bound 请求的精确 model 值>"));
+}
+
+#[test]
+fn req04_tool_thinking_guidance_requires_model_self_report_in_both_protocols() {
+    for guidance in [
+        V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE,
+        V3_TOOL_THINKING_ANTHROPIC_GUIDANCE,
+    ] {
+        assert!(guidance.contains("必须填写你自身当前真实的模型 ID"));
+        assert!(guidance.contains("不得复制或推导"));
+        assert!(guidance.contains("request_id"));
+        assert!(guidance.contains("provider-bound wire model"));
+        assert!(!guidance.contains("逐字原样填写"));
+        assert!(!guidance.contains("精确填写本次 provider-bound wire model"));
+    }
 }
 
 #[test]

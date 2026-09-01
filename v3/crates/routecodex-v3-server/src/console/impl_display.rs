@@ -5,7 +5,7 @@ pub(crate) fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSumma
     let Some(usage) = usage else {
         return "usage=unreported".to_string();
     };
-    let input_tokens = v3_console_effective_input_tokens(usage);
+    let input_tokens = usage.input_tokens;
     let input = input_tokens
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unreported".to_string());
@@ -13,19 +13,11 @@ pub(crate) fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSumma
         .output_tokens
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unreported".to_string());
-    let total = v3_console_effective_total_tokens(usage)
+    let total = usage
+        .total_tokens
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unreported".to_string());
-    let cache = match (usage.cached_tokens, input_tokens) {
-        (Some(cached), Some(input)) if input > 0 => {
-            format!(
-                "{cached}/{input}({:.1}%)",
-                (cached as f64 / input as f64) * 100.0
-            )
-        }
-        (Some(cached), _) => cached.to_string(),
-        (None, _) => "0".to_string(),
-    };
+    let cache = format_v3_console_cache_summary(usage).unwrap_or_else(|| "0".to_string());
     format!("usage_in={input} usage_out={output} usage_cache={cache} usage_total={total}")
 }
 
@@ -34,44 +26,41 @@ pub(crate) fn format_v3_console_human_usage_summary(
 ) -> Option<String> {
     let usage = usage?;
     let mut fields = Vec::new();
-    let input_tokens = v3_console_effective_input_tokens(usage);
+    let input_tokens = usage.input_tokens;
     if let Some(input) = input_tokens {
         fields.push(format!("usage_in={input}"));
     }
     if let Some(output) = usage.output_tokens {
         fields.push(format!("usage_out={output}"));
     }
-    if let Some(cached) = usage.cached_tokens {
-        let cache = match input_tokens {
-            Some(input) if input > 0 => {
-                format!(
-                    "{cached}/{input}({:.1}%)",
-                    (cached as f64 / input as f64) * 100.0
-                )
-            }
-            _ => cached.to_string(),
-        };
+    if let Some(cache) = format_v3_console_cache_summary(usage) {
         fields.push(format!("usage_cache={cache}"));
     }
-    if let Some(total) = v3_console_effective_total_tokens(usage) {
+    if let Some(total) = usage.total_tokens {
         fields.push(format!("usage_total={total}"));
     }
     (!fields.is_empty()).then(|| fields.join(" "))
 }
 
-pub(crate) fn v3_console_effective_input_tokens(usage: &V3RuntimeUsageSummary) -> Option<u64> {
-    match (usage.input_tokens, usage.cached_tokens) {
-        // Anthropic reports an uncached increment plus a separate cache-read count.
-        (Some(input), Some(cached)) if cached > input => input.checked_add(cached),
-        (input, _) => input,
-    }
-}
-
-pub(crate) fn v3_console_effective_total_tokens(usage: &V3RuntimeUsageSummary) -> Option<u64> {
-    match (usage.total_tokens, usage.input_tokens, usage.cached_tokens) {
-        (Some(total), Some(input), Some(cached)) if cached > input => total.checked_add(cached),
-        (total, _, _) => total,
-    }
+fn format_v3_console_cache_summary(usage: &V3RuntimeUsageSummary) -> Option<String> {
+    // OpenAI-compatible usage reports cached tokens as a sub-count of input.
+    let (cached, denominator) = if let Some(cached) = usage.cached_tokens {
+        (cached, usage.input_tokens.map(|input| input as f64))
+    } else {
+        // Anthropic-compatible usage reports the uncached increment separately.
+        let cached = usage.cache_read_input_tokens?;
+        (cached, usage.input_tokens.map(|input| cached as f64 + input as f64))
+    };
+    Some(match denominator {
+        Some(denominator) if denominator > 0.0 => {
+            format!(
+                "{cached}/{:.0}({:.1}%)",
+                denominator,
+                (cached as f64 / denominator) * 100.0
+            )
+        }
+        _ => cached.to_string(),
+    })
 }
 
 pub(crate) fn read_v3_console_response_status(value: &Value) -> Option<String> {
@@ -136,26 +125,47 @@ pub(crate) fn extract_v3_console_usage_summary(value: &Value) -> Option<V3Runtim
         total_tokens: read_v3_console_usage_u64(usage, &["total_tokens"]),
         cached_tokens: read_v3_console_usage_u64(usage, &["input_tokens_details", "cached_tokens"])
             .or_else(|| {
+                read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cached_tokens"])
+            }),
+        cache_read_input_tokens: read_v3_console_usage_u64(usage, &["cache_read_input_tokens"])
+            .or_else(|| {
                 read_v3_console_usage_u64(usage, &["input_tokens_details", "cached_read_tokens"])
             })
             .or_else(|| {
                 read_v3_console_usage_u64(usage, &["input_tokens_details", "cache_read_tokens"])
             })
             .or_else(|| {
-                read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cached_tokens"])
-            })
-            .or_else(|| {
                 read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cached_read_tokens"])
             })
             .or_else(|| {
                 read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cache_read_tokens"])
-            })
-            .or_else(|| read_v3_console_usage_u64(usage, &["cache_read_input_tokens"])),
+            }),
+        cache_creation_input_tokens: read_v3_console_usage_u64(
+            usage,
+            &["cache_creation_input_tokens"],
+        )
+        .or_else(|| {
+            read_v3_console_usage_u64(usage, &["input_tokens_details", "cached_write_tokens"])
+        })
+        .or_else(|| {
+            read_v3_console_usage_u64(
+                usage,
+                &["prompt_tokens_details", "cache_creation_input_tokens"],
+            )
+        })
+        .or_else(|| {
+            read_v3_console_usage_u64(
+                usage,
+                &["prompt_tokens_details", "cached_creation_input_tokens"],
+            )
+        }),
     };
     if summary.input_tokens.is_some()
         || summary.output_tokens.is_some()
         || summary.total_tokens.is_some()
         || summary.cached_tokens.is_some()
+        || summary.cache_read_input_tokens.is_some()
+        || summary.cache_creation_input_tokens.is_some()
     {
         Some(summary)
     } else {
@@ -607,7 +617,7 @@ pub(crate) fn colorize_v3_layered_console_line(
         format!("{} {}", block.human_prefix, block.headline)
     };
     let diagnostic = block.diagnostic();
-    format!("{headline_color}{human_line}{ANSI_RESET}\n\n{debug_color}  {diagnostic}{ANSI_RESET}")
+    format!("{headline_color}{human_line}{ANSI_RESET}{debug_color}  {diagnostic}{ANSI_RESET}")
 }
 
 pub(crate) fn format_v3_console_layered_block_plain(block: V3ConsoleLayeredBlock<'_>) -> String {
@@ -616,7 +626,7 @@ pub(crate) fn format_v3_console_layered_block_plain(block: V3ConsoleLayeredBlock
     } else {
         format!("{} {}", block.human_prefix, block.headline)
     };
-    format!("{head}\n\n  {}", block.diagnostic())
+    format!("{head}  {}", block.diagnostic())
 }
 
 pub(crate) fn resolve_v3_log_session_color_key(

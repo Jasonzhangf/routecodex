@@ -1,4 +1,5 @@
 fn commit_or_release_v3_direct_continuation(
+    _receipt: &V3AttemptSuccessReceipt,
     continuation_state: Option<&V3ResponsesDirectContinuationState>,
     scope: &V3ResponsesDirectContinuationScope,
     remote_continuation: &V3RemoteContinuationObservation,

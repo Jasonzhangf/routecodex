@@ -160,7 +160,7 @@ fn weighted_priority_forwarder_manifest() -> V3Config05ManifestPublished {
 }
 
 #[test]
-fn weighted_forwarder_advances_priority_only_after_current_session_exhausts_lower_tier() {
+fn weighted_forwarder_advances_to_lower_priority_only_after_higher_tier_exhausts() {
     let manifest = weighted_priority_forwarder_manifest();
     let target = V3TargetInterpreter::default();
     let all_available = Availability {
@@ -169,7 +169,7 @@ fn weighted_forwarder_advances_priority_only_after_current_session_exhausts_lowe
     let selected = target
         .select_available(expanded_with(&manifest, &target, 4), &all_available, 0)
         .unwrap();
-    assert_ne!(selected.candidate.provider_id, "c");
+    assert_eq!(selected.candidate.provider_id, "c");
 
     let one_priority_one_available = Availability {
         blocked: BTreeSet::from(["b:kb:m".into()]),
@@ -181,7 +181,7 @@ fn weighted_forwarder_advances_priority_only_after_current_session_exhausts_lowe
             0,
         )
         .unwrap();
-    assert_eq!(selected.candidate.provider_id, "a");
+    assert_eq!(selected.candidate.provider_id, "c");
 
     let only_priority_two_available = Availability {
         blocked: BTreeSet::from(["a:ka:m".into(), "b:kb:m".into()]),
@@ -267,6 +267,67 @@ fn direct_provider_model_expands_pinned_provider_but_respects_health_cooldown() 
         cooled.attempted_candidates,
         vec!["a:ka:m:availability(a:ka:m)"],
         "cooldown must be reported as target exhaustion"
+    );
+}
+
+#[test]
+fn direct_provider_model_never_selects_an_unavailable_candidate_without_a_scope_label() {
+    struct UnavailableWithoutScope;
+    impl V3ProviderSchedulingReader for UnavailableWithoutScope {
+        fn scheduling_projection(
+            &self,
+            provider_id: &str,
+            auth_alias: &str,
+            model_id: &str,
+            priority: i32,
+            base_weight: u32,
+            _now_ms: u64,
+        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+            let mut projection =
+                routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
+                    provider_id,
+                    auth_alias,
+                    model_id,
+                    priority,
+                    1_000,
+                    base_weight,
+                );
+            projection.available = false;
+            projection
+        }
+    }
+
+    let manifest = manifest();
+    let router = V3VirtualRouter::default();
+    let target = V3TargetInterpreter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("a.m".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 10,
+                route_classification: RouteClassification::default(),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+
+    let exhausted = target
+        .select_available_with_health(expanded, &UnavailableWithoutScope, 0, 0)
+        .expect_err("unavailable direct candidate must remain unavailable");
+    assert_eq!(
+        exhausted.attempted_candidates,
+        vec!["a:ka:m:health_cooldown"]
     );
 }
 
@@ -633,7 +694,7 @@ targets = [
             .iter()
             .map(|candidate| candidate.provider_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["minimax_anthropic", "minimax_openai"]
+        vec!["minimax_openai", "minimax_anthropic"]
     );
     let selected = target
         .select_available(
@@ -725,7 +786,7 @@ targets = [
             .iter()
             .map(|candidate| candidate.provider_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["default_gpt", "minimax"]
+        vec!["minimax", "default_gpt"]
     );
     let selected = target
         .select_available(
@@ -736,8 +797,7 @@ targets = [
             0,
         )
         .unwrap();
-    assert_eq!(selected.candidate.provider_id, "default_gpt");
-    assert_eq!(selected.candidate.model_id, "gpt-5.5");
+    assert_eq!(selected.candidate.provider_id, "minimax");
 }
 
 #[test]
@@ -747,19 +807,22 @@ fn nested_forwarder_expands_and_reselects_inside_same_route_hit() {
     assert_eq!(expanded.candidates.len(), 2);
     assert_eq!(
         expanded.candidates[0].compatibility_profile.as_deref(),
+        None
+    );
+    assert!(expanded.candidates[0]
+        .provider_request_cleanup
+        .historical_fields
+        .is_empty());
+    assert_eq!(
+        expanded.candidates[1].compatibility_profile.as_deref(),
         Some("chat:minimax")
     );
     assert_eq!(
-        expanded.candidates[0]
+        expanded.candidates[1]
             .provider_request_cleanup
             .historical_fields,
         vec!["reasoning.encrypted_content"]
     );
-    assert_eq!(expanded.candidates[1].compatibility_profile, None);
-    assert!(expanded.candidates[1]
-        .provider_request_cleanup
-        .historical_fields
-        .is_empty());
     let selected = V3TargetInterpreter::default()
         .select_available(
             expanded,
@@ -771,7 +834,7 @@ fn nested_forwarder_expands_and_reselects_inside_same_route_hit() {
         .unwrap();
     assert_eq!(selected.route.hit_count, 1);
     assert_eq!(selected.candidate.provider_id, "b");
-    assert_eq!(selected.attempts, 2);
+    assert_eq!(selected.attempts, 1);
 }
 
 #[test]
@@ -958,8 +1021,8 @@ fn default_floor_does_not_reselect_request_local_failed_candidate() {
     assert_eq!(
         exhausted.attempted_candidates,
         vec![
-            "a:ka:m:availability(request_local_provider_failure)".to_string(),
             "b:kb:m:availability(request_local_provider_failure)".to_string(),
+            "a:ka:m:availability(request_local_provider_failure)".to_string(),
         ]
     );
 }
@@ -1283,7 +1346,7 @@ targets = [
         )
         .unwrap();
 
-    assert_eq!(selected.candidate.provider_id, "short");
+    assert_eq!(selected.candidate.provider_id, "long");
     assert!(selected.unavailable_candidates.is_empty());
 
     let classified = router
@@ -1542,7 +1605,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected_over_limit = target
+    let exhaustion_over_limit = target
         .select_available(
             expanded,
             &Availability {
@@ -1550,12 +1613,11 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
             },
             0,
         )
-        .unwrap();
-    assert_eq!(selected_over_limit.candidate.provider_id, "pinned");
-    assert_eq!(
-        selected_over_limit.unavailable_candidates,
-        vec!["pinned:key:m:context_window_exceeded(input_tokens=1500,max_context_tokens=1000)"]
-    );
+        .expect_err("context-ineligible candidates must not enter the pool");
+    assert!(exhaustion_over_limit
+        .attempted_candidates
+        .iter()
+        .any(|entry| entry.contains("context_window_exceeded(")));
 }
 
 #[test]
@@ -1665,7 +1727,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected_floor = target
+    let exhaustion_floor = target
         .select_available(
             expanded,
             &Availability {
@@ -1673,10 +1735,9 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
             },
             0,
         )
-        .unwrap();
-    assert_eq!(selected_floor.candidate.provider_id, "pinned");
-    assert!(selected_floor
-        .unavailable_candidates
+        .expect_err("default floor must not admit an over-context candidate");
+    assert!(exhaustion_floor
+        .attempted_candidates
         .iter()
         .any(|entry| entry.contains("context_window_exceeded(")));
 }

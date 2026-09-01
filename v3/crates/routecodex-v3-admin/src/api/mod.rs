@@ -4,6 +4,7 @@ pub mod observability;
 pub mod providers;
 pub mod reload;
 pub mod routes;
+pub mod timeseries;
 
 use crate::AppState;
 use axum::routing::get;

@@ -21,6 +21,7 @@ pub struct V3ProviderSchedulingProjection {
     pub auth_alias: String,
     pub model_id: String,
     pub priority: i32,
+    pub effective_priority: i32,
     pub score_milli: u32,
     pub base_weight: u32,
     pub effective_weight_milli: u64,
@@ -30,18 +31,18 @@ pub struct V3ProviderSchedulingProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ProviderKeyHealthProbePermit {
+pub struct V3ProviderHealthProbePermit {
     provider_id: String,
-    auth_alias: String,
-    model_id: String,
+    auth_alias: Option<String>,
+    model_id: Option<String>,
     expected_generation: u64,
 }
 
-impl V3ProviderKeyHealthProbePermit {
+impl V3ProviderHealthProbePermit {
     pub(crate) fn new(
         provider_id: String,
-        auth_alias: String,
-        model_id: String,
+        auth_alias: Option<String>,
+        model_id: Option<String>,
         expected_generation: u64,
     ) -> Self {
         Self {
@@ -56,12 +57,12 @@ impl V3ProviderKeyHealthProbePermit {
         &self.provider_id
     }
 
-    pub fn auth_alias(&self) -> &str {
-        &self.auth_alias
+    pub fn auth_alias(&self) -> Option<&str> {
+        self.auth_alias.as_deref()
     }
 
-    pub fn model_id(&self) -> &str {
-        &self.model_id
+    pub fn model_id(&self) -> Option<&str> {
+        self.model_id.as_deref()
     }
 
     pub fn expected_generation(&self) -> u64 {
@@ -90,15 +91,15 @@ impl V3ProviderSchedulingProjection {
         score_milli: u32,
         base_weight: u32,
     ) -> Self {
-        let score_multiplier = 500_u64.saturating_add(u64::from(score_milli));
         Self {
             provider_id: provider_id.to_string(),
             auth_alias: auth_alias.to_string(),
             model_id: model_id.to_string(),
             priority,
+            effective_priority: priority,
             score_milli,
             base_weight,
-            effective_weight_milli: u64::from(base_weight.max(1)) * score_multiplier,
+            effective_weight_milli: u64::from(base_weight.max(1)),
             available: true,
             blocked_scopes: Vec::new(),
             score_generation: 0,

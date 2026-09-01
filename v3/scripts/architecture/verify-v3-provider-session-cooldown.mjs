@@ -170,7 +170,7 @@ requireMatch(
 );
 requireMatch(
   source.health,
-  /try_acquire_provider_cooldown_rescue_probe[\s\S]*wait_for_provider_cooldown_probe_completion/u,
+  /acquire_provider_cooldown_rescue_probe[\s\S]*wait_for_provider_cooldown_probe_completion/u,
   "Provider Health must own single-flight cooldown rescue admission and waiting",
 );
 forbidMatch(
@@ -190,7 +190,7 @@ requireMatch(
 );
 requireMatch(
   source.resourceMap,
-  /resource_id:\s*v3\.provider\.health_state[\s\S]*allowed_writers:\s*\[[^\]]*V3ProviderHealthStore::record_provider_failure_in_session[^\]]*V3ProviderHealthStore::record_provider_success_in_session[^\]]*V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe[^\]]*\]/u,
+  /resource_id:\s*v3\.provider\.health_state[\s\S]*allowed_writers:\s*\[[^\]]*V3ProviderHealthStore::record_provider_failure_in_session[^\]]*V3ProviderHealthStore::record_provider_success_in_session[^\]]*V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe[^\]]*\]/u,
   "Resource map provider health writers must name only session-scoped health mutation owners",
 );
 requireMatch(
@@ -272,7 +272,7 @@ requireBlockLine(
 );
 forbidBlockLine(
   failureSessionScopeResource,
-  /allowed_writers:\s*\[[^\]]*(routecodex-v3-server|V3ProviderHealthStore::record_provider_failure_in_session|V3ProviderHealthStore::record_provider_success_in_session|V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe)[^\]]*\]/u,
+  /allowed_writers:\s*\[[^\]]*(routecodex-v3-server|V3ProviderHealthStore::record_provider_failure_in_session|V3ProviderHealthStore::record_provider_success_in_session|V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe)[^\]]*\]/u,
   "Resource map failure session scope must not be written by Server or Provider Health",
 );
 requireBlockLine(
@@ -506,7 +506,7 @@ requireMatch(
 );
 requireMatch(
   source.cooldownRescue,
-  /try_acquire_provider_cooldown_rescue_probe[\s\S]*probe_v3_provider_global_target[\s\S]*complete_provider_cooldown_probe_success/u,
+  /acquire_provider_cooldown_rescue_probe[\s\S]*probe_v3_provider_global_target[\s\S]*complete_provider_cooldown_probe_success_at_generation/u,
   "Runtime rescue owner must require a successful provider probe before revival",
 );
 requireMatch(

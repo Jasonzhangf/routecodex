@@ -82,11 +82,10 @@
 - 这个流程必须走当前 server handler、Hub/VR/provider runtime；禁止直接调用 provider codec 或手拼 provider body 当 request dry-run。
 
 2. response dry-run
-- 使用相关 `provider-response*.json`：`npm run dry-run:codex-response -- --sample <provider-response.json>`。
-- 必须确认脚本调用 `convertProviderResponseIfNeeded` 并产出 `response-dry-run.json`。
-- 对 chat 入口直通 Responses provider 的样本，脚本应从 provider payload 真相识别 `openai-responses`，不能只按 sample 目录或 entry endpoint 推成 `openai-chat`。
-- 离线 response dry-run 需要 materialized 响应体。只有序列化 live `sseStream` 且没有 `bodyText` / `raw` / `text` / `sseBodyText` 的样本不可重放，必须重新捕获或换完整 provider-response 样本。
-- 禁止在脚本里新写第二套 provider response parser / converter。
+- 使用同一 requestId 的完整 `provider-response.json`，把捕获体包装为 `routecodex.v3.provider_response_snapshot`，调用当前 server 的 `POST /_routecodex/debug/dry-run`。
+- `/v1/responses` 走 Direct；`/v1/messages` 走 Anthropic Relay。必须确认 `kind=provider_response`、`evidence.providerResponseConsumed=true`、`evidence.providerNetworkSend=false`，并检查已 materialize 的 `clientResponse`。
+- SSE snapshot 必须提供完整 `rawSse`，JSON snapshot 必须提供完整 `body`。只有 node trace 或未消费的 lazy `sseStream` 不是响应回放证据，必须重新捕获完整 provider response。
+- 响应语义必须走现有 Rust RespInbound/Resp03/投影 owner；禁止复活 V2 TS `convertProviderResponseIfNeeded` / `dry-run:codex-response`，也禁止在 debug handler 新写 parser/converter。Toolreason 专项见 `26-toolreason-dryrun-diagnostic.md`。
 
 3. live replay
 - dry-run 过后，再重放旧失败样本或同入口真实样本。

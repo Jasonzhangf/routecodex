@@ -115,7 +115,7 @@ const cases = [
     path: "docs/architecture/v3-resource-operation-map.yml",
     mutate: (source) =>
       source.replace(
-        "allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_provider_cooldown_probe, V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success, V3ProviderHealthStore::complete_provider_cooldown_probe_failure]",
+        "allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]",
         "allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record, V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session]",
       ),
     diagnostic: /Resource map provider health writers must name only session-scoped|Resource map must not register Runtime wrappers/u,
@@ -175,7 +175,7 @@ const cases = [
     path: copied[1],
     mutate: (source) =>
       source.replaceAll(
-        "try_acquire_provider_cooldown_rescue_probe",
+        "acquire_provider_cooldown_rescue_probe",
         "rescue_without_atomic_owner",
       ),
     diagnostic: /Provider Health must own single-flight cooldown rescue admission/u,

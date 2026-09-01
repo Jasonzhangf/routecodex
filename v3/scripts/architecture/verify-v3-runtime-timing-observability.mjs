@@ -339,8 +339,8 @@ requireMatch(
 );
 requireMatch(
   directRuntimeHelpers,
-  /commit_direct_sse_attempt_after_terminal[\s\S]*V3ProviderAttemptSseStream[\s\S]*V3ClientSseStream/,
-  "Direct SSE Runtime must hand off a typed provider attempt to the client broker without full-stream draining",
+  /pub\(crate\) async fn collect_direct_sse_attempt_after_terminal\([\s\S]*V3CommittedClientSseBuilder::with_budget/,
+  "Direct SSE Runtime must collect the provider attempt into the bounded committed replay before client projection",
 );
 requireMatch(
   kernel,
@@ -349,13 +349,13 @@ requireMatch(
 );
 requireMatch(
   kernel,
-  /V3ClientBody::Sse\(stream\)/,
-  "Direct SSE Resp15 must expose the incremental client broker stream",
+  /V3ClientBody::CommittedSse\(committed\)/,
+  "Direct SSE Resp15 must expose only the terminal-sealed committed replay",
 );
 requireMatch(
   directCore,
-  /V3ClientBody::Sse\(stream\)/,
-  "Direct SSE core must expose the incremental client broker stream",
+  /V3ClientBody::CommittedSse\(committed\)/,
+  "Direct SSE core must expose only the terminal-sealed committed replay",
 );
 forbidMatch(
   nodes,
@@ -364,8 +364,8 @@ forbidMatch(
 );
 forbidMatch(
   directRuntimeHelpers,
-  /commit_direct_sse_attempt_after_terminal[\s\S]*while\s+let\s+Some\(frame\)\s*=\s*stream\.next\(\)\.await/,
-  "Direct SSE broker must not drain the provider stream before Resp15",
+  /wrap_direct_sse_provider_handoff_stream|commit_direct_sse_attempt_after_terminal/,
+  "Direct SSE timing owner must not revive the removed lazy handoff path",
 );
 requireMatch(
   directSseOutcome,
@@ -434,7 +434,7 @@ requireMatch(
 );
 requireMatch(
   providerSseJsonCodec,
-  /fn responses_event_name_recovers_missing_json_type_before_precommit\(\)[\s\S]*classify_v3_provider_sse_json_data/,
+  /fn responses_event_name_does_not_supply_missing_json_type_before_precommit\(\)[\s\S]*classify_v3_provider_sse_json_data/,
   "Direct SSE normalization regression must bind transport event metadata before typed JSON classification",
 );
 forbidMatch(
@@ -538,7 +538,7 @@ for (const [source, label] of [
   );
   if (
     directTimingPublication?.caller_symbol !==
-      "wrap_direct_sse_provider_outcome_stream" ||
+      "wrap_direct_sse_provider_event_json_observation_stream_with_compat" ||
     directTimingPublication?.callee_symbol !== "record_timing" ||
     directTimingPublication?.callee_file !==
       "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs"

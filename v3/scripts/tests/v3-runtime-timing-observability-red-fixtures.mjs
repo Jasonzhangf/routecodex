@@ -28,6 +28,7 @@ const copied = [
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/tests.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs",
+  "v3/crates/routecodex-v3-runtime/src/nodes.rs",
   "v3/crates/routecodex-v3-runtime/src/shared.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
@@ -37,6 +38,7 @@ const copied = [
   "v3/crates/routecodex-v3-server/src/lib.rs",
   "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
   "v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs",
+  "v3/crates/routecodex-v3-server/src/executors.rs",
   "v3/crates/routecodex-v3-server/src/tests/mod.rs",
   "docs/architecture/function-map.yml",
   "docs/architecture/mainline-call-map.yml",
@@ -210,20 +212,17 @@ const cases = [
     path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
     mutate: (source) =>
       source.replace(
-        "commit_direct_sse_attempt_after_terminal(",
-        "commit_direct_sse_attempt_after_terminal_removed(",
+        "collect_direct_sse_attempt_after_terminal(",
+        "collect_direct_sse_attempt_after_terminal_removed(",
       ),
-    diagnostic: /must seal only a fully validated terminal stream before Resp15/u,
+    diagnostic: /Direct SSE Runtime must collect the provider attempt into the bounded committed replay/u,
   },
   {
     name: "Direct SSE Resp15 exposes the unsealed stream",
     path: "v3/crates/routecodex-v3-runtime/src/kernel.rs",
     mutate: (source) =>
-      source.replace(
-        "direct_runtime_helpers_stream::commit_direct_sse_attempt_after_terminal(",
-        "direct_runtime_helpers_stream::commit_direct_sse_attempt_after_terminal_removed(",
-      ),
-    diagnostic: /must expose only the Runtime-committed stream type/u,
+      source.replaceAll("V3ClientBody::CommittedSse(committed)", "V3ClientBody::Json(serde_json::Value::Null)"),
+    diagnostic: /Direct SSE Resp15 must expose only the terminal-sealed committed replay/u,
   },
   {
     name: "V3 timing mainline drops Relay and Server edges",

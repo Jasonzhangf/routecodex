@@ -96,6 +96,27 @@ pub struct RouteToolCallClassification {
     pub snippet: Option<String>,
 }
 
+const WEB_SEARCH_TERMS: &[&str] = &[
+    "search the web", "web search", "browse the web", "search online", "look it up",
+    "with sources", "联网搜索", "上网搜索", "上网搜", "网页搜索", "请搜索", "引用来源",
+];
+
+const WEB_SEARCH_NEGATIVE_TERMS: &[&str] = &[
+    "do not web search", "don't web search", "don't search", "do not search",
+    "don't look up", "do not look up", "不需要联网", "不要联网", "不用联网", "不用上网搜",
+    "不要上网搜", "别上网搜", "不用搜", "不要搜", "别搜", "别查", "不要查", "不用查",
+];
+
+pub fn has_web_search_intent(text: &str) -> bool {
+    let normalized = text.to_lowercase();
+    !WEB_SEARCH_NEGATIVE_TERMS
+        .iter()
+        .any(|term| normalized.contains(term))
+        && WEB_SEARCH_TERMS
+            .iter()
+            .any(|term| normalized.contains(term))
+}
+
 pub fn classify_tool_call(
     raw_name: &str,
     raw_arguments: Option<&Value>,

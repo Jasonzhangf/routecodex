@@ -110,6 +110,20 @@ function closePanel() {
   lastPanelTrigger = null;
 }
 
+function startAutoRefresh(loadFn, intervalMs = 10000) {
+  let running = false;
+  const refresh = async () => {
+    if (running || document.hidden) return;
+    running = true;
+    try {
+      await loadFn();
+    } finally {
+      running = false;
+    }
+  };
+  setInterval(refresh, intervalMs);
+}
+
 document.getElementById("drawer-close")?.addEventListener("click", closePanel);
 document.getElementById("drawer-backdrop")?.addEventListener("click", closePanel);
 document.addEventListener("keydown", (event) => {

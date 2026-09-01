@@ -3,7 +3,7 @@ use routecodex_v3_config::{
     V3RoutePolicyManifest,
 };
 use routecodex_v3_route_classifier::{
-    build_v3_current_turn_route_facts, evaluate_v3_route_policies, V3RouteCondition,
+    build_v3_current_turn_route_facts_from_value, evaluate_v3_route_policies, V3RouteCondition,
     V3RouteHistoryWindow, V3RoutePolicy, V3RoutePolicyAction, V3RouteTurnObservation,
 };
 use routecodex_v3_virtual_router::{V3Router05RequestClassified, V3VirtualRouter};
@@ -211,7 +211,7 @@ pub fn compile_route_policies(
 }
 
 pub fn observe_route_turn(body: &Value, route_name: &str) -> V3RouteTurnObservation {
-    let current = build_v3_current_turn_route_facts(body);
+    let current = build_v3_current_turn_route_facts_from_value(body);
     V3RouteTurnObservation {
         new_user_input: current.latest_message_from_user,
         is_compaction: current.is_compaction || route_name == "compact",

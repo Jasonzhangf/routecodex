@@ -66,3 +66,69 @@ modules:
     owner_feature_id: v3.servertool_hook_skeleton_lifecycle
     owned_paths:
       - v3/crates/stop-message-core/**
+
+responsibility_contracts:
+  - contract_id: v3.execution_control_payload.runtime
+    module_id: v3.runtime
+    owner_feature_ids:
+      - v3.execution_request_lifecycle
+      - v3.execution_attempt_budget_store
+      - v3.execution_attempt_success_receipt
+      - v3.execution_stream_control_diagnostics_split
+    allowed_responsibilities:
+      - one resident request and attempt lifecycle
+      - immutable target-plan consumption
+      - cumulative request budget and bounded attempt payload ownership
+      - one request budget shared by provider-attempt admission and Runtime-sealed client replay
+      - typed non-optional sealed client replay outcome
+      - Error05 recovery decision execution
+      - protocol-terminal success receipt issuance
+      - small control-state reads and diagnostic event projection
+    forbidden_responsibilities:
+      - create a Tokio Runtime inside an SSE wrapper or handoff closure
+      - re-enter a full executor from a stream wrapper
+      - reclassify or re-hit the route pool during target-local recovery
+      - derive control truth from payload or diagnostic snapshots
+      - convert local resource or observation failures into provider failures
+    binding_status: active
+  - contract_id: v3.execution_control_payload.provider_responses
+    module_id: v3.provider_responses
+    owner_feature_ids:
+      - v3.provider_health_persistence_isolation
+    allowed_responsibilities:
+      - provider network transport and stream lifetime
+      - provider health in-memory mutation from typed receipts/failures
+      - versioned bounded persistence queue and single writer
+      - immutable persistence ticket construction under lock and enqueue only after write-guard consumption
+    forbidden_responsibilities:
+      - routing or attempt recovery policy
+      - synchronous disk I/O while holding the global health-state write lock
+      - provider health penalty for local resource, observation, or persistence failure
+    binding_status: active
+  - contract_id: v3.execution_control_payload.server
+    module_id: v3.server
+    owner_feature_ids:
+      - v3.observability_persistence_isolation
+    allowed_responsibilities:
+      - receive typed observability events
+      - retain active requests and a bounded recent-terminal projection
+      - enqueue bounded persistence records without blocking request control
+    forbidden_responsibilities:
+      - request retry, handoff, route selection, success declaration, or provider health mutation
+      - construct or reconstruct attempt budgets or client replay streams from manifest/payload
+      - unwrap or expect an optional Runtime-sealed replay stream
+      - open, write, or flush history files while holding the listener request mutex
+      - unbounded terminal-request retention
+    binding_status: active
+  - contract_id: v3.execution_control_payload.config
+    module_id: v3.config
+    owner_feature_ids:
+      - v3.execution_attempt_budget_store
+      - v3.observability_persistence_isolation
+    allowed_responsibilities:
+      - compile attempt-store byte, frame, request, process, and residence policy
+      - compile observability storage path and record schema policy
+    forbidden_responsibilities:
+      - own runtime observability append, flush, rotation, or history loading
+      - block request or health control paths on filesystem I/O
+    binding_status: active

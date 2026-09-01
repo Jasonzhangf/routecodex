@@ -17,8 +17,9 @@ async fn reupserted_rescue_probe_preserves_waiter_and_single_generation() {
         )
         .unwrap();
     assert!(store
-        .try_acquire_provider_cooldown_rescue_probe("provider-a", Some("key-a"), Some("gpt-5.5"),)
-        .unwrap());
+        .acquire_provider_cooldown_rescue_probe("provider-a", Some("key-a"), Some("gpt-5.5"),)
+        .unwrap()
+        .is_some());
 
     let completion = store.wait_for_provider_cooldown_probe_completion(
         "provider-a",
@@ -44,12 +45,9 @@ async fn reupserted_rescue_probe_preserves_waiter_and_single_generation() {
 
     assert!(
         !store
-            .try_acquire_provider_cooldown_rescue_probe(
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-            )
-            .unwrap(),
+            .acquire_provider_cooldown_rescue_probe("provider-a", Some("key-a"), Some("gpt-5.5"),)
+            .unwrap()
+            .is_some(),
         "the same cooldown generation must not acquire a second rescue probe",
     );
     tokio::time::timeout(Duration::from_millis(100), &mut completion)
@@ -72,8 +70,9 @@ async fn successful_probe_wakes_waiter_before_removing_probe_state() {
         )
         .unwrap();
     assert!(store
-        .try_acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
-        .unwrap());
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
+        .unwrap()
+        .is_some());
 
     let completion = store.wait_for_provider_cooldown_probe_completion(
         "provider-a",

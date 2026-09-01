@@ -641,13 +641,8 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", priorit
         )
         .expect("config");
         let manifest = compile_v3_config_05_manifest(authoring).expect("manifest");
-        let status = project_v3_virtual_router_status(
-            &manifest,
-            "a",
-            &KeyedAvailability,
-            1_000,
-        )
-        .expect("status");
+        let status = project_v3_virtual_router_status(&manifest, "a", &KeyedAvailability, 1_000)
+            .expect("status");
         let pool = &status["routes"]["gateway"]["pools"][0];
         assert_eq!(
             pool["resolvedTargets"],

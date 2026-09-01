@@ -4,7 +4,7 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope,
 };
 use routecodex_v3_route_classifier::{
-    build_v3_current_turn_route_facts, classify_route, V3CurrentTurnRouteFacts,
+    build_v3_current_turn_route_facts_from_value, classify_route, V3CurrentTurnRouteFacts,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -12,8 +12,13 @@ use std::fmt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-const V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES: usize = 64 * 1024 * 1024;
-const V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES: usize = 262_144;
+pub(crate) use crate::execution_control::{
+    V3AttemptBudget, V3AttemptStoreError, V3CommittedClientSseBuilder,
+};
+pub use crate::execution_control::{
+    V3AttemptSuccessReceipt, V3CommittedClientSseStream, V3CommittedSseTerminal,
+    V3RequestExecutionControl,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Server03HttpRequestRaw {
@@ -242,227 +247,6 @@ impl fmt::Debug for V3ProviderAttemptSseStream {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum V3CommittedSseTerminal {
-    Completed,
-    Dropped,
-}
-
-/// Runtime-sealed replay of one completely validated provider attempt.
-///
-/// The inner stream and constructor are intentionally private. Server/Front
-/// code may consume or observe the replay, but cannot manufacture an empty or
-/// terminal-incomplete stream and call it committed.
-pub struct V3CommittedClientSseStream {
-    inner: Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>,
-    next_frame_index: usize,
-    terminal_frame_index: usize,
-}
-
-impl fmt::Debug for V3CommittedClientSseStream {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("V3CommittedClientSseStream(<sealed-replay>)")
-    }
-}
-
-impl Stream for V3CommittedClientSseStream {
-    type Item = Vec<u8>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.inner.as_mut().poll_next(cx) {
-            Poll::Ready(Some(frame)) => {
-                self.next_frame_index = self.next_frame_index.saturating_add(1);
-                Poll::Ready(Some(frame))
-            }
-            terminal => terminal,
-        }
-    }
-}
-
-impl V3CommittedClientSseStream {
-    pub fn observe(
-        self,
-        on_frame: impl Fn(&[u8]) + Send + Sync + 'static,
-        on_terminal: impl FnOnce(V3CommittedSseTerminal) + Send + 'static,
-    ) -> Self {
-        let next_frame_index = self.next_frame_index;
-        let terminal_frame_index = self.terminal_frame_index;
-        Self {
-            inner: Box::pin(V3ObservedCommittedSseStream {
-                source: self,
-                on_frame: Box::new(on_frame),
-                on_terminal: Some(Box::new(on_terminal)),
-            }),
-            next_frame_index,
-            terminal_frame_index,
-        }
-    }
-}
-
-struct V3ObservedCommittedSseStream {
-    source: V3CommittedClientSseStream,
-    on_frame: Box<dyn Fn(&[u8]) + Send + Sync>,
-    on_terminal: Option<Box<dyn FnOnce(V3CommittedSseTerminal) + Send>>,
-}
-
-impl V3ObservedCommittedSseStream {
-    fn finish(&mut self, terminal: V3CommittedSseTerminal) {
-        if let Some(on_terminal) = self.on_terminal.take() {
-            on_terminal(terminal);
-        }
-    }
-}
-
-impl Stream for V3ObservedCommittedSseStream {
-    type Item = Vec<u8>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match Pin::new(&mut self.source).poll_next(cx) {
-            Poll::Ready(Some(frame)) => {
-                (self.on_frame)(&frame);
-                if self.source.next_frame_index > self.source.terminal_frame_index {
-                    self.finish(V3CommittedSseTerminal::Completed);
-                }
-                Poll::Ready(Some(frame))
-            }
-            Poll::Ready(None) => {
-                self.finish(V3CommittedSseTerminal::Completed);
-                Poll::Ready(None)
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-impl Drop for V3ObservedCommittedSseStream {
-    fn drop(&mut self) {
-        self.finish(V3CommittedSseTerminal::Dropped);
-    }
-}
-
-/// Attempt-local bounded buffer owned by Runtime/Broker. Successful clean EOF
-/// of the protocol-validating projected stream is the only call site allowed
-/// to seal it into `V3CommittedClientSseStream`.
-pub(crate) struct V3CommittedClientSseBuilder {
-    frames: Vec<Vec<u8>>,
-    byte_len: usize,
-    terminal_frame_index: Option<usize>,
-}
-
-impl V3CommittedClientSseBuilder {
-    pub(crate) fn new() -> Self {
-        Self {
-            frames: Vec::new(),
-            byte_len: 0,
-            terminal_frame_index: None,
-        }
-    }
-
-    pub(crate) fn push(&mut self, frame: Vec<u8>) -> Result<(), String> {
-        if frame.is_empty() {
-            return Err("provider response event codec produced an empty frame".to_string());
-        }
-        if self.frames.len() >= V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES {
-            return Err(format!(
-                "provider SSE attempt exceeded the committed replay frame limit ({V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES})"
-            ));
-        }
-        let byte_len = self
-            .byte_len
-            .checked_add(frame.len())
-            .ok_or_else(|| "provider SSE attempt byte count overflowed".to_string())?;
-        if byte_len > V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES {
-            return Err(format!(
-                "provider SSE attempt exceeded the committed replay byte limit ({V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES})"
-            ));
-        }
-        self.byte_len = byte_len;
-        self.frames.push(frame);
-        Ok(())
-    }
-
-    pub(crate) fn mark_last_frame_as_terminal(&mut self) -> Result<(), String> {
-        let terminal_frame_index = self
-            .frames
-            .len()
-            .checked_sub(1)
-            .ok_or_else(|| "committed SSE terminal cannot precede every frame".to_string())?;
-        if self.terminal_frame_index.is_none() {
-            self.terminal_frame_index = Some(terminal_frame_index);
-        }
-        Ok(())
-    }
-
-    pub(crate) fn seal_after_validated_terminal(
-        self,
-    ) -> Result<V3CommittedClientSseStream, String> {
-        if self.frames.is_empty() {
-            return Err("provider response event codec produced an empty stream".to_string());
-        }
-        let terminal_frame_index = self.terminal_frame_index.ok_or_else(|| {
-            "provider response event codec did not identify the committed terminal frame"
-                .to_string()
-        })?;
-        Ok(V3CommittedClientSseStream {
-            inner: Box::pin(futures_util::stream::iter(self.frames)),
-            next_frame_index: 0,
-            terminal_frame_index,
-        })
-    }
-}
-
-#[cfg(test)]
-mod committed_sse_handoff_tests {
-    use super::*;
-    use futures_util::StreamExt;
-    use std::sync::{Arc, Mutex};
-
-    async fn observed_terminal_after_drop(frames_to_consume: usize) -> V3CommittedSseTerminal {
-        let mut builder = V3CommittedClientSseBuilder::new();
-        builder
-            .push(b"event: response.created\n\n".to_vec())
-            .unwrap();
-        builder
-            .push(b"event: response.completed\n\n".to_vec())
-            .unwrap();
-        builder.mark_last_frame_as_terminal().unwrap();
-        builder.push(b"event: ping\n\n".to_vec()).unwrap();
-        let terminal = Arc::new(Mutex::new(None));
-        let observed_terminal = Arc::clone(&terminal);
-        let mut stream = builder.seal_after_validated_terminal().unwrap().observe(
-            |_| {},
-            move |value| {
-                *observed_terminal.lock().unwrap() = Some(value);
-            },
-        );
-        for _ in 0..frames_to_consume {
-            stream.next().await.expect("sealed replay frame");
-        }
-        drop(stream);
-        let terminal = terminal
-            .lock()
-            .unwrap()
-            .expect("drop must finalize the committed handoff");
-        terminal
-    }
-
-    #[tokio::test]
-    async fn committed_sse_drop_before_last_handoff_frame_remains_dropped() {
-        assert_eq!(
-            observed_terminal_after_drop(1).await,
-            V3CommittedSseTerminal::Dropped
-        );
-    }
-
-    #[tokio::test]
-    async fn committed_sse_drop_after_last_handoff_frame_is_completed() {
-        assert_eq!(
-            observed_terminal_after_drop(2).await,
-            V3CommittedSseTerminal::Completed
-        );
-    }
-}
-
 pub enum V3ClientBody {
     Json(Value),
     Bytes(Vec<u8>),
@@ -583,9 +367,14 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
     standardized: &V3Req04StandardizedResponses,
     manifest: &routecodex_v3_config::V3Config05ManifestPublished,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
+    let entry_protocol = if standardized.endpoint.starts_with("/v1/messages") {
+        "anthropic"
+    } else {
+        "responses"
+    };
     let mut facts = build_v3_router_request_facts_for_entry_with_control(
         &standardized.body,
-        "responses",
+        entry_protocol,
         configured_v3_longcontext_threshold_tokens(manifest, &standardized.server_id),
         false,
         standardized.request_purpose.is_compaction()
@@ -675,11 +464,8 @@ fn build_v3_router_request_facts_for_entry_with_control(
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
     let input_tokens = estimate_v3_routing_input_tokens(body);
-    let active_turn = build_v3_current_turn_route_facts(body);
+    let active_turn = build_v3_current_turn_route_facts_from_value(body);
     let has_image_attachment = active_turn.has_current_turn_image;
-    // 客户端显式声明 websearch 工具（function/custom 名为 websearch/web_search）
-    // 是 typed current-turn 路由事实：候选 Mode B pool 必须据此命中，禁止依赖
-    // 请求文本意图推断（r4 typed facts 设计：不扫描 payload 文本重建控制）。
     let declares_web_search_tool = request_declares_v3_web_search_tool(body, manifest);
     let route_facts = V3CurrentTurnRouteFacts {
         reached_long_context: longcontext_threshold_tokens
@@ -690,13 +476,13 @@ fn build_v3_router_request_facts_for_entry_with_control(
         stopless_followup,
         has_current_turn_tool_output: active_turn.has_current_turn_tool_output,
         has_current_turn_tool_execution_error: active_turn.has_current_turn_tool_execution_error,
-        has_current_turn_web_search: active_turn.has_current_turn_web_search
-            || declares_web_search_tool,
+        has_current_turn_web_search: active_turn.has_current_turn_web_search,
         last_assistant_tool_category: active_turn
             .last_assistant_tool
             .as_ref()
             .map(|tool| tool.category.clone()),
         has_background_keyword: false,
+        current_user_text: active_turn.current_user_text.clone(),
     };
     let route_classification = classify_route(&route_facts);
     for capability in &route_classification.required_capabilities {
@@ -1117,6 +903,32 @@ mod tests {
     }
 
     #[test]
+    fn anthropic_messages_req04_preserves_entry_protocol_for_route_facts() {
+        let raw = build_v3_server_03_http_request_raw(
+            "server".to_string(),
+            V3ProviderFailureSessionScope::new("server", "default", "request")
+                .expect("failure scope"),
+            "request".to_string(),
+            "execution".to_string(),
+            "POST".to_string(),
+            "/v1/messages".to_string(),
+            json!({
+                "model": "claude-client-alias",
+                "messages": [{"role": "user", "content": "call pwd"}],
+                "tools": [{"name": "pwd", "description": "cwd", "input_schema": {"type": "object"}}]
+            }),
+        );
+        let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
+            .expect("Anthropic messages request must normalize");
+        let facts = super::build_v3_router_request_facts_from_v3_req_04(
+            &normalized,
+            &manifest_mode_b_websearch_for_routing_facts(),
+        );
+
+        assert_eq!(facts.entry_protocol, "anthropic");
+    }
+
+    #[test]
     fn auxiliary_compaction_purpose_reaches_responses_route_facts() {
         let raw = build_v3_server_03_http_request_raw_with_purpose(
             "controlled".to_string(),
@@ -1144,6 +956,30 @@ mod tests {
             .route_classification
             .reasoning
             .contains("compact:registered-ingress"));
+    }
+
+    #[test]
+    fn declared_web_search_tool_does_not_activate_web_search_route() {
+        let request = serde_json::json!({
+            "model": "gpt-5.5",
+            "messages": [{"role": "user", "content": "fix the routing bug"}],
+            "tools": [{"type": "function", "function": {
+                "name": "web_search",
+                "description": "search the web",
+                "parameters": {"type": "object"}
+            }}]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(&request, "chat", None);
+        assert_ne!(
+            facts.route_classification.route_name, "web_search",
+            "declared tools are not current-turn web-search evidence"
+        );
+        assert!(!facts
+            .route_classification
+            .required_capabilities
+            .iter()
+            .any(|capability| capability == "web_search"));
     }
 
     #[test]

@@ -7,6 +7,7 @@ use routecodex_v3_config::{
     V3Config02AuthoringParsed, V3RouteGroupAuthoringConfig, V3RoutePoolAuthoringConfig,
     V3RoutePoolMatchAuthoringConfig, V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind,
     V3SelectionPolicy, V3SelectionStrategy, V3ServerAuthoringConfig,
+    V3UserConfig02RoutingSelectionParsed, V3UserRouteMember,
 };
 use std::collections::BTreeMap;
 
@@ -51,6 +52,93 @@ pub struct RouteMemberView {
 pub struct RouteGroupView {
     pub group_id: String,
     pub ports: Vec<RoutePortView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UserRouteGroupView {
+    pub group_id: String,
+    pub pools: Vec<UserRoutePoolView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UserRoutePoolView {
+    pub name: String,
+    pub tiers: Vec<UserRouteTierView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UserRouteTierView {
+    pub members: Vec<UserRouteMemberView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UserRouteMemberView {
+    #[serde(rename = "use")]
+    pub use_ref: String,
+    pub weight: Option<u32>,
+}
+
+pub fn user_route_groups_from_selection(
+    selection: &V3UserConfig02RoutingSelectionParsed,
+) -> Vec<UserRouteGroupView> {
+    selection
+        .route_groups
+        .iter()
+        .map(|(group_id, pools)| UserRouteGroupView {
+            group_id: group_id.clone(),
+            pools: pools
+                .iter()
+                .map(|(name, pool)| UserRoutePoolView {
+                    name: name.clone(),
+                    tiers: pool
+                        .tiers
+                        .iter()
+                        .map(|tier| UserRouteTierView {
+                            members: tier
+                                .iter()
+                                .map(|member| UserRouteMemberView {
+                                    use_ref: member.use_ref().to_string(),
+                                    weight: member.weight,
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+pub fn apply_user_route_group_view(
+    selection: &mut V3UserConfig02RoutingSelectionParsed,
+    group: &UserRouteGroupView,
+) -> Result<(), String> {
+    let pools = selection
+        .route_groups
+        .get_mut(&group.group_id)
+        .ok_or_else(|| format!("unknown route group {:?}", group.group_id))?;
+    for pool in &group.pools {
+        let target = pools
+            .get_mut(&pool.name)
+            .ok_or_else(|| format!("unknown route pool {}.{}", group.group_id, pool.name))?;
+        target.tiers = pool
+            .tiers
+            .iter()
+            .map(|tier| {
+                tier.members
+                    .iter()
+                    .map(|member| {
+                        let (provider, model) =
+                            member.use_ref.split_once('/').ok_or_else(|| {
+                                format!("invalid provider/model {:?}", member.use_ref)
+                            })?;
+                        Ok(V3UserRouteMember::new(provider, model, member.weight))
+                    })
+                    .collect::<Result<Vec<_>, String>>()
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+    }
+    Ok(())
 }
 
 pub fn route_groups_from_authoring(authoring: &V3Config02AuthoringParsed) -> Vec<RouteGroupView> {

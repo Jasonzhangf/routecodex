@@ -8,8 +8,8 @@ mod metadata_center;
 mod models_catalog;
 mod request_id;
 mod responses_direct_server_outcome;
-mod restart_handoff;
 mod restart_closeout;
+mod restart_handoff;
 mod scope_metadata;
 mod session_admission;
 mod websocket;
@@ -58,8 +58,8 @@ use responses_direct_server_outcome::{
 };
 use routecodex_v3_config::{
     collect_v3_route_group_catalog_model_refs, resolve_routecodex_package_version_from_executable,
-    V3AdminWebuiManifest, V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode,
-    V3ServerManifest,
+    V3AdminWebuiManifest, V3Config05ManifestPublished, V3DebugManifest,
+    V3EntryProtocolExecutionMode, V3ServerManifest,
 };
 use routecodex_v3_debug::{
     V3DebugBoundedTextCapture, V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig,
@@ -79,6 +79,7 @@ use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw_with_purpose_and_port,
     build_v3_server_03_http_request_raw_with_purpose_and_scope,
     execute_v3_anthropic_relay_dry_run_runtime_with_client_headers,
+    execute_v3_anthropic_relay_response_dry_run_runtime,
     execute_v3_anthropic_relay_runtime_with_default_transport,
     execute_v3_anthropic_relay_runtime_with_default_transport_and_client_headers,
     execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health,
@@ -87,6 +88,7 @@ use routecodex_v3_runtime::{
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode,
+    execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
@@ -123,7 +125,8 @@ use routecodex_v3_runtime::{
     V3ResponsesRelayStoplessControlState, V3RuntimeObservability,
     V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
-    V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
+    V3RequestExecutionControl, V3RuntimeStreamObservation, V3RuntimeTimingSummary,
+    V3RuntimeUsageSummary,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -176,7 +179,7 @@ struct V3ListenerState {
     responses_relay_local_continuation: Arc<V3ResponsesRelayLocalContinuationState>,
     responses_relay_stopless_control: Arc<V3ResponsesRelayStoplessControlState>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
-    realtime_cooled_provider_keys: Arc<Mutex<BTreeSet<String>>>,
+    realtime_cooled_provider_keys: Arc<Mutex<BTreeMap<String, u64>>>,
     responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
@@ -237,6 +240,8 @@ pub struct V3ServerAggregateHandle {
     probe_shutdown: Option<oneshot::Sender<()>>,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
+    provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
+    observability_writers: Vec<V3WebuiObservability>,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -259,6 +264,7 @@ impl V3ServerAggregateHandle {
     }
 
     pub async fn shutdown(mut self) {
+        self.flush_runtime_persistence();
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -280,6 +286,7 @@ impl V3ServerAggregateHandle {
         // the process; otherwise the replacement can restore a lease with no
         // socket owner and the client waits forever.
         self.front_transport_broker.close_active_client_transports();
+        self.flush_runtime_persistence();
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -290,6 +297,17 @@ impl V3ServerAggregateHandle {
         }
         let _ = &self.request_activity_gate;
         checkpoints
+    }
+
+    fn flush_runtime_persistence(&self) {
+        if let Err(error) = self.provider_health.flush_persistence() {
+            eprintln!("V3 provider health persistence flush failed: {error}");
+        }
+        for observability in &self.observability_writers {
+            if let Err(error) = observability.flush_persistence() {
+                eprintln!("V3 observability persistence flush failed: {error}");
+            }
+        }
     }
 
     pub fn restore_front_checkpoints(
@@ -337,8 +355,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
     let sse_dump_enabled = v3_sse_dump_env_flag();
     let console_enabled = manifest.debug.log_console;
-    let mut debug_manifest = manifest.debug.clone();
-    debug_manifest.log_console = false;
+    let debug_manifest = manifest.debug.clone();
     let manifest = Arc::new(manifest);
     let preflight = build_v3_server_startup_01_listener_set_from_config_05(&manifest);
     let debug =
@@ -357,7 +374,8 @@ pub async fn spawn_v3_server_aggregate_with_admin(
         manifest.debug.codex_samples,
         routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
         routecodex_v3_config::internal::v3_error_samples_only()
-            && !manifest.debug.full_codex_sampling,
+            && !manifest.debug.full_codex_sampling
+            && !manifest.debug.codex_samples,
     ));
     for server in &preflight.listeners {
         codex_sample_store
@@ -404,7 +422,13 @@ pub async fn spawn_v3_server_aggregate_with_admin(
     // broker must already carry a valid positive runtime generation.
     let front_transport_broker = V3FrontTransportBroker::new(1);
     let admin_config_path_for_router = admin_config_path.clone();
+    let canonical_admin_config_path = admin_config_path.clone().or_else(|| {
+        std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .map(routecodex_v3_config::default_v3_config_path)
+    });
     let mut listeners = Vec::with_capacity(bound.len());
+    let mut observability_writers = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
         let app = if server_id == "admin_webui" {
@@ -414,17 +438,23 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                     "admin_webui requires a canonical config path",
                 )
             })?;
-            routecodex_v3_admin::router(routecodex_v3_admin::AppState::new(
-                config_path,
-            ))
+            routecodex_v3_admin::router(routecodex_v3_admin::AppState::new(config_path))
         } else {
-            let observability_store_path = observability_store_path_for_listener(
-                manifest.debug.log_file.as_deref().map(std::path::Path::new),
+            let config_path = canonical_admin_config_path.as_ref().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "observability requires HOME or an explicit canonical config path",
+                )
+            })?;
+            let observability_store_path = routecodex_v3_config::v3_webui_observability_store_path(
+                config_path,
+                manifest.debug.log_file.as_deref(),
                 server.port,
             );
             let webui_observability =
                 V3WebuiObservability::load_persisted(&observability_store_path)
                     .map_err(std::io::Error::other)?;
+            observability_writers.push(webui_observability.clone());
             build_v3_listener_router(V3ListenerState {
                 server,
                 manifest_version: preflight.manifest_version,
@@ -439,7 +469,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                 responses_relay_local_continuation: responses_relay_local_continuation.clone(),
                 responses_relay_stopless_control: responses_relay_stopless_control.clone(),
                 provider_health: provider_health.clone(),
-                realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
+                realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
                 responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
                 request_activity_gate: Arc::clone(&request_activity_gate),
                 front_transport_broker: front_transport_broker.clone(),
@@ -512,8 +542,9 @@ pub async fn spawn_v3_server_aggregate_with_admin(
             }
         };
         let startup_result = probe_health
-            .run_due_global_subscription_probes(
+            .run_due_provider_health_probes(
                 startup_now_ms,
+                true,
                 move |provider_id, auth_alias, model_id| {
                     let startup_manifest = Arc::clone(&startup_manifest);
                     async move {
@@ -528,31 +559,9 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                 },
             )
             .await;
-        if let Err(error) = startup_result {
-            eprintln!("provider persistent startup probe cycle failed: {error}");
-        }
-        let startup_key_manifest = Arc::clone(&probe_manifest);
-        let startup_key_result = probe_health
-            .run_due_provider_key_health_probes(
-                startup_now_ms,
-                true,
-                move |provider_id, auth_alias, model_id| {
-                    let startup_key_manifest = Arc::clone(&startup_key_manifest);
-                    async move {
-                        let target = build_v3_provider_global_probe_target(
-                            &startup_key_manifest,
-                            &provider_id,
-                            Some(&auth_alias),
-                            Some(&model_id),
-                        )?;
-                        probe_v3_provider_global_target(target).await
-                    }
-                },
-            )
-            .await;
-        if let Err(error) = startup_key_result {
-            eprintln!("provider persistent startup key probe cycle failed: {error}");
-        }
+        // Probe health records each target result; aggregate probe errors are
+        // not human console events.
+        let _ = startup_result;
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             tokio::select! {
@@ -566,7 +575,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                         }
                     };
                     let manifest_for_probe = Arc::clone(&probe_manifest);
-                    let result = probe_health.run_due_global_subscription_probes(now_ms, move |provider_id, auth_alias, model_id| {
+                    let result = probe_health.run_due_provider_health_probes(now_ms, false, move |provider_id, auth_alias, model_id| {
                         let manifest_for_probe = Arc::clone(&manifest_for_probe);
                         async move {
                             let target = build_v3_provider_global_probe_target(
@@ -578,29 +587,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                             probe_v3_provider_global_target(target).await
                         }
                     }).await;
-                    if let Err(error) = result {
-                        eprintln!("adaptive provider cooldown probe cycle failed: {error}");
-                    }
-                    let key_manifest_for_probe = Arc::clone(&probe_manifest);
-                    let key_result = probe_health.run_due_provider_key_health_probes(
-                        now_ms,
-                        false,
-                        move |provider_id, auth_alias, model_id| {
-                            let key_manifest_for_probe = Arc::clone(&key_manifest_for_probe);
-                            async move {
-                                let target = build_v3_provider_global_probe_target(
-                                    &key_manifest_for_probe,
-                                    &provider_id,
-                                    Some(&auth_alias),
-                                    Some(&model_id),
-                                )?;
-                                probe_v3_provider_global_target(target).await
-                            }
-                        },
-                    ).await;
-                    if let Err(error) = key_result {
-                        eprintln!("provider persistent key probe cycle failed: {error}");
-                    }
+                    let _ = result;
                 }
             }
         }
@@ -610,15 +597,9 @@ pub async fn spawn_v3_server_aggregate_with_admin(
         probe_shutdown: Some(probe_shutdown),
         request_activity_gate,
         front_transport_broker,
+        provider_health,
+        observability_writers,
     })
-}
-
-fn observability_store_path_for_listener(log_path: Option<&std::path::Path>, port: u16) -> std::path::PathBuf {
-    const DEFAULT_LOG_PATH: &str = "server.log";
-    match log_path {
-        Some(path) => path.with_extension("request-records.jsonl"),
-        None => std::path::PathBuf::from(format!("{DEFAULT_LOG_PATH}.port-{port}.request-records.jsonl")),
-    }
 }
 
 pub async fn serve_v3_server_aggregate_until_shutdown(
@@ -661,14 +642,6 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         .route("/_routecodex/debug/snapshots", get(debug_snapshots))
         .route("/_routecodex/debug/dry-run", post(debug_dry_run))
         .route(
-            "/_routecodex/observability/snapshot",
-            get(webui_observability_endpoints::observability_snapshot),
-        )
-        .route(
-            "/_routecodex/observability/events",
-            get(webui_observability_endpoints::observability_events),
-        )
-        .route(
             "/_routecodex/diagnostics/virtual-router",
             get(virtual_router_status),
         )
@@ -682,7 +655,9 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         )
         .route(
             "/_routecodex/health/cooldown-pool",
-            get(webui_observability_endpoints::cooldown_pool),
+            get(webui_observability_endpoints::cooldown_pool).post(
+                webui_observability_endpoints::remove_cooldown,
+            ),
         )
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(path_not_found)
@@ -968,6 +943,8 @@ async fn pending_endpoint(
                 V3ErrorProjectionConsoleInput {
                     endpoint: &path,
                     request_id: &request_id,
+                    entry_protocol: &entry_protocol,
+                    session_id: None,
                     status: frame.status,
                     error_chain: &frame.error_chain,
                     body: match &frame.body {
@@ -1039,6 +1016,8 @@ fn pending_binding_output_response(
 struct V3ErrorProjectionConsoleInput<'input> {
     endpoint: &'input str,
     request_id: &'input str,
+    entry_protocol: &'input str,
+    session_id: Option<&'input str>,
     status: u16,
     error_chain: &'input [&'static str],
     body: Option<&'input Value>,
@@ -1049,8 +1028,10 @@ struct V3ErrorProjectionConsoleInput<'input> {
 fn emit_relay_error_chain_if_any(
     state: &Arc<V3ListenerState>,
     trace_scope: &V3DebugTraceScope,
+    entry_protocol: &str,
     path: &str,
     request_id: &str,
+    session_id: Option<&str>,
     status: u16,
     error_chain: Option<&[&'static str]>,
     body: Option<&Value>,
@@ -1063,6 +1044,8 @@ fn emit_relay_error_chain_if_any(
         V3ErrorProjectionConsoleInput {
             endpoint: path,
             request_id,
+            entry_protocol,
+            session_id,
             status,
             error_chain,
             body,
@@ -1100,6 +1083,23 @@ fn record_and_emit_v3_error_projection(
         input.body,
         input.project_path,
     );
+    if let Err(error) = webui_observability::record_v3_webui_error_projection(
+        &state.webui_observability,
+        state.server.port,
+        input.request_id,
+        input.endpoint,
+        input.entry_protocol,
+        input.project_path,
+        input.session_id,
+        input.status,
+        input.body,
+    ) {
+        let line = format_v3_console_timed_content(
+            "[webui-observability]",
+            &format!("req={} error={}", input.request_id, error),
+        );
+        append_v3_human_console_line(state, &line);
+    }
     None
 }
 

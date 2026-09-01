@@ -1,0 +1,150 @@
+lifecycle_id: v3.execution_control_payload_architecture
+status: active
+owner_feature_id: v3.execution_request_lifecycle
+summary: One resident request lifecycle owns immutable target planning, cumulative recovery budget, bounded attempt payloads, terminal success, and closeout; diagnostics and persistence are bounded side channels without execution authority.
+canonical_docs:
+  problem: docs/goals/v3-execution-control-payload-architecture-audit-problem.md
+  design: docs/goals/v3-execution-control-payload-architecture-audit-design.md
+  plan: docs/goals/v3-execution-control-payload-architecture-audit-plan.md
+  goal_prompt: docs/goals/v3-execution-control-payload-architecture-audit-goal-prompt.md
+implementation_owner_files:
+  request_execution_control: v3/crates/routecodex-v3-runtime/src/execution_control.rs
+  attempt_store_policy: v3/crates/routecodex-v3-config/src/attempt_store.rs
+  provider_health_persistence: v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
+entrypoint:
+  node_id: V3ExecutionControl01RequestAccepted
+  call_map_chain_id: v3.execution_control_payload_architecture
+  wiki_page: docs/architecture/wiki/v3-execution-control-payload-architecture.md
+return_path:
+  success_node_id: V3ExecutionControl06SuccessCommitted
+  failure_node_id: V3Error05ExecutionDecision
+node_ids:
+  - V3ExecutionControl01RequestAccepted
+  - V3ExecutionControl02RecoveryDecision
+  - V3ExecutionControl03AttemptReserved
+  - V3ExecutionControl04AttemptInFlight
+  - V3ExecutionControl05AttemptSealed
+  - V3ExecutionControl06SuccessCommitted
+  - V3ExecutionControl07PersistenceQueued
+  - V3Error05ExecutionDecision
+control_resources:
+  - v3.execution.request_lifecycle_control
+  - v3.execution.target_plan
+  - v3.execution.attempt_budget
+  - v3.execution.attempt_control_state
+  - v3.execution.attempt_success_receipt
+payload_resources:
+  - v3.execution.attempt_payload_store
+diagnostic_resources:
+  - v3.observability.stream_diagnostics
+persistence_resources:
+  - v3.provider.health_persistence_queue
+  - v3.observability.request_ledger_queue
+module_contracts:
+  runtime:
+    owns: [request_lifecycle, target_plan_consumption, attempt_budget, attempt_store, Error05_execution, success_receipt]
+    forbids: [temporary_runtime, stream_wrapper_executor_reentry, route_pool_rehit, payload_control_reconstruction]
+  provider_responses:
+    owns: [network_io, lazy_stream_runtime_lifetime, health_memory_truth, health_persistence_writer]
+    forbids: [routing, recovery_policy, lock_held_disk_io, local_failure_provider_penalty]
+  server_observability:
+    owns: [typed_event_projection, active_request_cache, bounded_recent_terminal_cache, request_ledger_queue]
+    forbids: [execution_control, provider_health_control, mutex_held_file_io, unbounded_history_cache]
+  config:
+    owns: [attempt_store_policy_compilation, storage_path_policy_compilation]
+    forbids: [runtime_append, runtime_flush, history_rotation, request_hot_path_io]
+budget_contract:
+  per_attempt: required
+  per_request: required
+  process_global: required
+  residence_or_deadline: required
+  reserve_before_append_or_copy: true
+  provider_attempt_and_client_replay_share_request_budget: true
+  server_budget_construction: forbidden
+  initial_storage: bounded_memory_only
+  disk_spill: forbidden
+sealed_replay_body_contract:
+  responses: typed_non_optional
+  anthropic: typed_non_optional
+  server_consumption: exhaustive_match
+  option_stream_with_expect: forbidden
+failure_kinds:
+  - Upstream
+  - Protocol
+  - LocalResourceExhausted
+  - ObservationFailure
+  - PersistenceFailure
+  - ClientCancelled
+failure_attribution_contract:
+  responses_client_replay:
+    runtime_variant: ExecutionControlResponse
+    source_kind: RuntimeFailure
+    source_stage: V3ServerRespOutbound06ClientFrame
+    client_status: 599
+    client_code: responses_relay_response_execution_control_error
+    provider_response_classification: forbidden
+    provider_health_mutation: forbidden
+success_receipt_contract:
+  issuer: response_semantic_owner_after_protocol_terminal_and_payload_seal
+  consumers: [provider_health_success, route_policy_commit, continuation_commit, client_semantic_commit]
+  forbidden_evidence: [http_2xx, response_headers, stream_constructed, first_business_frame, transport_accepted]
+  source_owner_files:
+    - v3/crates/routecodex-v3-runtime/src/kernel.rs
+    - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+    - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
+    - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+current_runtime_red_bindings: []
+edges:
+  - step_id: v3-execution-control-target-plan
+    from_node: V3ExecutionControl01RequestAccepted
+    to_node: V3ExecutionControl02RecoveryDecision
+    status: active
+  - step_id: v3-execution-control-attempt-admission
+    from_node: V3ExecutionControl02RecoveryDecision
+    to_node: V3ExecutionControl03AttemptReserved
+    status: active
+  - step_id: v3-execution-control-attempt-stream
+    from_node: V3ExecutionControl03AttemptReserved
+    to_node: V3ExecutionControl04AttemptInFlight
+    status: active
+  - step_id: v3-execution-control-terminal-read
+    from_node: V3ExecutionControl04AttemptInFlight
+    to_node: V3ExecutionControl05AttemptSealed
+    status: active
+  - step_id: v3-execution-control-success-receipt
+    from_node: V3ExecutionControl05AttemptSealed
+    to_node: V3ExecutionControl06SuccessCommitted
+    status: active
+  - step_id: v3-execution-control-health-persistence
+    from_node: V3ExecutionControl06SuccessCommitted
+    to_node: V3ExecutionControl07PersistenceQueued
+    status: active
+  - step_id: v3-execution-control-observability-persistence
+    from_node: V3ExecutionControl06SuccessCommitted
+    to_node: V3ExecutionControl07PersistenceQueued
+    status: active
+verification_gates:
+  - npm run verify:v3-execution-control-payload-architecture
+  - npm run test:v3-execution-control-payload-architecture-red-fixtures
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-architecture-ci
+  - npm run verify:ci
+completion_contract:
+  runtime_red_bindings_remaining: 0
+  binding_pending_remaining: 0
+  real_tcp_handoff: required
+  global_install_restart_live_replay: required
+  agy_controller_pass: required
+  exact_reviewed_commit_pushed: required
+generated_docs:
+  markdown: docs/architecture/wiki/v3-execution-control-payload-architecture.md
+  html: docs/architecture/wiki/html/v3-execution-control-payload-architecture.html
+  renderer: v3/scripts/architecture/render-v3-execution-control-payload-architecture.mjs
+  verifier: v3/scripts/architecture/verify-v3-execution-control-payload-architecture.mjs

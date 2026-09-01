@@ -147,32 +147,6 @@ source = "token_file:/Volumes/extension/.rcc/secrets/v3/opencode-go.conf#opencod
 route_group_id = "responses_v3_7777"
 
 [[route_groups.pools]]
-pool_id = "anthropic_entry"
-selection = "priority"
-precedence = 100
-entry_protocol = "anthropic"
-[[route_groups.pools.targets]]
-provider_id = "opencode-go"
-model_id = "deepseek-v4-flash"
-priority = 2
-weight = 1
-[[route_groups.pools.targets]]
-provider_id = "minimax_anthropic"
-model_id = "MiniMax-M3"
-priority = 3
-weight = 1
-[[route_groups.pools.targets]]
-provider_id = "modrouter_anthropic"
-model_id = "claude-fable-5"
-priority = 4
-weight = 1
-[[route_groups.pools.targets]]
-provider_id = "glmrelay_anthropic"
-model_id = "glm-5.2"
-priority = 5
-weight = 1
-
-[[route_groups.pools]]
 pool_id = "ox_alpha_direct"
 selection = "priority"
 precedence = -1
@@ -193,22 +167,22 @@ min_input_tokens = 180000
 [[route_groups.pools.targets]]
 provider_id = "opencode-go-zen"
 model_id = "x-preview-f-free"
-priority = 2
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "opencode-go"
 model_id = "deepseek-v4-flash"
-priority = 3
+priority = 100
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "modrouter_anthropic"
 model_id = "claude-fable-5"
-priority = 4
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "glmrelay_anthropic"
 model_id = "glm-5.2"
-priority = 5
+priority = 80
 weight = 1
 
 [[route_groups.pools]]
@@ -220,32 +194,32 @@ required_capabilities = ["thinking"]
 [[route_groups.pools.targets]]
 provider_id = "cc-sol"
 model_id = "gpt-5.6-sol"
-priority = 1
+priority = 100
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "opencode-go"
 model_id = "deepseek-v4-flash"
-priority = 2
+priority = 100
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "opencode-go-zen"
 model_id = "x-preview-f-free"
-priority = 3
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "minimax_anthropic"
 model_id = "MiniMax-M3"
-priority = 4
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "modrouter_anthropic"
 model_id = "claude-fable-5"
-priority = 5
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "glmrelay_anthropic"
 model_id = "glm-5.2"
-priority = 6
+priority = 80
 weight = 1
 
 [[route_groups.pools]]
@@ -257,32 +231,32 @@ required_capabilities = ["coding"]
 [[route_groups.pools.targets]]
 provider_id = "cc-sol"
 model_id = "gpt-5.6-sol"
-priority = 1
+priority = 100
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "opencode-go-zen"
 model_id = "x-preview-f-free"
-priority = 1
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "opencode-go"
 model_id = "deepseek-v4-flash"
-priority = 3
+priority = 100
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "minimax_anthropic"
 model_id = "MiniMax-M3"
-priority = 4
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "modrouter_anthropic"
 model_id = "claude-fable-5"
-priority = 5
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "glmrelay_anthropic"
 model_id = "glm-5.2"
-priority = 6
+priority = 80
 weight = 1
 
 [[route_groups.pools]]
@@ -294,17 +268,17 @@ required_capabilities = ["multimodal"]
 [[route_groups.pools.targets]]
 provider_id = "cc-sol"
 model_id = "gpt-5.6-sol"
-priority = 1
+priority = 100
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "opencode-go-zen"
 model_id = "x-preview-f-free"
-priority = 1
+priority = 90
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "minimax_anthropic"
 model_id = "MiniMax-M3"
-priority = 3
+priority = 80
 weight = 1
 
 [[route_groups.pools]]
@@ -316,17 +290,17 @@ required_capabilities = ["web_search"]
 [[route_groups.pools.targets]]
 provider_id = "minimax_anthropic"
 model_id = "MiniMax-M3"
-priority = 3
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "glmrelay_anthropic"
 model_id = "glm-5.2"
-priority = 4
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "modrouter_anthropic"
 model_id = "claude-fable-5"
-priority = 5
+priority = 80
 weight = 1
 
 [[route_groups.pools]]
@@ -337,27 +311,27 @@ entry_protocol = "responses"
 [[route_groups.pools.targets]]
 provider_id = "cc-sol"
 model_id = "gpt-5.6-sol"
-priority = 1
+priority = 100
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "opencode-go-zen"
 model_id = "x-preview-f-free"
-priority = 1
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "minimax_anthropic"
 model_id = "MiniMax-M3"
-priority = 3
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "modrouter_anthropic"
 model_id = "claude-fable-5"
-priority = 4
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "opencode-go"
 model_id = "deepseek-v4-flash"
-priority = 5
+priority = 90
 weight = 1
 
 [[route_groups.pools]]
@@ -368,27 +342,27 @@ required_capabilities = ["tools"]
 [[route_groups.pools.targets]]
 provider_id = "cc-sol"
 model_id = "gpt-5.6-sol"
-priority = 1
+priority = 100
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "opencode-go-zen"
 model_id = "x-preview-f-free"
-priority = 1
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "minimax_anthropic"
 model_id = "MiniMax-M3"
-priority = 3
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "modrouter_anthropic"
 model_id = "claude-fable-5"
-priority = 4
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "opencode-go"
 model_id = "deepseek-v4-flash"
-priority = 5
+priority = 90
 weight = 1
 
 [[route_groups.pools]]
@@ -397,30 +371,30 @@ selection = "priority"
 [[route_groups.pools.targets]]
 provider_id = "cc-sol"
 model_id = "gpt-5.6-sol"
-priority = 1
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "opencode-go-zen"
 model_id = "x-preview-f-free"
-priority = 2
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "opencode-go"
 model_id = "deepseek-v4-flash"
-priority = 3
+priority = 90
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "minimax_anthropic"
 model_id = "MiniMax-M3"
-priority = 4
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "modrouter_anthropic"
 model_id = "claude-fable-5"
-priority = 5
+priority = 80
 weight = 1
 [[route_groups.pools.targets]]
 provider_id = "glmrelay_anthropic"
 model_id = "glm-5.2"
-priority = 6
+priority = 80
 weight = 1

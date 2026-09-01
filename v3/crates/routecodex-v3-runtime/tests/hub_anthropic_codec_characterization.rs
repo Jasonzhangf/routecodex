@@ -10,9 +10,9 @@ use routecodex_v3_runtime::{
     encode_v3_responses_semantic_as_anthropic_request,
     project_v3_anthropic_message_as_responses_response,
     project_v3_anthropic_message_as_responses_response_with_context,
-    V3AnthropicChatShapeBranchSemantic, V3AnthropicCodecError, V3AnthropicCodecStage,
-    V3AnthropicResponsesProjectionContext, V3HubEntryProtocol, V3HubProviderWireProtocol,
-    V3HubTransportIntent,
+    project_v3_responses_json_as_anthropic_message, V3AnthropicChatShapeBranchSemantic,
+    V3AnthropicCodecError, V3AnthropicCodecStage, V3AnthropicResponsesProjectionContext,
+    V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent,
 };
 use serde_json::json;
 
@@ -230,6 +230,10 @@ fn multi_turn_tool_history_with_current_image_projects_full_anthropic_wire_shape
     assert_eq!(assistant["role"], "assistant");
     assert_eq!(
         assistant["content"][0],
+        json!({"type":"thinking", "thinking":"需要运行 git status"})
+    );
+    assert_eq!(
+        assistant["content"][1],
         json!({"type":"tool_use","id":"call_1","name":"bash","input":{"command":"git status"}})
     );
     // reasoning_content 不得泄漏
@@ -257,6 +261,38 @@ fn multi_turn_tool_history_with_current_image_projects_full_anthropic_wire_shape
             "source":{"type":"base64","media_type":"image/png","data":"AAAA"}
         })
     );
+}
+
+#[test]
+fn anthropic_wire_preserves_reasoning_only_assistant_content() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"glm-5.3",
+        "stream": false,
+        "messages": [
+            {"role":"assistant", "content": null, "reasoning_content":"先检查配置"},
+            {"role":"user", "content":"继续"}
+        ]
+    }))
+    .expect("reasoning-only assistant must remain a valid Anthropic message");
+
+    assert_eq!(
+        provider_request["messages"][0],
+        json!({
+            "role":"assistant",
+            "content":[{"type":"thinking", "thinking":"先检查配置"}]
+        })
+    );
+}
+
+#[test]
+fn anthropic_wire_rejects_non_string_reasoning_content() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"glm-5.3",
+        "messages":[{"role":"assistant", "content":null, "reasoning_content":[]}]
+    }))
+    .expect_err("malformed reasoning must fail at the codec boundary");
+
+    assert!(error.to_string().contains("reasoning_content"), "{error}");
 }
 
 #[test]
@@ -2648,5 +2684,65 @@ fn anthropic_web_search_result_requires_exact_pairing() {
         error.to_string().contains("web_search_tool_result")
             && error.to_string().contains("srvtoolu_missing"),
         "{error}"
+    );
+}
+
+#[test]
+fn anthropic_ordinary_text_json_wrapper_remains_text_through_client_projection() {
+    let wrapper = r#"{"name":"probe","arguments":"{\"cmd\":\"ping\",\"reason\":\"执行 ping 命令进行探测\"}"}"#;
+    let canonical = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_ordinary_wrapper",
+        "model":"MiniMax-M3",
+        "role":"assistant",
+        "content":[{"type":"text","text":wrapper}],
+        "stop_reason":"end_turn"
+    }))
+    .expect("ordinary Anthropic text must normalize");
+
+    assert_eq!(canonical["status"], "completed");
+    assert_eq!(canonical["output"][0]["type"], "message");
+    assert_eq!(canonical["output"][0]["content"][0]["type"], "output_text");
+    assert_eq!(canonical["output"][0]["content"][0]["text"], wrapper);
+    assert!(canonical["output"].as_array().unwrap().iter().all(|item| {
+        !matches!(
+            item["type"].as_str(),
+            Some("function_call" | "custom_tool_call" | "tool_call")
+        )
+    }));
+
+    let client = project_v3_responses_json_as_anthropic_message(&canonical)
+        .expect("canonical ordinary text must project back to Anthropic");
+    assert_eq!(client["stop_reason"], "end_turn");
+    assert_eq!(client["content"], json!([{"type":"text","text":wrapper}]));
+    assert!(client["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|part| part["type"] != "tool_use"));
+}
+
+#[test]
+fn anthropic_native_tool_use_remains_projectable_tool_reason_source() {
+    let canonical = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_native_tool",
+        "model":"MiniMax-M3",
+        "role":"assistant",
+        "content":[{"type":"tool_use","id":"toolu_probe","name":"probe","input":{
+            "cmd":"ping",
+            "reason":"执行 ping 命令进行探测"
+        }}],
+        "stop_reason":"tool_use"
+    }))
+    .expect("native Anthropic tool_use must normalize");
+
+    assert_eq!(canonical["output"][0]["type"], "function_call");
+    assert_eq!(canonical["output"][0]["call_id"], "toolu_probe");
+    let client = project_v3_responses_json_as_anthropic_message(&canonical)
+        .expect("native function_call must project back to Anthropic");
+    assert_eq!(client["content"][0]["type"], "tool_use");
+    assert_eq!(client["content"][0]["id"], "toolu_probe");
+    assert_eq!(
+        client["content"][0]["input"]["reason"],
+        "执行 ping 命令进行探测"
     );
 }

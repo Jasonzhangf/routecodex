@@ -39,8 +39,8 @@ impl V3ProviderFailureAction {
             class_code: class_code.to_string(),
             recovery: V3ProviderRecoveryKind::RecoverableCounted,
             scope: V3ProviderHealthScope::GlobalProviderKey,
-            score_delta_milli: -100,
-            failure_threshold: 3,
+            score_delta_milli: -5,
+            failure_threshold: 0,
             cooldown_ms: 15 * 60_000,
         }
     }
@@ -71,7 +71,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .as_ref()
         .and_then(|error| error.status);
     let response_stream_failure = classified.source.code == "provider_response_sse_stream";
-    let http_status_is_health_counted = matches!(status, Some(429 | 500 | 502));
+    let http_status_is_health_counted = matches!(status, Some(429 | 500 | 502 | 503));
     if !response_stream_failure
         && !http_status_is_health_counted
         && is_v3_retryable_transient_source(&classified.source)
@@ -85,15 +85,15 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             cooldown_ms: 0,
         };
     }
-    if matches!(status, Some(401 | 402 | 403 | 503))
+    if matches!(status, Some(401 | 402 | 403))
         || is_irrecoverable_provider_failure_code(&classified.source.code)
     {
         return V3ProviderFailureAction {
             class_code: classified.source.code.clone(),
             recovery: V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
             scope: V3ProviderHealthScope::GlobalProviderKey,
-            score_delta_milli: -400,
-            failure_threshold: 1,
+            score_delta_milli: -20,
+            failure_threshold: 0,
             cooldown_ms: classified
                 .provider_global_cooldown_ms
                 .unwrap_or(60 * 60_000),
@@ -246,12 +246,9 @@ mod tests {
             "provider_connect_failed",
             503,
         ));
-        assert_eq!(
-            action.recovery,
-            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
-        );
+        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 0);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",
@@ -263,7 +260,7 @@ mod tests {
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
         );
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 0);
 
         for (code, status) in [("insufficient_quota", 429), ("account_disabled", 403)] {
             let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -275,7 +272,7 @@ mod tests {
                 action.recovery,
                 V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
             );
-            assert_eq!(action.failure_threshold, 1);
+            assert_eq!(action.failure_threshold, 0);
         }
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -285,8 +282,8 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
-        assert_eq!(action.score_delta_milli, -100);
+        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderRespInbound01Raw",
@@ -295,8 +292,8 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
-        assert_eq!(action.score_delta_milli, -100);
+        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",
@@ -305,7 +302,15 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
-        assert_eq!(action.score_delta_milli, -100);
+        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.score_delta_milli, -5);
+
+        let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "provider_connect_failed",
+            502,
+        ));
+        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
+        assert_eq!(action.failure_threshold, 0);
     }
 }

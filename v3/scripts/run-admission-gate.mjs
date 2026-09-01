@@ -49,6 +49,16 @@ try {
   for (const name of ['.agents', '.github', 'docs']) {
     cpSync(resolve(admissionRepo, name), resolve(workspace, name), { recursive: true });
   }
+  for (const relative of [
+    'docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml',
+    'docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md',
+  ]) {
+    const source = resolve(v3Root, '..', relative);
+    if (existsSync(source)) {
+      mkdirSync(dirname(resolve(workspace, relative)), { recursive: true });
+      copyFileSync(source, resolve(workspace, relative));
+    }
+  }
   mkdirSync(resolve(workspace, 'v3'), { recursive: true });
   cpSync(
     resolve(admissionRepo, 'v3', 'config'),
@@ -99,7 +109,10 @@ try {
     copyFileSync(resolve(v3Root, name), resolve(workspace, 'v3', name));
   }
   symlinkSync(resolve(workspace, 'v3', 'crates'), resolve(workspace, 'crates'), 'dir');
-  for (const name of ['Cargo.toml', 'Cargo.lock', 'package.json', 'package-lock.json']) {
+  for (const name of ['Cargo.toml', 'Cargo.lock']) {
+    copyFileSync(resolve(v3Root, name), resolve(workspace, name));
+  }
+  for (const name of ['package.json', 'package-lock.json']) {
     copyFileSync(resolve(v3Root, name), resolve(workspace, name));
   }
   symlinkSync(resolve(v3Root, 'node_modules'), resolve(workspace, 'node_modules'), 'dir');

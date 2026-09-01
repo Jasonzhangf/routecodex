@@ -72,6 +72,7 @@ pub struct V3Router07OpaqueTargetHitOnce {
     pub server_id: String,
     pub routing_group_id: String,
     pub pool_id: String,
+    pub route_classification_reason: String,
     pub target_index: usize,
     pub target_kind: V3RouteTargetKind,
     pub target_id: Option<String>,
@@ -520,6 +521,7 @@ impl V3VirtualRouter {
             server_id: plan.server_id,
             routing_group_id: plan.routing_group_id,
             pool_id: first.pool_id.clone(),
+            route_classification_reason: plan.facts.route_classification.reasoning.clone(),
             target_index: first.target_index,
             target_kind: first.target_kind.clone(),
             target_id: first.target_id.clone(),
@@ -819,9 +821,9 @@ fn ordered_target_indices(
     }
 }
 
-/// Returns stable target-index buckets ordered by ascending numeric priority.
+/// Returns stable target-index buckets ordered by descending numeric priority.
 /// Selection policies may reorder only inside one returned bucket; they must
-/// never move a higher numeric priority ahead of a lower one.
+/// never move a lower numeric priority ahead of a higher one.
 pub fn priority_tier_indices<T>(
     targets: &[T],
     mut priority: impl FnMut(&T) -> Option<i32>,
@@ -833,7 +835,7 @@ pub fn priority_tier_indices<T>(
             .or_default()
             .push(index);
     }
-    tiers.into_values().collect()
+    tiers.into_iter().rev().map(|(_, indices)| indices).collect()
 }
 
 /// Smooth weighted round-robin (nginx SWRR), ported from the V2 engine: each

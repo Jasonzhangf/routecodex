@@ -16,6 +16,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
     payload: serde_json::Value,
     responses_protocol_plan: Option<&V3ResponsesProtocolExecutionPlan>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    request_execution_control: Option<V3RequestExecutionControl>,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
     request_purpose: V3RequestPurpose,
@@ -149,7 +150,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
         Some(pipeline_id.clone()),
         payload.clone(),
     );
-    let output = match responses_protocol_plan {
+    let mut output = match responses_protocol_plan {
         Some(plan) => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
                 V3ResponsesDirectRuntimeSharedState::new(
@@ -175,6 +176,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 now_epoch_ms,
                 plan,
                 observability_accumulator,
+                request_execution_control,
             )
             .await
         }
@@ -244,6 +246,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 handoff.expanded,
                 handoff.request_local_excluded_candidates,
                 Some(handoff.observability_accumulator),
+                Some(handoff.request_execution_control),
             )
             .await
         } else {
@@ -256,12 +259,13 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 handoff.expanded,
                 handoff.request_local_excluded_candidates,
                 Some(handoff.observability_accumulator),
+                Some(handoff.request_execution_control),
             )
             .await
         };
         let mut relay_output = match relay_result {
             Ok(output) => output,
-            Err(error) => project_v3_responses_relay_runtime_failure(error),
+            Err(error) => project_v3_responses_relay_runtime_failure(error, None),
         };
         prepend_v3_protocol_plan_trace_to_responses_relay_output(
             &mut relay_output,
@@ -282,6 +286,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 .map(|observability| observability.provider_failure_events.clone())
                 .unwrap_or_default();
             relay_events.extend(next_handoff.provider_failure_events);
+            let request_execution_control = next_handoff.request_execution_control;
             let nested_outcome = Box::pin(execute_responses_direct_server_outcome(
                 state,
                 request_headers,
@@ -293,6 +298,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 next_handoff.request_payload.clone(),
                 Some(&next_handoff.plan),
                 Some(next_handoff.observability_accumulator),
+                Some(request_execution_control),
                 provider_failure_event_sink,
                 route_selection_event_sink,
                 request_purpose,
@@ -319,6 +325,20 @@ pub(super) async fn execute_responses_direct_server_outcome(
         }
         return V3ResponsesDirectServerOutcome::RelayOutput(relay_output);
     }
+    if let Some(output) = capture_v3_responses_direct_provider_snapshots(
+        state,
+        "responses",
+        &path,
+        &request_id,
+        &mut output,
+    ) {
+        return V3ResponsesDirectServerOutcome::DirectFrame(
+            project_v3_responses_direct_stream_error_frame_if_requested(
+                build_v3_server_16_http_frame_from_v3_foundation_output(output),
+                requested_stream,
+            ),
+        );
+    }
     let scope = match state
         .debug
         .start_trace(&state.server.id, &request_id, &execution_id)
@@ -343,10 +363,13 @@ pub(super) async fn execute_responses_direct_server_outcome(
         Some(json!({"status": output.client_payload.status})),
     ) {
         return V3ResponsesDirectServerOutcome::DirectFrame(
-            build_v3_server_16_http_frame_from_v3_foundation_output(project_v3_debug_failure(
-                "V3Server16HttpFrame",
-                error,
-            )),
+            project_v3_responses_direct_stream_error_frame_if_requested(
+                build_v3_server_16_http_frame_from_v3_foundation_output(project_v3_debug_failure(
+                    "V3Server16HttpFrame",
+                    error,
+                )),
+                requested_stream,
+            ),
         );
     }
     let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(

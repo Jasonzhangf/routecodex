@@ -1,10 +1,13 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::sync::{oneshot, Notify};
 
 #[derive(Debug)]
 pub(crate) struct V3FrontTransportCloseoutState {
     request_cycle: Mutex<V3FrontTransportRequestCycle>,
     closed: AtomicBool,
+    peer_disconnected: AtomicBool,
+    peer_disconnect_notify: Notify,
 }
 
 #[derive(Debug, Default)]
@@ -19,6 +22,8 @@ impl V3FrontTransportCloseoutState {
         Arc::new(Self {
             request_cycle: Mutex::new(V3FrontTransportRequestCycle::default()),
             closed: AtomicBool::new(false),
+            peer_disconnected: AtomicBool::new(false),
+            peer_disconnect_notify: Notify::new(),
         })
     }
 
@@ -71,6 +76,31 @@ impl V3FrontTransportCloseoutState {
 
     pub(crate) fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn is_peer_disconnected(&self) -> bool {
+        self.peer_disconnected.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn mark_peer_disconnected(&self) {
+        if !self.peer_disconnected.swap(true, Ordering::AcqRel) {
+            self.peer_disconnect_notify.notify_waiters();
+        }
+    }
+
+    pub(crate) async fn wait_peer_disconnected(&self) {
+        let notified = self.peer_disconnect_notify.notified();
+        if !self.peer_disconnected.load(Ordering::Acquire) {
+            notified.await;
+        }
+    }
+
+    pub(crate) fn signal_socket_close(&self, close_tx: &Mutex<Option<oneshot::Sender<()>>>) {
+        let _ = close_tx
+            .lock()
+            .expect("front socket close lock")
+            .take()
+            .map(|tx| tx.send(()));
     }
 }
 

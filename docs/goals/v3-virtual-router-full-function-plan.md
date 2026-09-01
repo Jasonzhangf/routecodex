@@ -31,9 +31,9 @@ two competing strategies:
    lane before ordinary route allocation; weighting cannot change that owner;
 2. Provider availability/cooldown is read through the request's session-bound availability reader,
    so one session cannot make another session's tier unavailable;
-3. among candidates available to that session, only the lowest numeric priority tier is eligible;
+3. among candidates available to that session, only the highest numeric priority tier is eligible;
 4. weight/SWRR chooses only among targets in that same priority tier;
-5. a higher numeric priority tier becomes eligible only after every candidate in all lower numeric
+5. a lower numeric priority tier becomes eligible only after every candidate in all higher numeric
    tiers is unavailable for the current session.
 
 Positive white-box cases:
@@ -68,8 +68,8 @@ that session advances to priority 2 while a second session still selects priorit
 - A single immutable route-selection plan that captures the matched optional tier, default floor,
   selection policy, and opaque targets before the one visible hit.
 - Priority, weighted, and round-robin selection with deterministic tests and isolated cursor state.
-- Weighted selection is priority-tiered: lower numeric priority is exhausted before SWRR can see a
-  higher numeric priority, and SWRR state is isolated by listener/group/pool/priority tier.
+- Weighted selection is priority-tiered: higher numeric priority is exhausted before SWRR can see a
+  lower numeric priority, and SWRR state is isolated by listener/group/pool/priority tier.
 - Exactly one `V3Router06... -> V3Router07...` consumption; the one-shot token cannot be cloned or
   reused for a second hit.
 - A typed handoff to Target Interpreter that contains opaque target identity and tier provenance but

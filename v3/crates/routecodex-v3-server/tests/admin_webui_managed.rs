@@ -83,13 +83,9 @@ port = {admin_port}
     let admin_webui = snapshot.admin_webui;
     assert!(admin_webui.is_some());
 
-    let handle = spawn_v3_server_aggregate_with_admin(
-        manifest,
-        admin_webui,
-        Some(config_path),
-    )
-    .await
-    .unwrap();
+    let handle = spawn_v3_server_aggregate_with_admin(manifest, admin_webui, Some(config_path))
+        .await
+        .unwrap();
     let admin_listener = handle
         .listeners
         .iter()

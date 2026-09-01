@@ -261,8 +261,9 @@ pub(crate) fn apply_responses_toolreason_sse_hook(
     expected_model_id: Option<&str>,
     argument_buffers: &mut Vec<String>,
     projection_authorized: &mut bool,
-) {
-    apply_relay_toolreason_sse_hook(
+    stream_observation: Option<&crate::hub_v1::V3RuntimeStreamObservation>,
+) -> Result<(), String> {
+    apply_toolreason_sse_hook_with_stream_observation(
         value,
         tool_names,
         pending_reasons,
@@ -273,7 +274,8 @@ pub(crate) fn apply_responses_toolreason_sse_hook(
         expected_model_id,
         argument_buffers,
         Some(projection_authorized),
-    );
+        stream_observation,
+    )
 }
 
 pub(crate) fn apply_relay_toolreason_sse_hook(
@@ -286,8 +288,37 @@ pub(crate) fn apply_relay_toolreason_sse_hook(
     request_id: Option<&str>,
     expected_model_id: Option<&str>,
     argument_buffers: &mut Vec<String>,
-    mut projection_authorized: Option<&mut bool>,
+    projection_authorized: Option<&mut bool>,
 ) {
+    let result = apply_toolreason_sse_hook_with_stream_observation(
+        value,
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        project_to_client,
+        session_id,
+        request_id,
+        expected_model_id,
+        argument_buffers,
+        projection_authorized,
+        None,
+    );
+    debug_assert!(result.is_ok());
+}
+
+fn apply_toolreason_sse_hook_with_stream_observation(
+    value: &mut serde_json::Value,
+    tool_names: &[String],
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    project_to_client: bool,
+    session_id: Option<&str>,
+    request_id: Option<&str>,
+    expected_model_id: Option<&str>,
+    argument_buffers: &mut Vec<String>,
+    mut projection_authorized: Option<&mut bool>,
+    stream_observation: Option<&crate::hub_v1::V3RuntimeStreamObservation>,
+) -> Result<(), String> {
     crate::hub_v1::strip_v3_tool_thinking_request_artifacts_at_resp03(value);
     if projection_authorized.is_some()
         && crate::hub_v1::v3_toolreason_projection_authorized_at_resp03(value, expected_model_id)
@@ -296,7 +327,8 @@ pub(crate) fn apply_relay_toolreason_sse_hook(
             *authorized = true;
         }
     }
-    crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_and_expected_model(
+    let mut observation_error = None;
+    crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_expected_model_and_stream_observation(
         value,
         true,
         tool_names,
@@ -307,12 +339,18 @@ pub(crate) fn apply_relay_toolreason_sse_hook(
         request_id,
         Some(argument_buffers),
         expected_model_id,
+        stream_observation,
+        &mut observation_error,
     );
+    if let Some(error) = observation_error {
+        return Err(error);
+    }
     if pending_reasons.iter().any(Option::is_some) {
         if let Some(authorized) = projection_authorized.as_deref_mut() {
             *authorized = true;
         }
     }
+    Ok(())
 }
 
 fn responses_direct_route_hook(
@@ -1040,6 +1078,7 @@ mod tests {
                     server_id: "direct-model-binding".to_string(),
                     routing_group_id: "direct-model-binding".to_string(),
                     pool_id: "default".to_string(),
+                    route_classification_reason: "direct:model-binding".to_string(),
                     target_index: 0,
                     target_kind: V3RouteTargetKind::ProviderModel,
                     target_id: None,

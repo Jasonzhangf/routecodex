@@ -141,6 +141,13 @@ impl V3ProviderResp14Raw {
         }
     }
 
+    pub fn json_body(&self) -> Option<&[u8]> {
+        match &self.body {
+            V3ProviderResponseBody::Json(body) => Some(body.as_slice()),
+            V3ProviderResponseBody::Sse(_) => None,
+        }
+    }
+
     pub fn into_body(self) -> V3ProviderResponseBody {
         self.body
     }

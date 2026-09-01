@@ -20,7 +20,9 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
-  'v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs',
+  'v3/crates/routecodex-v3-runtime/src/sse_object_pipeline.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/tests.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
@@ -77,6 +79,24 @@ function removeEdge(document, chainId, stepId) {
 }
 const cases = [
   {
+    name: 'Direct provider action gate revives the removed handoff-budget executor',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    mutate: (source) => source.replaceAll(
+      'execute_v3_responses_direct_runtime_kernel_core_resident',
+      'execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget',
+    ),
+    diagnostic: /forbidden removed Direct lifecycle symbol execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget/u,
+  },
+  {
+    name: 'Direct provider action gate revives the removed SSE handoff wrapper',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs',
+    mutate: (source) => source.replaceAll(
+      'collect_direct_sse_attempt_after_terminal',
+      'wrap_direct_sse_provider_handoff_stream',
+    ),
+    diagnostic: /forbidden removed Direct lifecycle symbol wrap_direct_sse_provider_handoff_stream/u,
+  },
+  {
     name: 'isolated floor shrinks',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace('V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000', 'V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 100'),
@@ -101,37 +121,37 @@ const cases = [
     name: 'OpenAI post-commit SSE failure loses fresh-request isolation coverage',
     path: 'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
     mutate: (source) => source.replace(
-      'post_commit_sse_failure_closes_action_lane_without_blocking_a_fresh_request',
-      'post_commit_sse_failure_has_no_fresh_request_isolation_contract',
+      'sse_provider_attempt_is_not_committed_before_provider_terminal',
+      'sse_provider_attempt_has_no_terminal_commit_contract',
     ),
-    diagnostic: /missing active Rust test post_commit_sse_failure_closes_action_lane_without_blocking_a_fresh_request/u,
+    diagnostic: /missing active Rust test sse_provider_attempt_is_not_committed_before_provider_terminal/u,
   },
   {
     name: 'Gemini fresh request starts consuming an unrelated recovery lane',
     path: 'v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs',
     mutate: (source) => source.replace(
-      'terminal_sse_recovery_does_not_block_a_fresh_request',
-      'terminal_sse_recovery_blocks_a_fresh_request',
+      'validated_terminal_sse_releases_action_lane_for_a_fresh_request',
+      'validated_terminal_sse_blocks_a_fresh_request',
     ),
-    diagnostic: /missing active Rust test terminal_sse_recovery_does_not_block_a_fresh_request/u,
+    diagnostic: /missing active Rust test validated_terminal_sse_releases_action_lane_for_a_fresh_request/u,
   },
   {
     name: 'OpenAI active recovery loses explicit permit duration coverage',
     path: 'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
     mutate: (source) => source.replace(
-      'active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds',
-      'active_recovery_sse_has_no_explicit_permit_duration_contract',
+      'sse_provider_attempt_is_not_committed_before_provider_terminal',
+      'sse_provider_attempt_has_no_terminal_commit_contract',
     ),
-    diagnostic: /missing active Rust test active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds/u,
+    diagnostic: /missing active Rust test sse_provider_attempt_is_not_committed_before_provider_terminal/u,
   },
   {
     name: 'Direct response.failed loses fresh-request isolation coverage',
     path: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs',
     mutate: (source) => source.replace(
-      'direct_post_commit_response_failed_records_failure_but_fresh_request_bypasses_recovery',
-      'direct_post_commit_response_failed_has_no_fresh_request_isolation_contract',
+      'failed_terminal_sse_attempt_never_commits_partial_bytes_and_exhausts_to_error06',
+      'failed_terminal_sse_attempt_has_no_error06_contract',
     ),
-    diagnostic: /missing active Rust test direct_post_commit_response_failed_records_failure_but_fresh_request_bypasses_recovery/u,
+    diagnostic: /missing active Rust test failed_terminal_sse_attempt_never_commits_partial_bytes_and_exhausts_to_error06/u,
   },
   {
     name: 'Responses Relay terminal-missing loses fresh-request isolation coverage',
@@ -232,8 +252,8 @@ const cases = [
   {
     name: 'provider change restarts isolated delay',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replaceAll('active_lane_generation', 'bypassed_lane_generation'),
-    diagnostic: /missing active_lane_generation/u,
+    mutate: (source) => source.replaceAll('sustained_delay_ms()', 'bypassed_sustained_delay_ms()'),
+    diagnostic: /missing state\.next_admission_at/u,
   },
   {
     name: 'Direct mutates health before client disconnect classification',
@@ -462,25 +482,25 @@ const cases = [
       'Some("response.completed") => Some("completed".to_string()),',
       'Some("response.completed" | "response.done") => Some("completed".to_string()),',
     ),
-    diagnostic: /provider response\.done\/response\.requires_action must not satisfy the response\.completed terminal contract/u,
+    diagnostic: /provider response\.done\/response\.requires_action|missing Some\("response\.completed"/u,
   },
   {
     name: 'Responses Relay event codec accepts response.done as provider semantic terminal',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs',
     mutate: (source) => source.replace(
-      'Some("response.completed") => {',
-      'Some("response.completed" | "response.done") => {',
+      '| "response.done"',
+      '| "response.done_removed"',
     ),
-    diagnostic: /provider response\.done\/response\.requires_action must not satisfy the response\.completed terminal contract/u,
+    diagnostic: /missing \| "response\.done"/u,
   },
   {
     name: 'Direct provider outcome accepts response.done as provider semantic terminal',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs',
     mutate: (source) => source.replace(
-      'classify_v3_provider_generic_sse_json_data(&data)',
-      'event_type == "response.completed"',
+      'if event_type == "response.completed" {',
+      'if matches!(event_type, "response.completed" | "response.done") {',
     ),
-    diagnostic: /SSE event metadata must not be used as provider semantic source/u,
+    diagnostic: /provider response\.done must not satisfy the response\.completed terminal contract/u,
   },
   {
     name: 'Relay target-resolution source errors are swallowed as exhaustion',
@@ -543,9 +563,10 @@ const cases = [
 ];
 
 function sourcePath(rel) {
-  if (rel === 'package.json') return resolve(v3Root, rel);
+  const projectRoot = resolve(v3Root, '..');
+  if (rel === 'package.json') return resolve(projectRoot, rel);
   if (rel.startsWith('v3/')) return resolve(v3Root, rel.slice('v3/'.length));
-  return resolve(admissionRoot, rel);
+  return resolve(projectRoot, rel);
 }
 
 function copyFixtureSurface(root) {

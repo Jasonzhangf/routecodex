@@ -189,6 +189,40 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     tool_result,
                 )?;
             }
+            "agent_message" => {
+                // OpenAI Responses Beta agent-to-agent message.  author/recipient
+                // are internal agent identity (not Chat semantics) and are not
+                // emitted; encrypted_content parts are Fernet ciphertext of
+                // session state and must be discarded before provider wire
+                // (same rule as compaction.encrypted_content).
+                let parts_value: Option<Value> = item
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .map(|parts| {
+                        parts
+                            .iter()
+                            .filter(|part| {
+                                !matches!(
+                                    part.get("type").and_then(Value::as_str),
+                                    Some("encrypted_content")
+                                )
+                            })
+                            .cloned()
+                            .collect::<Vec<Value>>()
+                    })
+                    .map(Value::Array);
+                let (content, _) = build_v3_openai_chat_content_from_responses_content(
+                    parts_value.as_ref().or(item.get("content")).or(Some(&Value::Null)),
+                )?;
+                append_v3_openai_chat_message_preserving_tool_adjacency(
+                    &mut messages,
+                    &mut pending_tool_message_index,
+                    &pending_tool_call_ids,
+                    json!({"role": "user", "content": content}),
+                    turn_assistant_tail_index,
+                )?;
+                turn_assistant_tail_index = None;
+            }
             "compaction" => {
                 // Client session-compaction marker. Its encrypted_content is Fernet
                 // ciphertext of prior context and must be discarded here, never

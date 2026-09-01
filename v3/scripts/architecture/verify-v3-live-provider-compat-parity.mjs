@@ -68,7 +68,6 @@ const requiredCurrentProfileProviders = [
   'minimax_openai',
 ];
 const requiredCurrentProfilePools = [
-  'anthropic_entry',
   'coding',
   'default',
   'longcontext',

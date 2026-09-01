@@ -6,10 +6,13 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
-const repo = process.cwd();
+const repo = resolve(
+  process.cwd(),
+  process.env.ROUTECODEX_V3_SOURCE_ROOT || ".",
+);
 const verifier = resolve(
   repo,
-  "scripts/architecture/verify-v3-console-request-count-visibility.mjs",
+  "v3/scripts/architecture/verify-v3-console-request-count-visibility.mjs",
 );
 const copied = [
   "package.json",

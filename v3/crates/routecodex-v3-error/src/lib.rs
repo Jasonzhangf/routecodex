@@ -607,6 +607,15 @@ fn internal_client_status(source: &V3Error01SourceRaised) -> u16 {
     }
 }
 
+fn provider_client_status(source: &V3Error01SourceRaised) -> u16 {
+    source
+        .external_error
+        .as_ref()
+        .and_then(|external| external.status)
+        .filter(|status| *status == 429)
+        .unwrap_or(502)
+}
+
 fn client_error_message(source: &V3Error01SourceRaised) -> String {
     match source.source_kind {
         // Provider/runtime text is diagnostic side-channel data.  It may contain
@@ -922,7 +931,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         V3ErrorSourceKind::PathNotFound => 404,
         V3ErrorSourceKind::ModelNotFound => 404,
         V3ErrorSourceKind::PendingEndpoint => 501,
-        V3ErrorSourceKind::ProviderFailure => 502,
+        V3ErrorSourceKind::ProviderFailure => provider_client_status(source),
         V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => 400,
         V3ErrorSourceKind::TargetPoolExhausted => 503,
         V3ErrorSourceKind::RuntimeFailure => internal_client_status(source),
@@ -1417,10 +1426,11 @@ pub fn raise_v3_provider_compat_payload_boundary_violation(
         field,
         reason.into()
     );
-    build_v3_error_01_source_raised(
-        V3ErrorSourceKind::InvalidRequest,
+    build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::RuntimeFailure,
         source_stage,
         V3_PROVIDER_COMPAT_PAYLOAD_BOUNDARY_VIOLATION_CODE,
         message,
+        V3InternalErrorCode::V3Provider12ResponsesWirePayload,
     )
 }

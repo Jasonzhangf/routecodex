@@ -11,7 +11,9 @@
 //! 收敛；JSON 响应链（resp01->02->03->04->05->06）经 `project_json_response` 收敛。
 
 use super::*;
-use crate::nodes::V3CommittedClientSseBuilder;
+use crate::nodes::{
+    V3AttemptStoreError, V3CommittedClientSseBuilder, V3RequestExecutionControl,
+};
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     resolve_v3_relay_target_outcome, resolve_v3_relay_target_outcome_with_rescue,
@@ -30,6 +32,12 @@ use routecodex_v3_provider_responses::{
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+
+enum V3RelayAttemptCollectFailure {
+    Provider(String),
+    LocalStore(V3AttemptStoreError),
+    Observation(String),
+}
 
 /// Relay SSE 首帧守卫：provider 返回 SSE 后、投影前 await 首帧。首帧错误/空流/
 /// 挂起超时 -> V3ProviderError，走 provider 失败策略(reselect 切 provider)。
@@ -162,11 +170,7 @@ async fn guard_relay_sse_first_frame(
     }
 }
 
-/// Relay SSE 流"每帧空闲守卫"(独立 relay 路径专用):responses/anthropic relay
-/// 不走本骨架的收集循环,需要本守卫保证 provider SSE 数据挂起(连接保持、无新帧)
-/// 超过 30s 时归一化为 Transport 错误进入 provider 失败链（记录 failure +
-/// reselect 切 provider），而不是让客户端无限等待/无限重试同一挂起 provider。
-/// 语义:任意两帧之间(含首帧)超过窗口即产出 Err 并终止流。
+/// Relay SSE idle guard: a configured window applies between every two frames.
 pub(crate) fn guard_v3_provider_sse_idle(
     request_id: &str,
     provider_id: &str,
@@ -193,8 +197,10 @@ pub(crate) fn guard_v3_provider_sse_idle(
                         Err(V3ProviderError::Transport {
                             request_id: request_id.clone(),
                             provider_id: provider_id.clone(),
-                            reason: "provider SSE stream idle timeout (no frame within 30s)"
-                                .to_string(),
+                            reason: format!(
+                                "provider SSE stream idle timeout (no frame within {}ms)",
+                                idle_timeout.as_millis()
+                            ),
                         }),
                         (stream, true),
                     )),
@@ -211,7 +217,18 @@ fn observe_v3_provider_sse(
     use futures_util::StreamExt;
     Box::pin(stream.map(move |item| {
         if let Ok(chunk) = &item {
-            let _ = observation.record_provider_raw_sse_chunk(chunk);
+            if let Err(error) = observation.record_provider_raw_sse_chunk(chunk) {
+                // This is runtime observation state, not provider health. Keep
+                // the failure on the typed side-channel while preserving the
+                // provider/client bytes and their protocol semantics.
+                if let Err(receipt_error) = observation.record_observation_error(&format!(
+                    "provider_raw_sse_observation_failed: {error}"
+                )) {
+                    eprintln!(
+                        "V3 runtime observation failure could not be recorded: {receipt_error}; original: {error}"
+                    );
+                }
+            }
         }
         item
     }))
@@ -263,12 +280,20 @@ mod response_header_timeout_contract_tests {
     }
 }
 
-/// Relay 收集 provider SSE 流时的流空闲上限：首帧已收到、但后续数据挂起
-/// （连接保持、不失败、无新帧）超过该窗口 → 归一化为 Transport 错误进入错误链
-/// （记录 provider failure + reselect 切 provider + 连续失败拉黑），否则客户端
-/// 会无限重试命中同一挂起 provider（半截响应/断流无感知）。
-pub(crate) const V3_RELAY_SSE_STREAM_IDLE_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(30);
+/// The published provider SSE timeout intentionally covers both the first frame
+/// and the maximum inter-frame idle interval for relay streams.
+pub(crate) fn v3_provider_sse_idle_timeout(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+) -> Result<std::time::Duration, String> {
+    manifest.providers.get(provider_id).and_then(|provider| provider.sse_first_frame_timeout_ms)
+        .filter(|timeout_ms| *timeout_ms > 0).map(std::time::Duration::from_millis)
+        .ok_or_else(|| {
+            format!(
+                "published provider SSE first-frame/inter-frame timeout is missing for provider {provider_id}"
+            )
+        })
+}
 use std::fmt;
 
 /// 骨架内部错误（协议入口负责映射到自身错误类型）。
@@ -453,6 +478,7 @@ pub async fn execute_v3_relay_runtime_core<'store, C, T>(
     continuation_lookup: V3HubContinuationLookup<'store>,
     provider_header_overrides: Vec<V3ProviderRequestHeader>,
     allow_exhaustion_rescue_probe: bool,
+    initial_request_execution_control: Option<V3RequestExecutionControl>,
 ) -> Result<C::Output, V3RelayCoreError>
 where
     C: V3RelayProtocolCodec,
@@ -510,6 +536,15 @@ where
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut pending_provider_action_recovery = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
+    let request_execution_control = match initial_request_execution_control {
+        Some(control) => control,
+        None => V3RequestExecutionControl::from_manifest(manifest, server_id).map_err(|error| {
+            V3RelayCoreError::Target(format!(
+                "V3ExecutionAttemptBudget rejected relay request: {error}"
+            ))
+        })?,
+    };
+    let attempt_budget = request_execution_control.attempt_budget();
     let deterministic_sample = v3_relay_provider_target_selection_sample(request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
@@ -704,6 +739,11 @@ where
                 }
             }
         }
+        attempt_budget.admit_transport_attempt().map_err(|error| {
+            V3RelayCoreError::Target(format!(
+                "V3ExecutionAttemptBudget rejected provider transport attempt: {error}"
+            ))
+        })?;
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3RelayCoreError::Target(timing_error));
         }
@@ -864,8 +904,11 @@ where
                         continue;
                     }
                 };
+                let attempt_success_receipt =
+                    crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
                 provider_health
                     .record_provider_success_in_failure_scope(
+                        &attempt_success_receipt,
                         &failure_session_scope,
                         &selected_target_provider_id,
                         Some(&selected_target_auth_alias),
@@ -955,7 +998,8 @@ where
                     request_id,
                     &selected_target_provider_id,
                     guarded_stream,
-                    V3_RELAY_SSE_STREAM_IDLE_TIMEOUT,
+                    v3_provider_sse_idle_timeout(manifest, &selected_target_provider_id)
+                        .map_err(V3RelayCoreError::Target)?,
                 );
                 let stream_observation = V3RuntimeStreamObservation::default();
                 let idle_guarded_stream =
@@ -1029,31 +1073,57 @@ where
                 // number of frames discards the entire attempt and enters the
                 // same Error01 -> Error05 policy path as pre-first-frame
                 // transport failures.
-                let mut committed_attempt = V3CommittedClientSseBuilder::new();
+                let mut committed_attempt = V3CommittedClientSseBuilder::with_budget(
+                    attempt_budget.clone(),
+                )
+                .map_err(|error| {
+                    V3RelayCoreError::Target(format!(
+                        "V3ExecutionAttemptPayloadStore rejected relay attempt: {error}"
+                    ))
+                })?;
                 let mut projected_sse = projected_sse;
                 let stream_failure = loop {
                     match projected_sse.next().await {
                         Some(Ok(frame)) => {
-                            if let Err(reason) = committed_attempt.push(frame) {
-                                break Some(reason);
+                            if let Err(error) = committed_attempt.push(frame) {
+                                break Some(V3RelayAttemptCollectFailure::LocalStore(error));
                             }
                             match stream_observation.has_semantic_terminal() {
                                 Ok(true) => {
-                                    if let Err(reason) =
+                                    if let Err(error) =
                                         committed_attempt.mark_last_frame_as_terminal()
                                     {
-                                        break Some(reason);
+                                        break Some(V3RelayAttemptCollectFailure::LocalStore(error));
                                     }
                                 }
                                 Ok(false) => {}
-                                Err(reason) => break Some(reason),
+                                Err(reason) => {
+                                    break Some(V3RelayAttemptCollectFailure::Observation(reason))
+                                }
                             }
                         }
-                        Some(Err(reason)) => break Some(reason),
+                        Some(Err(reason)) => {
+                            break Some(V3RelayAttemptCollectFailure::Provider(reason))
+                        }
                         None => break None,
                     }
                 };
-                if let Some(reason) = stream_failure {
+                if let Some(failure) = stream_failure {
+                    let reason = match failure {
+                        V3RelayAttemptCollectFailure::LocalStore(error) => {
+                            drop(provider_action_permit.take());
+                            return Err(V3RelayCoreError::Target(format!(
+                                "V3ExecutionAttemptPayloadStore relay local resource failure: {error}"
+                            )));
+                        }
+                        V3RelayAttemptCollectFailure::Observation(error) => {
+                            drop(provider_action_permit.take());
+                            return Err(V3RelayCoreError::Target(format!(
+                                "V3RuntimeStreamObservation relay control failure: {error}"
+                            )));
+                        }
+                        V3RelayAttemptCollectFailure::Provider(reason) => reason,
+                    };
                     drop(provider_action_permit.take());
                     if reason.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
                         return Err(V3RelayCoreError::WebSearchIntercepted(reason));
@@ -1087,39 +1157,19 @@ where
                 }
                 let committed_sse = match committed_attempt.seal_after_validated_terminal() {
                     Ok(committed_sse) => committed_sse,
-                    Err(reason) => {
+                    Err(error) => {
                         drop(provider_action_permit.take());
-                        let failure = provider_runtime_failure(
-                            V3ProviderError::ResponseBody {
-                                request_id: request_id.to_string(),
-                                provider_id: selected_target_provider_id.clone(),
-                                reason,
-                            },
-                            &selected_target_provider_id,
-                        );
-                        if let Some(failure) = handle_provider_failure(
-                            &failure_context,
-                            selected,
-                            failure,
-                            &mut V3RelayProviderFailurePolicyState {
-                                failed_candidates: &mut failed_candidates,
-                                same_candidate_retries: &mut same_candidate_retries,
-                                trace: &mut trace,
-                            },
-                            &mut retry_selected,
-                            &mut pending_provider_action_recovery,
-                        )
-                        .await
-                        .map_err(V3RelayCoreError::Target)?
-                        {
-                            return Ok(C::assemble_failure_output(failure, trace));
-                        }
-                        continue;
+                        return Err(V3RelayCoreError::Target(format!(
+                            "V3ExecutionAttemptPayloadStore could not seal relay attempt: {error}"
+                        )));
                     }
                 };
                 drop(provider_action_permit.take());
+                let attempt_success_receipt =
+                    crate::nodes::V3AttemptSuccessReceipt::from_sealed_sse_attempt(&committed_sse);
                 provider_health
                     .record_provider_success_in_failure_scope(
+                        &attempt_success_receipt,
                         &failure_session_scope,
                         &selected_target_provider_id,
                         Some(&selected_target_auth_alias),
@@ -1132,6 +1182,10 @@ where
                     build_v3_relay_observability(C::ENTRY_KIND, &selected, "sse");
                 observability.provider_status = Some(provider_status);
                 observability.response_status = Some("completed".to_string());
+                observability.usage = stream_observation
+                    .snapshot()
+                    .ok()
+                    .and_then(|snapshot| snapshot.usage);
                 observability.timing = Some(
                     runtime_timing
                         .finish_runtime()
@@ -1389,6 +1443,10 @@ mod tests {
                     reason.contains("idle timeout"),
                     "hung stream must produce idle timeout transport error, got {reason}"
                 );
+                assert!(
+                    reason.contains("50ms"),
+                    "idle timeout error must report the configured window, got {reason}"
+                );
             }
             other => panic!("hung stream must produce Transport error, got {other:?}"),
         }
@@ -1430,5 +1488,21 @@ mod tests {
             }
             other => panic!("post-first-frame hang must produce Transport error, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn provider_raw_sse_observation_is_preserved_on_side_channel() {
+        let observation = V3RuntimeStreamObservation::default();
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(
+            futures_util::stream::iter(vec![Ok(b"data: semantic\n\n".to_vec())]),
+        );
+        let mut observed = observe_v3_provider_sse(stream, observation.clone());
+
+        assert_eq!(observed.next().await.unwrap().unwrap(), b"data: semantic\n\n");
+        assert_eq!(
+            observation.snapshot().unwrap().provider_raw_sse,
+            "data: semantic\n\n"
+        );
+        assert_eq!(observation.snapshot().unwrap().observation_error, None);
     }
 }

@@ -1644,7 +1644,7 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         Some("minimax:key1:MiniMax-M3")
     );
     assert_eq!(provider_event.failure_count, 0);
-    assert_eq!(provider_event.health_state, "request_local_provider_compat");
+    assert_eq!(provider_event.health_state, "transient_exhausted");
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 4);
@@ -1695,7 +1695,7 @@ async fn responses_relay_provider_duplicate_tool_identity_reselects_before_proje
             .expect("successful retry must keep console observability");
         assert_eq!(observability.provider_id.as_deref(), Some("minimax"));
         assert_eq!(observability.provider_status, Some(200));
-        assert_eq!(observability.attempts, Some(4));
+        assert_eq!(observability.attempts, Some(7));
         assert_eq!(observability.provider_failure_events.len(), 3);
         let provider_event = observability.provider_failure_events.last().unwrap();
         assert_eq!(provider_event.provider_key, "limited:key1:gpt-5.5");
@@ -1768,7 +1768,8 @@ async fn responses_relay_provider_duplicate_tool_identity_projects_typed_error_a
 async fn responses_relay_shared_health_cools_provider_key_after_three_cross_request_failures() {
     let server_id = "responses_shared_health";
     let manifest = responses_reselect_manifest_for_scope(server_id);
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let transport = ResponsesContextErrorThenSuccessTransport {
         captures: Mutex::new(Vec::new()),
     };
@@ -2078,7 +2079,8 @@ async fn responses_relay_provider_request_compat_failure_reselects_without_actio
 #[tokio::test]
 async fn concurrent_provider_request_compat_failures_do_not_serialize_request_local_reselects() {
     let manifest = responses_request_compat_storm_manifest();
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let transport = ResponsesCompatStormTransport {
         sends: Mutex::new(Vec::new()),
     };
@@ -2406,8 +2408,9 @@ fn provider_key_three_failures_cool_for_fifteen_minutes_and_probe_recovers() {
         "cooled provider must be probe-due after cooldown expiry"
     );
     assert!(store
-        .try_acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
-        .unwrap());
+        .acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
+        .unwrap()
+        .is_some());
     store
         .complete_provider_cooldown_probe_success("limited", Some("key1"), Some("gpt-5.5"))
         .unwrap();
@@ -2449,6 +2452,7 @@ async fn provider_error_closeout_enters_error01_06_without_success_projection() 
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
+            toolreason_observation_session_id: None,
             request_id: "req-closeout-error".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -2683,6 +2687,7 @@ fn request(request_id: &str, messages: Value, stream: bool) -> V3AnthropicRelayR
             concat!(module_path!(), ":", line!()),
         )
         .expect("test provider failure session scope"),
+        toolreason_observation_session_id: None,
         request_id: request_id.into(),
         payload: json!({
             "model":"claude-client-alias",

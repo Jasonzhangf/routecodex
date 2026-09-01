@@ -1,3 +1,4 @@
+use crate::restart_closeout::V3FrontTransportCloseoutState;
 use crate::V3MetadataCenterExecutionPlan;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
@@ -12,7 +13,6 @@ use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use crate::restart_closeout::V3FrontTransportCloseoutState;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
@@ -897,9 +897,11 @@ impl V3StableFrontSocket {
                     frame = write_rx.recv() => {
                         let Some(frame) = frame else { break };
                         if write_half.write_all(&frame).await.is_err() {
+                            worker_closeout_state.close();
                             break;
                         }
                         if write_half.flush().await.is_err() {
+                            worker_closeout_state.close();
                             break;
                         }
                     }
@@ -927,7 +929,9 @@ impl V3StableFrontSocket {
         self.signal_close();
     }
 
-    fn signal_close(&self) { let _ = self.close_tx.lock().expect("front socket close lock").take().map(|tx| tx.send(())); }
+    fn signal_close(&self) {
+        self.closeout_state.signal_socket_close(&self.close_tx);
+    }
 
     fn close(&self) {
         self.closeout_state.close();
@@ -953,7 +957,13 @@ impl AsyncRead for V3FrontHttpIo {
         if self.front_socket.is_closed() {
             return std::task::Poll::Ready(Ok(()));
         }
-        std::pin::Pin::new(&mut self.read_half).poll_read(cx, buf)
+        let result = std::pin::Pin::new(&mut self.read_half).poll_read(cx, buf);
+        if matches!(&result, std::task::Poll::Ready(Ok(())) if buf.filled().is_empty())
+            || matches!(&result, std::task::Poll::Ready(Err(_)))
+        {
+            self.front_socket.closeout_state.mark_peer_disconnected();
+        }
+        result
     }
 }
 
@@ -1035,13 +1045,25 @@ where
             service.call(request).await
         }
     });
-    hyper::server::conn::http1::Builder::new()
-        .serve_connection(
-            TokioIo::new(V3FrontHttpIo { read_half, front_socket }),
-            hyper_service,
-        )
-        .await
-        .map_err(std::io::Error::other)
+    let connection = hyper::server::conn::http1::Builder::new().serve_connection(
+        TokioIo::new(V3FrontHttpIo {
+            read_half,
+            front_socket: front_socket.clone(),
+        }),
+        hyper_service,
+    );
+    tokio::select! {
+        _ = front_socket.closeout_state.wait_peer_disconnected() => {
+            front_socket.close();
+            Ok(())
+        },
+        result = connection => {
+            if front_socket.closeout_state.is_peer_disconnected() {
+                front_socket.close();
+            }
+            result.map_err(std::io::Error::other)
+        },
+    }
 }
 
 #[cfg(test)]
@@ -1087,7 +1109,6 @@ mod tests {
             ),
         }
     }
-
     #[test]
     fn frame_sequence_rejects_duplicate_and_out_of_order_frames() {
         let mut sequence = V3FrontFrameSequence::default();
@@ -1096,7 +1117,6 @@ mod tests {
         assert_eq!(sequence.observe_client(2), V3FrontFrameDecision::OutOfOrder);
         assert_eq!(sequence.observe_client(1), V3FrontFrameDecision::New);
     }
-
     #[test]
     fn reattach_preserves_mode_owner_commit_and_sequence() {
         let now = Instant::now();
@@ -1120,7 +1140,6 @@ mod tests {
         assert_eq!(restored.frame_sequence.client_next(), 1);
         assert_eq!(restored.frame_sequence.provider_next(), 1);
     }
-
     #[test]
     fn reattach_never_extends_the_absolute_deadline() {
         let now = Instant::now();
@@ -1131,7 +1150,6 @@ mod tests {
         let (absolute, _) = restored.deadline.remaining(now + Duration::from_secs(120));
         assert!(absolute.is_zero());
     }
-
     #[test]
     fn registry_is_keyed_by_full_request_scope() {
         let now = Instant::now();
@@ -1145,7 +1163,6 @@ mod tests {
         );
         assert_eq!(registry.state(&lease.key), None);
     }
-
     #[test]
     fn broker_reattach_increments_generation_without_resetting_deadline() {
         let now = Instant::now();
@@ -1170,7 +1187,6 @@ mod tests {
             .0
             .is_zero());
     }
-
     #[test]
     fn broker_binds_front_connection_identity_to_full_request_lease() {
         let now = Instant::now();
@@ -1188,7 +1204,6 @@ mod tests {
             lease.key
         );
     }
-
     #[test]
     fn broker_rejects_duplicate_front_connection_identity_binding() {
         let now = Instant::now();
@@ -1231,7 +1246,6 @@ mod tests {
         assert!(broker.front_socket(connection).is_none());
         assert!(broker.client_socket(&lease.key).is_some());
     }
-
     #[test]
     fn broker_closes_active_client_transports_before_exec_replacement() {
         let broker = V3FrontTransportBroker::new(4);
@@ -1246,7 +1260,6 @@ mod tests {
 
         assert!(socket.is_closed());
     }
-
     #[tokio::test]
     async fn broker_close_finishes_active_tcp_client_before_exec_replacement() {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
@@ -1308,7 +1321,6 @@ mod tests {
             .expect("client write half shutdown");
         let _ = accept.await;
     }
-
     #[test]
     fn broker_reattach_moves_client_socket_to_new_generation_key() {
         let now = Instant::now();
@@ -1330,7 +1342,6 @@ mod tests {
         assert!(broker.client_socket(&lease.key).is_none());
         assert!(broker.client_socket(&restored.key).is_some());
     }
-
     #[test]
     fn broker_restores_checkpoint_with_new_generation_and_same_deadline_budget() {
         let now = Instant::now();
@@ -1353,7 +1364,6 @@ mod tests {
         assert_eq!(restored_checkpoint[0].key.generation, 5);
         assert!(restored_checkpoint[0].absolute_remaining_ms < checkpoint[0].absolute_remaining_ms);
     }
-
     #[test]
     fn broker_rejects_checkpoint_with_incomplete_request_scope() {
         let now = Instant::now();
@@ -1365,7 +1375,6 @@ mod tests {
         assert!(restored.restore_checkpoints(&checkpoint, now).is_err());
         assert!(restored.freeze(now).is_empty());
     }
-
     #[tokio::test]
     async fn stable_front_keeps_client_socket_open_while_runtime_detaches() {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
@@ -1427,7 +1436,6 @@ mod tests {
             .is_err());
         front.close().await.unwrap();
     }
-
     #[tokio::test]
     async fn stable_front_rejects_client_frame_after_absolute_deadline() {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))

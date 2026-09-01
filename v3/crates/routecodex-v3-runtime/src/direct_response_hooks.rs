@@ -8,6 +8,22 @@ use crate::hub_v1::V3HubProviderWireProtocol;
 use crate::hub_v1::V3ToolThinkingTurnContext;
 use crate::runtime_timing::V3RuntimeTimingState;
 
+/// The sole Direct response payload hook for protocol-neutral response cleanup.
+/// Both buffered JSON and SSE consumers call this owner; neither transport
+/// layer may reimplement response-id or cipher projection.
+pub(crate) fn apply_v3_direct_response_projection_hooks(
+    payload: &mut serde_json::Value,
+    strip_client_response_id: bool,
+    retain_response_cipher: bool,
+) {
+    if !retain_response_cipher {
+        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(payload, false);
+    }
+    if strip_client_response_id {
+        crate::shared::strip_v3_response_id_from_json_body(payload);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3DirectResponseCompatBlock {
     Passthrough,

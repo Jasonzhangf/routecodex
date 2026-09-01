@@ -45,6 +45,29 @@ fn responses_reasoning_effort_still_rejects_invalid_json_types_and_empty_strings
         );
     }
 }
+
+#[test]
+fn responses_inbound_preserves_text_format_for_target_outbound_whitelist() {
+    let format = json!({
+        "type": "json_schema",
+        "name": "answer_contract",
+        "description": "response contract",
+        "schema": {"type": "object", "properties": {"answer": {"type": "string"}}},
+        "strict": true
+    });
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": "return structured output",
+        "text": {"format": format}
+    }))
+    .expect("Responses inbound normalization must preserve registered text semantics");
+
+    assert_eq!(
+        request["routecodex_chat_extension"]["responses_request"]["text"]["format"], format,
+        "ReqInbound must not strip fields before the selected target outbound whitelist"
+    );
+}
+
 #[test]
 fn responses_input_image_url_maps_to_openai_chat_image_url_url() {
     let request = build_v3_chat_canonical_request_from_responses_payload(&json!({

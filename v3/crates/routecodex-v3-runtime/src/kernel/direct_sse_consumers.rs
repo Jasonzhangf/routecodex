@@ -5,6 +5,7 @@ use crate::hub_v1::{
     project_v3_responses_sse_event_json, V3HubProviderWireProtocol, V3OpenAiChatSseHookInput,
     V3OpenAiChatSseSemanticObject, V3OpenAiChatSseTreeError, V3ProviderResponsesJsonFrameOutcome,
     V3ResponsesSseHookInput, V3ResponsesSseSemanticObject, V3ResponsesSseTreeError,
+    V3RuntimeStreamObservation,
 };
 use crate::sse_object_pipeline::{
     SseObjectConsumer, SseObjectConsumerAction, SseObjectError, SseObjectFrame,
@@ -65,6 +66,7 @@ pub(crate) struct V3DirectSseContentConsumer {
     pub(crate) request_id: Option<String>,
     pub(crate) expected_model_id: Option<String>,
     pub(crate) client_responses_projection: bool,
+    pub(crate) stream_observation: Option<V3RuntimeStreamObservation>,
 }
 
 pub(crate) type ToolreasonHook = fn(
@@ -78,7 +80,8 @@ pub(crate) type ToolreasonHook = fn(
     Option<&str>,
     &mut Vec<String>,
     &mut bool,
-);
+    Option<&V3RuntimeStreamObservation>,
+) -> Result<(), String>;
 
 /// Direct response business-hook catalog.
 ///
@@ -156,7 +159,8 @@ impl V3DirectSseTypedHookCatalog {
         expected_model_id: Option<&str>,
         argument_buffers: &mut Vec<String>,
         projection_authorized: &mut bool,
-    ) {
+        stream_observation: Option<&V3RuntimeStreamObservation>,
+    ) -> Result<(), String> {
         (self.toolreason)(
             value,
             tool_names,
@@ -168,7 +172,8 @@ impl V3DirectSseTypedHookCatalog {
             expected_model_id,
             argument_buffers,
             projection_authorized,
-        );
+            stream_observation,
+        )
     }
 
     fn apply_responses(
@@ -235,7 +240,9 @@ fn noop_toolreason(
     _expected_model_id: Option<&str>,
     _argument_buffers: &mut Vec<String>,
     _projection_authorized: &mut bool,
-) {
+    _stream_observation: Option<&V3RuntimeStreamObservation>,
+) -> Result<(), String> {
+    Ok(())
 }
 
 impl V3DirectSseContentConsumer {
@@ -273,11 +280,11 @@ impl V3DirectSseContentConsumer {
         current_item_next.max(self.tool_names.len()).max(1)
     }
 
-    pub(crate) fn finalize_toolreason_observation(&mut self) {
+    pub(crate) fn finalize_toolreason_observation(&mut self) -> Result<(), String> {
         if !self.tool_thinking_enabled {
-            return;
+            return Ok(());
         }
-        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_expected_model(
+        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_expected_model_and_stream_observation(
             &self.tool_names,
             &mut self.pending_reasons,
             &mut self.reason_emitted,
@@ -286,7 +293,8 @@ impl V3DirectSseContentConsumer {
                 request_id: self.request_id.as_deref(),
             },
             self.expected_model_id.as_deref(),
-        );
+            self.stream_observation.as_ref(),
+        )
     }
 
     pub(crate) fn take_toolreason_reasoning_projection(&mut self) -> Option<Vec<u8>> {
@@ -350,26 +358,63 @@ impl V3DirectSseContentConsumer {
                     return None;
                 }
                 let output = payload.pointer("/response/output")?.as_array()?;
-                output.iter().enumerate().find_map(|(output_index, item)| {
-                    let is_projected_reasoning =
-                        item.get("type").and_then(serde_json::Value::as_str) == Some("reasoning")
-                            && item
-                                .get("id")
-                                .and_then(serde_json::Value::as_str)
-                                .is_some_and(|id| id.starts_with("rcc_reason_"));
-                    if !is_projected_reasoning {
-                        return None;
+                let mut reasoning_item: Option<(usize, String)> = None;
+                let mut native_toolreason: Option<(usize, String, String)> = None;
+                for (output_index, item) in output.iter().enumerate() {
+                    let item_type = item.get("type").and_then(serde_json::Value::as_str);
+                    let item_id = item.get("id").and_then(serde_json::Value::as_str);
+                    if item_type == Some("reasoning")
+                        && item_id.is_some_and(|id| id.starts_with("rcc_reason_"))
+                    {
+                        if let Some(text) = item
+                            .pointer("/summary/0/text")
+                            .and_then(serde_json::Value::as_str)
+                        {
+                            reasoning_item = Some((output_index, text.to_owned()));
+                            break;
+                        }
                     }
-                    let reasoning = item
-                        .pointer("/summary/0/text")
-                        .and_then(serde_json::Value::as_str)?;
-                    Some(
+                    if matches!(
+                        item_type,
+                        Some("function_call" | "tool_call" | "custom_tool_call")
+                    ) && native_toolreason.is_none()
+                    {
+                        let arguments = item.get("arguments").and_then(serde_json::Value::as_str);
+                        let item_id_owned = item_id.map(str::to_owned);
+                        if let (Some(arguments), Some(item_id)) = (arguments, item_id_owned) {
+                            if let Ok(args_value) =
+                                serde_json::from_str::<serde_json::Value>(arguments)
+                            {
+                                if let Some(reason) = args_value
+                                    .get("reason")
+                                    .and_then(serde_json::Value::as_str)
+                                    .filter(|text| !text.is_empty())
+                                {
+                                    native_toolreason =
+                                        Some((output_index, item_id, reason.to_owned()));
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some((output_index, reasoning)) = reasoning_item {
+                    return Some(
                         crate::hub_v1::build_v3_toolreason_visible_text_sse_events_at_resp03(
                             &serde_json::json!({"output_index": output_index}),
-                            reasoning,
+                            &reasoning,
                         ),
-                    )
-                })
+                    );
+                }
+                let (output_index, item_id, reasoning) = native_toolreason?;
+                Some(
+                    crate::hub_v1::build_v3_toolreason_visible_text_sse_events_at_resp03(
+                        &serde_json::json!({
+                            "output_index": output_index,
+                            "item": {"id": item_id},
+                        }),
+                        &reasoning,
+                    ),
+                )
             })?;
         self.toolreason_reasoning_projected = true;
         Some(projection.into_bytes())
@@ -453,7 +498,8 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
             return Ok(SseObjectConsumerAction::Pass);
         }
         if self.tool_thinking_enabled && is_anthropic_terminal {
-            self.finalize_toolreason_observation();
+            self.finalize_toolreason_observation()
+                .map_err(|message| SseObjectError::Consumer { message })?;
             return Ok(SseObjectConsumerAction::Pass);
         }
         let mut rewritten =
@@ -463,18 +509,21 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
                 &rewritten,
                 &mut self.tool_names,
             );
-            self.typed_hooks.apply_toolreason(
-                &mut rewritten,
-                &self.tool_names,
-                &mut self.pending_reasons,
-                &mut self.reason_emitted,
-                self.toolreason_client_projection,
-                self.session_id.as_deref(),
-                self.request_id.as_deref(),
-                self.expected_model_id.as_deref(),
-                &mut self.toolreason_argument_buffers,
-                &mut self.toolreason_projection_authorized,
-            );
+            self.typed_hooks
+                .apply_toolreason(
+                    &mut rewritten,
+                    &self.tool_names,
+                    &mut self.pending_reasons,
+                    &mut self.reason_emitted,
+                    self.toolreason_client_projection,
+                    self.session_id.as_deref(),
+                    self.request_id.as_deref(),
+                    self.expected_model_id.as_deref(),
+                    &mut self.toolreason_argument_buffers,
+                    &mut self.toolreason_projection_authorized,
+                    self.stream_observation.as_ref(),
+                )
+                .map_err(|message| SseObjectError::Consumer { message })?;
             let chat_toolreason_projection = self.toolreason_client_projection
                 && rewritten.get("object").and_then(serde_json::Value::as_str)
                     == Some("chat.completion.chunk")
@@ -561,17 +610,14 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
             }
         }
         if self.tool_thinking_enabled && is_direct_toolreason_terminal(&rewritten) {
-            self.finalize_toolreason_observation();
+            self.finalize_toolreason_observation()
+                .map_err(|message| SseObjectError::Consumer { message })?;
         }
-        if !self.retain_response_cipher {
-            routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
-                &mut rewritten,
-                false,
-            );
-        }
-        if self.strip_client_response_id {
-            crate::shared::strip_v3_response_id_from_json_body(&mut rewritten);
-        }
+        crate::direct_response_hooks::apply_v3_direct_response_projection_hooks(
+            &mut rewritten,
+            self.strip_client_response_id,
+            self.retain_response_cipher,
+        );
         if self.deepseek_console_go {
             rewritten = provider_compat_core::apply_deepseek_console_go_response_compat(rewritten);
         }
@@ -724,11 +770,13 @@ mod tests {
         expected_model_id: Option<&str>,
         argument_buffers: &mut Vec<String>,
         projection_authorized: &mut bool,
-    ) {
+        stream_observation: Option<&V3RuntimeStreamObservation>,
+    ) -> Result<(), String> {
         if crate::hub_v1::v3_toolreason_projection_authorized_at_resp03(value, expected_model_id) {
             *projection_authorized = true;
         }
-        crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_and_expected_model(
+        let mut observation_error = None;
+        crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_expected_model_and_stream_observation(
             value,
             true,
             tool_names,
@@ -739,10 +787,32 @@ mod tests {
             request_id,
             Some(argument_buffers),
             expected_model_id,
+            stream_observation,
+            &mut observation_error,
         );
+        if let Some(error) = observation_error {
+            return Err(error);
+        }
         if pending_reasons.iter().any(Option::is_some) {
             *projection_authorized = true;
         }
+        Ok(())
+    }
+
+    fn failing_toolreason_observation_hook(
+        _value: &mut serde_json::Value,
+        _tool_names: &[String],
+        _pending_reasons: &mut Vec<Option<String>>,
+        _reason_emitted: &mut bool,
+        _project_to_client: bool,
+        _session_id: Option<&str>,
+        _request_id: Option<&str>,
+        _expected_model_id: Option<&str>,
+        _argument_buffers: &mut Vec<String>,
+        _projection_authorized: &mut bool,
+        _stream_observation: Option<&V3RuntimeStreamObservation>,
+    ) -> Result<(), String> {
+        Err("typed Toolreason observation unavailable".to_string())
     }
 
     fn rewrite_direct_responses_text(
@@ -968,6 +1038,29 @@ mod tests {
     }
 
     #[test]
+    fn direct_sse_toolreason_observation_failure_is_explicit() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new()
+                    .with_toolreason(failing_toolreason_observation_hook),
+            )
+            .with_tool_thinking(true, true);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"id":"call_1","type":"function_call","name":"pwd","call_id":"call_1","arguments":""}}"#,
+        )
+        .unwrap();
+        let error = consumer
+            .consume(&mut object)
+            .expect_err("typed observation failure must stop Direct projection");
+        assert!(matches!(
+            error,
+            SseObjectError::Consumer { message }
+                if message == "typed Toolreason observation unavailable"
+        ));
+    }
+
+    #[test]
     fn direct_consumer_mounts_business_rewrite_on_typed_responses_object() {
         let catalog = V3DirectSseTypedHookCatalog::new()
             .with_responses(noop_responses_notify, rewrite_direct_responses_text);
@@ -1077,14 +1170,19 @@ mod tests {
                 V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
             )
             .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
             .with_client_responses_projection(true);
         let mut object = SseObjectFrame::from_json(
             r#"{"type":"response.completed","response":{"id":"resp_1","output":[{"id":"call_1","type":"function_call","name":"exec_command","call_id":"call_1","arguments":"{\"cmd\":\"pwd\",\"reason\":\"读取工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\"}"}]}}"#,
         )
         .unwrap();
         consumer.consume(&mut object).unwrap();
-        let arguments = object.data_value().unwrap()["response"]["output"][0]["arguments"]
-            .as_str()
+        let arguments = object.data_value().unwrap()["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "function_call")
+            .and_then(|item| item["arguments"].as_str())
             .unwrap();
         assert_eq!(arguments, "{\"cmd\":\"pwd\"}");
         assert!(object.data_value().unwrap()["response"]["output"]
@@ -1099,6 +1197,128 @@ mod tests {
         assert!(reasoning.contains("response.output_item.added"));
         assert!(reasoning.contains("response.reasoning_summary_text.delta"));
         assert!(reasoning.contains("调用工具 pwd：读取工作目录"));
+    }
+
+    #[test]
+    fn direct_responses_completed_response_projects_toolreason_as_independent_output_text() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
+            )
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_client_responses_projection(true);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.completed","response":{"id":"resp_1","output":[{"id":"call_1","type":"function_call","name":"exec_command","call_id":"call_1","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100}"}]}}"#,
+        )
+        .unwrap();
+
+        consumer.consume(&mut object).unwrap();
+
+        let projection = consumer
+            .take_toolreason_reasoning_projection()
+            .expect("Responses completed response must project toolreason visible text");
+        let projection = String::from_utf8(projection).expect("projection must be UTF-8");
+        assert!(projection.contains("event: response.reasoning_summary_text.delta"));
+        assert!(projection.contains("event: response.output_item.added"));
+        assert!(projection.contains("\"type\":\"message\""));
+        assert!(projection.contains("event: response.output_text.delta"));
+        assert!(projection.contains("\"delta\":\"调用工具 pwd：确认当前工作目录\""));
+        assert!(projection.contains("event: response.output_text.done"));
+        assert!(projection.contains("event: response.output_item.done"));
+    }
+
+    #[test]
+    fn direct_responses_stream_projects_toolreason_as_independent_output_text() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
+            )
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_client_responses_projection(true);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100}","call_id":"call_EdBmVtq5tjZ8N9xMfrlH3dxt","id":"fc_07aabdb984bc4601016a931477516887d099520672e03b7698","name":"exec_command","status":"completed","type":"function_call"}}"#,
+        )
+        .unwrap();
+
+        consumer.consume(&mut object).unwrap();
+
+        let projection = consumer
+            .take_toolreason_reasoning_projection()
+            .expect("valid toolreason must project to client SSE");
+        let projection = String::from_utf8(projection).unwrap();
+        assert!(projection.contains("event: response.reasoning_summary_text.delta"));
+        assert!(projection.contains("event: response.output_item.added"));
+        assert!(projection.contains("\"type\":\"message\""));
+        assert!(projection.contains("event: response.output_text.delta"));
+        assert!(projection.contains("\"delta\":\"调用工具 pwd：确认当前工作目录\""));
+        assert!(projection.contains("event: response.output_text.done"));
+        assert!(projection.contains("event: response.output_item.done"));
+    }
+
+    #[test]
+    fn direct_responses_stream_does_not_project_toolreason_without_reason() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new().with_toolreason(test_toolreason_hook),
+            )
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_client_responses_projection(true);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"arguments":"{\"cmd\":\"pwd\",\"goal_alignment_confidence\":100}","call_id":"call_missing_reason","id":"fc_missing_reason","name":"exec_command","status":"completed","type":"function_call"}}"#,
+        )
+        .unwrap();
+
+        consumer.consume(&mut object).unwrap();
+
+        let projection = consumer.take_toolreason_reasoning_projection();
+        assert!(projection.is_none());
+    }
+
+    #[test]
+    fn direct_responses_sse_strips_toolreason_from_arguments_done() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new()
+                    .with_toolreason(crate::hooks::apply_responses_toolreason_sse_hook),
+            )
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_client_responses_projection(true);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.function_call_arguments.done","arguments":"{\"cmd\":\"ping\",\"reason\":\"Run the requested ping probe\"}","output_index":0}"#,
+        )
+        .unwrap();
+        consumer.consume(&mut object).unwrap();
+        assert_eq!(
+            object.data_value().unwrap()["arguments"],
+            "{\"cmd\":\"ping\"}"
+        );
+        assert!(consumer.take_toolreason_reasoning_projection().is_none());
+    }
+
+    #[test]
+    fn direct_responses_sse_event_name_strips_toolreason_from_arguments_done() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_typed_hooks(
+                V3DirectSseTypedHookCatalog::new()
+                    .with_toolreason(crate::hooks::apply_responses_toolreason_sse_hook),
+            )
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses)
+            .with_client_responses_projection(true);
+        let mut object = SseObjectFrame::from_event_json(
+            Some("response.function_call_arguments.done".to_owned()),
+            r#"{"arguments":"{\"cmd\":\"ping\",\"reason\":\"Run the requested ping probe\"}","output_index":0,"type":"response.function_call_arguments.done"}"#,
+        )
+        .unwrap();
+        consumer.consume(&mut object).unwrap();
+        assert_eq!(
+            object.data_value().unwrap()["arguments"],
+            "{\"cmd\":\"ping\"}"
+        );
     }
 
     #[test]
@@ -1154,7 +1374,8 @@ mod tests {
                 V3DirectSseTypedHookCatalog::new()
                     .with_toolreason(crate::hooks::apply_responses_toolreason_sse_hook),
             )
-            .with_tool_thinking(true, true);
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses);
         let mut object = SseObjectFrame::from_json(
             r#"{"type":"response.created","response":{"tools":[{"type":"function","name":"pwd","description":"Return the current working directory.\n\n工具调用协议（只适用于本轮工具调用，不适用于普通回答）：\nreason","parameters":{"type":"object","properties":{"reason":{"type":"string","description":"当前工具调用的唯一直接动机，只说动机，简短"},"native":{"type":"string"}},"required":["reason","native"]}}]}}"#,
         )
@@ -1189,7 +1410,8 @@ mod tests {
                 V3DirectSseTypedHookCatalog::new()
                     .with_toolreason(crate::hooks::apply_responses_toolreason_sse_hook),
             )
-            .with_tool_thinking(true, true);
+            .with_tool_thinking(true, true)
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses);
         let mut arguments_done = SseObjectFrame::from_json(
             r#"{"type":"response.function_call_arguments.done","output_index":0,"arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"deepseek-v4-flash\"}"}"#,
         )
@@ -1260,7 +1482,7 @@ mod tests {
                 ["arguments"],
             "{\"cmd\":\"pwd\"}"
         );
-        consumer.finalize_toolreason_observation();
+        consumer.finalize_toolreason_observation().unwrap();
         assert!(consumer.reason_emitted);
     }
 

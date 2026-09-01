@@ -16,7 +16,6 @@
       <a href="/requests.html" class="active">Requests</a>
     </nav>
     <div class="spacer"></div>
-    <button class="btn" id="pause-btn" type="button">Pause</button>
     <button class="btn primary" id="reload-btn" type="button">Reload</button>
   </header>
 
@@ -28,39 +27,60 @@
     <div class="section">
       <h2>Statistics</h2>
       <div class="cards" id="summary-cards"></div>
+      <div class="chart-controls">
+        <label>Range<select id="chart-range"><option value="today">Today</option><option value="week">Last 7 days</option><option value="month">Last 30 days</option></select></label>
+        <label>Metric<select id="chart-metric"><option value="count">Requests</option><option value="total_tokens">Total tokens</option><option value="input_tokens">Input tokens</option><option value="output_tokens">Output tokens</option><option value="cached_tokens">Cached tokens</option><option value="cache_hit_rate_percent">Cache hit rate</option></select></label>
+      </div>
+      <div class="panel chart-panel">
+        <div id="usage-chart" class="bar-chart" role="img" aria-label="Requests and token usage over selected range"></div>
+      </div>
       <div class="layout">
-        <div class="panel"><table id="ports-table"><thead><tr><th>Port</th><th class="num">Total</th><th class="num">Active</th><th class="num">Success</th><th class="num">Error</th><th class="num">Cancelled</th></tr></thead><tbody><tr><td colspan="6" class="loading">loading…</td></tr></tbody></table></div>
-        <div class="panel"><table id="errors-table"><thead><tr><th>Error category</th><th class="num">Count</th><th>Latest</th></tr></thead><tbody><tr><td colspan="3" class="loading">no errors</td></tr></tbody></table></div>
+        <div class="panel"><table id="ports-table"><thead><tr><th>Port</th><th class="num">Total</th><th class="num">Active</th><th class="num">Success</th><th class="num">Error</th><th class="num">Failed attempts</th><th class="num">Cancelled</th></tr></thead><tbody><tr><td colspan="7" class="loading">loading…</td></tr></tbody></table></div>
+        <div class="panel"><table id="errors-table"><thead><tr><th>Status code</th><th class="num">Errors</th></tr></thead><tbody><tr><td colspan="2" class="loading">no errors</td></tr></tbody></table></div>
       </div>
     </div>
 
     <div class="toolbar">
       <label>Status<select id="status-filter"><option value="all">all</option><option value="active">active</option><option value="retrying">retrying</option><option value="success">success</option><option value="error">error</option><option value="cancelled">cancelled</option></select></label>
       <label>Port<select id="port-filter"><option value="all">all ports</option></select></label>
-      <label>Provider<input id="provider-filter" type="search" placeholder="provider"></label>
-      <label>Model<input id="model-filter" type="search" placeholder="model"></label>
+      <label>Provider<select id="provider-filter"><option value="all">all providers</option></select></label>
+      <label>Model<select id="model-filter"><option value="all">all models</option></select></label>
+      <label>Endpoint<select id="endpoint-filter"><option value="all">all endpoints</option></select></label>
       <label>Route<input id="route-filter" type="search" placeholder="route"></label>
       <label>Protocol<select id="protocol-filter"><option value="all">all</option></select></label>
       <label>Mode<select id="mode-filter"><option value="all">all</option><option value="direct">direct</option><option value="relay">relay</option></select></label>
       <label>Search<input id="search-filter" type="search" placeholder="request, model, provider, route, error"></label>
-      <label>Sort by<select id="sort-field"><option value="started_epoch_ms">Started</option><option value="updated_epoch_ms">Updated</option><option value="finished_epoch_ms">Finished</option><option value="duration_ms">Duration</option><option value="attempts">Attempts</option><option value="failed_attempts">Failures</option><option value="switches">Switches</option><option value="usage_input_tokens">Input tokens</option><option value="usage_output_tokens">Output tokens</option><option value="usage_total_tokens">Total tokens</option><option value="usage_cached_tokens">Cached tokens</option></select></label>
+      <label>Sort by<select id="sort-field"><option value="started_epoch_ms">Started</option><option value="updated_epoch_ms">Updated</option><option value="finished_epoch_ms">Finished</option><option value="duration_ms">Duration</option><option value="attempts">Attempts</option><option value="failed_attempts">Failures</option><option value="switches">Switches</option><option value="usage_input_tokens">Input tokens</option><option value="usage_output_tokens">Output tokens</option><option value="usage_total_tokens">Total tokens</option><option value="usage_cached_tokens">Cached tokens</option><option value="result">Status</option><option value="scope.port">Port</option><option value="meta.entry_protocol">Protocol</option><option value="meta.endpoint">Endpoint</option><option value="meta.route_reason">Route reason</option><option value="meta.provider">Provider</option><option value="timing_internal_ms">Internal</option><option value="meta.finish_reason">Finish reason</option></select></label>
       <label>Order<select id="sort-order"><option value="desc">Descending</option><option value="asc">Ascending</option></select></label>
     </div>
 
     <div class="pagination">
       <button class="btn" id="page-prev" type="button">&#8592; Prev</button>
       <span id="page-info" class="muted">page — of — · — records</span>
+      <label>Page size<select id="page-size"><option value="100">100</option><option value="200">200</option><option value="300">300</option></select></label>
       <button class="btn" id="page-next" type="button">Next &#8594;</button>
     </div>
 
     <div class="section">
+      <nav class="requests-tab-bar" id="requests-tab-bar">
+        <button class="tab-btn active" data-tab="entries" type="button">Entries <span class="tab-count" id="tab-count-entries">—</span></button>
+        <button class="tab-btn" data-tab="attempts" type="button">Attempts <span class="tab-count" id="tab-count-attempts">—</span></button>
+        <button class="tab-btn" data-tab="errors" type="button">Errors <span class="tab-count" id="tab-count-errors">—</span></button>
+      </nav>
+      <nav class="entries-sub-tab-bar" id="entries-sub-tab-bar" data-visible="all" hidden>
+        <button class="sub-tab-btn active" data-sub-tab="pool" type="button">Pool</button>
+        <button class="sub-tab-btn" data-sub-tab="reason" type="button">Reason</button>
+      </nav>
       <div class="panel table-panel" id="requests-panel"><div class="loading">loading…</div></div>
     </div>
   </main>
 
 <div class="drawer-backdrop" id="drawer-backdrop"></div>
 <div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
-  <button class="btn close" id="drawer-close" type="button" aria-label="Close details">&#10005;</button>
+  <div class="drawer-head">
+    <button class="btn" id="drawer-back" type="button" aria-label="Back to list">&#859; Back</button>
+    <button class="btn close" id="drawer-close" type="button" aria-label="Close details">&#10005;</button>
+  </div>
   <h2 id="drawer-title">Details</h2>
   <div id="drawer-body"></div>
   <div class="actions">
@@ -69,24 +89,188 @@
   </div>
 </div>
 
+<div class="row-popover" id="row-popover" role="tooltip" aria-hidden="true"></div>
+
+  <script>
+    // Endpoint label: shorten canonical V3 entry paths so the Endpoint column
+    // stays compact without losing the protocol identity; non-canonical paths
+    // pass through.
+    function endpointLabel(endpoint) {
+      if (endpoint == null || endpoint === "—") return "—";
+      if (endpoint === "/v1/responses") return "responses";
+      if (endpoint === "/v1/chat/completions") return "chat";
+      if (endpoint === "/v1/messages") return "messages";
+      if (endpoint === "/v1beta/models") return "gemini";
+      return endpoint;
+    }
+  </script>
   <script src="/app.embedded.txt"></script>
   <script>
-    const PAGE_SIZE = 50;
+    // Compact numeric formatting for token counts and request totals.
+    function fmtCompact(n) {
+      const value = Number(n || 0);
+      if (!Number.isFinite(value)) return "0";
+      if (Math.abs(value) >= 1e9) return `${(value / 1e9).toFixed(value >= 1e10 ? 0 : 1)}B`;
+      if (Math.abs(value) >= 1e6) return `${(value / 1e6).toFixed(value >= 1e7 ? 0 : 1)}M`;
+      if (Math.abs(value) >= 1e4) return `${(value / 1e3).toFixed(value >= 1e5 ? 0 : 1)}K`;
+      return value.toLocaleString();
+    }
+
+    function fmtMs(value) {
+      if (value == null || !Number.isFinite(Number(value))) return "—";
+      const ms = Number(value);
+      if (ms < 1000) return `${Math.round(ms)}ms`;
+      if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+      return `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`;
+    }
+
+    function statusText(row) {
+      const http = row.meta?.provider_status;
+      if (http != null && Number.isFinite(Number(http))) {
+        return String(http);
+      }
+      const errorCode = compactErrorReason(row);
+      if (/^\d+$/.test(errorCode)) {
+        return errorCode;
+      }
+      const fallback = row.result;
+      if (fallback) {
+        if (fallback === "success") return "200";
+        if (fallback === "error") return "5xx";
+        if (fallback === "cancelled") return "499";
+        return fallback;
+      }
+      return "—";
+    }
+
+    function compactErrorReason(row) {
+      const ec = row.meta?.error_category;
+      if (!ec) return "—";
+      const map = {
+        provider_http_400: "400",
+        provider_http_401: "401",
+        provider_http_402: "402",
+        provider_http_403: "403",
+        provider_http_429: "429",
+        provider_http_500: "500",
+        provider_http_502: "502",
+        provider_http_503: "503",
+        provider_http_504: "504",
+        target_pool: "exhausted",
+        internal_request_lane: "598",
+        v3_debug_failure: "598",
+        debug_sink: "598",
+        internal_response_lane: "599",
+        provider_response_sse_event_invalid: "599",
+        provider_response_body_error: "599",
+        provider_stream_handoff_runtime_failed: "599",
+      };
+      return map[ec] || ec;
+    }
+    function compactFinishReason(row) {
+      const reason = row.meta?.finish_reason;
+      if (!reason || reason === "—") return "—";
+      const map = {
+        tool_calls: "tool_calls",
+        stop: "stop",
+        length: "length",
+        content_filter: "filter",
+        requires_action: "action",
+        completed: "done",
+        error: "error",
+        cancel: "cancel",
+        client_disconnected: "client drop",
+        provider_http_400: "http_400",
+        provider_http_401: "http_401",
+        provider_http_402: "http_402",
+        provider_http_403: "http_403",
+        provider_http_429: "http_429",
+        provider_http_500: "http_500",
+        provider_http_502: "http_502",
+        provider_http_503: "http_503",
+        provider_http_504: "http_504",
+      };
+      return map[reason] || reason;
+    }
+
+    function buildRowPopover(row) {
+      const usage = row.usage || {};
+      const fields = [
+        ["request id", row.meta?.request_id || row.request_key],
+        ["port", row.scope?.port], ["protocol", row.meta?.entry_protocol],
+        ["endpoint", row.meta?.endpoint], ["model", row.meta?.model],
+        ["wire model", row.meta?.wire_model], ["provider", row.meta?.provider],
+        ["provider status", row.meta?.provider_status], ["response status", row.meta?.response_status],
+        ["finish reason", compactFinishReason(row)],
+        ["error", compactErrorReason(row)],
+        ["attempts", `${row.attempts}/${row.failed_attempts}/${row.switches}`],
+        ["tokens in/out/read/created", `${fmtCompact(usage.input_tokens)}/${fmtCompact(usage.output_tokens)}/${fmtCompact(usage.cache_read_input_tokens ?? usage.cached_tokens)}/${fmtCompact(usage.cache_creation_input_tokens)}`],
+        ["internal / external", `${row.timing_internal_ms != null ? fmtMs(row.timing_internal_ms) : "—"} / ${row.timing_external_ms != null ? fmtMs(row.timing_external_ms) : "—"}`],
+        ["duration", fmtMs(row.duration_ms)],
+      ];
+      const box = el("div", "row-popover-body");
+      for (const [label, value] of fields) {
+        const line = el("div", "row-popover-row");
+        line.append(el("span", "label", label), el("span", "value", String(value ?? "—")));
+        box.appendChild(line);
+      }
+      if (row.meta?.error_detail) {
+        const detail = el("div", "row-popover-detail muted", row.meta.error_detail);
+        box.appendChild(detail);
+      }
+      return box;
+    }
+
+    function showRowPopover(row, event) {
+      const popover = document.getElementById("row-popover");
+      if (!popover) return;
+      popover.replaceChildren(buildRowPopover(row));
+      popover.setAttribute("aria-hidden", "false");
+      popover.classList.add("show");
+      positionRowPopover(event);
+    }
+
+    function positionRowPopover(event) {
+      const popover = document.getElementById("row-popover");
+      if (!popover || !popover.classList.contains("show")) return;
+      const margin = 12;
+      const rect = popover.getBoundingClientRect();
+      let x = event.clientX + margin;
+      let y = event.clientY + margin;
+      const overflowX = x + rect.width - window.innerWidth;
+      if (overflowX > 0) x = Math.max(margin, event.clientX - rect.width - margin);
+      const overflowY = y + rect.height - window.innerHeight;
+      if (overflowY > 0) y = Math.max(margin, event.clientY - rect.height - margin);
+      popover.style.left = `${x}px`;
+      popover.style.top = `${y}px`;
+    }
+
+    function hideRowPopover() {
+      const popover = document.getElementById("row-popover");
+      if (!popover) return;
+      popover.classList.remove("show");
+      popover.setAttribute("aria-hidden", "true");
+    }
+
     const state = {
       records: [],
+      attemptRecords: [],
+      errorFacets: [],
       page: 1,
+      pageSize: 100,
       total: 0,
+      attemptsTotal: 0,
+      attemptsPage: 1,
+      errorStatuses: 0,
+      tab: "entries",
+      entriesGroup: "pool",
       stats: {},
-      facets: { ports: {}, providers: {}, models: {}, routes: {}, sessions: {}, response_types: {}, error_categories: {} },
-      liveStats: {},
+      timeseries: [],
+      facets: { ports: {}, providers: {}, models: {}, routes: {}, endpoints: {}, sessions: {}, response_types: {}, error_status_codes: {} },
+      errorStatusCode: null,
       selected: null,
+      tableWidths: { entries: null, attempts: null, errors: null },
       loading: false,
-      eventLog: new Map(),
-      sourceCursors: new Map(),
-      recentEvents: [],
-      resyncing: false,
-      pollTimer: null,
-      paused: false,
     };
 
     function statusOf(row) {
@@ -94,61 +278,210 @@
       if (r === "success") return "success";
       if (r === "error") return "error";
       if (r === "cancelled") return "cancelled";
-      if (row.event_type === "request.provider_attempt_failed") return "retrying";
+      if (r === "failed-attempt") return "error";
       return "active";
     }
     function usageText(usage) {
       if (!usage) return "—";
-      const parts = [];
-      if (usage.input_tokens != null) parts.push(`in ${Number(usage.input_tokens).toLocaleString()}`);
-      if (usage.output_tokens != null) parts.push(`out ${Number(usage.output_tokens).toLocaleString()}`);
-      if (usage.cached_tokens != null) parts.push(`cache ${Number(usage.cached_tokens).toLocaleString()}`);
-      if (usage.total_tokens != null) parts.push(`total ${Number(usage.total_tokens).toLocaleString()}`);
-      return parts.length ? parts.join(" / ") : "—";
+      const input = Number(usage.input_tokens ?? 0);
+      const output = Number(usage.output_tokens ?? 0);
+      const read = Number(usage.cache_read_input_tokens ?? usage.cached_tokens ?? 0);
+      const created = Number(usage.cache_creation_input_tokens ?? 0);
+      return `${fmtCompact(input)} / ${fmtCompact(output)} · read=${fmtCompact(read)} · created=${fmtCompact(created)}`;
+    }
+
+    function hitRateText(usage) {
+      if (!usage) return "—";
+      const input = Number(usage.input_tokens ?? 0);
+      const read = Number(usage.cache_read_input_tokens ?? usage.cached_tokens ?? 0);
+      return input > 0 ? `${((read / input) * 100).toFixed(1)}%` : "—";
     }
 
     function timeText(value) {
       if (!value) return "—";
-      return new Date(value).toLocaleString([], { hour12: false });
+      const d = new Date(value);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      const ss = String(d.getSeconds()).padStart(2, "0");
+      return `${hh}:${mm}:${ss}`;
     }
 
     function metaValue(row, key) {
       return row.meta?.[key] ?? "—";
     }
 
-    function applyPoll(data) {
-      if (!data || typeof data !== "object") throw new Error("invalid observability poll");
-      for (const source of data.sources || []) state.sourceCursors.set(source.port, source.cursor);
-      for (const event of data.recent_events || []) {
-        state.eventLog.set(`${event.row?.scope?.port}:${event.sequence}`, event);
+    function endpointLabel(endpoint) {
+      // Shorten canonical V3 entry paths so the Endpoint column stays compact
+      // without losing the protocol identity; non-canonical paths pass through.
+      if (endpoint == null || endpoint === "—") return "—";
+      if (endpoint === "/v1/responses") return "responses";
+      if (endpoint === "/v1/chat/completions") return "chat";
+      if (endpoint === "/v1/messages") return "messages";
+      if (endpoint === "/v1beta/models") return "gemini";
+      return endpoint;
+    }
+
+    function providerModelCell(row) {
+      const provider = metaValue(row, "provider");
+      const model = metaValue(row, "model");
+      if (provider === "—" && model === "—") return "—";
+      if (provider === "—") return model;
+      if (model === "—") return provider;
+      return `${provider} · ${model}`;
+    }
+
+    // Compact provider cell: show the alias model by default; reveal
+    // provider/auth_alias/provider_id/wire_model on hover or focus.
+    function compactProviderCell(row) {
+      const meta = (row && row.meta) || {};
+      const model = meta.model ?? "—";
+      const wire = meta.wire_model ?? "—";
+      const provider = meta.provider ?? "—";
+      const providerId = meta.provider_id ?? "—";
+      const authAlias = meta.auth_alias ?? "—";
+      const allEmpty = [model, wire, provider, providerId, authAlias].every((v) => v === "—");
+      const cell = el("td", "providercompact compact");
+      if (allEmpty) {
+        cell.textContent = "—";
+        return cell;
       }
-      while (state.eventLog.size > 2048) state.eventLog.delete(state.eventLog.keys().next().value);
-      state.recentEvents = data.recent_events || [];
-      state.liveStats = data.stats || {};
-      renderStats(data.stats || {});
+      const primary = el("div", "providercompact-primary mono");
+      primary.append(
+        el("span", "providercompact-model", model),
+        el("span", "providercompact-sep muted", " · "),
+        el("span", "providercompact-key muted", authAlias)
+      );
+      cell.appendChild(primary);
+      const details = el("dl", "providercompact-detail");
+      for (const [label, value] of [
+        ["provider", provider],
+        ["key", authAlias],
+        ["provider id", providerId],
+        ["wire model", wire],
+      ]) {
+        details.append(el("dt", null, label), el("dd", null, value));
+      }
+      cell.appendChild(details);
+      cell.tabIndex = 0;
+      cell.setAttribute(
+        "aria-label",
+        `provider ${provider}, key ${authAlias}, model ${model}, wire ${wire}`
+      );
+      cell.addEventListener("focus", () => cell.classList.add("is-detail"));
+      cell.addEventListener("blur", () => cell.classList.remove("is-detail"));
+      cell.addEventListener("mouseenter", () => cell.classList.add("is-detail"));
+      cell.addEventListener("mouseleave", () => cell.classList.remove("is-detail"));
+      return cell;
+    }
+
+    // Per-tab Excel-style column resizing with localStorage persistence so
+    // each tab keeps its own widths across reloads.
+    const TABLE_WIDTH_PREFIX = "v3-admin-webui-requests-table";
+    function loadTableWidths(tab) {
+      try {
+        const raw = window.localStorage.getItem(`${TABLE_WIDTH_PREFIX}-${tab}`);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : null;
+      } catch (_error) {
+        return null;
+      }
+    }
+    function saveTableWidths(tab, widths) {
+      try {
+        window.localStorage.setItem(`${TABLE_WIDTH_PREFIX}-${tab}`, JSON.stringify(widths));
+      } catch (_error) {
+        /* storage unavailable; layout still works for the session. */
+      }
+    }
+    function applyTableWidths(table, widths) {
+      if (!widths || !table) return;
+      const colgroup = table.querySelector("colgroup");
+      if (!colgroup) return;
+      [...colgroup.children].forEach((col) => {
+        const cls = [...col.classList].find((token) => token.startsWith("col-"));
+        if (cls && typeof widths[cls] === "number" && widths[cls] >= 40) {
+          col.style.width = `${widths[cls]}px`;
+        }
+      });
+    }
+    function attachColumnResizers(table, tab) {
+      const colgroup = table.querySelector("colgroup");
+      if (!colgroup || table.dataset.resizable === "attached") return;
+      table.dataset.resizable = "attached";
+      const headRow = table.querySelector("thead tr");
+      if (!headRow) return;
+      const columns = [...colgroup.children];
+      [...headRow.children].forEach((th, index) => {
+        const col = columns[index];
+        if (!col) return;
+        const cls = [...col.classList].find((token) => token.startsWith("col-"));
+        if (!cls) return;
+        if (th.querySelector(".col-resizer")) return;
+        const handle = el("span", "col-resizer");
+        handle.setAttribute("aria-hidden", "true");
+        th.appendChild(handle);
+        // Stop propagation so dragging the handle never triggers the header
+        // sort click handler that lives on the parent <th>. preventDefault
+        // also kills text selection and the native drag-image that some
+        // browsers attach to the span.
+        handle.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          const startX = event.clientX;
+          const startWidth = col.getBoundingClientRect().width || 40;
+          let moved = false;
+          const onMove = (ev) => {
+            moved = true;
+            const next = Math.max(40, Math.round(startWidth + (ev.clientX - startX)));
+            col.style.width = `${next}px`;
+            ev.preventDefault();
+          };
+          const onUp = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            if (!moved) return;
+            const updated = { ...(state.tableWidths[tab] || {}) };
+            const finalWidth = Math.round(col.getBoundingClientRect().width || startWidth);
+            updated[cls] = finalWidth;
+            state.tableWidths[tab] = updated;
+            saveTableWidths(tab, updated);
+          };
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp);
+        });
+        handle.addEventListener("click", (event) => {
+          // A bare click on the handle is never a sort intent.
+          event.stopPropagation();
+        });
+      });
     }
 
     async function loadRecords() {
       if (state.loading) return;
       state.loading = true;
+      // placeholder
       try {
         const params = new URLSearchParams();
         params.set("page", String(state.page));
-        params.set("page_size", String(PAGE_SIZE));
+        params.set("page_size", String(state.pageSize));
+        params.set("range", document.getElementById("chart-range").value);
+        params.set("timezone_offset_minutes", String(new Date().getTimezoneOffset()));
         params.set("sort_by", document.getElementById("sort-field").value);
         params.set("sort_order", document.getElementById("sort-order").value);
         const status = document.getElementById("status-filter").value;
         if (status !== "all") {
-          const map = { success: "success", error: "error", cancelled: "cancelled", active: "", retrying: "" };
-          const serverStatus = map[status];
-          if (serverStatus) params.set("status", serverStatus);
+          params.set("status", status);
         }
         const port = document.getElementById("port-filter").value;
         if (port !== "all") params.set("port", port);
-        const provider = document.getElementById("provider-filter").value.trim();
-        if (provider) params.set("provider", provider);
-        const model = document.getElementById("model-filter").value.trim();
-        if (model) params.set("model", model);
+        const provider = document.getElementById("provider-filter").value;
+        if (provider !== "all") params.set("provider", provider);
+        const model = document.getElementById("model-filter").value;
+        if (model !== "all") params.set("model", model);
+        const endpoint = document.getElementById("endpoint-filter").value;
+        if (endpoint !== "all") params.set("endpoint", endpoint);
         const route = document.getElementById("route-filter").value.trim();
         if (route) params.set("route", route);
         const protocol = document.getElementById("protocol-filter").value;
@@ -157,11 +490,14 @@
         if (mode !== "all") params.set("execution_mode", mode);
         const search = document.getElementById("search-filter").value.trim();
         if (search) params.set("search", search);
+        if (state.errorStatusCode) params.set("error_status_code", state.errorStatusCode);
         const response = await api(`/api/observability/records?${params}`);
         state.records = response.records || [];
         state.total = response.total || 0;
         state.stats = response.stats || {};
+        state.timeseries = response.timeseries || [];
         state.facets = response.facets || state.facets;
+        await Promise.all([loadAttempts(), loadErrors()]);
         renderAll();
       } catch (error) {
         showStatus("err", `records query failed: ${error.message}`);
@@ -170,30 +506,56 @@
       }
     }
 
-    async function pollLifecycle() {
-      const params = new URLSearchParams();
-      if (state.sourceCursors.size) {
-        params.set("sources", [...state.sourceCursors.entries()].sort(([a], [b]) => a - b).map(([port, cursor]) => `${port}:${cursor}`).join(","));
+    async function loadAttempts() {
+      try {
+        const params = new URLSearchParams();
+        params.set("status", "error");
+        params.set("page", String(state.attemptsPage));
+        params.set("page_size", "50");
+        params.set("sort_by", "updated_epoch_ms");
+        params.set("sort_order", "desc");
+        params.set("range", "today");
+        const response = await api(`/api/observability/records?${params}`);
+        state.attemptRecords = (response.records || []).filter((row) => row.result === "failed-attempt");
+        state.attemptsTotal = state.attemptRecords.length;
+      } catch (error) {
+        state.attemptRecords = [];
+        state.attemptsTotal = 0;
       }
-      const data = await api(`/api/observability/poll?${params}`);
-      applyPoll(data);
     }
 
-    function schedulePoll() {
-      if (state.pollTimer) clearTimeout(state.pollTimer);
-      state.pollTimer = setTimeout(async () => {
-        state.pollTimer = null;
-        if (!state.paused) {
-          try { await pollLifecycle(); } catch (error) { showStatus("err", `observability failed: ${error.message}`); }
-          await loadRecords();
-        }
-        schedulePoll();
-      }, 2000);
+    async function loadErrors() {
+      try {
+        const codes = Object.entries(state.facets.error_status_codes || {})
+          .map(([code, count]) => ({ code, count }))
+          .sort((a, b) => b.count - a.count);
+        state.errorFacets = codes;
+        state.errorStatuses = codes.reduce((sum, item) => sum + Number(item.count || 0), 0);
+        state.errorExamples = {};
+        await Promise.all(codes.slice(0, 12).map(async (item) => {
+          try {
+            const params = new URLSearchParams();
+            params.set("status", "error");
+            params.set("error_status_code", item.code);
+            params.set("page", "1");
+            params.set("page_size", "1");
+            params.set("range", "today");
+            const response = await api(`/api/observability/records?${params}`);
+            const first = (response.records || [])[0];
+            state.errorExamples[item.code] = first?.meta?.error_detail
+              || first?.meta?.error_category
+              || "—";
+          } catch (error) {
+            state.errorExamples[item.code] = "—";
+          }
+        }));
+      } catch (error) {
+        state.errorFacets = [];
+        state.errorStatuses = 0;
+      }
     }
 
     async function load() {
-      state.sourceCursors.clear();
-      try { await pollLifecycle(); } catch (error) { /* ignore */ }
       await loadRecords();
     }
 
@@ -201,71 +563,48 @@
       hideStatus();
     }
 
-    function matches(row) {
-      const statusFilter = document.getElementById("status-filter").value;
-      const portFilter = document.getElementById("port-filter").value;
-      const search = document.getElementById("search-filter").value.trim().toLowerCase();
-      const status = statusOf(row);
-      if (statusFilter !== "all" && status !== statusFilter) return false;
-      if (portFilter !== "all" && String(row.scope?.port) !== portFilter) return false;
-      if (!search) return true;
-      const values = [row.request_key, row.meta?.request_id, row.meta?.model, row.meta?.provider, row.meta?.route, row.scope?.session, row.scope?.workdir, row.meta?.error_category, row.meta?.error_detail];
-      return values.some((value) => String(value ?? "").toLowerCase().includes(search));
-    }
-
-    function sortRows(rows) {
-      const field = document.getElementById("sort-field").value;
-      const direction = document.getElementById("sort-order").value === "asc" ? 1 : -1;
-      const grouped = document.getElementById("group-toggle").checked;
-      return rows.sort((left, right) => {
-        if (grouped) {
-          const portOrder = Number(left.scope?.port ?? Number.MAX_SAFE_INTEGER) -
-            Number(right.scope?.port ?? Number.MAX_SAFE_INTEGER);
-          if (portOrder) return portOrder;
-        }
-        let a = left[field];
-        let b = right[field];
-        if (field === "finished_epoch_ms") { a = a ?? Number.MAX_SAFE_INTEGER; b = b ?? Number.MAX_SAFE_INTEGER; }
-        else { a = a ?? 0; b = b ?? 0; }
-        return direction * ((a > b) - (b > a) || String(left.request_key).localeCompare(right.request_key));
-      });
-    }
-
     function renderStats(stats) {
       stats = stats || {};
-      const cards = document.getElementById("summary-cards");
-      cards.replaceChildren();
-      const values = [["Total", stats.total], ["Active", stats.active], ["Success", stats.success], ["Error", stats.error], ["Cancelled", stats.cancelled], ["Switches", stats.switches], ["Output tokens", stats.tokens_output]];
-      for (const [label, value] of values) {
-        const card = el("div", `card stat-${label.toLowerCase().replace(/\s+/g, "-")}`);
-        card.appendChild(el("div", "label", label));
-        card.appendChild(el("div", "value", Number(value || 0).toLocaleString()));
-        cards.appendChild(card);
-      }
       const portBody = document.querySelector("#ports-table tbody");
       const ports = [...(stats.by_port ? Object.entries(stats.by_port) : [])].sort(([a], [b]) => Number(a) - Number(b));
       portBody.replaceChildren(...ports.map(([port, item]) => {
-        const row = el("tr", item.error ? "status-error" : item.active ? "status-active" : "status-success");
-        row.append(el("td", null, String(port)), numberCell(item.total), numberCell(item.active), numberCell(item.success), numberCell(item.error), numberCell(item.cancelled));
+        const failed = Number(item.provider_failures || 0);
+        const cls = item.error || failed > 0 ? "status-error" : item.active ? "status-active" : "status-success";
+        const row = el("tr", cls);
+        row.append(el("td", null, String(port)), numberCell(item.total), numberCell(item.active), numberCell(item.success), numberCell(item.error), numberCell(failed), numberCell(item.cancelled));
         return row;
       }));
       if (!ports.length) {
         const cell = document.createElement("td");
-        cell.colSpan = 6;
+        cell.colSpan = 7;
         const emptyRow = document.createElement("tr");
         emptyRow.appendChild(cell);
         portBody.replaceChildren(emptyRow);
       }
       const errorBody = document.querySelector("#errors-table tbody");
-      const categories = Object.entries(state.facets.error_categories || {}).sort(([, a], [, b]) => b - a);
-      errorBody.replaceChildren(...categories.map(([category, count]) => {
+      // Group errors by raw numeric status; semantic error details stay in the drawer.
+      const errorMap = new Map();
+      for (const [code, count] of Object.entries(state.facets.error_status_codes || {})) {
+        errorMap.set(code, { terminal: count });
+      }
+      const statusCodes = [...errorMap.entries()]
+        .sort(([left], [right]) => Number(left) - Number(right));
+      errorBody.replaceChildren(...statusCodes.map(([statusCode, entry]) => {
         const row = el("tr", "status-error");
-        row.append(el("td", null, category), numberCell(count));
+        row.style.cursor = "pointer";
+        row.title = `Filter requests by status code "${statusCode}"`;
+        row.addEventListener("click", () => {
+          state.page = 1;
+          document.getElementById("status-filter").value = "error";
+          state.errorStatusCode = statusCode;
+          loadRecords();
+        });
+        row.append(el("td", null, statusCode), numberCell(entry.terminal));
         return row;
       }));
-      if (!categories.length) {
+      if (!statusCodes.length) {
         const cell = document.createElement("td");
-        cell.colSpan = 3;
+        cell.colSpan = 2;
         const emptyRow = document.createElement("tr");
         emptyRow.appendChild(cell);
         errorBody.replaceChildren(emptyRow);
@@ -279,11 +618,14 @@
       }));
       portSelect.value = [...portSelect.options].some((option) => option.value === selected) ? selected : "all";
       populateFacetSelect("protocol-filter", state.facets.response_types || {});
+      populateFacetSelect("provider-filter", state.facets.providers || {}, "all providers");
+      populateFacetSelect("model-filter", state.facets.models || {}, "all models");
+      populateFacetSelect("endpoint-filter", state.facets.endpoints || {}, "all endpoints");
     }
-    function populateFacetSelect(id, facet) {
+    function populateFacetSelect(id, facet, allLabel = "all") {
       const select = document.getElementById(id);
       const selected = select.value;
-      const all = el("option", null, "all"); all.value = "all";
+      const all = el("option", null, allLabel); all.value = "all";
       select.replaceChildren(all, ...Object.entries(facet).sort(([,a],[,b])=>b-a).map(([value]) => {
         const option = el("option", null, String(value)); option.value = String(value); return option;
       }));
@@ -313,7 +655,8 @@
         ["error category", row.meta?.error_category], ["error detail", row.meta?.error_detail],
         ["usage in", usage.input_tokens != null ? Number(usage.input_tokens).toLocaleString() : "—"],
         ["usage out", usage.output_tokens != null ? Number(usage.output_tokens).toLocaleString() : "—"],
-        ["usage cache", usage.cached_tokens != null ? Number(usage.cached_tokens).toLocaleString() : "—"],
+        ["usage cache read", usage.cache_read_input_tokens != null ? Number(usage.cache_read_input_tokens).toLocaleString() : (usage.cached_tokens != null ? Number(usage.cached_tokens).toLocaleString() : "—")],
+        ["usage cache creation", usage.cache_creation_input_tokens != null ? Number(usage.cache_creation_input_tokens).toLocaleString() : "—"],
         ["usage total", usage.total_tokens != null ? Number(usage.total_tokens).toLocaleString() : "—"],
         ["internal time", row.timing_internal_ms != null ? `${row.timing_internal_ms} ms` : "—"],
         ["external time", row.timing_external_ms != null ? `${row.timing_external_ms} ms` : "—"],
@@ -329,46 +672,52 @@
       return grid;
     }
 
-    function requestTimeline(requestKey) {
-      const events = [...state.eventLog.values()]
-        .filter((event) => event.row?.request_key === requestKey)
-        .sort((left, right) => left.sequence - right.sequence);
-      const section = el("section", "request-timeline");
-      section.appendChild(el("h3", null, "Lifecycle"));
-      if (!events.length) {
-        section.appendChild(el("div", "muted", "No lifecycle events retained"));
-        return section;
-      }
-      const list = el("ol");
-      for (const event of events) {
-        const item = el("li", `status-${statusOf(event.row)}`);
-        item.append(
-          el("time", "muted", timeText(event.timestamp_epoch_ms)),
-          el("strong", null, event.row.event_type),
-          el("span", "muted", `${event.row.meta?.provider || "—"} · ${event.row.meta?.route || "—"}`)
-        );
-        list.appendChild(item);
-      }
-      section.appendChild(list);
-      return section;
-    }
-
     function requestRow(row) {
       const status = statusOf(row);
       const tr = el("tr", `request-row status-${status}`);
       tr.dataset.requestKey = row.request_key;
       tr.style.cursor = "pointer";
       tr.addEventListener("click", () => openRequestDetail(row));
+      tr.addEventListener("mouseenter", (event) => showRowPopover(row, event));
+      tr.addEventListener("mousemove", (event) => positionRowPopover(event));
+      tr.addEventListener("mouseleave", hideRowPopover);
       const usage = row.usage || {};
-      tr.appendChild(el("td", "status-cell", status));
-      tr.appendChild(el("td", "mono", `${row.scope?.port ?? "?"}:${row.meta?.request_id ?? row.request_key}`));
-      tr.appendChild(el("td", null, `${metaValue(row, "endpoint")} · ${metaValue(row, "model")}`));
-      tr.appendChild(el("td", null, `${metaValue(row, "route")} · ${metaValue(row, "provider")}`));
-      tr.appendChild(el("td", "num", `${row.attempts || 0}/${row.failed_attempts || 0}`));
-      tr.appendChild(el("td", "num", fmtMs(row.duration_ms)));
-      tr.appendChild(el("td", "mono", usageText(usage)));
-      tr.appendChild(el("td", "muted", timeText(status === "success" || status === "error" || status === "cancelled" ? row.finished_epoch_ms : row.updated_epoch_ms)));
+      // Compact port: strip the leading zero-width space so a 4-digit port stays narrow.
+      const portValue = row.scope?.port;
+      const portText = portValue == null ? "—" : String(portValue);
+      const statusCell = el("td", `status-cell ${status}`, statusText(row));
+      statusCell.title = row.meta?.error_category
+        ? `${row.meta.error_category}: ${row.meta.error_detail || ""}`.trim()
+        : `${status}`;
+      tr.appendChild(statusCell);
+      tr.appendChild(el("td", "col-port", portText));
+      tr.appendChild(el("td", null, endpointLabel(metaValue(row, "endpoint"))));
+      if ((state.entriesGroup || "pool") === "reason") {
+        tr.appendChild(el("td", "muted col-route", metaValue(row, "route_reason")));
+      } else {
+        tr.appendChild(el("td", "muted col-pool", metaValue(row, "pool")));
+      }
+      tr.appendChild(compactProviderCell(row));
+      tr.appendChild(el("td", "num", `${row.timing_internal_ms != null ? fmtMs(row.timing_internal_ms) : "—"} / ${row.timing_external_ms != null ? fmtMs(row.timing_external_ms) : "—"}`));
+      const usageCell = el("td", "mono col-usage");
+      usageCell.appendChild(el("div", "usage-value", usageText(usage)));
+      usageCell.appendChild(el("div", "hit-rate", hitRateText(usage)));
+      tr.appendChild(usageCell);
+      tr.appendChild(el("td", "col-finish", compactFinishReason(row)));
+      tr.appendChild(el("td", "mono col-time col-time-last", timeText(row.started_epoch_ms)));
+      tr.appendChild(el("td", "mono col-time col-time-last", timeText(status === "active" || status === "retrying" ? row.updated_epoch_ms : row.finished_epoch_ms)));
       return tr;
+    }
+
+    function drilldownErrorStatus(code) {
+      // Preserve current toolbar filters, then drill into Entries tab with
+      // status=error and the clicked status code. After viewing, the user
+      // can return to the Errors tab via the tabs themselves.
+      state.page = 1;
+      document.getElementById("status-filter").value = "error";
+      state.errorStatusCode = code;
+      state.tab = "entries";
+      loadRecords();
     }
 
     function openRequestDetail(row) {
@@ -386,16 +735,119 @@
         return;
       }
       document.getElementById("drawer-title").textContent = `Request ${row.meta?.request_id || row.request_key}`;
-      body.replaceChildren(detailGrid(row), requestTimeline(row.request_key));
+      body.replaceChildren(detailGrid(row));
     }
 
     function renderRequests() {
       const panel = document.getElementById("requests-panel");
+      const tab = state.tab || "entries";
+      const subBar = document.getElementById("entries-sub-tab-bar");
+      if (subBar) subBar.hidden = tab !== "entries";
+      if (tab === "attempts") {
+        renderAttemptsPanel(panel);
+        wireTableResizers(panel, "attempts");
+        return;
+      }
+      if (tab === "errors") {
+        renderErrorsPanel(panel);
+        wireTableResizers(panel, "errors");
+        return;
+      }
+      renderEntriesPanel(panel);
+      wireTableResizers(panel, "entries");
+      syncEntriesSubTabs();
+    }
+
+    // Persist per-tab column widths once each table is rendered. The resize
+    // handle in attachColumnResizers records widths; this helper only
+    // applies whatever is stored on disk so the layout matches the user
+    // choice across reloads.
+    function wireTableResizers(panel, tab) {
+      const table = panel ? panel.querySelector("table.request-table") : null;
+      if (!table) return;
+      const widths = state.tableWidths[tab] || loadTableWidths(tab);
+      if (widths) state.tableWidths[tab] = widths;
+      applyTableWidths(table, widths);
+      attachColumnResizers(table, tab);
+    }
+
+    function syncEntriesSubTabs() {
+      const bar = document.getElementById("entries-sub-tab-bar");
+      if (!bar) return;
+      const active = (state.entriesGroup || "pool") === "reason" ? "reason" : "pool";
+      bar.querySelectorAll(".sub-tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.subTab === active);
+      });
+    }
+
+    function renderEntriesPanel(panel) {
       const rows = state.records;
-      if (!rows.length) { panel.replaceChildren(el("div", "loading", "no matching requests")); return; }
+      // Single-action return-to-errors banner: keeps the prior status_code
+      // context visible and offers one click to clear it.
+      const fragments = [];
+      if (state.errorStatusCode) {
+        const banner = el("div", "status-bar info", `Filtered by error status ${state.errorStatusCode}. `);
+        const clear = el("button", "btn", "Clear filter");
+        clear.addEventListener("click", () => {
+          state.errorStatusCode = null;
+          state.page = 1;
+          loadRecords();
+        });
+        banner.appendChild(clear);
+        fragments.push(banner);
+      }
+      if (!rows.length) {
+        fragments.push(el("div", "loading", "no matching requests"));
+        panel.replaceChildren(...fragments);
+        return;
+      }
       const table = el("table", "request-table");
       const head = el("tr");
-      ["Status", "Port · Request", "Endpoint · Model", "Route · Provider", "Try/Fail", "Duration", "Usage", "Time"].forEach((label) => head.appendChild(el("th", null, label)));
+      const group = state.entriesGroup === "reason" ? "reason" : "pool";
+      const columns = [
+        { key: "result", label: "Status", colClass: "col-status" },
+        { key: "scope.port", label: "Port", colClass: "col-port" },
+        { key: "meta.endpoint", label: "Endpoint", colClass: "col-endpoint" },
+        group === "reason"
+          ? { key: "meta.route_reason", label: "Reason", colClass: "col-route" }
+          : { key: "meta.pool", label: "Pool", colClass: "col-pool" },
+        { key: "meta.provider", label: "Model", colClass: "col-provider" },
+        { key: "timing_internal_ms", label: "Internal / External", colClass: "col-intext" },
+        { key: "usage_total_tokens", label: "Usage", colClass: "col-usage" },
+        { key: "meta.finish_reason", label: "Finish", colClass: "col-finish" },
+        { key: "started_epoch_ms", label: "Sent", colClass: "col-time col-time-last" },
+        { key: "finished_epoch_ms", label: "Responded", colClass: "col-time col-time-last" },
+      ];
+      const colgroup = el("colgroup");
+      columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
+      table.appendChild(colgroup);
+      columns.forEach((col, index) => {
+        const th = el("th", `sortable ${col.colClass}`, col.label);
+        th.dataset.sortKey = col.key;
+        const active = document.getElementById("sort-field").value === col.key;
+        if (active) {
+          const dir = document.getElementById("sort-order").value === "desc" ? "▼" : "▲";
+          th.classList.add("sorted");
+          th.appendChild(el("span", "sort-indicator", dir));
+        }
+        th.addEventListener("click", (event) => {
+          // The resizer handle sits inside <th>; clicks on it are already
+          // stopped from bubbling, but guard again in case any other
+          // child element (sort indicator, future icon) is added later.
+          if (event.target instanceof Element && event.target.closest(".col-resizer")) return;
+          const fieldEl = document.getElementById("sort-field");
+          const orderEl = document.getElementById("sort-order");
+          if (fieldEl.value === col.key) {
+            orderEl.value = orderEl.value === "desc" ? "asc" : "desc";
+          } else {
+            fieldEl.value = col.key;
+            orderEl.value = "desc";
+          }
+          state.page = 1;
+          loadRecords();
+        });
+        head.appendChild(th);
+      });
       const tableHead = document.createElement("thead");
       tableHead.appendChild(head);
       table.appendChild(tableHead);
@@ -403,7 +855,123 @@
       body.className = "request-body is-updating";
       rows.forEach((row) => body.appendChild(requestRow(row)));
       table.appendChild(body);
+      panel.replaceChildren(...fragments, table);
+      state.tableWidths.entries = loadTableWidths("entries");
+      applyTableWidths(table, state.tableWidths.entries);
+      attachColumnResizers(table, "entries");
+      requestAnimationFrame(() => body.classList.remove("is-updating"));
+    }
+
+    function renderAttemptsPanel(panel) {
+      const rows = state.attemptRecords || [];
+      if (!rows.length) {
+        panel.replaceChildren(el("div", "loading", "no failed attempts"));
+        return;
+      }
+      const table = el("table", "request-table");
+      const head = el("tr");
+      const columns = [
+        { key: "status", label: "Status", colClass: "col-status" },
+        { key: "scope.port", label: "Port", colClass: "col-port" },
+        { key: "meta.endpoint", label: "Endpoint", colClass: "col-endpoint" },
+        { key: "meta.pool", label: "Pool", colClass: "col-pool" },
+        { key: "meta.route_reason", label: "Reason", colClass: "col-route" },
+        { key: "meta.provider", label: "Model", colClass: "col-provider" },
+        { key: "duration_ms", label: "Duration", colClass: "col-intext" },
+        { key: "error", label: "Error", colClass: "col-usage" },
+        { key: "switches", label: "Next", colClass: "col-finish" },
+        { key: "updated_epoch_ms", label: "When", colClass: "col-time col-time-last" },
+      ];
+      const colgroup = el("colgroup");
+      columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
+      table.appendChild(colgroup);
+      const trh = el("tr");
+      columns.forEach((col) => trh.appendChild(el("th", col.colClass, col.label)));
+      const tableHead = document.createElement("thead");
+      tableHead.appendChild(trh);
+      table.appendChild(tableHead);
+      const body = document.createElement("tbody");
+      body.className = "request-body is-updating";
+      rows.forEach((row) => body.appendChild(attemptRow(row)));
+      table.appendChild(body);
       panel.replaceChildren(table);
+      state.tableWidths.attempts = loadTableWidths("attempts");
+      applyTableWidths(table, state.tableWidths.attempts);
+      attachColumnResizers(table, "attempts");
+      requestAnimationFrame(() => body.classList.remove("is-updating"));
+    }
+
+    function attemptRow(row) {
+      const tr = el("tr", "request-row status-error");
+      tr.dataset.requestKey = row.request_key;
+      tr.style.cursor = "pointer";
+      tr.addEventListener("click", () => openRequestDetail(row));
+      tr.addEventListener("mouseenter", (event) => showRowPopover(row, event));
+      tr.addEventListener("mousemove", (event) => positionRowPopover(event));
+      tr.addEventListener("mouseleave", hideRowPopover);
+      const portValue = row.scope?.port;
+      const portText = portValue == null ? "—" : String(portValue);
+      const statusCell = el("td", `status-cell error`, statusText(row));
+      const detail = row.meta?.error_category
+        ? `${row.meta.error_category}: ${row.meta.error_detail || ""}`.trim()
+        : "—";
+      statusCell.title = detail;
+      tr.appendChild(statusCell);
+      tr.appendChild(el("td", "col-port", portText));
+      tr.appendChild(el("td", null, endpointLabel(metaValue(row, "endpoint"))));
+      tr.appendChild(el("td", "muted col-pool", metaValue(row, "pool")));
+      tr.appendChild(el("td", "muted col-route", metaValue(row, "route_reason")));
+      tr.appendChild(compactProviderCell(row));
+      tr.appendChild(el("td", "num", row.duration_ms != null ? fmtMs(row.duration_ms) : "—"));
+      tr.appendChild(el("td", "mono", detail));
+      tr.appendChild(el("td", "col-finish", row.switches > 0 ? `switched` : "terminal"));
+      tr.appendChild(el("td", "mono col-time col-time-last", timeText(row.updated_epoch_ms)));
+      return tr;
+    }
+
+    function renderErrorsPanel(panel) {
+      const codes = state.errorFacets || [];
+      if (!codes.length) {
+        panel.replaceChildren(el("div", "loading", "no errors"));
+        return;
+      }
+      const wrapper = el("div", "errors-grid");
+      const table = el("table", "request-table");
+      const columns = [
+        { key: "code", label: "Status", colClass: "col-status" },
+        { key: "count", label: "Count", colClass: "col-port" },
+        { key: "example", label: "Example detail", colClass: "col-usage" },
+      ];
+      const colgroup = el("colgroup");
+      columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
+      table.appendChild(colgroup);
+      const trh = el("tr");
+      columns.forEach((col) => trh.appendChild(el("th", col.colClass, col.label)));
+      const head = document.createElement("thead");
+      head.appendChild(trh);
+      table.appendChild(head);
+      const body = document.createElement("tbody");
+      body.className = "request-body is-updating";
+      codes.forEach((item) => {
+        const tr = el("tr", "status-error");
+        tr.style.cursor = "pointer";
+        tr.title = `View Requests filtered by status ${item.code}`;
+        // Drilldown: jump to Entries tab with status=error + error_status_code
+        // set, keeping all other toolbar filters. Single action; no separate
+        // modal or extra navigation step.
+        tr.addEventListener("click", () => drilldownErrorStatus(item.code));
+        tr.appendChild(el("td", "col-status", item.code));
+        tr.appendChild(el("td", "col-port", String(item.count)));
+        tr.appendChild(el("td", "mono", state.errorExamples?.[item.code] || "—"));
+        body.appendChild(tr);
+      });
+      table.appendChild(body);
+      const summary = el("div", "muted", `Total error requests: ${state.errorStatuses}`);
+      wrapper.append(summary, table);
+      panel.replaceChildren(wrapper);
+      state.tableWidths.errors = loadTableWidths("errors");
+      applyTableWidths(table, state.tableWidths.errors);
+      attachColumnResizers(table, "errors");
       requestAnimationFrame(() => body.classList.remove("is-updating"));
     }
 
@@ -412,24 +980,84 @@
       const cards = document.getElementById("summary-cards");
       cards.replaceChildren();
       const total = Number(stats.count || 0);
+      const providerFails = Number(stats.provider_failure_count ?? 0);
       const values = [
-        ["Total", total],
-        ["Input tokens", Number(stats.input_tokens || 0)],
-        ["Output tokens", Number(stats.output_tokens || 0)],
-        ["Cached tokens", Number(stats.cached_tokens || 0)],
+        ["Requests", total],
+        ["Success", Number(stats.success_count ?? 0)],
+        ["Errors", Number(stats.error_count ?? 0), stats.error_count > 0 ? "bad" : ""],
+        ["Provider fails", providerFails, providerFails > 0 ? "bad" : ""],
+        ["Input tokens", fmtCompact(Number(stats.input_tokens || 0))],
+        ["Output tokens", fmtCompact(Number(stats.output_tokens || 0))],
+        ["Cached tokens", fmtCompact(Number(stats.cached_tokens || 0))],
+        ["Total tokens", fmtCompact(Number(stats.total_tokens || 0))],
         ["Avg cache hit", stats.cache_hit_rate_percent != null ? `${Number(stats.cache_hit_rate_percent).toFixed(1)}%` : "—"],
         ["Avg duration", stats.avg_duration_ms != null ? `${Math.round(Number(stats.avg_duration_ms))} ms` : "—"],
       ];
-      for (const [label, value] of values) {
-        const card = el("div", `card stat-${label.toLowerCase().replace(/\s+/g, "-")}`);
+      for (const item of values) {
+        const [label, value, tone = ""] = item;
+        const card = el("div", `card stat-${label.toLowerCase().replace(/\s+/g, "-")}${tone ? ` ${tone}` : ""}`);
         card.appendChild(el("div", "label", label));
-        card.appendChild(el("div", "value", String(value)));
+        card.appendChild(el("div", `value${tone ? ` ${tone}` : ""}`, String(value)));
         cards.appendChild(card);
       }
     }
 
+    function chartLabel(bucket, range) {
+      if (range === "today") return bucket.date.slice(11, 16);
+      if (range === "month") return `${bucket.date.slice(5)} w`;
+      return bucket.date.slice(5);
+    }
+
+    function renderTimeseries() {
+      const chart = document.getElementById("usage-chart");
+      const metric = document.getElementById("chart-metric").value;
+      const range = document.getElementById("chart-range").value;
+      const buckets = state.timeseries || [];
+      if (!buckets.length) {
+        chart.replaceChildren(el("div", "empty-chart muted", "no data in selected range"));
+        return;
+      }
+      // Per Jason spec: x-axis is date (one column per bucket), y-axis is the
+      // selected metric normalized to the bucket maximum, with the tallest bar
+      // at 80% of the chart area height.
+      const chartHeight = Math.max(200, chart.clientHeight || 0);
+      const axisHeight = 22;
+      const gap = 8;
+      const usableHeight = chartHeight - axisHeight - gap;
+      const fillHeight = Math.max(20, Math.round(usableHeight * 0.8));
+      const maximum = Math.max(...buckets.map((bucket) => Number(bucket[metric] || 0)), 1);
+
+      const yAxis = el("div", "chart-y-axis");
+      yAxis.style.height = `${chartHeight}px`;
+      for (const ratio of [1, 0.8, 0.6, 0.4, 0.2, 0]) {
+        const axisValue = maximum * ratio;
+        const label = el("span", "chart-y-label", metric === "cache_hit_rate_percent" ? `${axisValue.toFixed(0)}%` : fmtCompact(axisValue));
+        label.style.bottom = `${Math.round(usableHeight * ratio)}px`;
+        yAxis.appendChild(label);
+      }
+
+      const bars = el("div", "chart-bars");
+      for (const bucket of buckets) {
+        const value = Number(bucket[metric] || 0);
+        const column = el("div", "bar-column");
+        column.style.height = `${chartHeight}px`;
+        const spacer = el("div", "bar-spacer");
+        spacer.style.height = `${Math.max(0, usableHeight - fillHeight)}px`;
+        const bar = el("div", "bar");
+        const heightPx = Math.max(2, Math.round((value / maximum) * fillHeight));
+        bar.style.height = `${heightPx}px`;
+        const displayValue = metric === "cache_hit_rate_percent" ? `${value.toFixed(1)}%` : fmtCompact(value);
+        bar.title = `${bucket.date}: ${displayValue} (${bucket.count.toLocaleString()} requests)`;
+        const label = el("span", "axis", chartLabel(bucket, range));
+        label.title = bucket.date;
+        column.append(spacer, bar, label);
+        bars.appendChild(column);
+      }
+      chart.replaceChildren(yAxis, bars);
+    }
+
     function renderPagination() {
-      const pages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+      const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
       const info = document.getElementById("page-info");
       info.textContent = `page ${state.page} of ${pages} · ${state.total.toLocaleString()} records`;
       document.getElementById("page-prev").disabled = state.page <= 1;
@@ -437,28 +1065,61 @@
     }
 
     function renderAll() {
+      renderStats(state.stats);
       renderStatsCards();
-      renderStats(state.liveStats);
+      renderTimeseries();
+      renderTabCounts();
       renderRequests();
       renderPagination();
       renderRequestDetail();
     }
 
+    function renderTabCounts() {
+      const entriesCount = document.getElementById("tab-count-entries");
+      const attemptsCount = document.getElementById("tab-count-attempts");
+      const errorsCount = document.getElementById("tab-count-errors");
+      if (entriesCount) entriesCount.textContent = state.total ? `${state.total}` : "0";
+      if (attemptsCount) attemptsCount.textContent = state.attemptsTotal ? `${state.attemptsTotal}` : "0";
+      if (errorsCount) errorsCount.textContent = state.errorStatuses ? `${state.errorStatuses}` : "0";
+      document.querySelectorAll("#requests-tab-bar .tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tab === (state.tab || "entries"));
+      });
+    }
+
     function render() { renderAll(); }
 
     document.getElementById("reload-btn").addEventListener("click", () => load().catch((error) => showStatus("err", error.message)));
-    document.getElementById("pause-btn").addEventListener("click", (event) => {
-      state.paused = !state.paused;
-      event.currentTarget.textContent = state.paused ? "Resume" : "Pause";
+    document.querySelectorAll("#requests-tab-bar .tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.tab = btn.dataset.tab;
+        if (state.tab === "attempts" && !state.attemptRecords.length) loadAttempts().then(renderAll);
+        else renderAll();
+      });
     });
-    ["status-filter","port-filter","provider-filter","model-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
+    document.querySelectorAll("#entries-sub-tab-bar .sub-tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const next = btn.dataset.subTab === "reason" ? "reason" : "pool";
+        if (state.entriesGroup === next) return;
+        state.entriesGroup = next;
+        renderAll();
+      });
+    });
+    ["chart-range","chart-metric"].forEach((id) => {
+      document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });
+    });
+    ["status-filter","port-filter","provider-filter","model-filter","endpoint-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
       const input = document.getElementById(id);
       let timer = null;
       input.addEventListener("input", () => {
         clearTimeout(timer);
+        if (id === "status-filter") state.errorStatusCode = null;
         timer = setTimeout(() => { state.page = 1; loadRecords(); }, 400);
       });
-      if (input.tagName === "SELECT") input.addEventListener("change", () => { state.page = 1; loadRecords(); });
+      if (input.tagName === "SELECT") input.addEventListener("change", () => {
+        if (id === "status-filter") state.errorStatusCode = null;
+        state.page = 1;
+        loadRecords();
+      });
     });
     ["sort-field","sort-order"].forEach((id) => {
       document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });
@@ -466,15 +1127,39 @@
     document.getElementById("page-prev").addEventListener("click", () => {
       if (state.page > 1) { state.page -= 1; loadRecords(); }
     });
+    document.getElementById("page-size").addEventListener("change", (event) => {
+      state.pageSize = Number(event.currentTarget.value);
+      state.page = 1;
+      loadRecords();
+    });
     document.getElementById("page-next").addEventListener("click", () => {
-      const pages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+      const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
       if (state.page < pages) { state.page += 1; loadRecords(); }
     });
+    startAutoRefresh(() => loadRecords(), 5000);
     document.getElementById("drawer-cancel")?.addEventListener("click", closePanel);
     document.getElementById("drawer-close")?.addEventListener("click", closePanel);
+    document.getElementById("drawer-back")?.addEventListener("click", () => {
+      const previous = state.drawerSourceTab;
+      closePanel();
+      if (previous && previous !== state.tab) {
+        state.tab = previous;
+        renderAll();
+      }
+    });
+    document.getElementById("drawer")?.addEventListener("transitionend", (event) => {
+      if (event.propertyName !== "transform" && event.propertyName !== "opacity") return;
+      const drawer = document.getElementById("drawer");
+      if (!drawer || drawer.classList.contains("is-open")) return;
+      const previous = state.drawerSourceTab;
+      state.drawerSourceTab = null;
+      if (previous && previous !== state.tab) {
+        state.tab = previous;
+        renderAll();
+      }
+    });
 
     load().catch((error) => showStatus("err", `observability failed: ${error.message}`));
-    schedulePoll();
   </script>
 </body>
 </html>

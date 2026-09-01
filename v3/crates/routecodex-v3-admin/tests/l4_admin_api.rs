@@ -2,18 +2,11 @@
 // Admin REST API 黑盒集成测试：使用 axum 自带 test server 拉起 in-process
 // 服务，覆盖 Dashboard / Routes / Providers / Revisions / Reload 端点。
 use routecodex_v3_admin::{router, AppState, ProviderHealthEntry};
-use routecodex_v3_config::{
-    V3Config02AuthoringParsed, V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind,
-    V3SelectionPolicy, V3SelectionStrategy, V3ServerAuthoringConfig,
-};
 use routecodex_v3_config_mgmt::ConfigMgmtStore;
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
 static TEST_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static OBSERVABILITY_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 fn temp_home() -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "rcc-admin-test-{}-{}",
@@ -25,32 +18,6 @@ fn temp_home() -> PathBuf {
 }
 
 fn write_init_config(home: &PathBuf) -> PathBuf {
-    let mut authoring = V3Config02AuthoringParsed {
-        version: 3,
-        pipelines: Default::default(),
-        servers: BTreeMap::new(),
-        providers: BTreeMap::new(),
-        forwarders: BTreeMap::new(),
-        route_groups: BTreeMap::new(),
-        features: BTreeMap::new(),
-        debug: Default::default(),
-        error: Default::default(),
-        admin_webui: Default::default(),
-    };
-    authoring.servers.insert(
-        "test-server".to_string(),
-        V3ServerAuthoringConfig {
-            enabled: true,
-            bind: "127.0.0.1".into(),
-            port: 19999,
-            routing_group: "test-group".into(),
-            endpoints: vec!["responses".into(), "openai_chat".into(), "anthropic".into()],
-            features: BTreeMap::new(),
-            execution: None,
-            expose_models: vec![],
-        },
-    );
-    // 把被引用 provider 的 stub 文件写出，让 commit 校验通过
     let provider_dir = home.join("provider").join("p1");
     std::fs::create_dir_all(&provider_dir).expect("provider dir");
     std::fs::write(
@@ -75,37 +42,22 @@ supportsStreaming = true
 "#,
     )
     .expect("provider file");
-    let mut pool = routecodex_v3_config::V3RoutePoolAuthoringConfig {
-        selection: V3SelectionPolicy {
-            strategy: V3SelectionStrategy::Priority,
-        },
-        route_object: None,
-        match_rule: None,
-        targets: vec![V3RoutePoolTargetAuthoringConfig {
-            kind: V3RouteTargetKind::ProviderModel,
-            id: None,
-            provider: Some("p1".into()),
-            model: Some("m1".into()),
-            key: Some("key1".into()),
-            priority: Some(1),
-            weight: None,
-        }],
-        features: BTreeMap::new(),
-    };
-    let _ = &mut pool;
-    let mut groups = routecodex_v3_config::V3RouteGroupAuthoringConfig {
-        pools: BTreeMap::new(),
-        compact_route_object: None,
-        route_policies: Vec::new(),
-        features: BTreeMap::new(),
-    };
-    groups.pools.insert("default".into(), pool);
-    authoring.route_groups.insert("test-group".into(), groups);
-    let path = home.join("config.v3.toml");
-    let store = ConfigMgmtStore::new(&path);
-    store
-        .commit_with_backup(&authoring, "init", "test fixture")
-        .expect("commit init");
+    let path = home.join("config.toml");
+    std::fs::write(
+        &path,
+        r#"version = 3
+
+[route_groups.routecodex_v3_4444.default]
+tiers = [[{ use = "p1/m1" }]]
+
+[route_groups.responses_v3_7777.default]
+tiers = [[{ use = "p1/m1" }]]
+"#,
+    )
+    .expect("user config");
+    ConfigMgmtStore::new(&path)
+        .read_authoring()
+        .expect("compiled user config fixture");
     path
 }
 
@@ -134,7 +86,7 @@ async fn bind_test_server() -> (String, AppState, PathBuf) {
 
 fn observability_source_row() -> serde_json::Value {
     serde_json::json!({
-        "request_key": "19999:req-source",
+        "request_key": "4444:req-source",
         "event_type": "request.failed",
         "started_epoch_ms": 1,
         "updated_epoch_ms": 3,
@@ -143,10 +95,11 @@ fn observability_source_row() -> serde_json::Value {
         "meta": {
             "request_id": "req-source",
             "endpoint": "/v1/chat/completions",
+            "provider_status": 429,
             "error_category": "provider_http_429",
             "error_detail": "upstream rate limited"
         },
-        "scope": {"port": 19999},
+        "scope": {"port": 4444},
         "result": "error",
         "attempts": 2,
         "failed_attempts": 1,
@@ -155,111 +108,93 @@ fn observability_source_row() -> serde_json::Value {
     })
 }
 
-fn source_snapshot() -> serde_json::Value {
+fn write_observability_store(home: &std::path::Path) {
+    let store_path = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    let line = serde_json::json!({
+        "schema_version": 1,
+        "row": observability_source_row()
+    });
+    std::fs::create_dir_all(store_path.parent().unwrap()).expect("logs dir");
+    std::fs::write(store_path, format!("{line}\n")).expect("observability store");
+}
+
+fn write_observability_rows(home: &std::path::Path, rows: &[serde_json::Value]) {
+    let store_path = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    std::fs::create_dir_all(store_path.parent().unwrap()).expect("logs dir");
+    let content = rows
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "schema_version": 1,
+                "row": row
+            })
+            .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(store_path, format!("{content}\n")).expect("observability store");
+}
+
+fn observability_row_with_result(request_key: &str, result: Option<&str>) -> serde_json::Value {
     serde_json::json!({
-        "cursor": 7,
-        "requests": {"19999:req-source": observability_source_row()},
-        "stats": {
-            "total": 2,
-            "active": 0,
-            "success": 1,
-            "error": 1,
-            "cancelled": 0,
-            "switches": 1,
-            "tokens_output": 11,
-            "by_port": {
-                "19999": {
-                    "total": 2,
-                    "active": 0,
-                    "success": 1,
-                    "error": 1,
-                    "cancelled": 0,
-                    "switches": 1,
-                    "tokens_output": 11
-                }
-            },
-            "error_categories": {"provider_http_429": 1}
+        "request_key": request_key,
+        "event_type": "request.completed",
+        "started_epoch_ms": 1,
+        "updated_epoch_ms": 3,
+        "finished_epoch_ms": 2,
+        "duration_ms": 10,
+        "meta": {},
+        "scope": {"port": 4444},
+        "result": result,
+        "attempts": 1,
+        "failed_attempts": 0,
+        "switches": 0,
+        "usage": {
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "cached_tokens": 50,
+            "total_tokens": 120
         }
     })
 }
 
-async fn spawn_source_on_configured_port() -> (u16, tokio::sync::oneshot::Sender<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:19999")
-        .await
-        .expect("bind configured observability source port");
-    let port = listener.local_addr().expect("source address").port();
-    let app = axum::Router::new()
-        .route(
-            "/_routecodex/observability/snapshot",
-            axum::routing::get(|| async { axum::Json(source_snapshot()) }),
-        )
-        .route(
-            "/_routecodex/observability/events",
-            axum::routing::get(
-                |axum::extract::Query(params): axum::extract::Query<
-                    std::collections::BTreeMap<String, String>,
-                >| async move {
-                    let cursor = params
-                        .get("cursor")
-                        .and_then(|cursor| cursor.parse::<u64>().ok())
-                        .unwrap_or_default();
-                    axum::Json(serde_json::json!({
-                        "kind": "events",
-                        "cursor": cursor + 1,
-                        "resync_required": cursor == 99,
-                        "events": [{
-                            "sequence": cursor + 1,
-                            "timestamp_epoch_ms": 4,
-                            "row": observability_source_row()
-                        }]
-                    }))
-                },
-            ),
-        );
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.await;
-            })
-            .await;
-    });
-    (port, shutdown_tx)
+fn observability_attempt_row(request_key: &str, provider_status: u16) -> serde_json::Value {
+    observability_attempt_row_with_failed(request_key, provider_status, 1)
 }
 
-async fn spawn_bootstrap_source_on_configured_port() -> (u16, tokio::sync::oneshot::Sender<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:19999")
-        .await
-        .expect("bind configured observability source port");
-    let port = listener.local_addr().expect("source address").port();
-    let app = axum::Router::new()
-        .route(
-            "/_routecodex/observability/snapshot",
-            axum::routing::get(|| async { axum::Json(source_snapshot()) }),
-        )
-        .route(
-            "/_routecodex/observability/events",
-            axum::routing::get(
-                |axum::extract::Query(query): axum::extract::Query<BTreeMap<String, String>>| async move {
-                    let cursor = query.get("cursor").and_then(|cursor| cursor.parse::<u64>().ok());
-                    axum::Json(serde_json::json!({
-                        "kind": "events",
-                        "cursor": 7,
-                        "resync_required": cursor == Some(0),
-                        "events": []
-                    }))
-                },
-            ),
-        );
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.await;
-            })
-            .await;
-    });
-    (port, shutdown_tx)
+fn observability_attempt_row_with_failed(
+    request_key: &str,
+    provider_status: u16,
+    failed_attempts: u64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "request_key": request_key,
+        "event_type": "request.provider_attempt_failed",
+        "started_epoch_ms": 1,
+        "updated_epoch_ms": 2,
+        "finished_epoch_ms": null,
+        "duration_ms": null,
+        "meta": {
+            "request_id": request_key.split(':').last().unwrap_or(request_key),
+            "endpoint": "/v1/chat/completions",
+            "provider_status": provider_status,
+            "error_category": format!("provider_http_{provider_status}"),
+            "error_detail": format!("provider returned HTTP {provider_status}"),
+            "provider": "p1",
+            "model": "m1",
+            "route_reason": "default:first-try"
+        },
+        "scope": {"port": 4444},
+        "result": null,
+        "attempts": 0,
+        "failed_attempts": failed_attempts,
+        "switches": 0,
+        "usage": null
+    })
 }
 
 #[tokio::test]
@@ -291,12 +226,8 @@ async fn routes_get_returns_tree() {
         .get("groups")
         .and_then(|v| v.as_array())
         .expect("groups array");
-    assert!(!groups.is_empty(), "groups populated from authored config");
-    let ports = groups[0]
-        .get("ports")
-        .and_then(|v| v.as_array())
-        .expect("ports");
-    let pools = ports[0]
+    assert!(!groups.is_empty(), "groups populated from user config");
+    let pools = groups[0]
         .get("pools")
         .and_then(|v| v.as_array())
         .expect("pools");
@@ -309,8 +240,8 @@ async fn routes_get_returns_tree() {
         .and_then(|v| v.as_array())
         .expect("members");
     assert_eq!(
-        members[0].get("provider").and_then(|v| v.as_str()),
-        Some("p1")
+        members[0].get("use").and_then(|v| v.as_str()),
+        Some("p1/m1")
     );
 }
 
@@ -319,30 +250,11 @@ async fn routes_validate_rejects_invalid_target() {
     let (base, _state, _home) = bind_test_server().await;
     let body = serde_json::json!({
         "groups": [{
-            "group_id": "test-group",
-            "ports": [{
-                "server_id": "test-server",
-                "port": 8080,
-                "bind": "127.0.0.1",
-                "enabled": true,
-                "endpoints": ["responses"],
-                "routing_group": "test-group",
-                "pools": [{
-                    "name": "default",
-                    "selection_strategy": "priority",
-                    "match_rule": null,
-                    "tiers": [{
-                        "priority": 1,
-                        "members": [{
-                            "kind": "provider_model",
-                            "id": null,
-                            "provider": "ghost",
-                            "model": "m9",
-                            "key": null,
-                            "priority": 1,
-                            "weight": null
-                        }]
-                    }]
+            "group_id": "routecodex_v3_4444",
+            "pools": [{
+                "name": "default",
+                "tiers": [{
+                    "members": [{"use": "ghost/m9", "weight": null}]
                 }]
             }]
         }],
@@ -358,6 +270,32 @@ async fn routes_validate_rejects_invalid_target() {
     let payload: serde_json::Value = response.json().await.expect("validate json");
     assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(false));
     assert!(payload.get("error").is_some(), "error message present");
+
+    let zero_weight = serde_json::json!({
+        "groups": [{
+            "group_id": "routecodex_v3_4444",
+            "pools": [{
+                "name": "default",
+                "tiers": [{
+                    "members": [{"use": "p1/m1", "weight": 0}]
+                }]
+            }]
+        }],
+        "reason": "validate zero weight"
+    });
+    let response = http_client()
+        .post(format!("{base}/api/routes/validate"))
+        .json(&zero_weight)
+        .send()
+        .await
+        .expect("zero-weight validation response");
+    assert!(response.status().is_success());
+    let payload: serde_json::Value = response.json().await.expect("zero-weight validation json");
+    assert_eq!(
+        payload.get("ok").and_then(|value| value.as_bool()),
+        Some(false),
+        "programmatic route selection must retain parser weight invariants: {payload}"
+    );
 }
 
 #[tokio::test]
@@ -427,6 +365,19 @@ async fn revisions_and_static_assets_are_served() {
         requests_body.contains("Persistent request records"),
         "requests page rendered"
     );
+    let routes = http_client()
+        .get(format!("{base}/routes.html"))
+        .send()
+        .await
+        .expect("routes page response");
+    assert!(routes.status().is_success());
+    let routes_body = routes.text().await.expect("routes page body");
+    assert!(routes_body.contains("Choose what runs first"));
+    assert!(routes_body.contains("Tier 1 is tried first"));
+    assert_eq!(routes_body.matches("id=\"save-btn\"").count(), 1);
+    assert!(!routes_body.contains("Cooldown pool"));
+    assert!(routes_body.contains("load();"));
+    assert!(routes_body.contains("aria-live=\"polite\""));
     let css = http_client()
         .get(format!("{base}/styles.css"))
         .send()
@@ -496,108 +447,164 @@ supportsStreaming = true
 }
 
 #[tokio::test]
-async fn observability_poll_aggregates_source_and_advances_cursor() {
-    let _guard = OBSERVABILITY_TEST_LOCK.lock().await;
-    let (base, _state, _home) = bind_test_server().await;
-    let (source_port, shutdown) = spawn_source_on_configured_port().await;
-    assert_eq!(source_port, 19999);
+async fn observability_records_group_terminal_errors_by_raw_status_code() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_store(&home);
 
     let response = http_client()
-        .get(format!("{base}/api/observability/poll?sources=19999:7"))
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10"
+        ))
         .send()
         .await
-        .expect("observability poll response");
+        .expect("records response");
+    let response_status = response.status();
+    let response_body = response.text().await.expect("records body");
+    assert!(
+        response_status.is_success(),
+        "records request failed: {response_status} {response_body}"
+    );
+    let body: serde_json::Value = serde_json::from_str(&response_body).expect("records json");
+
+    assert_eq!(body["facets"]["error_status_codes"]["429"], 1);
+    assert!(
+        body["facets"]["error_status_codes"]["provider_http_429"].is_null(),
+        "semantic error category must never be exposed as a status-code facet: {body}"
+    );
+
+    let filtered = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&status=error&error_status_code=429"
+        ))
+        .send()
+        .await
+        .expect("filtered records response");
+    assert!(filtered.status().is_success());
+    let filtered_body: serde_json::Value = filtered.json().await.expect("filtered json");
+    assert_eq!(filtered_body["total"], 1);
+    assert_eq!(
+        filtered_body["records"][0]["request_key"],
+        "4444:req-source"
+    );
+}
+
+#[tokio::test]
+async fn observability_stats_exclude_non_success_usage_but_keep_request_counts() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[
+            observability_row_with_result("4444:success", Some("success")),
+            observability_row_with_result("4444:error", Some("error")),
+            observability_row_with_result("4444:cancelled", Some("cancelled")),
+            observability_row_with_result("4444:active", None),
+        ],
+    );
+
+    let response = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("records response");
+    let response_status = response.status();
+    let response_body = response.text().await.expect("records body");
+    assert!(
+        response_status.is_success(),
+        "records request failed: {response_status} {response_body}"
+    );
+    let body: serde_json::Value = serde_json::from_str(&response_body).expect("records json");
+    let stats = &body["stats"];
+    assert_eq!(stats["count"], 4);
+    assert_eq!(stats["success_count"], 1);
+    assert_eq!(stats["error_count"], 1);
+    assert_eq!(stats["cancelled_count"], 1);
+    assert_eq!(stats["active_count"], 1);
+    assert_eq!(stats["input_tokens"], 100);
+    assert_eq!(stats["output_tokens"], 20);
+    assert_eq!(stats["cached_tokens"], 50);
+    assert_eq!(stats["total_tokens"], 120);
+    assert_eq!(stats["cache_hit_rate_percent"], 50.0);
+    assert_eq!(stats["avg_duration_ms"], 10.0);
+    assert_eq!(stats["by_port"]["4444"]["total"], 4);
+    assert_eq!(stats["by_port"]["4444"]["success"], 1);
+    assert_eq!(stats["by_port"]["4444"]["error"], 1);
+    assert_eq!(stats["by_port"]["4444"]["provider_failures"], 0);
+    assert_eq!(stats["by_port"]["4444"]["cancelled"], 1);
+    assert_eq!(stats["by_port"]["4444"]["active"], 1);
+
+    let timeseries = &body["timeseries"];
+    assert_eq!(timeseries[0]["count"], 4);
+    assert_eq!(timeseries[0]["input_tokens"], 100);
+    assert_eq!(timeseries[0]["output_tokens"], 20);
+    assert_eq!(timeseries[0]["cached_tokens"], 50);
+    assert_eq!(timeseries[0]["total_tokens"], 120);
+}
+
+#[tokio::test]
+async fn observability_keeps_provider_attempt_failures_visible_after_success() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[
+            observability_row_with_result("4444:recovered", Some("success")),
+            observability_attempt_row("4444:recovered", 502),
+            observability_attempt_row_with_failed("4444:recovered", 503, 2),
+            observability_attempt_row_with_failed("4444:terminal", 429, 3),
+        ],
+    );
+
+    let response = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("records response");
     assert!(response.status().is_success());
-    let body: serde_json::Value = response.json().await.expect("poll json");
-    println!("observability poll body: {body}");
-    assert!(
-        body["requests"]["19999:req-source"].is_object(),
-        "source request row must be aggregated: {body}"
-    );
-    assert_eq!(body["stats"]["total"], 2);
-    assert_eq!(body["stats"]["by_port"]["19999"]["error"], 1);
-    assert_eq!(body["stats"]["error_categories"]["provider_http_429"], 1);
-    assert_eq!(body["sources"][0]["port"], 19999);
-    assert_eq!(body["sources"][0]["cursor"], 8);
-    assert_eq!(body["recent_events"][0]["sequence"], 8);
-    assert!(
-        body.get("errors").is_none(),
-        "errors field removed from aggregate"
-    );
-    shutdown.send(()).unwrap();
-}
+    let body: serde_json::Value = response.json().await.expect("records json");
 
-#[tokio::test]
-async fn observability_poll_fails_fast_when_source_unavailable() {
-    let _guard = OBSERVABILITY_TEST_LOCK.lock().await;
-    let (base, _state, _home) = bind_test_server().await;
+    assert_eq!(body["facets"]["error_status_codes"]["502"], 1);
+    assert_eq!(body["facets"]["error_status_codes"]["503"], 1);
+    assert_eq!(body["facets"]["error_status_codes"]["429"], 1);
+    assert_eq!(body["stats"]["provider_failure_count"], 3);
+    assert_eq!(body["stats"]["success_count"], 1);
+    assert_eq!(body["stats"]["error_count"], 3);
+    assert_eq!(body["stats"]["by_port"]["4444"]["total"], 4);
+    assert_eq!(body["stats"]["by_port"]["4444"]["success"], 1);
+    assert_eq!(body["stats"]["by_port"]["4444"]["error"], 3);
+    assert_eq!(body["stats"]["by_port"]["4444"]["provider_failures"], 3);
 
-    // Port 19999 is intentionally unbound for this negative test.
-    let response = http_client()
-        .get(format!("{base}/api/observability/poll?sources=19999:0"))
+    let filtered = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&status=retrying&error_status_code=502"
+        ))
         .send()
         .await
-        .expect("observability poll response");
+        .expect("attempt filtered response");
+    assert!(filtered.status().is_success());
+    let filtered_body: serde_json::Value = filtered.json().await.expect("filtered json");
+    assert_eq!(filtered_body["total"], 1);
     assert_eq!(
-        response.status(),
-        reqwest::StatusCode::BAD_GATEWAY,
-        "source unavailable must fail fast, not degrade to partial success"
+        filtered_body["records"][0]["event_type"],
+        "request.provider_attempt_failed"
     );
-    let body: serde_json::Value = response.json().await.expect("poll json");
-    assert!(body["error"].is_string(), "error message present");
-}
+    assert_eq!(filtered_body["records"][0]["result"], "failed-attempt");
+    assert_eq!(filtered_body["records"][0]["meta"]["provider_status"], 502);
 
-#[tokio::test]
-async fn observability_poll_fails_fast_when_source_requires_resync() {
-    let _guard = OBSERVABILITY_TEST_LOCK.lock().await;
-    let (base, _state, _home) = bind_test_server().await;
-    let (source_port, shutdown) = spawn_source_on_configured_port().await;
-    assert_eq!(source_port, 19999);
-
-    let response = http_client()
-        .get(format!("{base}/api/observability/poll?sources=19999:99"))
+    let error_filtered = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&status=error&error_status_code=502"
+        ))
         .send()
         .await
-        .expect("observability poll response");
+        .expect("error filtered response");
+    assert!(error_filtered.status().is_success());
+    let error_filtered_body: serde_json::Value = error_filtered.json().await.expect("error json");
+    assert_eq!(error_filtered_body["total"], 1);
     assert_eq!(
-        response.status(),
-        reqwest::StatusCode::BAD_GATEWAY,
-        "resync_required must fail fast instead of merging incomplete events"
+        error_filtered_body["records"][0]["result"],
+        "failed-attempt"
     );
-    let body: serde_json::Value = response.json().await.expect("poll json");
-    assert!(
-        body["error"]
-            .as_str()
-            .is_some_and(|error| error.contains("resync")),
-        "resync reason present: {body}"
-    );
-    assert_eq!(
-        body["error_code"].as_str(),
-        Some("observability_resync_required"),
-        "resync contract must be machine-readable"
-    );
-    shutdown.send(()).unwrap();
-}
-
-#[tokio::test]
-async fn observability_poll_bootstraps_from_snapshot_cursor() {
-    let _guard = OBSERVABILITY_TEST_LOCK.lock().await;
-    let (base, _state, _home) = bind_test_server().await;
-    let (source_port, shutdown) = spawn_bootstrap_source_on_configured_port().await;
-    assert_eq!(source_port, 19999);
-
-    let response = http_client()
-        .get(format!("{base}/api/observability/poll?sources=19999:0"))
-        .send()
-        .await
-        .expect("observability poll response");
-    assert!(
-        response.status().is_success(),
-        "cursor zero is bootstrap, not a stale client cursor: {}",
-        response.status()
-    );
-    let body: serde_json::Value = response.json().await.expect("poll json");
-    assert_eq!(body["sources"][0]["cursor"], 7);
-    assert!(body["requests"]["19999:req-source"].is_object());
-    shutdown.send(()).unwrap();
 }

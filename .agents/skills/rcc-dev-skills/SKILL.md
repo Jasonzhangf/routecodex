@@ -297,7 +297,7 @@ Provider SSE 的兼容修复只能修复传输语法和格式，不得根据响�
 2. 改唯一 owner
 3. green gate
 4. request dry-run：真实入口或 codex sample 走 `x-routecodex-dry-run: provider-request`，确认返回 `routecodex.pipeline_dry_run`、最终 `providerRequest` 和 `stoppedBeforeProviderSend=true`；若返回普通 provider response，先修 dry-run loop
-5. response dry-run：相关 `provider-response*.json` 走 `npm run dry-run:codex-response -- --sample <file>`，确认现有 response converter 输出；未 materialize 的 live `sseStream` 样本不能当离线响应证据
+5. response dry-run：把同一 requestId 的完整 `provider-response.json` 包装为 V3 snapshot，走 `POST /_routecodex/debug/dry-run`；必须确认 `kind=provider_response`、`providerResponseConsumed=true` 和 materialized `clientResponse`
 6. live replay old sample
 7. note → MEMORY → lessons
 
@@ -336,7 +336,7 @@ Provider SSE 的兼容修复只能修复传输语法和格式，不得根据响�
 - 资源 residual 补缺边界：error/VR/contract/snapshot/debug/manager/daemon/SSE residual feature 也必须用 owner-specific 资源收口；禁止为完成覆盖率把它们塞进 request/response/route 主线真相。第四层 `119/119` 只代表 map/doc/gate 闭合，不代表 runtime refactor 已完成。
 - 资源 source-binding gate 边界：第四层 `119/119` 后，runtime refactor 前必须先跑 `verify:resource-source-bindings` 和红测 fixture；资源 owner 必须能经 function-map `owner_module` / `allowed_paths` 找到真实 `feature_id:` source anchor，查不到只能标 `binding pending`，禁止伪造 symbol/resource/edge。source-binding 绿门禁必须留在 `verify:architecture-review-surface-light`，红测 fixture 必须留在 `verify:architecture-ci-longtail` 并由 `verify:function-map-build-wiring` 锁住。
 - 首个 runtime slice 准入：先用 `.agent-collab` claim 精确 `feature_id` / `resource_id` / `mainline_node_id`，再证明 owner/source/map/gate 可查；对 dry-run 相关 slice，runtime 改动前必须先有 request dry-run 最终 provider request 样本和 response dry-run converter 黑盒结果，后续修复先加失败 dry-run 样本再改唯一 owner。
-- Dry-run 黑盒门禁：请求构造问题先用 request dry-run 固化 final `providerRequest`，响应处理问题先用 response dry-run 固化 `convertProviderResponseIfNeeded` 黑盒输出；serialized live `sseStream` 没有 `bodyText/raw/text` 不是离线 replay 证据，必须重新 capture。`test:pipeline-dry-run-blackbox-fixtures` 是 dry-run runtime refactor 前置门禁，不是事后补测。
+- Dry-run 黑盒门禁：请求构造问题先用 request dry-run 固化 final `providerRequest`；响应处理问题把完整 `provider-response.json` snapshot 交给 V3 Rust `POST /_routecodex/debug/dry-run`，并要求 `kind=provider_response`、`providerResponseConsumed=true`、materialized `clientResponse`。node trace 不能证明 lazy stream 已消费；禁止复活已退役的 V2 TS `convertProviderResponseIfNeeded` / `dry-run:codex-response`。Toolreason 细则见 `references/26-toolreason-dryrun-diagnostic.md`。
 - Host bridge 收敛先收调用面：先把 broad `native-exports.ts` 外部调用点收敛到 owner-specific narrow host，再删除零引用 facade；禁止为了删桥让 handler/executor 直接接更多 native helper。
 - Host bridge 测试收敛分型：白盒 host wiring / mocked native-call tests 必须 mock owner-specific host（如 `routing-native-host.ts`、`runtime-lifecycle-host.ts`），不能 mock broad `native-exports.ts`；只有纯 Rust/NAPI 输出证据测试才迁到 `tests/sharedmodule/helpers/*direct-native*`。
 - Responses conversation store 状态断言若验证 host capture/record 后的 pending entries，必须走 `responses-conversation-store-host.ts` 的同一 host store binding；pending request 未有 response id 前不会持久化，direct-native 单独 binding 只适合纯 Rust 输出证据。

@@ -99,7 +99,7 @@ The Target Interpreter module must:
 
 ### Policy semantics
 
-- Priority: examine tiers in ascending configured priority order; do not visit a lower tier while an available candidate remains in a higher tier.
+- Priority: examine tiers in descending configured priority order; do not visit a lower tier while an available candidate remains in a higher tier.
 - Weight: choose from the current eligible set using normalized positive configured weights and an injected deterministic sampler; zero/invalid weights must already be rejected by Config or fail explicitly at the contract boundary.
 - Round-robin: maintain process-local cursor state keyed by the stable target/pool identity, with concurrency-safe increment and deterministic fixture reset.
 - Single target/name mapping: resolve without inventing a second policy layer; canonical model identity and upstream model alias rules remain those compiled by Config.
