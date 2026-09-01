@@ -1,6 +1,6 @@
 {
   "binary_ref": "project-sdk",
-  "bundle_digest": "sha256:6ef877831f9a403b53373d0c243fe01c292cdada21462d7b6cd02df8b24b07bd",
+  "bundle_digest": "sha256:55f22b7f9edf468ca19ce4b759eef55a6385b4f16388d4b908a230b9c5d5434a",
   "bundle_manifest_digest": "sha256:7d2b1ddb54d95f73fe4af5ce5a744def24eaa3f9371db6de3ea98ff7f5861710",
   "bundle_resources": {
     "contracts": [
@@ -50,9 +50,9 @@
       "skills/appsdk-project-governance/SKILL.md"
     ]
   },
-  "compiler_digest": "sha256:a8a90a181fb4ac1b5a0caab44971029c376f2a78df2518675a4ecf8cd1f6c3cf",
+  "compiler_digest": "sha256:e0724997e96afe09ee32a6be01913595102f3c1a1cd7f0095d3b82e6d1477861",
   "contract_schema": 1,
-  "digest": "sha256:a8a90a181fb4ac1b5a0caab44971029c376f2a78df2518675a4ecf8cd1f6c3cf",
+  "digest": "sha256:e0724997e96afe09ee32a6be01913595102f3c1a1cd7f0095d3b82e6d1477861",
   "sdk": "appsdk",
   "version": "0.1.6"
 }
