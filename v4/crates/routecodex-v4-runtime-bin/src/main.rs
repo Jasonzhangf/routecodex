@@ -20,9 +20,8 @@ use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
     build_retry_wire, normalize_provider_response_with_instructions, send_anthropic_messages,
     send_anthropic_messages_streaming, send_openai_chat, send_openai_chat_streaming,
-    send_responses, send_responses_streaming, validate_auth_alias,
-    write_provider_profile, ProviderInitAuth, ProviderInitOptions, ProviderResponseStream,
-    V4Availability01SessionScoped,
+    send_responses, send_responses_streaming, validate_auth_alias, write_provider_profile,
+    ProviderInitAuth, ProviderInitOptions, ProviderResponseStream, V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
     apply_product_error_policy, select_product_target_excluding, select_target,
@@ -685,6 +684,7 @@ fn handle_responses(
     entry_protocol: &str,
     continuation_owner: &str,
 ) -> Result<HttpResponse, HttpResponse> {
+    let started_at = std::time::Instant::now();
     let body: serde_json::Value = serde_json::from_slice(&request.body).map_err(|error| {
         project_fault(
             request,
@@ -854,7 +854,16 @@ fn handle_responses(
             Some(&request_lease),
         )
         .map_err(|fault| project_fault(request, fault, 598))?;
-    emit_payload_console_events(&request_report.trace);
+    emit_payload_console_events(
+        &request_report.trace,
+        request,
+        &request.path,
+        &target.provider_id,
+        &target.wire_model,
+        stream_mode,
+        None,
+        started_at.elapsed(),
+    );
     let request_scope = request_report.scope.clone();
     let semantic_body = request_report.provider_wire_value.ok_or_else(|| {
         project_fault(
@@ -1203,7 +1212,16 @@ fn handle_responses(
             } else {
                 raw.status
             };
-            emit_payload_console_events(&report.trace);
+            emit_payload_console_events(
+                &report.trace,
+                request,
+                &request.path,
+                &target.provider_id,
+                &target.wire_model,
+                stream_mode,
+                Some(client_status),
+                started_at.elapsed(),
+            );
             let _ = std::io::stdout().flush();
             Ok(json_response(client_status, projected))
         }
@@ -1367,7 +1385,6 @@ impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
                         {
                             Ok((disposition, report)) => {
                                 if let Some(report) = report {
-                                    emit_payload_console_events(&report.trace);
                                     if report.client_frame.is_none() {
                                         Err(RuntimeFault::new(
                                             "response_frame_missing",
@@ -1400,17 +1417,70 @@ impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
     }
 }
 
-fn emit_payload_console_events(trace: &[String]) {
+fn emit_payload_console_events(
+    trace: &[String],
+    request: &HttpRequest,
+    endpoint: &str,
+    provider: &str,
+    model: &str,
+    stream: bool,
+    status: Option<u16>,
+    elapsed: std::time::Duration,
+) {
     for event in trace {
-        let Some((plugin_id, rest)) = event.split_once(':') else {
-            continue;
-        };
-        let Some((kind, message)) = rest.split_once(':') else {
-            continue;
-        };
-        if plugin_id.ends_with("payload_console_render") && kind == "console.payload_ready" {
-            println!("{message}");
+        if let Some(line) = render_payload_console_event(
+            event, request, endpoint, provider, model, stream, status, elapsed,
+        ) {
+            println!("{line}");
         }
+    }
+}
+
+fn render_payload_console_event(
+    event: &str,
+    request: &HttpRequest,
+    endpoint: &str,
+    provider: &str,
+    model: &str,
+    stream: bool,
+    status: Option<u16>,
+    elapsed: std::time::Duration,
+) -> Option<String> {
+    let (plugin_id, rest) = event.split_once(':')?;
+    let (kind, message) = rest.split_once(':')?;
+    if !plugin_id.ends_with("payload_console_render") || kind != "console.payload_ready" {
+        return None;
+    }
+    if message.starts_with("▶ [req]") {
+        Some(format!(
+            "▶ [{}] req={} model={} target={}/{} stream={} elapsed_ms={}",
+            endpoint,
+            request.request_id,
+            model,
+            provider,
+            model,
+            stream,
+            elapsed.as_millis()
+        ))
+    } else if message.starts_with("✅ [resp]") {
+        if message.contains("output_items=0") && !message.contains("usage=") {
+            return None;
+        }
+        Some(format!(
+            "✅ [{}] req={} status={} provider={} model={} {} elapsed_ms={}",
+            endpoint,
+            request.request_id,
+            status.unwrap_or(200),
+            provider,
+            model,
+            message
+                .split_once("output_items=")
+                .map(|(_, rest)| format!("output_items={rest}"))
+                .unwrap_or_else(|| "response".to_string()),
+            elapsed.as_millis()
+        ))
+    } else {
+        None
     }
 }
 
@@ -1579,6 +1649,50 @@ mod tests {
     use super::*;
     use routecodex_v4_config::compile_runtime_config;
     use std::collections::VecDeque;
+
+    fn diagnostic_request() -> HttpRequest {
+        HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+            request_id: "127.0.0.1:5520-day-test-00000001".to_string(),
+            server_id: "rccv4".to_string(),
+            port: 5520,
+        }
+    }
+
+    #[test]
+    fn console_projection_aggregates_scope_and_suppresses_empty_stream_frames() {
+        let request = diagnostic_request();
+        let empty = "v4.std.diagnostic.response_payload_console_render:console.payload_ready:✅ [resp] model=- output_items=0";
+        assert!(render_payload_console_event(
+            empty,
+            &request,
+            "responses",
+            "cc-sol",
+            "gpt-5.5",
+            true,
+            Some(200),
+            std::time::Duration::from_millis(4),
+        )
+        .is_none());
+        let request_event = "v4.std.diagnostic.request_payload_console_render:console.payload_ready:▶ [req] model=gpt-5.5 stream=true messages=1 tools=0";
+        let rendered = render_payload_console_event(
+            request_event,
+            &request,
+            "responses",
+            "cc-sol",
+            "gpt-5.5",
+            true,
+            None,
+            std::time::Duration::from_millis(7),
+        )
+        .expect("request summary is rendered");
+        assert!(rendered.contains("req=127.0.0.1:5520-day-test-00000001"));
+        assert!(rendered.contains("target=cc-sol/gpt-5.5"));
+        assert!(rendered.contains("elapsed_ms=7"));
+    }
 
     fn test_manifest() -> RuntimeConfigManifest {
         compile_runtime_config(
