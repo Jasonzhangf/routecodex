@@ -12,22 +12,55 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const SKELETON_VERSION: &str = "v4-skeleton-1";
+pub const SKELETON_VERSION: &str = "v4-direct-relay-1";
 pub const PLAN_CONTRACT_PATH: &str = "v4/contracts/skeleton-plan.contract.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BindingContract {
     pub required: bool,
     pub fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PluginBinding {
     pub plugin_id: String,
     pub effects: Vec<String>,
+    #[serde(default)]
+    pub writes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransportPluginBinding {
+    pub plugin_id: String,
+    pub node_id: String,
+    pub owner: String,
+    pub direction: String,
+    pub attachment: String,
+    pub effect: String,
+    pub resource_id: String,
+    #[serde(default)]
+    pub writes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectProtocolContract {
+    pub same_protocol: bool,
+    pub mismatch: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProtocolInformationContract {
+    pub client_provider_independent: bool,
+    pub payload_inference: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NodeSlot {
     pub node_id: String,
     pub chain: String,
@@ -42,6 +75,7 @@ pub struct NodeSlot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Edge {
     pub from: String,
     pub to: String,
@@ -49,6 +83,7 @@ pub struct Edge {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SemanticCheckpoint {
     pub node_id: String,
     pub semantic: String,
@@ -56,6 +91,7 @@ pub struct SemanticCheckpoint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ChainDefinition {
     pub chain_id: String,
     pub nodes: Vec<NodeSlot>,
@@ -67,6 +103,7 @@ pub struct ChainDefinition {
 /// the whole plan with the `plan_hash` field removed; `manifest_hash` binds the
 /// config v2 manifest, `plan_epoch` gives the immutable plan generation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SkeletonPlan {
     pub schema_version: u32,
     pub contract_id: String,
@@ -77,6 +114,9 @@ pub struct SkeletonPlan {
     pub manifest_hash: String,
     pub plan_epoch: u64,
     pub plan_hash: String,
+    pub direct_protocol_contract: DirectProtocolContract,
+    pub protocol_information_contract: ProtocolInformationContract,
+    pub transport_plugins: Vec<TransportPluginBinding>,
     pub chains: Vec<ChainDefinition>,
 }
 
@@ -281,7 +321,7 @@ mod tests {
         .expect("contract file");
         let plan = SkeletonPlan::from_contract_json(&json).expect("real contract must load");
         assert_eq!(plan.skeleton_version, SKELETON_VERSION);
-        assert_eq!(plan.chains.len(), 4);
+        assert_eq!(plan.chains.len(), 6);
         assert!(plan.verify().is_ok());
     }
 
@@ -304,6 +344,24 @@ mod tests {
             manifest_hash: "sha256:m".to_string(),
             plan_epoch: 1,
             plan_hash: String::new(),
+            direct_protocol_contract: DirectProtocolContract {
+                same_protocol: true,
+                mismatch: "fail_fast".to_string(),
+            },
+            protocol_information_contract: ProtocolInformationContract {
+                client_provider_independent: true,
+                payload_inference: "forbidden".to_string(),
+            },
+            transport_plugins: vec![TransportPluginBinding {
+                plugin_id: "v4.transport.sse.ingress".to_string(),
+                node_id: "V4TransportSsePlugin".to_string(),
+                owner: "routecodex-v4-standard-plugins::sse_transport".to_string(),
+                direction: "ingress".to_string(),
+                attachment: "provider_response".to_string(),
+                effect: "transport".to_string(),
+                resource_id: "v4.transport.sse_frames".to_string(),
+                writes: vec![],
+            }],
             chains,
         }
     }
@@ -399,6 +457,7 @@ mod tests {
                 plugins: vec![PluginBinding {
                     plugin_id: "bad".to_string(),
                     effects: vec!["next_node".to_string()],
+                    writes: vec![],
                 }],
             }],
             edges: vec![],
@@ -422,5 +481,44 @@ mod tests {
         let second = plan_hash(&plan);
         assert_eq!(first, second);
         assert!(first.starts_with("sha256:"));
+    }
+
+    #[test]
+    fn red_unknown_top_level_field_fails() {
+        let json = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../contracts/skeleton-plan.contract.json"
+        ))
+        .expect("contract file");
+        let mutated = json.replacen(
+            "\"schema_version\": 1,",
+            "\"schema_version\": 1, \"unexpected\": true,",
+            1,
+        );
+        assert!(serde_json::from_str::<SkeletonPlan>(&mutated).is_err());
+    }
+
+    #[test]
+    fn red_unknown_transport_binding_field_fails() {
+        let json = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../contracts/skeleton-plan.contract.json"
+        ))
+        .expect("contract file");
+        let mutated = json.replacen(
+            "\"plugin_id\": \"v4.transport.sse.ingress\",",
+            "\"plugin_id\": \"v4.transport.sse.ingress\", \"unexpected\": true,",
+            1,
+        );
+        assert!(serde_json::from_str::<SkeletonPlan>(&mutated).is_err());
+    }
+
+    #[test]
+    fn transport_binding_changes_plan_hash() {
+        let plan = test_plan(vec![]);
+        let original = plan_hash(&plan);
+        let mut changed = plan.clone();
+        changed.transport_plugins[0].direction = "egress".to_string();
+        assert_ne!(original, plan_hash(&changed));
     }
 }

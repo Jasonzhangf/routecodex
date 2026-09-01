@@ -1,0 +1,37 @@
+{
+  "ai_confidence": 0.9,
+  "confidence_rationale": "Current v4-cordis tree binds the base-node contract to the Cordis control plane and passes the mapped L0 and architecture gates.",
+  "created_at": "2026-08-27T14:48:10Z",
+  "evidence_ids": [
+    "v4-cordis-base-node-current-candidate",
+    "v4-cordis-base-node-current-positive-intervention",
+    "v4-cordis-base-node-current-negative-intervention"
+  ],
+  "fix_candidate_id": "v4-cordis-base-node-candidate",
+  "function_map_hash": "sha256:69f16dfe5d056634f6164cd325dbdbdf134588890b69f101c0d9045e6a01d776",
+  "issue_id": "v4-cordis-base-node-rebuild",
+  "mainline_call_map_hash": "sha256:c36e4f9d5cff527d7f98b339772a53c87f420db58bb2215b6b68210e01124673",
+  "pre_review_validation_id": "v4-cordis-base-node-prereview",
+  "promotion_id": "v4-cordis-base-node-promotion",
+  "resource_map_hash": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
+  "review_id": "v4-cordis-base-node-review",
+  "review_kind": "architecture",
+  "reviewed_artifact_hash": "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd",
+  "reviewed_commit": "8f906514a9a454add8dabc129b24d0852d43a724",
+  "reviewed_diff_hash": "sha256:2bd91fe6908d5c95e515155cc0330551f603144a54178456e65c8b87eba21ff2",
+  "reviewed_scope_hash": "sha256:7d1e6dda7043dedd559eb5c13df6ae94d7c49165b54e4602ecbd29ad5c6c6de9",
+  "reviewed_tree_hash": "266bdf4e21cb087288563e5a7399ca650dbc0d31",
+  "reviewer": {
+    "adapter": "dsh",
+    "identity": "v4-cordis-master"
+  },
+  "v4_product_map_hashes": {
+    "function_map_hash": "sha256:fe4ce4d5a83f510bb7d8a1692e82177a0c6369716a7e09cb2be6e91a0ae93049",
+    "mainline_call_map_hash": "sha256:6cda9361f91ed0b9d5c5850fad4cdc90a204ede157ced2f22d386849c043a66f",
+    "resource_map_hash": "sha256:8ec2f6ad0b8bd9c3f414ef3bfed571bf90efaf9b052b08ba31916921207cbb19",
+    "verification_map_hash": "sha256:0a7342b68b6d5dcc406b7b47f451297a19d7c1ac5689c805b00d6a4551bde297"
+  },
+  "v4_product_map_root": "docs/architecture/maps",
+  "verdict": "pass",
+  "verification_map_hash": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230"
+}

@@ -156,6 +156,8 @@
       ],
       "verification_gates": [
         "v4_control_l2_regression",
+        "v4_control_event_domains",
+        "v4_control_event_domains_red",
         "v4_parity_gate_resource_binding",
         "fix_lifecycle_graph",
         "mainline_merge_identity",
@@ -364,6 +366,7 @@
         "contract_valid",
         "record_graph",
         "v4_runtime_l2_regression",
+        "v4_execution_engine_l2_regression",
         "v4_runtime_005_request_port_positive",
         "v4_runtime_005_request_port_red",
         "v4_runtime_005_request_port_boundary",
@@ -438,6 +441,8 @@
         "contract_valid",
         "record_graph",
         "v4_provider_l2_regression",
+        "v4_provider_bound_raw_evidence_positive",
+        "v4_provider_bound_raw_evidence_red",
         "v4_parity_gate_resource_binding",
         "v4_parity_gate_plane_isolation"
       ]
@@ -458,6 +463,7 @@
         "contract_valid",
         "record_graph",
         "v4_server_l2_regression",
+        "v4_server_wire_evidence_bundle",
         "v4_parity_gate_resource_binding",
         "v4_parity_gate_execution_binding",
         "v4_parity_gate_plane_isolation"

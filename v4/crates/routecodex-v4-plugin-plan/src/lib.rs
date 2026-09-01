@@ -83,9 +83,7 @@ impl NodePluginPlanBundle {
             .iter()
             .map(|plan| (plan.node_id.clone(), plan.hash.clone()))
             .zip(self.artifact_hashes.iter().cloned())
-            .map(|((node_id, plan_hash), artifact_hash)| {
-                (node_id, plan_hash, artifact_hash)
-            })
+            .map(|((node_id, plan_hash), artifact_hash)| (node_id, plan_hash, artifact_hash))
             .collect::<Vec<_>>();
         body.sort();
         let encoded = serde_json::to_vec(&body).expect("bundle identity is serializable");
@@ -737,7 +735,12 @@ fn validate_bound_node_selector(
     let anchor = active_node_anchor(selector_node_id)?.ok_or_else(|| PlanError::UnknownNode {
         node_id: selector_node_id.to_string(),
     })?;
-    if anchor.chain != chain {
+    let contract_chain = match chain {
+        "direct_request" | "relay_request" => "request",
+        "direct_response" | "relay_response" => "response",
+        other => other,
+    };
+    if anchor.chain != contract_chain {
         return Err(PlanError::NodeChainMismatch {
             node_id: selector_node_id.to_string(),
             chain: chain.to_string(),
@@ -986,8 +989,8 @@ mod tests {
                 selection_group: None,
                 node_selector: NodeSelector {
                     role_id: "request_chat_process".to_string(),
-                    node_id: "V4HubReqChatProcess04Governed".to_string(),
-                    position: 4,
+                    node_id: "V4HubReqChatProcess03Governed".to_string(),
+                    position: 3,
                 },
                 services_provided: vec![],
                 inject: vec![],
@@ -1021,10 +1024,10 @@ mod tests {
             authoring_plugin("v4.request.c", PluginPhase::Admission, 10, true),
         ];
         let plan = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &authoring,
             &allowed_reads(),
             &allowed_writes(),
@@ -1052,10 +1055,10 @@ mod tests {
             authoring_plugin("v4.request.a", PluginPhase::Semantic, 400, true),
         ];
         let plan_a = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &first,
             &allowed_reads(),
             &allowed_writes(),
@@ -1064,10 +1067,10 @@ mod tests {
         )
         .unwrap();
         let plan_b = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &second,
             &allowed_reads(),
             &allowed_writes(),
@@ -1100,10 +1103,10 @@ mod tests {
         let mut second = first.clone();
         second.reverse();
         let plan_a = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &first,
             &allowed_reads(),
             &allowed_writes(),
@@ -1112,10 +1115,10 @@ mod tests {
         )
         .unwrap();
         let plan_b = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &second,
             &allowed_reads(),
             &allowed_writes(),
@@ -1142,10 +1145,10 @@ mod tests {
         validator.descriptor.writes = vec![];
         let authoring = vec![codec_a, codec_b, validator];
         let plan = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &authoring,
             &allowed_reads(),
             &allowed_writes(),
@@ -1172,10 +1175,10 @@ mod tests {
         let mut codec_a = authoring_plugin("v4.codec.a", PluginPhase::Semantic, 200, false);
         codec_a.descriptor.selection_group = Some("provider_wire_codec".to_string());
         let error = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &[codec_a],
             &allowed_reads(),
             &allowed_writes(),
@@ -1193,10 +1196,10 @@ mod tests {
         let mut codec_b = authoring_plugin("v4.codec.b", PluginPhase::Semantic, 200, true);
         codec_b.descriptor.selection_group = Some("provider_wire_codec".to_string());
         let error = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &[codec_a, codec_b],
             &allowed_reads(),
             &allowed_writes(),
@@ -1214,10 +1217,10 @@ mod tests {
         let mut b = authoring_plugin("v4.request.b", PluginPhase::Semantic, 300, true);
         b.descriptor.before = vec!["v4.request.a".to_string()];
         let error = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &[a, b],
             &allowed_reads(),
             &allowed_writes(),
@@ -1233,10 +1236,10 @@ mod tests {
         let a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
         let b = authoring_plugin("v4.request.b", PluginPhase::Semantic, 300, true);
         let error = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &[a, b],
             &allowed_reads(),
             &allowed_writes(),
@@ -1252,10 +1255,10 @@ mod tests {
         let mut a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
         a.descriptor.before = vec!["v4.request.ghost".to_string()];
         let error = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &[a],
             &allowed_reads(),
             &allowed_writes(),
@@ -1276,10 +1279,10 @@ mod tests {
         }];
         let provider = authoring_plugin("v4.request.provider", PluginPhase::Semantic, 200, true);
         let error = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &[consumer, provider],
             &allowed_reads(),
             &allowed_writes(),
@@ -1295,10 +1298,10 @@ mod tests {
         let mut a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
         a.descriptor.writes = vec!["v4.response.normal_payload".to_string()];
         let error = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &[a],
             &allowed_reads(),
             &allowed_writes(),
@@ -1314,10 +1317,10 @@ mod tests {
         let mut a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
         a.descriptor.inject = vec!["nodeBPrivate".to_string()];
         let error = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &[a],
             &allowed_reads(),
             &allowed_writes(),
@@ -1350,10 +1353,10 @@ mod tests {
             "nodePlugins".to_string(),
         ];
         let plan = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &[a],
             &allowed_reads(),
             &allowed_writes(),
@@ -1374,10 +1377,10 @@ mod tests {
         observer.descriptor.reads = vec!["v4.debug.event_ledger".to_string()];
         observer.descriptor.writes = vec![];
         let plan = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &[observer],
             &allowed_reads(),
             &allowed_writes(),
@@ -1395,10 +1398,10 @@ mod tests {
         a.descriptor.before = vec!["v4.request.b".to_string()];
         let b = authoring_plugin("v4.request.b", PluginPhase::Semantic, 300, true);
         let error = compile_node_plan(
-            "V4HubReqChatProcess04Governed",
+            "V4HubReqChatProcess03Governed",
             "request_chat_process",
             "request",
-            4,
+            3,
             &[a, b],
             &allowed_reads(),
             &allowed_writes(),
@@ -1412,10 +1415,10 @@ mod tests {
     #[test]
     fn active_node_bundle_binds_plan_and_artifact_set_identity() {
         let input = ActiveNodePlanInput {
-            node_id: "V4HubReqChatProcess04Governed".to_string(),
+            node_id: "V4HubReqChatProcess03Governed".to_string(),
             role_id: "request_chat_process".to_string(),
             chain: "request".to_string(),
-            position: 4,
+            position: 3,
             authoring: vec![authoring_plugin(
                 "v4.request.govern",
                 PluginPhase::Semantic,
@@ -1447,28 +1450,48 @@ mod tests {
             plugin.descriptor.node_selector.role_id = role_id.to_string();
             plugin.descriptor.node_selector.position = position;
             ActiveNodePlanInput {
-            node_id: node_id.to_string(),
-            role_id: role_id.to_string(),
-            chain: chain.to_string(),
-            position,
-            authoring: vec![plugin],
-            allowed_reads: allowed_reads(),
-            allowed_writes: allowed_writes(),
-            container_services: vec![],
+                node_id: node_id.to_string(),
+                role_id: role_id.to_string(),
+                chain: chain.to_string(),
+                position,
+                authoring: vec![plugin],
+                allowed_reads: allowed_reads(),
+                allowed_writes: allowed_writes(),
+                container_services: vec![],
             }
         };
         let first = compile_active_node_plan_bundle(
             vec![
-                make_input("V4HubReqChatProcess04Governed", "request_chat_process", "request", 4),
-                make_input("V4HubRespChatProcess03Governed", "response_chat_process", "response", 3),
+                make_input(
+                    "V4HubReqChatProcess03Governed",
+                    "request_chat_process",
+                    "request",
+                    3,
+                ),
+                make_input(
+                    "V4HubRespChatProcess04Governed",
+                    "response_chat_process",
+                    "response",
+                    4,
+                ),
             ],
             &registry(),
         )
         .expect("first bundle compiles");
         let second = compile_active_node_plan_bundle(
             vec![
-                make_input("V4HubRespChatProcess03Governed", "response_chat_process", "response", 3),
-                make_input("V4HubReqChatProcess04Governed", "request_chat_process", "request", 4),
+                make_input(
+                    "V4HubRespChatProcess04Governed",
+                    "response_chat_process",
+                    "response",
+                    4,
+                ),
+                make_input(
+                    "V4HubReqChatProcess03Governed",
+                    "request_chat_process",
+                    "request",
+                    3,
+                ),
             ],
             &registry(),
         )
@@ -1479,10 +1502,10 @@ mod tests {
     #[test]
     fn active_node_bundle_rejects_plan_or_artifact_identity_drift() {
         let input = ActiveNodePlanInput {
-            node_id: "V4HubReqChatProcess04Governed".to_string(),
+            node_id: "V4HubReqChatProcess03Governed".to_string(),
             role_id: "request_chat_process".to_string(),
             chain: "request".to_string(),
-            position: 4,
+            position: 3,
             authoring: vec![authoring_plugin(
                 "v4.request.govern",
                 PluginPhase::Semantic,

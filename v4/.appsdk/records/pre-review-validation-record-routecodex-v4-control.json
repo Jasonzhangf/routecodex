@@ -1,34 +1,23 @@
 {
-  "validation_id": "control-sdk013-prereview-validation",
-  "issue_id": "appsdk-013-migration",
+  "validation_id": "v4-cordis-control-pre-review-current",
+  "issue_id": "v4-cordis-control-fresh-governance",
   "module_id": "routecodex-v4-control",
-  "fix_candidate_id": "control-sdk013-candidate",
-  "candidate_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
-  "candidate_tree_hash": "674c43a073f24ddb02679b65c76300e984639d7b",
-  "artifact_hash": "sha256:e280965a718eeaaee59725a1703dd58b16a875b616e6b0e8c65bf5b2b4a28676",
-  "whitebox_producer": {
-    "adapter": "cargo",
-    "identity": "routecodex-v4-control-regression"
-  },
-  "whitebox_evidence_ids": [
-    "control-sdk013-prereview-positive",
-    "control-sdk013-prereview-negative"
-  ],
-  "blackbox_evidence_ids": [
-    "control-sdk013-prereview-blackbox"
-  ],
+  "fix_candidate_id": "v4-cordis-control-candidate-current",
+  "candidate_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
+  "candidate_tree_hash": "36be15c494a0decd221f05ca3db4f084434e4684",
+  "artifact_hash": "sha256:cf200dbd7f3e1a6284477035ef57b5d6bc0596bda36c29a1704461d12dbae469",
+  "whitebox_producer": {"adapter":"cargo","identity":"v4-cordis-control-l2"},
+  "whitebox_evidence_ids": ["v4-cordis-control-prereview-positive", "v4-cordis-control-prereview-negative"],
+  "blackbox_evidence_ids": ["v4-cordis-control-blackbox"],
   "deployment": {
-    "environment_id": "v4-local-worktree",
-    "install_receipt_id": "control-sdk013-install",
-    "restart_receipt_id": "control-sdk013-restart",
-    "entrypoint": "cargo run --quiet --release -p routecodex-v4-build-link -- test-consumer",
-    "producer": {
-      "adapter": "cargo",
-      "identity": "routecodex-v4-control"
-    },
-    "observed_at": "2026-08-22T05:40:04Z"
+    "environment_id": "v4-cordis-control-local",
+    "install_receipt_id": "v4-cordis-control-install",
+    "restart_receipt_id": "v4-cordis-control-restart",
+    "entrypoint": "cargo run --quiet --release -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-control --deps routecodex-v4-base-node",
+    "producer": {"adapter":"cargo","identity":"v4-cordis-control-l2"},
+    "observed_at": "2026-08-28T16:07:30Z"
   },
   "source_unchanged": true,
   "result": "pass",
-  "created_at": "2026-08-22T05:40:04Z"
+  "created_at": "2026-08-28T16:08:30Z"
 }

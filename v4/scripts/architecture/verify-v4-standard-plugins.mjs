@@ -100,32 +100,62 @@ const REQUIRED_SOURCE = [
 ];
 
 const NODE_PERMISSIONS = new Map([
-  ['V4HubReqInbound03Normalized', {
+  ['V4DirectReq02RelayContainer', {
+    reads: [
+      'v4.direct.request.client_payload',
+      'v4.information.client_protocol',
+      'v4.information.provider_protocol',
+    ],
+    writes: ['v4.direct.request.provider_wire'],
+  }],
+  ['V4DirectResp02RelayContainer', {
+    reads: [
+      'v4.direct.response.provider_raw',
+      'v4.information.client_protocol',
+      'v4.information.provider_protocol',
+    ],
+    writes: ['v4.direct.response.client_payload'],
+  }],
+  ['V4HubReqInbound02Normalized', {
     reads: ['v4.request.normal_payload'], writes: [],
   }],
-  ['V4HubReqChatProcess04Governed', {
+  ['V4HubReqChatProcess03Governed', {
     reads: ['v4.request.normal_payload'], writes: ['v4.request.normal_payload'],
   }],
-  ['V4HubRespInbound02Parsed', {
+  ['V4HubRespInbound03Normalized', {
     reads: ['v4.response.provider_raw'], writes: ['v4.response.normal_payload'],
   }],
-  ['V4HubRespChatProcess03Governed', {
+  ['V4ProviderRespCompat02ProviderCompat', {
+    reads: [
+      'v4.response.provider_raw',
+      'v4.information.provider_protocol',
+    ],
+    writes: ['v4.response.provider_raw'],
+  }],
+  ['V4HubRespChatProcess04Governed', {
     reads: ['v4.response.normal_payload'],
     writes: ['v4.response.normal_payload', 'v4.control.metadata_center'],
   }],
-  ['V4HubRespOutbound04ClientSemantic', {
-    reads: ['v4.response.normal_payload'], writes: ['v4.response.client_wire_payload'],
+  ['V4HubRespOutbound05ClientSemantic', {
+    reads: [
+      'v4.response.normal_payload',
+      'v4.information.client_protocol',
+      'v4.information.provider_protocol',
+    ],
+    writes: ['v4.response.client_wire_payload'],
   }],
-  ['V4ServerSseOut05FrameBoundary', {
-    reads: ['v4.response.client_wire_payload'], writes: [],
+  ['V4HubReqOutbound06ProviderSemantic', {
+    reads: [
+      'v4.request.normal_payload',
+      'v4.information.client_protocol',
+      'v4.information.provider_protocol',
+    ],
+    writes: ['v4.request.provider_semantic'],
   }],
-  ['V4HubReqOutbound05ProviderSemantic', {
-    reads: ['v4.request.normal_payload'], writes: ['v4.request.provider_semantic'],
-  }],
-  ['V4ProviderReqCompat06Compat', {
+  ['V4ProviderReqCompat07ProviderCompat', {
     reads: ['v4.request.provider_semantic'], writes: ['v4.request.provider_wire_payload'],
   }],
-  ['V4ProviderSseOut07WireBoundary', {
+  ['V4ProviderReqOutbound09TransportRequest', {
     reads: [
       'v4.request.provider_wire_payload',
       'v4.config.manifest',
@@ -148,10 +178,10 @@ const NODE_PERMISSIONS = new Map([
   ['V4Error06ClientProjected', {
     reads: ['v4.control.error_chain'], writes: ['v4.control.error_chain'],
   }],
-  ['V4Router05RequestClassified', {
+  ['V4HubReqExecution04Planned', {
     reads: [], writes: ['v4.control.route_facts'],
   }],
-  ['V4Router06SelectionPlan', {
+  ['V4HubReqTarget05Resolved', {
     reads: ['v4.control.route_facts'], writes: ['v4.control.target_selection'],
   }],
 ]);
@@ -195,9 +225,9 @@ function functionBody(source, functionName) {
 function parseNodePermissionFunction(source, functionName) {
   const body = functionBody(source, functionName);
   const permissions = new Map();
-  const armPattern = /"([^"]+)"\s*=>\s*(vec!\[[\s\S]*?\]|Vec::new\(\)),/g;
+  const armPattern = /"([^"]+)"\s*=>\s*(?:\{\s*(vec!\[[\s\S]*?\]|Vec::new\(\))\s*\}|(vec!\[[\s\S]*?\]|Vec::new\(\))\s*,)/g;
   for (const match of body.matchAll(armPattern)) {
-    permissions.set(match[1], parseStringVector(match[2]));
+    permissions.set(match[1], parseStringVector(match[2] ?? match[3]));
   }
   return permissions;
 }
@@ -212,12 +242,19 @@ function activeNodeAnchors(nodeGraph) {
     anchors.set(node.node_id, node);
   }
   for (const key of [
+    'v4_direct_request_chain',
+    'v4_direct_response_chain',
     'v4_hub_request_chain',
     'v4_hub_response_chain',
     'v4_config_chain',
     'v4_error_chain',
   ]) {
     for (const node of nodeGraph[key]?.nodes ?? []) {
+      anchors.set(node.node_id, { ...(anchors.get(node.node_id) ?? {}), ...node });
+    }
+  }
+  for (const chain of nodeGraph.chains ?? []) {
+    for (const node of chain.nodes ?? []) {
       anchors.set(node.node_id, { ...(anchors.get(node.node_id) ?? {}), ...node });
     }
   }
@@ -483,8 +520,8 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 29) {
-      failures.push(`${MODULE}: expected 29 active standard descriptors, got ${activeDescriptors.length}`);
+    if (activeDescriptors.length !== 30) {
+      failures.push(`${MODULE}: expected 30 active standard descriptors, got ${activeDescriptors.length}`);
     }
     if (!activeDescriptors.some(
       (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',
@@ -664,20 +701,20 @@ function runSelfTest() {
     }],
     ['retired node selector reintroduced', (state) => {
       state.source = source.replace(
+        '"V4ProviderReqCompat07ProviderCompat",\n        "request_outbound",',
         '"V4ProviderReqCompat06Compat",\n        "request_outbound",',
-        '"V4ProviderReqOutbound06WirePayload",\n        "request_outbound",',
       );
     }],
     ['active node role mismatch reintroduced', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat06Compat",\n        "request_outbound",',
-        '"V4ProviderReqCompat06Compat",\n        "request_chat_process",',
+        '"V4ProviderReqCompat07ProviderCompat",\n        "request_outbound",',
+        '"V4ProviderReqCompat07ProviderCompat",\n        "request_chat_process",',
       );
     }],
     ['active node position mismatch reintroduced', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat06Compat",\n        "request_outbound",\n        Some(6),',
-        '"V4ProviderReqCompat06Compat",\n        "request_outbound",\n        Some(7),',
+        '"V4ProviderReqCompat07ProviderCompat",\n        "request_outbound",\n        Some(7),',
+        '"V4ProviderReqCompat07ProviderCompat",\n        "request_outbound",\n        Some(6),',
       );
     }],
     ['provider semantic reversal reintroduced', (state) => {
@@ -688,11 +725,21 @@ function runSelfTest() {
     }],
     ['node permission broadened', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat06Compat" => vec!["v4.request.provider_wire_payload".to_string()],',
-        '"V4ProviderReqCompat06Compat" => vec![\n'
-          + '            "v4.request.provider_wire_payload".to_string(),\n'
-          + '            "v4.request.normal_payload".to_string(),\n'
-          + '        ],',
+        '"V4ProviderReqCompat07ProviderCompat" => {\n'
+          + '            vec!["v4.request.provider_wire_payload".to_string()]\n'
+          + '        }',
+        '"V4ProviderReqCompat07ProviderCompat" => {\n'
+          + '            vec![\n'
+          + '                "v4.request.provider_wire_payload".to_string(),\n'
+          + '                "v4.request.normal_payload".to_string(),\n'
+          + '            ]\n'
+          + '        }',
+      );
+    }],
+    ['provider response compat permission removed', (state) => {
+      state.source = source.replace(
+        '"V4ProviderRespCompat02ProviderCompat" => vec!["v4.response.provider_raw".to_string()],',
+        '"V4ProviderRespCompat02ProviderCompat" => Vec::new(),',
       );
     }],
     ['resource operation owner and writer removed', (state) => {

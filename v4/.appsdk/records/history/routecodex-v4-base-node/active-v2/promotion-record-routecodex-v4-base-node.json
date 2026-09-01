@@ -1,0 +1,48 @@
+{
+  "architecture_review_id": "v4-cordis-base-node-review",
+  "artifact_hash": "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd",
+  "base_artifact_hash": "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd",
+  "base_commit": "8f906514a9a454add8dabc129b24d0852d43a724",
+  "candidate_commit": "dad0742a457276d1ed8e9da2fe1f3c35b0bc4889",
+  "change_reason_comment": "Bind the current Cordis base-node artifact to a fresh governance graph.",
+  "change_set_id": "v4-cordis-base-node-change",
+  "compatibility_level": "compatible",
+  "created_at": "2026-08-27T15:01:00Z",
+  "design_id": "v4-cordis-mainline-migration",
+  "effectiveness_record_id": "v4-cordis-base-node-effectiveness",
+  "evidence_ids": [
+    "v4-cordis-base-node-current-candidate",
+    "v4-cordis-base-node-current-positive-intervention",
+    "v4-cordis-base-node-current-negative-intervention"
+  ],
+  "experiment_id": "v4-cordis-base-node",
+  "fix_candidate_id": "v4-cordis-base-node-candidate",
+  "issue_id": "v4-cordis-base-node-rebuild",
+  "merge_record_id": "v4-cordis-base-node-merge",
+  "merged_commit": "dad0742a457276d1ed8e9da2fe1f3c35b0bc4889",
+  "migration_id": null,
+  "module_id": "routecodex-v4-base-node",
+  "new_active_version": "active-v2",
+  "playground_cleanup_record_id": "v4-cordis-base-node-cleanup",
+  "previous_active_version": "active-v1",
+  "promotion_id": "v4-cordis-base-node-promotion",
+  "public_api_hash": "sha256:45f153ddb96a6dab9f73e037a6ae4c4377fde82524a76a44586ff2089f5902fe",
+  "reproduction_record_id": "v4-cordis-base-node-reproduction",
+  "required_gate_results": [
+    {
+      "gate_id": "v4-base-node-l0",
+      "producer": "cargo",
+      "result": "pass"
+    },
+    {
+      "gate_id": "v4-node-graph",
+      "producer": "verify-v4-node-graph",
+      "result": "pass"
+    }
+  ],
+  "review_id": "v4-cordis-base-node-review",
+  "root_cause": "Fresh v4-cordis tree lacked current module record graph required by AppSDK admission.",
+  "scope_hash": "sha256:7d1e6dda7043dedd559eb5c13df6ae94d7c49165b54e4602ecbd29ad5c6c6de9",
+  "source_commit": "8f906514a9a454add8dabc129b24d0852d43a724",
+  "worktree_record_id": "v4-cordis-base-node-worktree"
+}

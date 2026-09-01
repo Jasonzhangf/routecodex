@@ -1,15 +1,15 @@
 {
-  "merge_id": "edge-sdk013-merge",
-  "issue_id": "appsdk-013-migration",
+  "merge_id": "v4-cordis-edge-merge-current",
+  "issue_id": "v4-cordis-edge-fresh-governance",
   "module_id": "routecodex-v4-edge",
-  "fix_candidate_id": "edge-sdk013-candidate",
-  "effectiveness_id": "edge-sdk013-effectiveness",
-  "mainline_ref": "refs/heads/codex/v4-config-freeze-redo-20260821",
-  "candidate_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
-  "merge_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
-  "candidate_tree_hash": "674c43a073f24ddb02679b65c76300e984639d7b",
-  "merged_tree_hash": "674c43a073f24ddb02679b65c76300e984639d7b",
+  "fix_candidate_id": "v4-cordis-edge-candidate-current",
+  "effectiveness_id": "v4-cordis-edge-effectiveness-current",
+  "mainline_ref": "v4-cordis",
+  "candidate_commit": "dbf569de040b34361c980e27849c00726d90d912",
+  "merge_commit": "dbf569de040b34361c980e27849c00726d90d912",
+  "candidate_tree_hash": "3c94284066ef9f329371730ce00a229a2c07c3d7",
+  "merged_tree_hash": "3c94284066ef9f329371730ce00a229a2c07c3d7",
   "change_identity": "exact",
   "result": "pass",
-  "created_at": "2026-08-22T05:52:00Z"
+  "created_at": "2026-08-31T18:30:00Z"
 }

@@ -41,8 +41,22 @@ fn initialize(test_root: &std::path::Path, port: u16) -> std::path::PathBuf {
         ])
         .output()
         .expect("init command");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     config
+}
+
+fn status_pid(output: &[u8]) -> u32 {
+    let text = String::from_utf8_lossy(output);
+    text.split_whitespace()
+        .find_map(|part| {
+            part.strip_prefix("pid=")
+                .and_then(|value| value.parse().ok())
+        })
+        .expect("managed status must include pid")
 }
 
 #[test]
@@ -55,14 +69,22 @@ fn help_version_config_and_servertool_are_cwd_independent() {
             .args(args)
             .output()
             .expect("surface command");
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     let check = Command::new(env!("CARGO_BIN_EXE_rccv4"))
         .current_dir("/tmp")
         .args(["config", "check", "-c", config.to_str().expect("config")])
         .output()
         .expect("config check");
-    assert!(check.status.success(), "{}", String::from_utf8_lossy(&check.stderr));
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
     let tool = Command::new(env!("CARGO_BIN_EXE_rccv4"))
         .current_dir("/tmp")
         .args([
@@ -80,7 +102,11 @@ fn help_version_config_and_servertool_are_cwd_independent() {
         ])
         .output()
         .expect("servertool");
-    assert!(tool.status.success(), "{}", String::from_utf8_lossy(&tool.stderr));
+    assert!(
+        tool.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tool.stderr)
+    );
     let value: serde_json::Value = serde_json::from_slice(&tool.stdout).expect("tool JSON");
     assert_eq!(value["toolName"], "web_search");
     assert!(value.get("routeHint").is_none());
@@ -93,8 +119,12 @@ fn help_version_config_and_servertool_are_cwd_independent() {
 fn managed_start_status_restart_stop_uses_v4_state_root() {
     let test_root = root("lifecycle");
     let state_root = std::path::PathBuf::from("/tmp").join(format!(
-        "rccv4-state-{}",
-        std::process::id()
+        "rccv4-state-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
     ));
     let port = free_port();
     let config = initialize(&test_root, port);
@@ -107,18 +137,80 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
             .expect("lifecycle command")
     };
     let start = run(&["start", "-c", config.to_str().expect("config"), "--snap"]);
-    assert!(start.status.success(), "{}", String::from_utf8_lossy(&start.stderr));
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
     let deadline = Instant::now() + Duration::from_secs(3);
     while Instant::now() < deadline && TcpStream::connect(("127.0.0.1", port)).is_err() {
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(TcpStream::connect(("127.0.0.1", port)).is_ok(), "listener not ready");
+    assert!(
+        TcpStream::connect(("127.0.0.1", port)).is_ok(),
+        "listener not ready"
+    );
+    let first_pid = status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
+    let takeover = run(&["start", "-c", config.to_str().expect("config"), "--snap"]);
+    assert!(
+        takeover.status.success(),
+        "{}",
+        String::from_utf8_lossy(&takeover.stderr)
+    );
+    assert!(String::from_utf8_lossy(&takeover.stdout).contains("state=running"));
+    let second_pid = status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
+    assert_ne!(
+        first_pid, second_pid,
+        "start must cold-start a fresh managed child"
+    );
     let status = run(&["status", "-c", config.to_str().expect("config")]);
     assert!(status.status.success());
     assert!(String::from_utf8_lossy(&status.stdout).contains("state=running"));
     let restart = run(&["restart", "-c", config.to_str().expect("config")]);
-    assert!(restart.status.success(), "{}", String::from_utf8_lossy(&restart.stderr));
+    assert!(
+        restart.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restart.stderr)
+    );
     let stop = run(&["stop", "-c", config.to_str().expect("config")]);
-    assert!(stop.status.success(), "{}", String::from_utf8_lossy(&stop.stderr));
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
     assert!(!state_root.join("instance.json").exists());
+}
+
+#[test]
+fn restart_cold_starts_when_no_managed_instance_exists() {
+    let test_root = root("cold-restart");
+    let state_root = std::path::PathBuf::from("/tmp").join(format!(
+        "rccv4-cold-restart-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let port = free_port();
+    let config = initialize(&test_root, port);
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_rccv4"))
+            .current_dir("/tmp")
+            .env("RCCV4_STATE_ROOT", &state_root)
+            .args(args)
+            .output()
+            .expect("lifecycle command")
+    };
+    let restart = run(&["restart", "-c", config.to_str().expect("config")]);
+    assert!(
+        restart.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restart.stderr)
+    );
+    assert!(String::from_utf8_lossy(&restart.stdout).contains("state=running"));
+    let status = run(&["status", "-c", config.to_str().expect("config")]);
+    assert!(status.status.success());
+    let stop = run(&["stop", "-c", config.to_str().expect("config")]);
+    assert!(stop.status.success());
 }

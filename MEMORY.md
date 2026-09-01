@@ -5852,3 +5852,11 @@ Tags: #v4 #cordis #workflow-correction #evidence-first
 - Provider Health owns score, streak, rolling deltas, cooldown, probe backoff, generation, and atomic probe completion. Runtime owns one scheduled/rescue probe orchestration path; Server only schedules it; Target consumes read-only availability and configured priority. A stale permit may release its waiter but must not mutate a newer health epoch.
 - Probe success starts a clean health epoch: score 1000, empty delta window, reset streak/backoff, cooldown removed, generation advanced. Business cooldown and `next_probe_at` are independent; 503 is a three-count recoverable error; HTTP 2xx is insufficient without a valid protocol terminal.
 - Installed `0.90.4739` passed build/install/aggregate restart and live Responses smoke on 7777; AGY review `v3-health-scheduler-failback-20260830` passed with no findings. Production fault-injection replay remains intentionally absent because no cooldown entry existed and mutating live config/health or driving repeated provider failures was not authorized.
+
+## 2026-08-30 - V4 Direct / Relay / SSE owner lock
+
+- V4 SSE is an independent transport plugin. It owns framing, ordering, bounded buffering, backpressure, timeout, keepalive, and closeout only; it never mutates model/fields/payload shape, protocol semantics, tools, continuation, routing, retry, or terminal truth.
+- Direct client-to-provider mediation is an independent NodeContainer feature with direction-specific request/response entrypoints. It executes only Cordis-compiled Direct hooks under the request's immutable epoch lease; it is not a runtime-bin/handler bypass.
+- Every payload change belongs to a registered Direct/Relay request/response hook or its adjacent protocol codec. Direct is same-protocol and fail-fast on mismatch. Relay keeps client and provider protocols independently typed; neither may infer the other from payload.
+- Required regression proof: SSE semantic-write red gate, Direct/Relay hook cross-mount red gates, typed lane/protocol carrier tests, and real Direct/Relay JSON+SSE replay from the globally installed `rccv4`.
+Tags: #v4 #cordis #direct #relay #sse #node-container #hook-owner

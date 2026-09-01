@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { v4Root, run } from './_common.mjs';
-import { ARCHITECTURE_GATES, CONSUMER_REGRESSIONS } from './_gate-matrix.mjs';
+import { ARCHITECTURE_GATES, CONSUMER_REGRESSIONS, RUST_GATES } from './_gate-matrix.mjs';
 
 run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
 // V4-LAYER-PREFLIGHT-END
@@ -36,6 +36,10 @@ run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-bui
 for (const gate of ARCHITECTURE_GATES) {
   run(`node scripts/architecture/${gate}`);
 }
+
+// The control-event lifecycle gate is a Rust owner gate, so invoke its
+// positive/negative suite explicitly in the canonical admission path.
+for (const [, command] of RUST_GATES) run(command);
 
 for (const [consumer, deps, ...extra] of CONSUMER_REGRESSIONS) {
   const extraArgs = extra.length > 0 ? ` ${extra.join(' ')}` : '';

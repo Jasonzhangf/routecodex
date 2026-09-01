@@ -36089,7 +36089,6 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - Layer definition recheck after removing `runtime/src/lib.rs` from the RUNTIME-005 request-port source projection: gate now exposes the remaining real contract gap (`CANDIDATE_REGISTRY_PROJECTION_DRIFT`, `CANDIDATE_PATH_COVERAGE`, and candidate-time source/gate input drift). The old 8369 candidate cannot be reused after current map/source changes; a fresh per-layer candidate/evidence registration is required before admission/install.
 
 - 2026-08-25 V4 live response isolation closeout: live Responses JSON exposed upstream gateway `extra_fields` diagnostics because the V4 Responses provider branch passed `raw.body` directly into response projection. The unique fix is in `routecodex-v4-provider`: known gateway diagnostic envelope members are consumed before `RespInbound`; unknown members fail closed. Runtime-bin now applies provider normalization to JSON responses for all protocols. Commit chain: `b3ceefc05` source fix, `1e4601fa7` surface binding, `e7a922648` receipt refresh. Provider positive/negative normalizer tests, runtime 38, runtime-bin 13, build, global `rccv4` install, `rccv4 restart` on 5520, manual replay (`has_extra_fields=false`), real runtime admission `8/8`, feature-layer admission all pass. Remaining: AGY review and final V4 integration commit/push admission; V3/main untouched.
-
 # 2026-08-26 7777 VR key-level status projection closeout
 
 - 根因：keyless `provider_model` route target 的 status projection 以 `(provider, None, model)` 查询健康；Target selection 已先展开全部 auth entries 后以具体 `(provider, auth_alias, model)` 查询，导致 status 与 dry-run 不一致。
@@ -36144,3 +36143,9 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - 修复：configured priority 保持静态；Provider Health 是唯一状态 owner；Runtime 只有一个 generation-guarded probe owner；scheduled/rescue probe 共用 typed permit 和原子 success/failure transition；probe 与 business cooldown 使用独立 deadline；503 改为三次计数恢复；2xx probe 必须通过 provider 协议终态。
 - 证据：provider/error/target/runtime/server 定向与回归测试、resource/function/mainline 及 scoped owner gates、canonical build/install 通过；全局安装 `0.90.4739`，聚合 restart 后 7777/4444 health 200。安装入口真实 Responses 请求完成，并自然观测到 429 进入 typed Error 链。AGY review `v3-health-scheduler-failback-20260830` PASS，零 findings。全量 module-boundary gate 仍被三个未修改文件中的既有 fallback 文案阻断。
 - 在线缺口：当前 cooldown pool 为空，真实 429 分散在不同 auth key；未通过修改 live config/health 或故意压测制造同一 generation 三次失败，因此 scheduled probe 后 failback 未做生产态故障注入重放。
+
+# 2026-08-29 V4 audit remediation in progress
+- P0-01 fixed: runtime request chain now returns canonical semantic body; runtime-bin invokes provider-owned `build_retry_wire` only after target selection, binding target protocol/model/stream for first attempt. OpenAI/Anthropic/Responses shape coverage exists in provider L2.
+- Source verification: `cargo test --locked --workspace` passed before this patch; runtime/runtime-bin no-run passed after call-site update.
+- Global install attempt reached the repository V3 install-cleanup gate but failed two pre-existing SIGINT/SIGTERM child-stop tests; generated V3 package version drift was reverted exactly and remains out of V4 scope.
+- Remaining audit P0: production frame carrier, single EpochLease lifecycle, async listener; then P1 Cordis active graph, typed NativePlugin ABI, unified ExecutionEpochBundle. After source closure, align V3-compatible stats persistence, console observability, and WebUI as V4 plugins.

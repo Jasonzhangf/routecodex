@@ -1,0 +1,18 @@
+{
+  "fix_candidate_id":"v4-runtime-005-006-runtime-port-candidate-20260831",
+  "issue_id":"V4-RUNTIME-005+V4-RUNTIME-006",
+  "module_id":"routecodex-v4-runtime",
+  "worktree_id":"v4-cordis-20260826T043500Z",
+  "base_commit":"57b581d2c86338a780fde7d95a039316ba9ad61a",
+  "head_commit":"e80ac4c7675d6116e8a615d1008a8ea930603e6a",
+  "tree_hash":"67226d77846e409e0cf4e890e202446d7c7569f1",
+  "diff_hash":"sha256:a24ee5825ce505aa1542383e7c2fbdfbe878f9cac135632cd367cf9870244e40",
+  "design_id":"v4-feature-completion-runtime-ports-20260831",
+  "owner":"routecodex-v4-runtime",
+  "scope_hash":"sha256:03aab1ced2697053b075e5792af244d27f31ecf316a5320faa67341905c5934b",
+  "changed_paths":["v4/crates/routecodex-v4-runtime/src/request_port.rs","v4/crates/routecodex-v4-runtime/src/response_error_port.rs","v4/crates/routecodex-v4-runtime/tests/l2_ports.rs"],
+  "verification_evidence_ids":["boundary-audit","plane-isolation","positive","red-gate"],
+  "created_at":"2026-08-31T14:45:00Z",
+  "batch_id":"F",
+  "task_ids":["V4-RUNTIME-005","V4-RUNTIME-006"]
+}

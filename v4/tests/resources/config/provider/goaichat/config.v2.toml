@@ -1,0 +1,38 @@
+version = "2.0.0"
+providerId = "goaichat"
+
+[provider]
+id = "goaichat"
+enabled = true
+type = "anthropic"
+baseURL = "https://llm.goaichat.top"
+defaultModel = "minimax-m3"
+compatibilityProfile = "chat:minimax"
+sse_first_frame_timeout_ms = 120000
+
+[provider.auth]
+type = "apikey"
+entries = [{ alias = "key1", secretFile = "/Volumes/extension/.rcc/secrets/v3/provider-auth.conf", secretKey = "goaichat.key1" }]
+
+[provider.concurrency]
+maxInFlight = 4
+acquireTimeoutMs = 60000
+staleLeaseMs = 300000
+
+[provider.models."minimax-m3"]
+wireName = "minimax-m3"
+capabilities = ["text", "reasoning", "thinking", "tools", "multimodal", "vision", "longcontext"]
+supportsStreaming = true
+supportsThinking = true
+thinking = "medium"
+maxTokens = 64000
+maxContextTokens = 1000000
+
+[provider.models."glm-5.3"]
+wireName = "glm-5.3"
+capabilities = ["text", "reasoning", "thinking", "tools", "longcontext"]
+supportsStreaming = true
+supportsThinking = true
+thinking = "medium"
+maxTokens = 64000
+maxContextTokens = 1000000

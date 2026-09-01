@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-cordis-m11-protocol-tools-admin",
+  "status": "contract_bound",
+  "owner_feature_id": "v4.cordis_m11_protocol_tools_admin_contract",
+  "lifecycle_id": "v4-cordis-m11-protocol-tools-admin",
+  "scope": "M11 front contract and task decomposition only; runtime implementation remains pending",
+  "canonical_docs": [
+    "v4/docs/goals/v4-cordis-m11-protocol-tools-admin-contract.md",
+    "v4/docs/goals/v4-cordis-m11-protocol-tools-admin-test-design.md",
+    "v4/docs/goals/v4-cordis-mainline-migration-plan.md",
+    "v4/docs/architecture/v4-cordis-node-plugin-architecture.md",
+    "v4/docs/architecture/v4-data-control-plane-boundary.md"
+  ],
+  "owner_rule": "one_owner_per_semantic",
+  "truth_rule": "Cordis compiled plan, PluginCatalog, PluginManager, RuntimeInspector, and typed lane owners are the only truth; UI/admin local state is never truth",
+  "dependencies": [
+    "v4.cordis.host_daemon",
+    "v4.plugin.catalog",
+    "v4.plugin_management.candidate_store",
+    "v4.admin.projection"
+  ],
+  "payload_boundary": {
+    "normal_payload_access": "forbidden",
+    "control_side_channel": "required",
+    "protocol_metadata_as_control": "forbidden",
+    "provider_or_client_payload_reconstruction": "forbidden",
+    "secret_material": "handle_only"
+  },
+  "failure_policy": {
+    "fail_fast": true,
+    "fallback": "forbidden",
+    "silent_strip": "forbidden",
+    "payload_reconstruction": "forbidden",
+    "automatic_rollback": "forbidden",
+    "unknown_lane_or_operation": "explicit_error"
+  },
+  "lanes": [
+    {
+      "lane_id": "protocol",
+      "status": "planned",
+      "owner_module_id": "routecodex-v4-standard-plugins",
+      "existing_owner_function_id": "v4.plugin.standard_library",
+      "resource_ids": [
+        "v4.request.normal_payload",
+        "v4.response.normal_payload"
+      ],
+      "invariants": [
+        "entry_protocol_is_typed_and_locked",
+        "protocol_shape_is_preserved",
+        "tool_and_reasoning_fields_are_not_downgraded_to_text",
+        "provider_specific_policy_is_not_added_to_hub_contract"
+      ]
+    },
+    {
+      "lane_id": "tools",
+      "status": "planned",
+      "owner_module_id": "routecodex-v4-standard-plugins",
+      "existing_owner_function_id": "v4.plugin.standard_library",
+      "resource_ids": [
+        "v4.plugin.request.governance",
+        "v4.plugin.response.governance",
+        "v4.control.stopless_state",
+        "v4.servertool.cli_control",
+        "v4.servertool.cli_projection"
+      ],
+      "invariants": [
+        "tool_identity_schema_and_order_are_preserved",
+        "tool_result_is_not_projected_as_plain_text",
+        "servertool_and_stopless_state_stay_on_typed_control_path",
+        "multi_turn_continuation_owner_is_not_reconstructed_from_payload"
+      ]
+    },
+    {
+      "lane_id": "admin",
+      "status": "planned",
+      "owner_module_id": "routecodex-v4-admin",
+      "delegated_owners": [
+        "routecodex-v4-plugin-manager",
+        "routecodex-v4-runtime-inspector"
+      ],
+      "resource_ids": [
+        "v4.plugin_management.active_pointer",
+        "v4.plugin_management.candidate_store",
+        "v4.plugin_management.audit_ledger",
+        "v4.admin.projection"
+      ],
+      "invariants": [
+        "queries_are_runtime_inspector_projections",
+        "mutations_delegate_to_plugin_manager",
+        "publish_requires_candidate_and_expected_base_hash",
+        "rollback_is_explicit_immutable_epoch_republish",
+        "admin_never_reads_or_writes_business_payload_control_or_secret"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "M11-T01-P",
+      "lane_id": "protocol",
+      "owner_module_id": "routecodex-v4-standard-plugins",
+      "status": "planned",
+      "depends_on": ["v4.plugin.catalog", "v4.cordis.host_daemon"],
+      "required_gates": [
+        "v4_m11_contract_positive",
+        "v4_m11_contract_red",
+        "v4_plugin_request_positive",
+        "v4_plugin_response_positive",
+        "v4_parity_gate_standard_plugins"
+      ]
+    },
+    {
+      "task_id": "M11-T01-T",
+      "lane_id": "tools",
+      "owner_module_id": "routecodex-v4-standard-plugins",
+      "status": "planned",
+      "depends_on": ["M11-T01-P", "v4.plugin_management.candidate_store"],
+      "required_gates": [
+        "v4_m11_contract_positive",
+        "v4_m11_contract_red",
+        "v4_plugin_request_boundary",
+        "v4_plugin_response_boundary",
+        "v4_servertool_l2_regression"
+      ]
+    },
+    {
+      "task_id": "M11-T01-AQ",
+      "lane_id": "admin",
+      "owner_module_id": "routecodex-v4-runtime-inspector",
+      "status": "planned",
+      "depends_on": ["v4.admin.projection"],
+      "required_gates": [
+        "v4_m11_contract_positive",
+        "v4_m11_contract_red",
+        "v4_parity_gate_runtime_inspector"
+      ]
+    },
+    {
+      "task_id": "M11-T01-AM",
+      "lane_id": "admin",
+      "owner_module_id": "routecodex-v4-admin",
+      "status": "planned",
+      "depends_on": ["M11-T01-AQ", "v4.plugin_management.candidate_store"],
+      "required_gates": [
+        "v4_m11_contract_positive",
+        "v4_m11_contract_red",
+        "v4_admin_l2_regression",
+        "v4_parity_gate_admin"
+      ]
+    },
+    {
+      "task_id": "M11-T01-AP",
+      "lane_id": "admin",
+      "owner_module_id": "routecodex-v4-plugin-manager",
+      "status": "planned",
+      "depends_on": ["M11-T01-AM", "v4.cordis.host_daemon"],
+      "required_gates": [
+        "v4_m11_contract_positive",
+        "v4_m11_contract_red",
+        "v4_plugin_manager_l2_regression",
+        "v4_parity_gate_plugin_manager"
+      ]
+    }
+  ],
+  "prohibited_shortcuts": [
+    "admin_to_cordis_host_direct_lifecycle_call",
+    "admin_to_node_container_direct_call",
+    "protocol_or_tool_control_state_in_business_payload",
+    "tool_call_or_tool_result_to_plain_text_conversion",
+    "automatic_old_plan_publish_or_rollback",
+    "second_graph_or_second_registry",
+    "provider_specific_branch_in_hub_or_virtual_router"
+  ],
+  "verification_gates": [
+    "v4_m11_contract_positive",
+    "v4_m11_contract_red",
+    "v4_parity_gate_plane_isolation",
+    "v4_parity_gate_resource_binding"
+  ]
+}

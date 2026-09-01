@@ -7,8 +7,13 @@ use routecodex_v4_base_node::Scope;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlSignalKind {
     Route,
+    Switching,
+    Retry,
+    ProviderSelection,
+    Health,
     Continuation,
     Stopless,
+    Servertool,
     Error,
     Scope,
 }

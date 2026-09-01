@@ -50,16 +50,16 @@ fn temp_fixture(tag: &str) -> PathBuf {
 }
 
 fn install_protected_version(root: &Path, module_id: &str, version: &str) {
-    let project = v4_root();
-    let protected = project.join("protected/history").join(module_id);
+    let fixture = fixture_root();
+    let protected = fixture.join("active/lib").join(module_id).join(version);
     let active = root.join("active/lib").join(module_id).join(version);
     fs::create_dir_all(active.join("lib")).expect("create Active version copy");
     fs::copy(
-        protected.join("module-artifact.json"),
+        protected.join("artifact.json"),
         active.join("artifact.json"),
     )
     .expect("copy protected module artifact");
-    copy_dir_all(&protected.join("library"), &active.join("lib"));
+    copy_dir_all(&protected.join("lib"), &active.join("lib"));
     for record_kind in [
         "freeze-record",
         "promotion-record",
@@ -68,7 +68,7 @@ fn install_protected_version(root: &Path, module_id: &str, version: &str) {
     ] {
         let record_name = format!("{record_kind}-{module_id}.json");
         fs::copy(
-            project.join(".appsdk/records").join(&record_name),
+            fixture.join(".appsdk/records").join(&record_name),
             root.join(".appsdk/records").join(record_name),
         )
         .expect("copy current record graph");

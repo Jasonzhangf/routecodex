@@ -19,6 +19,7 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-relay-continuation.mjs',
   'verify-v4-resource-binding.mjs',
   'verify-v4-responses-direct-compat.mjs',
+  'verify-v4-responses-request.mjs',
   'verify-v4-product-differential.mjs',
   'verify-v4-product-parity-ledger.mjs',
   'verify-v4-product-parity-status.mjs',
@@ -36,6 +37,18 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-cli-plugin.mjs',
   'verify-v4-real-runtime-admission.mjs',
   'verify-v4-control-event-arc.mjs',
+  'verify-v4-production-mainline-red.mjs',
+  'verify-v4-direct-relay-sse.mjs',
+];
+
+// Rust-owner gates are executed by verify.mjs alongside script gates. Keeping
+// the identifiers here lets isolation verify declared/executed parity too.
+export const RUST_GATES = [
+  ['v4_control_event_domains', 'cargo test -p routecodex-v4-control --locked --offline'],
+];
+
+export const RUST_GATES_RED = [
+  ['v4_control_event_domains_red', 'cargo test -p routecodex-v4-control --test l2_control_red --locked --offline'],
 ];
 
 export const RED_SUITES = [

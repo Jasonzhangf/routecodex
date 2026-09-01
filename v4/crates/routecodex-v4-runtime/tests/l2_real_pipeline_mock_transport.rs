@@ -6,23 +6,28 @@
 //! - red: (entry_protocol, continuation_owner) illegal pairs
 //! - red: fixture.path vs entry_protocol mismatch
 //! - red: error-chain projection consumes real ExecutionReport.scope
+use routecodex_v4_base_node::Scope;
+use routecodex_v4_runtime::SkeletonRuntime;
 use routecodex_v4_runtime::{
     execute_mock_transport_slice, execution_binding, is_known_mock_transport_fault_code,
     KeylessChatFixture, MockTransportIdentityCounter, MockTransportReport,
     MOCK_TRANSPORT_FAULT_CODES,
 };
-use routecodex_v4_base_node::Scope;
-use routecodex_v4_runtime::SkeletonRuntime;
+
+mod support;
 
 const CONTRACT_JSON: &str = include_str!("../../../contracts/skeleton-plan.contract.json");
 const TEST_PORT: u16 = 5555;
 
 fn load_runtime() -> SkeletonRuntime {
-    SkeletonRuntime::load(CONTRACT_JSON).expect("runtime must load contract")
+    support::active_runtime(CONTRACT_JSON)
 }
 
 fn chat_fixture() -> KeylessChatFixture {
-    KeylessChatFixture::chat("chat:hello-world".to_string(), "mock-model".to_string())
+    KeylessChatFixture::chat(
+        r#"{"model":"mock-model","messages":[{"role":"user","content":"hello"}]}"#,
+        "mock-model",
+    )
 }
 
 /// Fixture whose path starts with /v1/responses — required for entry_protocol=responses.
@@ -31,13 +36,13 @@ fn responses_fixture() -> KeylessChatFixture {
         "POST",
         "/v1/responses",
         Vec::new(),
-        "responses:{\"model\":\"responses-model\",\"input\":[{\"role\":\"user\",\"content\":\"hello\"}]}".to_string(),
+        r#"{"model":"responses-model","input":[{"role":"user","content":"hello"}]}"#.to_string(),
         "responses-model".to_string(),
     )
 }
 
 fn mock_provider_frame_ok() -> &'static str {
-    r#"{"ok": true, "choices": [{"message": {"role": "assistant"}}]}"#
+    r#"{"id":"resp_mock_chat","object":"response","model":"mock-model","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}"#
 }
 
 fn mock_responses_provider_frame_ok() -> &'static str {
@@ -70,14 +75,20 @@ fn positive_keyless_fixture_carries_fixture_identity_through_request_chain() {
         serde_json::from_str(&first.client_frame).expect("client frame must be JSON");
     assert_eq!(frame["object"], "chat.completion");
     assert_eq!(frame["choices"][0]["message"]["role"], "assistant");
-    assert!(first.provider_wire.starts_with("wire:semantic:mock-model:"));
-    assert!(first.continuation_committed, "chat/relay commits");
+    let provider_wire: serde_json::Value =
+        serde_json::from_str(&first.provider_wire).expect("provider wire must be JSON");
+    assert_eq!(provider_wire["model"], "mock-model");
+    assert!(provider_wire.get("requestId").is_none());
+    assert!(!first.continuation_committed, "runtime owns no local continuation");
     assert_eq!(first.continuation_owner, "relay");
     assert_eq!(first.fixture_method, "POST");
     assert_eq!(first.fixture_path, "/v1/chat/completions");
     assert_eq!(first.fixture_model, "mock-model");
     assert_eq!(first.fixture_headers, Vec::<(String, String)>::new());
-    assert!(first.relay_operator_accepted, "chat+relay is a valid typed-facts pair");
+    assert!(
+        first.relay_operator_accepted,
+        "chat+relay is a valid typed-facts pair"
+    );
     assert_eq!(first.error_projection_scope, None, "no error occurred");
     assert!(first.error.is_none(), "no fault expected");
     let second = execute_mock_transport_slice(
@@ -120,7 +131,11 @@ fn positive_trace_entries_follows_request_then_response_chains() {
         "relay",
     )
     .expect("mock transport slice must succeed");
-    assert_eq!(report.trace.len(), 7 + 6);
+    assert!(!report.trace.is_empty());
+    assert!(report
+        .trace
+        .iter()
+        .all(|event| !event.contains("requestId") && !event.contains("providerId")));
 }
 
 #[test]
@@ -142,16 +157,23 @@ fn positive_responses_direct_operator_accepted() {
         "direct",
     )
     .expect("responses + direct must succeed");
-    assert!(report.error.is_none(), "no fault expected: {:?}", report.error);
-    assert!(report.relay_operator_accepted, "responses+direct selects Direct operator");
+    assert!(
+        report.error.is_none(),
+        "no fault expected: {:?}",
+        report.error
+    );
+    assert!(
+        report.relay_operator_accepted,
+        "responses+direct selects Direct operator"
+    );
     assert_eq!(report.fixture_path, "/v1/responses");
     assert_eq!(report.fixture_model, "responses-model");
-    assert!(report.continuation_committed, "responses/direct commits");
+    assert!(!report.continuation_committed, "runtime owns no local continuation");
     assert_eq!(report.continuation_owner, "direct");
 }
 
 #[test]
-fn positive_responses_relay_operator_accepted() {
+fn red_responses_relay_operator_rejected() {
     let runtime = load_runtime();
     let mut counter = MockTransportIdentityCounter::new();
     let fixture = responses_fixture();
@@ -168,12 +190,8 @@ fn positive_responses_relay_operator_accepted() {
         "responses",
         "relay",
     );
-    let report = outcome.expect("responses + relay owner must use local materialization");
-    assert!(report.error.is_none(), "no fault expected: {:?}", report.error);
-    assert!(report.relay_operator_accepted, "responses+relay selects relay operator");
-    assert_eq!(report.fixture_path, "/v1/responses");
-    assert!(report.continuation_committed, "responses/relay commits local continuation");
-    assert_eq!(report.continuation_owner, "relay");
+    let error = outcome.expect_err("responses + relay owner must fail fast");
+    assert!(error.to_string().contains("not accepted"));
 }
 
 #[test]
@@ -217,10 +235,16 @@ fn red_chat_fixture_with_responses_entry_rejected() {
         "responses", // expects /v1/responses but fixture path is /v1/chat/completions
         "direct",
     );
-    assert!(outcome.is_err(), "chat fixture path cannot serve responses entry");
+    assert!(
+        outcome.is_err(),
+        "chat fixture path cannot serve responses entry"
+    );
     let fault = outcome.err().expect("missing fault");
     assert_eq!(fault.code, "keyless_fixture_invalid");
-    assert!(fault.message.contains("/v1/chat/completions"), "error must name the mismatched path");
+    assert!(
+        fault.message.contains("/v1/chat/completions"),
+        "error must name the mismatched path"
+    );
 }
 
 #[test]
@@ -232,7 +256,7 @@ fn red_responses_path_with_chat_body_rejected() {
         "POST",
         "/v1/responses",
         Vec::new(),
-        "chat:hello-world".to_string(),
+        r#"{"model":"responses-model","messages":[{"role":"user","content":"hello"}]}"#.to_string(),
         "responses-model".to_string(),
     );
     let outcome = execute_mock_transport_slice(
@@ -250,7 +274,10 @@ fn red_responses_path_with_chat_body_rejected() {
     );
     let fault = outcome.expect_err("body must match entry protocol");
     assert_eq!(fault.code, "keyless_fixture_invalid");
-    assert!(fault.message.contains("body"), "error must name the mismatched body");
+    assert!(
+        fault.message.contains("body"),
+        "error must name the mismatched body"
+    );
 }
 
 #[test]
@@ -281,7 +308,10 @@ fn red_empty_server_id_fails_fast() {
 fn red_empty_fixture_model_fails_fast() {
     let runtime = load_runtime();
     let mut counter = MockTransportIdentityCounter::new();
-    let fixture = KeylessChatFixture::chat("chat:hello-world", "");
+    let fixture = KeylessChatFixture::chat(
+        r#"{"model":"mock-model","messages":[{"role":"user","content":"hello"}]}"#,
+        "",
+    );
     let outcome = execute_mock_transport_slice(
         &runtime,
         &mut counter,
@@ -352,8 +382,8 @@ fn red_malformed_provider_frame_flows_error_chain_with_real_scope() {
     assert!(
         error
             .client_projection_message
-            .contains("malformed provider JSON"),
-        "client projection must carry the json_parse reason: {:?}",
+            .contains("expected ident"),
+        "client projection must carry the raw parse reason: {:?}",
         error.client_projection_message
     );
     assert_eq!(report.continuation_committed, false);

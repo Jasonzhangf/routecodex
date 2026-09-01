@@ -11,6 +11,8 @@ path = "src/lib.rs"
 [dependencies]
 routecodex-v4-base-node = { path = "../routecodex-v4-base-node" }
 routecodex-v4-edge = { path = "../routecodex-v4-edge" }
+routecodex-v4-skeleton = { path = "../routecodex-v4-skeleton" }
+routecodex-v4-standard-plugins = { path = "../routecodex-v4-standard-plugins" }
 sha2 = "0.10"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }

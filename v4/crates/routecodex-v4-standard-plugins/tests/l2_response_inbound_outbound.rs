@@ -1,14 +1,16 @@
-//! L2 response inbound/outbound plugin tests.
+//! Relay response codec and terminal frame boundary tests.
 //!
-//! Positive: provider raw/semantic decodes to parsed response, governed
-//! response projects to client semantic, and client semantic builds a client
-//! frame. Negative: non-object/malformed payloads, control/debug fields in
-//! client payload, unauthorized resource writes and non-adjacent node
-//! selectors fail fast without fallback.
+//! SSE transport has separate opaque-byte tests and is intentionally absent.
 
 use routecodex_v4_cordis_bridge::{BridgeError, NodeExecutionInput};
 use routecodex_v4_node_container::{NodeContainer, NodeContainerError, PlanBindings};
 use routecodex_v4_plugin_plan::{compile_node_plan, PlanError};
+use routecodex_v4_standard_plugins::response_inbound::{
+    decode_provider_sse_frame, ProviderSseEventDisposition,
+};
+use routecodex_v4_standard_plugins::response_outbound::{
+    encode_client_error_sse_frame, encode_client_sse_frame,
+};
 use routecodex_v4_standard_plugins::{
     compile_standard_plan, standard_authoring, standard_container_services,
     standard_node_allowed_reads, standard_node_allowed_writes, standard_resource_registry,
@@ -16,371 +18,86 @@ use routecodex_v4_standard_plugins::{
 };
 use serde_json::{json, Value};
 
-fn plan_bindings(plan: &routecodex_v4_plugin_plan::NodePluginPlan) -> PlanBindings {
-    let hash = plan.plan_hash();
-    PlanBindings {
-        graph_hash: hash.clone(),
-        manifest_hash: hash.clone(),
-        loaded_plan_hash: hash,
-    }
-}
-
-fn publish_container(mut container: NodeContainer) -> NodeContainer {
-    container.context_created().unwrap();
-    container.plugins_mounted().unwrap();
-    container.publish().unwrap();
-    container
-}
-
-fn provider_raw() -> Value {
-    json!({
-        "requestId": "req-response-1",
-        "providerId": "keyless-mock",
-        "statusCode": 200,
-        "data": {
-            "id": "resp-1",
-            "output": [
-                {"type": "text", "text": "hello"},
-                {"type": "function_call", "id": "call-1", "name": "lookup", "arguments": "{}"}
-            ],
-            "usage": {"input_tokens": 10, "output_tokens": 2}
-        }
-    })
-}
-
 fn execute(
     node_id: &str,
-    role_id: &str,
-    chain: &str,
     position: u32,
     plugin_id: &str,
     data: Value,
+    information: Value,
 ) -> Result<Value, NodeContainerError> {
-    let plan = compile_standard_plan(node_id, role_id, chain, position, &[plugin_id])
-        .expect("response plan compiles");
+    let plan = compile_standard_plan(
+        node_id,
+        if node_id == "V4HubRespInbound03Normalized" {
+            "response_inbound"
+        } else {
+            "response_outbound"
+        },
+        "response",
+        position,
+        &[plugin_id],
+    )
+    .expect("response plan compiles");
     let hash = plan.plan_hash();
-    let mut container = NodeContainer::declare(node_id, plan.clone(), plan_bindings(&plan))
-        .expect("binding passes");
-    container = publish_container(container);
-    let registry = StandardHandleRegistry::new();
-    let output = container.execute_with_plan_hash(
-        &hash,
+    let bindings = PlanBindings {
+        graph_hash: hash.clone(),
+        manifest_hash: hash.clone(),
+        loaded_plan_hash: hash,
+    };
+    let mut container = NodeContainer::declare(node_id, plan, bindings).expect("binding passes");
+    container.context_created().unwrap();
+    container.plugins_mounted().unwrap();
+    container.publish().unwrap();
+    let output = container.execute(
         NodeExecutionInput {
             data,
             control: json!({}),
+            information,
         },
-        &registry,
-    )?;
+        &StandardHandleRegistry::new(),
+    );
     container.drain().unwrap();
     container.dispose().unwrap();
-    Ok(output.data)
-}
-
-fn assert_no_control_fields(value: &Value) {
-    let object = value.as_object().expect("response payload is object");
-    for key in [
-        "control",
-        "metadata",
-        "error_chain",
-        "route_facts",
-        "target_selection",
-        "payload_cycle",
-        "debug",
-        "diagnostics",
-        "snapshot",
-    ] {
-        assert!(
-            !object.contains_key(key),
-            "{key} leaked into client payload"
-        );
-    }
+    output.map(|value| value.data)
 }
 
 #[test]
-fn positive_protocol_decode_builds_parsed_response() {
-    let parsed = execute(
-        "V4HubRespInbound02Parsed",
-        "response_inbound",
-        "response",
-        2,
+fn protocol_decode_preserves_provider_business_response() {
+    let response = json!({
+        "id":"resp-1",
+        "output":[
+            {"type":"message","content":[{"type":"output_text","text":"hello"}]},
+            {"type":"function_call","call_id":"call-1","name":"lookup","arguments":"{}"}
+        ],
+        "usage":{"input_tokens":10,"output_tokens":2},
+        "metadata":{"client_visible":true}
+    });
+    let decoded = execute(
+        "V4HubRespInbound03Normalized",
+        3,
         "v4.std.response.protocol_decode",
-        provider_raw(),
-    );
-    let parsed = parsed.expect("parsed response is object");
-    let parsed = parsed.as_object().expect("parsed response is object");
-    assert_eq!(parsed["requestId"], json!("req-response-1"));
-    assert_eq!(parsed["providerId"], json!("keyless-mock"));
-    assert_eq!(parsed["statusCode"], json!(200));
-    assert_eq!(parsed["output"][0]["type"], json!("text"));
-    assert_eq!(parsed["output"][0]["text"], json!("hello"));
-    assert_eq!(parsed["output"][1]["type"], json!("function_call"));
-    assert_eq!(parsed["output"][1]["id"], json!("call-1"));
-    assert_no_control_fields(&Value::from(parsed.clone()));
-}
-
-#[test]
-fn positive_nested_business_keys_are_preserved() {
-    let mut raw = provider_raw();
-    raw["data"]["output"] = json!([
-        {
-            "type": "function_call",
-            "name": "search",
-            "arguments": {
-                "query": "routecodex",
-                "debug": true,
-                "metadata_center": {"enabled": false}
-            }
-        }
-    ]);
-    let parsed = execute(
-        "V4HubRespInbound02Parsed",
-        "response_inbound",
-        "response",
-        2,
-        "v4.std.response.protocol_decode",
-        raw,
-    )
-    .expect("nested business keys are not control leakage");
-    assert_eq!(parsed["output"][0]["arguments"]["debug"], json!(true));
-}
-
-#[test]
-fn positive_client_semantic_projection_preserves_response_semantics() {
-    let semantic = execute(
-        "V4HubRespOutbound04ClientSemantic",
-        "response_outbound",
-        "response",
-        4,
-        "v4.std.response.client_semantic_projection",
-        json!({
-            "requestId": "req-response-1",
-            "id": "resp-1",
-            "output": [{"type": "text", "text": "hello"}],
-            "usage": {"input_tokens": 10, "output_tokens": 2}
-        }),
-    )
-    .expect("response plugin executes");
-    let semantic = semantic.as_object().expect("client semantic is object");
-    assert_eq!(semantic["requestId"], json!("req-response-1"));
-    assert_eq!(semantic["id"], json!("resp-1"));
-    assert_eq!(semantic["output"][0]["text"], json!("hello"));
-    assert_eq!(semantic["usage"]["input_tokens"], json!(10));
-    assert_no_control_fields(&Value::from(semantic.clone()));
-}
-
-#[test]
-fn positive_frame_build_creates_single_client_frame() {
-    let frame = execute(
-        "V4ServerRespOutbound06ClientFrame",
-        "response_outbound",
-        "response",
-        6,
-        "v4.std.response.frame_build",
-        json!({
-            "requestId": "req-response-1",
-            "id": "resp-1",
-            "output": [{"type": "text", "text": "hello"}],
-            "usage": {"input_tokens": 10, "output_tokens": 2}
-        }),
-    )
-    .expect("response plugin executes");
-    let frame = frame.as_object().expect("client frame is object");
-    assert_eq!(frame["kind"], json!("client_frame"));
-    assert_eq!(frame["requestId"], json!("req-response-1"));
-    assert_eq!(frame["response"]["id"], json!("resp-1"));
-    assert_eq!(frame["response"]["output"][0]["text"], json!("hello"));
-    assert_no_control_fields(&Value::from(frame.clone()));
-}
-
-#[test]
-fn positive_protocol_metadata_and_response_fields_are_preserved() {
-    let parsed = execute(
-        "V4HubRespInbound02Parsed",
-        "response_inbound",
-        "response",
-        2,
-        "v4.std.response.protocol_decode",
-        json!({
-            "requestId": "req-response-1",
-            "providerId": "keyless-mock",
-            "statusCode": 200,
-            "data": {
-                "id": "resp-1",
-                "metadata": {"trace": "client-visible"},
-                "usage": {"input_tokens": 10},
-                "output": [{"type": "text", "text": "hello", "annotations": []}]
-            }
-        }),
-    )
-    .expect("protocol metadata remains business payload");
-    assert_eq!(parsed["metadata"]["trace"], json!("client-visible"));
-    assert_eq!(parsed["output"][0]["annotations"], json!([]));
-
-    let semantic = execute(
-        "V4HubRespOutbound04ClientSemantic",
-        "response_outbound",
-        "response",
-        4,
-        "v4.std.response.client_semantic_projection",
-        parsed,
-    )
-    .expect("client projection succeeds");
-    let frame = execute(
-        "V4ServerRespOutbound06ClientFrame",
-        "response_outbound",
-        "response",
-        6,
-        "v4.std.response.frame_build",
-        semantic,
-    )
-    .expect("frame build succeeds");
-    assert_eq!(
-        frame["response"]["metadata"]["trace"],
-        json!("client-visible")
-    );
-    assert_eq!(frame["response"]["usage"]["input_tokens"], json!(10));
-}
-
-#[test]
-fn negative_protocol_decode_rejects_non_object() {
-    let error = execute(
-        "V4HubRespInbound02Parsed",
-        "response_inbound",
-        "response",
-        2,
-        "v4.std.response.protocol_decode",
-        json!([1, 2, 3]),
-    )
-    .expect_err("protocol_decode must reject non-object");
-    assert!(
-        matches!(error,
-            NodeContainerError::Bridge(BridgeError::HandleError { ref plugin_id, .. })
-                if plugin_id == "v4.std.response.protocol_decode"
-        ),
-        "expect Bridge HandleError for non-array input, got: {:?}",
-        error
-    );
-}
-
-#[test]
-fn negative_protocol_decode_rejects_malformed_provider_raw() {
-    let mut raw = provider_raw();
-    raw["statusCode"] = json!(503);
-    let plan = compile_standard_plan(
-        "V4HubRespInbound02Parsed",
-        "response_inbound",
-        "response",
-        2,
-        &["v4.std.response.protocol_decode"],
-    )
-    .expect("plan compiles");
-    let hash = plan.plan_hash();
-    let mut container = NodeContainer::declare(
-        "V4HubRespInbound02Parsed",
-        plan.clone(),
-        plan_bindings(&plan),
-    )
-    .expect("binding passes");
-    container = publish_container(container);
-    let registry = StandardHandleRegistry::new();
-    let error = container
-        .execute_with_plan_hash(
-            &hash,
-            NodeExecutionInput {
-                data: raw,
-                control: json!({}),
-            },
-            &registry,
-        )
-        .expect_err("non-success provider status must fail fast");
-    assert!(matches!(
-        error,
-        NodeContainerError::Bridge(BridgeError::HandleError { .. })
-    ));
-    container.drain().unwrap();
-    container.dispose().unwrap();
-}
-
-#[test]
-fn negative_client_projection_requires_request_identity() {
-    let plan = compile_standard_plan(
-        "V4HubRespOutbound04ClientSemantic",
-        "response_outbound",
-        "response",
-        4,
-        &["v4.std.response.client_semantic_projection"],
-    )
-    .expect("plan compiles");
-    let hash = plan.plan_hash();
-    let mut container = NodeContainer::declare(
-        "V4HubRespOutbound04ClientSemantic",
-        plan.clone(),
-        plan_bindings(&plan),
-    )
-    .expect("binding passes");
-    container = publish_container(container);
-    let registry = StandardHandleRegistry::new();
-    let error = container
-        .execute_with_plan_hash(
-            &hash,
-            NodeExecutionInput {
-                data: json!({
-                    "id": "resp-1",
-                    "output": []
-                }),
-                control: json!({}),
-            },
-            &registry,
-        )
-        .expect_err("missing request identity must fail fast");
-    assert!(matches!(
-        error,
-        NodeContainerError::Bridge(BridgeError::HandleError { .. })
-    ));
-    container.drain().unwrap();
-    container.dispose().unwrap();
-}
-
-#[test]
-fn negative_response_client_projection_cannot_write_normal_payload() {
-    let mut authoring = standard_authoring(&["v4.std.response.client_semantic_projection"])
-        .expect("authoring succeeds");
-    authoring[0].descriptor.writes = vec!["v4.response.normal_payload".to_string()];
-    let error = compile_node_plan(
-        "V4HubRespOutbound04ClientSemantic",
-        "response_outbound",
-        "response",
-        4,
-        &authoring,
-        &standard_node_allowed_reads("V4HubRespOutbound04ClientSemantic"),
-        &standard_node_allowed_writes("V4HubRespOutbound04ClientSemantic"),
-        &standard_resource_registry(),
-        &standard_container_services(),
-    )
-    .expect_err("client semantic must not write backward into normal payload");
-    assert!(matches!(error, PlanError::UnauthorizedWrite { .. }));
-}
-
-#[test]
-fn negative_protocol_decode_rejects_invalid_output_shapes() {
-    for data in [
+        response.clone(),
         json!({}),
-        json!({"output": {}}),
-        json!({"output": ["text"]}),
-        json!({"output": [{}]}),
-        json!({"output": [{"type": 1}]}),
+    )
+    .unwrap();
+    assert_eq!(decoded, response);
+}
+
+#[test]
+fn protocol_decode_rejects_invalid_shape_and_control_leakage() {
+    for response in [
+        json!([]),
+        json!({"output":{}}),
+        json!({"output":[{}]}),
+        json!({"output":[],"error_chain":{}}),
     ] {
-        let mut raw = provider_raw();
-        raw["data"] = data;
         let error = execute(
-            "V4HubRespInbound02Parsed",
-            "response_inbound",
-            "response",
-            2,
+            "V4HubRespInbound03Normalized",
+            3,
             "v4.std.response.protocol_decode",
-            raw,
+            response,
+            json!({}),
         )
-        .expect_err("invalid output shape must fail fast");
+        .expect_err("invalid response must fail fast");
         assert!(matches!(
             error,
             NodeContainerError::Bridge(BridgeError::HandleError { .. })
@@ -389,58 +106,115 @@ fn negative_protocol_decode_rejects_invalid_output_shapes() {
 }
 
 #[test]
-fn positive_response_outbound_nodes_preserve_request_identity() {
-    let semantic = execute(
-        "V4HubRespOutbound04ClientSemantic",
-        "response_outbound",
-        "response",
-        4,
-        "v4.std.response.client_semantic_projection",
-        json!({
-            "requestId": "req-response-1",
-            "id": "resp-1",
-            "output": [{"type": "text", "text": "hello"}]
-        }),
-    )
-    .expect("client semantic projection succeeds");
-    let boundary = execute(
-        "V4ServerSseOut05FrameBoundary",
-        "response_outbound",
-        "response",
+fn relay_response_hook_projects_only_registered_protocol_pair() {
+    let projected = execute(
+        "V4HubRespOutbound05ClientSemantic",
         5,
-        "v4.std.response.sse_frame_boundary",
-        semantic,
+        "v4.hook.relay.response",
+        json!({
+            "id":"resp-1",
+            "model":"m",
+            "output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]
+        }),
+        json!({"provider_protocol":"openai-responses","client_protocol":"openai-chat"}),
     )
-    .expect("SSE boundary validates adjacent client wire payload");
-    let frame = execute(
-        "V4ServerRespOutbound06ClientFrame",
-        "response_outbound",
-        "response",
-        6,
-        "v4.std.response.frame_build",
-        boundary,
+    .unwrap();
+    assert_eq!(
+        projected["choices"][0]["message"]["content"],
+        json!("hello")
+    );
+
+    assert!(execute(
+        "V4HubRespOutbound05ClientSemantic",
+        5,
+        "v4.hook.relay.response",
+        json!({"id":"resp-2"}),
+        json!({"provider_protocol":"openai-responses","client_protocol":"gemini"}),
     )
-    .expect("terminal frame build succeeds");
-    assert_eq!(frame["requestId"], json!("req-response-1"));
+    .is_err());
 }
 
 #[test]
-fn negative_non_adjacent_response_node_selector_rejected() {
-    let mut authoring =
-        standard_authoring(&["v4.std.response.frame_build"]).expect("authoring succeeds");
-    authoring[0].descriptor.node_selector.node_id = "V4HubRespChatProcess03Governed".to_string();
+fn relay_response_hook_projects_responses_function_arguments_delta() {
+    let projected = execute(
+        "V4HubRespOutbound05ClientSemantic",
+        5,
+        "v4.hook.relay.response",
+        json!({
+            "type": "response.function_call_arguments.delta",
+            "output_index": 1,
+            "delta": "{\"city\":"
+        }),
+        json!({"provider_protocol":"openai-responses","client_protocol":"openai-chat"}),
+    )
+    .expect("registered Responses event projects through the Relay response hook");
+
+    assert_eq!(
+        projected["choices"][0]["delta"]["tool_calls"][0]["index"],
+        1
+    );
+    assert_eq!(
+        projected["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
+        "{\"city\":"
+    );
+}
+
+#[test]
+fn frame_build_preserves_client_semantic_payload() {
+    let payload = json!({"id":"resp-1","object":"chat.completion","choices":[]});
+    let frame = execute(
+        "V4ServerRespOutbound06ClientFrame",
+        6,
+        "v4.std.response.frame_build",
+        payload.clone(),
+        json!({}),
+    )
+    .unwrap();
+    assert_eq!(frame, payload);
+}
+
+#[test]
+fn frame_build_rejects_control_plane_fields() {
+    let error = execute(
+        "V4ServerRespOutbound06ClientFrame",
+        6,
+        "v4.std.response.frame_build",
+        json!({"id":"resp-1","route_facts":{}}),
+        json!({}),
+    )
+    .expect_err("control leakage must fail fast");
+    assert!(matches!(
+        error,
+        NodeContainerError::Bridge(BridgeError::HandleError { .. })
+    ));
+}
+
+#[test]
+fn client_sse_codec_rejects_control_plane_fields_before_projection() {
+    let error = encode_client_sse_frame(
+        "responses",
+        &json!({"type":"response.completed","route_facts":{}}),
+        true,
+    )
+    .expect_err("client SSE projection must reject control leakage");
+    assert!(error.contains("rejects control/debug field route_facts"));
+}
+
+#[test]
+fn frame_builder_cannot_bind_to_chat_process_node() {
+    let authoring = standard_authoring(&["v4.std.response.frame_build"]).unwrap();
     let error = compile_node_plan(
-        "V4HubRespChatProcess03Governed",
+        "V4HubRespChatProcess04Governed",
         "response_chat_process",
         "response",
-        3,
+        4,
         &authoring,
-        &standard_node_allowed_reads("V4HubRespChatProcess03Governed"),
-        &standard_node_allowed_writes("V4HubRespChatProcess03Governed"),
+        &standard_node_allowed_reads("V4HubRespChatProcess04Governed"),
+        &standard_node_allowed_writes("V4HubRespChatProcess04Governed"),
         &standard_resource_registry(),
         &standard_container_services(),
     )
-    .expect_err("frame_build must not bind to chat process");
+    .expect_err("non-adjacent node selector must fail");
     assert!(matches!(
         error,
         PlanError::NodeSelectorMismatch { .. }
@@ -450,243 +224,78 @@ fn negative_non_adjacent_response_node_selector_rejected() {
 }
 
 #[test]
-fn negative_outbound_rejects_hostile_control_fields() {
-    for data in [
-        json!({
-            "requestId": "req-response-1",
-            "id": "resp-1",
-            "output": [{"type": "text", "text": "hello"}],
-            "control": {"route": "internal"}
-        }),
-        json!({
-            "requestId": "req-response-1",
-            "id": "resp-1",
-            "output": [{"type": "text", "text": "hello"}],
-            "metadata_center": {"key": "internal"}
-        }),
-        json!({
-            "requestId": "req-response-1",
-            "id": "resp-1",
-            "output": [{"type": "text", "text": "hello"}],
-            "error_chain": {"stage": "ErrorErr03"}
-        }),
-        json!({
-            "requestId": "req-response-1",
-            "id": "resp-1",
-            "output": [{"type": "text", "text": "hello"}],
-            "route_facts": {"provider": "internal"}
-        }),
-        json!({
-            "requestId": "req-response-1",
-            "id": "resp-1",
-            "output": [{"type": "text", "text": "hello"}],
-            "snapshot": {"debug": true}
-        }),
-    ] {
-        let error = execute(
-            "V4HubRespOutbound04ClientSemantic",
-            "response_outbound",
-            "response",
-            4,
-            "v4.std.response.client_semantic_projection",
-            data,
-        )
-        .expect_err("hostile control fields must fail fast");
-        assert!(matches!(
-            error,
-            NodeContainerError::Bridge(BridgeError::HandleError { .. })
-        ));
-    }
-}
-
-#[test]
-fn positive_inbound_preserves_output_business_fields() {
-    let mut raw = provider_raw();
-    raw["data"]["output"] = json!([
-        {
-            "type": "text",
-            "text": "hello",
-            "control": {"route": "internal"}
-        }
-    ]);
-    let parsed = execute(
-        "V4HubRespInbound02Parsed",
-        "response_inbound",
-        "response",
-        2,
-        "v4.std.response.protocol_decode",
-        raw,
+fn provider_sse_codec_classifies_continue_complete_and_failure() {
+    let continuing = decode_provider_sse_frame(
+        b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n",
     )
-    .expect("nested business fields in output items are preserved");
-    assert_eq!(parsed["output"][0]["control"]["route"], json!("internal"));
-}
-
-#[test]
-fn negative_frame_boundary_rejects_malformed_wire() {
-    let plan = compile_standard_plan(
-        "V4ServerSseOut05FrameBoundary",
-        "response_outbound",
-        "response",
-        5,
-        &["v4.std.response.sse_frame_boundary"],
-    )
-    .expect("plan compiles");
-    let hash = plan.plan_hash();
-    for data in [json!({}), json!({"requestId": 1, "response": {}})] {
-        let mut container = NodeContainer::declare(
-            "V4ServerSseOut05FrameBoundary",
-            plan.clone(),
-            plan_bindings(&plan),
-        )
-        .expect("binding passes");
-        container = publish_container(container);
-        let registry = StandardHandleRegistry::new();
-        let error = container
-            .execute_with_plan_hash(
-                &hash,
-                NodeExecutionInput {
-                    data,
-                    control: json!({}),
-                },
-                &registry,
-            )
-            .expect_err("malformed wire must fail fast");
-        assert!(matches!(
-            error,
-            NodeContainerError::Bridge(BridgeError::HandleError { .. })
-        ));
-        container.drain().unwrap();
-        container.dispose().unwrap();
-    }
-}
-
-#[test]
-fn positive_frame_boundary_accepts_generic_client_wire_shapes() {
-    let plan = compile_standard_plan(
-        "V4ServerSseOut05FrameBoundary",
-        "response_outbound",
-        "response",
-        5,
-        &["v4.std.response.sse_frame_boundary"],
-    )
-    .expect("plan compiles");
-    let hash = plan.plan_hash();
-    for data in [
-        json!({
-            "requestId": "req-chat-1",
-            "choices": [{"message": {"role": "assistant", "content": "hello"}}]
-        }),
-        json!({
-            "requestId": "req-gemini-1",
-            "candidates": [{"content": {"parts": [{"text": "hello"}]}}]
-        }),
-    ] {
-        let mut container = NodeContainer::declare(
-            "V4ServerSseOut05FrameBoundary",
-            plan.clone(),
-            plan_bindings(&plan),
-        )
-        .expect("binding passes");
-        container = publish_container(container);
-        let registry = StandardHandleRegistry::new();
-        container
-            .execute_with_plan_hash(
-                &hash,
-                NodeExecutionInput {
-                    data,
-                    control: json!({}),
-                },
-                &registry,
-            )
-            .expect("generic client wire shape must pass transport boundary");
-        container.drain().unwrap();
-        container.dispose().unwrap();
-    }
-}
-
-#[test]
-fn positive_outbound_preserves_nested_business_keys() {
-    let data = json!({
-        "requestId": "req-response-nested",
-        "id": "resp-nested",
-        "output": [{
-            "type": "text",
-            "text": "hello",
-            "metadata_center": {
-                "scope": "internal",
-                "children": [
-                    {"route_facts": {"provider": "internal"}}
-                ]
-            }
-        }]
-    });
-    let parsed = execute(
-        "V4HubRespOutbound04ClientSemantic",
-        "response_outbound",
-        "response",
-        4,
-        "v4.std.response.client_semantic_projection",
-        data,
-    )
-    .expect("nested business keys are not control leakage");
+    .expect("delta frame decodes");
     assert_eq!(
-        parsed["output"][0]["metadata_center"]["scope"],
-        json!("internal")
+        continuing.disposition,
+        ProviderSseEventDisposition::Continue
+    );
+
+    let completed = decode_provider_sse_frame(
+        b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\"}}\n\n",
+    )
+    .expect("completed frame decodes");
+    assert_eq!(
+        completed.disposition,
+        ProviderSseEventDisposition::Completed
+    );
+
+    let failed = decode_provider_sse_frame(
+        b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"upstream failed\"}}}\n\n",
+    )
+    .expect("failed frame decodes");
+    assert_eq!(
+        failed.disposition,
+        ProviderSseEventDisposition::Failed {
+            message: "upstream failed".to_string(),
+        }
     );
 }
 
 #[test]
-fn positive_outbound_preserves_nested_trace_business_fields() {
-    let data = json!({
-        "requestId": "req-response-frame-nested",
-        "id": "resp-frame-nested",
-        "output": [{"type": "text", "text": "hello"}],
-        "trace": {
-            "nested": {
-                "error_chain": {
-                    "stage": "ErrorErr03RuntimeClassified"
-                },
-                "diagnostics": {"reason": "leak"}
-            }
-        }
-    });
-    let parsed = execute(
-        "V4HubRespOutbound04ClientSemantic",
-        "response_outbound",
-        "response",
-        4,
-        "v4.std.response.client_semantic_projection",
-        data,
+fn provider_sse_codec_rejects_failed_event_without_error_truth() {
+    let error = decode_provider_sse_frame(
+        b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{}}\n\n",
     )
-    .expect("nested business fields are not control leakage");
-    assert_eq!(
-        parsed["trace"]["nested"]["error_chain"]["stage"],
-        json!("ErrorErr03RuntimeClassified")
-    );
+    .expect_err("failed event without error truth must fail fast");
+    assert!(error.contains("missing error.message"));
 }
 
 #[test]
-fn positive_outbound_preserves_deep_client_payload() {
-    let data = json!({
-        "requestId": "req-response-deep-payload",
-        "id": "resp-deep-payload",
-        "output": [{
-            "type": "message",
-            "content": [
-                {"type": "text", "text": "hello"},
-                {"type": "tool_use", "name": "search", "input": {"query": "openai"}}
-            ]
-        }]
-    });
-    let parsed = execute(
-        "V4HubRespOutbound04ClientSemantic",
-        "response_outbound",
-        "response",
-        4,
-        "v4.std.response.client_semantic_projection",
-        data,
+fn provider_sse_codec_projects_control_extra_fields_out_of_client_payload() {
+    let decoded = decode_provider_sse_frame(
+        b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\",\"extra_fields\":{\"provider\":\"openai\"}}\n\n",
     )
-    .expect("non-control deep client payload must survive recursion");
-    assert_eq!(parsed["id"], json!("resp-deep-payload"));
-    assert_eq!(parsed["output"][0]["content"][1]["name"], json!("search"));
+    .expect("diagnostic extra_fields are consumed by provider normalization");
+    assert_eq!(decoded.semantic["delta"], "hi");
+    assert!(decoded.semantic.get("extra_fields").is_none());
+}
+
+#[test]
+fn provider_sse_codec_rejects_malformed_function_arguments_delta() {
+    for frame in [
+        b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{}\"}\n\n".as_slice(),
+        b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":1,\"delta\":{}}\n\n".as_slice(),
+    ] {
+        let error = decode_provider_sse_frame(frame)
+            .expect_err("malformed function arguments delta must fail at provider codec");
+        assert!(error.contains("response.function_call_arguments.delta"));
+    }
+}
+
+#[test]
+fn client_error_frame_never_fabricates_success_closeout() {
+    let responses = encode_client_error_sse_frame("responses", "upstream failed")
+        .expect("Responses error frame");
+    let responses = String::from_utf8(responses).expect("Responses error frame is UTF-8");
+    assert!(responses.starts_with("event: error\ndata: "));
+    assert!(!responses.contains("response.completed"));
+
+    let chat = encode_client_error_sse_frame("chat", "upstream failed").expect("Chat error frame");
+    let chat = String::from_utf8(chat).expect("Chat error frame is UTF-8");
+    assert!(chat.starts_with("data: "));
+    assert!(!chat.contains("[DONE]"));
 }

@@ -270,7 +270,9 @@ snapshot_stages = ["req_chatprocess"]
 
     assert_eq!(first.plan_hash(), second.plan_hash());
     assert_eq!(first.artifact_hash(), second.artifact_hash());
-    first.verify().expect("stored hashes verify with codex_sample");
+    first
+        .verify()
+        .expect("stored hashes verify with codex_sample");
 }
 
 #[test]
@@ -282,8 +284,5 @@ version = 2
 managed_instance_id = "v3-main"
 unknown_field = "leak"
 "#;
-    assert!(matches!(
-        compile_v2(raw),
-        Err(ConfigV2Error::Parse(_))
-    ));
+    assert!(matches!(compile_v2(raw), Err(ConfigV2Error::Parse(_))));
 }

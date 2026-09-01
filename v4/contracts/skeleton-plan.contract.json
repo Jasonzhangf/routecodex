@@ -3,7 +3,7 @@
   "contract_id": "v4-skeleton-plan",
   "status": "active",
   "owner_feature_id": "v4.skeleton",
-  "skeleton_version": "v4-skeleton-1",
+  "skeleton_version": "v4-direct-relay-1",
   "binding": {
     "required": true,
     "fields": [
@@ -14,96 +14,125 @@
     ]
   },
   "manifest_hash": "sha256:pending-config-v2-manifest",
-  "plan_epoch": 1,
-  "plan_hash": "sha256:a8340466a8ae8e48c01745c51722b27be140f0e47185866b66d10a4d38391086",
+  "plan_epoch": 2,
+  "plan_hash": "sha256:eec49ae8aed92af29c4c89d99be91974fa466b0a5479e5670cd02981c3e7b8ee",
+  "direct_protocol_contract": {
+    "same_protocol": true,
+    "mismatch": "fail_fast"
+  },
+  "protocol_information_contract": {
+    "client_provider_independent": true,
+    "payload_inference": "forbidden"
+  },
+  "transport_plugins": [
+    {
+      "plugin_id": "v4.transport.sse.ingress",
+      "node_id": "V4TransportSsePlugin",
+      "owner": "routecodex-v4-standard-plugins::sse_transport",
+      "direction": "ingress",
+      "attachment": "provider_response",
+      "effect": "transport",
+      "resource_id": "v4.transport.sse_frames",
+      "writes": []
+    },
+    {
+      "plugin_id": "v4.transport.sse.egress",
+      "node_id": "V4TransportSsePlugin",
+      "owner": "routecodex-v4-standard-plugins::sse_transport",
+      "direction": "egress",
+      "attachment": "client_response",
+      "effect": "transport",
+      "resource_id": "v4.transport.sse_frames",
+      "writes": []
+    }
+  ],
   "chains": [
     {
-      "chain_id": "request",
+      "chain_id": "direct_request",
       "nodes": [
-        {"node_id": "V4ServerReqInbound01ClientRaw", "chain": "request", "position": 1, "role_id": "request_inbound", "terminal": false, "kernel": true, "plugins": [
-          {"plugin_id": "protocol_parse", "effects": ["semantic"]}
+        {"node_id": "V4DirectReq01ClientProtocol", "chain": "direct_request", "position": 1, "role_id": "request_inbound", "terminal": false, "kernel": true, "plugins": [
+          {"plugin_id": "v4.hook.direct.request.admission", "effects": ["validation"]}
         ]},
-        {"node_id": "V4ServerSseIn02FrameBoundary", "chain": "request", "position": 2, "role_id": "request_inbound", "terminal": false, "kernel": false, "plugins": []},
-        {"node_id": "V4HubReqInbound03Normalized", "chain": "request", "position": 3, "role_id": "request_inbound", "terminal": false, "kernel": false, "plugins": [
-          {"plugin_id": "normalize", "effects": ["semantic"]},
-          {"plugin_id": "input_validate", "effects": ["validation"]}
+        {"node_id": "V4DirectReq02RelayContainer", "chain": "direct_request", "position": 2, "role_id": "request_outbound", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "v4.hook.direct.request", "effects": ["semantic"]}
         ]},
-        {"node_id": "V4HubReqChatProcess04Governed", "chain": "request", "position": 4, "role_id": "request_chat_process", "terminal": false, "kernel": false, "plugins": [
-          {"plugin_id": "continuation_classify", "effects": ["control"]},
-          {"plugin_id": "continuation_restore", "effects": ["control"]},
-          {"plugin_id": "governance", "effects": ["control"]},
-          {"plugin_id": "execution_plan", "effects": ["control"]}
-        ]},
-        {"node_id": "V4HubReqOutbound05ProviderSemantic", "chain": "request", "position": 5, "role_id": "request_outbound", "terminal": false, "kernel": false, "plugins": [
-          {"plugin_id": "semantic_projection", "effects": ["semantic"]}
-        ]},
-        {"node_id": "V4ProviderReqCompat06Compat", "chain": "request", "position": 6, "role_id": "request_outbound", "terminal": false, "kernel": false, "plugins": [
-          {"plugin_id": "wire_build", "effects": ["semantic"]}
-        ]},
-        {"node_id": "V4ProviderSseOut07WireBoundary", "chain": "request", "position": 7, "role_id": "request_outbound", "terminal": true, "kernel": false, "plugins": [
-          {"plugin_id": "output_validate", "effects": ["validation"]}
+        {"node_id": "V4DirectReq03ProviderWire", "chain": "direct_request", "position": 3, "role_id": "request_outbound", "terminal": true, "kernel": false, "plugins": [
+          {"plugin_id": "v4.hook.direct.request.wire_validate", "effects": ["validation"]}
         ]}
       ],
       "edges": [
-        {"from": "V4ServerReqInbound01ClientRaw", "to": "V4ServerSseIn02FrameBoundary", "direction": "forward"},
-        {"from": "V4ServerSseIn02FrameBoundary", "to": "V4HubReqInbound03Normalized", "direction": "forward"},
-        {"from": "V4HubReqInbound03Normalized", "to": "V4HubReqChatProcess04Governed", "direction": "forward"},
-        {"from": "V4HubReqChatProcess04Governed", "to": "V4HubReqOutbound05ProviderSemantic", "direction": "forward"},
-        {"from": "V4HubReqOutbound05ProviderSemantic", "to": "V4ProviderReqCompat06Compat", "direction": "forward"},
-        {"from": "V4ProviderReqCompat06Compat", "to": "V4ProviderSseOut07WireBoundary", "direction": "forward"}
+        {"from": "V4DirectReq01ClientProtocol", "to": "V4DirectReq02RelayContainer", "direction": "forward"},
+        {"from": "V4DirectReq02RelayContainer", "to": "V4DirectReq03ProviderWire", "direction": "forward"}
       ],
       "checkpoints": [
-        {"node_id": "V4HubReqInbound03Normalized", "semantic": "normalized_request_identity_locked", "owner": "routecodex-v4-runtime::Normalize"},
-        {"node_id": "V4ReqContinuationClassified", "semantic": "continuation_scope_locked", "owner": "routecodex-v4-runtime::ContinuationClassify"},
-        {"node_id": "V4ChatProcess04ContinuationRestore", "semantic": "continuation_restored", "owner": "routecodex-v4-runtime::ContinuationRestore"},
-        {"node_id": "V4HubReqChatProcess04Governed", "semantic": "governed_request", "owner": "routecodex-v4-runtime::Governance"},
-        {"node_id": "V4ReqExecutionPlan04", "semantic": "immutable_plan", "owner": "routecodex-v4-runtime::ExecutionPlan"},
-        {"node_id": "V4Router05RequestClassified", "semantic": "route_facts", "owner": "routecodex-v4-runtime::ExecutionPlan"},
-        {"node_id": "V4Router06SelectionPlan", "semantic": "opaque_target_selection", "owner": "routecodex-v4-runtime::ExecutionPlan"},
-        {"node_id": "V4HubReqOutbound05ProviderSemantic", "semantic": "provider_semantic", "owner": "routecodex-v4-runtime::SemanticProjection"},
-        {"node_id": "V4ProviderReqCompat06Compat", "semantic": "provider_compat", "owner": "routecodex-v4-provider::V4ProviderReqCompat06Compat"},
-        {"node_id": "V4ProviderSseOut07WireBoundary", "semantic": "provider_wire", "owner": "routecodex-v4-runtime::WireBuild"}
+        {"node_id": "V4DirectReq02RelayContainer", "semantic": "direct_same_protocol_request_hooked", "owner": "routecodex-v4-node-container::NodeContainer"}
       ]
     },
     {
-      "chain_id": "response",
+      "chain_id": "direct_response",
       "nodes": [
-        {"node_id": "V4ProviderSseIn01FrameBoundary", "chain": "response", "position": 1, "role_id": "response_inbound", "terminal": false, "kernel": true, "plugins": [
-          {"plugin_id": "frame_parse", "effects": ["semantic"]},
-          {"plugin_id": "json_parse", "effects": ["semantic"]}
+        {"node_id": "V4DirectResp01ProviderRaw", "chain": "direct_response", "position": 1, "role_id": "response_inbound", "terminal": false, "kernel": true, "plugins": []},
+        {"node_id": "V4DirectResp02RelayContainer", "chain": "direct_response", "position": 2, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "v4.hook.direct.response", "effects": ["semantic"]}
         ]},
-        {"node_id": "V4HubRespInbound02Parsed", "chain": "response", "position": 2, "role_id": "response_inbound", "terminal": false, "kernel": false, "plugins": [
-          {"plugin_id": "protocol_decode", "effects": ["semantic"]}
-        ]},
-        {"node_id": "V4HubRespChatProcess03Governed", "chain": "response", "position": 3, "role_id": "response_chat_process", "terminal": false, "kernel": false, "plugins": [
-          {"plugin_id": "response_governance", "effects": ["control"]},
-          {"plugin_id": "tool_harvest", "effects": ["semantic"]},
-          {"plugin_id": "continuation_commit", "effects": ["control"]}
-        ]},
-        {"node_id": "V4HubRespOutbound04ClientSemantic", "chain": "response", "position": 4, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": [
-          {"plugin_id": "client_semantic_projection", "effects": ["semantic"]}
-        ]},
-        {"node_id": "V4ServerSseOut05FrameBoundary", "chain": "response", "position": 5, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": [
-          {"plugin_id": "sse_frame", "effects": ["semantic"]}
-        ]},
-        {"node_id": "V4ServerRespOutbound06ClientFrame", "chain": "response", "position": 6, "role_id": "response_outbound", "terminal": true, "kernel": false, "plugins": [
-          {"plugin_id": "frame_build", "effects": ["semantic"]}
-        ]}
+        {"node_id": "V4DirectResp03ClientProtocol", "chain": "direct_response", "position": 3, "role_id": "response_outbound", "terminal": true, "kernel": false, "plugins": []}
       ],
       "edges": [
-        {"from": "V4ProviderSseIn01FrameBoundary", "to": "V4HubRespInbound02Parsed", "direction": "forward"},
-        {"from": "V4HubRespInbound02Parsed", "to": "V4HubRespChatProcess03Governed", "direction": "forward"},
-        {"from": "V4HubRespChatProcess03Governed", "to": "V4HubRespOutbound04ClientSemantic", "direction": "forward"},
-        {"from": "V4HubRespOutbound04ClientSemantic", "to": "V4ServerSseOut05FrameBoundary", "direction": "forward"},
-        {"from": "V4ServerSseOut05FrameBoundary", "to": "V4ServerRespOutbound06ClientFrame", "direction": "forward"}
+        {"from": "V4DirectResp01ProviderRaw", "to": "V4DirectResp02RelayContainer", "direction": "forward"},
+        {"from": "V4DirectResp02RelayContainer", "to": "V4DirectResp03ClientProtocol", "direction": "forward"}
       ],
       "checkpoints": [
-        {"node_id": "V4ProviderSseIn01FrameBoundary", "semantic": "provider_frame_json", "owner": "routecodex-v4-runtime::FrameParse"},
-        {"node_id": "V4HubRespInbound02Parsed", "semantic": "parsed_response", "owner": "routecodex-v4-runtime::ProtocolDecode"},
-        {"node_id": "V4HubRespChatProcess03Governed", "semantic": "governed_response_and_continuation_committed", "owner": "routecodex-v4-runtime::ResponseGovernance"},
-        {"node_id": "V4HubRespOutbound04ClientSemantic", "semantic": "client_semantic", "owner": "routecodex-v4-runtime::ClientSemanticProjection"},
-        {"node_id": "V4ServerSseOut05FrameBoundary", "semantic": "client_sse_frame", "owner": "routecodex-v4-server::V4ServerSseOut05FrameBoundary"},
-        {"node_id": "V4ServerRespOutbound06ClientFrame", "semantic": "client_frame", "owner": "routecodex-v4-runtime::FrameBuild"}
+        {"node_id": "V4DirectResp02RelayContainer", "semantic": "direct_same_protocol_response_hooked", "owner": "routecodex-v4-node-container::NodeContainer"}
+      ]
+    },
+    {
+      "chain_id": "relay_request",
+      "nodes": [
+        {"node_id": "V4ServerReqInbound01ClientRaw", "chain": "relay_request", "position": 1, "role_id": "request_inbound", "terminal": false, "kernel": true, "plugins": [{"plugin_id": "protocol_parse", "effects": ["semantic"]}]},
+        {"node_id": "V4HubReqInbound02Normalized", "chain": "relay_request", "position": 2, "role_id": "request_inbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "normalize", "effects": ["semantic"]}, {"plugin_id": "input_validate", "effects": ["validation"]}]},
+        {"node_id": "V4HubReqChatProcess03Governed", "chain": "relay_request", "position": 3, "role_id": "request_chat_process", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "governance", "effects": ["semantic"]}]},
+        {"node_id": "V4HubReqExecution04Planned", "chain": "relay_request", "position": 4, "role_id": "request_execution", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "execution_plan", "effects": ["control"]}]},
+        {"node_id": "V4HubReqTarget05Resolved", "chain": "relay_request", "position": 5, "role_id": "request_execution", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "target_resolve", "effects": ["control"]}]},
+        {"node_id": "V4HubReqOutbound06ProviderSemantic", "chain": "relay_request", "position": 6, "role_id": "request_outbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.hook.relay.request", "effects": ["semantic"]}]},
+        {"node_id": "V4ProviderReqCompat07ProviderCompat", "chain": "relay_request", "position": 7, "role_id": "request_outbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "provider_compat", "effects": ["semantic"]}]},
+        {"node_id": "V4ProviderReqOutbound08WirePayload", "chain": "relay_request", "position": 8, "role_id": "request_outbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "wire_build", "effects": ["semantic"]}]},
+        {"node_id": "V4ProviderReqOutbound09TransportRequest", "chain": "relay_request", "position": 9, "role_id": "request_outbound", "terminal": true, "kernel": false, "plugins": [{"plugin_id": "transport_validate", "effects": ["validation"]}]}
+      ],
+      "edges": [
+        {"from": "V4ServerReqInbound01ClientRaw", "to": "V4HubReqInbound02Normalized", "direction": "forward"},
+        {"from": "V4HubReqInbound02Normalized", "to": "V4HubReqChatProcess03Governed", "direction": "forward"},
+        {"from": "V4HubReqChatProcess03Governed", "to": "V4HubReqExecution04Planned", "direction": "forward"},
+        {"from": "V4HubReqExecution04Planned", "to": "V4HubReqTarget05Resolved", "direction": "forward"},
+        {"from": "V4HubReqTarget05Resolved", "to": "V4HubReqOutbound06ProviderSemantic", "direction": "forward"},
+        {"from": "V4HubReqOutbound06ProviderSemantic", "to": "V4ProviderReqCompat07ProviderCompat", "direction": "forward"},
+        {"from": "V4ProviderReqCompat07ProviderCompat", "to": "V4ProviderReqOutbound08WirePayload", "direction": "forward"},
+        {"from": "V4ProviderReqOutbound08WirePayload", "to": "V4ProviderReqOutbound09TransportRequest", "direction": "forward"}
+      ],
+      "checkpoints": [
+        {"node_id": "V4HubReqChatProcess03Governed", "semantic": "relay_governed_request", "owner": "routecodex-v4-standard-plugins::RelayRequestHooks"},
+        {"node_id": "V4ProviderReqOutbound09TransportRequest", "semantic": "provider_wire_ready", "owner": "routecodex-v4-provider"}
+      ]
+    },
+    {
+      "chain_id": "relay_response",
+      "nodes": [
+        {"node_id": "V4ProviderRespInbound01Raw", "chain": "relay_response", "position": 1, "role_id": "response_inbound", "terminal": false, "kernel": true, "plugins": []},
+        {"node_id": "V4ProviderRespCompat02ProviderCompat", "chain": "relay_response", "position": 2, "role_id": "response_inbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "provider_protocol_decode", "effects": ["semantic"]}]},
+        {"node_id": "V4HubRespInbound03Normalized", "chain": "relay_response", "position": 3, "role_id": "response_inbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "hub_response_normalize", "effects": ["semantic"]}]},
+        {"node_id": "V4HubRespChatProcess04Governed", "chain": "relay_response", "position": 4, "role_id": "response_chat_process", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "response_governance", "effects": ["semantic"]}, {"plugin_id": "tool_harvest", "effects": ["semantic"]}]},
+        {"node_id": "V4HubRespOutbound05ClientSemantic", "chain": "relay_response", "position": 5, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": [{"plugin_id": "v4.hook.relay.response", "effects": ["semantic"]}]},
+        {"node_id": "V4ServerRespOutbound06ClientFrame", "chain": "relay_response", "position": 6, "role_id": "response_outbound", "terminal": true, "kernel": false, "plugins": []}
+      ],
+      "edges": [
+        {"from": "V4ProviderRespInbound01Raw", "to": "V4ProviderRespCompat02ProviderCompat", "direction": "forward"},
+        {"from": "V4ProviderRespCompat02ProviderCompat", "to": "V4HubRespInbound03Normalized", "direction": "forward"},
+        {"from": "V4HubRespInbound03Normalized", "to": "V4HubRespChatProcess04Governed", "direction": "forward"},
+        {"from": "V4HubRespChatProcess04Governed", "to": "V4HubRespOutbound05ClientSemantic", "direction": "forward"},
+        {"from": "V4HubRespOutbound05ClientSemantic", "to": "V4ServerRespOutbound06ClientFrame", "direction": "forward"}
+      ],
+      "checkpoints": [
+        {"node_id": "V4ProviderRespCompat02ProviderCompat", "semantic": "provider_protocol_decoded", "owner": "routecodex-v4-standard-plugins::RelayResponseCodec"},
+        {"node_id": "V4HubRespOutbound05ClientSemantic", "semantic": "client_protocol_projected", "owner": "routecodex-v4-standard-plugins::RelayResponseHooks"}
       ]
     },
     {

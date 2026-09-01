@@ -28,10 +28,10 @@ fn plan_bindings(plan: &routecodex_v4_plugin_plan::NodePluginPlan) -> PlanBindin
 
 fn chat_process_plan() -> routecodex_v4_plugin_plan::NodePluginPlan {
     compile_standard_plan(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         "request_chat_process",
         "request",
-        4,
+        3,
         &[
             "v4.std.chat_process.request_governance",
             "v4.std.diagnostic.debug_observe",
@@ -61,7 +61,7 @@ fn positive_blackbox_execute_standard_plan_through_node_container() {
     let plan = chat_process_plan();
     let hash = plan.plan_hash();
     let bindings = plan_bindings(&plan);
-    let mut container = NodeContainer::declare("V4HubReqChatProcess04Governed", plan, bindings)
+    let mut container = NodeContainer::declare("V4HubReqChatProcess03Governed", plan, bindings)
         .expect("three-way hash binding passes");
     container = publish_container(container);
 
@@ -72,6 +72,7 @@ fn positive_blackbox_execute_standard_plan_through_node_container() {
             NodeExecutionInput {
                 data: request_data(),
                 control: json!({}),
+                information: json!({}),
             },
             &registry,
         )
@@ -148,6 +149,7 @@ fn positive_error_plugin_writes_typed_error_side_channel_only() {
                 control: json!({
                     "error_chain": {"code": "provider_failure"}
                 }),
+                information: json!({}),
             },
             &registry,
         )
@@ -176,16 +178,16 @@ fn positive_error_plugin_writes_typed_error_side_channel_only() {
 #[test]
 fn positive_response_governance_preserves_response_data() {
     let plan = compile_standard_plan(
-        "V4HubRespChatProcess03Governed",
+        "V4HubRespChatProcess04Governed",
         "response_chat_process",
         "response",
-        3,
+        4,
         &["v4.std.chat_process.response_governance"],
     )
     .expect("response plan compiles");
     let hash = plan.plan_hash();
     let mut container = NodeContainer::declare(
-        "V4HubRespChatProcess03Governed",
+        "V4HubRespChatProcess04Governed",
         plan.clone(),
         plan_bindings(&plan),
     )
@@ -200,6 +202,7 @@ fn positive_response_governance_preserves_response_data() {
             NodeExecutionInput {
                 data: input.clone(),
                 control: json!({}),
+                information: json!({}),
             },
             &registry,
         )
@@ -217,7 +220,7 @@ fn positive_response_governance_preserves_response_data() {
 fn negative_execute_rejects_plan_hash_drift() {
     let plan = chat_process_plan();
     let mut container = NodeContainer::declare(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         plan.clone(),
         plan_bindings(&plan),
     )
@@ -230,6 +233,7 @@ fn negative_execute_rejects_plan_hash_drift() {
             NodeExecutionInput {
                 data: request_data(),
                 control: json!({}),
+                information: json!({}),
             },
             &registry,
         )
@@ -262,6 +266,7 @@ fn negative_scope_consume_rejects_non_object_control() {
             NodeExecutionInput {
                 data: json!({}),
                 control: json!("scalar"),
+                information: json!({}),
             },
             &registry,
         )
@@ -306,6 +311,7 @@ fn positive_scope_consume_records_object_control_carrier() {
                     "error_chain": {"stage": "source_raised"},
                     "route_facts": {"selected": false}
                 }),
+                information: json!({}),
             },
             &registry,
         )
@@ -348,6 +354,7 @@ fn negative_error_intake_rejects_non_object_control() {
             NodeExecutionInput {
                 data: json!({}),
                 control: json!([1, 2, 3]),
+                information: json!({}),
             },
             &registry,
         )
@@ -381,6 +388,7 @@ fn assert_missing_control_resource_fails(
             NodeExecutionInput {
                 data: json!({}),
                 control: json!({}),
+                information: json!({}),
             },
             &registry,
         )
@@ -452,20 +460,20 @@ fn negative_unregistered_handle_fails_fast() {
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.plugin_id = "v4.real.product.plugin".to_string();
     let plan = compile_node_plan(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         "request_chat_process",
         "request",
-        4,
+        3,
         &authoring,
-        &standard_node_allowed_reads("V4HubReqChatProcess04Governed"),
-        &standard_node_allowed_writes("V4HubReqChatProcess04Governed"),
+        &standard_node_allowed_reads("V4HubReqChatProcess03Governed"),
+        &standard_node_allowed_writes("V4HubReqChatProcess03Governed"),
         &standard_resource_registry(),
         &standard_container_services(),
     )
     .expect("plan with unknown plugin id compiles");
     let hash = plan.plan_hash();
     let mut container = NodeContainer::declare(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         plan,
         PlanBindings {
             graph_hash: hash.clone(),
@@ -482,6 +490,7 @@ fn negative_unregistered_handle_fails_fast() {
             NodeExecutionInput {
                 data: request_data(),
                 control: json!({}),
+                information: json!({}),
             },
             &registry,
         )
@@ -496,7 +505,7 @@ fn negative_unregistered_handle_fails_fast() {
 fn negative_execute_before_publish_is_rejected() {
     let plan = chat_process_plan();
     let mut container = NodeContainer::declare(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         plan.clone(),
         plan_bindings(&plan),
     )
@@ -508,6 +517,7 @@ fn negative_execute_before_publish_is_rejected() {
             NodeExecutionInput {
                 data: request_data(),
                 control: json!({}),
+                information: json!({}),
             },
             &registry,
         )
@@ -523,13 +533,13 @@ fn negative_effect_violation_diagnostic_write_data_is_rejected() {
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.writes = vec!["v4.debug.event_ledger".to_string()];
     let error = compile_node_plan(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         "request_chat_process",
         "request",
-        4,
+        3,
         &authoring,
-        &standard_node_allowed_reads("V4HubReqChatProcess04Governed"),
-        &standard_node_allowed_writes("V4HubReqChatProcess04Governed"),
+        &standard_node_allowed_reads("V4HubReqChatProcess03Governed"),
+        &standard_node_allowed_writes("V4HubReqChatProcess03Governed"),
         &standard_resource_registry(),
         &standard_container_services(),
     )

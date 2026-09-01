@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import yaml from 'js-yaml';
 import { v4Root, runCapture } from './_common.mjs';
-import { ARCHITECTURE_GATES, RED_SUITES, CONSUMER_REGRESSIONS } from './_gate-matrix.mjs';
+import { ARCHITECTURE_GATES, RED_SUITES, CONSUMER_REGRESSIONS, RUST_GATES, RUST_GATES_RED } from './_gate-matrix.mjs';
 import { loadV3Baseline } from './architecture/_v3-baseline.mjs';
 
 const failures = [];
@@ -287,7 +287,7 @@ function checkModuleCoverage(registry, files) {
 function checkMainlineEdges(mainlinePath = path.join(v4Root, 'docs/architecture/maps/mainline-call-map.json')) {
   const out = [];
   const mainline = JSON.parse(fs.readFileSync(mainlinePath, 'utf8'));
-  const allowedOwners = new Set(['appsdk::goal', 'appsdk::lifecycle', 'appsdk::regression_gate', 'appsdk::compiler', 'appsdk::publisher', 'appsdk::freezer', 'appsdk::verifier', 'appsdk::workspace', 'appsdk::init', 'appsdk::verify', 'appsdk::build_domain', 'routecodex-v4-build-link', 'routecodex-v4-edge::validate_edge', 'routecodex-v4-control::metadata_center', 'routecodex-v4-error::error_chain', 'routecodex-v4-base-node::BaseNode', 'routecodex-v4-config::config_node', 'routecodex-v4-config::validate_edges', 'routecodex-v4-config::parse_v4_config_02_from_v4_config_01', 'routecodex-v4-config::validate_v4_config_03_from_v4_config_02', 'routecodex-v4-config::build_v4_config_04_from_v4_config_03', 'routecodex-v4-config::publish_v4_config_05_from_v4_config_04', 'routecodex-v4-runtime::ExecutionContext', 'routecodex-v4-runtime::SkeletonRuntime', 'routecodex-v4-runtime::scope_session_from_control', 'routecodex-v4-plugin-plan::compile_node_plan', 'routecodex-v4-plugin-catalog::register', 'routecodex-v4-cordis-bridge::compile_node', 'routecodex-v4-cordis-bridge::execute_plan']);
+  const allowedOwners = new Set(['appsdk::goal', 'appsdk::lifecycle', 'appsdk::regression_gate', 'appsdk::compiler', 'appsdk::publisher', 'appsdk::freezer', 'appsdk::verifier', 'appsdk::workspace', 'appsdk::init', 'appsdk::verify', 'appsdk::build_domain', 'routecodex-v4-build-link', 'routecodex-v4-edge::validate_edge', 'routecodex-v4-control::metadata_center', 'routecodex-v4-error::error_chain', 'routecodex-v4-base-node::BaseNode', 'routecodex-v4-config::config_node', 'routecodex-v4-config::validate_edges', 'routecodex-v4-config::parse_v4_config_02_from_v4_config_01', 'routecodex-v4-config::validate_v4_config_03_from_v4_config_02', 'routecodex-v4-config::build_v4_config_04_from_v4_config_03', 'routecodex-v4-config::publish_v4_config_05_from_v4_config_04', 'routecodex-v4-runtime::ExecutionContext', 'routecodex-v4-runtime::SkeletonRuntime', 'routecodex-v4-runtime::scope_session_from_control', 'routecodex-v4-plugin-plan::compile_node_plan', 'routecodex-v4-plugin-catalog::register', 'routecodex-v4-cordis-bridge::compile_node', 'routecodex-v4-cordis-bridge::execute_plan', 'routecodex-v4-cordis-host::createCordisPluginFactory']);
   allowedOwners.add('routecodex-v4-runtime::NodePlugin');
   allowedOwners.add('routecodex-v4-runtime::execute_mock_transport_slice');
   allowedOwners.add('routecodex-v4-runtime::project_runtime_fault');
@@ -327,6 +327,24 @@ function checkMainlineEdges(mainlinePath = path.join(v4Root, 'docs/architecture/
   allowedOwners.add('routecodex-v4-standard-plugins::compile_standard_plan');
   allowedOwners.add('routecodex-v4-standard-plugins::StandardHandleRegistry');
   allowedOwners.add('routecodex-v4-cli-plugin::run');
+  // Current Cordis v4 mainline edges use symbol-qualified owners. Keep the
+  // allowlist explicit so an unregistered symbol remains fail-fast.
+  for (const owner of [
+    'routecodex-v4-standard-plugins::RelayRequestOutboundHook',
+    'routecodex-v4-provider::RelayRequestCodec',
+    'routecodex-v4-provider::NativeProviderTransport',
+    'routecodex-v4-provider::RelayResponseCodec',
+    'routecodex-v4-standard-plugins::RelayResponseHook',
+    'routecodex-v4-standard-plugins::RelayResponseOutboundHook',
+    'v4.execution_epoch_control_port',
+    'routecodex-v4-runtime::RuntimeLease',
+    'routecodex-v4-runtime::ExecutionEngine',
+    'v4.direct.relay_container',
+    'v4.hook.direct.request_response',
+    'v4.hook.relay.request_response',
+    'v4.transport.sse_plugin',
+    'v4.runtime.sse_response_pipeline',
+  ]) allowedOwners.add(owner);
   const pathExists = (candidate) => {
     const trimmed = candidate.trim();
     const concrete = trimmed.endsWith('/**') ? trimmed.slice(0, -3) : trimmed;
@@ -473,6 +491,9 @@ function checkDeclaredExecutedBinding(
     }
     seenGateIds.add(gate.gate_id);
     const command = String(gate.command ?? '');
+    for (const [gateId, gateCommand] of [...RUST_GATES, ...RUST_GATES_RED]) {
+      if (command === gateCommand) declaredGates.add(gateId);
+    }
     for (const match of command.matchAll(/node scripts\/architecture\/(verify-v4-[a-z0-9_-]+\.mjs)/g)) {
       declaredGates.add(match[1]);
     }
@@ -490,6 +511,8 @@ function checkDeclaredExecutedBinding(
     declaredConsumerDetails.set(consumer, { deps, sourceDeps });
   }
   const executedGates = new Set(ARCHITECTURE_GATES);
+  for (const [gate] of RUST_GATES) executedGates.add(gate);
+  for (const [gate] of RUST_GATES_RED) executedGates.add(gate);
   for (const [gate] of RED_SUITES) executedGates.add(gate);
   const executedConsumers = new Set(CONSUMER_REGRESSIONS.map(([consumer]) => consumer));
   const executedConsumerDetails = new Map();
@@ -510,7 +533,7 @@ function checkDeclaredExecutedBinding(
     out.push(`architecture gates registered in verification-map.json but not executed: ${neverExecuted.join(', ')}`);
   }
   for (const gate of declaredGates) {
-    if (!fs.existsSync(path.join(architectureDir, gate))) {
+    if (![...RUST_GATES, ...RUST_GATES_RED].some(([gateId]) => gateId === gate) && !fs.existsSync(path.join(architectureDir, gate))) {
       out.push(`architecture gate file missing: ${gate}`);
     }
   }

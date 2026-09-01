@@ -322,10 +322,6 @@ export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Da
     write(repo, 'contracts/feature-completion-layer-batches.manifest.json', JSON.stringify(manifest, null, 2));
     const gateInput = input.verificationMap.gates;
     input.verificationMap.gates = gateInput;
-    write(repo, 'docs/architecture/maps/function-map.json', JSON.stringify(input.functionMap, null, 2));
-    write(repo, 'docs/architecture/maps/resource-map.json', JSON.stringify(input.resourceMap, null, 2));
-    write(repo, 'docs/architecture/maps/verification-map.json', JSON.stringify(input.verificationMap, null, 2));
-    write(repo, '.appsdk/maps/module-registry.json', JSON.stringify(input.moduleRegistry, null, 2));
     const finalHead = commit(repo, 'fixture all-ready evidence');
     const fixtureInput = { ...input, manifest };
     const context = {

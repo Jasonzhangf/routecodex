@@ -8,10 +8,10 @@ fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
 
 #[test]
 fn no_args_maps_to_start_intent() {
-    assert!(matches!(
-        parse(&["rccv4"]).expect("parse").command_or_start(),
-        V4CommandIntent::Start(_)
-    ));
+    match parse(&["rccv4"]).expect("parse").command_or_start() {
+        V4CommandIntent::Start(intent) => assert!(!intent.foreground),
+        other => panic!("unexpected command: {other:?}"),
+    }
 }
 
 #[test]
@@ -45,6 +45,24 @@ fn start_snapshot_flags_are_typed() {
                 Some("req_inbound,resp_outbound")
             );
         }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn start_foreground_is_explicit_and_typed() {
+    let cli = parse(&["rccv4", "start", "--foreground"]).expect("parse");
+    match cli.command.expect("command") {
+        V4CommandIntent::Start(intent) => assert!(intent.foreground),
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn start_defaults_to_managed_console_observation() {
+    let cli = parse(&["rccv4", "start"]).expect("parse");
+    match cli.command.expect("command") {
+        V4CommandIntent::Start(intent) => assert!(!intent.foreground),
         other => panic!("unexpected command: {other:?}"),
     }
 }

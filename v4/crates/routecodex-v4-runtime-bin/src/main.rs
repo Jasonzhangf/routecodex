@@ -1,5 +1,4 @@
 use routecodex_v4_base_node::Scope;
-use routecodex_v4_cordis_bridge::NodeExecutionInput;
 use routecodex_v4_cli::{
     Cli, ConfigIntent, ConfigPathIntent, InitIntent, ManagedChildIntent, RestartIntent,
     ServerIntent, ServerStartIntent, ServertoolIntent, SnapshotIntent, StartIntent, StopIntent,
@@ -8,46 +7,50 @@ use routecodex_v4_cli::{
 use routecodex_v4_config::{
     compile_runtime_config_file, default_runtime_config_path, load_runtime_manifest,
     write_runtime_authoring, write_runtime_manifest_atomic, RuntimeConfigManifest,
-    RuntimeInitOptions,
+    RuntimeInitOptions, RuntimeProductConfig, RuntimeProductRouteGroup,
 };
 use routecodex_v4_error::ErrorChain;
 use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
-    exec_managed_restart, request_restart, request_stop, start_managed, status_managed,
-    ManagedAction, ManagedControlPlane, ManagedInstanceRecord, ManagedSpawnOptions,
-    V4LifecyclePaths,
+    exec_managed_restart, release_for_foreground, repair_stale, request_restart, request_stop,
+    start_managed, status_managed, LifecycleError, ManagedAction, ManagedControlPlane,
+    ManagedInstanceRecord, ManagedSpawnOptions, V4LifecyclePaths,
 };
-use routecodex_v4_node_container::{NodeContainer, PlanBindings};
-use routecodex_v4_standard_plugins::{compile_standard_plan, StandardHandleRegistry};
-use routecodex_v4_standard_plugins::diagnostic;
+use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
-    build_protocol_wire, build_responses_local_continuation_wire, load_profile, send_responses,
-    send_responses_streaming, write_provider_profile,
-    normalize_provider_response, normalize_provider_sse_frame, send_anthropic_messages,
+    build_retry_wire, normalize_provider_response_with_instructions, send_anthropic_messages,
     send_anthropic_messages_streaming, send_openai_chat, send_openai_chat_streaming,
-    validate_auth_alias, ProviderInitAuth, ProviderInitOptions, ProviderResponseStream,
+    send_responses, send_responses_streaming, validate_auth_alias,
+    write_provider_profile, ProviderInitAuth, ProviderInitOptions, ProviderResponseStream,
     V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
-    apply_product_error_policy, select_product_target_with_unavailable,
-    select_target,
+    apply_product_error_policy, select_product_target_excluding, select_target,
 };
 use routecodex_v4_runtime::{
-    parse_responses_provider_payload,
-    project_chat_request_to_responses, project_runtime_fault, project_runtime_fault_with_policy,
-    ContinuationKey, ResponsesProviderPayload, RuntimeFault, SkeletonRuntime,
+    parse_responses_provider_payload, project_runtime_fault, project_runtime_fault_with_policy,
+    ResponseStreamDisposition, ResponseStreamProcessor, ResponsesProviderPayload, RuntimeFault,
+    SkeletonRuntime,
 };
-use routecodex_v4_server::{HttpHandler, HttpRequest, HttpResponse, ResponseStream, V4HttpServer};
+use routecodex_v4_server::{
+    AsyncHttpHandler, AsyncHttpServer, HttpHandler, HttpRequest, HttpResponse, ResponseStream,
+};
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
+use routecodex_v4_standard_plugins::diagnostic;
+use routecodex_v4_standard_plugins::sse_transport::{
+    SseEgressPlugin, SseIngressPlugin, SseTransportPolicy,
+};
+use std::future::Future;
 use std::io::Write;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-v4");
-const SKELETON_PLAN: &str = include_str!("../../../contracts/skeleton-plan.contract.json");
 pub const RCCV4_BINARY_IDENTITY: &str = "rccv4";
 
 fn main() {
@@ -73,6 +76,7 @@ fn dispatch(command: V4CommandIntent) -> Result<Option<String>, String> {
         V4CommandIntent::Init(intent) => initialize(intent).map(Some),
         V4CommandIntent::Start(intent) => start(intent).map(Some),
         V4CommandIntent::Status(intent) => status(intent).map(Some),
+        V4CommandIntent::RepairStale(intent) => repair_stale_state(intent).map(Some),
         V4CommandIntent::Restart(intent) => restart(intent).map(Some),
         V4CommandIntent::Stop(intent) => stop(intent).map(Some),
         V4CommandIntent::Servertool {
@@ -210,19 +214,36 @@ fn compile_for_lifecycle(
 }
 
 fn start(intent: StartIntent) -> Result<String, String> {
-    let (config, _, paths) = compile_for_lifecycle(intent.config)?;
+    let config = config_path(ConfigPathIntent {
+        config: intent.config,
+    })?;
+    if intent.foreground {
+        let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
+        print_startup(&manifest);
+        let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
+        release_for_foreground(&paths, Duration::from_secs(15))
+            .map_err(|error| error.to_string())?;
+        run_foreground(manifest)?;
+        return Ok("state=stopped identity=rccv4 foreground=true".to_string());
+    }
+    let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
+    print_startup(&manifest);
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    let options = spawn_options(&intent.snapshot);
     let record = start_managed(
         &paths,
         &executable,
         &config,
         &paths.manifest_path,
-        &options,
+        &spawn_options(&intent.snapshot),
         Duration::from_secs(15),
     )
     .map_err(|error| error.to_string())?;
-    Ok(format_status("started", &record))
+    println!(
+        "state=running identity=rccv4 pid={} listeners={}",
+        record.pid,
+        record.listeners.join(",")
+    );
+    Ok(format_status("running", &record))
 }
 
 fn status(intent: ConfigPathIntent) -> Result<String, String> {
@@ -237,15 +258,35 @@ fn status(intent: ConfigPathIntent) -> Result<String, String> {
     })
 }
 
+fn repair_stale_state(intent: ConfigPathIntent) -> Result<String, String> {
+    if let Some(path) = intent.config {
+        compile_runtime_config_file(&path).map_err(|error| error.to_string())?;
+    }
+    let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
+    repair_stale(&paths).map_err(|error| error.to_string())?;
+    Ok("state=stopped identity=rccv4 repaired=stale".to_string())
+}
+
 fn restart(intent: RestartIntent) -> Result<String, String> {
-    let (_, manifest, paths) = compile_for_lifecycle(intent.config)?;
-    let record = request_restart(
-        &paths,
-        &manifest.manifest_digest,
-        Duration::from_millis(intent.timeout_ms),
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(format_status("restarted", &record))
+    let (config, manifest, paths) = compile_for_lifecycle(intent.config)?;
+    let timeout = Duration::from_millis(intent.timeout_ms);
+    match request_restart(&paths, &manifest.manifest_digest, timeout) {
+        Ok(record) => Ok(format_status("restarted", &record)),
+        Err(LifecycleError::NotRunning) => {
+            let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+            let record = start_managed(
+                &paths,
+                &executable,
+                &config,
+                &paths.manifest_path,
+                &ManagedSpawnOptions::default(),
+                timeout,
+            )
+            .map_err(|error| error.to_string())?;
+            Ok(format_status("running", &record))
+        }
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 fn stop(intent: StopIntent) -> Result<String, String> {
@@ -262,6 +303,7 @@ fn server_start(intent: ServerStartIntent) -> Result<String, String> {
     if !intent.foreground {
         return start(StartIntent {
             config: intent.config,
+            foreground: false,
             snapshot: intent.snapshot,
         });
     }
@@ -269,13 +311,29 @@ fn server_start(intent: ServerStartIntent) -> Result<String, String> {
         config: intent.config,
     })?;
     let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
+    print_startup(&manifest);
     run_foreground(manifest)?;
     Ok("state=stopped identity=rccv4 foreground=true".to_string())
 }
 
+fn print_startup(manifest: &RuntimeConfigManifest) {
+    let listeners = manifest
+        .listeners
+        .iter()
+        .map(|listener| listener.address.clone())
+        .collect::<Vec<_>>();
+    let binary = std::env::current_exe()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    let (headline, debug) =
+        diagnostic::format_startup(&manifest.runtime_identity, VERSION, &binary, &listeners);
+    println!("{headline}");
+    println!("{debug}");
+    let _ = std::io::stdout().flush();
+}
+
 fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     let manifest = load_runtime_manifest(&intent.manifest).map_err(|error| error.to_string())?;
-    SkeletonRuntime::load(SKELETON_PLAN).map_err(|error| error.to_string())?;
     let servers = bind_servers(&manifest)?;
     let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
     if paths.manifest_path != intent.manifest {
@@ -306,12 +364,8 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     let binary = std::env::current_exe()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
-    let (headline, debug) = diagnostic::format_startup(
-        &manifest.runtime_identity,
-        VERSION,
-        &binary,
-        &listeners,
-    );
+    let (headline, debug) =
+        diagnostic::format_startup(&manifest.runtime_identity, VERSION, &binary, &listeners);
     println!("{headline}");
     println!("{debug}");
     let _ = std::io::stdout().flush();
@@ -330,10 +384,14 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
         }
     };
     stop.store(true, Ordering::Release);
-    join_servers(handles)?;
+    join_servers_for_shutdown(handles)?;
     control.clear_record().map_err(|error| error.to_string())?;
     drop(control);
     if action == ManagedAction::Restart {
+        // macOS may retain the just-closed TCP listener briefly after the
+        // shutdown join. Give the kernel a bounded handoff window before the
+        // exec image binds the same aggregate listener again.
+        thread::sleep(Duration::from_millis(100));
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let error = exec_managed_restart(
             &executable,
@@ -352,16 +410,16 @@ fn run_foreground(manifest: RuntimeConfigManifest) -> Result<(), String> {
     join_servers(spawn_servers(servers, manifest, stop))
 }
 
-fn bind_servers(manifest: &RuntimeConfigManifest) -> Result<Vec<V4HttpServer>, String> {
-    manifest
+fn bind_servers(manifest: &RuntimeConfigManifest) -> Result<Vec<String>, String> {
+    Ok(manifest
         .listeners
         .iter()
-        .map(|listener| V4HttpServer::bind(&listener.address).map_err(|error| error.to_string()))
-        .collect()
+        .map(|listener| listener.address.clone())
+        .collect())
 }
 
 fn spawn_servers(
-    servers: Vec<V4HttpServer>,
+    servers: Vec<String>,
     manifest: RuntimeConfigManifest,
     stop: Arc<AtomicBool>,
 ) -> Vec<thread::JoinHandle<Result<(), String>>> {
@@ -371,10 +429,35 @@ fn spawn_servers(
             let manifest = manifest.clone();
             let stop = Arc::clone(&stop);
             thread::spawn(move || {
-                let mut handler = PipelineHandler::new(manifest)?;
-                server
-                    .run_until(&mut handler, || stop.load(Ordering::Acquire))
-                    .map_err(|error| error.to_string())
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| error.to_string())?;
+                let result = runtime.block_on(async move {
+                    let server = AsyncHttpServer::bind_persisted(&server)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    let handler = Arc::new(PipelineHandler::new(manifest)?);
+                    let cancellation = CancellationToken::new();
+                    let watcher = cancellation.clone();
+                    tokio::spawn(async move {
+                        while !stop.load(Ordering::Acquire) {
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
+                        watcher.cancel();
+                    });
+                    server
+                        .run_until(handler, cancellation)
+                        .await
+                        .map_err(|error| error.to_string())
+                });
+                // A disconnected client can leave a synchronous provider
+                // call in spawn_blocking. Do not let runtime drop wait
+                // forever for that task during managed restart; the bounded
+                // shutdown preserves lifecycle progress and the process
+                // replacement reclaims any remaining worker threads.
+                runtime.shutdown_timeout(Duration::from_secs(1));
+                result
             })
         })
         .collect()
@@ -385,6 +468,22 @@ fn join_servers(handles: Vec<thread::JoinHandle<Result<(), String>>>) -> Result<
         handle
             .join()
             .map_err(|_| "V4 listener thread panicked".to_string())??;
+    }
+    Ok(())
+}
+
+fn join_servers_for_shutdown(
+    handles: Vec<thread::JoinHandle<Result<(), String>>>,
+) -> Result<(), String> {
+    for handle in handles {
+        let result = handle
+            .join()
+            .map_err(|_| "V4 listener thread panicked".to_string())?;
+        if let Err(error) = result {
+            if error != "HTTP accept failed: Invalid argument (os error 22)" {
+                return Err(error);
+            }
+        }
     }
     Ok(())
 }
@@ -409,101 +508,52 @@ fn format_status(state: &str, record: &ManagedInstanceRecord) -> String {
     )
 }
 
+#[derive(Clone)]
 struct PipelineHandler {
     manifest: RuntimeConfigManifest,
     runtime: Arc<Mutex<SkeletonRuntime>>,
-    request_node: Arc<Mutex<NodeContainer>>,
-    response_node: Arc<Mutex<NodeContainer>>,
-    plugin_registry: Arc<StandardHandleRegistry>,
+    execution_epoch: ExecutionEpochSnapshot,
     availability: Arc<Mutex<V4Availability01SessionScoped>>,
-}
-
-fn publish_node_container(
-    node_id: &str,
-    plan: routecodex_v4_plugin_plan::NodePluginPlan,
-) -> Result<NodeContainer, String> {
-    let plan_hash = plan.plan_hash();
-    let mut node = NodeContainer::declare(
-        node_id,
-        plan,
-        PlanBindings {
-            graph_hash: plan_hash.clone(),
-            manifest_hash: plan_hash.clone(),
-            loaded_plan_hash: plan_hash,
-        },
-    )
-    .map_err(|error| format!("{node_id} NodeContainer declare failed: {error}"))?;
-    node.context_created()
-        .and_then(|_| node.plugins_mounted())
-        .and_then(|_| node.publish())
-        .map_err(|error| format!("{node_id} NodeContainer publish failed: {error}"))?;
-    Ok(node)
 }
 
 impl PipelineHandler {
     fn new(manifest: RuntimeConfigManifest) -> Result<Self, String> {
-        let runtime = SkeletonRuntime::load(SKELETON_PLAN).map_err(|error| error.to_string())?;
-        let request_plan = compile_standard_plan(
-            "V4HubReqInbound03Normalized",
-            "request_inbound",
-            "request",
-            3,
-            &["v4.std.contract.input_validate"],
-        )
-        .map_err(|error| format!("request NodePluginPlan compile failed: {error:?}"))?;
-        let response_plan = compile_standard_plan(
-            "V4HubRespInbound02Parsed",
-            "response_inbound",
-            "response",
-            2,
-            &["v4.std.response.protocol_decode"],
-        )
-        .map_err(|error| format!("response NodePluginPlan compile failed: {error:?}"))?;
+        let runtime =
+            SkeletonRuntime::from_compiled_plan(manifest.execution_epoch.skeleton.clone())
+                .map_err(|error| error.to_string())?;
+        let transaction_id = format!("runtime-config:{}", &manifest.manifest_digest[7..23]);
+        runtime
+            .prepare_compiled_execution_epoch(
+                &transaction_id,
+                0,
+                routecodex_v4_node_container::ZERO_BASE_MANIFEST_HASH,
+                &manifest.execution_epoch.candidate,
+                &manifest.execution_epoch.graph_hash,
+                &manifest.execution_epoch.manifest_hash,
+            )
+            .map_err(|error| error.to_string())?;
+        runtime
+            .commit_execution_epoch(&transaction_id)
+            .map_err(|error| error.to_string())?;
+        let execution_epoch = runtime
+            .admit_request("runtime-epoch-readiness")
+            .map_err(|error| error.to_string())?
+            .snapshot();
         Ok(Self {
             manifest,
             runtime: Arc::new(Mutex::new(runtime)),
-            request_node: Arc::new(Mutex::new(publish_node_container(
-                "V4HubReqInbound03Normalized",
-                request_plan,
-            )?)),
-            response_node: Arc::new(Mutex::new(publish_node_container(
-                "V4HubRespInbound02Parsed",
-                response_plan,
-            )?)),
-            plugin_registry: Arc::new(StandardHandleRegistry::new()),
+            execution_epoch,
             availability: Arc::new(Mutex::new(V4Availability01SessionScoped::new())),
         })
     }
-
-    fn execute_request_node(&self, request: &HttpRequest) -> Result<(), RuntimeFault> {
-        let Ok(data) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
-            return Ok(());
-        };
-        let node = self.request_node.lock().map_err(|_| {
-            RuntimeFault::new("request_node_lock", "request NodeContainer lock poisoned")
-        })?;
-        let plan_hash = node.bindings().loaded_plan_hash.clone();
-        node.execute_with_plan_hash(
-            &plan_hash,
-            NodeExecutionInput {
-                data,
-                control: serde_json::json!({}),
-            },
-            self.plugin_registry.as_ref(),
-        )
-        .map(|_| ())
-        .map_err(|error| RuntimeFault::new("request_node_execution", error.to_string()))
-    }
-
 }
 
-impl HttpHandler for PipelineHandler {
-    fn handle(&mut self, request: HttpRequest) -> HttpResponse {
-        if request.method == "POST" {
-            if let Err(fault) = self.execute_request_node(&request) {
-                return project_fault(&request, fault, 409);
-            }
-        }
+impl PipelineHandler {
+    fn handle_request(&self, request: HttpRequest) -> HttpResponse {
+        debug_assert_eq!(
+            self.execution_epoch.state,
+            routecodex_v4_node_container::ExecutionEpochState::Active
+        );
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/health") => json_response(
                 200,
@@ -517,27 +567,21 @@ impl HttpHandler for PipelineHandler {
             ("POST", "/v1/responses") => handle_responses(
                 &self.manifest,
                 &self.runtime,
-                &self.response_node,
-                &self.plugin_registry,
                 &self.availability,
                 &request,
                 "responses",
                 "direct",
             )
             .unwrap_or_else(|response| response),
-            ("POST", "/v1/chat/completions") => {
-                handle_responses(
-                    &self.manifest,
-                    &self.runtime,
-                    &self.response_node,
-                    &self.plugin_registry,
-                    &self.availability,
-                    &request,
-                    "chat",
-                    "relay",
-                )
-                .unwrap_or_else(|response| response)
-            }
+            ("POST", "/v1/chat/completions") => handle_responses(
+                &self.manifest,
+                &self.runtime,
+                &self.availability,
+                &request,
+                "chat",
+                "relay",
+            )
+            .unwrap_or_else(|response| response),
             _ => project_fault(
                 &request,
                 RuntimeFault::new("route_not_found", "route not found"),
@@ -547,12 +591,45 @@ impl HttpHandler for PipelineHandler {
     }
 }
 
+impl HttpHandler for PipelineHandler {
+    fn handle(&mut self, request: HttpRequest) -> HttpResponse {
+        self.handle_request(request)
+    }
+}
+
+impl AsyncHttpHandler for PipelineHandler {
+    fn handle_async<'a>(
+        &'a self,
+        request: HttpRequest,
+        _cancellation: CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = HttpResponse> + Send + 'a>> {
+        let handler = self.clone();
+        let request_for_fault = request.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || handler.handle_request(request))
+                .await
+                .unwrap_or_else(|error| {
+                    project_fault(
+                        &request_for_fault,
+                        RuntimeFault::new("request_worker_panicked", error.to_string()),
+                        500,
+                    )
+                })
+        })
+    }
+}
+
 fn models_response(manifest: &RuntimeConfigManifest) -> HttpResponse {
     let mut models = if let Some(product) = &manifest.product {
         product
             .providers
             .iter()
-            .flat_map(|provider| provider.models.iter().map(|model| model.model_id.as_str()))
+            .flat_map(|provider| {
+                provider.models.iter().flat_map(|model| {
+                    std::iter::once(model.model_id.as_str())
+                        .chain(model.aliases.iter().map(String::as_str))
+                })
+            })
             .collect::<Vec<_>>()
     } else {
         manifest
@@ -576,11 +653,33 @@ fn models_response(manifest: &RuntimeConfigManifest) -> HttpResponse {
     )
 }
 
+fn route_group_for_request<'a>(
+    product: &'a RuntimeProductConfig,
+    request: &HttpRequest,
+) -> Result<&'a RuntimeProductRouteGroup, RuntimeFault> {
+    let requested = request.header("x-rccv4-route-group-id");
+    match requested {
+        Some(route_group_id) => product
+            .route_groups
+            .iter()
+            .find(|group| group.route_group_id == route_group_id)
+            .ok_or_else(|| {
+                RuntimeFault::new(
+                    "product_route_group_missing",
+                    "requested route group is not configured",
+                )
+            }),
+        None if product.route_groups.len() == 1 => Ok(&product.route_groups[0]),
+        None => Err(RuntimeFault::new(
+            "product_route_group_ambiguous",
+            "route group header is required when multiple route groups are configured",
+        )),
+    }
+}
+
 fn handle_responses(
     manifest: &RuntimeConfigManifest,
     runtime: &Arc<Mutex<SkeletonRuntime>>,
-    response_node: &Arc<Mutex<NodeContainer>>,
-    plugin_registry: &Arc<StandardHandleRegistry>,
     availability: &Arc<Mutex<V4Availability01SessionScoped>>,
     request: &HttpRequest,
     entry_protocol: &str,
@@ -633,13 +732,8 @@ fn handle_responses(
         .transpose()?
         .unwrap_or(false);
     let unavailable_provider_ids = if let Some(product) = &manifest.product {
-        let group = product.route_groups.first().ok_or_else(|| {
-            project_fault(
-                request,
-                RuntimeFault::new("product_route_group_missing", "product manifest has no route group"),
-                500,
-            )
-        })?;
+        let group = route_group_for_request(product, request)
+            .map_err(|error| project_fault(request, error, 500))?;
         let availability_guard = availability.lock().map_err(|_| {
             project_fault(
                 request,
@@ -664,53 +758,56 @@ fn handle_responses(
         Vec::new()
     };
     let mut target = if let Some(product) = &manifest.product {
-        let route_group = product
-            .route_groups
-            .first()
-            .ok_or_else(|| {
-                project_fault(
-                    request,
-                    RuntimeFault::new("product_route_group_missing", "product manifest has no route group"),
-                    500,
-                )
-            })?;
-        select_product_target_with_unavailable(
+        let route_group = route_group_for_request(product, request)
+            .map_err(|error| project_fault(request, error, 500))?;
+        select_product_target_excluding(
             product,
             &route_group.route_group_id,
             model,
             entry_protocol,
             &[],
             0,
-            &unavailable_provider_ids.iter().map(String::as_str).collect::<Vec<_>>(),
+            &unavailable_provider_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
         )
     } else {
         select_target(&manifest.providers, &manifest.routes, model)
     }
     .map_err(|error| {
+        let status = if !unavailable_provider_ids.is_empty()
+            && matches!(
+                error,
+                routecodex_v4_router::TargetSelectionError::ProductPoolUnavailable(_)
+            ) {
+            503
+        } else {
+            404
+        };
         project_fault(
             request,
-            RuntimeFault::new("model_unavailable", error.to_string()),
-            404,
+            RuntimeFault::new(
+                if status == 503 {
+                    "provider_pool_exhausted"
+                } else {
+                    "model_unavailable"
+                },
+                format!("{} (requested_model={})", error, model),
+            ),
+            status,
         )
     })?;
-    println!(
-        "{}",
-        diagnostic::format_request(
-            request.path.as_str(),
-            &request.request_id,
-            model,
-            &target.provider_id,
-        )
-    );
-    let _ = std::io::stdout().flush();
     let continuation_owner = if entry_protocol == "responses" {
-        load_profile(&target.config_path)
-            .map_err(|error| project_fault(request, RuntimeFault::new(&error.code, error.message), 500))?
-            .responses_continuation
+        // V4 retains only provider-owned Direct Responses continuation.
+        // Local/relay continuation is retired and must never be inferred from
+        // provider profile configuration.
+        "direct".to_string()
     } else {
         continuation_owner.to_string()
     };
-    runtime
+    let request_id = request.request_id.clone();
+    let request_lease = runtime
         .lock()
         .map_err(|_| {
             project_fault(
@@ -719,94 +816,122 @@ fn handle_responses(
                 500,
             )
         })?
-        .execute_request_scoped_with_owner(
-            &format!(
-                "{entry_protocol}:{}",
-                String::from_utf8_lossy(&request.body)
-            ),
-            &format!("{}:request", request.request_id),
+        .admit_request(&request_id)
+        .map_err(|fault| project_fault(request, fault, 598))?;
+    let request_report = runtime
+        .lock()
+        .map_err(|_| {
+            project_fault(
+                request,
+                RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"),
+                500,
+            )
+        })?
+        .execute_request_json_scoped_for_target_with_lease(
+            &String::from_utf8_lossy(&request.body),
+            entry_protocol,
+            &target.protocol,
+            &target.wire_model,
+            stream_mode,
+            &request_id,
             request.port,
             session_scope,
             conversation_scope,
             Some(&continuation_owner),
+            Some(&request_lease),
         )
-        .map_err(|fault| project_fault(request, fault, 409))?;
-    let provider_body = client_to_responses_request(&body, entry_protocol)
-        .map_err(|fault| project_fault(request, fault, 400))?;
-    let wire_body = build_continuation_or_protocol_wire(
-        &body,
-        &provider_body,
-        &target,
-        entry_protocol,
-        &continuation_owner,
-        request.port,
-        session_scope,
-        conversation_scope,
-        runtime,
+        .map_err(|fault| project_fault(request, fault, 598))?;
+    emit_payload_console_events(&request_report.trace);
+    if entry_protocol == "responses"
+        && continuation_owner == "relay"
+        && body.get("previous_response_id").is_some()
+    {
+        return Err(project_fault(
+            request,
+            RuntimeFault::new(
+                "continuation_unsupported",
+                "local relay continuation is not implemented",
+            ),
+            400,
+        ));
+    }
+    let request_scope = request_report.scope.clone();
+    let semantic_body = request_report.provider_wire_value.ok_or_else(|| {
+        project_fault(
+            request,
+            RuntimeFault::new(
+                "request_wire_missing",
+                "request chain produced no provider wire",
+            ),
+            598,
+        )
+    })?;
+    let wire_body = build_retry_wire(
+        &target.protocol,
+        &semantic_body,
+        &target.wire_model,
         stream_mode,
     )
     .map_err(|error| {
         project_fault(
             request,
             RuntimeFault::new(&error.code, error.message),
-            error.status.unwrap_or(400),
+            error.status.unwrap_or(598),
         )
     })?;
     if stream_mode {
-        let mut stream = send_target_streaming(&target, &wire_body)
-        .map_err(|error| {
-                project_fault(
-                    request,
-                    RuntimeFault::new(error.code.as_str(), error.message)
-                        .with_status(error.status.unwrap_or(502)),
-                    error.status.unwrap_or(502),
-                )
-            })?;
+        let mut stream = send_target_streaming(&target, &wire_body).map_err(|error| {
+            project_fault(
+                request,
+                RuntimeFault::new(error.code.as_str(), error.message)
+                    .with_status(error.status.unwrap_or(502)),
+                error.status.unwrap_or(502),
+            )
+        })?;
         if stream.status() >= 400 {
             if let Some(product) = manifest.product.as_ref() {
-                if let Some(policy) = apply_product_error_policy(
-                    product,
-                    &target.provider_id,
-                    stream.status(),
-                    "",
-                ) {
+                if let Some(policy) =
+                    apply_product_error_policy(product, &target.provider_id, stream.status(), "")
+                {
+                    let route_group = route_group_for_request(product, request)
+                        .map_err(|error| project_fault(request, error, 500))?;
                     record_provider_failure(
                         availability,
                         request,
-                        product.route_groups.first().map(|group| group.route_group_id.as_str()),
+                        Some(route_group.route_group_id.as_str()),
                         session_scope,
                         &target.provider_id,
                         policy.cooldown,
                         policy.failure_threshold,
                     )?;
                     if policy.retry {
-                        if let Some(group) = product.route_groups.first() {
-                            let mut excluded = unavailable_provider_ids.clone();
-                            excluded.push(target.provider_id.clone());
-                            if let Ok(candidate) = select_product_target_with_unavailable(
-                                product,
-                                &group.route_group_id,
-                                model,
-                                entry_protocol,
-                                &[],
-                                0,
-                                &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
-                            ) {
-                                let retry_body = build_protocol_wire(
-                                    &candidate.protocol,
-                                    &provider_body,
-                                    &candidate.wire_model,
-                                    true,
+                        let mut excluded = unavailable_provider_ids.clone();
+                        excluded.push(target.provider_id.clone());
+                        if let Ok(candidate) = select_product_target_excluding(
+                            product,
+                            &route_group.route_group_id,
+                            model,
+                            entry_protocol,
+                            &[],
+                            0,
+                            &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
+                        ) {
+                            let retry_body = build_retry_wire(
+                                &candidate.protocol,
+                                &wire_body,
+                                &candidate.wire_model,
+                                true,
+                            )
+                            .map_err(|error| {
+                                project_fault(
+                                    request,
+                                    RuntimeFault::new(&error.code, error.message),
+                                    error.status.unwrap_or(400),
                                 )
-                                .map_err(|error| {
-                                    project_fault(
-                                        request,
-                                        RuntimeFault::new(&error.code, error.message),
-                                        error.status.unwrap_or(400),
-                                    )
-                                })?;
-                                target = candidate;
-                                stream = send_target_streaming(&target, &retry_body).map_err(|error| {
+                            })?;
+                            target = candidate;
+                            stream =
+                                send_target_streaming(&target, &retry_body).map_err(|error| {
                                     project_provider_fault(
                                         request,
                                         RuntimeFault::new(&error.code, error.message),
@@ -816,7 +941,6 @@ fn handle_responses(
                                         "",
                                     )
                                 })?;
-                            }
                         }
                     }
                 }
@@ -854,41 +978,25 @@ fn handle_responses(
                 502,
             ));
         }
-        let client_status = if (200..300).contains(&status) { 200 } else { status };
-        println!(
-            "{}",
-            diagnostic::format_response(
-                request.path.as_str(),
-                &request.request_id,
-                client_status,
-                model,
-            )
-        );
+        let client_status = if (200..300).contains(&status) {
+            200
+        } else {
+            status
+        };
         let _ = std::io::stdout().flush();
-        let mut response_stream = ResponsesSseStream::new(
-            stream,
-            Arc::clone(runtime),
-            request.request_id.clone(),
+        let response_processor = ResponseStreamProcessor::new(
+            request_lease,
+            request_scope,
             request.port,
-            entry_protocol.to_string(),
-            continuation_owner.to_string(),
-            target.protocol.clone(),
-            session_scope.to_string(),
-            conversation_scope.to_string(),
-        );
-        if entry_protocol == "responses" && continuation_owner == "relay" {
-            let context_seed = wire_body
-                .get("input")
-                .cloned()
-                .ok_or_else(|| {
-                    project_fault(
-                        request,
-                        RuntimeFault::new("continuation_commit", "stream input is missing"),
-                        400,
-                    )
-                })?;
-            response_stream.set_local_context_seed(context_seed);
-        }
+            entry_protocol,
+            &target.protocol,
+            &continuation_owner,
+            session_scope,
+            conversation_scope,
+        )
+        .map_err(|fault| project_fault(request, fault, 599))?;
+        let response_stream =
+            ResponsesSseStream::new(stream, Arc::clone(runtime), response_processor);
         return Ok(HttpResponse::streaming(
             client_status,
             "text/event-stream",
@@ -916,62 +1024,62 @@ fn handle_responses(
     let mut reselected = false;
     if let Some(product) = manifest.product.as_ref() {
         if let Some(policy) = matched_policy.as_ref() {
-                record_provider_failure(
-                    availability,
-                    request,
-                    product.route_groups.first().map(|group| group.route_group_id.as_str()),
-                    session_scope,
-                    &target.provider_id,
-                    policy.cooldown,
-                    policy.failure_threshold,
-                )?;
-                if policy.retry {
-                    if let Some(group) = product.route_groups.first() {
-                        let mut excluded = unavailable_provider_ids.clone();
-                        excluded.push(target.provider_id.clone());
-                        if let Ok(candidate) = select_product_target_with_unavailable(
-                            product,
-                            &group.route_group_id,
-                            model,
-                            entry_protocol,
-                            &[],
-                            0,
-                            &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
-                        ) {
-                            let retry_body = build_protocol_wire(
-                                &candidate.protocol,
-                                &provider_body,
-                                &candidate.wire_model,
-                                false,
-                            )
-                            .map_err(|error| {
-                                project_fault(
-                                    request,
-                                    RuntimeFault::new(&error.code, error.message),
-                                    error.status.unwrap_or(400),
-                                )
-                            })?;
-                            target = candidate;
-                            reselected = true;
-                            raw = send_target_nonstream(&target, &retry_body).map_err(|error| {
-                                project_provider_fault(
-                                    request,
-                                    RuntimeFault::new(&error.code, error.message),
-                                    error.status.unwrap_or(502),
-                                    manifest.product.as_ref(),
-                                    &target.provider_id,
-                                    "",
-                                )
-                            })?;
-                            matched_policy = apply_product_error_policy(
-                                product,
-                                &target.provider_id,
-                                raw.status,
-                                &String::from_utf8_lossy(&raw.body),
-                            );
-                        }
-                    }
+            let route_group = route_group_for_request(product, request)
+                .map_err(|error| project_fault(request, error, 500))?;
+            record_provider_failure(
+                availability,
+                request,
+                Some(route_group.route_group_id.as_str()),
+                session_scope,
+                &target.provider_id,
+                policy.cooldown,
+                policy.failure_threshold,
+            )?;
+            if policy.retry {
+                let mut excluded = unavailable_provider_ids.clone();
+                excluded.push(target.provider_id.clone());
+                if let Ok(candidate) = select_product_target_excluding(
+                    product,
+                    &route_group.route_group_id,
+                    model,
+                    entry_protocol,
+                    &[],
+                    0,
+                    &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
+                ) {
+                    let retry_body = build_retry_wire(
+                        &candidate.protocol,
+                        &wire_body,
+                        &candidate.wire_model,
+                        false,
+                    )
+                    .map_err(|error| {
+                        project_fault(
+                            request,
+                            RuntimeFault::new(&error.code, error.message),
+                            error.status.unwrap_or(400),
+                        )
+                    })?;
+                    target = candidate;
+                    reselected = true;
+                    raw = send_target_nonstream(&target, &retry_body).map_err(|error| {
+                        project_provider_fault(
+                            request,
+                            RuntimeFault::new(&error.code, error.message),
+                            error.status.unwrap_or(502),
+                            manifest.product.as_ref(),
+                            &target.provider_id,
+                            "",
+                        )
+                    })?;
+                    matched_policy = apply_product_error_policy(
+                        product,
+                        &target.provider_id,
+                        raw.status,
+                        &String::from_utf8_lossy(&raw.body),
+                    );
                 }
+            }
         }
     }
     if raw.status >= 400 || (matched_policy.is_some() && !reselected) {
@@ -989,54 +1097,27 @@ fn handle_responses(
         ));
     }
     if let Some(product) = manifest.product.as_ref() {
-        let _ = availability.lock().map_err(|_| {
-            project_fault(
-                request,
-                RuntimeFault::new("availability_lock", "provider availability lock poisoned"),
-                500,
-            )
-        })?.mark_success(
-            &request.port.to_string(),
-            product
-                .route_groups
-                .first()
-                .map(|group| group.route_group_id.as_str())
-                .unwrap_or("default"),
-            session_scope,
-            &target.provider_id,
-        );
+        let _ = availability
+            .lock()
+            .map_err(|_| {
+                project_fault(
+                    request,
+                    RuntimeFault::new("availability_lock", "provider availability lock poisoned"),
+                    500,
+                )
+            })?
+            .mark_success(
+                &request.port.to_string(),
+                product
+                    .route_groups
+                    .first()
+                    .map(|group| group.route_group_id.as_str())
+                    .unwrap_or("default"),
+                session_scope,
+                &target.provider_id,
+            );
     }
-    let normalized_body = if raw.content_type.to_ascii_lowercase().contains("json") {
-        let provider_value: serde_json::Value = serde_json::from_slice(&raw.body).map_err(|error| {
-            project_fault(
-                request,
-                RuntimeFault::new("provider_json_parse", error.to_string()),
-                502,
-            )
-        })?;
-        let normalized = normalize_provider_response(&target.protocol, &provider_value).map_err(|error| {
-            project_fault(
-                request,
-                RuntimeFault::new(&error.code, error.message),
-                error.status.unwrap_or(502),
-            )
-        })?;
-        serde_json::to_vec(&normalized).map_err(|error| {
-            project_fault(
-                request,
-                RuntimeFault::new("provider_json_encode", error.to_string()),
-                502,
-            )
-        })?
-    } else {
-        raw.body.clone()
-    };
-    let normalized_content_type = if target.protocol == "responses" {
-        raw.content_type.as_str()
-    } else {
-        "application/json"
-    };
-    match parse_responses_provider_payload(raw.status, normalized_content_type, &normalized_body, false)
+    match parse_responses_provider_payload(raw.status, &raw.content_type, &raw.body, false)
         .map_err(|fault| {
             project_provider_fault(
                 request,
@@ -1046,38 +1127,29 @@ fn handle_responses(
                 &target.provider_id,
                 String::from_utf8_lossy(&raw.body).as_ref(),
             )
-        })?
-    {
+        })? {
         ResponsesProviderPayload::Json(value) => {
-            let response_node_guard = response_node.lock().map_err(|_| {
-                project_fault(
-                    request,
-                    RuntimeFault::new("response_node_lock", "response NodeContainer lock poisoned"),
-                    409,
-                )
-            })?;
-            let response_plan_hash = response_node_guard.bindings().loaded_plan_hash.clone();
-            response_node_guard
-                .execute_with_plan_hash(
-                    &response_plan_hash,
-                    NodeExecutionInput {
-                        data: serde_json::json!({
-                            "requestId": request.request_id,
-                            "providerId": target.provider_id,
-                            "statusCode": raw.status,
-                            "data": value.clone(),
-                        }),
-                        control: serde_json::json!({}),
-                    },
-                    plugin_registry.as_ref(),
+            let value = if request.path == "/v1/responses" {
+                let expected_instructions =
+                    body.get("instructions").and_then(|value| value.as_str());
+                normalize_provider_response_with_instructions(
+                    &target.protocol,
+                    &value,
+                    expected_instructions,
                 )
                 .map_err(|error| {
-                    project_fault(
+                    project_provider_fault(
                         request,
-                        RuntimeFault::new("response_node_execution", error.to_string()),
+                        RuntimeFault::new(&error.code, error.message),
                         502,
+                        manifest.product.as_ref(),
+                        &target.provider_id,
+                        "",
                     )
-                })?;
+                })?
+            } else {
+                value
+            };
             let provider_raw = serde_json::to_string(&value).map_err(|error| {
                 project_fault(
                     request,
@@ -1097,15 +1169,16 @@ fn handle_responses(
                         500,
                     )
                 })?
-                .execute_provider_response_scoped_with_seed(
+                .execute_provider_response_scoped_for_target_with_lease(
                     &provider_raw,
-                    &format!("{}:response", request.request_id),
+                    &request_id,
                     request.port,
                     session_scope,
                     conversation_scope,
                     entry_protocol,
+                    &target.protocol,
                     &continuation_owner,
-                    Some(serde_json::to_string(wire_body.get("input").unwrap_or(&serde_json::Value::Null)).map_err(|error| project_fault(request, RuntimeFault::new("continuation_commit", error.to_string()), 500))?),
+                    Some(&request_lease),
                 )
                 .map_err(|fault| project_fault(request, fault, 502))?;
             let frame = report.client_frame.ok_or_else(|| {
@@ -1125,16 +1198,12 @@ fn handle_responses(
                     502,
                 )
             })?;
-            let client_status = if (200..300).contains(&raw.status) { 200 } else { raw.status };
-            println!(
-                "{}",
-                diagnostic::format_response(
-                    request.path.as_str(),
-                    &request.request_id,
-                    client_status,
-                    model,
-                )
-            );
+            let client_status = if (200..300).contains(&raw.status) {
+                200
+            } else {
+                raw.status
+            };
+            emit_payload_console_events(&report.trace);
             let _ = std::io::stdout().flush();
             Ok(json_response(client_status, projected))
         }
@@ -1147,84 +1216,6 @@ fn handle_responses(
             502,
         )),
     }
-}
-
-fn client_to_responses_request(
-    body: &serde_json::Value,
-    entry_protocol: &str,
-) -> Result<serde_json::Value, RuntimeFault> {
-    if entry_protocol == "responses" {
-        return Ok(body.clone());
-    }
-    if entry_protocol == "chat" {
-        return project_chat_request_to_responses(body);
-    }
-    Err(RuntimeFault::new(
-        "client_protocol_unsupported",
-        format!("unsupported client request protocol {entry_protocol}"),
-    ))
-}
-
-fn build_continuation_or_protocol_wire(
-    client_body: &serde_json::Value,
-    provider_body: &serde_json::Value,
-    target: &routecodex_v4_router::SelectedTarget,
-    entry_protocol: &str,
-    continuation_owner: &str,
-    port: u16,
-    session_scope: &str,
-    conversation_scope: &str,
-    runtime: &Arc<Mutex<SkeletonRuntime>>,
-    stream: bool,
-) -> Result<serde_json::Value, routecodex_v4_provider::ProviderTransportError> {
-    if entry_protocol == "responses"
-        && target.protocol == "responses"
-        && continuation_owner == "relay"
-        && client_body.get("previous_response_id").is_some()
-    {
-        let response_id = client_body
-            .get("previous_response_id")
-            .and_then(serde_json::Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| routecodex_v4_provider::ProviderTransportError {
-                code: "continuation_locator_invalid".to_string(),
-                message: "previous_response_id must be a non-empty string".to_string(),
-                status: None,
-            })?;
-        let key = ContinuationKey::new(
-            "responses",
-            "relay",
-            port,
-            session_scope,
-            conversation_scope,
-        );
-        let record = runtime
-            .lock()
-            .map_err(|_| routecodex_v4_provider::ProviderTransportError {
-                code: "continuation_runtime_lock".to_string(),
-                message: "runtime lock poisoned".to_string(),
-                status: None,
-            })?
-            .load_local_continuation(&key, response_id)
-            .map_err(|fault| routecodex_v4_provider::ProviderTransportError {
-                code: "continuation_restore".to_string(),
-                message: fault.to_string(),
-                status: None,
-            })?;
-        let prior_context: serde_json::Value = serde_json::from_str(&record.ordered_context)
-            .map_err(|error| routecodex_v4_provider::ProviderTransportError {
-                code: "continuation_context_decode".to_string(),
-                message: error.to_string(),
-                status: None,
-            })?;
-        return build_responses_local_continuation_wire(
-            &prior_context,
-            provider_body,
-            &target.wire_model,
-            stream,
-        );
-    }
-    build_protocol_wire(&target.protocol, provider_body, &target.wire_model, stream)
 }
 
 trait ProviderSseSource: Send {
@@ -1240,130 +1231,73 @@ impl ProviderSseSource for ProviderResponseStream {
     fn wait(&mut self) -> Result<(), String> {
         ProviderResponseStream::wait(self).map_err(|error| error.to_string())
     }
-
 }
 
 struct ResponsesSseStream<S = ProviderResponseStream> {
     stream: S,
     runtime: Arc<Mutex<SkeletonRuntime>>,
-    request_id: String,
-    port: u16,
-    entry_protocol: String,
-    continuation_owner: String,
-    provider_protocol: String,
-    session_scope: String,
-    conversation_scope: String,
-    frame_sequence: u64,
-    pending: Vec<u8>,
-    frame_buffer: Vec<u8>,
-    terminal_seen: bool,
+    processor: ResponseStreamProcessor,
+    ingress: SseIngressPlugin,
+    egress: SseEgressPlugin,
     close_after_pending: bool,
-    local_context_seed: Option<serde_json::Value>,
 }
 
 impl<S: ProviderSseSource> ResponsesSseStream<S> {
     fn new(
         stream: S,
         runtime: Arc<Mutex<SkeletonRuntime>>,
-        request_id: String,
-        port: u16,
-        entry_protocol: String,
-        continuation_owner: String,
-        provider_protocol: String,
-        session_scope: String,
-        conversation_scope: String,
+        processor: ResponseStreamProcessor,
     ) -> Self {
         Self {
             stream,
             runtime,
-            request_id,
-            port,
-            entry_protocol,
-            continuation_owner,
-            provider_protocol,
-            session_scope,
-            conversation_scope,
-            frame_sequence: 0,
-            pending: Vec::new(),
-            frame_buffer: Vec::new(),
-            terminal_seen: false,
+            processor,
+            ingress: SseIngressPlugin::new(
+                SseTransportPolicy::new(1024 * 1024, 1024 * 1024, Duration::from_secs(30))
+                    .expect("constant SSE transport policy"),
+                std::time::Instant::now(),
+            ),
+            egress: SseEgressPlugin::new(
+                SseTransportPolicy::new(1024 * 1024, 1024 * 1024, Duration::from_secs(30))
+                    .expect("constant SSE transport policy"),
+                std::time::Instant::now(),
+            ),
             close_after_pending: false,
-            local_context_seed: None,
         }
     }
 
-    fn set_local_context_seed(&mut self, seed: serde_json::Value) {
-        self.local_context_seed = Some(seed);
-    }
-
-    fn queue_error(&mut self, message: impl Into<String>) {
-        let payload = serde_json::json!({
-            "type": "error",
-            "error": {"message": message.into()}
-        });
-        self.pending.extend_from_slice(b"event: error\n");
-        self.pending.extend_from_slice(b"data: ");
-        self.pending.extend_from_slice(
-            &serde_json::to_vec(&payload).expect("stream error projection is serializable"),
-        );
-        self.pending.extend_from_slice(b"\n\n");
-        self.close_after_pending = true;
-    }
-
-    fn project_frame(&mut self, frame: &[u8], terminal: bool) -> Result<(), RuntimeFault> {
-        self.frame_sequence += 1;
-        let normalized_frame = if self.provider_protocol == "responses" {
-            frame.to_vec()
-        } else {
-            normalize_provider_sse_frame(&self.provider_protocol, frame).map_err(|error| {
-                RuntimeFault::new(&error.code, error.message)
-            })?
+    fn enqueue_disposition(
+        &mut self,
+        disposition: ResponseStreamDisposition,
+    ) -> Result<(), std::io::Error> {
+        let (frame, failed) = match disposition {
+            ResponseStreamDisposition::Continue { frame } => (frame, false),
+            ResponseStreamDisposition::Terminal { frame } => (frame, false),
+            ResponseStreamDisposition::Failure { frame } => (frame, true),
         };
-        let owner = if terminal {
-            self.continuation_owner.as_str()
-        } else {
-            "none"
-        };
-        let continuation_seed = self
-            .local_context_seed
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))?;
-        let report = self
-            .runtime
-            .lock()
-            .map_err(|_| {
-                RuntimeFault::new("response_runtime_lock", "response runtime lock poisoned")
-            })?
-            .execute_provider_response_scoped_with_seed(
-                std::str::from_utf8(&normalized_frame)
-                    .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?,
-                &format!("{}:sse:{}", self.request_id, self.frame_sequence),
-                self.port,
-                &self.session_scope,
-                &self.conversation_scope,
-                &self.entry_protocol,
-                owner,
-                continuation_seed,
-            )?;
-        let client_frame = report.client_frame.ok_or_else(|| {
-            RuntimeFault::new(
-                "response_frame_missing",
-                "response chain produced no client frame",
-            )
-        })?;
-        self.pending.extend_from_slice(client_frame.as_bytes());
+        self.egress
+            .enqueue(frame, std::time::Instant::now())
+            .map_err(|error| {
+                std::io::Error::other(format!("client SSE transport failed: {error:?}"))
+            })?;
+        self.close_after_pending |= failed;
         Ok(())
+    }
+
+    fn enqueue_runtime_failure(&mut self, fault: RuntimeFault) -> Result<(), std::io::Error> {
+        let disposition = self
+            .processor
+            .project_failure(fault)
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        self.enqueue_disposition(disposition)
     }
 }
 
 impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
     fn next_chunk(&mut self, chunk: &mut Vec<u8>) -> Result<bool, std::io::Error> {
         loop {
-            if !self.pending.is_empty() {
-                chunk.extend_from_slice(&self.pending);
-                self.pending.clear();
+            if let Some(frame) = self.egress.pop() {
+                chunk.extend_from_slice(frame.as_bytes());
                 return Ok(true);
             }
             if self.close_after_pending {
@@ -1373,62 +1307,110 @@ impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
             let count = match self.stream.read_chunk(&mut bytes) {
                 Ok(count) => count,
                 Err(error) => {
-                    self.queue_error(format!("provider SSE read failed: {error}"));
+                    self.enqueue_runtime_failure(RuntimeFault::new(
+                        "provider_sse_read",
+                        format!("provider SSE read failed: {error}"),
+                    ))?;
                     continue;
                 }
             };
             if count == 0 {
-                if !self.frame_buffer.is_empty() {
-                    self.frame_buffer.clear();
-                    self.queue_error("incomplete provider SSE frame at end of stream");
-                    continue;
-                }
-                if !self.terminal_seen {
-                    self.queue_error(
-                        "provider SSE ended before response.completed or response.failed",
-                    );
+                if let Err(error) = self.ingress.finish() {
+                    let fault = match error {
+                        routecodex_v4_standard_plugins::sse_transport::SseTransportError::IncompleteFrame =>
+                            RuntimeFault::new(
+                                "provider_sse_incomplete_frame",
+                                "incomplete provider SSE frame at end of stream",
+                            ),
+                        other => RuntimeFault::new(
+                            "provider_sse_transport",
+                            format!("provider SSE framing failed: {other:?}"),
+                        ),
+                    };
+                    self.enqueue_runtime_failure(fault)?;
                     continue;
                 }
                 if let Err(error) = self.stream.wait() {
-                    self.queue_error(format!("provider SSE closeout failed: {error}"));
+                    self.enqueue_runtime_failure(RuntimeFault::new(
+                        "provider_sse_closeout",
+                        format!("provider SSE closeout failed: {error}"),
+                    ))?;
                     continue;
                 }
-                return Ok(false);
-            }
-            self.frame_buffer.extend_from_slice(&bytes[..count]);
-            while let Some(end) = find_frame_end(&self.frame_buffer) {
-                let frame = self.frame_buffer[..end].to_vec();
-                self.frame_buffer.drain(..end);
-                let terminal = match routecodex_v4_runtime::validate_responses_sse_frame(&frame) {
-                    Ok(terminal) => terminal,
+                match self.processor.finish() {
+                    Ok(()) => return Ok(false),
                     Err(fault) => {
-                        self.queue_error(fault.to_string());
+                        self.enqueue_runtime_failure(fault)?;
+                        continue;
+                    }
+                }
+            }
+            let frames = match self
+                .ingress
+                .push_chunk(&bytes[..count], std::time::Instant::now())
+            {
+                Ok(frames) => frames,
+                Err(error) => {
+                    self.enqueue_runtime_failure(RuntimeFault::new(
+                        "provider_sse_transport",
+                        format!("provider SSE framing failed: {error:?}"),
+                    ))?;
+                    continue;
+                }
+            };
+            for frame in frames {
+                let disposition = match self.runtime.lock() {
+                    Ok(runtime) => {
+                        match self
+                            .processor
+                            .execute_provider_response_scoped(&runtime, frame)
+                        {
+                            Ok((disposition, report)) => {
+                                if let Some(report) = report {
+                                    emit_payload_console_events(&report.trace);
+                                    if report.client_frame.is_none() {
+                                        Err(RuntimeFault::new(
+                                            "response_frame_missing",
+                                            "response chain produced no client frame",
+                                        ))
+                                    } else {
+                                        Ok(disposition)
+                                    }
+                                } else {
+                                    Ok(disposition)
+                                }
+                            }
+                            Err(fault) => Err(fault),
+                        }
+                    }
+                    Err(_) => Err(RuntimeFault::new(
+                        "response_runtime_lock",
+                        "response runtime lock poisoned",
+                    )),
+                };
+                match disposition {
+                    Ok(disposition) => self.enqueue_disposition(disposition)?,
+                    Err(fault) => {
+                        self.enqueue_runtime_failure(fault)?;
                         break;
                     }
-                };
-                self.terminal_seen |= terminal;
-                if let Err(fault) = self.project_frame(&frame, terminal) {
-                    self.queue_error(fault.to_string());
-                    break;
                 }
             }
         }
     }
 }
 
-fn find_frame_end(bytes: &[u8]) -> Option<usize> {
-    let lf = bytes
-        .windows(2)
-        .position(|window| window == b"\n\n")
-        .map(|position| position + 2);
-    let crlf = bytes
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|position| position + 4);
-    match (lf, crlf) {
-        (Some(left), Some(right)) => Some(left.min(right)),
-        (Some(end), None) | (None, Some(end)) => Some(end),
-        (None, None) => None,
+fn emit_payload_console_events(trace: &[String]) {
+    for event in trace {
+        let Some((plugin_id, rest)) = event.split_once(':') else {
+            continue;
+        };
+        let Some((kind, message)) = rest.split_once(':') else {
+            continue;
+        };
+        if plugin_id.ends_with("payload_console_render") && kind == "console.payload_ready" {
+            println!("{message}");
+        }
     }
 }
 
@@ -1458,7 +1440,8 @@ fn project_provider_fault(
     let Some(product) = product else {
         return project_fault(request, fault, status);
     };
-    let Some(policy) = apply_product_error_policy(product, provider_id, status, response_body) else {
+    let Some(policy) = apply_product_error_policy(product, provider_id, status, response_body)
+    else {
         return project_fault(request, fault, status);
     };
     let action = if policy.retry {
@@ -1504,8 +1487,10 @@ fn project_provider_fault(
 fn send_target_nonstream(
     target: &routecodex_v4_router::SelectedTarget,
     wire_body: &serde_json::Value,
-) -> Result<routecodex_v4_provider::ProviderRawResponse, routecodex_v4_provider::ProviderTransportError>
-{
+) -> Result<
+    routecodex_v4_provider::ProviderRawResponse,
+    routecodex_v4_provider::ProviderTransportError,
+> {
     validate_auth_alias(&target.config_path, target.auth_alias.as_deref())?;
     match target.protocol.as_str() {
         "responses" => send_responses(&target.config_path, &target.wire_model, wire_body, false),
@@ -1592,9 +1577,8 @@ fn json_response(status: u16, value: serde_json::Value) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::VecDeque;
     use routecodex_v4_config::compile_runtime_config;
-    use routecodex_v4_node_container::NodeContainerState;
+    use std::collections::VecDeque;
 
     fn test_manifest() -> RuntimeConfigManifest {
         compile_runtime_config(
@@ -1627,54 +1611,31 @@ targets = ["mock"]
     }
 
     #[test]
-    fn production_pipeline_declares_and_executes_request_node_container() {
+    fn production_pipeline_uses_the_single_runtime_execution_owner() {
         let mut handler = PipelineHandler::new(test_manifest()).expect("handler initializes");
-        assert_eq!(
+        assert!(
             handler
-                .request_node
+                .runtime
                 .lock()
-                .expect("request node lock")
-                .state(),
-            NodeContainerState::Accepting
+                .expect("runtime lock")
+                .plan()
+                .chains
+                .len()
+                >= 2
         );
-        assert_eq!(
-            handler
-                .response_node
-                .lock()
-                .expect("response node lock")
-                .state(),
-            NodeContainerState::Accepting
-        );
-        {
-            let response_node = handler.response_node.lock().expect("response node lock");
-            let response_plan_hash = response_node.bindings().loaded_plan_hash.clone();
-            let output = response_node
-                .execute_with_plan_hash(
-                    &response_plan_hash,
-                    NodeExecutionInput {
-                        data: serde_json::json!({
-                            "requestId": "request-node-container-test",
-                            "providerId": "mock",
-                            "statusCode": 200,
-                            "data": {"output": [{"type": "message"}]}
-                        }),
-                        control: serde_json::json!({}),
-                    },
-                    handler.plugin_registry.as_ref(),
-                )
-                .expect("response inbound plan executes through NodeContainer");
-            assert_eq!(output.data["output"][0]["type"], "message");
-        }
         let response = handler.handle(HttpRequest {
             method: "POST".to_string(),
             path: "/unknown".to_string(),
             headers: Vec::new(),
             body: br#"{"model":"mock-model","input":"hello"}"#.to_vec(),
-            request_id: "request-node-container-test".to_string(),
+            request_id: "request-engine-test".to_string(),
             server_id: "test".to_string(),
             port: u16::from_ne_bytes([0, 1]),
         });
-        assert_eq!(response.status, 404, "request node must run before route projection");
+        assert_eq!(
+            response.status, 404,
+            "request node must run before route projection"
+        );
     }
 
     struct MockSseSource {
@@ -1698,13 +1659,12 @@ targets = ["mock"]
         fn wait(&mut self) -> Result<(), String> {
             self.wait_result.clone()
         }
-
     }
 
     fn runtime() -> Arc<Mutex<SkeletonRuntime>> {
-        Arc::new(Mutex::new(
-            SkeletonRuntime::load(SKELETON_PLAN).expect("response plan must load"),
-        ))
+        PipelineHandler::new(test_manifest())
+            .expect("compiled response plan must load")
+            .runtime
     }
 
     fn stream(chunks: Vec<Result<Vec<u8>, String>>) -> ResponsesSseStream<MockSseSource> {
@@ -1716,12 +1676,7 @@ targets = ["mock"]
         entry_protocol: &str,
         continuation_owner: &str,
     ) -> ResponsesSseStream<MockSseSource> {
-        stream_for_with_runtime(
-            runtime(),
-            chunks,
-            entry_protocol,
-            continuation_owner,
-        )
+        stream_for_with_runtime(runtime(), chunks, entry_protocol, continuation_owner)
     }
 
     fn stream_for_with_runtime(
@@ -1730,19 +1685,52 @@ targets = ["mock"]
         entry_protocol: &str,
         continuation_owner: &str,
     ) -> ResponsesSseStream<MockSseSource> {
+        let port = u16::from_ne_bytes([0, 1]);
+        let (request_lease, request_scope) = {
+            let runtime = runtime.lock().expect("test runtime lock");
+            let request_lease = runtime
+                .admit_request("request-1")
+                .expect("test stream admission");
+            let body = if entry_protocol == "chat" {
+                r#"{"model":"m","messages":[{"role":"user","content":"hello"}]}"#
+            } else {
+                r#"{"model":"m","input":[]}"#
+            };
+            let report = runtime
+                .execute_request_json_scoped_for_target_with_lease(
+                    body,
+                    entry_protocol,
+                    "responses",
+                    "m",
+                    true,
+                    "request-1",
+                    port,
+                    "session-1",
+                    "conversation-1",
+                    Some(continuation_owner),
+                    Some(&request_lease),
+                )
+                .expect("test request establishes stream scope");
+            (request_lease, report.scope)
+        };
+        let processor = ResponseStreamProcessor::new(
+            request_lease,
+            request_scope,
+            port,
+            entry_protocol,
+            "responses",
+            continuation_owner,
+            "session-1",
+            "conversation-1",
+        )
+        .expect("test stream processor");
         ResponsesSseStream::new(
             MockSseSource {
                 chunks: chunks.into(),
                 wait_result: Ok(()),
             },
             runtime,
-            "request-1".to_string(),
-            u16::from_ne_bytes([0, 1]),
-            entry_protocol.to_string(),
-            continuation_owner.to_string(),
-            "responses".to_string(),
-            "session-1".to_string(),
-            "conversation-1".to_string(),
+            processor,
         )
     }
 
@@ -1770,79 +1758,6 @@ targets = ["mock"]
         );
         chunk.clear();
         assert!(!stream.next_chunk(&mut chunk).expect("stream must close"));
-    }
-
-    #[test]
-    fn local_responses_terminal_frame_commits_ordered_context() {
-        let runtime = runtime();
-        let frame = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-local\",\"output\":[{\"type\":\"message\"}]}}\n\n";
-        let mut stream = stream_for_with_runtime(
-            Arc::clone(&runtime),
-            vec![Ok(frame.to_vec())],
-            "responses",
-            "relay",
-        );
-        stream.set_local_context_seed(
-            serde_json::json!([{"role":"user","content":"hello"}]),
-        );
-        let mut chunk = Vec::new();
-        assert!(stream.next_chunk(&mut chunk).expect("terminal frame projects"));
-        let key = ContinuationKey::new(
-            "responses",
-            "relay",
-            u16::from_ne_bytes([0, 1]),
-            "session-1",
-            "conversation-1",
-        );
-        let ordered_context = {
-            let runtime_guard = runtime.lock().expect("runtime lock");
-            runtime_guard
-                .load_local_continuation(&key, "resp-local")
-                .expect("terminal response is committed")
-                .ordered_context
-        };
-        let context: serde_json::Value = serde_json::from_str(&ordered_context).expect("context JSON");
-        assert_eq!(context.as_array().expect("ordered context").len(), 2);
-    }
-
-    #[test]
-    fn local_continuation_wire_uses_exact_locator_and_preserves_request_fields() {
-        let runtime = runtime();
-        let key = ContinuationKey::new("responses", "relay", 5520, "session-1", "conversation-1");
-        runtime
-            .lock()
-            .expect("runtime lock")
-            .commit_local_continuation(key, "resp-1", r#"[{"role":"user","content":"first"}]"#)
-            .expect("seed local continuation");
-        let target = routecodex_v4_router::SelectedTarget {
-            provider_id: "cc-sol".to_string(),
-            config_path: "/tmp/provider.toml".to_string(),
-            protocol: "responses".to_string(),
-            wire_model: "gpt-wire".to_string(),
-            auth_alias: Some("key1".to_string()),
-        };
-        let client = serde_json::json!({
-            "model":"gpt-wire",
-            "previous_response_id":"resp-1",
-            "input":[{"role":"user","content":"second"}],
-            "tools":[{"type":"function"}]
-        });
-        let wire = build_continuation_or_protocol_wire(
-            &client,
-            &client,
-            &target,
-            "responses",
-            "relay",
-            5520,
-            "session-1",
-            "conversation-1",
-            &runtime,
-            false,
-        )
-        .expect("local continuation wire");
-        assert!(wire.get("previous_response_id").is_none());
-        assert_eq!(wire["tools"][0]["type"], "function");
-        assert_eq!(wire["input"].as_array().expect("input array").len(), 2);
     }
 
     #[test]
@@ -1886,7 +1801,9 @@ targets = ["mock"]
         let frame = b"event: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"abc\"}}\r\n\r\n";
         let mut stream = stream(vec![Ok(frame.to_vec())]);
         let mut chunk = Vec::new();
-        assert!(stream.next_chunk(&mut chunk).expect("CRLF frame must project"));
+        assert!(stream
+            .next_chunk(&mut chunk)
+            .expect("CRLF frame must project"));
         let text = String::from_utf8(chunk).expect("projected frame must be UTF-8");
         assert!(text.contains("event: response.completed"));
         assert!(!text.contains("event: error"));
@@ -1903,7 +1820,26 @@ targets = ["mock"]
             .expect("error event must emit"));
         let text = String::from_utf8(chunk).expect("error event must be UTF-8");
         assert!(text.starts_with("event: error\ndata: "));
-        assert!(text.contains("provider_sse_malformed"));
+        assert!(text.contains("invalid JSON"));
+    }
+
+    #[test]
+    fn provider_failed_event_projects_error_once_without_success_terminal() {
+        let frame = b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"upstream failed\"}}}\n\n";
+        let mut stream = stream(vec![Ok(frame.to_vec())]);
+        let mut chunk = Vec::new();
+        assert!(stream
+            .next_chunk(&mut chunk)
+            .expect("failure event must emit"));
+        let text = String::from_utf8(chunk).expect("failure event must be UTF-8");
+        assert!(text.starts_with("event: error\ndata: "));
+        assert!(text.contains("upstream failed"));
+        assert!(!text.contains("response.completed"));
+        let mut closed = Vec::new();
+        assert!(!stream
+            .next_chunk(&mut closed)
+            .expect("failed stream must close"));
+        assert!(closed.is_empty());
     }
 
     #[test]
@@ -1928,7 +1864,10 @@ targets = ["mock"]
                 "name": "lookup", "description": "lookup", "parameters": {"type": "object"}
             }}]
         });
-        let projected = client_to_responses_request(&body, "chat")
+        let projected =
+            routecodex_v4_standard_plugins::request_plugins::project_chat_request_to_responses(
+                &body,
+            )
             .expect("chat request must project to Responses input");
         assert_eq!(projected["input"], body["messages"]);
         assert_eq!(projected["tools"][0]["name"], "lookup");
@@ -1936,7 +1875,7 @@ targets = ["mock"]
     }
 
     #[test]
-    fn relay_terminal_frame_projects_chat_chunk_and_done() {
+    fn chat_terminal_frame_projects_chunk_and_done_without_continuation() {
         let frame = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\"}}\n\n";
         let mut stream = stream_for(vec![Ok(frame.to_vec())], "chat", "relay");
         let mut chunk = Vec::new();
@@ -1945,7 +1884,10 @@ targets = ["mock"]
             .expect("relay frame must project"));
         let text = String::from_utf8(chunk).expect("relay frame must be UTF-8");
         assert!(!text.contains("event: response.completed"));
-        assert!(text.contains("\"object\":\"chat.completion.chunk\""));
+        assert!(
+            text.contains("\"object\":\"chat.completion.chunk\""),
+            "unexpected chat projection: {text}"
+        );
         assert!(text.ends_with("data: [DONE]\n\n"));
     }
 }

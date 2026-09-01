@@ -8,11 +8,15 @@
 //!   recorded by the provider runtime owner only;
 //! - availability never enters provider/client payload.
 
+use bytes::Bytes;
+use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
-use std::process::{Command, Stdio};
+use std::io::Read;
+use std::pin::Pin;
+use std::time::{Duration, Instant};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct ProviderFile {
@@ -31,7 +35,10 @@ struct ProviderSection {
     protocol: String,
     #[serde(default)]
     models: BTreeMap<String, ModelSection>,
-    #[serde(rename = "responsesContinuation", default = "default_responses_continuation")]
+    #[serde(
+        rename = "responsesContinuation",
+        default = "default_responses_continuation"
+    )]
     responses_continuation: String,
     auth: AuthSection,
 }
@@ -87,14 +94,21 @@ pub struct ProviderProfile {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ProviderAuthHandle {
-    TokenFile { path: String, alias: Option<String> },
-    Env { name: String },
+    TokenFile {
+        path: String,
+        alias: Option<String>,
+    },
+    Env {
+        name: String,
+    },
     SecretFile {
         path: String,
         key: String,
         alias: Option<String>,
     },
-    ConfigInline { config_path: String },
+    ConfigInline {
+        config_path: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,10 +118,331 @@ pub struct ProviderRawResponse {
     pub body: Vec<u8>,
 }
 
+const NATIVE_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+const NATIVE_MAX_CHUNK_BYTES: usize = 64 * 1024;
+
+/// Async provider transport owner. It owns HTTP connection pooling and wire
+/// bytes only; routing, retry, continuation, and client projection remain
+/// typed runtime side-channel concerns.
+#[derive(Clone)]
+pub struct NativeProviderTransport {
+    client: reqwest::Client,
+    deadline: Duration,
+    max_buffer_bytes: usize,
+}
+
+impl NativeProviderTransport {
+    pub fn new(
+        deadline: Duration,
+        max_buffer_bytes: usize,
+    ) -> Result<Self, ProviderTransportError> {
+        if deadline.is_zero() {
+            return Err(ProviderTransportError {
+                code: "provider_deadline_invalid".into(),
+                message: "deadline must be positive".into(),
+                status: None,
+            });
+        }
+        if max_buffer_bytes == 0 || max_buffer_bytes > NATIVE_MAX_RESPONSE_BYTES {
+            return Err(ProviderTransportError {
+                code: "provider_buffer_limit_invalid".into(),
+                message: format!("buffer must be 1..={NATIVE_MAX_RESPONSE_BYTES} bytes"),
+                status: None,
+            });
+        }
+        let client = reqwest::Client::builder()
+            .pool_max_idle_per_host(16)
+            .build()
+            .map_err(|error| ProviderTransportError {
+                code: "provider_client_build".into(),
+                message: error.to_string(),
+                status: None,
+            })?;
+        Ok(Self {
+            client,
+            deadline,
+            max_buffer_bytes,
+        })
+    }
+
+    pub async fn send_json(
+        &self,
+        profile_path: &str,
+        endpoint_suffix: &str,
+        input: &Value,
+        cancellation: CancellationToken,
+    ) -> Result<ProviderRawResponse, ProviderTransportError> {
+        if input.get("metadata").is_some() {
+            return Err(ProviderTransportError {
+                code: "provider_control_payload_leak".into(),
+                message: "internal metadata cannot enter provider wire payload".into(),
+                status: None,
+            });
+        }
+        let profile = load_profile(profile_path)?;
+        let key = materialize_auth(&profile.auth)?;
+        let body = serde_json::to_vec(input).map_err(|error| ProviderTransportError {
+            code: "provider_request_encode".into(),
+            message: error.to_string(),
+            status: None,
+        })?;
+        let response = self
+            .send_request(&profile, endpoint_suffix, key, body, cancellation.clone())
+            .await?;
+        let status = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        let bytes = self
+            .read_bounded_body(response, status, cancellation)
+            .await?;
+        Ok(ProviderRawResponse {
+            status,
+            content_type,
+            body: bytes,
+        })
+    }
+
+    pub async fn send_streaming(
+        &self,
+        profile_path: &str,
+        endpoint_suffix: &str,
+        input: &Value,
+        cancellation: CancellationToken,
+    ) -> Result<NativeProviderResponseStream, ProviderTransportError> {
+        if input.get("metadata").is_some() {
+            return Err(ProviderTransportError {
+                code: "provider_control_payload_leak".into(),
+                message: "internal metadata cannot enter provider wire payload".into(),
+                status: None,
+            });
+        }
+        let profile = load_profile(profile_path)?;
+        let key = materialize_auth(&profile.auth)?;
+        let body = serde_json::to_vec(input).map_err(|error| ProviderTransportError {
+            code: "provider_request_encode".into(),
+            message: error.to_string(),
+            status: None,
+        })?;
+        let response = self
+            .send_request(&profile, endpoint_suffix, key, body, cancellation.clone())
+            .await?;
+        let status = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        Ok(NativeProviderResponseStream {
+            body: Box::pin(response.bytes_stream()),
+            pending: Bytes::new(),
+            seen: 0,
+            max_buffer_bytes: self.max_buffer_bytes,
+            deadline: Instant::now() + self.deadline,
+            cancellation,
+            status,
+            content_type,
+        })
+    }
+
+    async fn send_request(
+        &self,
+        profile: &ProviderProfile,
+        endpoint_suffix: &str,
+        key: String,
+        body: Vec<u8>,
+        cancellation: CancellationToken,
+    ) -> Result<reqwest::Response, ProviderTransportError> {
+        let endpoint = format!(
+            "{}/{}",
+            profile.base_url.trim_end_matches('/'),
+            endpoint_suffix.trim_start_matches('/')
+        );
+        let mut request = self
+            .client
+            .post(endpoint)
+            .header(reqwest::header::CONTENT_TYPE, "application/json");
+        request = if profile.protocol == "anthropic" {
+            request
+                .header("x-api-key", key)
+                .header("anthropic-version", "2023-06-01")
+        } else {
+            request.bearer_auth(key)
+        };
+        tokio::time::timeout(self.deadline, async { tokio::select! { _ = cancellation.cancelled() => Err(ProviderTransportError { code: "provider_transport_cancelled".into(), message: "provider request cancelled".into(), status: None }), result = request.body(body).send() => result.map_err(|error| ProviderTransportError { code: "provider_transport_send".into(), message: error.to_string(), status: None }) } }).await.map_err(|_| ProviderTransportError { code: "provider_deadline_exceeded".into(), message: "provider request deadline exceeded".into(), status: None })?
+    }
+
+    async fn read_bounded_body(
+        &self,
+        response: reqwest::Response,
+        status: u16,
+        cancellation: CancellationToken,
+    ) -> Result<Vec<u8>, ProviderTransportError> {
+        let deadline = Instant::now() + self.deadline;
+        let mut body = response.bytes_stream();
+        let mut output = Vec::new();
+        loop {
+            let item = tokio::time::timeout_at(deadline.into(), async {
+                tokio::select! {
+                    _ = cancellation.cancelled() => Err(ProviderTransportError {
+                        code: "provider_transport_cancelled".into(),
+                        message: "provider response read cancelled".into(),
+                        status: Some(status),
+                    }),
+                    item = body.next() => Ok(item),
+                }
+            })
+            .await
+            .map_err(|_| ProviderTransportError {
+                code: "provider_deadline_exceeded".into(),
+                message: "provider response deadline exceeded".into(),
+                status: Some(status),
+            })??;
+            let Some(item) = item else { break };
+            let bytes = item.map_err(|error| ProviderTransportError {
+                code: "provider_response_read".into(),
+                message: error.to_string(),
+                status: Some(status),
+            })?;
+            if output.len().saturating_add(bytes.len()) > self.max_buffer_bytes {
+                return Err(ProviderTransportError {
+                    code: "provider_response_buffer_limit".into(),
+                    message: "provider response exceeded bounded buffer".into(),
+                    status: Some(status),
+                });
+            }
+            output.extend_from_slice(&bytes);
+        }
+        Ok(output)
+    }
+}
+
+pub struct NativeProviderResponseStream {
+    body: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
+    pending: Bytes,
+    seen: usize,
+    max_buffer_bytes: usize,
+    deadline: Instant,
+    cancellation: CancellationToken,
+    status: u16,
+    content_type: String,
+}
+
+impl NativeProviderResponseStream {
+    pub fn status(&self) -> u16 {
+        self.status
+    }
+    pub fn content_type(&self) -> &str {
+        &self.content_type
+    }
+
+    pub async fn next_chunk(&mut self) -> Result<Option<Bytes>, ProviderTransportError> {
+        if !self.pending.is_empty() {
+            return Ok(Some(std::mem::take(&mut self.pending)));
+        }
+        if Instant::now() >= self.deadline {
+            return Err(ProviderTransportError {
+                code: "provider_deadline_exceeded".into(),
+                message: "provider stream deadline exceeded".into(),
+                status: Some(self.status),
+            });
+        }
+        let next = tokio::time::timeout_at(self.deadline.into(), async {
+            tokio::select! {
+                _ = self.cancellation.cancelled() => Err(ProviderTransportError { code: "provider_transport_cancelled".into(), message: "provider stream cancelled".into(), status: Some(self.status) }),
+                item = self.body.next() => Ok(item),
+            }
+        }).await.map_err(|_| ProviderTransportError { code: "provider_deadline_exceeded".into(), message: "provider stream deadline exceeded".into(), status: Some(self.status) })??;
+        let Some(item) = next else {
+            return Ok(None);
+        };
+        let bytes = item.map_err(|error| ProviderTransportError {
+            code: "provider_response_read".into(),
+            message: error.to_string(),
+            status: Some(self.status),
+        })?;
+        self.seen = self.seen.saturating_add(bytes.len());
+        if self.seen > self.max_buffer_bytes {
+            return Err(ProviderTransportError {
+                code: "provider_response_buffer_limit".into(),
+                message: "provider stream exceeded bounded buffer".into(),
+                status: Some(self.status),
+            });
+        }
+        let split_at = bytes.len().min(NATIVE_MAX_CHUNK_BYTES);
+        let mut bytes = bytes;
+        let remainder = bytes.split_off(split_at);
+        self.pending = remainder;
+        Ok(Some(bytes))
+    }
+}
+
+pub const PROVIDER_BOUND_RAW_EVIDENCE_OWNER: &str =
+    "routecodex-v4-provider::ProviderBoundRawEvidence";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderBoundRawEvidence {
+    pub request_id: String,
+    pub provider_request: Vec<u8>,
+    pub provider_response: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderBoundRawEvidenceBindingError {
+    MissingOwner,
+    InvalidOwner { owner: String },
+    MissingRequestId,
+    MissingProviderRequest,
+    MissingProviderResponse,
+}
+
+/// Contract-only binding point for future live provider capture.
+///
+/// M00 may validate ownership and identity only. M08 supplies transport bytes
+/// and decides when a capture is made; no transport, retry, or payload logic
+/// belongs here.
+pub struct ProviderBoundRawEvidenceOwnerContract;
+
+impl ProviderBoundRawEvidenceOwnerContract {
+    pub fn bind(
+        owner: &str,
+        request_id: &str,
+        provider_request: &[u8],
+        provider_response: &[u8],
+    ) -> Result<ProviderBoundRawEvidence, ProviderBoundRawEvidenceBindingError> {
+        if owner.trim().is_empty() {
+            return Err(ProviderBoundRawEvidenceBindingError::MissingOwner);
+        }
+        if owner != PROVIDER_BOUND_RAW_EVIDENCE_OWNER {
+            return Err(ProviderBoundRawEvidenceBindingError::InvalidOwner {
+                owner: owner.to_string(),
+            });
+        }
+        if request_id.trim().is_empty() {
+            return Err(ProviderBoundRawEvidenceBindingError::MissingRequestId);
+        }
+        if provider_request.is_empty() {
+            return Err(ProviderBoundRawEvidenceBindingError::MissingProviderRequest);
+        }
+        if provider_response.is_empty() {
+            return Err(ProviderBoundRawEvidenceBindingError::MissingProviderResponse);
+        }
+        Ok(ProviderBoundRawEvidence {
+            request_id: request_id.to_string(),
+            provider_request: provider_request.to_vec(),
+            provider_response: provider_response.to_vec(),
+        })
+    }
+}
+
 /// Provider-owned real transport stream. The runtime owns semantic frame
 /// validation and the server owns client chunk emission.
 pub struct ProviderResponseStream {
-    child: std::process::Child,
+    response: reqwest::blocking::Response,
     buffer: Vec<u8>,
     status: u16,
     content_type: String,
@@ -134,14 +469,7 @@ impl ProviderResponseStream {
             self.buffer.drain(..count);
             return Ok(count);
         }
-        self.child
-            .stdout
-            .as_mut()
-            .ok_or_else(|| ProviderTransportError {
-                code: "provider_stream_no_stdout".to_string(),
-                message: "provider stream lost stdout".to_string(),
-                status: None,
-            })?
+        self.response
             .read(chunk)
             .map_err(|error| ProviderTransportError {
                 code: "provider_stream_read".to_string(),
@@ -151,29 +479,7 @@ impl ProviderResponseStream {
     }
 
     pub fn wait(&mut self) -> Result<(), ProviderTransportError> {
-        let status = self.child.wait().map_err(|error| ProviderTransportError {
-            code: "provider_transport_wait".to_string(),
-            message: error.to_string(),
-            status: None,
-        })?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(ProviderTransportError {
-                code: "provider_transport_failed".to_string(),
-                message: format!("provider transport exited with {status}"),
-                status: None,
-            })
-        }
-    }
-}
-
-impl Drop for ProviderResponseStream {
-    fn drop(&mut self) {
-        if self.child.try_wait().ok().flatten().is_none() {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-        }
+        Ok(())
     }
 }
 
@@ -231,7 +537,14 @@ pub fn load_profile(path: &str) -> Result<ProviderProfile, ProviderTransportErro
             key: format!("{}.key1", file.provider_id),
             alias: Some("key1".to_string()),
         }
-    } else if !file.provider.auth.env.as_deref().unwrap_or_default().is_empty() {
+    } else if !file
+        .provider
+        .auth
+        .env
+        .as_deref()
+        .unwrap_or_default()
+        .is_empty()
+    {
         ProviderAuthHandle::Env {
             name: file.provider.auth.env.clone().expect("checked non-empty"),
         }
@@ -262,24 +575,15 @@ pub fn load_profile(path: &str) -> Result<ProviderProfile, ProviderTransportErro
             id,
         })
         .collect();
-    if file.provider.responses_continuation != "direct"
-        && file.provider.responses_continuation != "relay"
-    {
-        return Err(ProviderTransportError {
-            code: "provider_continuation_owner_invalid".to_string(),
-            message: format!(
-                "responsesContinuation must be direct or relay, got {}",
-                file.provider.responses_continuation
-            ),
-            status: None,
-        });
-    }
     Ok(ProviderProfile {
         provider_id: file.provider_id,
         base_url: file.provider.base_url,
         default_model: file.provider.default_model,
         protocol: file.provider.protocol,
-        responses_continuation: file.provider.responses_continuation,
+        // V4 has no local continuation owner. Provider profiles may carry the
+        // retired V3 hint, but runtime semantics are always provider-owned
+        // Direct and never inferred from that legacy field.
+        responses_continuation: "direct".to_string(),
         models,
         auth,
     })
@@ -349,10 +653,7 @@ fn build_messages_wire(
             status: None,
         });
     }
-    if !object
-        .get("messages")
-        .is_some_and(Value::is_array)
-    {
+    if !object.get("messages").is_some_and(Value::is_array) {
         return Err(ProviderTransportError {
             code: "provider_request_invalid".to_string(),
             message: format!("{protocol} request requires messages array"),
@@ -463,64 +764,13 @@ pub fn build_protocol_wire(
     }
 }
 
-/// Build an explicitly V4-owned Responses relay continuation request.
-///
-/// This is not a cleanup path for a direct request: the caller must have
-/// already selected the relay continuation owner and provide the immutable
-/// ordered context captured at the previous response Chat Process commit.
-/// The provider receives the materialized input and never receives the
-/// control-plane `previous_response_id` locator.
-pub fn build_responses_local_continuation_wire(
-    prior_context: &Value,
-    current_request: &Value,
+pub fn build_retry_wire(
+    provider_protocol: &str,
+    semantic_body: &Value,
     wire_model: &str,
     stream: bool,
 ) -> Result<Value, ProviderTransportError> {
-    let prior_items = prior_context.as_array().ok_or_else(|| ProviderTransportError {
-        code: "continuation_context_invalid".to_string(),
-        message: "relay continuation context must be an ordered input array".to_string(),
-        status: None,
-    })?;
-    let current_input = current_request
-        .get("input")
-        .ok_or_else(|| ProviderTransportError {
-            code: "continuation_input_missing".to_string(),
-            message: "relay continuation request input is missing".to_string(),
-            status: None,
-        })?;
-    let current_items = match current_input {
-        Value::Array(items) => items.clone(),
-        Value::String(text) => vec![Value::String(text.clone())],
-        value if value.is_object() => vec![value.clone()],
-        _ => {
-            return Err(ProviderTransportError {
-                code: "continuation_input_invalid".to_string(),
-                message: "relay continuation input must be a string, object, or array".to_string(),
-                status: None,
-            })
-        }
-    };
-    let mut input = Vec::with_capacity(prior_items.len() + current_items.len());
-    input.extend(prior_items.iter().cloned());
-    input.extend(current_items);
-    let mut wire = current_request.clone();
-    let object = wire.as_object_mut().ok_or_else(|| ProviderTransportError {
-        code: "provider_request_invalid".to_string(),
-        message: "Responses request must be a JSON object".to_string(),
-        status: None,
-    })?;
-    if object.contains_key("metadata") {
-        return Err(ProviderTransportError {
-            code: "provider_control_payload_leak".to_string(),
-            message: "internal metadata cannot enter provider wire payload".to_string(),
-            status: None,
-        });
-    }
-    object.remove("previous_response_id");
-    object.insert("model".to_string(), Value::String(wire_model.to_string()));
-    object.insert("input".to_string(), Value::Array(input));
-    object.insert("stream".to_string(), Value::Bool(stream));
-    Ok(wire)
+    build_protocol_wire(provider_protocol, semantic_body, wire_model, stream)
 }
 
 pub fn send_responses(
@@ -533,7 +783,7 @@ pub fn send_responses(
     let wire_model = resolve_model(&profile, model)?;
     if profile.protocol != "responses" {
         return Err(ProviderTransportError {
-            code: "provider_protocol_unsupported".to_string(),
+            code: "provider_protocol_unsupported".into(),
             message: format!(
                 "provider protocol {} cannot serve Responses",
                 profile.protocol
@@ -541,7 +791,6 @@ pub fn send_responses(
             status: None,
         });
     }
-    let key = materialize_auth(&profile.auth)?;
     let mut body = input.clone();
     let object = body.as_object_mut().ok_or_else(|| ProviderTransportError {
         code: "provider_request_invalid".to_string(),
@@ -550,50 +799,72 @@ pub fn send_responses(
     })?;
     object.insert("model".to_string(), Value::String(wire_model));
     object.insert("stream".to_string(), Value::Bool(stream));
-    let endpoint = format!("{}/responses", profile.base_url.trim_end_matches('/'));
-    let script = "curl --silent --show-error --location --max-time 300 --request POST --header 'content-type: application/json' --header \"authorization: Bearer $RCCV4_API_KEY\" --data-binary @- --write-out '\n__RCCV4_STATUS__:%{http_code}\n__RCCV4_TYPE__:%{content_type}\n' \"$1\"";
-    let mut command = Command::new("/bin/sh");
-    command
-        .args(["-c", script, "rccv4-curl", &endpoint])
-        .env("RCCV4_API_KEY", key)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| ProviderTransportError {
-        code: "provider_transport_spawn".to_string(),
-        message: error.to_string(),
-        status: None,
-    })?;
     let payload = serde_json::to_vec(&body).map_err(|error| ProviderTransportError {
-        code: "provider_request_encode".to_string(),
+        code: "provider_request_encode".into(),
         message: error.to_string(),
         status: None,
     })?;
-    child
-        .stdin
-        .take()
-        .expect("curl stdin configured")
-        .write_all(&payload)
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
         .map_err(|error| ProviderTransportError {
-            code: "provider_transport_write".to_string(),
+            code: "provider_client_build".into(),
             message: error.to_string(),
             status: None,
         })?;
-    let output = child
-        .wait_with_output()
+    let key = materialize_auth(&profile.auth)?;
+    let endpoint = format!("{}/responses", profile.base_url.trim_end_matches('/'));
+    let response = client
+        .post(endpoint)
+        .bearer_auth(key)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(payload)
+        .send()
         .map_err(|error| ProviderTransportError {
-            code: "provider_transport_wait".to_string(),
+            code: "provider_transport_send".into(),
             message: error.to_string(),
             status: None,
         })?;
-    if !output.status.success() {
-        return Err(ProviderTransportError {
-            code: "provider_transport_failed".to_string(),
-            message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            status: None,
-        });
-    }
-    parse_curl_response(&output.stdout)
+    let status = response.status().as_u16();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let body = response.bytes().map_err(|error| ProviderTransportError {
+        code: "provider_response_read".into(),
+        message: error.to_string(),
+        status: Some(status),
+    })?;
+    let body = if status < 400
+        && content_type
+            .to_ascii_lowercase()
+            .contains("application/json")
+    {
+        let value: Value = serde_json::from_slice(&body).map_err(|error| ProviderTransportError {
+            code: "provider_json_parse".into(),
+            message: error.to_string(),
+            status: Some(status),
+        })?;
+        // Transport normalization cannot enforce client-entry instruction
+        // binding: this response may be relayed to Chat.  The runtime
+        // response boundary applies the strict check only for direct
+        // /v1/responses requests with the original request instructions.
+        serde_json::to_vec(&normalize_provider_response_for_relay("responses", &value)?)
+            .map_err(|error| ProviderTransportError {
+                code: "provider_json_encode".into(),
+                message: error.to_string(),
+                status: Some(status),
+            })?
+    } else {
+        body.to_vec()
+    };
+    Ok(ProviderRawResponse {
+        status,
+        content_type,
+        body,
+    })
 }
 
 pub fn send_responses_streaming(
@@ -613,7 +884,6 @@ pub fn send_responses_streaming(
             status: None,
         });
     }
-    let key = materialize_auth(&profile.auth)?;
     let mut body = input.clone();
     let object = body.as_object_mut().ok_or_else(|| ProviderTransportError {
         code: "provider_request_invalid".to_string(),
@@ -622,44 +892,46 @@ pub fn send_responses_streaming(
     })?;
     object.insert("model".to_string(), Value::String(wire_model));
     object.insert("stream".to_string(), Value::Bool(true));
-    let endpoint = format!("{}/responses", profile.base_url.trim_end_matches('/'));
-    let script = "curl --silent --show-error --no-buffer --include --location --max-time 300 --request POST --header 'content-type: application/json' --header \"authorization: Bearer $RCCV4_API_KEY\" --data-binary @- \"$1\"";
-    let mut command = Command::new("/bin/sh");
-    command
-        .args(["-c", script, "rccv4-curl", &endpoint])
-        .env("RCCV4_API_KEY", key)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| ProviderTransportError {
-        code: "provider_transport_spawn".to_string(),
-        message: error.to_string(),
-        status: None,
-    })?;
     let payload = serde_json::to_vec(&body).map_err(|error| ProviderTransportError {
         code: "provider_request_encode".to_string(),
         message: error.to_string(),
         status: None,
     })?;
-    child
-        .stdin
-        .take()
-        .expect("curl stdin configured")
-        .write_all(&payload)
+    let key = materialize_auth(&profile.auth)?;
+    let endpoint = format!("{}/responses", profile.base_url.trim_end_matches('/'));
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
         .map_err(|error| ProviderTransportError {
-            code: "provider_transport_write".to_string(),
+            code: "provider_client_build".into(),
             message: error.to_string(),
             status: None,
         })?;
-    let mut stream = ProviderResponseStream {
-        child,
+    let response = client
+        .post(endpoint)
+        .bearer_auth(key)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(payload)
+        .send()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_transport_send".into(),
+            message: error.to_string(),
+            status: None,
+        })?;
+    let status = response.status().as_u16();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    Ok(ProviderResponseStream {
+        response,
         buffer: Vec::new(),
-        status: 0,
-        content_type: String::new(),
+        status,
+        content_type,
         protocol: "responses".to_string(),
-    };
-    parse_provider_stream_header(&mut stream)?;
-    Ok(stream)
+    })
 }
 
 fn send_wire_request(
@@ -672,54 +944,67 @@ fn send_wire_request(
     if profile.protocol != protocol {
         return Err(ProviderTransportError {
             code: "provider_protocol_mismatch".to_string(),
-            message: format!("profile protocol {} does not match {protocol}", profile.protocol),
+            message: format!(
+                "profile protocol {} does not match {protocol}",
+                profile.protocol
+            ),
             status: None,
         });
     }
-    let key = materialize_auth(&profile.auth)?;
-    let endpoint = format!("{}/{}", profile.base_url.trim_end_matches('/'), endpoint_suffix);
-    let script = if protocol == "anthropic" {
-        "curl --silent --show-error --location --max-time 300 --request POST --header 'content-type: application/json' --header \"x-api-key: $RCCV4_API_KEY\" --header 'anthropic-version: 2023-06-01' --data-binary @- --write-out '\\n__RCCV4_STATUS__:%{http_code}\\n__RCCV4_TYPE__:%{content_type}\\n' \"$1\""
-    } else {
-        "curl --silent --show-error --location --max-time 300 --request POST --header 'content-type: application/json' --header \"authorization: Bearer $RCCV4_API_KEY\" --data-binary @- --write-out '\\n__RCCV4_STATUS__:%{http_code}\\n__RCCV4_TYPE__:%{content_type}\\n' \"$1\""
-    };
-    let mut command = Command::new("/bin/sh");
-    command
-        .args(["-c", script, "rccv4-curl", &endpoint])
-        .env("RCCV4_API_KEY", key)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| ProviderTransportError {
-        code: "provider_transport_spawn".to_string(),
-        message: error.to_string(),
-        status: None,
-    })?;
     let payload = serde_json::to_vec(input).map_err(|error| ProviderTransportError {
         code: "provider_request_encode".to_string(),
         message: error.to_string(),
         status: None,
     })?;
-    child.stdin.take().expect("curl stdin configured").write_all(&payload).map_err(|error| {
-        ProviderTransportError {
-            code: "provider_transport_write".to_string(),
+    let key = materialize_auth(&profile.auth)?;
+    let endpoint = format!(
+        "{}/{}",
+        profile.base_url.trim_end_matches('/'),
+        endpoint_suffix
+    );
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_client_build".into(),
             message: error.to_string(),
             status: None,
-        }
-    })?;
-    let output = child.wait_with_output().map_err(|error| ProviderTransportError {
-        code: "provider_transport_wait".to_string(),
-        message: error.to_string(),
-        status: None,
-    })?;
-    if !output.status.success() {
-        return Err(ProviderTransportError {
-            code: "provider_transport_failed".to_string(),
-            message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        })?;
+    let mut request = client
+        .post(endpoint)
+        .header(reqwest::header::CONTENT_TYPE, "application/json");
+    request = if protocol == "anthropic" {
+        request
+            .header("x-api-key", key)
+            .header("anthropic-version", "2023-06-01")
+    } else {
+        request.bearer_auth(key)
+    };
+    let response = request
+        .body(payload)
+        .send()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_transport_send".into(),
+            message: error.to_string(),
             status: None,
-        });
-    }
-    parse_curl_response(&output.stdout)
+        })?;
+    let status = response.status().as_u16();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let body = response.bytes().map_err(|error| ProviderTransportError {
+        code: "provider_response_read".into(),
+        message: error.to_string(),
+        status: Some(status),
+    })?;
+    Ok(ProviderRawResponse {
+        status,
+        content_type,
+        body: body.to_vec(),
+    })
 }
 
 pub fn send_openai_chat(
@@ -746,49 +1031,64 @@ fn send_wire_streaming(
     if profile.protocol != protocol {
         return Err(ProviderTransportError {
             code: "provider_protocol_mismatch".to_string(),
-            message: format!("profile protocol {} does not match {protocol}", profile.protocol),
+            message: format!(
+                "profile protocol {} does not match {protocol}",
+                profile.protocol
+            ),
             status: None,
         });
     }
-    let key = materialize_auth(&profile.auth)?;
-    let endpoint = format!("{}/{}", profile.base_url.trim_end_matches('/'), endpoint_suffix);
-    let script = if protocol == "anthropic" {
-        "curl --silent --show-error --no-buffer --include --location --max-time 300 --request POST --header 'content-type: application/json' --header \"x-api-key: $RCCV4_API_KEY\" --header 'anthropic-version: 2023-06-01' --data-binary @- \"$1\""
-    } else {
-        "curl --silent --show-error --no-buffer --include --location --max-time 300 --request POST --header 'content-type: application/json' --header \"authorization: Bearer $RCCV4_API_KEY\" --data-binary @- \"$1\""
-    };
-    let mut command = Command::new("/bin/sh");
-    command
-        .args(["-c", script, "rccv4-curl", &endpoint])
-        .env("RCCV4_API_KEY", key)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| ProviderTransportError {
-        code: "provider_transport_spawn".to_string(),
-        message: error.to_string(),
-        status: None,
-    })?;
+    let endpoint = format!(
+        "{}/{}",
+        profile.base_url.trim_end_matches('/'),
+        endpoint_suffix
+    );
     let payload = serde_json::to_vec(input).map_err(|error| ProviderTransportError {
         code: "provider_request_encode".to_string(),
         message: error.to_string(),
         status: None,
     })?;
-    child.stdin.take().expect("curl stdin configured").write_all(&payload).map_err(|error| {
-        ProviderTransportError {
-            code: "provider_transport_write".to_string(),
+    let key = materialize_auth(&profile.auth)?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_client_build".into(),
             message: error.to_string(),
             status: None,
-        }
-    })?;
-    let mut stream = ProviderResponseStream {
-        child,
+        })?;
+    let mut request = client
+        .post(endpoint)
+        .header(reqwest::header::CONTENT_TYPE, "application/json");
+    request = if protocol == "anthropic" {
+        request
+            .header("x-api-key", key)
+            .header("anthropic-version", "2023-06-01")
+    } else {
+        request.bearer_auth(key)
+    };
+    let response = request
+        .body(payload)
+        .send()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_transport_send".into(),
+            message: error.to_string(),
+            status: None,
+        })?;
+    let status = response.status().as_u16();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let stream = ProviderResponseStream {
+        response,
         buffer: Vec::new(),
-        status: 0,
-        content_type: String::new(),
+        status,
+        content_type,
         protocol: protocol.to_string(),
     };
-    parse_provider_stream_header(&mut stream)?;
     Ok(stream)
 }
 
@@ -809,9 +1109,20 @@ pub fn send_anthropic_messages_streaming(
 /// Normalize non-Responses provider JSON into the V4 Responses response
 /// contract before response-inbound processing. Provider-specific shape work
 /// stays here; chat/handler layers never repair upstream payloads.
-pub fn normalize_provider_response(protocol: &str, body: &Value) -> Result<Value, ProviderTransportError> {
+pub fn normalize_provider_response(
+    protocol: &str,
+    body: &Value,
+) -> Result<Value, ProviderTransportError> {
+    normalize_provider_response_with_instructions(protocol, body, None)
+}
+
+pub fn normalize_provider_response_with_instructions(
+    protocol: &str,
+    body: &Value,
+    expected_instructions: Option<&str>,
+) -> Result<Value, ProviderTransportError> {
     match protocol {
-        "responses" => normalize_responses_response(body),
+        "responses" => normalize_responses_response(body, expected_instructions, false),
         "openai" | "chat" => normalize_openai_response(body),
         "anthropic" => normalize_anthropic_response(body),
         other => Err(ProviderTransportError {
@@ -822,17 +1133,56 @@ pub fn normalize_provider_response(protocol: &str, body: &Value) -> Result<Value
     }
 }
 
+/// Relay Responses are projected into another client protocol; provider
+/// instructions remain provider-side data and are not exposed by that client
+/// projection. Direct Responses uses the strict request-bound variant above.
+pub fn normalize_provider_response_for_relay(
+    protocol: &str,
+    body: &Value,
+) -> Result<Value, ProviderTransportError> {
+    match protocol {
+        "responses" => normalize_responses_response(body, None, true),
+        _ => normalize_provider_response(protocol, body),
+    }
+}
+
 /// Consume the upstream gateway envelope before response-inbound processing.
 /// `extra_fields` is a provider transport/diagnostic side channel; it is not
 /// part of the Responses client semantic payload and must never cross the
 /// provider boundary. Unknown envelope members fail closed so a new control
 /// field cannot silently become client-visible business data.
-fn normalize_responses_response(body: &Value) -> Result<Value, ProviderTransportError> {
-    let mut object = body.as_object().cloned().ok_or_else(|| ProviderTransportError {
-        code: "provider_json_shape".to_string(),
-        message: "Responses provider JSON must be an object".to_string(),
-        status: None,
-    })?;
+fn normalize_responses_response(
+    body: &Value,
+    expected_instructions: Option<&str>,
+    allow_relay_instructions: bool,
+) -> Result<Value, ProviderTransportError> {
+    const KNOWN_DIAGNOSTIC_FIELDS: &[&str] = &[
+        "chunk_index",
+        "dropped_compat_plugin_params",
+        "latency",
+        "original_model_requested",
+        "provider",
+        "provider_response_headers",
+        "request_type",
+        "resolved_model_used",
+    ];
+    let mut object = body
+        .as_object()
+        .cloned()
+        .ok_or_else(|| ProviderTransportError {
+            code: "provider_json_shape".to_string(),
+            message: "Responses provider JSON must be an object".to_string(),
+            status: None,
+        })?;
+    if let Some(value) = object.get("instructions") {
+        if !allow_relay_instructions && expected_instructions != value.as_str() {
+            return Err(ProviderTransportError {
+                code: "provider_response_instructions_injected".to_string(),
+                message: "provider Responses instructions must exactly match request instructions".to_string(),
+                status: None,
+            });
+        }
+    }
     if let Some(extra_fields) = object.remove("extra_fields") {
         let Some(extra_fields) = extra_fields.as_object() else {
             return Err(ProviderTransportError {
@@ -841,16 +1191,6 @@ fn normalize_responses_response(body: &Value) -> Result<Value, ProviderTransport
                 status: None,
             });
         };
-        const KNOWN_DIAGNOSTIC_FIELDS: &[&str] = &[
-            "chunk_index",
-            "dropped_compat_plugin_params",
-            "latency",
-            "original_model_requested",
-            "provider",
-            "provider_response_headers",
-            "request_type",
-            "resolved_model_used",
-        ];
         if let Some(unknown) = extra_fields
             .keys()
             .find(|key| !KNOWN_DIAGNOSTIC_FIELDS.contains(&key.as_str()))
@@ -860,6 +1200,36 @@ fn normalize_responses_response(body: &Value) -> Result<Value, ProviderTransport
                 message: format!("unknown Responses extra_fields member {unknown}"),
                 status: None,
             });
+        }
+    }
+    if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
+        if let Some(value) = response.get("instructions") {
+            if !allow_relay_instructions && expected_instructions != value.as_str() {
+                return Err(ProviderTransportError {
+                    code: "provider_response_instructions_injected".to_string(),
+                    message: "provider Responses instructions must exactly match request instructions".to_string(),
+                    status: None,
+                });
+            }
+        }
+        if let Some(extra_fields) = response.remove("extra_fields") {
+            let Some(extra_fields) = extra_fields.as_object() else {
+                return Err(ProviderTransportError {
+                    code: "provider_response_control_envelope".to_string(),
+                    message: "Responses response.extra_fields envelope must be an object".to_string(),
+                    status: None,
+                });
+            };
+            if let Some(unknown) = extra_fields
+                .keys()
+                .find(|key| !KNOWN_DIAGNOSTIC_FIELDS.contains(&key.as_str()))
+            {
+                return Err(ProviderTransportError {
+                    code: "provider_response_control_envelope".to_string(),
+                    message: format!("unknown Responses response.extra_fields member {unknown}"),
+                    status: None,
+                });
+            }
         }
     }
     Ok(Value::Object(object))
@@ -872,6 +1242,24 @@ pub fn normalize_provider_sse_frame(
     protocol: &str,
     frame: &[u8],
 ) -> Result<Vec<u8>, ProviderTransportError> {
+    normalize_provider_sse_frame_with_lane(protocol, frame, false)
+}
+
+/// Relay SSE may carry provider-owned Responses instructions while the
+/// client entry is Chat; strict instruction binding belongs to direct
+/// Responses runtime validation, not transport framing.
+pub fn normalize_provider_sse_frame_for_relay(
+    protocol: &str,
+    frame: &[u8],
+) -> Result<Vec<u8>, ProviderTransportError> {
+    normalize_provider_sse_frame_with_lane(protocol, frame, true)
+}
+
+fn normalize_provider_sse_frame_with_lane(
+    protocol: &str,
+    frame: &[u8],
+    allow_relay_instructions: bool,
+) -> Result<Vec<u8>, ProviderTransportError> {
     let text = std::str::from_utf8(frame).map_err(|error| ProviderTransportError {
         code: "provider_sse_utf8".to_string(),
         message: error.to_string(),
@@ -880,7 +1268,9 @@ pub fn normalize_provider_sse_frame(
     let mut output = Vec::new();
     for line in text.lines() {
         let line = line.strip_suffix('\r').unwrap_or(line);
-        let Some(data) = line.strip_prefix("data:") else { continue };
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
         let data = data.trim();
         if data == "[DONE]" {
             output.extend_from_slice(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n");
@@ -894,7 +1284,11 @@ pub fn normalize_provider_sse_frame(
         let event = match protocol {
             "openai" | "chat" => normalize_openai_sse_event(&value),
             "anthropic" => normalize_anthropic_sse_event(&value),
-            "responses" => Some(value),
+            "responses" => Some(normalize_responses_response(
+                &value,
+                None,
+                allow_relay_instructions,
+            )?),
             other => {
                 return Err(ProviderTransportError {
                     code: "provider_protocol_unsupported".to_string(),
@@ -904,8 +1298,17 @@ pub fn normalize_provider_sse_frame(
             }
         };
         if let Some(event) = event {
-            let event_type = event.get("type").and_then(Value::as_str).unwrap_or("response.output_text.delta");
-            output.extend_from_slice(format!("event: {event_type}\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string())).as_bytes());
+            let event_type = event
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("response.output_text.delta");
+            output.extend_from_slice(
+                format!(
+                    "event: {event_type}\ndata: {}\n\n",
+                    serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string())
+                )
+                .as_bytes(),
+            );
         }
     }
     if output.is_empty() {
@@ -924,8 +1327,13 @@ fn normalize_openai_sse_event(value: &Value) -> Option<Value> {
     if let Some(content) = delta.get("content").and_then(Value::as_str) {
         return Some(serde_json::json!({"type":"response.output_text.delta","delta":content}));
     }
-    if choice.get("finish_reason").is_some_and(|reason| !reason.is_null()) {
-        return Some(serde_json::json!({"type":"response.completed","response":{"status":"completed"}}));
+    if choice
+        .get("finish_reason")
+        .is_some_and(|reason| !reason.is_null())
+    {
+        return Some(
+            serde_json::json!({"type":"response.completed","response":{"status":"completed"}}),
+        );
     }
     None
 }
@@ -937,7 +1345,9 @@ fn normalize_anthropic_sse_event(value: &Value) -> Option<Value> {
             .and_then(|delta| delta.get("text"))
             .and_then(Value::as_str)
             .map(|text| serde_json::json!({"type":"response.output_text.delta","delta":text})),
-        "message_stop" => Some(serde_json::json!({"type":"response.completed","response":{"status":"completed"}})),
+        "message_stop" => {
+            Some(serde_json::json!({"type":"response.completed","response":{"status":"completed"}}))
+        }
         _ => None,
     }
 }
@@ -957,11 +1367,13 @@ fn normalize_openai_response(body: &Value) -> Result<Value, ProviderTransportErr
             message: "OpenAI Chat response choices must be non-empty".to_string(),
             status: None,
         })?;
-    let message = choice.get("message").ok_or_else(|| ProviderTransportError {
-        code: "provider_json_shape".to_string(),
-        message: "OpenAI Chat response message is missing".to_string(),
-        status: None,
-    })?;
+    let message = choice
+        .get("message")
+        .ok_or_else(|| ProviderTransportError {
+            code: "provider_json_shape".to_string(),
+            message: "OpenAI Chat response message is missing".to_string(),
+            status: None,
+        })?;
     let mut output = Vec::new();
     if let Some(content) = message.get("content") {
         if !content.is_null() {
@@ -1057,7 +1469,11 @@ fn normalize_anthropic_response(body: &Value) -> Result<Value, ProviderTransport
         let total_tokens = usage
             .get("total_tokens")
             .and_then(Value::as_u64)
-            .or_else(|| input_tokens.zip(output_tokens).map(|(input, output)| input + output));
+            .or_else(|| {
+                input_tokens
+                    .zip(output_tokens)
+                    .map(|(input, output)| input + output)
+            });
         normalized["usage"] = serde_json::json!({
             "input_tokens": input_tokens.map(Value::from).unwrap_or(Value::Null),
             "output_tokens": output_tokens.map(Value::from).unwrap_or(Value::Null),
@@ -1065,83 +1481,6 @@ fn normalize_anthropic_response(body: &Value) -> Result<Value, ProviderTransport
         });
     }
     Ok(normalized)
-}
-
-/// Parse the upstream HTTP header prefix from the provider stream and return
-/// the number of bytes consumed. Only one informational/final response block
-/// may be consumed by a stream; later blocks fail fast.
-fn parse_provider_stream_header(
-    stream: &mut ProviderResponseStream,
-) -> Result<(), ProviderTransportError> {
-    let mut head = [0u8; 8192];
-    let mut bytes = Vec::new();
-    loop {
-        let Some((end, status, content_type)) = http_header_at(&bytes) else {
-            if bytes.len() > 64 * 1024 {
-                return Err(ProviderTransportError {
-                    code: "provider_response_headers_too_large".to_string(),
-                    message: "provider HTTP headers exceeded 64 KiB".to_string(),
-                    status: None,
-                });
-            }
-            let count = stream
-                .child
-                .stdout
-                .as_mut()
-                .ok_or_else(|| ProviderTransportError {
-                    code: "provider_stream_no_stdout".to_string(),
-                    message: "provider stream lost stdout".to_string(),
-                    status: None,
-                })?
-                .read(&mut head)
-                .map_err(|error| ProviderTransportError {
-                    code: "provider_stream_header_read".to_string(),
-                    message: error.to_string(),
-                    status: None,
-                })?;
-            if count == 0 {
-                return Err(ProviderTransportError {
-                    code: "provider_stream_no_header".to_string(),
-                    message: "provider stream ended before HTTP headers".to_string(),
-                    status: None,
-                });
-            }
-            bytes.extend_from_slice(&head[..count]);
-            continue;
-        };
-        if status == 100 {
-            bytes.drain(..end);
-            continue;
-        }
-        stream.buffer.extend_from_slice(&bytes[end..]);
-        stream.status = status;
-        stream.content_type = content_type;
-        return Ok(());
-    }
-}
-
-fn http_header_at(bytes: &[u8]) -> Option<(usize, u16, String)> {
-    // HTTP/1.1 uses CRLF CRLF. HTTP/2 over curl --include may emit simple LF
-    // terminators instead. Accept both forms so the header parser covers the
-    // real upstream shape that curl describes for HTTP/2 responses.
-    let end = if let Some(position) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
-        position + 4
-    } else {
-        let position = bytes.windows(2).position(|window| window == b"\n\n")?;
-        position + 2
-    };
-    let head = std::str::from_utf8(&bytes[..end]).ok()?;
-    let first = head.lines().next()?;
-    let status = first.split_whitespace().nth(1)?.parse::<u16>().ok()?;
-    let content_type = head
-        .lines()
-        .filter_map(|line| line.split_once(':'))
-        .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
-        .map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_string()))
-        .filter(|(name, _)| name == "content-type")
-        .map(|(_, value)| value)
-        .unwrap_or_default();
-    Some((end, status, content_type))
 }
 
 fn materialize_auth(handle: &ProviderAuthHandle) -> Result<String, ProviderTransportError> {
@@ -1183,11 +1522,15 @@ fn materialize_auth(handle: &ProviderAuthHandle) -> Result<String, ProviderTrans
         ProviderAuthHandle::SecretFile { path, key, alias } => {
             let raw = std::fs::read_to_string(path).map_err(|error| ProviderTransportError {
                 code: "provider_auth_read".to_string(),
-                message: format!("auth handle {}: {error}", alias.as_deref().unwrap_or("default")),
+                message: format!(
+                    "auth handle {}: {error}",
+                    alias.as_deref().unwrap_or("default")
+                ),
                 status: None,
             })?;
             let secret = if let Ok(document) = toml::from_str::<toml::Value>(&raw) {
-                key.split('.').try_fold(&document, |value, segment| value.get(segment))
+                key.split('.')
+                    .try_fold(&document, |value, segment| value.get(segment))
                     .and_then(toml::Value::as_str)
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
@@ -1204,7 +1547,10 @@ fn materialize_auth(handle: &ProviderAuthHandle) -> Result<String, ProviderTrans
             };
             secret.ok_or_else(|| ProviderTransportError {
                 code: "provider_auth_key_missing".to_string(),
-                message: format!("auth handle {} key is missing", alias.as_deref().unwrap_or("default")),
+                message: format!(
+                    "auth handle {} key is missing",
+                    alias.as_deref().unwrap_or("default")
+                ),
                 status: None,
             })
         }
@@ -1340,38 +1686,6 @@ pub fn write_provider_profile(
         status: None,
     })?;
     Ok(path)
-}
-
-fn parse_curl_response(output: &[u8]) -> Result<ProviderRawResponse, ProviderTransportError> {
-    let marker = b"\n__RCCV4_STATUS__:";
-    let marker_start = output
-        .windows(marker.len())
-        .position(|window| window == marker)
-        .ok_or_else(|| ProviderTransportError {
-            code: "provider_response_parse".to_string(),
-            message: "curl status marker missing".to_string(),
-            status: None,
-        })?;
-    let body = output[..marker_start].to_vec();
-    let metadata = String::from_utf8_lossy(&output[marker_start + 1..]);
-    let status = metadata
-        .lines()
-        .find_map(|line| line.strip_prefix("__RCCV4_STATUS__:")?.parse().ok())
-        .ok_or_else(|| ProviderTransportError {
-            code: "provider_response_parse".to_string(),
-            message: "provider status missing".to_string(),
-            status: None,
-        })?;
-    let content_type = metadata
-        .lines()
-        .find_map(|line| line.strip_prefix("__RCCV4_TYPE__:"))
-        .unwrap_or_default()
-        .to_string();
-    Ok(ProviderRawResponse {
-        status,
-        content_type,
-        body,
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1512,7 +1826,14 @@ impl V4Availability01SessionScoped {
         session_id: &str,
         provider_runtime_identity: &str,
     ) -> bool {
-        self.get(server_id, routing_group, session_id, provider_runtime_identity)
-            .map_or(true, |record| record.state != AvailabilityState::Unavailable)
+        self.get(
+            server_id,
+            routing_group,
+            session_id,
+            provider_runtime_identity,
+        )
+        .map_or(true, |record| {
+            record.state != AvailabilityState::Unavailable
+        })
     }
 }

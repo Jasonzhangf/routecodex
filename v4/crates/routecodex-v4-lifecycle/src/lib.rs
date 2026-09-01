@@ -45,6 +45,7 @@ pub enum LifecycleError {
 pub struct V4LifecyclePaths {
     pub state_root: PathBuf,
     pub record_path: PathBuf,
+    pub status_path: PathBuf,
     pub control_socket: PathBuf,
     pub manifest_path: PathBuf,
     pub log_path: PathBuf,
@@ -58,12 +59,14 @@ impl V4LifecyclePaths {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .ok_or(LifecycleError::HomeMissing)?;
+        let state_root = home.join(".rcc/state/runtime-lifecycle/v4");
         Ok(Self {
-            state_root: home.join(".rcc/v4"),
-            record_path: home.join(".rcc/v4/instance.json"),
-            control_socket: home.join(".rcc/v4/control.sock"),
-            manifest_path: home.join(".rcc/v4/manifest.compiled.json"),
+            record_path: state_root.join("instance.json"),
+            status_path: state_root.join("status.json"),
+            control_socket: state_root.join("control.sock"),
+            manifest_path: state_root.join("manifest.compiled.json"),
             log_path: home.join(".rcc/logs/rccv4.log"),
+            state_root,
         })
     }
 
@@ -71,6 +74,7 @@ impl V4LifecyclePaths {
         let log_path = state_root.join("logs/rccv4.log");
         Self {
             record_path: state_root.join("instance.json"),
+            status_path: state_root.join("status.json"),
             control_socket: state_root.join("control.sock"),
             manifest_path: state_root.join("manifest.compiled.json"),
             state_root,
@@ -153,6 +157,7 @@ impl ManagedControlPlane {
             .set_nonblocking(true)
             .map_err(|error| io_error(&paths.control_socket, error))?;
         write_record_atomic(&paths, &record)?;
+        write_status_atomic(&paths, "running", Some(&record))?;
         Ok(Self {
             listener,
             paths,
@@ -168,6 +173,14 @@ impl ManagedControlPlane {
             }
             Err(error) => return Err(io_error(&self.paths.control_socket, error)),
         };
+        // The listener is nonblocking for the polling loop, but accepted
+        // control connections must be blocking: the client half-shuts down
+        // its write side before the command is read. On macOS the accepted
+        // socket inherits O_NONBLOCK; leaving it set turns a valid restart
+        // request into EAGAIN ("Resource temporarily unavailable").
+        stream
+            .set_nonblocking(false)
+            .map_err(|error| io_error(&self.paths.control_socket, error))?;
         let mut request = String::new();
         stream
             .read_to_string(&mut request)
@@ -202,6 +215,15 @@ impl ManagedControlPlane {
             fs::remove_file(&self.paths.record_path)
                 .map_err(|error| io_error(&self.paths.record_path, error))?;
         }
+        // Restart execs the same process immediately after clearing state.
+        // Remove the pathname while this owner still controls the listener;
+        // otherwise the new image can observe the inherited stale socket and
+        // fail its bind before it can publish a fresh record.
+        if self.paths.control_socket.exists() {
+            fs::remove_file(&self.paths.control_socket)
+                .map_err(|error| io_error(&self.paths.control_socket, error))?;
+        }
+        write_status_atomic(&self.paths, "stopped", None)?;
         Ok(())
     }
 }
@@ -249,6 +271,33 @@ pub fn status_managed(paths: &V4LifecyclePaths) -> Result<ManagedStatus, Lifecyc
     }
 }
 
+/// Remove only a provably stale V4 instance declaration.  A live process or
+/// responsive control socket is never touched; callers must run the normal
+/// managed `restart` command after this explicit repair.
+pub fn repair_stale(paths: &V4LifecyclePaths) -> Result<(), LifecycleError> {
+    let record = read_record(paths)?.ok_or_else(|| {
+        if paths.control_socket.exists() {
+            LifecycleError::StaleState
+        } else {
+            LifecycleError::NotRunning
+        }
+    })?;
+    if request_control(paths, "status").is_ok() {
+        return Err(LifecycleError::AlreadyManaged);
+    }
+    let process_alive = unsafe { libc::kill(record.pid as libc::pid_t, 0) == 0 }
+        || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
+    if process_alive {
+        return Err(LifecycleError::AlreadyManaged);
+    }
+    fs::remove_file(&paths.record_path).map_err(|error| io_error(&paths.record_path, error))?;
+    if paths.control_socket.exists() {
+        fs::remove_file(&paths.control_socket)
+            .map_err(|error| io_error(&paths.control_socket, error))?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ManagedSpawnOptions {
     pub snap: bool,
@@ -267,7 +316,28 @@ pub fn start_managed(
     timeout: Duration,
 ) -> Result<ManagedInstanceRecord, LifecycleError> {
     paths.prepare()?;
-    if paths.record_path.exists() || paths.control_socket.exists() {
+    if paths.record_path.exists() {
+        match status_managed(paths)? {
+            ManagedStatus {
+                state,
+                record: Some(_),
+            } if state == "running" => {
+                // V3 start semantics are a cold managed start: release the
+                // exact declared instance, then publish/spawn a fresh child
+                // using this invocation's stdout/stderr. In-place exec
+                // restart belongs to the explicit `restart` command.
+                release_for_foreground(paths, timeout)?;
+            }
+            ManagedStatus {
+                state,
+                record: Some(_),
+            } if state == "stale" => {
+                repair_stale(paths)?;
+            }
+            _ => return Err(LifecycleError::AlreadyManaged),
+        }
+    }
+    if paths.control_socket.exists() {
         return Err(LifecycleError::AlreadyManaged);
     }
     let mut command = Command::new(executable);
@@ -281,9 +351,6 @@ pub fn start_managed(
         .current_dir("/")
         .stdin(Stdio::null())
         .stdout(if std::io::stdout().is_terminal() {
-            // V3's top-level managed start keeps the child attached to the
-            // invoking shell. V4 previously redirected both streams to a
-            // file, so no live startup/request console was visible.
             Stdio::inherit()
         } else {
             Stdio::from(open_log(paths)?)
@@ -291,22 +358,31 @@ pub fn start_managed(
         .stderr(if std::io::stderr().is_terminal() {
             Stdio::inherit()
         } else {
-            let log = open_log(paths)?;
-            Stdio::from(log)
+            Stdio::from(open_log(paths)?)
         });
+    // Keep the managed child independent from the invoking shell. The parent
+    // command may return immediately in detached mode; a separate process
+    // group prevents shell teardown from terminating the listener.
+    command.process_group(0);
     append_spawn_options(&mut command, options);
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
     let mut child = command
         .spawn()
         .map_err(|error| io_error(executable, error))?;
-    wait_child_ready(paths, &mut child, timeout)
+    let record = wait_child_ready(paths, &mut child, timeout)?;
+    if std::io::stdout().is_terminal() {
+        wait_for_attached_instance(paths)?;
+    }
+    Ok(record)
+}
+
+fn wait_for_attached_instance(paths: &V4LifecyclePaths) -> Result<(), LifecycleError> {
+    loop {
+        match status_managed(paths) {
+            Ok(status) if status.state == "running" => thread::sleep(Duration::from_millis(100)),
+            Ok(_) => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 pub fn request_stop(paths: &V4LifecyclePaths, timeout: Duration) -> Result<(), LifecycleError> {
@@ -315,6 +391,77 @@ pub fn request_stop(paths: &V4LifecyclePaths, timeout: Duration) -> Result<(), L
     }
     request_control(paths, "stop")?;
     wait_until(timeout, || !paths.record_path.exists())
+}
+
+/// Release the exact V4 managed instance before a foreground takeover.
+///
+/// This is deliberately scoped to the lifecycle record's PID; it never scans
+/// or signals unrelated processes.  A responsive managed child receives the
+/// normal control-plane stop first, then the recorded process is terminated
+/// only if its declaration remains after the bounded grace period.
+pub fn release_for_foreground(
+    paths: &V4LifecyclePaths,
+    timeout: Duration,
+) -> Result<(), LifecycleError> {
+    let Some(record) = read_record(paths)? else {
+        return Ok(());
+    };
+    let _ = request_control(paths, "stop");
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if read_record(paths)?.is_none() {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    if unsafe { libc::kill(record.pid as libc::pid_t, libc::SIGTERM) } == -1 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(io_error(&paths.record_path, error));
+        }
+    }
+    wait_until(timeout, || !paths.record_path.exists())
+}
+
+/// Release an unmanaged listener only when the OS identifies one exact rccv4
+/// executable on the requested address. Ambiguous or foreign listeners fail
+/// closed; no port-wide or broad process termination is attempted.
+pub fn release_unmanaged_listener(address: &str, timeout: Duration) -> Result<(), LifecycleError> {
+    let Some(port) = address.rsplit(':').next() else {
+        return Ok(());
+    };
+    let output = std::process::Command::new("/usr/sbin/lsof")
+        .args(["-nP", "-Fpct", &format!("-iTCP:{port}"), "-sTCP:LISTEN"])
+        .output()
+        .map_err(|error| io_error(Path::new(address), error))?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut pid = None;
+    let mut command = None;
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix('p') {
+            pid = value.parse::<i32>().ok();
+        }
+        if let Some(value) = line.strip_prefix('c') {
+            command = Some(value.to_string());
+        }
+    }
+    if pid.is_none() || command.as_deref() != Some("rccv4") {
+        return Ok(());
+    }
+    let pid = pid.expect("checked above");
+    if unsafe { libc::kill(pid, libc::SIGTERM) } == -1 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(io_error(Path::new(address), error));
+        }
+    }
+    wait_until(timeout, || {
+        std::process::Command::new("/usr/sbin/lsof")
+            .args(["-nP", "-Fp", &format!("-iTCP:{port}"), "-sTCP:LISTEN"])
+            .output()
+            .map(|result| result.stdout.is_empty())
+            .unwrap_or(false)
+    })
 }
 
 pub fn request_restart(
@@ -383,6 +530,19 @@ fn wait_child_ready(
     Err(LifecycleError::StartTimeout(timeout.as_millis() as u64))
 }
 
+fn open_log(paths: &V4LifecyclePaths) -> Result<File, LifecycleError> {
+    let parent = paths
+        .log_path
+        .parent()
+        .ok_or_else(|| io_error(&paths.log_path, "log path has no parent"))?;
+    fs::create_dir_all(parent).map_err(|error| io_error(parent, error))?;
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&paths.log_path)
+        .map_err(|error| io_error(&paths.log_path, error))
+}
+
 fn request_control(
     paths: &V4LifecyclePaths,
     command: &str,
@@ -419,6 +579,25 @@ fn write_record_atomic(
     bytes.push(b'\n');
     fs::write(&temporary, bytes).map_err(|error| io_error(&temporary, error))?;
     fs::rename(&temporary, &paths.record_path).map_err(|error| io_error(&paths.record_path, error))
+}
+
+fn write_status_atomic(
+    paths: &V4LifecyclePaths,
+    state: &str,
+    record: Option<&ManagedInstanceRecord>,
+) -> Result<(), LifecycleError> {
+    let body = serde_json::json!({
+        "state": state,
+        "record": record,
+    });
+    let temporary = paths
+        .state_root
+        .join(format!(".status.{}.tmp", std::process::id()));
+    let mut bytes = serde_json::to_vec_pretty(&body)
+        .map_err(|error| LifecycleError::Record(error.to_string()))?;
+    bytes.push(b'\n');
+    fs::write(&temporary, bytes).map_err(|error| io_error(&temporary, error))?;
+    fs::rename(&temporary, &paths.status_path).map_err(|error| io_error(&paths.status_path, error))
 }
 
 fn write_reply(stream: &mut UnixStream, value: &serde_json::Value) -> Result<(), LifecycleError> {
@@ -460,14 +639,6 @@ fn wait_until(timeout: Duration, condition: impl Fn() -> bool) -> Result<(), Lif
 
 fn create_dir(path: &Path) -> Result<(), LifecycleError> {
     fs::create_dir_all(path).map_err(|error| io_error(path, error))
-}
-
-fn open_log(paths: &V4LifecyclePaths) -> Result<File, LifecycleError> {
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&paths.log_path)
-        .map_err(|error| io_error(&paths.log_path, error))
 }
 
 fn io_error(path: &Path, error: impl std::fmt::Display) -> LifecycleError {

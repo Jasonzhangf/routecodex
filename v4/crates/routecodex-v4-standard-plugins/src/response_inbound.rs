@@ -1,7 +1,7 @@
 //! V4 response inbound plugin: provider raw/semantic -> parsed response.
 //!
 //! This module owns the `protocol_decode` descriptor and typed handle for
-//! `V4HubRespInbound02Parsed`. It only consumes the adjacent
+//! `V4HubRespInbound03Normalized`. It only consumes the adjacent
 //! `v4.response.provider_raw` resource and writes the adjacent
 //! `v4.response.normal_payload` resource. It never performs response
 //! governance, tool harvest, continuation save/release or provider/client
@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, StandardPlugin};
 
 const PLUGIN_ID: &str = "v4.std.response.protocol_decode";
+const PROVIDER_COMPAT_PLUGIN_ID: &str = "v4.std.response.provider_compat";
 
 pub(crate) fn control_keys() -> &'static [&'static str] {
     &[
@@ -28,6 +29,7 @@ pub(crate) fn control_keys() -> &'static [&'static str] {
         "debug",
         "diagnostics",
         "snapshot",
+        "extra_fields",
     ]
 }
 
@@ -68,19 +70,58 @@ fn normalize_output(value: &Value) -> Result<Value, String> {
 }
 
 pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
-    vec![plugin(
-        PLUGIN_ID,
-        PluginCategory::Protocol,
-        "V4HubRespInbound02Parsed",
-        "response_inbound",
-        Some(2),
-        PluginKind::Operator,
-        PluginEffect::Semantic,
-        PluginPhase::Semantic,
-        200,
-        vec!["v4.response.provider_raw"],
-        vec!["v4.response.normal_payload"],
-    )]
+    vec![
+        plugin(
+            PROVIDER_COMPAT_PLUGIN_ID,
+            PluginCategory::Protocol,
+            "V4ProviderRespCompat02ProviderCompat",
+            "response_inbound",
+            Some(2),
+            PluginKind::Operator,
+            PluginEffect::Semantic,
+            PluginPhase::Projection,
+            100,
+            vec![
+                "v4.response.provider_raw",
+                "v4.information.provider_protocol",
+            ],
+            vec!["v4.response.provider_raw"],
+        ),
+        plugin(
+            PLUGIN_ID,
+            PluginCategory::Protocol,
+            "V4HubRespInbound03Normalized",
+            "response_inbound",
+            Some(3),
+            PluginKind::Operator,
+            PluginEffect::Semantic,
+            PluginPhase::Semantic,
+            200,
+            vec!["v4.response.provider_raw"],
+            vec!["v4.response.normal_payload"],
+        ),
+    ]
+}
+
+fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let protocol = ctx
+        .read_information_resource("v4.information.provider_protocol")
+        .map_err(|error| error.to_string())?
+        .and_then(Value::as_str)
+        .ok_or_else(|| "provider response compat requires provider protocol".to_string())?
+        .to_string();
+    let provider_protocol = match protocol.as_str() {
+        "openai-responses" => "responses",
+        "openai-chat" => "chat",
+        other => other,
+    };
+    let normalized = routecodex_v4_provider::normalize_provider_response_for_relay(
+        provider_protocol,
+        ctx.read_data(),
+    )
+    .map_err(|error| format!("{}: {}", error.code, error.message))?;
+    ctx.write_data(normalized)
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn protocol_decode_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -90,42 +131,113 @@ pub(crate) fn protocol_decode_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String>
         .ok_or_else(|| "protocol_decode requires an object provider response".to_string())?;
     reject_control_fields(raw)?;
 
-    let request_id = raw
-        .get("requestId")
+    let mut parsed = raw.clone();
+    if parsed
+        .get("type")
         .and_then(Value::as_str)
-        .ok_or_else(|| "protocol_decode requires string requestId".to_string())?;
-    let provider_id = raw
-        .get("providerId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "protocol_decode requires string providerId".to_string())?;
-    let status_code = raw
-        .get("statusCode")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| "protocol_decode requires numeric statusCode".to_string())?;
-    if status_code < 200 || status_code >= 300 {
-        return Err(format!(
-            "protocol_decode rejects non-success provider status {status_code}"
-        ));
+        .is_some_and(|kind| kind.starts_with("response."))
+    {
+        return ctx
+            .write_data(Value::Object(parsed))
+            .map_err(|error| error.to_string());
     }
-
-    let provider_data = raw
-        .get("data")
-        .ok_or_else(|| "protocol_decode requires provider data object".to_string())?;
-    let provider_data_object = provider_data
-        .as_object()
-        .ok_or_else(|| "protocol_decode requires provider data object".to_string())?;
-
-    let mut parsed = provider_data_object.clone();
-    parsed.insert("requestId".to_string(), json!(request_id));
-    parsed.insert("providerId".to_string(), json!(provider_id));
-    parsed.insert("statusCode".to_string(), json!(status_code));
-    parsed.insert("output".to_string(), normalize_output(provider_data)?);
+    parsed.insert("output".to_string(), normalize_output(data)?);
     ctx.write_data(Value::Object(parsed))
         .map_err(|error| error.to_string())
 }
 
 pub(crate) fn protocol_decode(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     protocol_decode_entry(ctx)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecodedProviderSseFrame {
+    pub semantic: Value,
+    pub disposition: ProviderSseEventDisposition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderSseEventDisposition {
+    Continue,
+    Completed,
+    Failed { message: String },
+}
+
+/// Adjacent provider protocol codec. Transport framing is already complete;
+/// this owner parses one Responses event into its semantic object.
+pub fn decode_provider_sse_frame(frame: &[u8]) -> Result<DecodedProviderSseFrame, String> {
+    let normalized = routecodex_v4_provider::normalize_provider_sse_frame_for_relay("responses", frame)
+        .map_err(|error| {
+            if error.code == "provider_sse_malformed" {
+                format!("provider SSE data is invalid JSON: {}", error.message)
+            } else {
+                format!("provider SSE normalization failed: {}", error.message)
+            }
+        })?;
+    let text = std::str::from_utf8(&normalized)
+        .map_err(|error| format!("provider SSE frame is not UTF-8: {error}"))?;
+    let mut event = None;
+    let mut data = Vec::new();
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("event:") {
+            event = Some(value.trim().to_string());
+        } else if let Some(value) = line.strip_prefix("data:") {
+            data.push(value.trim_start());
+        }
+    }
+    let event = event.ok_or_else(|| "provider SSE frame is missing event".to_string())?;
+    let raw = data.join("\n");
+    let semantic: Value = serde_json::from_str(&raw)
+        .map_err(|error| format!("provider SSE data is invalid JSON: {error}"))?;
+    semantic
+        .as_object()
+        .ok_or_else(|| "provider SSE semantic object must be an object".to_string())?;
+    let semantic_type = semantic
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "provider SSE semantic object is missing type".to_string())?;
+    if semantic_type != event {
+        return Err(format!(
+            "provider SSE event/type mismatch: {event} != {semantic_type}"
+        ));
+    }
+    if semantic_type == "response.function_call_arguments.delta" {
+        semantic
+            .get("output_index")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                "provider SSE response.function_call_arguments.delta requires integer output_index"
+                    .to_string()
+            })?;
+        semantic
+            .get("delta")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                "provider SSE response.function_call_arguments.delta requires string delta"
+                    .to_string()
+            })?;
+    }
+    let disposition = match semantic_type {
+        "response.completed" => ProviderSseEventDisposition::Completed,
+        "response.failed" => {
+            let message = semantic
+                .pointer("/response/error/message")
+                .or_else(|| semantic.pointer("/error/message"))
+                .and_then(Value::as_str)
+                .filter(|message| !message.trim().is_empty())
+                .ok_or_else(|| {
+                    "provider SSE response.failed is missing error.message".to_string()
+                })?;
+            ProviderSseEventDisposition::Failed {
+                message: message.to_string(),
+            }
+        }
+        _ => ProviderSseEventDisposition::Continue,
+    };
+    Ok(DecodedProviderSseFrame {
+        semantic,
+        disposition,
+    })
 }
 
 pub(crate) fn protocol_decode_handle() -> (&'static str, fn(&mut ExecCtx<'_>) -> Result<(), String>)
@@ -138,5 +250,11 @@ pub(crate) fn protocol_decode_handle() -> (&'static str, fn(&mut ExecCtx<'_>) ->
 
 pub(crate) fn response_inbound_handles(
 ) -> Vec<(&'static str, fn(&mut ExecCtx<'_>) -> Result<(), String>)> {
-    vec![protocol_decode_handle()]
+    vec![
+        (
+            PROVIDER_COMPAT_PLUGIN_ID,
+            provider_compat as fn(&mut ExecCtx<'_>) -> Result<(), String>,
+        ),
+        protocol_decode_handle(),
+    ]
 }

@@ -1,4 +1,6 @@
-use routecodex_v4_config::{compile_product_config, compile_runtime_config, compile_runtime_config_file, RuntimeConfigError};
+use routecodex_v4_config::{
+    compile_product_config, compile_runtime_config, compile_runtime_config_file, RuntimeConfigError,
+};
 use std::path::Path;
 
 fn config(extra: &str) -> String {
@@ -38,7 +40,10 @@ fn compiles_deterministic_secret_free_runtime_manifest() {
     assert_eq!(first.runtime_identity, "rccv4");
     assert_eq!(first.listeners[0].address, "127.0.0.1:61234");
     assert_eq!(first.providers[0].wire_model, "gpt-5.6-sol");
-    assert_eq!(first.providers[0].config_path, "/tmp/v4/providers/cc-sol.toml");
+    assert_eq!(
+        first.providers[0].config_path,
+        "/tmp/v4/providers/cc-sol.toml"
+    );
     assert!(first.verify().is_ok());
     let json = String::from_utf8(first.to_json().expect("json")).expect("utf8");
     assert!(!json.contains("api_key"));
@@ -46,10 +51,53 @@ fn compiles_deterministic_secret_free_runtime_manifest() {
 }
 
 #[test]
+fn runtime_manifest_contains_digest_bound_five_lane_execution_epoch() {
+    let manifest =
+        compile_runtime_config(&config(""), Some(Path::new("/tmp/v4"))).expect("compile");
+    let candidate = manifest
+        .execution_epoch
+        .candidate
+        .as_object()
+        .expect("compiled execution candidate object");
+    let pipelines = candidate["pipelines"]
+        .as_object()
+        .expect("compiled pipelines");
+    assert_eq!(
+        pipelines.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec![
+            "direct_request",
+            "direct_response",
+            "error",
+            "relay_request",
+            "relay_response",
+        ]
+    );
+    let serialized = serde_json::to_string(candidate).expect("candidate JSON");
+    assert!(serialized.contains("V4DirectReq02RelayContainer"));
+    assert!(serialized.contains("V4DirectResp02RelayContainer"));
+    assert!(serialized.contains("v4.hook.direct.request"));
+    assert!(serialized.contains("v4.hook.direct.response"));
+    assert!(!serialized.contains("v4.transport.sse.ingress"));
+    assert!(!serialized.contains("v4.transport.sse.egress"));
+    assert!(manifest.verify().is_ok());
+
+    let mut drifted = manifest.clone();
+    drifted.execution_epoch.candidate["plan_epoch"] = serde_json::json!(999);
+    assert!(matches!(
+        drifted.verify(),
+        Err(RuntimeConfigError::DigestDrift { .. })
+    ));
+}
+
+#[test]
 fn manifest_digest_drift_fails_fast() {
-    let mut manifest = compile_runtime_config(&config(""), Some(Path::new("/tmp/v4"))).expect("compile");
+    let mut manifest =
+        compile_runtime_config(&config(""), Some(Path::new("/tmp/v4"))).expect("compile");
     manifest.listeners[0].address = "127.0.0.1:61235".to_string();
-    assert!(matches!(manifest.verify(), Err(RuntimeConfigError::DigestDrift { .. })));
+    assert!(matches!(
+        manifest.verify(),
+        Err(RuntimeConfigError::DigestDrift { .. })
+    ));
 }
 
 #[test]
@@ -190,10 +238,14 @@ fn product_config_import_is_deterministic_and_secret_free() {
     let product = first.product.as_ref().expect("product declarations");
     assert_eq!(product.route_groups[0].route_group_id, "responses_v3_7777");
     assert_eq!(product.providers.len(), 2);
-    assert_eq!(product.error_policies[0].policy_id, "account_http_401_two_errors");
+    assert_eq!(
+        product.error_policies[0].policy_id,
+        "account_http_401_two_errors"
+    );
     let json = String::from_utf8(first.to_json().expect("json")).expect("utf8");
     assert!(!json.contains("sk-"));
-    assert!(json.contains("token_file:/Volumes/extension/.rcc/secrets/v3/opencode-go.conf#opencode.key1"));
+    assert!(json
+        .contains("token_file:/Volumes/extension/.rcc/secrets/v3/opencode-go.conf#opencode.key1"));
 }
 
 #[test]
@@ -287,11 +339,55 @@ fn v3_7777_fixture_preserves_all_route_pools_and_targets() {
 }
 
 #[test]
+fn v3_4444_fixture_preserves_route_group_and_provider_targets() {
+    let product = compile_product_config(
+        include_str!("../../../tests/resources/config/v4-4444-product.toml"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect("compile 4444 product fixture");
+    assert_eq!(product.source, "v3-baseline:routecodex_v3_4444");
+    assert_eq!(product.route_groups.len(), 1);
+    let group = &product.route_groups[0];
+    assert_eq!(group.route_group_id, "routecodex_v3_4444");
+    assert_eq!(group.pools.len(), 9);
+    assert!(group
+        .pools
+        .iter()
+        .flat_map(|pool| pool.targets.iter())
+        .any(|target| target.provider_id == "goaichat" && target.model_id == "glm-5.3"));
+    assert!(group
+        .pools
+        .iter()
+        .flat_map(|pool| pool.targets.iter())
+        .any(|target| target.provider_id == "glm" && target.model_id == "glm-5.3-flash"));
+}
+
+#[test]
+fn v3_4444_live_runtime_binds_5520_and_product_manifest() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/resources/config/v4-4444-live-runtime.toml");
+    let manifest = compile_runtime_config_file(&path).expect("compile 4444 live authoring");
+    assert_eq!(manifest.listeners[0].address, "127.0.0.1:5520");
+    assert_eq!(manifest.providers.len(), 4);
+    assert_eq!(manifest.routes[0].id, "routecodex_v3_4444");
+    assert_eq!(
+        manifest.product.as_ref().unwrap().route_groups[0]
+            .pools
+            .len(),
+        9
+    );
+    assert!(manifest.verify().is_ok());
+}
+
+#[test]
 fn live_authoring_consumes_product_config_path_into_manifest() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/resources/config/v4-live-product-runtime.toml");
     let manifest = compile_runtime_config_file(&path).expect("compile live product authoring");
-    let product = manifest.product.as_ref().expect("product manifest consumer");
+    let product = manifest
+        .product
+        .as_ref()
+        .expect("product manifest consumer");
     let baseline = compile_product_config(
         include_str!("../../../tests/resources/config/v3-responses-7777-product.toml"),
         Some(
@@ -302,7 +398,10 @@ fn live_authoring_consumes_product_config_path_into_manifest() {
         ),
     )
     .expect("compile baseline product");
-    assert_eq!(product, &baseline, "live manifest product differs from normalized baseline");
+    assert_eq!(
+        product, &baseline,
+        "live manifest product differs from normalized baseline"
+    );
     assert_eq!(product.source, "v3-baseline:responses_v3_7777");
     assert_eq!(manifest.listeners[0].address, "127.0.0.1:5520");
     assert_eq!(product.providers.len(), 6);

@@ -1,0 +1,38 @@
+{
+  "active_version": "active-v1",
+  "artifact_record_id": "v4-cordis-plugin-contract-candidate-r3",
+  "clean_scope": {
+    "base_commit": "3d97d154d72d125ab90055f597983f8201aeffa5",
+    "changed_paths": [
+      "crates/routecodex-v4-plugin-contract/**"
+    ],
+    "generated_policy": "excluded_from_source_clean",
+    "ignored_paths": [
+      "target/**",
+      "generated/**",
+      "build-control/**"
+    ]
+  },
+  "created_at": "2026-08-28T11:15:00Z",
+  "freeze_id": "v4-cordis-plugin-contract-freeze-current",
+  "git_clean": true,
+  "issue_id": "v4-cordis-plugin-contract-rebuild-current",
+  "library_hash": "sha256:308725f4606c2751f861efe5401f63b57fab38a8c3fb827cc6958e06a70a9ff3",
+  "module_id": "routecodex-v4-plugin-contract",
+  "owners": {
+    "api_extractor": "appsdk-0.1.5",
+    "artifact_registry": "appsdk-active",
+    "compiler": "appsdk-0.1.5",
+    "review": "agy",
+    "vcs": "git"
+  },
+  "previous_active_immutable": false,
+  "previous_active_version": null,
+  "promotion_id": "v4-cordis-plugin-contract-promotion-current",
+  "promotion_record_hash": "sha256:6d39358f543d2594d01c4d59e944e8d5a5162a11fc0e27824d127cf4295dc0b6",
+  "public_api_hash": "sha256:b6f455ee7fb4c7702156edf9f7fee9f127c7aacad6ff56dc4d2d7a7c4889be11",
+  "regression_report_hash": "sha256:6f0236022bc943f19ccefee6d91bbdb9a82589d64d2f84cf0d51b7dc4077efab",
+  "regression_report_id": "v4-cordis-plugin-contract-regression-current",
+  "review_id": "v4-cordis-plugin-contract-review-current",
+  "source_commit_or_tag": "4944a2fafe8349102a625cef502ba02b414e5db8"
+}

@@ -1,1 +1,40 @@
-{"evidence_id":"red-gate","issue_id":"V4-RUNTIME-006","experiment_id":"v4-runtime-ports","kind":"red_test","producer":{"adapter":"cargo","identity":"v4_runtime_006_response_error_red"},"command_argv":["cargo","test","--manifest-path","Cargo.toml","-p","routecodex-v4-runtime","--test","l2_ports","--locked"],"source_commit":"eafc7f694e6ceb9fc361593d0ae20fe2b7b168cb","scope":{"feature_id":"V4-RUNTIME-006","module_id":"routecodex-v4-runtime"},"exit_status":0,"result":"pass","input_hashes":["sha256:131370e3276a17941f679fea1cda8fe33aa1412c6d14f361d3bb2bf6a844cd63","sha256:635a5e2760c2b3d6cf65373558af376e479c51ad6c3bb370838ed669689dde7d","sha256:733a491423dc47d8c1da4064266e71afda6804c2c755761966e6e166dc198701"],"scope_hash":"sha256:c0972b199e2dcf7f22fca8d167e1409d87c74ae03c2d586d84b197947386b2b0","phase":"negative_intervention","created_at":"2026-08-24T05:30:00Z","expires_at":"2026-08-29T00:00:00Z"}
+{
+  "evidence_id": "red-gate",
+  "issue_id": "V4-RUNTIME-006",
+  "experiment_id": "v4-runtime-ports",
+  "kind": "red_test",
+  "producer": {
+    "adapter": "cargo",
+    "identity": "v4_runtime_006_response_error_red"
+  },
+  "command_argv": [
+    "cargo",
+    "test",
+    "--manifest-path",
+    "Cargo.toml",
+    "-p",
+    "routecodex-v4-runtime",
+    "--test",
+    "l2_ports",
+    "--locked"
+  ],
+  "source_commit": "56ec8e9f8ea6be50623eb7f3f46df7234db04f95",
+  "scope": {
+    "feature_id": "V4-RUNTIME-006",
+    "module_id": "routecodex-v4-runtime"
+  },
+  "exit_status": 0,
+  "result": "pass",
+  "input_hashes": [
+    "sha256:0d1efa8e8b01fbe773e383c5c3421befef1bbeb65ba506b14f1deef5e4f5d4bc",
+    "sha256:131370e3276a17941f679fea1cda8fe33aa1412c6d14f361d3bb2bf6a844cd63",
+    "sha256:635a5e2760c2b3d6cf65373558af376e479c51ad6c3bb370838ed669689dde7d",
+    "sha256:95acda3812bdd03bde34aad4d91d50a6f777680e5d4121248610dbbeed2de1b9",
+    "sha256:d0c0915253d9ac414f4cb15aedb2c53489d1d2fd89eb1e31646f8bb974818378",
+    "sha256:d62265b99e5a9c2f2a21405bbd922c0f205ab979bfe921e2323597b47e9cfa31"
+  ],
+  "scope_hash": "sha256:38ce09a99c913fd277bc92ac7f82cb5cbf63ba90fb4638ce57e25946a1454299",
+  "phase": "negative_intervention",
+  "created_at": "2026-08-29T00:50:00Z",
+  "expires_at": "2026-09-05T00:50:00Z"
+}

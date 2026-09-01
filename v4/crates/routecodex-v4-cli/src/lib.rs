@@ -28,8 +28,10 @@ impl Cli {
     }
 
     pub fn command_or_start(self) -> V4CommandIntent {
-        self.command
-            .unwrap_or(V4CommandIntent::Start(StartIntent::default()))
+        self.command.unwrap_or(V4CommandIntent::Start(StartIntent {
+            foreground: false,
+            ..StartIntent::default()
+        }))
     }
 }
 
@@ -42,6 +44,7 @@ pub enum V4CommandIntent {
     Init(InitIntent),
     Start(StartIntent),
     Status(ConfigPathIntent),
+    RepairStale(ConfigPathIntent),
     Restart(RestartIntent),
     Stop(StopIntent),
     Servertool {
@@ -106,6 +109,8 @@ pub struct SnapshotIntent {
 pub struct StartIntent {
     #[arg(short = 'c', long = "config")]
     pub config: Option<PathBuf>,
+    #[arg(long, default_value_t = false)]
+    pub foreground: bool,
     #[command(flatten)]
     pub snapshot: SnapshotIntent,
 }

@@ -1,15 +1,1 @@
-{
-  "merge_id": "error-sdk013-merge",
-  "issue_id": "appsdk-013-migration",
-  "module_id": "routecodex-v4-error",
-  "fix_candidate_id": "error-sdk013-candidate",
-  "effectiveness_id": "error-sdk013-effectiveness",
-  "mainline_ref": "refs/heads/codex/v4-config-freeze-redo-20260821",
-  "candidate_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
-  "merge_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
-  "candidate_tree_hash": "674c43a073f24ddb02679b65c76300e984639d7b",
-  "merged_tree_hash": "674c43a073f24ddb02679b65c76300e984639d7b",
-  "change_identity": "exact",
-  "result": "pass",
-  "created_at": "2026-08-22T06:01:00Z"
-}
+{"merge_id":"v4-cordis-error-merge-current","issue_id":"v4-cordis-error-rebuild-current","module_id":"routecodex-v4-error","fix_candidate_id":"v4-cordis-error-candidate-current","effectiveness_id":"v4-cordis-error-effectiveness-current","mainline_ref":"v4-cordis","candidate_commit":"47927fe2405c9989c5effff83f84c55c19b1c3b1","merge_commit":"47927fe2405c9989c5effff83f84c55c19b1c3b1","candidate_tree_hash":"0ab70c6852498972581f04d0b8b4ce9b8fafd317","merged_tree_hash":"0ab70c6852498972581f04d0b8b4ce9b8fafd317","change_identity":"exact","result":"pass","created_at":"2026-08-28T09:52:00Z"}

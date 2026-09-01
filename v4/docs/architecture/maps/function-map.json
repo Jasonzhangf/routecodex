@@ -294,8 +294,8 @@
         "protocol_decode",
         "response_governance",
         "tool_harvest",
-        "client_semantic_projection",
-        "sse_frame_boundary",
+        "direct_response_passthrough",
+        "relay_response_projection",
         "frame_build"
       ],
       "required_gates": [
@@ -388,15 +388,25 @@
       "owner": "routecodex-v4-runtime",
       "entry_symbols": [
         "SkeletonRuntime::load",
+        "SkeletonRuntime::admit_request",
         "SkeletonRuntime::execute_request",
+        "SkeletonRuntime::execute_request_json_scoped_with_lease",
         "SkeletonRuntime::execute_provider_response",
         "SkeletonRuntime::execute_provider_response_scoped",
+        "SkeletonRuntime::execute_provider_response_scoped_with_lease",
         "SkeletonRuntime::execute_chain",
         "SkeletonRuntime::claim",
         "SkeletonRuntime::release",
+        "RuntimeLease",
+        "RuntimeLease::snapshot",
         "project_runtime_fault",
         "project_runtime_fault_with_policy",
-        "NodePluginPlan::build",
+        "ExecutionEngine",
+        "ExecutionEngine::execute",
+        "NodeExecutionFrame",
+        "NodeOutcome",
+        "ExecutionNode",
+        "validate_execution_plan",
         "ExecutionContext::new",
         "ExecutionContext::scope",
         "assert_no_control_leak",
@@ -407,15 +417,9 @@
         "ResponseGovernance",
         "ToolHarvest",
         "ContinuationCommit",
-        "LocalContinuationStore::new",
-        "LocalContinuationStore::commit",
-        "LocalContinuationStore::load",
-        "LocalContinuationStore::rotate",
-        "LocalContinuationStore::release",
         "ClientSemanticProjection",
         "SseFrame",
         "FrameBuild",
-        "PLUGIN_REGISTRY",
         "bind_scope_via_bridge",
         "release_scope_via_bridge"
       ],
@@ -561,7 +565,6 @@
         "build_openai_chat_wire",
         "build_anthropic_messages_wire",
         "build_protocol_wire",
-        "build_responses_local_continuation_wire",
         "ProviderProfile::responses_continuation",
         "send_responses",
         "send_openai_chat",
@@ -579,6 +582,26 @@
       ]
     },
     {
+      "function_id": "v4.provider.bound_raw_evidence_binding",
+      "owner": "routecodex-v4-provider",
+      "status": "active",
+      "entry_symbols": [
+        "PROVIDER_BOUND_RAW_EVIDENCE_OWNER",
+        "ProviderBoundRawEvidence",
+        "ProviderBoundRawEvidenceOwnerContract::bind",
+        "ProviderBoundRawEvidenceBindingError"
+      ],
+      "resource_ids": [
+        "v4.provider.bound_raw_evidence"
+      ],
+      "required_gates": [
+        "v4_provider_bound_raw_evidence_positive",
+        "v4_provider_bound_raw_evidence_red",
+        "v4_parity_gate_resource_binding",
+        "v4_parity_gate_plane_isolation"
+      ]
+    },
+    {
       "function_id": "v4.server.console_identity_evidence",
       "owner": "routecodex-v4-server",
       "entry_symbols": [
@@ -592,6 +615,7 @@
         "V4RequestIdCounter::next_request_identity",
         "V4ErrorEvidenceFlushOnTerminalFailure::new",
         "V4ErrorEvidenceFlushOnTerminalFailure::flush",
+        "V4ErrorEvidenceFlushOnTerminalFailure::capture_provider_exchange",
         "V4ErrorEvidenceFlushOnTerminalFailure::records"
       ],
       "required_gates": [
@@ -777,6 +801,30 @@
       ]
     },
     {
+      "function_id": "v4.cordis.generic_factory",
+      "owner": "routecodex-v4-cordis-host",
+      "status": "active",
+      "feature_id": "v4.cordis_generic_factory",
+      "entry_symbols": [
+        "cordisCatalogIdentityKey",
+        "createCordisPluginFactory",
+        "createCordisPluginFactory::createPlugin",
+        "createCordisPluginFactory::createPlugins"
+      ],
+      "entry_paths": [
+        "cordis/routecodex-v4-cordis-host/src/index.mjs"
+      ],
+      "resource_bindings": [
+        "v4.plugin.catalog",
+        "v4.cordis.plugin_fibers"
+      ],
+      "required_gates": [
+        "v4_cordis_host_l3_regression",
+        "v4_parity_gate_cordis_host",
+        "v4_parity_gate_cordis_host_red"
+      ]
+    },
+    {
       "function_id": "v4.cordis.host",
       "owner": "routecodex-v4-cordis-host",
       "entry_symbols": [
@@ -831,16 +879,22 @@
         "ExecutionEpochIdentity",
         "ExecutionEpochSnapshot",
         "ExecutionEpochState",
-        "ActiveExecutionEpoch",
-        "ActiveExecutionEpoch::new",
-        "ActiveExecutionEpoch::admit",
-        "ActiveExecutionEpoch::record_execution_failure",
-        "ActiveExecutionEpoch::snapshot",
+        "ExecutionEpochBundle",
+        "ExecutionEpochBundle::new",
+        "ExecutionEpochBundle::admit",
+        "ExecutionEpochBundle::record_execution_failure",
+        "ExecutionEpochBundle::snapshot",
         "EpochLease",
         "EpochLease::release",
         "ActiveEpochStore",
+        "ActiveEpochStore::empty",
+        "ActiveEpochStore::prepare",
+        "ActiveEpochStore::commit",
+        "ActiveEpochStore::abort",
         "ActiveEpochStore::admit",
         "ActiveEpochStore::publish",
+        "ActiveEpochStore::drain",
+        "ActiveEpochStore::rollback",
         "ActiveEpochStore::record_execution_failure",
         "ActiveEpochStore::active_snapshot"
       ],
@@ -861,7 +915,7 @@
         "v4.node_container.execution_epoch"
       ],
       "resource_ids": ["v4.node_container.execution_epoch"],
-      "mainline_binding": "forbidden_before_integration"
+      "mainline_binding": "integration_pending"
     },
     {
       "function_id": "v4.cordis.host_binding",
@@ -884,6 +938,45 @@
         "v4_parity_gate_cordis_host",
         "v4_parity_gate_cordis_host_red"
       ]
+    },
+    {
+      "function_id": "v4.cordis.host_daemon",
+      "owner": "routecodex-v4-cordis-host",
+      "feature_id": "v4.cordis_host_daemon",
+      "status": "active",
+      "entry_symbols": [
+        "startCordisHostDaemon",
+        "CordisHostDaemonClient",
+        "CordisHostDaemonClient::connect",
+        "CordisHostDaemonClient::querySnapshot",
+        "CordisHostDaemonClient::heartbeat",
+        "CordisHostDaemonClient::reconcile",
+        "CordisHostDaemonClient::sendEpochControl",
+        "CordisHostDaemonClient::prepareEpoch",
+        "CordisHostDaemonClient::commitEpoch",
+        "CordisHostDaemonClient::abortEpoch",
+        "CordisHostDaemonClient::drainEpoch",
+        "CordisHostDaemonClient::rollbackEpoch",
+        "CordisHostDaemonClient::queryActiveEpoch",
+        "CordisHostDaemonError"
+      ],
+      "entry_paths": [
+        "cordis/routecodex-v4-cordis-host/src/daemon.mjs"
+      ],
+      "source_paths": [
+        "cordis/routecodex-v4-cordis-host/src/daemon.mjs",
+        "cordis/routecodex-v4-cordis-host/tests/daemon.test.mjs",
+        "cordis/routecodex-v4-cordis-host/tests/daemon-epoch.test.mjs",
+        "cordis/routecodex-v4-cordis-host/tests/resources/daemon-child.mjs"
+      ],
+      "required_gates": [
+        "v4_cordis_host_l3_regression",
+        "v4_parity_gate_cordis_host",
+        "v4_parity_gate_cordis_host_red"
+      ],
+      "resource_bindings": ["v4.cordis.host_daemon"],
+      "resource_ids": ["v4.cordis.host_daemon"],
+      "mainline_binding": "integration_pending"
     },
     {
       "function_id": "v4.node_container.lifecycle_dispatch",
@@ -943,7 +1036,9 @@
       "entry_symbols": [
         "dispatch",
         "run_managed_child",
-        "PipelineHandler::handle"
+        "PipelineHandler::handle",
+        "PipelineHandler::new",
+        "SkeletonRuntime::execution_epoch_bundle"
       ],
       "entry_paths": [
         "crates/routecodex-v4-runtime-bin/src/main.rs"
@@ -1132,6 +1227,16 @@
       "resource_ids": ["v4.parity.differential_harness"],
       "source_paths": ["scripts/architecture/verify-v4-product-differential.mjs"],
       "required_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
+    },
+    {
+      "function_id": "v4.control.event_domains",
+      "status": "active",
+      "feature_id": "v4.control.event_domains",
+      "owner": "routecodex-v4-control",
+      "entry_symbols": ["ControlSignalKind", "MetadataCenter::register", "MetadataCenter::consume", "PayloadGate::write_control"],
+      "resource_ids": ["v4.control.side_channel", "v4.control.metadata_center"],
+      "source_paths": ["crates/routecodex-v4-control/src/lib.rs", "crates/routecodex-v4-control/tests/l2_control.rs"],
+      "required_gates": ["v4_control_event_domains", "v4_control_event_domains_red"]
     }
     ,{
       "function_id":"v4.plugin.request.responses_normalize","status":"active","feature_id":"V4-PLUGIN-001","owner":"routecodex-v4-standard-plugins","entry_symbols":["request_normalize","request_normalize_entry"],"resource_ids":["v4.plugin.request.responses_normalize"],"source_paths":["crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/src/request_normalize.rs"],"required_gates":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"]
@@ -1184,6 +1289,87 @@
       "resource_ids":["v4.data.immutable_arc_carriers"],
       "source_paths":["crates/routecodex-v4-runtime/src/lib.rs","crates/routecodex-v4-runtime/tests/l2_immutable_arc_red.rs"],
       "required_gates":["v4_control_event_arc_positive","v4_control_event_arc_red"]
+    }
+    ,{
+      "function_id": "v4.governance.cordis_concurrency_reconciliation",
+      "status": "active",
+      "feature_id": "gate_id:v4.cordis-concurrency-reconciliation",
+      "owner": "routecodex-v4-governance",
+      "entry_symbols": ["root"],
+      "resource_ids": ["v4.governance.cordis_concurrency_reconciliation"],
+      "source_paths": ["scripts/verify-v4-cordis-concurrency-reconciliation.mjs", "contracts/v4-cordis-concurrency-reconciliation.manifest.json"],
+      "required_gates": ["v4_cordis_concurrency_reconciliation", "v4_cordis_concurrency_reconciliation_red"]
+    },
+    {
+      "function_id": "v4.runtime.production_request_chain",
+      "status": "active",
+      "feature_id": "V4-RUNTIME-REQUEST-MAINLINE",
+      "owner": "routecodex-v4-runtime",
+      "entry_symbols": ["SkeletonRuntime::admit_request", "SkeletonRuntime::execute_request_json_scoped_with_lease", "ExecutionEngine::execute_pinned_node", "ExecutionReport::provider_wire_value"],
+      "resource_ids": ["v4.node_container.execution_epoch", "v4.request.normal_payload", "v4.request.provider_semantic", "v4.request.provider_wire_payload"],
+      "source_paths": ["crates/routecodex-v4-runtime/src/lib.rs", "crates/routecodex-v4-runtime-bin/src/main.rs"],
+      "required_gates": ["v4_parity_gate_node_graph", "v4_parity_gate_node_graph_red", "v4_parity_gate_execution_binding", "v4_parity_gate_execution_binding_red", "v4_parity_gate_cordis_host", "v4_parity_gate_cordis_host_red", "v4_production_mainline_red", "v4_runtime_l2_regression", "v4_real_runtime_responses_json", "v4_real_runtime_responses_sse"],
+      "mainline_binding": "integration_pending"
+    },
+    {
+      "function_id": "v4.plugin.hook.model_mapping",
+      "status": "integration_pending",
+      "feature_id": "V4-PLUGIN-MODEL-HOOK",
+      "owner": "routecodex-v4-standard-plugins",
+      "entry_symbols": ["direct_model_passthrough", "relay_model_projection"],
+      "resource_ids": ["v4.request.normal_payload"],
+      "source_paths": ["crates/routecodex-v4-standard-plugins/src/model_hooks.rs"],
+      "required_gates": ["v4_standard_plugins_l2_regression", "v4_parity_gate_standard_plugins", "v4_plugin_model_hook_red", "v4_direct_relay_sse", "v4_direct_relay_sse_red"]
+    },
+    {
+      "function_id": "v4.transport.sse_plugin",
+      "status": "active",
+      "feature_id": "V4-DIRECT-RELAY-SSE",
+      "owner": "routecodex-v4-standard-plugins::sse_transport",
+      "entry_symbols": ["SseIngressPlugin::push_chunk", "SseIngressPlugin::finish", "SseEgressPlugin::enqueue", "SseEgressPlugin::pop", "SseEgressPlugin::keepalive_frame", "SseEgressPlugin::drain_closeout"],
+      "resource_ids": ["v4.transport.sse_frames"],
+      "source_paths": ["crates/routecodex-v4-standard-plugins/src/sse_transport.rs"],
+      "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red"]
+    },
+    {
+      "function_id": "v4.runtime.sse_response_pipeline",
+      "status": "active",
+      "feature_id": "V4-DIRECT-RELAY-SSE",
+      "owner": "routecodex-v4-runtime",
+      "entry_symbols": ["ResponseStreamProcessor::process_frame", "ResponseStreamProcessor::finish", "ResponseStreamProcessor::project_failure"],
+      "resource_ids": ["v4.transport.sse_frames", "v4.event.response_stream_disposition", "v4.information.execution_lane", "v4.information.client_protocol", "v4.information.provider_protocol"],
+      "source_paths": ["crates/routecodex-v4-runtime/src/lib.rs", "crates/routecodex-v4-standard-plugins/src/response_inbound.rs", "crates/routecodex-v4-standard-plugins/src/response_outbound.rs", "crates/routecodex-v4-runtime-bin/src/main.rs"],
+      "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red", "v4_runtime_l2_regression", "v4_standard_plugins_l2_regression"]
+    },
+    {
+      "function_id": "v4.direct.relay_container",
+      "status": "active",
+      "feature_id": "V4-DIRECT-RELAY-SSE",
+      "owner": "routecodex-v4-node-container::NodeContainer",
+      "entry_symbols": ["ExecutionEngine::execute_pinned_node", "EpochLease::execute", "NodeContainer::execute_with_plan_hash"],
+      "resource_ids": ["v4.execution.direct_relay_container", "v4.information.execution_lane", "v4.information.client_protocol", "v4.information.provider_protocol"],
+      "source_paths": ["crates/routecodex-v4-runtime/src/execution_engine.rs", "crates/routecodex-v4-node-container/src/lib.rs"],
+      "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red", "v4_parity_gate_node_graph", "v4_parity_gate_execution_binding"]
+    },
+    {
+      "function_id": "v4.hook.direct.request_response",
+      "status": "active",
+      "feature_id": "V4-DIRECT-RELAY-SSE",
+      "owner": "routecodex-v4-standard-plugins",
+      "entry_symbols": ["direct_model_passthrough", "direct_response_passthrough"],
+      "resource_ids": ["v4.direct.request.client_payload", "v4.direct.request.provider_wire", "v4.direct.response.provider_raw", "v4.direct.response.client_payload", "v4.information.execution_lane", "v4.information.client_protocol", "v4.information.provider_protocol"],
+      "source_paths": ["crates/routecodex-v4-standard-plugins/src/model_hooks.rs"],
+      "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red", "v4_parity_gate_standard_plugins"]
+    },
+    {
+      "function_id": "v4.hook.relay.request_response",
+      "status": "integration_pending",
+      "feature_id": "V4-DIRECT-RELAY-SSE",
+      "owner": "routecodex-v4-standard-plugins",
+      "entry_symbols": ["relay_model_projection", "relay_response_projection", "project_responses_to_chat"],
+      "resource_ids": ["v4.request.normal_payload", "v4.response.normal_payload", "v4.information.execution_lane", "v4.information.client_protocol", "v4.information.provider_protocol"],
+      "source_paths": ["crates/routecodex-v4-standard-plugins/src/model_hooks.rs", "crates/routecodex-v4-standard-plugins/src/response_outbound.rs"],
+      "required_gates": ["v4_direct_relay_sse", "v4_direct_relay_sse_red", "v4_parity_gate_standard_plugins"]
     }
   ]
 }

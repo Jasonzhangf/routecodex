@@ -1,10 +1,11 @@
 //! routecodex-v4-provider L2 regression: session-scoped availability.
 
 use routecodex_v4_provider::{
-    build_anthropic_messages_wire, build_openai_chat_wire, build_protocol_wire,
-    build_responses_local_continuation_wire, load_profile, normalize_provider_response,
-    normalize_provider_sse_frame, send_openai_chat, validate_auth_alias, verify_profile_auth,
-    AvailabilityRecord, AvailabilityState, V4Availability01SessionScoped,
+    build_anthropic_messages_wire, build_openai_chat_wire, build_protocol_wire, load_profile,
+    normalize_provider_response, normalize_provider_sse_frame, send_openai_chat,
+    validate_auth_alias, verify_profile_auth, AvailabilityRecord, AvailabilityState,
+    ProviderBoundRawEvidenceBindingError, ProviderBoundRawEvidenceOwnerContract,
+    V4Availability01SessionScoped, PROVIDER_BOUND_RAW_EVIDENCE_OWNER,
 };
 use serde_json::json;
 use std::fs;
@@ -60,6 +61,62 @@ fn session_scoped_availability_positive_and_red() {
 }
 
 #[test]
+fn provider_bound_raw_evidence_owner_binding_positive_and_red() {
+    let bound = ProviderBoundRawEvidenceOwnerContract::bind(
+        PROVIDER_BOUND_RAW_EVIDENCE_OWNER,
+        "req-live-b-1",
+        br#"{"model":"wire"}"#,
+        br#"{"error":{"code":"upstream"}}"#,
+    )
+    .expect("canonical provider owner must bind both raw artifacts");
+    assert_eq!(bound.request_id, "req-live-b-1");
+    assert_eq!(bound.provider_request, br#"{"model":"wire"}"#);
+    assert_eq!(bound.provider_response, br#"{"error":{"code":"upstream"}}"#);
+
+    assert_eq!(
+        ProviderBoundRawEvidenceOwnerContract::bind(
+            "routecodex-v4-server::V4ErrorEvidenceFlushOnTerminalFailure",
+            "req-live-b-1",
+            b"request",
+            b"response",
+        )
+        .expect_err("diagnostic server owner cannot claim provider-bound evidence"),
+        ProviderBoundRawEvidenceBindingError::InvalidOwner {
+            owner: "routecodex-v4-server::V4ErrorEvidenceFlushOnTerminalFailure".to_string(),
+        }
+    );
+}
+
+#[test]
+fn provider_bound_raw_evidence_binding_fails_closed_on_missing_owner_or_artifact() {
+    assert_eq!(
+        ProviderBoundRawEvidenceOwnerContract::bind("", "req-1", b"request", b"response")
+            .expect_err("missing owner must fail closed"),
+        ProviderBoundRawEvidenceBindingError::MissingOwner
+    );
+    assert_eq!(
+        ProviderBoundRawEvidenceOwnerContract::bind(
+            PROVIDER_BOUND_RAW_EVIDENCE_OWNER,
+            "req-1",
+            b"",
+            b"response",
+        )
+        .expect_err("missing provider request must fail closed"),
+        ProviderBoundRawEvidenceBindingError::MissingProviderRequest
+    );
+    assert_eq!(
+        ProviderBoundRawEvidenceOwnerContract::bind(
+            PROVIDER_BOUND_RAW_EVIDENCE_OWNER,
+            "req-1",
+            b"request",
+            b"",
+        )
+        .expect_err("missing provider response must fail closed"),
+        ProviderBoundRawEvidenceBindingError::MissingProviderResponse
+    );
+}
+
+#[test]
 fn secret_file_requires_and_resolves_exact_secret_key() {
     let root = std::env::temp_dir().join(format!("rccv4-provider-{}", std::process::id()));
     fs::create_dir_all(&root).expect("temp root");
@@ -91,7 +148,10 @@ fn secret_file_without_secret_key_fails_fast() {
 
 #[test]
 fn responses_continuation_owner_is_compiled_and_invalid_values_fail_fast() {
-    let root = std::env::temp_dir().join(format!("rccv4-provider-continuation-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!(
+        "rccv4-provider-continuation-{}",
+        std::process::id()
+    ));
     fs::create_dir_all(&root).expect("temp root");
     let relay_path = root.join("relay.toml");
     fs::write(
@@ -99,8 +159,9 @@ fn responses_continuation_owner_is_compiled_and_invalid_values_fail_fast() {
         "providerId = \"relay\"\n[provider]\nbaseURL = \"https://example.invalid/v1\"\ndefaultModel = \"wire\"\ntype = \"responses\"\nresponsesContinuation = \"relay\"\n[provider.models.wire]\nwireName = \"wire\"\n[provider.auth]\nenv = \"RCCV4_TEST_KEY\"\n",
     )
     .expect("relay profile");
-    let profile = load_profile(relay_path.to_str().expect("utf8 path")).expect("load relay profile");
-    assert_eq!(profile.responses_continuation, "relay");
+    let profile = load_profile(relay_path.to_str().expect("utf8 path"))
+        .expect("retired relay hint is ignored");
+    assert_eq!(profile.responses_continuation, "direct");
 
     let invalid_path = root.join("invalid.toml");
     fs::write(
@@ -108,9 +169,9 @@ fn responses_continuation_owner_is_compiled_and_invalid_values_fail_fast() {
         "providerId = \"invalid\"\n[provider]\nbaseURL = \"https://example.invalid/v1\"\ndefaultModel = \"wire\"\ntype = \"responses\"\nresponsesContinuation = \"unknown\"\n[provider.models.wire]\nwireName = \"wire\"\n[provider.auth]\nenv = \"RCCV4_TEST_KEY\"\n",
     )
     .expect("invalid profile");
-    let error = load_profile(invalid_path.to_str().expect("utf8 path"))
-        .expect_err("unknown continuation owner must fail");
-    assert_eq!(error.code, "provider_continuation_owner_invalid");
+    let profile = load_profile(invalid_path.to_str().expect("utf8 path"))
+        .expect("retired continuation hint is ignored");
+    assert_eq!(profile.responses_continuation, "direct");
 }
 
 #[test]
@@ -177,45 +238,18 @@ fn protocol_dispatch_projects_normalized_input_to_selected_wire_shape() {
     let openai = build_protocol_wire("openai", &input, "gpt-wire", false).expect("openai wire");
     assert!(openai.get("input").is_none());
     assert_eq!(openai["messages"][0]["content"], "hello");
-    let anthropic = build_protocol_wire("anthropic", &input, "claude-wire", false)
-        .expect("anthropic wire");
+    let anthropic =
+        build_protocol_wire("anthropic", &input, "claude-wire", false).expect("anthropic wire");
     assert_eq!(anthropic["max_tokens"], 64);
     assert!(build_protocol_wire("unknown", &input, "wire", false).is_err());
 }
 
 #[test]
-fn responses_local_continuation_materializes_ordered_context_without_locator() {
-    let wire = build_responses_local_continuation_wire(
-        &json!([
-            {"role":"user","content":"first"},
-            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}
-        ]),
-        &json!({"input":[{"role":"user","content":"second"}],"tools":[{"type":"function"}],"previous_response_id":"resp-1"}),
-        "gpt-wire",
-        false,
-    )
-    .expect("relay wire");
-    assert_eq!(wire["model"], "gpt-wire");
-    assert_eq!(wire["input"].as_array().expect("input array").len(), 3);
-    assert_eq!(wire["tools"][0]["type"], "function");
-    assert!(wire.get("previous_response_id").is_none());
-}
-
-#[test]
-fn responses_local_continuation_rejects_non_array_prior_context() {
-    let error = build_responses_local_continuation_wire(
-        &json!({"id":"response-1"}),
-        &json!("next"),
-        "gpt-wire",
-        false,
-    )
-    .expect_err("prior context must be an ordered array");
-    assert_eq!(error.code, "continuation_context_invalid");
-}
-
-#[test]
 fn protocol_transport_rejects_profile_protocol_mismatch_before_network() {
-    let path = std::env::temp_dir().join(format!("rccv4-provider-protocol-{}.toml", std::process::id()));
+    let path = std::env::temp_dir().join(format!(
+        "rccv4-provider-protocol-{}.toml",
+        std::process::id()
+    ));
     fs::write(
         &path,
         "providerId = \"real\"\n[provider]\nbaseURL = \"https://example.invalid/v1\"\ndefaultModel = \"wire\"\ntype = \"anthropic\"\n[provider.auth]\nenv = \"RCCV4_TEST_KEY\"\n",
@@ -288,6 +322,29 @@ fn responses_normalizer_rejects_unknown_gateway_diagnostics() {
 }
 
 #[test]
+fn responses_normalizer_rejects_provider_injected_instructions() {
+    let error = normalize_provider_response(
+        "responses",
+        &json!({"id":"resp-1","status":"completed","instructions":"internal prompt","output":[]}),
+    )
+    .expect_err("provider instructions must not cross the response boundary");
+    assert_eq!(error.code, "provider_response_instructions_injected");
+}
+
+#[test]
+fn responses_sse_normalizer_rejects_provider_injected_instructions() {
+    let error = normalize_provider_sse_frame(
+        "responses",
+        br#"event: response.created
+data: {"type":"response.created","response":{"id":"resp-1","instructions":"internal prompt"}}
+
+"#,
+    )
+    .expect_err("SSE provider instructions must fail at provider boundary");
+    assert_eq!(error.code, "provider_response_instructions_injected");
+}
+
+#[test]
 fn provider_sse_normalizers_project_text_and_terminal_events() {
     let openai = normalize_provider_sse_frame(
         "openai",
@@ -302,5 +359,22 @@ fn provider_sse_normalizers_project_text_and_terminal_events() {
         b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hi\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
     )
     .expect("anthropic sse normalized");
-    assert!(String::from_utf8(anthropic).expect("utf8").contains("response.completed"));
+    assert!(String::from_utf8(anthropic)
+        .expect("utf8")
+        .contains("response.completed"));
+}
+
+#[test]
+fn responses_sse_normalizer_removes_transport_envelopes() {
+    let normalized = normalize_provider_sse_frame(
+        "responses",
+        br#"event: response.created
+data: {"type":"response.created","extra_fields":{"provider":"openai","latency":4},"response":{"id":"resp-1","extra_fields":{"chunk_index":0}}}
+
+"#,
+    )
+    .expect("responses sse normalized");
+    let text = String::from_utf8(normalized).expect("utf8");
+    assert!(!text.contains("extra_fields"));
+    assert!(text.contains("response.created"));
 }

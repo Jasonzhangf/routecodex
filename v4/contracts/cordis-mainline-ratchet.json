@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-cordis-mainline-ratchet",
+  "status": "active",
+  "owner_feature_id": "v4.cordis.mainline",
+  "canonical_docs": ["v4/docs/architecture/v4-cordis-mainline-adr.md", "v4/docs/goals/v4-cordis-mainline-migration-plan.md"],
+  "rule": "known production bypass count may only decrease; new bypasses fail the gate; each retired exception requires source evidence and a negative test",
+  "baseline_exception_ids": ["internal_rust_node_container", "static_plugin_registry", "runtime_bin_direct_business_calls", "discarded_node_output", "test_only_cordis_binding_in_production_shape"],
+  "known_exceptions": [
+    {
+      "id": "runtime_bin_direct_business_calls",
+      "evidence": {
+        "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+        "symbols": ["handle_responses", "send_target_nonstream", "send_target_streaming"]
+      }
+    }
+  ],
+  "forbidden_new_patterns": ["fallback", "silent strip", "Cordis event bus payload", "second NodeContainer", "runtime graph construction", "v4.test.* in active production plan"]
+}

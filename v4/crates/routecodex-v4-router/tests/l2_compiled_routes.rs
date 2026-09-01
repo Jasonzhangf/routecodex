@@ -1,8 +1,7 @@
 use routecodex_v4_config::{
-    compile_product_config,
-    RuntimeProductConfig, RuntimeProductModel, RuntimeProductPool, RuntimeProductProvider,
-    RuntimeProductErrorPolicy, RuntimeProductPolicyAction, RuntimeProductRouteGroup,
-    RuntimeProductTarget, RuntimeProviderCandidate, RuntimeRoute,
+    compile_product_config, RuntimeProductConfig, RuntimeProductErrorPolicy, RuntimeProductModel,
+    RuntimeProductPolicyAction, RuntimeProductPool, RuntimeProductProvider,
+    RuntimeProductRouteGroup, RuntimeProductTarget, RuntimeProviderCandidate, RuntimeRoute,
 };
 use routecodex_v4_router::{
     apply_product_error_policy, select_product_target, select_product_target_with_unavailable,
@@ -64,6 +63,7 @@ fn product_config() -> RuntimeProductConfig {
                 model_id: "client-model".to_string(),
                 wire_name: "wire-model".to_string(),
                 capabilities: vec!["thinking".to_string()],
+                aliases: Vec::new(),
             }],
             auth_handles: Vec::new(),
         }],
@@ -91,6 +91,23 @@ fn product_config() -> RuntimeProductConfig {
 }
 
 #[test]
+fn product_alias_selects_wire_model_without_rewriting_target() {
+    let mut product = product_config();
+    product.providers[0].models[0].aliases = vec!["client-alias".to_string()];
+    let selected = select_product_target(
+        &product,
+        "responses",
+        "client-alias",
+        "responses",
+        &["thinking"],
+        0,
+    )
+    .expect("alias target");
+    assert_eq!(selected.provider_id, "product-provider");
+    assert_eq!(selected.wire_model, "wire-model");
+}
+
+#[test]
 fn product_route_pool_selects_provider_wire_model() {
     let selected = select_product_target(
         &product_config(),
@@ -106,14 +123,54 @@ fn product_route_pool_selects_provider_wire_model() {
 }
 
 #[test]
+fn protocol_incompatible_priority_target_is_rejected_before_selection() {
+    let mut product = product_config();
+    product.providers.push(RuntimeProductProvider {
+        provider_id: "anthropic-provider".to_string(),
+        protocol: "anthropic".to_string(),
+        config_path: "/tmp/anthropic.toml".to_string(),
+        models: vec![RuntimeProductModel {
+            model_id: "client-model".to_string(),
+            wire_name: "wire-model".to_string(),
+            capabilities: vec!["thinking".to_string()],
+            aliases: Vec::new(),
+        }],
+        auth_handles: Vec::new(),
+    });
+    product.route_groups[0].pools[0].targets.insert(0, RuntimeProductTarget {
+        provider_id: "anthropic-provider".to_string(),
+        model_id: "client-model".to_string(),
+        priority: 0,
+        weight: None,
+    });
+    let selected = select_product_target(
+        &product,
+        "responses",
+        "client-model",
+        "responses",
+        &["thinking"],
+        0,
+    )
+    .expect("compatible responses target selected");
+    assert_eq!(selected.provider_id, "product-provider");
+}
+
+#[test]
 fn v3_product_default_pool_selects_target_matching_requested_model() {
     let product = compile_product_config(
         include_str!("../../../tests/resources/config/v3-responses-7777-product.toml"),
         Some(std::path::Path::new("/tmp/v4")),
     )
     .expect("compile product fixture");
-    let selected = select_product_target(&product, "responses_v3_7777", "deepseek-v4-flash", "responses", &[], 0)
-        .expect("select matching default target");
+    let selected = select_product_target(
+        &product,
+        "responses_v3_7777",
+        "deepseek-v4-flash",
+        "responses",
+        &[],
+        0,
+    )
+    .expect("select matching default target");
     assert_eq!(selected.provider_id, "opencode-go");
     assert_eq!(selected.wire_model, "deepseek-v4-flash");
 }
@@ -129,7 +186,10 @@ fn unavailable_provider_is_excluded_before_reselect() {
         0,
         &["product-provider"],
     );
-    assert!(matches!(selected, Err(TargetSelectionError::ProductPoolUnavailable(_))));
+    assert!(matches!(
+        selected,
+        Err(TargetSelectionError::ProductPoolUnavailable(_))
+    ));
 }
 
 #[test]
@@ -204,7 +264,10 @@ fn product_error_policy_produces_typed_retry_cooldown_projection_facts() {
     assert!(decision.retry);
     assert!(decision.cooldown);
     assert_eq!(decision.project_status, Some(502));
-    assert_eq!(decision.reason_code.as_deref(), Some("provider_account_http_401"));
+    assert_eq!(
+        decision.reason_code.as_deref(),
+        Some("provider_account_http_401")
+    );
     assert!(apply_product_error_policy(&product, "product-provider", 200, "completed").is_none());
     assert!(apply_product_error_policy(&product, "other", 500, "failed").is_none());
 }

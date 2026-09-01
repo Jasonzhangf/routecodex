@@ -202,6 +202,9 @@
     },
     {
       "gate_id": "v4_parity_gate_node_graph",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.execution_engine.production_owner", "V4-RUNTIME-002", "V4-RUNTIME-REQUEST-MAINLINE"],
       "command": "node scripts/architecture/verify-v4-node-graph.mjs",
       "required_for": [
         "routecodex-v4-governance:architecture_stable",
@@ -240,6 +243,9 @@
     },
     {
       "gate_id": "v4_parity_gate_execution_binding",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.execution_engine.production_owner", "V4-RUNTIME-002", "V4-RUNTIME-REQUEST-MAINLINE"],
       "command": "node scripts/architecture/verify-v4-execution-binding.mjs",
       "required_for": [
         "routecodex-v4-runtime:architecture_stable"
@@ -480,6 +486,14 @@
       ]
     },
     {
+      "gate_id": "v4_execution_engine_l2_regression",
+      "command": "cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-runtime --test l2_execution_engine --locked",
+      "argv": ["cargo", "test", "--manifest-path", "v4/Cargo.toml", "-p", "routecodex-v4-runtime", "--test", "l2_execution_engine", "--locked"],
+      "producer": {"adapter": "cargo", "identity": "v4_execution_engine_l2_regression"},
+      "evidence_role": "execution_engine_positive_negative",
+      "required_for": ["routecodex-v4-runtime:architecture_stable", "V4-RUNTIME-002:source_green"]
+    },
+    {
       "gate_id": "v4_runtime_l2_regression",
       "command": "cargo build --release --manifest-path Cargo.toml --locked -p routecodex-v4-skeleton && cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-skeleton,routecodex-v4-plugin-contract",
       "required_for": [
@@ -537,6 +551,32 @@
       ]
     },
     {
+      "gate_id": "v4_provider_bound_raw_evidence_positive",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-provider",
+      "feature_ids": [
+        "v4.cordis_m00.live_capture_binding"
+      ],
+      "command": "cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-provider --test l2_provider provider_bound_raw_evidence_owner_binding_positive_and_red --locked",
+      "evidence_role": "positive",
+      "required_for": [
+        "v4.provider.bound_raw_evidence_binding"
+      ]
+    },
+    {
+      "gate_id": "v4_provider_bound_raw_evidence_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-provider",
+      "feature_ids": [
+        "v4.cordis_m00.live_capture_binding"
+      ],
+      "command": "cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-provider --test l2_provider provider_bound_raw_evidence_binding_fails_closed_on_missing_owner_or_artifact --locked",
+      "evidence_role": "red_gate",
+      "required_for": [
+        "v4.provider.bound_raw_evidence_binding"
+      ]
+    },
+    {
       "gate_id": "v4_provider_availability_runtime_regression",
       "command": "cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-provider --test l2_provider session_scoped_availability_positive_and_red --locked && cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-runtime-bin --locked",
       "required_for": [
@@ -551,6 +591,14 @@
         "routecodex-v4-server:architecture_stable",
         "routecodex-v4-server:freeze",
         "routecodex-v4-server:active_link"
+      ]
+    },
+    {
+      "gate_id": "v4_server_wire_evidence_bundle",
+      "command": "cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-server --test l2_server wire_evidence --locked",
+      "required_for": [
+        "v4.server.console_identity_evidence",
+        "v4.error.raw_wire_evidence"
       ]
     },
     {
@@ -650,6 +698,9 @@
     },
     {
       "gate_id": "v4_parity_gate_cordis_host",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.execution_engine.production_owner", "v4.cordis_host_daemon", "V4-RUNTIME-002"],
       "command": "node scripts/architecture/verify-v4-cordis-host.mjs",
       "required_for": [
         "routecodex-v4-cordis-host:architecture_stable"
@@ -913,6 +964,14 @@
       ]
     },
     {
+      "gate_id": "v4_production_mainline",
+      "status": "active",
+      "command": "node scripts/architecture/verify-v4-production-mainline-red.mjs",
+      "required_for": [
+        "routecodex-v4-runtime-bin:production_mainline"
+      ]
+    },
+    {
       "gate_id": "v4_real_runtime_admission_red",
       "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
@@ -1166,10 +1225,11 @@
       "evidence_role": "plane_isolation",
       "input_paths": ["scripts/architecture/verify-v4-product-parity-status.mjs"],
       "required_for": ["source_green"]
-    }
-    ,{
+    },
+    {
       "gate_id":"v4_plugin_request_positive","status":"active","owner_module_id":"routecodex-v4-standard-plugins","feature_ids":["V4-PLUGIN-001","V4-PLUGIN-002","V4-PLUGIN-003","V4-PLUGIN-004","V4-PLUGIN-005"],"command":"cargo test -p routecodex-v4-standard-plugins --test l2_request_plugins --manifest-path Cargo.toml --locked","argv":["cargo","test","-p","routecodex-v4-standard-plugins","--test","l2_request_plugins","--manifest-path","Cargo.toml","--locked"],"producer":{"adapter":"cargo","identity":"v4_plugin_request_positive"},"evidence_role":"positive","input_paths":["crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs","crates/routecodex-v4-standard-plugins/src/provider_semantic.rs","crates/routecodex-v4-standard-plugins/src/request_governance.rs","crates/routecodex-v4-standard-plugins/src/request_normalize.rs","crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs","crates/routecodex-v4-standard-plugins/tests/l2_request_plugins.rs"],"required_for":["source_green"]
-    },{
+    },
+    {
       "gate_id":"v4_plugin_request_red","status":"active","owner_module_id":"routecodex-v4-standard-plugins","feature_ids":["V4-PLUGIN-001","V4-PLUGIN-002","V4-PLUGIN-003","V4-PLUGIN-004","V4-PLUGIN-005"],"command":"cargo test -p routecodex-v4-standard-plugins --test l2_request_plugins --manifest-path Cargo.toml --locked","argv":["cargo","test","-p","routecodex-v4-standard-plugins","--test","l2_request_plugins","--manifest-path","Cargo.toml","--locked"],"producer":{"adapter":"cargo","identity":"v4_plugin_request_red"},"evidence_role":"red_gate","input_paths":["crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs","crates/routecodex-v4-standard-plugins/src/provider_semantic.rs","crates/routecodex-v4-standard-plugins/src/request_governance.rs","crates/routecodex-v4-standard-plugins/src/request_normalize.rs","crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs","crates/routecodex-v4-standard-plugins/tests/l2_request_plugins.rs"],"required_for":["source_green"]
     },{
       "gate_id":"v4_plugin_request_boundary","status":"active","owner_module_id":"routecodex-v4-standard-plugins","feature_ids":["V4-PLUGIN-001","V4-PLUGIN-002","V4-PLUGIN-003","V4-PLUGIN-004","V4-PLUGIN-005"],"command":"node scripts/architecture/verify-v4-standard-plugins.mjs","argv":["node","scripts/architecture/verify-v4-standard-plugins.mjs"],"producer":{"adapter":"node","identity":"v4_plugin_request_boundary"},"evidence_role":"boundary_audit","input_paths":["crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs","crates/routecodex-v4-standard-plugins/src/provider_semantic.rs","crates/routecodex-v4-standard-plugins/src/request_governance.rs","crates/routecodex-v4-standard-plugins/src/request_normalize.rs","crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs","scripts/architecture/verify-v4-standard-plugins.mjs"],"required_for":["source_green"]
@@ -1211,6 +1271,165 @@
       "evidence_role":"red_gate",
       "input_paths":["crates/routecodex-v4-control/tests/l2_control_event_arc_red.rs","crates/routecodex-v4-runtime/tests/l2_immutable_arc_red.rs","scripts/architecture/verify-v4-control-event-arc.mjs"],
       "required_for":["source_green","routecodex-v4-governance:architecture_stable"]
+    },
+    {
+      "gate_id": "v4_cordis_concurrency_reconciliation",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["gate_id:v4.cordis-concurrency-reconciliation"],
+      "command": "node scripts/verify-v4-cordis-concurrency-reconciliation.mjs",
+      "argv": ["node", "scripts/verify-v4-cordis-concurrency-reconciliation.mjs"],
+      "evidence_role": "positive",
+      "input_paths": ["contracts/v4-cordis-concurrency-reconciliation.manifest.json", "docs/goals/v4-cordis-concurrency-reconciliation.md"],
+      "required_for": ["merge_queue_admission"]
+    },{
+      "gate_id": "v4_cordis_concurrency_reconciliation_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["gate_id:v4.cordis-concurrency-reconciliation"],
+      "command": "node scripts/verify-v4-cordis-concurrency-reconciliation.mjs --red-self-test",
+      "argv": ["node", "scripts/verify-v4-cordis-concurrency-reconciliation.mjs", "--red-self-test"],
+      "evidence_role": "red_gate",
+      "input_paths": ["contracts/v4-cordis-concurrency-reconciliation.manifest.json"],
+      "required_for": ["merge_queue_admission"]
+    },
+    {
+      "gate_id": "v4_m11_contract_positive",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.cordis_m11_protocol_tools_admin_contract"],
+      "input_contract_path": "contracts/m11-protocol-tools-admin.contract.json",
+      "input_set_id": "m11_protocol_tools_admin",
+      "command": "node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs",
+      "argv": ["node", "--test", "cordis/routecodex-v4-cordis-host/tests/*.test.mjs"],
+      "producer": {"adapter": "node", "identity": "v4_m11_contract_positive"},
+      "evidence_role": "positive",
+      "input_paths": [
+        "contracts/m11-protocol-tools-admin.contract.json",
+        "contracts/m11-protocol-tools-admin.manifest.json",
+        "cordis/routecodex-v4-cordis-host/tests/m11-protocol-tools-admin-contract.test.mjs"
+      ],
+      "required_for": ["source_green", "routecodex-v4-governance:architecture_stable"]
+    },
+    {
+      "gate_id": "v4_m11_contract_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["v4.cordis_m11_protocol_tools_admin_contract"],
+      "input_contract_path": "contracts/m11-protocol-tools-admin.contract.json",
+      "input_set_id": "m11_protocol_tools_admin",
+      "command": "node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs",
+      "argv": ["node", "--test", "cordis/routecodex-v4-cordis-host/tests/*.test.mjs"],
+      "producer": {"adapter": "node", "identity": "v4_m11_contract_red"},
+      "evidence_role": "red_gate",
+      "input_paths": [
+        "contracts/m11-protocol-tools-admin.contract.json",
+        "cordis/routecodex-v4-cordis-host/tests/m11-protocol-tools-admin-contract.test.mjs"
+      ],
+      "required_for": ["source_green", "routecodex-v4-governance:architecture_stable"]
+    },
+    {
+      "gate_id": "v4_responses_request_mainline",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["M06-T01", "feature_id:v4.responses_request_mainline"],
+      "command": "node scripts/architecture/verify-v4-responses-request.mjs",
+      "argv": ["node", "scripts/architecture/verify-v4-responses-request.mjs"],
+      "producer": {"adapter": "node", "identity": "v4_responses_request_mainline"},
+      "evidence_role": "positive",
+      "input_paths": [
+        "crates/routecodex-v4-runtime-bin/src/main.rs",
+        "crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs",
+        "crates/routecodex-v4-standard-plugins/src/request_plugins.rs",
+        "scripts/architecture/verify-v4-responses-request.mjs"
+      ],
+      "required_for": ["M06-T01:source_green"]
+    },
+    {
+      "gate_id": "v4_control_event_domains",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-control",
+      "feature_ids": ["v4.control.event_domains"],
+      "command": "cargo test -p routecodex-v4-control --locked --offline",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-control", "--locked", "--offline"],
+      "producer": {"adapter": "cargo", "identity": "v4_control_event_domains"},
+      "evidence_role": "positive_and_negative",
+      "input_paths": [
+        "crates/routecodex-v4-control/src/lib.rs",
+        "crates/routecodex-v4-control/tests/l2_control.rs",
+        "docs/architecture/v4-control-event-sse-audit.md"
+      ],
+      "required_for": ["v4.control.event_domains:source_green"]
+    },
+    {
+      "gate_id": "v4_control_event_domains_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-control",
+      "feature_ids": ["v4.control.event_domains"],
+      "command": "cargo test -p routecodex-v4-control --test l2_control_red --locked --offline",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-control", "--test", "l2_control_red", "--locked", "--offline"],
+      "producer": {"adapter": "cargo", "identity": "v4_control_event_domains_red"},
+      "evidence_role": "negative",
+      "input_paths": [
+        "crates/routecodex-v4-control/src/lib.rs",
+        "crates/routecodex-v4-control/tests/l2_control_red.rs",
+        "docs/architecture/v4-control-event-sse-audit.md"
+      ],
+      "required_for": ["v4.control.event_domains:source_green"]
+    },
+    {
+      "gate_id": "v4_plugin_model_hook_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-standard-plugins",
+      "feature_ids": ["V4-PLUGIN-MODEL-HOOK"],
+      "command": "cargo test -p routecodex-v4-standard-plugins --offline model_hooks::tests::hook_ids_are_stable",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-standard-plugins", "--offline", "model_hooks::tests::hook_ids_are_stable"],
+      "producer": {"adapter": "cargo", "identity": "v4_plugin_model_hook_red"},
+      "evidence_role": "negative",
+      "input_paths": ["crates/routecodex-v4-standard-plugins/src/model_hooks.rs"],
+      "required_for": ["V4-PLUGIN-MODEL-HOOK:source_green"]
+    },
+    {
+      "gate_id": "v4_direct_relay_sse",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-DIRECT-RELAY-SSE"],
+      "command": "node scripts/architecture/verify-v4-direct-relay-sse.mjs",
+      "argv": ["node", "scripts/architecture/verify-v4-direct-relay-sse.mjs"],
+      "producer": {"adapter": "node", "identity": "v4_direct_relay_sse"},
+      "evidence_role": "positive",
+      "input_paths": [
+        "contracts/skeleton-plan.contract.json",
+        "contracts/node-graph.contract.json",
+        "docs/architecture/v4-resource-operation-map.yml",
+        "docs/architecture/maps/resource-map.json",
+        "docs/architecture/maps/function-map.json",
+        "docs/architecture/maps/mainline-call-map.json",
+        "crates/routecodex-v4-runtime/src/lib.rs",
+        "crates/routecodex-v4-runtime/tests/l2_runtime.rs",
+        "crates/routecodex-v4-runtime-bin/src/main.rs",
+        "crates/routecodex-v4-node-container/src/lib.rs",
+        "crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
+        "crates/routecodex-v4-standard-plugins/src/response_inbound.rs",
+        "crates/routecodex-v4-standard-plugins/src/response_outbound.rs",
+        "crates/routecodex-v4-standard-plugins/src/sse_transport.rs",
+        "crates/routecodex-v4-standard-plugins/tests/l2_response_inbound_outbound.rs",
+        "crates/routecodex-v4-standard-plugins/tests/l2_sse_transport.rs",
+        "scripts/architecture/verify-v4-direct-relay-sse.mjs"
+      ],
+      "required_for": ["V4-DIRECT-RELAY-SSE:source_green", "merge_queue_admission"]
+    },
+    {
+      "gate_id": "v4_direct_relay_sse_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-DIRECT-RELAY-SSE"],
+      "command": "node scripts/architecture/verify-v4-direct-relay-sse.mjs --red-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-direct-relay-sse.mjs", "--red-self-test"],
+      "producer": {"adapter": "node", "identity": "v4_direct_relay_sse_red"},
+      "evidence_role": "red_gate",
+      "input_paths": ["scripts/architecture/verify-v4-direct-relay-sse.mjs"],
+      "required_for": ["V4-DIRECT-RELAY-SSE:source_green", "merge_queue_admission"]
     }
   ]
 }

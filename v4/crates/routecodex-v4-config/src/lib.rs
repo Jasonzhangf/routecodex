@@ -782,6 +782,8 @@ fn sorted<T: Ord>(mut values: Vec<T>) -> Vec<T> {
 }
 
 pub const RUNTIME_CONFIG_CHAIN_VERSION: &str = "v4-runtime-config-1";
+const PRODUCTION_SKELETON: &str =
+    include_str!("../../../contracts/skeleton-plan.contract.json");
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RuntimeConfigError {
@@ -843,6 +845,8 @@ pub enum RuntimeConfigError {
     ProductPolicyInvalid,
     #[error("runtime manifest encode failed: {0}")]
     Encode(String),
+    #[error("runtime execution epoch compile failed: {0}")]
+    ExecutionEpoch(String),
     #[error("runtime manifest digest drift: expected {expected}, actual {actual}")]
     DigestDrift { expected: String, actual: String },
     #[error("runtime manifest write failed for {path}: {message}")]
@@ -928,6 +932,8 @@ pub struct RuntimeProductModel {
     pub wire_name: String,
     #[serde(default)]
     pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1018,7 +1024,17 @@ pub struct RuntimeConfigManifest {
     pub routes: Vec<RuntimeRoute>,
     #[serde(default)]
     pub product: Option<RuntimeProductConfig>,
+    pub execution_epoch: RuntimeExecutionEpochManifest,
     pub manifest_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeExecutionEpochManifest {
+    pub skeleton: routecodex_v4_skeleton::SkeletonPlan,
+    pub candidate: serde_json::Value,
+    pub graph_hash: String,
+    pub manifest_hash: String,
 }
 
 #[derive(Serialize)]
@@ -1030,6 +1046,7 @@ struct UnsignedRuntimeConfigManifest<'a> {
     providers: &'a [RuntimeProviderCandidate],
     routes: &'a [RuntimeRoute],
     product: &'a Option<RuntimeProductConfig>,
+    execution_epoch: &'a RuntimeExecutionEpochManifest,
 }
 
 impl RuntimeConfigManifest {
@@ -1042,6 +1059,7 @@ impl RuntimeConfigManifest {
             &self.providers,
             &self.routes,
             &self.product,
+            &self.execution_epoch,
         )?;
         if actual != self.manifest_digest {
             return Err(RuntimeConfigError::DigestDrift {
@@ -1053,7 +1071,8 @@ impl RuntimeConfigManifest {
     }
 
     pub fn to_json(&self) -> Result<Vec<u8>, RuntimeConfigError> {
-        serde_json::to_vec_pretty(self).map_err(|error| RuntimeConfigError::Encode(error.to_string()))
+        serde_json::to_vec_pretty(self)
+            .map_err(|error| RuntimeConfigError::Encode(error.to_string()))
     }
 }
 
@@ -1064,7 +1083,9 @@ pub fn default_runtime_config_path() -> Result<PathBuf, RuntimeConfigError> {
         .ok_or(RuntimeConfigError::HomeMissing)
 }
 
-pub fn compile_runtime_config_file(path: &Path) -> Result<RuntimeConfigManifest, RuntimeConfigError> {
+pub fn compile_runtime_config_file(
+    path: &Path,
+) -> Result<RuntimeConfigManifest, RuntimeConfigError> {
     let raw = fs::read_to_string(path).map_err(|error| RuntimeConfigError::Read {
         path: path.display().to_string(),
         message: error.to_string(),
@@ -1083,22 +1104,25 @@ pub fn compile_product_config(
     raw: &str,
     config_dir: Option<&Path>,
 ) -> Result<RuntimeProductConfig, RuntimeConfigError> {
-    let mut product: RuntimeProductConfig = toml::from_str(raw)
-        .map_err(|error| RuntimeConfigError::Parse(error.to_string()))?;
+    let mut product: RuntimeProductConfig =
+        toml::from_str(raw).map_err(|error| RuntimeConfigError::Parse(error.to_string()))?;
     validate_product_config(&product)?;
     normalize_product_config(&mut product, config_dir)?;
     Ok(product)
 }
 
-pub fn compile_product_config_file(path: &Path) -> Result<RuntimeProductConfig, RuntimeConfigError> {
+pub fn compile_product_config_file(
+    path: &Path,
+) -> Result<RuntimeProductConfig, RuntimeConfigError> {
     let raw = fs::read_to_string(path).map_err(|error| RuntimeConfigError::ProductConfigRead {
         path: path.display().to_string(),
         message: error.to_string(),
     })?;
-    let absolute_path = fs::canonicalize(path).map_err(|error| RuntimeConfigError::ProductConfigRead {
-        path: path.display().to_string(),
-        message: error.to_string(),
-    })?;
+    let absolute_path =
+        fs::canonicalize(path).map_err(|error| RuntimeConfigError::ProductConfigRead {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })?;
     compile_product_config(&raw, absolute_path.parent())
 }
 
@@ -1154,6 +1178,16 @@ pub fn compile_runtime_config(
     if let Some(value) = &mut product {
         normalize_product_config(value, config_dir)?;
     }
+    let execution_manifest_hash = runtime_manifest_base_digest(
+        authoring.version,
+        RUNTIME_CONFIG_CHAIN_VERSION,
+        &authoring.runtime.id,
+        &listeners,
+        &providers,
+        &routes,
+        &product,
+    )?;
+    let execution_epoch = compile_runtime_execution_epoch(&execution_manifest_hash)?;
     let manifest_digest = runtime_manifest_digest(
         authoring.version,
         RUNTIME_CONFIG_CHAIN_VERSION,
@@ -1162,6 +1196,7 @@ pub fn compile_runtime_config(
         &providers,
         &routes,
         &product,
+        &execution_epoch,
     )?;
     Ok(RuntimeConfigManifest {
         schema_version: authoring.version,
@@ -1171,7 +1206,119 @@ pub fn compile_runtime_config(
         providers,
         routes,
         product,
+        execution_epoch,
         manifest_digest,
+    })
+}
+
+fn compile_runtime_execution_epoch(
+    manifest_hash: &str,
+) -> Result<RuntimeExecutionEpochManifest, RuntimeConfigError> {
+    let mut skeleton = routecodex_v4_skeleton::SkeletonPlan::from_contract_json(
+        PRODUCTION_SKELETON,
+    )
+    .map_err(|error| RuntimeConfigError::ExecutionEpoch(error.to_string()))?;
+    skeleton.manifest_hash = manifest_hash.to_string();
+    skeleton.plan_hash = routecodex_v4_skeleton::plan_hash(&skeleton);
+    skeleton
+        .verify()
+        .map_err(|error| RuntimeConfigError::ExecutionEpoch(error.to_string()))?;
+    let compiled = routecodex_v4_standard_plugins::compile_production_execution_plans(&skeleton)
+        .map_err(|error| RuntimeConfigError::ExecutionEpoch(error.to_string()))?;
+
+    let mut pipelines = serde_json::Map::new();
+    let mut entrypoints = serde_json::Map::new();
+    let mut nodes = Vec::new();
+    for chain in skeleton.chains.iter().filter(|chain| chain.chain_id != "config") {
+        let node_ids = chain
+            .nodes
+            .iter()
+            .map(|node| serde_json::Value::String(node.node_id.clone()))
+            .collect::<Vec<_>>();
+        let entrypoint = chain
+            .nodes
+            .first()
+            .ok_or_else(|| RuntimeConfigError::ExecutionEpoch(format!(
+                "production chain {} is empty",
+                chain.chain_id
+            )))?;
+        pipelines.insert(chain.chain_id.clone(), serde_json::Value::Array(node_ids));
+        entrypoints.insert(
+            chain.chain_id.clone(),
+            serde_json::Value::String(entrypoint.node_id.clone()),
+        );
+        for node in &chain.nodes {
+            let plan = compiled
+                .plans
+                .iter()
+                .find(|plan| plan.node_id == node.node_id)
+                .ok_or_else(|| RuntimeConfigError::ExecutionEpoch(format!(
+                    "compiled plan missing node {}",
+                    node.node_id
+                )))?;
+            let allowed_edges = chain
+                .edges
+                .iter()
+                .filter(|edge| edge.from == node.node_id)
+                .map(|edge| (edge.direction.clone(), edge.to.clone()))
+                .collect::<BTreeMap<_, _>>();
+            let (input_resource, output_resource) = match chain.chain_id.as_str() {
+                "direct_request" => (
+                    "v4.direct.request.client_payload",
+                    "v4.direct.request.provider_wire",
+                ),
+                "direct_response" => (
+                    "v4.direct.response.provider_raw",
+                    "v4.direct.response.client_payload",
+                ),
+                "relay_request" => (
+                    "v4.request.normal_payload",
+                    "v4.request.provider_wire_payload",
+                ),
+                "relay_response" => (
+                    "v4.response.provider_raw",
+                    "v4.response.client_object",
+                ),
+                "error" => ("v4.control.error_chain", "v4.control.error_chain"),
+                other => {
+                    return Err(RuntimeConfigError::ExecutionEpoch(format!(
+                        "unsupported production chain {other}"
+                    )))
+                }
+            };
+            nodes.push(serde_json::json!({
+                "node_id": node.node_id,
+                "plan_hash": plan.hash,
+                "input_resource": input_resource,
+                "output_resource": output_resource,
+                "allowed_edges": allowed_edges,
+                "plan": plan,
+            }));
+        }
+    }
+    let graph_hash = skeleton.plan_hash.clone();
+    let candidate = serde_json::json!({
+        "schema_version": 1,
+        "candidate_id": format!("v4-runtime:{}", &graph_hash[7..23]),
+        "epoch_id": format!("v4-runtime-epoch:{}", skeleton.plan_epoch),
+        "plan_epoch": skeleton.plan_epoch,
+        "manifest_hash": manifest_hash,
+        "graph_hash": graph_hash,
+        "plugin_artifact_set_hash": compiled.artifact_set_hash,
+        "entrypoints": entrypoints,
+        "pipelines": pipelines,
+        "nodes": nodes,
+        "policies": {
+            "direct_same_protocol": true,
+            "protocol_mismatch": "fail_fast",
+            "sse_transport_owner": "v4.transport.sse_plugin"
+        }
+    });
+    Ok(RuntimeExecutionEpochManifest {
+        skeleton,
+        candidate,
+        graph_hash,
+        manifest_hash: manifest_hash.to_string(),
     })
 }
 
@@ -1190,7 +1337,9 @@ pub fn write_runtime_manifest_atomic(
     })?;
     let temporary = parent.join(format!(
         ".{}.{}.tmp",
-        path.file_name().and_then(|name| name.to_str()).unwrap_or("manifest"),
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("manifest"),
         std::process::id()
     ));
     let mut bytes = manifest.to_json()?;
@@ -1325,7 +1474,10 @@ fn validate_runtime_authoring(authoring: &RuntimeAuthoring) -> Result<(), Runtim
             return Err(RuntimeConfigError::ProviderDuplicate);
         }
         if provider.entry_models.is_empty()
-            || provider.entry_models.iter().any(|model| model.trim().is_empty())
+            || provider
+                .entry_models
+                .iter()
+                .any(|model| model.trim().is_empty())
         {
             return Err(RuntimeConfigError::ProviderEntryModels);
         }
@@ -1376,14 +1528,16 @@ fn validate_product_config(product: &RuntimeProductConfig) -> Result<(), Runtime
             || provider.config_path.trim().is_empty()
             || !provider_ids.insert(provider.provider_id.as_str())
         {
-            return Err(if provider.provider_id.trim().is_empty()
-                || provider.protocol.trim().is_empty()
-                || provider.config_path.trim().is_empty()
-            {
-                RuntimeConfigError::ProductProviderInvalid
-            } else {
-                RuntimeConfigError::ProductProviderDuplicate
-            });
+            return Err(
+                if provider.provider_id.trim().is_empty()
+                    || provider.protocol.trim().is_empty()
+                    || provider.config_path.trim().is_empty()
+                {
+                    RuntimeConfigError::ProductProviderInvalid
+                } else {
+                    RuntimeConfigError::ProductProviderDuplicate
+                },
+            );
         }
         let mut model_ids = BTreeSet::new();
         for model in &provider.models {
@@ -1393,11 +1547,13 @@ fn validate_product_config(product: &RuntimeProductConfig) -> Result<(), Runtime
             if !model_ids.insert(model.model_id.as_str()) {
                 return Err(RuntimeConfigError::ProductModelDuplicate);
             }
+            if model.aliases.iter().any(|alias| alias.trim().is_empty()) {
+                return Err(RuntimeConfigError::ProductModelInvalid);
+            }
         }
         for handle in &provider.auth_handles {
             if handle.alias.trim().is_empty()
-                || !(handle.source.starts_with("env:")
-                    || handle.source.starts_with("token_file:"))
+                || !(handle.source.starts_with("env:") || handle.source.starts_with("token_file:"))
             {
                 return Err(RuntimeConfigError::ProductAuthHandleInvalid);
             }
@@ -1406,12 +1562,16 @@ fn validate_product_config(product: &RuntimeProductConfig) -> Result<(), Runtime
     let provider_model_exists = |provider_id: &str, model_id: &str| {
         product.providers.iter().any(|provider| {
             provider.provider_id == provider_id
-                && provider.models.iter().any(|model| model.model_id == model_id)
+                && provider
+                    .models
+                    .iter()
+                    .any(|model| model.model_id == model_id)
         })
     };
     let mut group_ids = BTreeSet::new();
     for group in &product.route_groups {
-        if group.route_group_id.trim().is_empty() || !group_ids.insert(group.route_group_id.as_str())
+        if group.route_group_id.trim().is_empty()
+            || !group_ids.insert(group.route_group_id.as_str())
         {
             return Err(RuntimeConfigError::ProductRouteDuplicate);
         }
@@ -1422,14 +1582,16 @@ fn validate_product_config(product: &RuntimeProductConfig) -> Result<(), Runtime
                 || pool.targets.is_empty()
                 || !pool_ids.insert(pool.pool_id.as_str())
             {
-                return Err(if pool.pool_id.trim().is_empty()
-                    || pool.selection.trim().is_empty()
-                    || pool.targets.is_empty()
-                {
-                    RuntimeConfigError::ProductRouteInvalid
-                } else {
-                    RuntimeConfigError::ProductRouteDuplicate
-                });
+                return Err(
+                    if pool.pool_id.trim().is_empty()
+                        || pool.selection.trim().is_empty()
+                        || pool.targets.is_empty()
+                    {
+                        RuntimeConfigError::ProductRouteInvalid
+                    } else {
+                        RuntimeConfigError::ProductRouteDuplicate
+                    },
+                );
             }
             for target in &pool.targets {
                 if target.provider_id.trim().is_empty()
@@ -1443,9 +1605,7 @@ fn validate_product_config(product: &RuntimeProductConfig) -> Result<(), Runtime
     }
     let mut policy_ids = BTreeSet::new();
     for policy in &product.error_policies {
-        if policy.policy_id.trim().is_empty()
-            || !policy_ids.insert(policy.policy_id.as_str())
-        {
+        if policy.policy_id.trim().is_empty() || !policy_ids.insert(policy.policy_id.as_str()) {
             return Err(RuntimeConfigError::ProductPolicyInvalid);
         }
     }
@@ -1460,13 +1620,19 @@ fn normalize_product_config(
         provider.config_path = resolve_authoring_path(&provider.config_path, config_dir)?
             .display()
             .to_string();
-        provider.models.sort_by(|left, right| left.model_id.cmp(&right.model_id));
+        provider
+            .models
+            .sort_by(|left, right| left.model_id.cmp(&right.model_id));
         for model in &mut provider.models {
             model.capabilities.sort();
         }
-        provider.auth_handles.sort_by(|left, right| left.alias.cmp(&right.alias));
+        provider
+            .auth_handles
+            .sort_by(|left, right| left.alias.cmp(&right.alias));
     }
-    product.providers.sort_by(|left, right| left.provider_id.cmp(&right.provider_id));
+    product
+        .providers
+        .sort_by(|left, right| left.provider_id.cmp(&right.provider_id));
     for group in &mut product.route_groups {
         for pool in &mut group.pools {
             pool.required_capabilities.sort();
@@ -1477,17 +1643,28 @@ fn normalize_product_config(
                     .then_with(|| left.model_id.cmp(&right.model_id))
             });
         }
-        group.pools.sort_by(|left, right| left.pool_id.cmp(&right.pool_id));
+        group
+            .pools
+            .sort_by(|left, right| left.pool_id.cmp(&right.pool_id));
     }
-    product.route_groups.sort_by(|left, right| left.route_group_id.cmp(&right.route_group_id));
+    product
+        .route_groups
+        .sort_by(|left, right| left.route_group_id.cmp(&right.route_group_id));
     for policy in &mut product.error_policies {
-        policy.actions.sort_by(|left, right| left.step.cmp(&right.step));
+        policy
+            .actions
+            .sort_by(|left, right| left.step.cmp(&right.step));
     }
-    product.error_policies.sort_by(|left, right| left.policy_id.cmp(&right.policy_id));
+    product
+        .error_policies
+        .sort_by(|left, right| left.policy_id.cmp(&right.policy_id));
     Ok(())
 }
 
-fn resolve_authoring_path(value: &str, config_dir: Option<&Path>) -> Result<PathBuf, RuntimeConfigError> {
+fn resolve_authoring_path(
+    value: &str,
+    config_dir: Option<&Path>,
+) -> Result<PathBuf, RuntimeConfigError> {
     if let Some(rest) = value.strip_prefix("~/") {
         return std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -1521,6 +1698,7 @@ fn runtime_manifest_digest(
     providers: &[RuntimeProviderCandidate],
     routes: &[RuntimeRoute],
     product: &Option<RuntimeProductConfig>,
+    execution_epoch: &RuntimeExecutionEpochManifest,
 ) -> Result<String, RuntimeConfigError> {
     let unsigned = UnsignedRuntimeConfigManifest {
         schema_version,
@@ -1530,8 +1708,41 @@ fn runtime_manifest_digest(
         providers,
         routes,
         product,
+        execution_epoch,
     };
     let bytes = serde_json::to_vec(&unsigned)
         .map_err(|error| RuntimeConfigError::Encode(error.to_string()))?;
+    Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+}
+
+fn runtime_manifest_base_digest(
+    schema_version: u32,
+    chain_version: &str,
+    runtime_identity: &str,
+    listeners: &[RuntimeListener],
+    providers: &[RuntimeProviderCandidate],
+    routes: &[RuntimeRoute],
+    product: &Option<RuntimeProductConfig>,
+) -> Result<String, RuntimeConfigError> {
+    #[derive(Serialize)]
+    struct BaseManifest<'a> {
+        schema_version: u32,
+        chain_version: &'a str,
+        runtime_identity: &'a str,
+        listeners: &'a [RuntimeListener],
+        providers: &'a [RuntimeProviderCandidate],
+        routes: &'a [RuntimeRoute],
+        product: &'a Option<RuntimeProductConfig>,
+    }
+    let bytes = serde_json::to_vec(&BaseManifest {
+        schema_version,
+        chain_version,
+        runtime_identity,
+        listeners,
+        providers,
+        routes,
+        product,
+    })
+    .map_err(|error| RuntimeConfigError::Encode(error.to_string()))?;
     Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
 }

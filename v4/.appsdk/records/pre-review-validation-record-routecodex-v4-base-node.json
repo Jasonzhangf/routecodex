@@ -1,34 +1,16 @@
 {
-  "validation_id": "base-sdk013-prereview-validation",
-  "issue_id": "appsdk-013-migration",
-  "module_id": "routecodex-v4-base-node",
-  "fix_candidate_id": "base-sdk013-candidate",
-  "candidate_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
-  "candidate_tree_hash": "674c43a073f24ddb02679b65c76300e984639d7b",
-  "artifact_hash": "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd",
-  "whitebox_producer": {
-    "adapter": "cargo",
-    "identity": "routecodex-v4-base-node-regression"
-  },
-  "whitebox_evidence_ids": [
-    "base-sdk013-prereview-positive",
-    "base-sdk013-prereview-negative"
-  ],
-  "blackbox_evidence_ids": [
-    "base-sdk013-prereview-blackbox"
-  ],
-  "deployment": {
-    "environment_id": "v4-local-worktree",
-    "install_receipt_id": "base-sdk013-install",
-    "restart_receipt_id": "base-sdk013-restart",
-    "entrypoint": "cargo test -p routecodex-v4-base-node",
-    "producer": {
-      "adapter": "cargo",
-      "identity": "routecodex-v4-base-node"
-    },
-    "observed_at": "2026-08-22T05:40:04Z"
-  },
-  "source_unchanged": true,
-  "result": "pass",
-  "created_at": "2026-08-22T05:40:04Z"
+  "validation_id":"v4-cordis-base-node-prereview",
+  "issue_id":"v4-cordis-base-node-rebuild",
+  "module_id":"routecodex-v4-base-node",
+  "fix_candidate_id":"v4-cordis-base-node-candidate",
+  "candidate_commit":"3930d19f22be04ee4e9a38076a877c1c3cd69a5d",
+  "candidate_tree_hash":"58b78a7f3d9244199a3c559b59eb270273f6b3a5",
+  "artifact_hash":"sha256:36febd56fcfe92b397abb82fefce01ce75397e4baf0049f3aece3f58c08520fa",
+  "whitebox_producer":{"adapter":"cargo","identity":"routecodex-v4-base-node-l0"},
+  "whitebox_evidence_ids":["v4-cordis-base-node-current-positive","v4-cordis-base-node-current-negative"],
+  "blackbox_evidence_ids":["v4-cordis-base-node-current-blackbox"],
+  "deployment":{"environment_id":"v4-cordis-local","install_receipt_id":"v4-cordis-base-node-install","restart_receipt_id":"v4-cordis-base-node-restart","entrypoint":"cargo test -p routecodex-v4-base-node --test l0_base_node --locked --offline","producer":{"adapter":"cargo","identity":"routecodex-v4-base-node-l0"},"observed_at":"2026-08-27T14:48:00Z"},
+  "source_unchanged":true,
+  "result":"pass",
+  "created_at":"2026-08-27T14:48:00Z"
 }

@@ -1,1 +1,37 @@
-{"evidence_id":"plane-isolation","issue_id":"V4-PLUGIN-008","experiment_id":"v4-response-plugins","kind":"gate","producer":{"adapter":"node","identity":"v4_plugin_response_plane"},"command_argv":["node","scripts/architecture/verify-v4-standard-plugins.mjs","--red-self-test"],"source_commit":"eb41f2753c3abd78081a3aeb48c15367c7d824e7","scope":{"feature_id":"V4-PLUGIN-008","module_id":"routecodex-v4-standard-plugins"},"exit_status":0,"result":"pass","input_hashes":["sha256:cd4d929ca0fa9304b20deeb813c51110350e3943750b90d3d7f444a4b8976ec0","sha256:c7d9a74aa173c026aceb7560093c9dbb6bdc1a606912c18ee2664efd6a06fe0e","sha256:726e9fdc2f1d1a2345edb7841131df53af3981f132155234694e858b45deae2d","sha256:a3afa884ddf9fdc558a16349dfa7b7e248918f7171b9bb1983aff0b745df2701","sha256:215e61f2db9a95a886aaee254b5744911008ca7dff2cc8b3a407edf5dcb2e66f","sha256:a49e797fd0d5b073ba6ad6b73d025c2d6408e86f18e3ae513343010092b613bf","sha256:5c5475843039691596dc31d8a59ba7f62ea4524f9b6341933bdc8b565bd3ac7d","sha256:f4767c270ddcbd98cd9786c9c558683a0f192fe9469a0aca82a226dbc0f9a452"],"scope_hash":"sha256:6763ed4a4d273273698d238de5aa89a4f56a2b10b8751efefa73c37300b4ec30","phase":"development_whitebox","execution_surface":"development_whitebox","created_at":"2026-08-23T00:00:00.000Z","expires_at":"2026-08-29T00:00:00.000Z"}
+{
+  "evidence_id": "plane-isolation",
+  "issue_id": "V4-PLUGIN-008",
+  "experiment_id": "v4-response-plugins",
+  "kind": "gate",
+  "producer": {
+    "adapter": "node",
+    "identity": "v4_plugin_response_plane"
+  },
+  "command_argv": [
+    "node",
+    "scripts/architecture/verify-v4-standard-plugins.mjs",
+    "--red-self-test"
+  ],
+  "source_commit": "eb41f2753c3abd78081a3aeb48c15367c7d824e7",
+  "scope": {
+    "feature_id": "V4-PLUGIN-008",
+    "module_id": "routecodex-v4-standard-plugins"
+  },
+  "exit_status": 0,
+  "result": "pass",
+  "input_hashes": [
+    "sha256:cd4d929ca0fa9304b20deeb813c51110350e3943750b90d3d7f444a4b8976ec0",
+    "sha256:c7d9a74aa173c026aceb7560093c9dbb6bdc1a606912c18ee2664efd6a06fe0e",
+    "sha256:726e9fdc2f1d1a2345edb7841131df53af3981f132155234694e858b45deae2d",
+    "sha256:a3afa884ddf9fdc558a16349dfa7b7e248918f7171b9bb1983aff0b745df2701",
+    "sha256:215e61f2db9a95a886aaee254b5744911008ca7dff2cc8b3a407edf5dcb2e66f",
+    "sha256:a49e797fd0d5b073ba6ad6b73d025c2d6408e86f18e3ae513343010092b613bf",
+    "sha256:5c5475843039691596dc31d8a59ba7f62ea4524f9b6341933bdc8b565bd3ac7d",
+    "sha256:f4767c270ddcbd98cd9786c9c558683a0f192fe9469a0aca82a226dbc0f9a452"
+  ],
+  "scope_hash": "sha256:6763ed4a4d273273698d238de5aa89a4f56a2b10b8751efefa73c37300b4ec30",
+  "phase": "development_whitebox",
+  "execution_surface": "development_whitebox",
+  "created_at": "2026-08-29T00:50:00.000Z",
+  "expires_at": "2026-09-05T00:50:00.000Z"
+}

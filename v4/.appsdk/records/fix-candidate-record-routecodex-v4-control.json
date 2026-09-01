@@ -1,23 +1,24 @@
 {
-  "fix_candidate_id": "control-sdk013-candidate",
-  "issue_id": "appsdk-013-migration",
+  "fix_candidate_id": "v4-cordis-control-candidate-current",
+  "issue_id": "v4-cordis-control-fresh-governance",
   "module_id": "routecodex-v4-control",
-  "worktree_id": "control-sdk013-worktree",
-  "base_commit": "3a845cd50ae0a7c3cf0cf29bd5d25997b7a07d59",
-  "head_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
-  "tree_hash": "674c43a073f24ddb02679b65c76300e984639d7b",
-  "diff_hash": "sha256:80e687c2399584140aa406e61c9e5a5a96172d1c3c7c71b6ed4c1ff1839603e2",
-  "design_id": "v4-appsdk-0.1.3-migration-v1",
+  "worktree_id": "v4-cordis-control-worktree-current",
+  "base_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
+  "head_commit": "e7014b7a627881bf8f606dff77bf7d134f10f283",
+  "tree_hash": "36be15c494a0decd221f05ca3db4f084434e4684",
+  "diff_hash": "sha256:ae794d63fa2ec0f4aeeec7ae8f7bd9b16d98c015d6f7aaddb3fefb08804a1474",
+  "design_id": "v4-cordis-control-fresh-governance",
   "owner": "routecodex-v4-control",
-  "scope_hash": "sha256:b0e43a8443ea5ccdc5965bddd42853b26d884128f16cd04976453d75305a1559",
+  "scope_hash": "sha256:bc932196faa3d642c7b835f5810ed1746a36d981106be5d81ddf6dbc03d3dd70",
   "changed_paths": [
-    "v4/.appsdk/**",
-    "v4/Protected/**"
+    ".appsdk/sdk.lock",
+    ".appsdk/records/evidence/routecodex-v4-control/",
+    ".appsdk/records/worktree-record-routecodex-v4-control.json",
+    ".appsdk/records/reproduction-record-routecodex-v4-control.json",
+    ".appsdk/records/fix-candidate-record-routecodex-v4-control.json",
+    ".appsdk/records/pre-review-validation-record-routecodex-v4-control.json",
+    ".appsdk/records/review-record-routecodex-v4-control.json"
   ],
-  "verification_evidence_ids": [
-    "control-sdk013-candidate",
-    "control-sdk013-positive",
-    "control-sdk013-negative"
-  ],
-  "created_at": "2026-08-16T04:21:30Z"
+  "verification_evidence_ids": ["v4-cordis-control-candidate", "v4-cordis-control-positive", "v4-cordis-control-negative"],
+  "created_at": "2026-08-28T16:05:20Z"
 }

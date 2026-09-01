@@ -1,9 +1,12 @@
 use routecodex_v4_node_container::{
-    ActiveEpochStore, ActiveExecutionEpoch, ExecutionEpochIdentity, NodeContainer, PlanBindings,
+    ActiveEpochStore, ExecutionEpochBundle, ExecutionEpochIdentity, NodeContainer, PlanBindings,
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
-use routecodex_v4_runtime::{execution_binding, request_port::RequestPortLease, response_error_port};
+use routecodex_v4_runtime::{
+    execution_binding, request_port::RequestPortLease, response_error_port,
+};
 use routecodex_v4_skeleton::{BindingContract, SkeletonPlan};
+use routecodex_v4_skeleton::{DirectProtocolContract, ProtocolInformationContract};
 
 fn plan() -> SkeletonPlan {
     SkeletonPlan {
@@ -12,32 +15,64 @@ fn plan() -> SkeletonPlan {
         status: "active".into(),
         owner_feature_id: "ports".into(),
         skeleton_version: "v4-skeleton-1".into(),
-        binding: BindingContract { required: false, fields: vec![] },
+        binding: BindingContract {
+            required: false,
+            fields: vec![],
+        },
         manifest_hash: "manifest-7".into(),
         plan_epoch: 7,
         plan_hash: "plan-hash".into(),
+        direct_protocol_contract: DirectProtocolContract {
+            same_protocol: true,
+            mismatch: "fail_fast".into(),
+        },
+        protocol_information_contract: ProtocolInformationContract {
+            client_provider_independent: true,
+            payload_inference: "forbidden".into(),
+        },
+        transport_plugins: vec![],
         chains: vec![],
     }
 }
 
 fn store() -> ActiveEpochStore {
     let plugin_plan = NodePluginPlan {
-        node_id: "ports".into(), position: 1, role_id: "role".into(),
-        chain: "request".into(), entries: vec![], selection_groups: vec![], hash: String::new(),
+        node_id: "ports".into(),
+        position: 1,
+        role_id: "role".into(),
+        chain: "request".into(),
+        entries: vec![],
+        selection_groups: vec![],
+        hash: String::new(),
     };
     let hash = plugin_plan.plan_hash();
     let mut container = NodeContainer::declare(
         "ports",
-        NodePluginPlan { hash: hash.clone(), ..plugin_plan },
-        PlanBindings { graph_hash: hash.clone(), manifest_hash: hash.clone(), loaded_plan_hash: hash },
-    ).unwrap();
+        NodePluginPlan {
+            hash: hash.clone(),
+            ..plugin_plan
+        },
+        PlanBindings {
+            graph_hash: hash.clone(),
+            manifest_hash: hash.clone(),
+            loaded_plan_hash: hash,
+        },
+    )
+    .unwrap();
     container.context_created().unwrap();
     container.plugins_mounted().unwrap();
     container.publish().unwrap();
-    ActiveEpochStore::new(ActiveExecutionEpoch::new(
-        container,
-        ExecutionEpochIdentity { plan_epoch: 7, manifest_hash: "manifest-7".into(), execution_identity: "exec-7".into() },
-    ).unwrap())
+    ActiveEpochStore::new(
+        ExecutionEpochBundle::new(
+            container,
+            ExecutionEpochIdentity {
+                plan_epoch: 7,
+                manifest_hash: "manifest-7".into(),
+                execution_identity: "exec-7".into(),
+            },
+        )
+        .unwrap(),
+    )
 }
 
 #[test]
@@ -72,10 +107,30 @@ fn request_admission_rejects_plan_epoch_drift_before_response_port() {
 }
 
 #[test]
+fn request_admission_rejects_empty_request_identity() {
+    let p = plan();
+    let error = match RequestPortLease::admit(&store(), "", &p) {
+        Ok(_) => panic!("request admission must reject an empty request identity"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, "request_identity");
+}
+
+#[test]
 fn response_receipt_preserves_immutable_execution_identity() {
     let p = plan();
     let request = RequestPortLease::admit(&store(), "req-4", &p).unwrap();
     let receipt = response_error_port::consume_response(&request, &execution_binding(&p)).unwrap();
     assert_eq!(receipt.binding.plan_epoch, 7);
     assert_eq!(request.lease_snapshot().execution_identity, "exec-7");
+}
+
+#[test]
+fn response_and_error_ports_share_one_terminal_claim() {
+    let p = plan();
+    let request = RequestPortLease::admit(&store(), "req-terminal", &p).unwrap();
+    let binding = execution_binding(&p);
+    response_error_port::consume_response(&request, &binding).unwrap();
+    let error = response_error_port::consume_error(&request, &binding).unwrap_err();
+    assert_eq!(error.code, "response_error_terminal");
 }

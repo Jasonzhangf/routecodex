@@ -234,8 +234,8 @@ mod tests {
 
     #[test]
     fn node_permission_for_response_inbound_is_locked() {
-        let reads = standard_node_allowed_reads("V4HubRespInbound02Parsed");
-        let writes = standard_node_allowed_writes("V4HubRespInbound02Parsed");
+        let reads = standard_node_allowed_reads("V4HubRespInbound03Normalized");
+        let writes = standard_node_allowed_writes("V4HubRespInbound03Normalized");
         assert_eq!(reads, vec!["v4.response.provider_raw".to_string()]);
         assert_eq!(writes, vec!["v4.response.normal_payload".to_string()]);
     }

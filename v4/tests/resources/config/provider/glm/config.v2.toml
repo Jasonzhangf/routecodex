@@ -1,0 +1,28 @@
+version = "2.0.0"
+providerId = "glm"
+
+[provider]
+id = "glm"
+enabled = true
+type = "anthropic"
+defaultModel = "glm-5.3-flash"
+baseURL = "https://open.bigmodel.cn/api/anthropic"
+
+[provider.auth]
+type = "apikey"
+secretFile = "/Volumes/extension/.rcc/secrets/v3/provider-auth.conf"
+
+[provider.concurrency]
+maxInFlight = 4
+acquireTimeoutMs = 60000
+staleLeaseMs = 300000
+
+[provider.models."glm-5.3-flash"]
+supportsStreaming = true
+supportsThinking = true
+thinking = "max"
+multimodal = true
+maxTokens = 64000
+maxContext = 1048576
+maxContextTokens = 1048576
+capabilities = ["text", "reasoning", "thinking", "tools", "multimodal", "web_search"]

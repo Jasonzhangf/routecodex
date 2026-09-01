@@ -1,106 +1,645 @@
 {
   "schema_version": 1,
   "contract_id": "v4-node-graph",
-  "status": "design",
+  "status": "active",
   "owner_feature_id": "v4.node_graph",
+  "graph_hash": "sha256:413e883986c4e605a027501ecd7f1c97f55ffac0066a55829d16806d03b6e92d",
   "canonical_docs": [
     "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
     "v4/docs/architecture/v4-resource-operation-map.yml"
   ],
   "standard_node_families": [
-    {"family": "RequestChainNode", "chain": "request", "data_plane": true, "role_subclasses": [
-      {"role_id": "request_inbound", "allowed_operator_kinds": ["entry_capture", "protocol_parse", "normalize"], "data_in_kind": "raw_entry", "data_out_kind": "normalized_request"},
-      {"role_id": "request_continuation", "allowed_operator_kinds": ["continuation_classify", "continuation_restore"], "data_in_kind": "normalized_request", "data_out_kind": "continuation_facts"},
-      {"role_id": "request_chat_process", "allowed_operator_kinds": ["request_governance", "tool_governance"], "data_in_kind": "normalized_request", "data_out_kind": "governed_request"},
-      {"role_id": "request_execution", "allowed_operator_kinds": ["execution_plan", "target_resolve"], "data_in_kind": "governed_request", "data_out_kind": "resolved_target"},
-      {"role_id": "request_outbound", "allowed_operator_kinds": ["semantic_projection", "wire_build", "transport_build"], "data_in_kind": "provider_semantic", "data_out_kind": "provider_wire"}
-    ]},
-    {"family": "ResponseChainNode", "chain": "response", "data_plane": true, "role_subclasses": [
-      {"role_id": "response_inbound", "allowed_operator_kinds": ["raw_parse", "protocol_decode"], "data_in_kind": "provider_raw", "data_out_kind": "parsed_response"},
-      {"role_id": "response_chat_process", "allowed_operator_kinds": ["response_governance", "tool_harvest"], "data_in_kind": "parsed_response", "data_out_kind": "governed_response"},
-      {"role_id": "response_continuation", "allowed_operator_kinds": ["continuation_commit", "continuation_release"], "data_in_kind": "governed_response", "data_out_kind": "continuation_truth"},
-      {"role_id": "response_outbound", "allowed_operator_kinds": ["client_semantic_projection", "frame_build"], "data_in_kind": "client_semantic", "data_out_kind": "client_frame"}
-    ]},
-    {"family": "ErrorChainNode", "chain": "error", "data_plane": false, "role_subclasses": [
-      {"role_id": "error_source", "allowed_operator_kinds": ["error_source_capture"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "error_classify", "allowed_operator_kinds": ["error_classify"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "error_policy", "allowed_operator_kinds": ["error_policy_apply"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "error_decision", "allowed_operator_kinds": ["execution_decision"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "error_projection", "allowed_operator_kinds": ["client_projection"], "data_in_kind": null, "data_out_kind": null}
-    ]},
-    {"family": "ConfigChainNode", "chain": "config", "data_plane": false, "role_subclasses": [
-      {"role_id": "config_authoring", "allowed_operator_kinds": ["config_parse", "config_validate"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "config_registry", "allowed_operator_kinds": ["registry_build"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "config_manifest", "allowed_operator_kinds": ["manifest_publish"], "data_in_kind": null, "data_out_kind": null}
-    ]},
-    {"family": "LifecycleChainNode", "chain": "lifecycle", "data_plane": false, "role_subclasses": [
-      {"role_id": "lifecycle_declare", "allowed_operator_kinds": ["instance_declare"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "lifecycle_lock", "allowed_operator_kinds": ["operation_lock"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "lifecycle_identity", "allowed_operator_kinds": ["identity_publish"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "lifecycle_control", "allowed_operator_kinds": ["controlled_runtime"], "data_in_kind": null, "data_out_kind": null}
-    ]},
-    {"family": "ControlCenterNode", "chain": "control", "data_plane": false, "role_subclasses": [
-      {"role_id": "control_center", "allowed_operator_kinds": ["register", "consume", "release"], "data_in_kind": null, "data_out_kind": null}
-    ]},
-    {"family": "DiagnosticChainNode", "chain": "diagnostic", "data_plane": false, "role_subclasses": [
-      {"role_id": "diagnostic_trace", "allowed_operator_kinds": ["trace_start", "trace_release"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "diagnostic_ledger", "allowed_operator_kinds": ["record_node_event", "query_ledger"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "diagnostic_capture", "allowed_operator_kinds": ["raw_capture", "payload_project"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "diagnostic_snapshot", "allowed_operator_kinds": ["snapshot_start", "snapshot_record", "snapshot_release"], "data_in_kind": null, "data_out_kind": null},
-      {"role_id": "diagnostic_observability", "allowed_operator_kinds": ["observe", "timing"], "data_in_kind": null, "data_out_kind": null}
-    ]}
+    {
+      "family": "RequestChainNode",
+      "chain": "request",
+      "data_plane": true,
+      "role_subclasses": [
+        {
+          "role_id": "request_inbound",
+          "allowed_operator_kinds": [
+            "entry_capture",
+            "protocol_parse",
+            "normalize"
+          ],
+          "data_in_kind": "raw_entry",
+          "data_out_kind": "normalized_request"
+        },
+        {
+          "role_id": "request_continuation",
+          "allowed_operator_kinds": [
+            "continuation_classify",
+            "continuation_restore"
+          ],
+          "data_in_kind": "normalized_request",
+          "data_out_kind": "continuation_facts"
+        },
+        {
+          "role_id": "request_chat_process",
+          "allowed_operator_kinds": [
+            "request_governance",
+            "tool_governance"
+          ],
+          "data_in_kind": "normalized_request",
+          "data_out_kind": "governed_request"
+        },
+        {
+          "role_id": "request_execution",
+          "allowed_operator_kinds": [
+            "execution_plan",
+            "target_resolve"
+          ],
+          "data_in_kind": "governed_request",
+          "data_out_kind": "resolved_target"
+        },
+        {
+          "role_id": "request_outbound",
+          "allowed_operator_kinds": [
+            "semantic_projection",
+            "wire_build",
+            "transport_build"
+          ],
+          "data_in_kind": "provider_semantic",
+          "data_out_kind": "provider_wire"
+        },
+        {
+          "role_id": "mainline_kernel",
+          "allowed_operator_kinds": [
+            "runtime_kernel",
+            "chain_execute"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        }
+      ]
+    },
+    {
+      "family": "ResponseChainNode",
+      "chain": "response",
+      "data_plane": true,
+      "role_subclasses": [
+        {
+          "role_id": "response_inbound",
+          "allowed_operator_kinds": [
+            "raw_parse",
+            "protocol_decode"
+          ],
+          "data_in_kind": "provider_raw",
+          "data_out_kind": "parsed_response"
+        },
+        {
+          "role_id": "response_chat_process",
+          "allowed_operator_kinds": [
+            "response_governance",
+            "tool_harvest"
+          ],
+          "data_in_kind": "parsed_response",
+          "data_out_kind": "governed_response"
+        },
+        {
+          "role_id": "response_continuation",
+          "allowed_operator_kinds": [
+            "continuation_commit",
+            "continuation_release"
+          ],
+          "data_in_kind": "governed_response",
+          "data_out_kind": "continuation_truth"
+        },
+        {
+          "role_id": "response_outbound",
+          "allowed_operator_kinds": [
+            "client_semantic_projection",
+            "frame_build"
+          ],
+          "data_in_kind": "client_semantic",
+          "data_out_kind": "client_frame"
+        },
+        {
+          "role_id": "server_frame",
+          "allowed_operator_kinds": [
+            "frame_projection"
+          ],
+          "data_in_kind": "client_frame",
+          "data_out_kind": "client_frame"
+        }
+      ]
+    },
+    {
+      "family": "ErrorChainNode",
+      "chain": "error",
+      "data_plane": false,
+      "role_subclasses": [
+        {
+          "role_id": "error_source",
+          "allowed_operator_kinds": [
+            "error_source_capture"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "error_classify",
+          "allowed_operator_kinds": [
+            "error_classify"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "error_policy",
+          "allowed_operator_kinds": [
+            "error_policy_apply"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "error_decision",
+          "allowed_operator_kinds": [
+            "execution_decision"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "error_projection",
+          "allowed_operator_kinds": [
+            "client_projection"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "error_chain",
+          "allowed_operator_kinds": [
+            "raise",
+            "capture",
+            "classify",
+            "apply_policy",
+            "decide",
+            "project"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        }
+      ]
+    },
+    {
+      "family": "ConfigChainNode",
+      "chain": "config",
+      "data_plane": false,
+      "role_subclasses": [
+        {
+          "role_id": "config_authoring",
+          "allowed_operator_kinds": [
+            "config_parse",
+            "config_validate"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "config_registry",
+          "allowed_operator_kinds": [
+            "registry_build"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "config_manifest",
+          "allowed_operator_kinds": [
+            "manifest_publish"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        }
+      ]
+    },
+    {
+      "family": "LifecycleChainNode",
+      "chain": "lifecycle",
+      "data_plane": false,
+      "role_subclasses": [
+        {
+          "role_id": "lifecycle_declare",
+          "allowed_operator_kinds": [
+            "instance_declare"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "lifecycle_lock",
+          "allowed_operator_kinds": [
+            "operation_lock"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "lifecycle_identity",
+          "allowed_operator_kinds": [
+            "identity_publish"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "lifecycle_control",
+          "allowed_operator_kinds": [
+            "controlled_runtime"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        }
+      ]
+    },
+    {
+      "family": "ControlCenterNode",
+      "chain": "control",
+      "data_plane": false,
+      "role_subclasses": [
+        {
+          "role_id": "control_center",
+          "allowed_operator_kinds": [
+            "register",
+            "consume",
+            "release"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "control_ledger",
+          "allowed_operator_kinds": [
+            "record",
+            "append"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "node_statistics",
+          "allowed_operator_kinds": [
+            "observe",
+            "record"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "control_audit",
+          "allowed_operator_kinds": [
+            "query"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "router_live_policy",
+          "allowed_operator_kinds": [
+            "set",
+            "current",
+            "audit"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "provider_availability",
+          "allowed_operator_kinds": [
+            "record",
+            "get"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "control_carrier",
+          "allowed_operator_kinds": [
+            "carry",
+            "release"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "router",
+          "allowed_operator_kinds": [
+            "classify",
+            "select"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "opaque_target",
+          "allowed_operator_kinds": [
+            "resolve",
+            "release"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        }
+      ]
+    },
+    {
+      "family": "TransportPluginNode",
+      "chain": "transport",
+      "data_plane": true,
+      "role_subclasses": [
+        {
+          "role_id": "sse_transport",
+          "allowed_operator_kinds": [
+            "frame",
+            "order",
+            "buffer",
+            "backpressure",
+            "timeout",
+            "keepalive",
+            "closeout"
+          ],
+          "data_in_kind": "opaque_bytes",
+          "data_out_kind": "opaque_sse_frames"
+        }
+      ]
+    },
+    {
+      "family": "DiagnosticChainNode",
+      "chain": "diagnostic",
+      "data_plane": false,
+      "role_subclasses": [
+        {
+          "role_id": "diagnostic_trace",
+          "allowed_operator_kinds": [
+            "trace_start",
+            "trace_release"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_ledger",
+          "allowed_operator_kinds": [
+            "record_node_event",
+            "query_ledger"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_capture",
+          "allowed_operator_kinds": [
+            "raw_capture",
+            "payload_project"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_snapshot",
+          "allowed_operator_kinds": [
+            "snapshot_start",
+            "snapshot_record",
+            "snapshot_release"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_observability",
+          "allowed_operator_kinds": [
+            "observe",
+            "timing"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_runtime",
+          "allowed_operator_kinds": [
+            "bind",
+            "capture",
+            "project"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_subscription",
+          "allowed_operator_kinds": [
+            "subscribe",
+            "observe"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_raw_capture",
+          "allowed_operator_kinds": [
+            "capture_raw",
+            "store"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_dry_run",
+          "allowed_operator_kinds": [
+            "register_fixture",
+            "execute",
+            "define_chain"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_payload_budget",
+          "allowed_operator_kinds": [
+            "project_verbatim",
+            "enforce_retention"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_sample_store",
+          "allowed_operator_kinds": [
+            "persist",
+            "enforce_listener_retention"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_module_switch",
+          "allowed_operator_kinds": [
+            "set",
+            "enabled_for_module"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_timing",
+          "allowed_operator_kinds": [
+            "record_phase",
+            "summarize"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_console",
+          "allowed_operator_kinds": [
+            "write",
+            "project"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "runtime_identity_counter",
+          "allowed_operator_kinds": [
+            "next_request_identity"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        },
+        {
+          "role_id": "diagnostic_error_evidence",
+          "allowed_operator_kinds": [
+            "flush"
+          ],
+          "data_in_kind": null,
+          "data_out_kind": null
+        }
+      ]
+    }
   ],
-  "node_identity_required": ["node_id", "chain", "chain_version", "position", "owner", "family", "role_id", "input_node", "output_node"],
+  "node_identity_required": [
+    "node_id",
+    "chain",
+    "chain_version",
+    "position",
+    "owner",
+    "family",
+    "role_id",
+    "input_node",
+    "output_node"
+  ],
   "role_subclass_contract": {
-    "required": ["role_id", "family", "allowed_operator_kinds", "config_schema"],
+    "required": [
+      "role_id",
+      "family",
+      "allowed_operator_kinds",
+      "config_schema"
+    ],
     "rule": "node instances can only register operators and consume configs allowed by their role subclass; operator kind and config must both validate"
   },
   "node_numbering": {
     "rule": "node_id encodes topological order (NN) and semantic function (SemanticName); both are contract and immutable after publication",
     "node_class_required": true
   },
-  "v4_hub_request_chain": {
-    "chain_version": "v4-hub-1",
+  "v4_direct_request_chain": {
+    "chain_version": "v4-direct-1",
     "nodes": [
-      {"position": 1, "node_id": "V4ServerReqInbound01ClientRaw", "role_id": "request_inbound", "data_plane": "raw_entry"},
-      {"position": 2, "node_id": "V4ServerSseIn02FrameBoundary", "role_id": "request_inbound", "data_plane": "sse_frame_to_json"},
-      {"position": 3, "node_id": "V4HubReqInbound03Normalized", "role_id": "request_inbound", "data_plane": "json_semantic"},
-      {"position": 4, "node_id": "V4HubReqChatProcess04Governed", "role_id": "request_chat_process", "group": true, "data_plane": "json_semantic"},
-      {"position": 5, "node_id": "V4HubReqOutbound05ProviderSemantic", "role_id": "request_outbound", "data_plane": "json_semantic"},
-      {"position": 6, "node_id": "V4ProviderReqCompat06Compat", "role_id": "request_outbound", "data_plane": "json_semantic"},
-      {"position": 7, "node_id": "V4ProviderSseOut07WireBoundary", "role_id": "request_outbound", "data_plane": "json_to_sse_frame"}
+      {
+        "position": 1,
+        "node_id": "V4DirectReq01ClientProtocol",
+        "role_id": "request_inbound",
+        "data_plane": "client_protocol_payload"
+      },
+      {
+        "position": 2,
+        "node_id": "V4DirectReq02RelayContainer",
+        "role_id": "request_outbound",
+        "data_plane": "same_protocol_direct_hook_queue"
+      },
+      {
+        "position": 3,
+        "node_id": "V4DirectReq03ProviderWire",
+        "role_id": "request_outbound",
+        "data_plane": "provider_wire_payload"
+      }
     ],
     "semantics": {
-      "sse_boundary_only": true,
-      "internal_data_plane": "json_semantic",
-      "direct_also_uses_chain": true,
-      "direct_flow": "sse_in -> json_semantic -> sse_out",
-      "sse_in_sse_out_coupling": "forbidden; SSE is transport boundary only",
-      "chat_process": "supernode group with entry/exit hooks for servertool and cross-cutting processing"
+      "flow": "client protocol -> DirectRelay NodeContainer -> same-protocol provider wire",
+      "same_protocol": true,
+      "protocol_mismatch": "fail_fast",
+      "relay_hook_mount": "forbidden",
+      "sse_semantic_ownership": "forbidden"
+    }
+  },
+  "v4_direct_response_chain": {
+    "chain_version": "v4-direct-1",
+    "mirror_of": "v4_direct_request_chain",
+    "nodes": [
+      {
+        "position": 1,
+        "node_id": "V4DirectResp01ProviderRaw",
+        "role_id": "response_inbound",
+        "data_plane": "provider_protocol_payload"
+      },
+      {
+        "position": 2,
+        "node_id": "V4DirectResp02RelayContainer",
+        "role_id": "response_outbound",
+        "data_plane": "same_protocol_direct_hook_queue"
+      },
+      {
+        "position": 3,
+        "node_id": "V4DirectResp03ClientProtocol",
+        "role_id": "response_outbound",
+        "data_plane": "client_protocol_payload"
+      }
+    ],
+    "semantics": {
+      "flow": "provider protocol -> DirectRelay NodeContainer -> same-protocol client payload",
+      "same_protocol": true,
+      "protocol_mismatch": "fail_fast",
+      "relay_hook_mount": "forbidden",
+      "sse_semantic_ownership": "forbidden"
+    }
+  },
+  "v4_hub_request_chain": {
+    "chain_version": "v4-relay-1",
+    "nodes": [
+      {"position": 1, "node_id": "V4ServerReqInbound01ClientRaw", "role_id": "request_inbound", "data_plane": "client_raw"},
+      {"position": 2, "node_id": "V4HubReqInbound02Normalized", "role_id": "request_inbound", "data_plane": "hub_normalized"},
+      {"position": 3, "node_id": "V4HubReqChatProcess03Governed", "role_id": "request_chat_process", "group": true, "data_plane": "hub_governed"},
+      {"position": 4, "node_id": "V4HubReqExecution04Planned", "role_id": "request_execution", "data_plane": "execution_plan"},
+      {"position": 5, "node_id": "V4HubReqTarget05Resolved", "role_id": "request_execution", "data_plane": "target_resolved"},
+      {"position": 6, "node_id": "V4HubReqOutbound06ProviderSemantic", "role_id": "request_outbound", "data_plane": "provider_semantic"},
+      {"position": 7, "node_id": "V4ProviderReqCompat07ProviderCompat", "role_id": "request_outbound", "data_plane": "provider_compat"},
+      {"position": 8, "node_id": "V4ProviderReqOutbound08WirePayload", "role_id": "request_outbound", "data_plane": "provider_wire"},
+      {"position": 9, "node_id": "V4ProviderReqOutbound09TransportRequest", "role_id": "request_outbound", "data_plane": "transport_request"}
+    ],
+    "semantics": {
+      "flow": "client entry codec -> Hub -> request Chat Process -> Relay hook -> provider codec -> wire",
+      "direct_hook_mount": "forbidden",
+      "client_provider_protocol_independence": true,
+      "sse_semantic_ownership": "forbidden"
     }
   },
   "v4_hub_response_chain": {
-    "chain_version": "v4-hub-1",
+    "chain_version": "v4-relay-1",
     "mirror_of": "v4_hub_request_chain",
     "nodes": [
-      {"position": 1, "node_id": "V4ProviderSseIn01FrameBoundary", "role_id": "response_inbound", "data_plane": "sse_frame_to_json"},
-      {"position": 2, "node_id": "V4HubRespInbound02Parsed", "role_id": "response_inbound", "data_plane": "json_semantic"},
-      {"position": 3, "node_id": "V4HubRespChatProcess03Governed", "role_id": "response_chat_process", "group": true, "data_plane": "json_semantic"},
-      {"position": 4, "node_id": "V4HubRespOutbound04ClientSemantic", "role_id": "response_outbound", "data_plane": "json_semantic"},
-      {"position": 5, "node_id": "V4ServerSseOut05FrameBoundary", "role_id": "response_outbound", "data_plane": "json_to_sse_frame"},
+      {"position": 1, "node_id": "V4ProviderRespInbound01Raw", "role_id": "response_inbound", "data_plane": "provider_raw"},
+      {"position": 2, "node_id": "V4ProviderRespCompat02ProviderCompat", "role_id": "response_inbound", "data_plane": "provider_compat"},
+      {"position": 3, "node_id": "V4HubRespInbound03Normalized", "role_id": "response_inbound", "data_plane": "hub_normalized"},
+      {"position": 4, "node_id": "V4HubRespChatProcess04Governed", "role_id": "response_chat_process", "group": true, "data_plane": "hub_governed"},
+      {"position": 5, "node_id": "V4HubRespOutbound05ClientSemantic", "role_id": "response_outbound", "data_plane": "client_semantic"},
       {"position": 6, "node_id": "V4ServerRespOutbound06ClientFrame", "role_id": "response_outbound", "data_plane": "client_frame"}
     ],
     "semantics": {
-      "flow": "provider_sse -> inbound -> chat_process(group) -> outbound -> client_sse -> server",
-      "sse_boundary_only": true,
-      "internal_data_plane": "json_semantic",
-      "sse_in_sse_out_coupling": "forbidden; provider SSE must not pipe directly to client SSE",
-      "chat_process": "supernode group with continuation save, response governance, tool harvest, and entry/exit hooks for servertool",
-      "continuation_save_only_at": "V4HubRespChatProcess03Governed",
-      "immutable_interval": "resp_chatprocess save -> next req_chatprocess restore; no semantic transformation in between",
-      "terminal": "V4ServerRespOutbound06ClientFrame is the single success terminal",
-      "direct_also_uses_chain": true
+      "flow": "provider codec -> Hub -> response Chat Process -> Relay hook -> client codec",
+      "direct_hook_mount": "forbidden",
+      "client_provider_protocol_independence": true,
+      "sse_semantic_ownership": "forbidden",
+      "local_continuation": "physically_forbidden"
     }
   },
   "v4_config_chain": {
@@ -108,11 +647,36 @@
     "data_plane": false,
     "edge_kind": "information_flow",
     "nodes": [
-      {"position": 1, "node_id": "V4Config01AuthoringFileSource", "role_id": "config_authoring", "info_plane": "authoring_file"},
-      {"position": 2, "node_id": "V4Config02AuthoringParsed", "role_id": "config_authoring", "info_plane": "parsed_authoring"},
-      {"position": 3, "node_id": "V4Config03SchemaValidated", "role_id": "config_authoring", "info_plane": "schema_validated"},
-      {"position": 4, "node_id": "V4Config04ResourceRegistryBuilt", "role_id": "config_registry", "info_plane": "resource_registry"},
-      {"position": 5, "node_id": "V4Config05ManifestPublished", "role_id": "config_manifest", "info_plane": "compiled_manifest"}
+      {
+        "position": 1,
+        "node_id": "V4Config01AuthoringFileSource",
+        "role_id": "config_authoring",
+        "info_plane": "authoring_file"
+      },
+      {
+        "position": 2,
+        "node_id": "V4Config02AuthoringParsed",
+        "role_id": "config_authoring",
+        "info_plane": "parsed_authoring"
+      },
+      {
+        "position": 3,
+        "node_id": "V4Config03SchemaValidated",
+        "role_id": "config_authoring",
+        "info_plane": "schema_validated"
+      },
+      {
+        "position": 4,
+        "node_id": "V4Config04ResourceRegistryBuilt",
+        "role_id": "config_registry",
+        "info_plane": "resource_registry"
+      },
+      {
+        "position": 5,
+        "node_id": "V4Config05ManifestPublished",
+        "role_id": "config_manifest",
+        "info_plane": "compiled_manifest"
+      }
     ],
     "semantics": {
       "flow": "authoring_file -> parsed -> schema_validated -> resource_registry -> compiled_manifest",
@@ -124,10 +688,79 @@
       "module_mock": "v4/contracts/mocks/config.module.mock.json"
     }
   },
+  "v4_error_chain": {
+    "chain_version": "v4-error-1",
+    "data_plane": false,
+    "edge_kind": "control_flow",
+    "nodes": [
+      {
+        "position": 1,
+        "node_id": "V4Error01SourceRaised",
+        "role_id": "error_source",
+        "control_plane": "source_raised"
+      },
+      {
+        "position": 2,
+        "node_id": "V4Error02HostCaptured",
+        "role_id": "error_source",
+        "control_plane": "host_captured"
+      },
+      {
+        "position": 3,
+        "node_id": "V4Error03RuntimeClassified",
+        "role_id": "error_classify",
+        "control_plane": "runtime_classified"
+      },
+      {
+        "position": 4,
+        "node_id": "V4Error04RouterPolicyApplied",
+        "role_id": "error_policy",
+        "control_plane": "router_policy_applied"
+      },
+      {
+        "position": 5,
+        "node_id": "V4Error05ExecutionDecision",
+        "role_id": "error_decision",
+        "control_plane": "execution_decision"
+      },
+      {
+        "position": 6,
+        "node_id": "V4Error06ClientProjected",
+        "role_id": "error_projection",
+        "control_plane": "client_projected"
+      }
+    ],
+    "semantics": {
+      "flow": "source_raised -> host_captured -> runtime_classified -> router_policy_applied -> execution_decision -> client_projected",
+      "frozen": true,
+      "single_kernel": "V4Error01SourceRaised",
+      "single_terminal": "V4Error06ClientProjected",
+      "witness_required": "V4Error02HostCaptured -> V4Error03RuntimeClassified requires an opaque ErrorCenter witness bound to the exact ErrorFact lineage",
+      "terminal": "V4Error06ClientProjected",
+      "owner": "routecodex-v4-error"
+    }
+  },
   "hook_queue_schema": {
-    "required": ["hook_id", "node_id", "kind", "position", "owner", "effect", "resources_read", "resources_written", "control_record_required"],
-    "kinds": ["entry", "exit"],
-    "effects": ["read_only", "control_only", "semantic"],
+    "required": [
+      "hook_id",
+      "node_id",
+      "kind",
+      "position",
+      "owner",
+      "effect",
+      "resources_read",
+      "resources_written",
+      "control_record_required"
+    ],
+    "kinds": [
+      "entry",
+      "exit"
+    ],
+    "effects": [
+      "read_only",
+      "control_only",
+      "semantic"
+    ],
     "rules": [
       "entry hooks run before operator in position order",
       "exit hooks run after operator in position order",
@@ -274,29 +907,104 @@
     "error_intake",
     "hook_queue"
   ],
-  "edge_kinds": ["data_flow", "information_flow", "control_flow", "debug_subscription", "error_intake"],
+  "edge_kinds": [
+    "data_flow",
+    "information_flow",
+    "control_flow",
+    "debug_subscription",
+    "error_intake"
+  ],
   "edges": {
     "data_flow": {
-      "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "data_in", "data_out", "owner", "adjacent_required"],
+      "required": [
+        "edge_id",
+        "kind",
+        "chain",
+        "chain_version",
+        "from",
+        "to",
+        "data_in",
+        "data_out",
+        "owner",
+        "adjacent_required"
+      ],
       "rule": "only adjacent nodes; resources must be data-axis; one data_in and one data_out per node"
     },
     "information_flow": {
-      "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "info_in", "info_out", "owner", "adjacent_required"],
+      "required": [
+        "edge_id",
+        "kind",
+        "chain",
+        "chain_version",
+        "from",
+        "to",
+        "info_in",
+        "info_out",
+        "owner",
+        "adjacent_required"
+      ],
       "rule": "only adjacent nodes on data_plane=false chains (config/lifecycle/diagnostic); resources must be information-axis; no control or data resource may travel an information edge"
     },
     "control_flow": {
-      "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "operation", "control_key", "scope_keys", "owner", "record_required"],
-      "operations": ["register", "consume", "release"],
+      "required": [
+        "edge_id",
+        "kind",
+        "chain",
+        "chain_version",
+        "from",
+        "to",
+        "operation",
+        "control_key",
+        "scope_keys",
+        "owner",
+        "record_required"
+      ],
+      "operations": [
+        "register",
+        "consume",
+        "release"
+      ],
       "rule": "record_required must be true; scope isolation enforced; control never enters data axis; release owned by registering node"
     },
     "debug_subscription": {
-      "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "topic", "direction", "read_only", "owner"],
-      "topics": ["node_event", "state_transition", "diagnostic"],
-      "snapshot_topics": ["node_entry", "node_exit", "node_error"],
+      "required": [
+        "edge_id",
+        "kind",
+        "chain",
+        "chain_version",
+        "from",
+        "to",
+        "topic",
+        "direction",
+        "read_only",
+        "owner"
+      ],
+      "topics": [
+        "node_event",
+        "state_transition",
+        "diagnostic"
+      ],
+      "snapshot_topics": [
+        "node_entry",
+        "node_exit",
+        "node_error"
+      ],
       "rule": "read_only must be true; no payload; no decision influence"
     },
     "error_intake": {
-      "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "error_stage", "payload_hash", "typed_context", "owner", "record_required"],
+      "required": [
+        "edge_id",
+        "kind",
+        "chain",
+        "chain_version",
+        "from",
+        "to",
+        "error_stage",
+        "payload_hash",
+        "typed_context",
+        "owner",
+        "record_required"
+      ],
       "rule": "any node/operator/hook error enters v4.control.error_center as typed error facts plus payload hash and typed context; the center classifies and audits only; route decision belongs to v4.control.route_exit; original payload is immutable across switch/cooldown/reroute"
     }
   },
@@ -320,9 +1028,18 @@
     "contract_id": "v4-route-control-exit",
     "role": "typed route decision output boundary",
     "owner": "routecodex-v4-router",
-    "inputs": ["v4.control.route_facts", "v4.control.error_center classified facts", "v4.lifecycle.payload_cycle"],
-    "outputs": ["v4.control.route_exit decision"],
-    "consumers": ["V4ReqOutbound05ProviderSemantic", "V4Error04RouterPolicyApplied"],
+    "inputs": [
+      "v4.control.route_facts",
+      "v4.control.error_center classified facts",
+      "v4.lifecycle.payload_cycle"
+    ],
+    "outputs": [
+      "v4.control.route_exit decision"
+    ],
+    "consumers": [
+      "V4ReqOutbound05ProviderSemantic",
+      "V4Error04RouterPolicyApplied"
+    ],
     "forbidden": [
       "payload patch",
       "provider wire write",
@@ -339,13 +1056,35 @@
     "success_terminal": "response entered client; the next request begins a new cycle",
     "error_terminal": "error terminal only; switch/cooldown/reroute are merged into the same cycle",
     "original_payload": "immutable within a cycle; retries re-execute the same original payload",
-    "forbidden": ["payload mutation", "cross-cycle reuse", "control fields in payload", "payload reconstruction from control state"]
+    "forbidden": [
+      "payload mutation",
+      "cross-cycle reuse",
+      "control fields in payload",
+      "payload reconstruction from control state"
+    ]
   },
   "module_debug_switch": {
     "contract_id": "v4-module-debug-switch",
-    "scope": ["module_id", "node_id", "chain_version", "scope"],
-    "kinds": ["debug", "snapshot", "dry_run", "route_probe"],
-    "levels": ["off", "error", "warn", "info", "debug", "trace"],
+    "scope": [
+      "module_id",
+      "node_id",
+      "chain_version",
+      "scope"
+    ],
+    "kinds": [
+      "debug",
+      "snapshot",
+      "dry_run",
+      "route_probe"
+    ],
+    "levels": [
+      "off",
+      "error",
+      "warn",
+      "info",
+      "debug",
+      "trace"
+    ],
     "dynamic_live_update": true,
     "default_from_manifest": true,
     "rules": [
@@ -360,17 +1099,704 @@
   "protocol_same_stage_rule": {
     "rule": "different protocols share the same node instance and role subclass; each protocol registers an operator on that slot",
     "wiring_selection": "exactly one active operator per node instance per compiled manifest",
-    "selection_facts": ["entry_protocol", "provider_wire_protocol", "continuation_owner", "execution_mode"],
-    "forbidden_selection_facts": ["provider_id", "model_prefix", "payload_shape_guess"]
+    "selection_facts": [
+      "execution_lane",
+      "client_protocol",
+      "provider_wire_protocol",
+      "target_model"
+    ],
+    "forbidden_selection_facts": [
+      "provider_id",
+      "model_prefix",
+      "payload_shape_guess"
+    ]
   },
   "registered_nodes": [
-    {"node_id": "V4Router07RouteDecisionExit", "family": "RequestChainNode", "role_id": "request_execution", "scope": "route decision exit produced at request execution stage"},
-    {"node_id": "V4ScopeRegistry", "family": "ControlCenterNode", "role_id": "control_center", "scope": "continuation scope bind/restore/release control center"},
-    {"node_id": "V4PayloadCycleRegistry", "family": "ControlCenterNode", "role_id": "control_center", "scope": "original payload cycle lifecycle control center"},
-    {"node_id": "V4Debug05EventLedgerRecorded", "family": "DiagnosticChainNode", "role_id": "diagnostic_ledger", "scope": "immutable event ledger record"},
-    {"node_id": "V4RuntimeObservability", "family": "DiagnosticChainNode", "role_id": "diagnostic_observability", "scope": "runtime observability projection"}
+    {
+      "node_id": "V4DirectReq01ClientProtocol",
+      "family": "RequestChainNode",
+      "role_id": "request_inbound",
+      "scope": "Direct client protocol payload admission",
+      "owner": "routecodex-v4-server"
+    },
+    {
+      "node_id": "V4DirectReq02RelayContainer",
+      "family": "RequestChainNode",
+      "role_id": "request_outbound",
+      "scope": "Direct request relay container and hook queue",
+      "owner": "routecodex-v4-node-container"
+    },
+    {
+      "node_id": "V4DirectReq03ProviderWire",
+      "family": "RequestChainNode",
+      "role_id": "request_outbound",
+      "scope": "Direct same-protocol provider wire",
+      "owner": "routecodex-v4-provider"
+    },
+    {
+      "node_id": "V4DirectResp01ProviderRaw",
+      "family": "ResponseChainNode",
+      "role_id": "response_inbound",
+      "scope": "Direct provider protocol response",
+      "owner": "routecodex-v4-provider"
+    },
+    {
+      "node_id": "V4DirectResp02RelayContainer",
+      "family": "ResponseChainNode",
+      "role_id": "response_outbound",
+      "scope": "Direct response relay container and hook queue",
+      "owner": "routecodex-v4-node-container"
+    },
+    {
+      "node_id": "V4DirectResp03ClientProtocol",
+      "family": "ResponseChainNode",
+      "role_id": "response_outbound",
+      "scope": "Direct same-protocol client payload",
+      "owner": "routecodex-v4-server"
+    },
+    {
+      "node_id": "V4TransportSsePlugin",
+      "family": "TransportPluginNode",
+      "role_id": "sse_transport",
+      "scope": "opaque SSE framing and transport lifecycle",
+      "owner": "routecodex-v4-standard-plugins"
+    },
+    {
+      "node_id": "V4ServerReqInbound01ClientRaw",
+      "family": "RequestChainNode",
+      "role_id": "request_inbound",
+      "scope": "Relay client request entry raw capture",
+      "owner": "routecodex-v4-server"
+    },
+    {
+      "node_id": "V4HubReqInbound02Normalized",
+      "family": "RequestChainNode",
+      "role_id": "request_inbound",
+      "scope": "Relay Hub request normalization",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4HubReqChatProcess03Governed",
+      "family": "RequestChainNode",
+      "role_id": "request_chat_process",
+      "scope": "Relay request Chat Process governance group",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4HubReqExecution04Planned",
+      "family": "RequestChainNode",
+      "role_id": "request_execution",
+      "scope": "Relay request execution plan",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4HubReqTarget05Resolved",
+      "family": "RequestChainNode",
+      "role_id": "request_execution",
+      "scope": "Relay target resolution",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4HubReqOutbound06ProviderSemantic",
+      "family": "RequestChainNode",
+      "role_id": "request_outbound",
+      "scope": "Relay provider semantic request projection",
+      "owner": "routecodex-v4-standard-plugins"
+    },
+    {
+      "node_id": "V4ProviderReqCompat07ProviderCompat",
+      "family": "RequestChainNode",
+      "role_id": "request_outbound",
+      "scope": "Relay provider request compat",
+      "owner": "routecodex-v4-provider"
+    },
+    {
+      "node_id": "V4ProviderReqOutbound08WirePayload",
+      "family": "RequestChainNode",
+      "role_id": "request_outbound",
+      "scope": "Relay provider wire payload",
+      "owner": "routecodex-v4-provider"
+    },
+    {
+      "node_id": "V4ProviderReqOutbound09TransportRequest",
+      "family": "RequestChainNode",
+      "role_id": "request_outbound",
+      "scope": "Relay provider transport request",
+      "owner": "routecodex-v4-provider"
+    },
+    {
+      "node_id": "V4ProviderRespInbound01Raw",
+      "family": "ResponseChainNode",
+      "role_id": "response_inbound",
+      "scope": "Relay provider raw response",
+      "owner": "routecodex-v4-provider"
+    },
+    {
+      "node_id": "V4ProviderRespCompat02ProviderCompat",
+      "family": "ResponseChainNode",
+      "role_id": "response_inbound",
+      "scope": "Relay provider response compat",
+      "owner": "routecodex-v4-provider"
+    },
+    {
+      "node_id": "V4HubRespInbound03Normalized",
+      "family": "ResponseChainNode",
+      "role_id": "response_inbound",
+      "scope": "Relay Hub response normalization",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4HubRespChatProcess04Governed",
+      "family": "ResponseChainNode",
+      "role_id": "response_chat_process",
+      "scope": "Relay response Chat Process governance group",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4HubRespOutbound05ClientSemantic",
+      "family": "ResponseChainNode",
+      "role_id": "response_outbound",
+      "scope": "Relay client semantic projection",
+      "owner": "routecodex-v4-standard-plugins"
+    },
+    {
+      "node_id": "V4ServerRespOutbound06ClientFrame",
+      "family": "ResponseChainNode",
+      "role_id": "response_outbound",
+      "scope": "Relay server client frame terminal",
+      "owner": "routecodex-v4-server"
+    },
+    {
+      "node_id": "V4Error01SourceRaised",
+      "family": "ErrorChainNode",
+      "role_id": "error_source",
+      "scope": "error source raised",
+      "owner": "routecodex-v4-error"
+    },
+    {
+      "node_id": "V4Error02HostCaptured",
+      "family": "ErrorChainNode",
+      "role_id": "error_source",
+      "scope": "error host captured",
+      "owner": "routecodex-v4-error"
+    },
+    {
+      "node_id": "V4Error03RuntimeClassified",
+      "family": "ErrorChainNode",
+      "role_id": "error_classify",
+      "scope": "error runtime classified",
+      "owner": "routecodex-v4-error"
+    },
+    {
+      "node_id": "V4Error04RouterPolicyApplied",
+      "family": "ErrorChainNode",
+      "role_id": "error_policy",
+      "scope": "error router policy applied",
+      "owner": "routecodex-v4-error"
+    },
+    {
+      "node_id": "V4Error05ExecutionDecision",
+      "family": "ErrorChainNode",
+      "role_id": "error_decision",
+      "scope": "error execution decision",
+      "owner": "routecodex-v4-error"
+    },
+    {
+      "node_id": "V4Error06ClientProjected",
+      "family": "ErrorChainNode",
+      "role_id": "error_projection",
+      "scope": "error client projected terminal",
+      "owner": "routecodex-v4-error"
+    },
+    {
+      "node_id": "V4Config01AuthoringFileSource",
+      "family": "ConfigChainNode",
+      "role_id": "config_authoring",
+      "scope": "config authoring file source",
+      "owner": "routecodex-v4-config"
+    },
+    {
+      "node_id": "V4Config02AuthoringParsed",
+      "family": "ConfigChainNode",
+      "role_id": "config_authoring",
+      "scope": "config authoring parsed",
+      "owner": "routecodex-v4-config"
+    },
+    {
+      "node_id": "V4Config03SchemaValidated",
+      "family": "ConfigChainNode",
+      "role_id": "config_authoring",
+      "scope": "config schema validated",
+      "owner": "routecodex-v4-config"
+    },
+    {
+      "node_id": "V4Config04ResourceRegistryBuilt",
+      "family": "ConfigChainNode",
+      "role_id": "config_registry",
+      "scope": "config resource registry built",
+      "owner": "routecodex-v4-config"
+    },
+    {
+      "node_id": "V4Config05ManifestPublished",
+      "family": "ConfigChainNode",
+      "role_id": "config_manifest",
+      "scope": "config manifest published",
+      "owner": "routecodex-v4-config"
+    },
+    {
+      "node_id": "V4ReqContinuationClassified",
+      "family": "RequestChainNode",
+      "role_id": "request_continuation",
+      "scope": "group_private: request chat-process continuation classify",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4ChatProcess04ContinuationRestore",
+      "family": "RequestChainNode",
+      "role_id": "request_continuation",
+      "scope": "group_private: request chat-process continuation restore",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4ReqExecutionPlan04",
+      "family": "RequestChainNode",
+      "role_id": "request_execution",
+      "scope": "group_private: request chat-process execution plan",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4Router05RequestClassified",
+      "position": 5,
+      "family": "RequestChainNode",
+      "role_id": "request_execution",
+      "scope": "group_private: route facts classification",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4Router06SelectionPlan",
+      "position": 6,
+      "family": "RequestChainNode",
+      "role_id": "request_execution",
+      "scope": "group_private: opaque target selection plan",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4ChatProcess03ContinuationCommit",
+      "family": "ResponseChainNode",
+      "role_id": "response_continuation",
+      "scope": "group_private: response chat-process continuation commit",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4RespContinuationCommitted",
+      "family": "ResponseChainNode",
+      "role_id": "response_continuation",
+      "scope": "group_private: response continuation truth",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4Router07RouteDecisionExit",
+      "family": "RequestChainNode",
+      "role_id": "request_execution",
+      "scope": "route decision exit produced at request execution stage",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4ScopeRegistry",
+      "family": "ControlCenterNode",
+      "role_id": "control_center",
+      "scope": "continuation scope bind/restore/release control center",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4PayloadCycleRegistry",
+      "position": 0,
+      "family": "ControlCenterNode",
+      "role_id": "control_center",
+      "scope": "original payload cycle lifecycle control center",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4StoplessControlState",
+      "family": "ControlCenterNode",
+      "role_id": "control_center",
+      "scope": "stopless current-turn control state, scope-bound and immutable outside the registered req04/resp03 projection",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4Control02RecordLedger",
+      "family": "ControlCenterNode",
+      "role_id": "control_ledger",
+      "scope": "immutable per-scope control in/out record ledger",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4Control03NodeStatistics",
+      "family": "ControlCenterNode",
+      "role_id": "node_statistics",
+      "scope": "diagnostic-only per-node/operator observability counters",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4ControlCenterAudit",
+      "family": "ControlCenterNode",
+      "role_id": "control_audit",
+      "scope": "control center immutable audit reader",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4Router08LivePolicyOverride",
+      "family": "ControlCenterNode",
+      "role_id": "router_live_policy",
+      "scope": "session-scoped live route policy override anchored to manifest baseline",
+      "owner": "routecodex-v4-router"
+    },
+    {
+      "node_id": "V4Availability01SessionScoped",
+      "family": "ControlCenterNode",
+      "role_id": "provider_availability",
+      "scope": "session-scoped provider availability record; never a process-global cooldown truth",
+      "owner": "routecodex-v4-provider"
+    },
+    {
+      "node_id": "V4ControlMetadataCenter",
+      "family": "ControlCenterNode",
+      "role_id": "control_center",
+      "scope": "metadata center scope-bound control signal registry",
+      "owner": "routecodex-v4-control"
+    },
+    {
+      "node_id": "V4Control01ScopeBoundCarrier",
+      "family": "ControlCenterNode",
+      "role_id": "control_carrier",
+      "scope": "scope-bound typed control carrier",
+      "owner": "routecodex-v4-control"
+    },
+    {
+      "node_id": "V4MetadataCenter01ScopeRegistry",
+      "position": 0,
+      "family": "ControlCenterNode",
+      "role_id": "control_center",
+      "scope": "metadata center scope registry",
+      "owner": "routecodex-v4-control"
+    },
+    {
+      "node_id": "V4Router",
+      "family": "ControlCenterNode",
+      "role_id": "router",
+      "scope": "virtual router control surface",
+      "owner": "routecodex-v4-router"
+    },
+    {
+      "node_id": "V4Target07OpaqueTarget",
+      "family": "ControlCenterNode",
+      "role_id": "opaque_target",
+      "scope": "opaque selected route target",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4DebugSnapshotLedger",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_ledger",
+      "scope": "debug snapshot ledger side-channel",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4ServerFrame",
+      "family": "ResponseChainNode",
+      "role_id": "server_frame",
+      "scope": "server response frame projection",
+      "owner": "routecodex-v4-server"
+    },
+    {
+      "node_id": "V4ErrorChain",
+      "family": "ErrorChainNode",
+      "role_id": "error_chain",
+      "scope": "typed error chain surface",
+      "owner": "routecodex-v4-error"
+    },
+    {
+      "node_id": "V4ErrorCenter02ClassifyAudit",
+      "family": "ErrorChainNode",
+      "role_id": "error_classify",
+      "scope": "error center classify audit",
+      "owner": "routecodex-v4-error"
+    },
+    {
+      "node_id": "V4Runtime01MainlineKernel",
+      "family": "RequestChainNode",
+      "role_id": "mainline_kernel",
+      "scope": "skeleton runtime mainline execution kernel",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4DebugRuntime",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_runtime",
+      "scope": "debug runtime typed facade for diagnostic-only capture/projection",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4Debug01SnapshotLedger",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_ledger",
+      "scope": "immutable snapshot ledger record",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4Debug02BusSubscription",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_subscription",
+      "scope": "read-only diagnostic bus subscription",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4Debug03SnapshotSubscription",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_subscription",
+      "scope": "read-only snapshot subscription",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4Debug04TraceContextStarted",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_trace",
+      "scope": "trace context start record",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4Debug05EventLedgerRecorded",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_ledger",
+      "scope": "immutable event ledger record",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4Debug06RawCaptureStored",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_raw_capture",
+      "scope": "verbatim raw capture side-channel, never payload truth",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4Debug07SnapshotSessionRegistered",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_snapshot",
+      "scope": "snapshot session start/record/release lifecycle",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4Debug08DryRunFixture",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_dry_run",
+      "scope": "dry-run payload fixture registry",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4Debug09DryRunNoNetworkTerminalEffect",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_dry_run",
+      "scope": "dry-run execution with no network terminal effect",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4Debug10PayloadBudget",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_payload_budget",
+      "scope": "bounded verbatim payload projection with retention cap",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4Debug11CodexSampleStore",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_sample_store",
+      "scope": "bounded codex sample filesystem store",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4Debug12ModuleSwitch",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_module_switch",
+      "scope": "diagnostic-only module switch, never a control decision",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4Debug13DryRunChain",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_dry_run",
+      "scope": "per-module dry-run chain definition",
+      "owner": "routecodex-v4-debug"
+    },
+    {
+      "node_id": "V4RuntimeObservability",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_observability",
+      "scope": "runtime observability projection",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4RuntimeObservabilityAccumulator",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_observability",
+      "scope": "runtime observability accumulator",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4RuntimeTimingSummary",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_timing",
+      "scope": "runtime timing summary projection",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4RuntimeTimingState",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_timing",
+      "scope": "runtime timing state",
+      "owner": "routecodex-v4-runtime"
+    },
+    {
+      "node_id": "V4ConsoleTerminalOutput",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_console",
+      "scope": "terminal console projection",
+      "owner": "routecodex-v4-server"
+    },
+    {
+      "node_id": "V4ConsoleProjection",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_console",
+      "scope": "console projection facade",
+      "owner": "routecodex-v4-server"
+    },
+    {
+      "node_id": "V4RequestIdCounter",
+      "family": "DiagnosticChainNode",
+      "role_id": "runtime_identity_counter",
+      "scope": "server request identity counter",
+      "owner": "routecodex-v4-server"
+    },
+    {
+      "node_id": "V4ErrorEvidenceFlushOnTerminalFailure",
+      "family": "DiagnosticChainNode",
+      "role_id": "diagnostic_error_evidence",
+      "scope": "terminal-failure raw wire evidence flush",
+      "owner": "routecodex-v4-server"
+    },
+    {
+      "node_id": "V4PluginManager",
+      "family": "ControlCenterNode",
+      "role_id": "control_ledger",
+      "scope": "plugin candidate transaction and atomic publish owner",
+      "owner": "routecodex-v4-plugin-manager"
+    },
+    {
+      "node_id": "V4PluginManagerAudit",
+      "family": "ControlCenterNode",
+      "role_id": "control_ledger",
+      "scope": "immutable audit ledger projection",
+      "owner": "routecodex-v4-plugin-manager"
+    },
+    {
+      "node_id": "V4RuntimeInspector",
+      "family": "ControlCenterNode",
+      "role_id": "control_ledger",
+      "scope": "read-only runtime projection",
+      "owner": "routecodex-v4-runtime-inspector"
+    },
+    {
+      "node_id": "V4Admin",
+      "family": "ControlCenterNode",
+      "role_id": "control_ledger",
+      "scope": "typed admin query/command surface",
+      "owner": "routecodex-v4-admin"
+    },
+    {
+      "node_id": "V4AdminCommand",
+      "family": "ControlCenterNode",
+      "role_id": "control_ledger",
+      "scope": "typed admin command DTO",
+      "owner": "routecodex-v4-admin"
+    },
+    {
+      "node_id": "V4CliStandardLibraryProjection",
+      "family": "ControlCenterNode",
+      "role_id": "control_center",
+      "scope": "read-only standard plugin library CLI projection",
+      "owner": "routecodex-v4-cli-plugin"
+    },
+    {
+      "node_id": "V4NodeContainer",
+      "family": "ControlCenterNode",
+      "role_id": "control_ledger",
+      "scope": "typed NodeContainer lifecycle port",
+      "owner": "routecodex-v4-node-container"
+    },
+    {
+      "node_id": "V4WebUI",
+      "family": "ControlCenterNode",
+      "role_id": "control_ledger",
+      "scope": "web UI projection consumer (future)",
+      "owner": "routecodex-v4-webui"
+    },
+    {
+      "node_id": "V4CordisNodeHost",
+      "family": "ControlCenterNode",
+      "role_id": "control_ledger",
+      "scope": "real Cordis Context/Fiber/Effect host lifecycle",
+      "owner": "routecodex-v4-cordis-host"
+    },
+    {
+      "node_id": "V4RuntimeBinary01Identity",
+      "family": "LifecycleChainNode",
+      "role_id": "lifecycle_identity",
+      "scope": "installed V4 runtime binary identity",
+      "owner": "routecodex-v4-runtime-bin"
+    },
+    {
+      "node_id": "V4Cli01CommandIntent",
+      "family": "LifecycleChainNode",
+      "role_id": "lifecycle_declare",
+      "scope": "typed CLI parse and dispatch intent",
+      "owner": "routecodex-v4-cli"
+    },
+    {
+      "node_id": "V4Lifecycle02ManagedInstance",
+      "family": "LifecycleChainNode",
+      "role_id": "lifecycle_identity",
+      "scope": "V4 managed instance state",
+      "owner": "routecodex-v4-lifecycle"
+    },
+    {
+      "node_id": "V4Lifecycle03ControlSocket",
+      "family": "LifecycleChainNode",
+      "role_id": "lifecycle_control",
+      "scope": "exact V4 managed instance control socket",
+      "owner": "routecodex-v4-lifecycle"
+    },
+    {
+      "node_id": "V4Servertool01CliProjection",
+      "family": "ResponseChainNode",
+      "role_id": "response_outbound",
+      "scope": "local servertool CLI result projection",
+      "owner": "routecodex-v4-servertool"
+    },
+    {
+      "node_id": "V4CordisMountCandidate",
+      "family": "ControlCenterNode",
+      "role_id": "control_center",
+      "scope": "validated Cordis mount candidate control resource",
+      "owner": "routecodex-v4-cordis-bridge"
+    },
+    {
+      "node_id": "V4NodePluginPlanBundle",
+      "family": "ControlCenterNode",
+      "role_id": "control_center",
+      "scope": "compiled node plugin plan bundle",
+      "owner": "routecodex-v4-plugin-plan"
+    }
   ],
-  "registered_nodes_rule": "registered_nodes is the machine node catalog for side-chain/control-center/diagnostic node references; these nodes are not hub request/response/config chain positions and do not carry payload semantics",
+  "registered_nodes_rule": "registered_nodes is the single machine node catalog: fixed chain nodes, group-private nodes, and control/diagnostic/lifecycle side nodes all resolve here; every entry needs unique family/role/scope/owner; skeleton checkpoints and resource relations may only reference catalog nodes",
   "verification_rules": [
     "all edge from/to must exist in declared nodes",
     "data edges must be adjacent in chain_version",
@@ -396,12 +1822,16 @@
     "parent chain cannot connect to group internal nodes",
     "every chain has single entry and single terminal",
     "every published node/group/chain has its standard test surface",
-    "v4 hub request chain is fixed: server -> sse_in -> inbound -> chat_process(group) -> outbound -> compat -> provider_sse_out",
-    "v4 hub response chain is the request chain mirror: provider_sse_in -> inbound -> chat_process(group) -> outbound -> client_sse_out -> server",
-    "continuation save occurs only at V4HubRespChatProcess03Governed; resp_chatprocess save -> req_chatprocess restore interval is immutable",
-    "sse is transport boundary only; internal data plane is json semantic",
-    "sse_in and sse_out cannot be directly coupled",
-    "direct and relay share the same chain; they differ only in operator selection and typed facts",
+    "v4 Direct request chain is fixed: client protocol -> direction-specific DirectRelay NodeContainer -> same-protocol provider wire",
+    "v4 Direct response chain is fixed: provider protocol -> direction-specific DirectRelay NodeContainer -> same-protocol client protocol",
+    "v4 Relay request chain is fixed: server raw -> Hub inbound -> request Chat Process -> execution plan -> target -> Hub outbound -> provider compat -> provider wire -> transport",
+    "v4 Relay response chain is fixed: provider raw -> provider compat -> Hub inbound -> response Chat Process -> Hub outbound -> server client frame",
+    "local and Relay continuation are physically forbidden; only provider-owned Direct Responses continuation may exist outside SSE transport",
+    "SSE is an independent transport plugin and owns framing, ordering, bounded buffering, backpressure, timeout, keepalive, and closeout only",
+    "SSE plugins cannot read, write, infer, normalize, project, or classify normal payload semantics or business terminal truth",
+    "Direct and Relay are different chain families selected only by typed execution-lane information",
+    "Direct requires client_protocol == provider_protocol and fails fast on mismatch; it never auto-switches to Relay",
+    "Relay client_protocol and provider_protocol are independent typed information resources and cannot be inferred from payload or each other",
     "every node entry/exit hook queue is machine declared and ordered"
   ]
 }

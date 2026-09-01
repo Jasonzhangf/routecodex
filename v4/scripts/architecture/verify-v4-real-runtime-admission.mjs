@@ -231,7 +231,15 @@ if (compiledManifest.runtime_identity !== 'rccv4'
   process.exit(1);
 }
 RCCV4_HOST ??= compiledManifest.listeners?.[0]?.address;
-ADMISSION_MODEL ??= compiledManifest.routes?.[0]?.models?.[0];
+if (!ADMISSION_MODEL) {
+  // The live fixture must exercise a protocol-compatible Direct/Relay lane.
+  // Do not pick the first route model: product priority may intentionally list
+  // an Anthropic model before the OpenAI Responses provider.
+  const responsesProvider = compiledManifest.product?.providers?.find((provider) =>
+    provider.protocol === 'responses' || provider.protocol === 'openai-responses');
+  ADMISSION_MODEL = responsesProvider?.models?.[0]?.model_id
+    ?? compiledManifest.routes?.[0]?.models?.[0];
+}
 if (!RCCV4_HOST || !ADMISSION_MODEL) {
   console.error('[v4_real_runtime_admission] FAIL: listener/model missing from compiled manifest');
   process.exit(1);
@@ -276,6 +284,7 @@ try {
   const requestBody = {
     model: ADMISSION_MODEL,
     input: [{ role: 'user', content: 'say hi in 3 words' }],
+    store: true,
   };
   const jsonResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'x-rccv4-session-id': directSession }, 60000);
   if (jsonResp.status !== 200) throw new Error(`responses JSON status ${jsonResp.status}, body=${jsonResp.body.substring(0, 200)}`);
@@ -300,6 +309,7 @@ try {
     model: ADMISSION_MODEL,
     previous_response_id: directResponseId,
     input: [{ role: 'user', content: 'now say bye in 3 words' }],
+    store: true,
   }, { 'x-rccv4-session-id': directSession }, 60000);
   if (continuation.status !== 200) throw new Error(`continuation status ${continuation.status}, body=${continuation.body.substring(0, 200)}`);
   const body = JSON.parse(continuation.body);

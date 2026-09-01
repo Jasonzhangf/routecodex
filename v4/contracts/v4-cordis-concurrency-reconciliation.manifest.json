@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "issue_id": "M00-T10",
+  "claim_id": "gate_id:v4.cordis-concurrency-reconciliation",
+  "owner": "routecodex-v4-governance",
+  "merge_target": "codex/v4-cordis-refactor-main",
+  "canonical_docs": [
+    "docs/goals/v4-cordis-concurrency-reconciliation.md",
+    "docs/goals/v4-cordis-concurrency-reconciliation-test-design.md",
+    "docs/goals/v4-cordis-mainline-task-board.md",
+    "docs/goals/v4-cordis-mainline-milestone-task-tables.md"
+  ],
+  "tasks": [
+    {"task_id":"M00-T00","independent_claim":"feature_id:v4.cordis_m00.migration_plan","dependencies":["none"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"M00","post_merge_mainline_verification":"canonical docs and dependency references present"},
+    {"task_id":"M00-T01","independent_claim":"feature_id:v4.cordis_m00.contracts","dependencies":["none"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"M00","post_merge_mainline_verification":"contract and map gates on refactor-main"},
+    {"task_id":"M00-T02","independent_claim":"feature_id:v4.cordis_m00.ratchet_gate","dependencies":["M00-T01"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"M00","post_merge_mainline_verification":"ratchet positive/red gates on refactor-main"},
+    {"task_id":"M00-T03","independent_claim":"feature_id:v4.cordis_m00.audit_surfaces","dependencies":["M00-T01"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"M00","post_merge_mainline_verification":"audit surface links and markdown checks"},
+    {"task_id":"M00-T04","independent_claim":"feature_id:v4.cordis_m00.stage_task_tables","dependencies":["M00-T03"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"M00","post_merge_mainline_verification":"per-milestone task table count and links"},
+    {"task_id":"M00-T05","independent_claim":"feature_id:v4.cordis_m00.live_admission_closeout","dependencies":["M00-T02","M00-T04"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"M00-blocked","post_merge_mainline_verification":"real provider continuation evidence only"},
+    {"task_id":"M00-T06","independent_claim":"resource_id:v4.error.raw_wire_evidence","dependencies":["M00-T01","M00-T03"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"M00","post_merge_mainline_verification":"raw wire evidence contract gate"},
+    {"task_id":"M00-T07","independent_claim":"feature_id:v4.cordis_m00.live_capture_binding","dependencies":["M00-T06"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"M00","post_merge_mainline_verification":"owner binding is fail-closed"},
+    {"task_id":"M00-T08","independent_claim":"feature_id:v4.cordis_m00.dependency_reconciliation","dependencies":["M00-T01","M00-T03","M00-T04"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"M00","post_merge_mainline_verification":"no T07/M08 circular dependency"},
+    {"task_id":"M00-T09","independent_claim":"feature_id:v4.cordis_m00.empty_epoch_admission","dependencies":["M00-T01","M00-T02"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"M00","post_merge_mainline_verification":"empty epoch positive/negative gate"},
+    {"task_id":"M01-T01","independent_claim":"feature_id:v4.native_plugin_abi","dependencies":["M00 structural contracts"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"control","post_merge_mainline_verification":"catalog and ABI gates"},
+    {"task_id":"M02-T01","independent_claim":"feature_id:v4.cordis_generic_factory","dependencies":["M01-T01"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"control","post_merge_mainline_verification":"factory/host/red gates"},
+    {"task_id":"M03-T01","independent_claim":"feature_id:v4.cordis_host_daemon","dependencies":["M00 structural contracts"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"control","post_merge_mainline_verification":"daemon/host/red gates"},
+    {"task_id":"M04-T01","independent_claim":"feature_id:v4.execution_epoch_transaction","dependencies":["M02-T01","M03-T01"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"control","post_merge_mainline_verification":"epoch transaction gates"},
+    {"task_id":"M05-T01","independent_claim":"feature_id:v4.execution_engine","dependencies":["M04-T01"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"control-serial","post_merge_mainline_verification":"Active artifact, feature-layer, install/live admission and M05 gates"},
+    {"task_id":"D0-T01","independent_claim":"feature_id:v4.differential_harness","dependencies":["M00 structural contracts"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"differential","post_merge_mainline_verification":"old/new differential gates; independent of M00-T05"},
+    {"task_id":"M06-T01","independent_claim":"feature_id:v4.responses_request_mainline","dependencies":["M05-T01"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"data-serial","post_merge_mainline_verification":"request mainline gates"},
+    {"task_id":"M07-T01","independent_claim":"feature_id:v4.responses_response_mainline","dependencies":["M06-T01"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"data-serial","post_merge_mainline_verification":"response mainline gates"},
+    {"task_id":"M08-T01","independent_claim":"feature_id:v4.async_data_plane","dependencies":["M00 structural contracts","M00-T07","M05 handoff or merge"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"data-paused","post_merge_mainline_verification":"runtime-bin overlap resolved by explicit M05 handoff/merge, then async gates"},
+    {"task_id":"M09-T01","independent_claim":"feature_id:v4.sse_mainline","dependencies":["M07-T01","M08-T01"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"data-serial","post_merge_mainline_verification":"SSE mainline gates"},
+    {"task_id":"M10-T01","independent_claim":"feature_id:v4.state_semantics","dependencies":["M09-T01"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"data-serial","post_merge_mainline_verification":"typed state semantics gates"},
+    {"task_id":"M11-T01","independent_claim":"feature_id:v4.protocols","dependencies":["M10-T01"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"product-parallel","post_merge_mainline_verification":"protocol gates"},
+    {"task_id":"M11-T02","independent_claim":"feature_id:v4.tools_admin","dependencies":["M10-T01"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"product-parallel","post_merge_mainline_verification":"tools/admin gates"},
+    {"task_id":"M12-T01","independent_claim":"feature_id:v4.parity_release","dependencies":["M11-T01","M11-T02","D0-T01"],"merge_target":"codex/v4-cordis-refactor-main","parallel_lane":"release-serial","post_merge_mainline_verification":"full differential/live/release gates"}
+  ],
+  "delivery_order": ["claim","worktree","red","implement","boundary","focused_gates","evidence","checker_merge","mainline_reverify","claim_release","cleanup"],
+  "merge_contract": {
+    "task_branch_source": "latest codex/v4-cordis-refactor-main HEAD",
+    "checker_required": true,
+    "post_merge_ref": "codex/v4-cordis-refactor-main",
+    "repo_main_merge": "milestone-only after milestone gates and refactor-main reverify"
+  },
+  "claim_release_cleanup": {
+    "release_after": ["checker merge receipt", "refactor-main post-merge verification", "remote receipt if pushed"],
+    "cleanup_after": ["claim release", "worktree clean", "branch has no unmerged unique commit"],
+    "never_before": ["evidence and merge queue", "checker decision", "mainline reverify"]
+  },
+  "blockers": {
+    "M05": {"status":"in_progress", "blocking":"Active artifact, feature-layer admission, isolation wiring, install/live baseline; no AGY/commit/merge yet", "resolution_claimed":false},
+    "D0": {"status":"in_progress", "blocking":"independent differential lane; T05 does not propagate", "resolution_claimed":false},
+    "M08": {"status":"paused", "blocking":"runtime-bin execution-owner overlap with M05; resume after M05 merge or explicit handoff", "resolution_claimed":false}
+  }
+}

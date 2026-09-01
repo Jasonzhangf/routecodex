@@ -8,10 +8,10 @@
  * fields and declare the canonical plan-hash rule from node-container.
  *
  * Code binding (AGENTS §20/§29): registry self-consistency is not enough.
- * The Rust runtime must actually implement `ExecutionBinding` +
- * `execution_binding()` and consume it in the chain runner, and the skeleton
- * crate must implement the contract loader/verifier (`SkeletonPlan`,
- * `plan_hash`, `from_contract_json`, `verify`).
+ * The Rust runtime must derive `ExecutionBinding` from the admitted epoch
+ * lease, execute the exact pinned containers, and pass data/control only
+ * through adjacent `NodeExecutionFrame`s. The skeleton crate remains an
+ * authoring/verification surface and is never a production active graph.
  *
  * Run with --red-self-test to prove each negative class fails.
  */
@@ -60,7 +60,7 @@ function validateContract(plan, nodeContainer) {
   return problems;
 }
 
-function validateCodeBinding(runtimeSource, skeletonSource) {
+function validateCodeBinding(runtimeSource, engineSource, runtimeBinSource, skeletonSource) {
   const problems = [];
 
   const bindingDecl = runtimeSource.match(/pub struct ExecutionBinding\s*\{([^}]*)\}/);
@@ -76,20 +76,49 @@ function validateCodeBinding(runtimeSource, skeletonSource) {
   if (!/pub fn execution_binding\(/.test(runtimeSource)) {
     problems.push('runtime: pub fn execution_binding() missing');
   }
-  if (!/execution_binding\(&self\.plan\)/.test(runtimeSource)) {
-    problems.push('runtime: execution_binding() is not consumed by the chain runner');
+  if (!/let snapshot = lease\.snapshot\(\)/.test(runtimeSource)
+      || !/plan_epoch:\s*snapshot\.plan_epoch/.test(runtimeSource)
+      || !/manifest_hash:\s*snapshot\.manifest_hash/.test(runtimeSource)) {
+    problems.push('runtime: admitted EpochLease snapshot must own the request execution binding');
   }
-  if (!/pub struct SkeletonRuntime\b/.test(runtimeSource)) {
-    problems.push('runtime: pub struct SkeletonRuntime missing (mainline executor is not implemented)');
+  for (const symbol of ['pub struct ExecutionEngine', 'pub struct NodeExecutionFrame', 'pub enum NodeOutcome']) {
+    if (!engineSource.includes(symbol)) problems.push(`runtime: ${symbol} missing`);
   }
-  if (!/pub struct NodePluginPlan\b/.test(runtimeSource)) {
-    problems.push('runtime: pub struct NodePluginPlan missing (compiled plan type is not implemented)');
+  if (!/pub fn execute_pinned_node\s*\(/.test(engineSource)) {
+    problems.push('runtime: ExecutionEngine::execute_pinned_node missing');
   }
-  if (!/pub static PLUGIN_REGISTRY\b/.test(runtimeSource)) {
-    problems.push('runtime: pub static PLUGIN_REGISTRY missing (plugin registry is not implemented)');
+  if (/struct RuntimeExecutionState\s*\{[\s\S]*?\bctx\s*:/.test(runtimeSource)) {
+    problems.push('runtime: RuntimeExecutionState must not own a ctx business-data carrier');
   }
-  if (!/fn run_chain\(/.test(runtimeSource)) {
-    problems.push('runtime: run_chain() missing (chain execution path is not implemented)');
+  if (!/ctx\.clone\(\)\.into_frame\s*\(chain_id\)/.test(runtimeSource)
+      || !/ctx\.from_frame\s*\([\s\S]*NodeExecutionFrame::with_side_channels/.test(runtimeSource)
+      || !/NodeExecutionInput\s*\{[\s\S]*data:\s*frame\.data,[\s\S]*control:\s*frame\.control,[\s\S]*information:\s*frame\.information/.test(engineSource)) {
+    problems.push('runtime: adjacent node data/control/information must enter and leave through NodeExecutionFrame');
+  }
+  for (const forbidden of ['pub struct NodePluginPlan', 'pub struct NodeContainer', 'pub static PLUGIN_REGISTRY', 'fn run_chain(']) {
+    if (runtimeSource.includes(forbidden)) problems.push(`runtime: legacy execution owner remains (${forbidden})`);
+  }
+  for (const [pattern, label] of [
+    [/\bstruct NodeSpec\b/, 'runtime-owned NodeSpec graph'],
+    [/\bchains:\s*HashMap</, 'runtime-owned chain graph'],
+    [/\bfn execute_local_plugin\s*\(/, 'plugin-id execution dispatcher'],
+    [/\bmatch plugin_id\b/, 'plugin-id execution match'],
+    [/\bActiveEpochStore::new\s*\(/, 'locally activated production epoch'],
+    [/\bNodeContainer::declare\s*\(/, 'runtime-declared production NodeContainer'],
+  ]) {
+    if (pattern.test(runtimeSource)) problems.push(`runtime: forbidden ${label} remains`);
+  }
+  if (!/ActiveEpochStore::empty\s*\(/.test(runtimeSource)) {
+    problems.push('runtime: production epoch store must start with ActiveEpochStore::empty()');
+  }
+  if (!/ExecutionEngine::execute_pinned_node\s*\(/.test(runtimeSource)) {
+    problems.push('runtime: request path must execute the admitted EpochLease through ExecutionEngine::execute_pinned_node');
+  }
+  if (!/lease\s*\.\s*execute\s*\(/.test(engineSource)) {
+    problems.push('runtime: ExecutionEngine must reach EpochLease::execute');
+  }
+  if (/const SKELETON_PLAN\s*:\s*&str\s*=\s*include_str!/.test(runtimeBinSource)) {
+    problems.push('runtime-bin: production entry must not embed the authoring skeleton as an active graph');
   }
 
   if (!/pub struct SkeletonPlan\b/.test(skeletonSource)) {
@@ -110,6 +139,8 @@ function validateCodeBinding(runtimeSource, skeletonSource) {
 function loadSource() {
   return {
     runtime: readText('crates/routecodex-v4-runtime/src/lib.rs'),
+    engine: readText('crates/routecodex-v4-runtime/src/execution_engine.rs'),
+    runtimeBin: readText('crates/routecodex-v4-runtime-bin/src/main.rs'),
     skeleton: readText('crates/routecodex-v4-skeleton/src/lib.rs'),
   };
 }
@@ -119,18 +150,42 @@ function runSelfTest() {
   const nodeContainer = readJson('contracts/node-container.contract.json');
   const base = loadSource();
   const cases = [
-    ['runtime ExecutionBinding ghost', (s) => {
-      s.runtime = s.runtime.replace('pub struct ExecutionBinding', 'pub struct GhostBinding');
-    }, 'ExecutionBinding missing'],
-    ['binding field removed', (s) => {
-      s.runtime = s.runtime.replace('    pub plan_hash: String,', '');
-    }, 'missing field plan_hash'],
-    ['runtime execution_binding fn ghost', (s) => {
-      s.runtime = s.runtime.replace('pub fn execution_binding(', 'pub fn ghost_binding(');
-    }, 'execution_binding() missing'],
-    ['binding not consumed', (s) => {
-      s.runtime = s.runtime.replace('execution_binding(&self.plan)', 'ghost_binding(&self.plan)');
-    }, 'not consumed'],
+    ['execution engine removed', (s) => {
+      s.engine = s.engine.replace('pub struct ExecutionEngine', 'pub struct GhostEngine');
+    }, 'pub struct ExecutionEngine missing'],
+    ['node outcome removed', (s) => {
+      s.engine = s.engine.replace('pub enum NodeOutcome', 'pub enum GhostOutcome');
+    }, 'pub enum NodeOutcome missing'],
+    ['legacy registry reintroduced', (s) => {
+      s.runtime = `${s.runtime}\npub static PLUGIN_REGISTRY: &[()] = &[];`;
+    }, 'legacy execution owner remains'],
+    ['legacy container reintroduced', (s) => {
+      s.runtime = `${s.runtime}\npub struct NodeContainer;`;
+    }, 'legacy execution owner remains'],
+    ['runtime state context reintroduced', (s) => {
+      s.runtime = `${s.runtime}\nstruct RuntimeExecutionState { ctx: ExecutionContext }`;
+    }, 'RuntimeExecutionState must not own a ctx business-data carrier'],
+    ['frame handoff removed', (s) => {
+      s.runtime = s.runtime.replace('ctx.clone().into_frame(chain_id)', 'ctx.clone().into_payload(chain_id)');
+    }, 'adjacent node data/control/information must enter and leave through NodeExecutionFrame'],
+    ['local epoch activation restored', (s) => {
+      s.runtime = `${s.runtime}\nfn ghost() { let _ = ActiveEpochStore::new(candidate); }`;
+    }, 'locally activated production epoch'],
+    ['runtime node declaration restored', (s) => {
+      s.runtime = `${s.runtime}\nfn ghost() { let _ = NodeContainer::declare("node", plan, bindings); }`;
+    }, 'runtime-declared production NodeContainer'],
+    ['plugin-id match restored', (s) => {
+      s.runtime = `${s.runtime}\nfn execute_local_plugin(plugin_id: &str) { match plugin_id { _ => {} } }`;
+    }, 'plugin-id execution dispatcher'],
+    ['pinned lease execution removed', (s) => {
+      s.runtime = s.runtime.replace('ExecutionEngine::execute_pinned_node(', 'ExecutionEngine::execute_unpinned_node(');
+    }, 'request path must execute the admitted EpochLease'],
+    ['lease container execution removed', (s) => {
+      s.engine = s.engine.replace(/lease\s*\.\s*execute\s*\(/, 'lease.ghost_execute(');
+    }, 'ExecutionEngine must reach EpochLease::execute'],
+    ['authoring skeleton embedded in runtime-bin', (s) => {
+      s.runtimeBin = `${s.runtimeBin}\nconst SKELETON_PLAN: &str = include_str!("skeleton.json");`;
+    }, 'must not embed the authoring skeleton'],
     ['skeleton plan_hash ghost', (s) => {
       s.skeleton = s.skeleton.replace('pub fn plan_hash(', 'pub fn ghost_hash(');
     }, 'plan_hash() missing'],
@@ -146,10 +201,12 @@ function runSelfTest() {
   for (const [name, mutate, marker] of cases) {
     const state = {
       runtime: base.runtime,
+      engine: base.engine,
+      runtimeBin: base.runtimeBin,
       skeleton: base.skeleton,
     };
     mutate(state);
-    const problems = validateCodeBinding(state.runtime, state.skeleton);
+    const problems = validateCodeBinding(state.runtime, state.engine, state.runtimeBin, state.skeleton);
     const hit = problems.some((problem) => problem.includes(marker));
     if (problems.length === 0 || !hit) {
       console.error(`[v4_parity_gate_execution_binding] red self-test ${name}: expected FAIL, got ${problems.length} (marker ${marker})`);
@@ -176,7 +233,7 @@ if (process.argv.includes('--red-self-test')) {
 
 failures.push(...validateContract(readJson('contracts/skeleton-plan.contract.json'), readJson('contracts/node-container.contract.json')));
 const source = loadSource();
-failures.push(...validateCodeBinding(source.runtime, source.skeleton));
+failures.push(...validateCodeBinding(source.runtime, source.engine, source.runtimeBin, source.skeleton));
 
 if (failures.length > 0) {
   console.error('[v4_parity_gate_execution_binding] FAIL');

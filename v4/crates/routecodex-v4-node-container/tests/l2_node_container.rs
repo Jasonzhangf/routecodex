@@ -72,6 +72,7 @@ fn positive_full_lifecycle_with_matching_hashes() {
             NodeExecutionInput {
                 data: Default::default(),
                 control: Default::default(),
+                information: Default::default(),
             },
             &EmptyRegistry,
         )
@@ -110,6 +111,14 @@ fn negative_three_way_binding_mismatch_is_rejected() {
 }
 
 #[test]
+fn negative_declared_node_identity_must_match_plan_identity() {
+    let plan = empty_plan();
+    let bindings = binding_for(&plan);
+    let error = NodeContainer::declare("node-b", plan, bindings).unwrap_err();
+    assert!(matches!(error, NodeContainerError::NodeIdentityMismatch));
+}
+
+#[test]
 fn negative_out_of_order_transition_is_rejected() {
     let plan = empty_plan();
     let bindings = binding_for(&plan);
@@ -136,6 +145,7 @@ fn negative_execute_before_publish_is_rejected() {
             NodeExecutionInput {
                 data: Default::default(),
                 control: Default::default(),
+                information: Default::default(),
             },
             &EmptyRegistry,
         )
@@ -230,6 +240,7 @@ fn positive_execute_is_bound_to_active_plan_hash() {
             NodeExecutionInput {
                 data: Default::default(),
                 control: Default::default(),
+                information: Default::default(),
             },
             &EmptyRegistry,
         )
@@ -250,6 +261,7 @@ fn negative_execute_rejects_plan_hash_drift() {
             NodeExecutionInput {
                 data: Default::default(),
                 control: Default::default(),
+                information: Default::default(),
             },
             &EmptyRegistry,
         )

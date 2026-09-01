@@ -1,34 +1,33 @@
 {
-  "regression_report_id": "v4-plugin-contract-regression-report",
-  "module_id": "routecodex-v4-plugin-contract",
-  "suite_id": "v4-plugin-contract-l2-regression",
+  "artifact_hash": "sha256:308725f4606c2751f861efe5401f63b57fab38a8c3fb827cc6958e06a70a9ff3",
   "command": {
-    "program": "cargo",
     "args": [
       "test",
-      "--locked",
       "-p",
       "routecodex-v4-plugin-contract"
     ],
+    "program": "cargo",
     "working_directory": "."
   },
-  "input_hash": "sha256:db4bee37e348c2358ed575354a613588ae86cea2398c780cb21e4406b3fdb02e",
-  "artifact_hash": "sha256:db4bee37e348c2358ed575354a613588ae86cea2398c780cb21e4406b3fdb02e",
-  "public_api_hash": "sha256:c54935fd20d466b81323165f79d544e697822e8789e2ffccf89428e130d25487",
-  "scope_hash": "sha256:743f1daa351791c653e264d14af32be31506248ad665d72495b119c1eaab0b20",
-  "source_commit": "cbb1006d741f693df3f490bf9c092d989284e0dd",
-  "passed": 14,
+  "created_at": "2026-08-28T11:12:10Z",
   "failed": 0,
-  "skipped": 0,
-  "test_count": 14,
-  "test_characteristics": {
-    "whitebox": true,
-    "blackbox": true
-  },
+  "input_hash": "sha256:308725f4606c2751f861efe5401f63b57fab38a8c3fb827cc6958e06a70a9ff3",
+  "module_id": "routecodex-v4-plugin-contract",
+  "passed": 16,
   "producer": {
     "adapter": "cargo",
-    "identity": "routecodex-v4-plugin-contract-regression"
+    "identity": "v4-cordis-plugin-contract-l2"
   },
+  "public_api_hash": "sha256:b6f455ee7fb4c7702156edf9f7fee9f127c7aacad6ff56dc4d2d7a7c4889be11",
+  "regression_report_id": "v4-cordis-plugin-contract-regression-current",
   "result": "pass",
-  "created_at": "2026-08-23T12:05:00Z"
+  "scope_hash": "sha256:226734beb3e1c3b24eb46f9695ae9501298458b87bb04d49199b1908c59ef24b",
+  "skipped": 0,
+  "source_commit": "4944a2fafe8349102a625cef502ba02b414e5db8",
+  "suite_id": "v4-plugin-contract-l2-regression",
+  "test_characteristics": {
+    "blackbox": true,
+    "whitebox": true
+  },
+  "test_count": 16
 }

@@ -72,9 +72,9 @@
   "source_owner": "routecodex-v4-edge",
   "stage": "frozen",
   "version_base": {
-    "base_artifact_hash": "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0",
-    "base_source_commit": "8bef032e6",
-    "new_active_version": "active-v4",
-    "previous_active_version": "active-v3"
+    "base_artifact_hash": "sha256:83728d3d7967db171cfb627301ba8e8d636eaf6015101f70e316a5234c260ea6",
+    "base_source_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
+    "new_active_version": "active-v5",
+    "previous_active_version": "active-v4"
   }
 }

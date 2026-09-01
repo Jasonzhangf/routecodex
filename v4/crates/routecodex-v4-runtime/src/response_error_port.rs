@@ -1,5 +1,5 @@
-use crate::{ExecutionBinding, RuntimeFault};
 use super::request_port::RequestPortLease;
+use crate::{ExecutionBinding, RuntimeFault};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponsePortReceipt {
@@ -16,6 +16,7 @@ pub fn consume_response(
     binding: &ExecutionBinding,
 ) -> Result<ResponsePortReceipt, RuntimeFault> {
     validate_binding(request, binding, "response")?;
+    request.claim_terminal()?;
     Ok(ResponsePortReceipt {
         request_id: request.request_id().to_string(),
         binding: request.binding().clone(),
@@ -28,6 +29,7 @@ pub fn consume_error(
     binding: &ExecutionBinding,
 ) -> Result<ResponsePortReceipt, RuntimeFault> {
     validate_binding(request, binding, "error")?;
+    request.claim_terminal()?;
     Ok(ResponsePortReceipt {
         request_id: request.request_id().to_string(),
         binding: request.binding().clone(),

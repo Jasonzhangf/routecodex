@@ -99,8 +99,8 @@ fn authoring_plugin(
             selection_group: None,
             node_selector: NodeSelector {
                 role_id: "request_chat_process".to_string(),
-                node_id: "V4HubReqChatProcess04Governed".to_string(),
-                position: 4,
+                node_id: "V4HubReqChatProcess03Governed".to_string(),
+                position: 3,
             },
             services_provided: vec![],
             inject: vec![],
@@ -113,10 +113,10 @@ fn authoring_plugin(
 
 fn compile_one_node(authoring: &[AuthoringPlugin]) -> routecodex_v4_plugin_plan::NodePluginPlan {
     compile_node(
-        "V4HubReqChatProcess04Governed",
+        "V4HubReqChatProcess03Governed",
         "request_chat_process",
         "request",
-        4,
+        3,
         authoring,
         &allowed_reads(),
         &allowed_writes(),
@@ -291,7 +291,11 @@ impl HandleRegistry for MapRegistry {
 }
 
 fn input(data: Value, control: Value) -> NodeExecutionInput {
-    NodeExecutionInput { data, control }
+    NodeExecutionInput {
+        data,
+        control,
+        information: json!({}),
+    }
 }
 
 #[test]
@@ -299,6 +303,7 @@ fn positive_execution_input_accepts_typed_data_and_control() {
     let decoded: NodeExecutionInput = serde_json::from_value(json!({
         "data": {"steps": []},
         "control": {},
+        "information": {},
     }))
     .expect("typed execution input decodes");
     assert_eq!(decoded.data, json!({"steps": []}));
@@ -310,6 +315,7 @@ fn negative_execution_input_rejects_undeclared_fields() {
     let error = serde_json::from_value::<NodeExecutionInput>(json!({
         "data": {},
         "control": {},
+        "information": {},
         "extra": true,
     }))
     .unwrap_err();

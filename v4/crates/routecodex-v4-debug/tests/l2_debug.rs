@@ -52,7 +52,7 @@ fn trace_event_raw_capture_lifecycle() {
         })
         .expect("trace start must succeed");
     assert_eq!(debug_runtime.trace_context.contexts().count(), 1);
-    debug_runtime.record_node_event("srv", "req-1", "exec-1", "V4HubReqInbound03Normalized", "in");
+    debug_runtime.record_node_event("srv", "req-1", "exec-1", "V4HubReqInbound02Normalized", "in");
     let raw: RawCaptureRecord =
         debug_runtime.capture_raw_request("srv", "req-1", "exec-1", r#"{"model":"m"}"#);
     assert_eq!(raw.kind, "request");

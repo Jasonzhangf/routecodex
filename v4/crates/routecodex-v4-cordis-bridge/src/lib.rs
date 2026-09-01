@@ -91,20 +91,22 @@ impl ScopeSessionCommand {
 }
 
 /// One typed diagnostic fact published by a plugin (side-channel only).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticFact {
     pub kind: String,
     pub plugin_id: String,
     pub message: String,
 }
 
-/// Typed per-node execution input. Data and control stay in separate fields;
-/// no synthetic metadata blob is accepted.
+/// Typed per-node execution input. Business data, typed control, and immutable
+/// information resources stay in separate fields; no synthetic metadata blob
+/// is accepted.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeExecutionInput {
     pub data: Value,
     pub control: Value,
+    pub information: Value,
 }
 
 /// Typed per-node execution output.
@@ -112,6 +114,7 @@ pub struct NodeExecutionInput {
 pub struct NodeExecutionOutput {
     pub data: Value,
     pub control: Value,
+    pub information: Value,
     pub diagnostics: Vec<DiagnosticFact>,
 }
 
@@ -151,6 +154,7 @@ pub struct CordisMountCandidate {
 impl CordisMountCandidate {
     pub fn verify(&self) -> bool {
         self.plan.verify()
+            && self.node_id == self.plan.node_id
             && !self.cordis_graph_hash.is_empty()
             && self.cordis_graph_hash == self.manifest_hash
             && self.manifest_hash == self.loaded_plan_hash
@@ -159,7 +163,7 @@ impl CordisMountCandidate {
 }
 
 /// Build a deterministic mount candidate without mutating Cordis or the
-/// ActiveExecutionEpoch.  Publication is owned by the lifecycle/container
+/// ExecutionEpochBundle. Publication is owned by the lifecycle/container
 /// lane after this candidate is independently verified.
 pub fn mount_candidate(
     node_id: &str,
@@ -230,6 +234,7 @@ impl std::error::Error for BridgeError {}
 struct ExecState {
     data: Value,
     control: Value,
+    information: Value,
     diagnostics: Vec<DiagnosticFact>,
 }
 
@@ -246,6 +251,30 @@ pub struct ExecCtx<'a> {
 impl ExecCtx<'_> {
     pub fn read_data(&self) -> &Value {
         &self.state.data
+    }
+
+    pub fn read_information_resource(
+        &mut self,
+        resource_id: &str,
+    ) -> Result<Option<&Value>, BridgeError> {
+        if !self.reads.iter().any(|declared_id| declared_id == resource_id) {
+            return Err(self.deny_resource_access(resource_id, "read"));
+        }
+        let Some(key) = information_resource_key(resource_id) else {
+            return Err(self.deny_resource_access(resource_id, "read"));
+        };
+        if !self.state.information.is_object() {
+            return Err(self.deny_resource_access(
+                resource_id,
+                "read from non-object carrier",
+            ));
+        }
+        let information = self
+            .state
+            .information
+            .as_object()
+            .expect("information object checked before read");
+        Ok(information.get(key))
     }
 
     pub fn read_control_resource(
@@ -366,6 +395,16 @@ fn control_resource_key(resource_id: &str) -> Option<&'static str> {
     }
 }
 
+fn information_resource_key(resource_id: &str) -> Option<&'static str> {
+    match resource_id {
+        "v4.information.entry_protocol" => Some("entry_protocol"),
+        "v4.information.execution_lane" => Some("execution_lane"),
+        "v4.information.client_protocol" => Some("client_protocol"),
+        "v4.information.provider_protocol" => Some("provider_protocol"),
+        _ => None,
+    }
+}
+
 /// A typed native handle registered for one plugin id. Handles are the only
 /// business code the executor runs; identity/order/permissions come from the
 /// compiled plan.
@@ -401,6 +440,7 @@ pub fn execute_plan(
     let mut state = ExecState {
         data: input.data,
         control: input.control,
+        information: input.information,
         diagnostics: Vec::new(),
     };
     for entry in &plan.entries {
@@ -433,6 +473,7 @@ pub fn execute_plan(
     let snapshot = ExecState {
         data: state.data.clone(),
         control: state.control.clone(),
+        information: state.information.clone(),
         diagnostics: Vec::new(),
     };
     let sink: std::sync::Mutex<Vec<(usize, Result<Vec<DiagnosticFact>, BridgeError>)>> =
@@ -490,6 +531,7 @@ pub fn execute_plan(
     Ok(NodeExecutionOutput {
         data: state.data,
         control: state.control,
+        information: state.information,
         diagnostics: state.diagnostics,
     })
 }
@@ -769,12 +811,42 @@ mod tests {
         };
         plan.hash = plan.plan_hash();
         assert!(matches!(
-            mount_candidate(&plan.node_id, plan.clone(), "graph-drift", &plan.hash, &plan.hash),
+            mount_candidate(
+                &plan.node_id,
+                plan.clone(),
+                "graph-drift",
+                &plan.hash,
+                &plan.hash
+            ),
             Err(BridgeError::PlanHashMismatch)
         ));
         let mut drifted = plan.clone();
         drifted.node_id = "V4HubRespChatProcess03Governed".to_string();
         assert!(!drifted.verify());
+    }
+
+    #[test]
+    fn mount_candidate_rejects_candidate_node_identity_drift() {
+        let mut plan = NodePluginPlan {
+            node_id: "V4HubReqChatProcess04Governed".to_string(),
+            position: 4,
+            role_id: "request_chat_process".to_string(),
+            chain: "request".to_string(),
+            entries: vec![],
+            selection_groups: vec![],
+            hash: String::new(),
+        };
+        plan.hash = plan.plan_hash();
+        let mut candidate = mount_candidate(
+            &plan.node_id,
+            plan.clone(),
+            &plan.hash,
+            &plan.hash,
+            &plan.hash,
+        )
+        .expect("matching mount identity must compile");
+        candidate.node_id = "V4HubRespChatProcess03Governed".to_string();
+        assert!(!candidate.verify());
     }
 
     #[test]

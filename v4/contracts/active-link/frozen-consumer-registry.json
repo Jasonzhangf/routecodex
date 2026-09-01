@@ -54,6 +54,20 @@
       "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
     },
     {
+      "consumer": "routecodex-v4-config",
+      "dependency": "routecodex-v4-skeleton",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-config",
+      "dependency": "routecodex-v4-standard-plugins",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
+    },
+    {
       "consumer": "routecodex-v4-edge",
       "dependency": "routecodex-v4-base-node",
       "mode": "source_path",
@@ -271,6 +285,13 @@
       "manifest_path": "crates/routecodex-v4-runtime/Cargo.toml"
     },
     {
+      "consumer": "routecodex-v4-runtime",
+      "dependency": "routecodex-v4-standard-plugins",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-runtime/Cargo.toml"
+    },
+    {
       "consumer": "routecodex-v4-plugin-manager",
       "dependency": "routecodex-v4-plugin-catalog",
       "mode": "source_path",
@@ -355,6 +376,13 @@
       "manifest_path": "crates/routecodex-v4-node-container/Cargo.toml"
     },
     {
+      "consumer": "routecodex-v4-node-container",
+      "dependency": "routecodex-v4-plugin-contract",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-node-container/Cargo.toml"
+    },
+    {
       "consumer": "routecodex-v4-standard-plugins",
       "dependency": "routecodex-v4-plugin-contract",
       "mode": "source_path",
@@ -385,6 +413,20 @@
     {
       "consumer": "routecodex-v4-standard-plugins",
       "dependency": "routecodex-v4-node-container",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-standard-plugins/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-standard-plugins",
+      "dependency": "routecodex-v4-provider",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-standard-plugins/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-standard-plugins",
+      "dependency": "routecodex-v4-skeleton",
       "mode": "source_path",
       "status": "transitional",
       "manifest_path": "crates/routecodex-v4-standard-plugins/Cargo.toml"

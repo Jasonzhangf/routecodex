@@ -69,7 +69,7 @@
     "zone_transition_contract": "contracts/transitions/zone-transition-manifest.json"
   },
   "lifecycle": {
-    "stage": "contract_bound"
+    "stage": "controlled_verified"
   },
   "lifecycles": {
     "artifact": "generated",
@@ -107,8 +107,7 @@
         "contracts/**",
         "docs/**",
         "scripts/**",
-        ".gitignore",
-        "playground/**"
+        ".gitignore"
       ],
       "regression": {
         "allow_skipped": false,
@@ -140,7 +139,7 @@
         "suite_id": "v4-governance-regression"
       },
       "source_owner": "routecodex-v4-governance",
-      "stage": "source_implemented"
+      "stage": "contract_bound"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-build-link/**",
@@ -194,7 +193,7 @@
         "suite_id": "v4-build-link-resolver-regression"
       },
       "source_owner": "routecodex-v4-build-link",
-      "stage": "source_implemented"
+      "stage": "contract_bound"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-base-node/**",
@@ -478,7 +477,7 @@
         "suite_id": "v4-error-l2-regression"
       },
       "source_owner": "routecodex-v4-error",
-      "stage": "source_implemented"
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-config/**",
@@ -488,7 +487,7 @@
       "build": {
         "args": [
           "-c",
-          "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-config --deps routecodex-v4-base-node,routecodex-v4-edge --out generated/modules/routecodex-v4-config/lib/libroutecodex_v4_config.rlib"
+          "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-config --deps routecodex-v4-base-node,routecodex-v4-edge --source-deps routecodex-v4-skeleton,routecodex-v4-standard-plugins --out generated/modules/routecodex-v4-config/lib/libroutecodex_v4_config.rlib"
         ],
         "program": "sh",
         "working_directory": "."
@@ -529,7 +528,9 @@
             "--consumer",
             "routecodex-v4-config",
             "--deps",
-            "routecodex-v4-base-node,routecodex-v4-edge"
+            "routecodex-v4-base-node,routecodex-v4-edge",
+            "--source-deps",
+            "routecodex-v4-skeleton,routecodex-v4-standard-plugins"
           ],
           "program": "cargo",
           "working_directory": "."
@@ -667,7 +668,7 @@
         "suite_id": "v4-plugin-contract-l2-regression"
       },
       "source_owner": "routecodex-v4-plugin-contract",
-      "stage": "controlled_verified"
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-plugin-plan/**",
@@ -725,7 +726,7 @@
         "suite_id": "v4-plugin-plan-l2-regression"
       },
       "source_owner": "routecodex-v4-plugin-plan",
-      "stage": "source_implemented"
+      "stage": "controlled_verified"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-plugin-catalog/**",
@@ -783,7 +784,7 @@
         "suite_id": "v4-plugin-catalog-l2-regression"
       },
       "source_owner": "routecodex-v4-plugin-catalog",
-      "stage": "source_implemented"
+      "stage": "controlled_verified"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-cordis-bridge/**",
