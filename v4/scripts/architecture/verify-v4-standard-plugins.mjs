@@ -161,6 +161,10 @@ const NODE_PERMISSIONS = new Map([
   ['V4ProviderReqCompat07ProviderCompat', {
     reads: ['v4.request.provider_semantic'], writes: ['v4.request.provider_wire_payload'],
   }],
+  ['V4ProviderReqOutbound08WirePayload', {
+    reads: ['v4.request.provider_semantic', 'v4.request.provider_wire_payload'],
+    writes: ['v4.request.provider_wire_payload'],
+  }],
   ['V4ProviderReqOutbound09TransportRequest', {
     reads: [
       'v4.request.provider_wire_payload',

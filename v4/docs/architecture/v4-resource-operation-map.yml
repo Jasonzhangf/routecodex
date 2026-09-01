@@ -310,6 +310,7 @@ resources:
   - V4HubReqOutbound06ProviderSemantic
   allowed_readers:
   - V4ProviderReqCompat07ProviderCompat
+  - V4ProviderReqOutbound08WirePayload
   forbidden_writers:
   - V4ControlMetadataCenter
   - V4Router

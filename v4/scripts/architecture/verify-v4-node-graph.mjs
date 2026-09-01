@@ -697,7 +697,7 @@ function makeCleanBase() {
         owner_crate: 'routecodex-v4-runtime',
         owner_symbols: ['SemanticProjection'],
         allowed_writers: ['V4HubReqOutbound06ProviderSemantic'],
-        allowed_readers: ['V4ProviderReqCompat07ProviderCompat'],
+        allowed_readers: ['V4ProviderReqCompat07ProviderCompat', 'V4ProviderReqOutbound08WirePayload'],
         forbidden_writers: ['V4ScopeRegistry'],
         verification_gate: ['v4_parity_gate_node_graph'],
       },
