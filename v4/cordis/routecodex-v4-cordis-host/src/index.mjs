@@ -164,6 +164,20 @@ function decodeExecutionResponse(value) {
     if (!failure || typeof failure !== 'object' || Array.isArray(failure)) {
       throw new CordisHostError('binding_protocol', 'failed execution response requires failure fact');
     }
+    if (
+      failure.resource_id === 'v4.node_container.lifecycle_failure'
+      && failure.operation === 'protocol_decode'
+      && LIFECYCLE_FAILURE_CODES.has(failure.code)
+    ) {
+      if (
+        failure.request_id !== value.request_id
+        || typeof failure.message !== 'string'
+        || failure.message.length === 0
+      ) {
+        throw new CordisHostError('binding_protocol', 'lifecycle failure fact is invalid');
+      }
+      return value;
+    }
     if (failure.resource_id !== 'v4.node_container.execution_failure') {
       throw new CordisHostError('binding_protocol', 'execution failure resource id is invalid');
     }

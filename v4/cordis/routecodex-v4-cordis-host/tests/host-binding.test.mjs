@@ -379,7 +379,7 @@ test('real Cordis fibers drive ordered Rust NodePluginPlan execution', async (t)
   assert.deepEqual(events, ['active', 'active', 'disposed', 'disposed']);
 });
 
-test('resource access violation retains its typed execution failure code', async (t) => {
+test('protocol decode failure retains its typed lifecycle failure code', async (t) => {
   const port = new RustNodeContainerPort({ binaryPath });
   t.after(() => port.close());
   const entries = [controlEntry()];
@@ -400,9 +400,9 @@ test('resource access violation retains its typed execution failure code', async
     }),
     (error) => (
       error instanceof CordisHostError
-      && error.code === 'resource_access_violation'
-      && error.failure?.resource_id === 'v4.node_container.execution_failure'
-      && error.failure?.operation === 'execute_node'
+      && error.code === 'protocol_error'
+      && error.failure?.resource_id === 'v4.node_container.lifecycle_failure'
+      && error.failure?.operation === 'protocol_decode'
     ),
   );
 
