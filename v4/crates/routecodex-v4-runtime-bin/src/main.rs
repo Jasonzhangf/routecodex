@@ -40,7 +40,7 @@ use routecodex_v4_standard_plugins::diagnostic;
 use routecodex_v4_standard_plugins::StandardHandleRegistry;
 use serde_json::Value;
 use routecodex_v4_standard_plugins::sse_transport::{
-    SseEgressPlugin, SseIngressPlugin, SseTransportPolicy,
+    production_transport_pair, SseEgressPlugin, SseIngressPlugin,
 };
 use std::future::Future;
 use std::io::Write;
@@ -1290,20 +1290,14 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
         runtime: Arc<Mutex<SkeletonRuntime>>,
         processor: ResponseStreamProcessor,
     ) -> Self {
+        let (ingress, egress) = production_transport_pair(std::time::Instant::now())
+            .expect("constant SSE transport policy");
         Self {
             stream,
             runtime,
             processor,
-            ingress: SseIngressPlugin::new(
-                SseTransportPolicy::new(1024 * 1024, 1024 * 1024, Duration::from_secs(30))
-                    .expect("constant SSE transport policy"),
-                std::time::Instant::now(),
-            ),
-            egress: SseEgressPlugin::new(
-                SseTransportPolicy::new(1024 * 1024, 1024 * 1024, Duration::from_secs(30))
-                    .expect("constant SSE transport policy"),
-                std::time::Instant::now(),
-            ),
+            ingress,
+            egress,
             close_after_pending: false,
         }
     }

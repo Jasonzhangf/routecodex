@@ -78,6 +78,20 @@ pub struct SseIngressPlugin {
     last_activity: Instant,
 }
 
+/// Construct the paired opaque transport plugins used by a production SSE
+/// relay.  Construction stays in the transport owner; runtime orchestration
+/// may only consume the pair and must not choose policy or instantiate one
+/// side independently.
+pub fn production_transport_pair(
+    started_at: Instant,
+) -> Result<(SseIngressPlugin, SseEgressPlugin), SseTransportError> {
+    let policy = SseTransportPolicy::new(1024 * 1024, 1024 * 1024, Duration::from_secs(30))?;
+    Ok((
+        SseIngressPlugin::new(policy, started_at),
+        SseEgressPlugin::new(policy, started_at),
+    ))
+}
+
 impl SseIngressPlugin {
     pub fn new(policy: SseTransportPolicy, started_at: Instant) -> Self {
         Self {
