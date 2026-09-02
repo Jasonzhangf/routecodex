@@ -9,6 +9,7 @@ use routecodex_v4_config::{
     write_runtime_authoring, write_runtime_manifest_atomic, RuntimeConfigManifest,
     RuntimeInitOptions, RuntimeProductConfig, RuntimeProductRouteGroup,
 };
+use routecodex_v4_debug::{DiagnosticEventEnvelope, SubscriptionTopic, V4Debug02BusSubscription};
 use routecodex_v4_error::ErrorChain;
 use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
@@ -46,6 +47,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-v4");
@@ -512,6 +514,7 @@ struct PipelineHandler {
     runtime: Arc<Mutex<SkeletonRuntime>>,
     execution_epoch: ExecutionEpochSnapshot,
     availability: Arc<Mutex<V4Availability01SessionScoped>>,
+    event_bus: Arc<Mutex<V4Debug02BusSubscription>>,
 }
 
 impl PipelineHandler {
@@ -542,6 +545,7 @@ impl PipelineHandler {
             runtime: Arc::new(Mutex::new(runtime)),
             execution_epoch,
             availability: Arc::new(Mutex::new(V4Availability01SessionScoped::new())),
+            event_bus: Arc::new(Mutex::new(V4Debug02BusSubscription::new())),
         })
     }
 }
@@ -566,6 +570,7 @@ impl PipelineHandler {
                 &self.manifest,
                 &self.runtime,
                 &self.availability,
+                &self.event_bus,
                 &request,
                 "responses",
                 "direct",
@@ -575,6 +580,7 @@ impl PipelineHandler {
                 &self.manifest,
                 &self.runtime,
                 &self.availability,
+                &self.event_bus,
                 &request,
                 "chat",
                 "relay",
@@ -713,6 +719,7 @@ fn handle_responses(
     manifest: &RuntimeConfigManifest,
     runtime: &Arc<Mutex<SkeletonRuntime>>,
     availability: &Arc<Mutex<V4Availability01SessionScoped>>,
+    event_bus: &Arc<Mutex<V4Debug02BusSubscription>>,
     request: &HttpRequest,
     entry_protocol: &str,
     continuation_owner: &str,
@@ -888,6 +895,7 @@ fn handle_responses(
         )
         .map_err(|fault| project_fault(request, fault, 598))?;
     emit_payload_console_events(
+        event_bus,
         &request_report.trace,
         request,
         &request.path,
@@ -1033,6 +1041,7 @@ fn handle_responses(
             request.clone(),
             target.provider_id.clone(),
             target.wire_model.clone(),
+            Arc::clone(event_bus),
         );
         return Ok(HttpResponse::streaming(
             client_status,
@@ -1221,6 +1230,7 @@ fn handle_responses(
                 raw.status
             };
             emit_payload_console_events(
+                event_bus,
                 &report.trace,
                 request,
                 &request.path,
@@ -1260,6 +1270,7 @@ struct CordisSseTransportStream<S = ProviderResponseStream> {
     provider: String,
     model: String,
     started_at: std::time::Instant,
+    event_bus: Arc<Mutex<V4Debug02BusSubscription>>,
 }
 
 impl<S: ProviderSseSource> CordisSseTransportStream<S> {
@@ -1270,6 +1281,7 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
         request: HttpRequest,
         provider: String,
         model: String,
+        event_bus: Arc<Mutex<V4Debug02BusSubscription>>,
     ) -> Self {
         Self {
             stream,
@@ -1290,6 +1302,7 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
             provider,
             model,
             started_at: std::time::Instant::now(),
+            event_bus,
         }
     }
 
@@ -1400,6 +1413,7 @@ impl<S: ProviderSseSource> ResponseStream for CordisSseTransportStream<S> {
                             Ok((disposition, report)) => {
                                 if let Some(report) = report.as_ref() {
                                     emit_payload_console_events(
+                                        &self.event_bus,
                                         &report.trace,
                                         &self.request,
                                         &self.request.path,
@@ -1444,6 +1458,7 @@ impl<S: ProviderSseSource> ResponseStream for CordisSseTransportStream<S> {
 }
 
 fn emit_payload_console_events(
+    event_bus: &Arc<Mutex<V4Debug02BusSubscription>>,
     trace: &[String],
     request: &HttpRequest,
     endpoint: &str,
@@ -1453,6 +1468,7 @@ fn emit_payload_console_events(
     status: Option<u16>,
     elapsed: std::time::Duration,
 ) {
+    publish_diagnostic_events(event_bus, request, trace);
     for event in trace {
         if let Some(line) = render_payload_console_event(
             event, request, endpoint, provider, model, stream, status, elapsed,
@@ -1461,6 +1477,40 @@ fn emit_payload_console_events(
             let _ = std::io::stdout().flush();
         }
     }
+}
+
+/// Publish diagnostic facts to the process-local read-only event bus before
+/// rendering them. The bus is a side-channel observer: payload bytes and
+/// control decisions never cross this boundary, and dispatch is scoped to the
+/// immutable request id.
+fn publish_diagnostic_events(
+    event_bus: &Arc<Mutex<V4Debug02BusSubscription>>,
+    request: &HttpRequest,
+    trace: &[String],
+) {
+    let Ok(mut bus) = event_bus.lock() else {
+        return;
+    };
+    let _ = bus.subscribe(
+        &format!("console:{}", request.request_id),
+        SubscriptionTopic::Diagnostic,
+        &request.request_id,
+    );
+    for entry in trace {
+        let Some((plugin_id, _)) = entry.split_once(':') else {
+            continue;
+        };
+        let mut hasher = Sha256::new();
+        hasher.update(entry.as_bytes());
+        let payload_hash = format!("sha256:{:x}", hasher.finalize());
+        let _ = bus.publish(DiagnosticEventEnvelope::new(
+            SubscriptionTopic::Diagnostic,
+            &request.request_id,
+            plugin_id,
+            &payload_hash,
+        ));
+    }
+    let _ = bus.dispatch(&SubscriptionTopic::Diagnostic, &request.request_id);
 }
 
 fn render_payload_console_event(
@@ -1987,6 +2037,7 @@ targets = ["mock"]
             },
             "test-provider".to_string(),
             "m".to_string(),
+            Arc::new(Mutex::new(V4Debug02BusSubscription::new())),
         )
     }
 

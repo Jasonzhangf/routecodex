@@ -1033,6 +1033,7 @@ dependencies = [
  "routecodex-v4-cli",
  "routecodex-v4-config",
  "routecodex-v4-cordis-bridge",
+ "routecodex-v4-debug",
  "routecodex-v4-error",
  "routecodex-v4-lifecycle",
  "routecodex-v4-node-container",
@@ -1044,6 +1045,7 @@ dependencies = [
  "routecodex-v4-servertool",
  "routecodex-v4-standard-plugins",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-util",
 ]
