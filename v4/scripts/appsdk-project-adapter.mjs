@@ -8,10 +8,6 @@ const root = process.cwd();
 const moduleId = 'routecodex-v4-base-node';
 const issueId = 'v4-cordis-governance-reset-20260903';
 const records = path.join(root, '.appsdk', 'records');
-const now = new Date().toISOString();
-const candidateCreatedAt = new Date(Date.now() - 5000).toISOString();
-const preReviewCreatedAt = new Date(Date.now() - 3000).toISOString();
-const expires = new Date(Date.now() + 7 * 86400000).toISOString();
 const run = (cmd, args) => {
   const result = spawnSync(cmd, args, { cwd: root, encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`${cmd} ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
@@ -19,6 +15,10 @@ const run = (cmd, args) => {
 };
 const hash = (value) => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 const head = run('git', ['rev-parse', 'HEAD']);
+const now = '2026-09-03T00:00:00.000Z';
+const candidateCreatedAt = '2026-09-02T23:59:55.000Z';
+const preReviewCreatedAt = '2026-09-02T23:59:57.000Z';
+const expires = '2026-09-10T00:00:00.000Z';
 const base = run('git', ['rev-parse', 'HEAD^']);
 const treeHash = run('git', ['rev-parse', `${head}^{tree}`]);
 const diffHash = hash(Buffer.from(run('git', ['diff-tree', '--no-commit-id', '--raw', '-r', '-z', '--no-renames', base, head, '--', 'v4'])));
