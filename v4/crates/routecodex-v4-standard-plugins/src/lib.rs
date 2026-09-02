@@ -802,19 +802,6 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             vec!["v4.control.target_selection"],
         ),
         plugin(
-            "v4.std.provider.auth_handle_mock",
-            PluginCategory::Provider,
-            "V4ProviderReqOutbound09TransportRequest",
-            "request_outbound",
-            Some(9),
-            PluginKind::Validator,
-            PluginEffect::ReadOnly,
-            PluginPhase::Semantic,
-            220,
-            vec!["v4.secret.provider_auth_handle"],
-            vec![],
-        ),
-        plugin(
             "v4.std.provider.wire_mock",
             PluginCategory::Provider,
             "V4HubReqOutbound06ProviderSemantic",
@@ -1336,14 +1323,6 @@ fn route_facts_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     .map_err(|error| error.to_string())
 }
 
-fn auth_handle_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    ctx.emit(
-        "node.provider_auth_handle_validated",
-        "keyless auth handle shape validated",
-    );
-    Ok(())
-}
-
 fn wire_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut data = ctx.read_data().clone();
     let object = data
@@ -1417,7 +1396,6 @@ impl StandardHandleRegistry {
             ("v4.std.chat_process.tool_harvest", tool_harvest),
             ("v4.std.routing.route_facts_producer", route_facts_produce),
             ("v4.std.routing.route_facts_consumer", route_facts_consume),
-            ("v4.std.provider.auth_handle_mock", auth_handle_mock),
             ("v4.std.provider.wire_mock", wire_mock),
             ("v4.std.provider.transport_mock", transport_mock),
             ("v4.std.provider.transport_validate", transport_mock),
@@ -1542,7 +1520,6 @@ mod tests {
             "v4.std.chat_process.tool_harvest",
             "v4.std.routing.route_facts_producer",
             "v4.std.routing.route_facts_consumer",
-            "v4.std.provider.auth_handle_mock",
             "v4.std.provider.wire_mock",
             "v4.std.provider.transport_mock",
             "v4.std.provider.transport_validate",
