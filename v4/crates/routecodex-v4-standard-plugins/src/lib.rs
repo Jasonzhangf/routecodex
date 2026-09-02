@@ -807,9 +807,9 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
         plugin(
             "v4.std.routing.route_facts_consumer",
             PluginCategory::Routing,
-            "V4HubReqExecution04Planned",
+            "V4HubReqTarget05Resolved",
             "request_execution",
-            Some(4),
+            Some(5),
             PluginKind::Operator,
             PluginEffect::ControlOnly,
             PluginPhase::Semantic,

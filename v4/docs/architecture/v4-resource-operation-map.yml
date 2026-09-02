@@ -274,7 +274,7 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4HubReqInbound02Normalized
   owner_symbols:
-  - ExecutionContext
+  - InformationView
   allowed_writers:
   - V4ServerReqInbound01ClientRaw
   - V4HubReqInbound02Normalized

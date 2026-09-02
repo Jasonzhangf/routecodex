@@ -57,7 +57,7 @@ fn positive_route_facts_producer_writes_typed_control() {
 }
 
 #[test]
-fn positive_route_facts_consumer_resolves_target_from_typed_facts() {
+fn positive_route_facts_consumer_accepts_typed_facts_without_selecting_target() {
     let output = execute(
         "V4HubReqTarget05Resolved",
         5,
@@ -65,7 +65,9 @@ fn positive_route_facts_consumer_resolves_target_from_typed_facts() {
         json!({"route_facts": {"keyless": true}}),
     )
     .expect("route facts consumer executes");
-    assert_eq!(output.control["target_selection"], json!({"selected":"keyless_mock"}));
+    assert_eq!(output.control["route_facts"], json!({"keyless": true}));
+    assert!(output.control.get("target_selection").is_none(),
+        "route-facts consumer must not own target selection");
     assert!(
         output.data.as_object().unwrap().get("target_selection").is_none(),
         "target selection must never enter data"
