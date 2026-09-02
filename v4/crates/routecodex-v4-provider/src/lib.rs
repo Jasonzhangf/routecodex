@@ -773,6 +773,48 @@ pub fn build_retry_wire(
     build_protocol_wire(provider_protocol, semantic_body, wire_model, stream)
 }
 
+/// Provider-owned dispatch for an already-built wire payload.
+pub fn send_target(
+    protocol: &str,
+    profile_path: &str,
+    auth_alias: Option<&str>,
+    wire_model: &str,
+    wire_body: &Value,
+    stream: bool,
+) -> Result<ProviderRawResponse, ProviderTransportError> {
+    validate_auth_alias(profile_path, auth_alias)?;
+    match protocol {
+        "responses" => send_responses(profile_path, wire_model, wire_body, stream),
+        "openai" | "chat" => send_openai_chat(profile_path, wire_body),
+        "anthropic" => send_anthropic_messages(profile_path, wire_body),
+        other => Err(ProviderTransportError {
+            code: "provider_protocol_unsupported".to_string(),
+            message: format!("provider protocol {other} has no transport owner"),
+            status: None,
+        }),
+    }
+}
+
+pub fn send_target_streaming(
+    protocol: &str,
+    profile_path: &str,
+    auth_alias: Option<&str>,
+    wire_model: &str,
+    wire_body: &Value,
+) -> Result<ProviderResponseStream, ProviderTransportError> {
+    validate_auth_alias(profile_path, auth_alias)?;
+    match protocol {
+        "responses" => send_responses_streaming(profile_path, wire_model, wire_body),
+        "openai" | "chat" => send_openai_chat_streaming(profile_path, wire_body),
+        "anthropic" => send_anthropic_messages_streaming(profile_path, wire_body),
+        other => Err(ProviderTransportError {
+            code: "provider_protocol_unsupported".to_string(),
+            message: format!("provider protocol {other} has no streaming transport owner"),
+            status: None,
+        }),
+    }
+}
+
 pub fn send_responses(
     profile_path: &str,
     model: &str,

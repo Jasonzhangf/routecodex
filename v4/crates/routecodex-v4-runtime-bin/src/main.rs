@@ -19,10 +19,8 @@ use routecodex_v4_lifecycle::{
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
-    send_anthropic_messages,
-    send_anthropic_messages_streaming, send_openai_chat, send_openai_chat_streaming,
-    send_responses, send_responses_streaming, validate_auth_alias, write_provider_profile,
-    ProviderInitAuth, ProviderInitOptions, ProviderResponseStream, V4Availability01SessionScoped,
+    write_provider_profile, ProviderInitAuth, ProviderInitOptions, ProviderResponseStream,
+    V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
     apply_product_error_policy, select_product_target_excluding, select_target,
@@ -918,7 +916,10 @@ fn handle_responses(
     })?;
     let wire_body = semantic_body;
     if stream_mode {
-        let mut stream = send_target_streaming(&target, &wire_body).map_err(|error| {
+        let mut stream = routecodex_v4_provider::send_target_streaming(
+            &target.protocol, &target.config_path, target.auth_alias.as_deref(),
+            &target.wire_model, &wire_body,
+        ).map_err(|error| {
             project_fault(
                 request,
                 RuntimeFault::new(error.code.as_str(), error.message)
@@ -969,8 +970,10 @@ fn handle_responses(
                             )
                             .map_err(|fault| project_fault(request, fault, 598))?;
                             target = candidate;
-                            stream =
-                                send_target_streaming(&target, &retry_body).map_err(|error| {
+                            stream = routecodex_v4_provider::send_target_streaming(
+                                &target.protocol, &target.config_path, target.auth_alias.as_deref(),
+                                &target.wire_model, &retry_body,
+                            ).map_err(|error| {
                                     project_provider_fault(
                                         request,
                                         RuntimeFault::new(&error.code, error.message),
@@ -1049,7 +1052,10 @@ fn handle_responses(
             Box::new(response_stream),
         ));
     }
-    let mut raw = send_target_nonstream(&target, &wire_body).map_err(|error| {
+    let mut raw = routecodex_v4_provider::send_target(
+        &target.protocol, &target.config_path, target.auth_alias.as_deref(),
+        &target.wire_model, &wire_body, false,
+    ).map_err(|error| {
         project_provider_fault(
             request,
             RuntimeFault::new(error.code.as_str(), error.message),
@@ -1109,7 +1115,10 @@ fn handle_responses(
                     .map_err(|fault| project_fault(request, fault, 598))?;
                     target = candidate;
                     reselected = true;
-                    raw = send_target_nonstream(&target, &retry_body).map_err(|error| {
+                    raw = routecodex_v4_provider::send_target(
+                        &target.protocol, &target.config_path, target.auth_alias.as_deref(),
+                        &target.wire_model, &retry_body, false,
+                    ).map_err(|error| {
                         project_provider_fault(
                             request,
                             RuntimeFault::new(&error.code, error.message),
@@ -1657,43 +1666,6 @@ fn project_provider_fault(
             500,
             format!("provider error policy projection failed: {error:?}"),
         ),
-    }
-}
-
-fn send_target_nonstream(
-    target: &routecodex_v4_router::SelectedTarget,
-    wire_body: &serde_json::Value,
-) -> Result<
-    routecodex_v4_provider::ProviderRawResponse,
-    routecodex_v4_provider::ProviderTransportError,
-> {
-    validate_auth_alias(&target.config_path, target.auth_alias.as_deref())?;
-    match target.protocol.as_str() {
-        "responses" => send_responses(&target.config_path, &target.wire_model, wire_body, false),
-        "openai" | "chat" => send_openai_chat(&target.config_path, wire_body),
-        "anthropic" => send_anthropic_messages(&target.config_path, wire_body),
-        other => Err(routecodex_v4_provider::ProviderTransportError {
-            code: "provider_protocol_unsupported".to_string(),
-            message: format!("provider protocol {other} has no transport owner"),
-            status: None,
-        }),
-    }
-}
-
-fn send_target_streaming(
-    target: &routecodex_v4_router::SelectedTarget,
-    wire_body: &serde_json::Value,
-) -> Result<ProviderResponseStream, routecodex_v4_provider::ProviderTransportError> {
-    validate_auth_alias(&target.config_path, target.auth_alias.as_deref())?;
-    match target.protocol.as_str() {
-        "responses" => send_responses_streaming(&target.config_path, &target.wire_model, wire_body),
-        "openai" | "chat" => send_openai_chat_streaming(&target.config_path, wire_body),
-        "anthropic" => send_anthropic_messages_streaming(&target.config_path, wire_body),
-        other => Err(routecodex_v4_provider::ProviderTransportError {
-            code: "provider_protocol_unsupported".to_string(),
-            message: format!("provider protocol {other} has no streaming transport owner"),
-            status: None,
-        }),
     }
 }
 
