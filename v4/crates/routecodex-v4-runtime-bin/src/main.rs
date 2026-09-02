@@ -1764,7 +1764,7 @@ mod tests {
             body: Vec::new(),
             request_id: "test-server-day-00000001".to_string(),
             server_id: "rccv4".to_string(),
-            port: 5520,
+            port: 5500,
         }
     }
 
@@ -1863,7 +1863,7 @@ mod tests {
             body: Vec::new(),
             request_id: "req-event-bus".to_string(),
             server_id: "rccv4".to_string(),
-            port: 5520,
+            port: 5500,
         };
         publish_diagnostic_events(
             &bus,
@@ -2058,7 +2058,7 @@ targets = ["mock"]
                 headers: Vec::new(),
                 body: Vec::new(),
                 request_id: "request-1".to_string(),
-                server_id: "127.0.0.1:5520-day-test".to_string(),
+                server_id: "127.0.0.1:5500-day-test".to_string(),
                 port,
             },
             "test-provider".to_string(),
