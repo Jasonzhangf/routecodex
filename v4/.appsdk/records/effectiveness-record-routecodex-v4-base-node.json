@@ -1,0 +1,27 @@
+{
+  "effectiveness_id": "effectiveness-fix-daa15fd1a8bc",
+  "issue_id": "v4-cordis-governance-reset-20260903",
+  "module_id": "routecodex-v4-base-node",
+  "fix_candidate_id": "fix-daa15fd1a8bc",
+  "architecture_review_id": "review-fix-daa15fd1a8bc",
+  "reviewed_commit": "daa15fd1a8bc2cda5df0a136bf14cd75ffc69d97",
+  "reviewed_tree_hash": "2097de335f42964357b246d8ecbf9d7e06225b8f",
+  "reproduction_input_hashes": [
+    "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
+    "sha256:b127c2535c22f61d066c05e08fbfd327703008cb988f45ec11b4c9eb71e1f6d7"
+  ],
+  "baseline_evidence_id": "baseline-1",
+  "fixed_replay_evidence_id": "effective-1",
+  "positive_evidence_ids": [
+    "positive-1"
+  ],
+  "negative_evidence_ids": [
+    "negative-1"
+  ],
+  "blackbox_evidence_ids": [
+    "effective-1"
+  ],
+  "source_unchanged_since_review": true,
+  "result": "pass",
+  "created_at": "2026-09-02T16:23:54.161Z"
+}

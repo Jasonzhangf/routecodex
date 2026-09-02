@@ -1,0 +1,33 @@
+{
+  "regression_report_id": "regression-fix-daa15fd1a8bc",
+  "module_id": "routecodex-v4-base-node",
+  "source_commit": "daa15fd1a8bc2cda5df0a136bf14cd75ffc69d97",
+  "artifact_hash": "sha256:0a7d33027e7b472443c04a29e677b2a3eb118a2c05c5026d62c6e170777a86ba",
+  "public_api_hash": "sha256:7ea54624ce8b9e1bbf64281a86251ec51ce6ee24ead640eaa98432b257717ab7",
+  "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "input_hash": "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
+  "suite_id": "routecodex-v4-base-node-regression",
+  "command": {
+    "program": "cargo",
+    "args": [
+      "test",
+      "-p",
+      "routecodex-v4-base-node"
+    ],
+    "working_directory": "."
+  },
+  "test_count": 12,
+  "passed": 12,
+  "failed": 0,
+  "skipped": 0,
+  "result": "pass",
+  "producer": {
+    "adapter": "project",
+    "identity": "v4-cordis-regression"
+  },
+  "test_characteristics": {
+    "whitebox": true,
+    "blackbox": true
+  },
+  "created_at": "2026-09-02T16:23:54.161Z"
+}

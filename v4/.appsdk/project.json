@@ -69,7 +69,7 @@
     "zone_transition_contract": "contracts/transitions/zone-transition-manifest.json"
   },
   "lifecycle": {
-    "stage": "contract_bound"
+    "stage": "controlled_verified"
   },
   "lifecycles": {
     "artifact": "generated",
@@ -131,7 +131,7 @@
         "suite_id": "routecodex-v4-base-node-regression"
       },
       "source_owner": "routecodex-v4-base-node",
-      "stage": "contract_bound"
+      "stage": "architecture_stable"
     }
   ],
   "project_id": "routecodex-v4",
