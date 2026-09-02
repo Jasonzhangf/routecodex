@@ -19,7 +19,7 @@
 
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::MetadataCenter;
-use routecodex_v4_cordis_bridge::{ScopeSessionCommand, ScopeSessionOperation};
+use routecodex_v4_cordis_bridge::{HandleRegistry, ScopeSessionCommand, ScopeSessionOperation};
 use routecodex_v4_error::{
     ClientProjection, DecisionAction, ErrorCenter, ErrorChain, ErrorChainError, ExecutionDecision,
     RetryPolicy,
@@ -1542,7 +1542,7 @@ pub struct ExecutionReport {
 pub struct SkeletonRuntime {
     plan: SkeletonPlan,
     epoch_store: ActiveEpochStore,
-    handle_registry: StandardHandleRegistry,
+    handle_registry: std::sync::Arc<dyn HandleRegistry>,
     active_requests: RefCell<HashSet<String>>,
     payload_cycles: RefCell<PayloadCycleRegistry>,
 }
@@ -1789,12 +1789,19 @@ impl SkeletonRuntime {
     }
 
     pub fn from_compiled_plan(plan: SkeletonPlan) -> Result<Self, RuntimeFault> {
+        Self::from_compiled_plan_with_registry(plan, std::sync::Arc::new(StandardHandleRegistry::new()))
+    }
+
+    pub fn from_compiled_plan_with_registry(
+        plan: SkeletonPlan,
+        handle_registry: std::sync::Arc<dyn HandleRegistry>,
+    ) -> Result<Self, RuntimeFault> {
         plan.verify()
             .map_err(|error| RuntimeFault::new("plan_invalid", error.to_string()))?;
         Ok(Self {
             plan,
             epoch_store: ActiveEpochStore::empty(),
-            handle_registry: StandardHandleRegistry::new(),
+            handle_registry,
             active_requests: RefCell::new(HashSet::new()),
             payload_cycles: RefCell::new(PayloadCycleRegistry::new()),
         })
@@ -1862,7 +1869,7 @@ impl SkeletonRuntime {
             candidate,
             expected_graph_hash,
             expected_manifest_hash,
-            &self.handle_registry,
+            self.handle_registry.as_ref(),
         )
         .map_err(|error| RuntimeFault::new("execution_epoch_materialize", error.to_string()))?;
         self.prepare_execution_epoch(
@@ -2404,7 +2411,7 @@ impl SkeletonRuntime {
             chain_id,
             initial_frame,
             lease,
-            &self.handle_registry,
+            self.handle_registry.as_ref(),
         )
         .map_err(|error| RuntimeFault::new("execution_engine", error.to_string()))?;
         if let NodeOutcome::Failure { error } = &outcome {

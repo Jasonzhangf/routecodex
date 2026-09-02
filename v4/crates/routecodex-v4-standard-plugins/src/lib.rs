@@ -252,6 +252,10 @@ pub fn standard_resource_registry() -> ResourceRegistry {
                 axis: ResourceAxis::Information,
             },
             ResourceEntry {
+                resource_id: "v4.information.model".to_string(),
+                axis: ResourceAxis::Information,
+            },
+            ResourceEntry {
                 resource_id: "v4.information.stream_terminal".to_string(),
                 axis: ResourceAxis::Information,
             },
@@ -460,7 +464,6 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         ],
         "V4HubReqTarget05Resolved" => vec![
             "v4.control.route_facts".to_string(),
-            "v4.control.target_selection".to_string(),
             "v4.information.model".to_string(),
         ],
         "V4Router05RequestClassified" => vec!["v4.control.route_facts".to_string()],
@@ -477,7 +480,10 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
     match node_id {
         "V4Error02HostCaptured" | "V4Error03RuntimeClassified" | "V4Error04RouterPolicyApplied"
         | "V4Error05ExecutionDecision" => vec!["v4.control.error_chain".to_string()],
-        "V4DirectReq02RelayContainer" => vec!["v4.direct.request.provider_wire".to_string()],
+        "V4DirectReq02RelayContainer" => vec![
+            "v4.direct.request.provider_wire".to_string(),
+            "v4.control.target_selection".to_string(),
+        ],
         "V4DirectResp02RelayContainer" => vec!["v4.direct.response.client_payload".to_string()],
         "V4HubReqOutbound06ProviderSemantic" => vec!["v4.request.provider_semantic".to_string()],
         "V4HubReqInbound02Normalized" => Vec::new(),
@@ -1453,6 +1459,10 @@ impl Default for StandardHandleRegistry {
 impl HandleRegistry for StandardHandleRegistry {
     fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
         self.get_handle(plugin_id)
+    }
+
+    fn encode_client_error_sse(&self, entry_protocol: &str, message: &str) -> Result<Vec<u8>, String> {
+        self.encode_client_error_sse(entry_protocol, message)
     }
 }
 

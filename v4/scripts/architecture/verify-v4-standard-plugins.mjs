@@ -117,7 +117,7 @@ const NODE_PERMISSIONS = new Map([
       'v4.information.model',
       'v4.control.route_facts',
     ],
-    writes: ['v4.direct.request.provider_wire'],
+    writes: ['v4.direct.request.provider_wire', 'v4.control.target_selection'],
   }],
   ['V4DirectResp02RelayContainer', {
     reads: [
@@ -239,7 +239,7 @@ const NODE_PERMISSIONS = new Map([
     reads: ['v4.information.entry_protocol', 'v4.information.execution_lane', 'v4.control.route_facts'], writes: ['v4.control.route_facts'],
   }],
   ['V4HubReqTarget05Resolved', {
-    reads: ['v4.control.route_facts'], writes: ['v4.control.target_selection'],
+    reads: ['v4.control.route_facts', 'v4.information.model'], writes: ['v4.control.target_selection'],
   }],
   ['V4Router05RequestClassified', {
     reads: ['v4.control.route_facts'], writes: [],
