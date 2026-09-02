@@ -1026,8 +1026,14 @@ fn handle_responses(
             conversation_scope,
         )
         .map_err(|fault| project_fault(request, fault, 599))?;
-        let response_stream =
-            CordisSseTransportStream::new(stream, Arc::clone(runtime), response_processor);
+        let response_stream = CordisSseTransportStream::new(
+            stream,
+            Arc::clone(runtime),
+            response_processor,
+            request.clone(),
+            target.provider_id.clone(),
+            target.wire_model.clone(),
+        );
         return Ok(HttpResponse::streaming(
             client_status,
             "text/event-stream",
@@ -1250,6 +1256,10 @@ struct CordisSseTransportStream<S = ProviderResponseStream> {
     ingress: SseIngressPlugin,
     egress: SseEgressPlugin,
     close_after_pending: bool,
+    request: HttpRequest,
+    provider: String,
+    model: String,
+    started_at: std::time::Instant,
 }
 
 impl<S: ProviderSseSource> CordisSseTransportStream<S> {
@@ -1257,6 +1267,9 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
         stream: S,
         runtime: Arc<Mutex<SkeletonRuntime>>,
         processor: ResponseStreamProcessor,
+        request: HttpRequest,
+        provider: String,
+        model: String,
     ) -> Self {
         Self {
             stream,
@@ -1273,6 +1286,10 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
                 std::time::Instant::now(),
             ),
             close_after_pending: false,
+            request,
+            provider,
+            model,
+            started_at: std::time::Instant::now(),
         }
     }
 
@@ -1381,6 +1398,18 @@ impl<S: ProviderSseSource> ResponseStream for CordisSseTransportStream<S> {
                             .execute_provider_response_scoped(&runtime, frame)
                         {
                             Ok((disposition, report)) => {
+                                if let Some(report) = report.as_ref() {
+                                    emit_payload_console_events(
+                                        &report.trace,
+                                        &self.request,
+                                        &self.request.path,
+                                        &self.provider,
+                                        &self.model,
+                                        true,
+                                        None,
+                                        self.started_at.elapsed(),
+                                    );
+                                }
                                 if let Some(report) = report {
                                     if report.client_frame.is_none() {
                                         Err(RuntimeFault::new(
@@ -1947,6 +1976,17 @@ targets = ["mock"]
             },
             runtime,
             processor,
+            HttpRequest {
+                method: "POST".to_string(),
+                path: "/v1/responses".to_string(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                request_id: "request-1".to_string(),
+                server_id: "127.0.0.1:5520-day-test".to_string(),
+                port,
+            },
+            "test-provider".to_string(),
+            "m".to_string(),
         )
     }
 
