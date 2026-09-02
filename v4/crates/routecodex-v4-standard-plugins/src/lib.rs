@@ -802,19 +802,6 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             vec!["v4.control.target_selection"],
         ),
         plugin(
-            "v4.std.provider.transport_mock",
-            PluginCategory::Provider,
-            "V4ProviderReqOutbound09TransportRequest",
-            "request_outbound",
-            Some(9),
-            PluginKind::Validator,
-            PluginEffect::ReadOnly,
-            PluginPhase::Projection,
-            550,
-            vec!["v4.request.provider_wire_payload"],
-            vec![],
-        ),
-        plugin(
             "v4.std.provider.transport_validate",
             PluginCategory::Provider,
             "V4ProviderReqOutbound09TransportRequest",
@@ -1310,7 +1297,7 @@ fn route_facts_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     .map_err(|error| error.to_string())
 }
 
-fn transport_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+fn transport_validate(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     if !ctx.read_data().is_object() {
         return Err("transport validator requires provider wire object".to_string());
     }
@@ -1374,8 +1361,7 @@ impl StandardHandleRegistry {
             ("v4.std.chat_process.tool_harvest", tool_harvest),
             ("v4.std.routing.route_facts_producer", route_facts_produce),
             ("v4.std.routing.route_facts_consumer", route_facts_consume),
-            ("v4.std.provider.transport_mock", transport_mock),
-            ("v4.std.provider.transport_validate", transport_mock),
+            ("v4.std.provider.transport_validate", transport_validate),
         ] {
             handles.insert(id, StandardHandle { execute_fn });
         }
@@ -1497,7 +1483,6 @@ mod tests {
             "v4.std.chat_process.tool_harvest",
             "v4.std.routing.route_facts_producer",
             "v4.std.routing.route_facts_consumer",
-            "v4.std.provider.transport_mock",
             "v4.std.provider.transport_validate",
             "v4.std.response.protocol_decode",
             "v4.std.response.frame_build",

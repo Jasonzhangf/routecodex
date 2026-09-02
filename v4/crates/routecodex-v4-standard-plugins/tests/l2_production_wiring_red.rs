@@ -66,9 +66,7 @@ fn every_standard_plugin_is_bound_in_production_chain_contract() {
     // They have separate owners or are explicitly ineligible for publication;
     // requiring them in this graph would turn the red gate into a false
     // positive.
-    let side_channel_or_ineligible = [
-        "v4.std.provider.transport_mock",
-    ];
+    let side_channel_or_ineligible: [&str; 0] = [];
     for plugin in standard_plugins()
         .into_iter()
         .filter(|plugin| !side_channel_or_ineligible.contains(&plugin.plugin_id.as_str()))
