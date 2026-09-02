@@ -230,6 +230,7 @@ resources:
   - V4DirectResp02RelayContainer
   - V4DirectResp03ClientProtocol
   - V4HubReqInbound02Normalized
+  - V4HubReqTarget05Resolved
   - V4HubReqOutbound06ProviderSemantic
   - V4ProviderReqCompat07ProviderCompat
   - V4ProviderReqOutbound08WirePayload

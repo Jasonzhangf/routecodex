@@ -248,6 +248,10 @@ pub fn standard_resource_registry() -> ResourceRegistry {
                 axis: ResourceAxis::Information,
             },
             ResourceEntry {
+                resource_id: "v4.information.model".to_string(),
+                axis: ResourceAxis::Information,
+            },
+            ResourceEntry {
                 resource_id: "v4.information.provider_protocol".to_string(),
                 axis: ResourceAxis::Information,
             },
@@ -338,6 +342,7 @@ pub fn standard_allowed_reads() -> Vec<String> {
         "v4.direct.response.client_payload".to_string(),
         "v4.information.execution_lane".to_string(),
         "v4.information.client_protocol".to_string(),
+        "v4.information.model".to_string(),
         "v4.information.provider_protocol".to_string(),
         "v4.information.stream_terminal".to_string(),
         "v4.control.metadata_center".to_string(),
@@ -415,6 +420,11 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         ],
         "V4HubReqInbound02Normalized" => vec!["v4.request.normal_payload".to_string()],
         "V4HubReqChatProcess03Governed" => vec!["v4.request.normal_payload".to_string()],
+        "V4HubReqTarget05Resolved" => vec![
+            "v4.control.route_facts".to_string(),
+            "v4.information.client_protocol".to_string(),
+            "v4.information.model".to_string(),
+        ],
         "V4HubRespInbound03Normalized" => vec!["v4.response.provider_raw".to_string()],
         "V4ProviderRespCompat02ProviderCompat" => vec![
             "v4.response.provider_raw".to_string(),
@@ -452,7 +462,6 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],
         "V4Error06ClientProjected" => vec!["v4.control.error_chain".to_string()],
         "V4HubReqExecution04Planned" => Vec::new(),
-        "V4HubReqTarget05Resolved" => vec!["v4.control.route_facts".to_string()],
         "V4Router05RequestClassified" => vec!["v4.control.route_facts".to_string()],
         "V4Router06SelectionPlan" => vec!["v4.control.target_selection".to_string()],
         _ => Vec::new(),
@@ -798,7 +807,11 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::ControlOnly,
             PluginPhase::Semantic,
             350,
-            vec!["v4.control.route_facts"],
+            vec![
+                "v4.control.route_facts",
+                "v4.information.client_protocol",
+                "v4.information.model",
+            ],
             vec!["v4.control.target_selection"],
         ),
         plugin(

@@ -67,7 +67,10 @@ impl ProductionHandleRegistry {
 
 impl HandleRegistry for ProductionHandleRegistry {
     fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
-        if plugin_id == TARGET_SELECTION_PLUGIN_ID || plugin_id == DIRECT_TARGET_SELECTION_PLUGIN_ID {
+        if plugin_id == TARGET_SELECTION_PLUGIN_ID
+            || plugin_id == DIRECT_TARGET_SELECTION_PLUGIN_ID
+            || plugin_id == "v4.std.routing.route_facts_consumer"
+        {
             if let Some(handle) = self.router_target.as_ref() {
                 return Some(handle as &dyn PluginHandle);
             }

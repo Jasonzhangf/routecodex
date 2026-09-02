@@ -144,6 +144,14 @@ const NODE_PERMISSIONS = new Map([
   ['V4HubReqChatProcess03Governed', {
     reads: ['v4.request.normal_payload'], writes: ['v4.request.normal_payload'],
   }],
+  ['V4HubReqTarget05Resolved', {
+    reads: [
+      'v4.control.route_facts',
+      'v4.information.client_protocol',
+      'v4.information.model',
+    ],
+    writes: ['v4.control.target_selection'],
+  }],
   ['V4HubRespInbound03Normalized', {
     reads: ['v4.response.provider_raw'], writes: ['v4.response.normal_payload'],
   }],
@@ -237,7 +245,12 @@ const NODE_PERMISSIONS = new Map([
     reads: [], writes: ['v4.control.route_facts'],
   }],
   ['V4HubReqTarget05Resolved', {
-    reads: ['v4.control.route_facts'], writes: ['v4.control.target_selection'],
+    reads: [
+      'v4.control.route_facts',
+      'v4.information.client_protocol',
+      'v4.information.model',
+    ],
+    writes: ['v4.control.target_selection'],
   }],
   ['V4Router05RequestClassified', {
     reads: ['v4.control.route_facts'], writes: [],
