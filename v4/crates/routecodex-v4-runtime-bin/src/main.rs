@@ -1479,6 +1479,9 @@ fn emit_payload_console_events(
 ) {
     publish_diagnostic_events(event_bus, request, trace);
     let mut rendered_response = false;
+    let saw_response_event = trace.iter().any(|entry| {
+        entry.contains(":console.payload_ready:✅ [resp]")
+    });
     for event in trace {
         if let Some(line) = render_payload_console_event(
             event, request, endpoint, provider, model, stream, status, elapsed,
@@ -1488,7 +1491,9 @@ fn emit_payload_console_events(
             rendered_response |= line.contains("responseStatus=");
         }
     }
-    if should_render_sse_terminal_summary(stream, rendered_response, trace) {
+    if should_render_sse_terminal_summary(stream, rendered_response, trace)
+        || (!stream && !rendered_response && !saw_response_event)
+    {
         let headline = diagnostic::format_response(
             endpoint,
             &request.request_id,
