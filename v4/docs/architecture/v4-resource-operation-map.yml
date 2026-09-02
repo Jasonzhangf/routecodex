@@ -27,6 +27,90 @@ notes: '本注册表是 V4 真源资源图，binding_status 已按机器 gate
 
   '
 resources:
+- resource_id: v4.control.event_bus
+  axis: control
+  verification_gate: [v4_parity_gate_control_event_arc]
+  resource_kind: event_bus
+  lifecycle: v4.control
+  owner_crate: routecodex-v4-control
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols: [ControlCommittedEvent]
+  allowed_writers: [V4Runtime01MainlineKernel]
+  allowed_readers: [V4HubReqChatProcess03Governed, V4HubRespChatProcess04Governed]
+  forbidden_writers: []
+  binding_status: anchored
+- resource_id: v4.data.immutable_arc_carriers
+  axis: data
+  verification_gate: [v4_parity_gate_plane_isolation]
+  resource_kind: immutable_carrier
+  lifecycle: v4.pipeline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols: [NodeServiceRegistry]
+  allowed_writers: [V4Runtime01MainlineKernel]
+  allowed_readers: [V4HubReqInbound02Normalized, V4HubRespInbound03Normalized]
+  forbidden_writers: []
+  binding_status: anchored
+- resource_id: v4.runtime.immutable_data_carrier
+  axis: data
+  verification_gate: [v4_parity_gate_plane_isolation]
+  resource_kind: immutable_carrier
+  lifecycle: v4.pipeline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols: [NodeServiceRegistry]
+  allowed_writers: [V4Runtime01MainlineKernel]
+  allowed_readers: [V4HubReqInbound02Normalized, V4HubRespInbound03Normalized]
+  forbidden_writers: []
+  binding_status: anchored
+- resource_id: v4.runtime.immutable_information_carrier
+  axis: information
+  verification_gate: [v4_parity_gate_plane_isolation]
+  resource_kind: immutable_carrier
+  lifecycle: v4.pipeline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols: [NodeServiceRegistry]
+  allowed_writers: [V4Runtime01MainlineKernel]
+  allowed_readers: [V4HubReqExecution04Planned, V4HubReqTarget05Resolved]
+  forbidden_writers: []
+  binding_status: anchored
+- resource_id: v4.runtime.immutable_diagnostic_carrier
+  axis: diagnostic
+  verification_gate: [v4_parity_gate_plane_isolation]
+  resource_kind: immutable_carrier
+  lifecycle: v4.pipeline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols: [NodeServiceRegistry]
+  allowed_writers: [V4Runtime01MainlineKernel]
+  allowed_readers: [V4HubReqChatProcess03Governed, V4HubRespChatProcess04Governed]
+  forbidden_writers: []
+  binding_status: anchored
+- resource_id: v4.runtime.node_service_registry
+  axis: control
+  verification_gate: [v4_parity_gate_plane_isolation]
+  resource_kind: node_service_registry
+  lifecycle: v4.pipeline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols: [NodeServiceRegistry]
+  allowed_writers: [V4Runtime01MainlineKernel]
+  allowed_readers: [V4HubReqInbound02Normalized, V4HubRespInbound03Normalized]
+  forbidden_writers: []
+  binding_status: anchored
+- resource_id: v4.cordis.typed_node_services
+  axis: control
+  verification_gate: [v4_parity_gate_plane_isolation]
+  resource_kind: typed_node_service
+  lifecycle: v4.cordis
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols: [NodeServiceRegistry]
+  allowed_writers: [V4Runtime01MainlineKernel]
+  allowed_readers: [V4HubReqChatProcess03Governed, V4HubRespChatProcess04Governed]
+  forbidden_writers: []
+  binding_status: anchored
 - resource_id: v4.direct.request.client_payload
   axis: data
   verification_gate:
@@ -304,6 +388,7 @@ resources:
   allowed_readers:
   - V4DirectResp03ClientProtocol
   - V4ServerRespOutbound06ClientFrame
+  - V4HubReqExecution04Planned
   forbidden_writers:
   - SseIngressPlugin
   - SseEgressPlugin
