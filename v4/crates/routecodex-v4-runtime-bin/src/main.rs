@@ -1886,6 +1886,80 @@ targets = ["mock"]
         }
     }
 
+    #[test]
+    fn production_request_report_witnesses_real_cordis_handles() {
+        let handler = PipelineHandler::new(test_manifest()).expect("handler initializes");
+        let runtime = handler.runtime.lock().expect("runtime lock");
+        let lease = runtime.admit_request("request-plugin-witness").expect("request lease");
+        let report = runtime
+            .execute_request_json_scoped_for_target_with_lease(
+                r#"{"model":"mock-model","messages":[{"role":"user","content":"hello"}]}"#,
+                "chat",
+                "responses",
+                "mock-model",
+                false,
+                "request-plugin-witness",
+                5520,
+                "session-plugin-witness",
+                "conversation-plugin-witness",
+                Some("relay"),
+                Some(&lease),
+            )
+            .expect("request chain executes");
+        for plugin_id in [
+            "v4.std.request.protocol_parse",
+            "v4.std.request.responses_normalize",
+            "v4.std.chat_process.request_governance",
+            "v4.std.request.responses_wire_build",
+            "v4.std.provider.wire_build",
+        ] {
+            assert!(
+                report.trace.iter().any(|entry| {
+                    entry.starts_with(plugin_id) && entry.contains("plugin.executed")
+                }),
+                "production request report missing typed handle witness for {plugin_id}: {:?}",
+                report.trace
+            );
+        }
+    }
+
+    #[test]
+    fn production_response_report_witnesses_real_cordis_handles() {
+        let handler = PipelineHandler::new(test_manifest()).expect("handler initializes");
+        let runtime = handler.runtime.lock().expect("runtime lock");
+        let lease = runtime.admit_request("response-plugin-witness").expect("response lease");
+        let report = runtime
+            .execute_provider_response_scoped_for_target_with_lease(
+                r#"{"id":"resp_1","model":"mock-model","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}"#,
+                "response-plugin-witness",
+                5520,
+                "session-response-plugin-witness",
+                "conversation-response-plugin-witness",
+                "chat",
+                "responses",
+                "relay",
+                Some(&lease),
+            )
+            .expect("response chain executes");
+        for plugin_id in [
+            "v4.std.response.provider_raw_validate",
+            "v4.std.response.provider_compat",
+            "v4.std.response.protocol_decode",
+            "v4.std.chat_process.response_governance",
+            "v4.std.chat_process.tool_harvest",
+            "v4.hook.relay.response",
+            "v4.std.response.frame_build",
+        ] {
+            assert!(
+                report.trace.iter().any(|entry| {
+                    entry.starts_with(plugin_id) && entry.contains("plugin.executed")
+                }),
+                "production response report missing typed handle witness for {plugin_id}: {:?}",
+                report.trace
+            );
+        }
+    }
+
     struct MockSseSource {
         chunks: VecDeque<Result<Vec<u8>, String>>,
         wait_result: Result<(), String>,
