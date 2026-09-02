@@ -22,7 +22,6 @@ use std::fs;
 const UNWIRED_PLUGINS: &[&str] = &[
     "v4.std.diagnostic.direct_request_payload_console_render",
     "v4.std.diagnostic.direct_response_payload_console_render",
-    "v4.std.provider.capability_mock",
     "v4.std.provider.auth_handle_mock",
     "v4.std.provider.wire_mock",
     "v4.std.provider.transport_mock",
@@ -129,7 +128,6 @@ fn every_unwired_plugin_has_a_typed_handle() {
 #[test]
 fn ineligible_unwired_plugins_must_not_appear_in_production_plans() {
     let ineligible = [
-        "v4.std.provider.capability_mock",
         "v4.std.provider.auth_handle_mock",
         "v4.std.provider.wire_mock",
         "v4.std.provider.transport_mock",
@@ -251,29 +249,6 @@ fn negative_direct_response_console_rejects_non_object_payload() {
         error,
         NodeContainerError::Bridge(BridgeError::HandleError { .. })
     ));
-}
-
-#[test]
-fn positive_capability_mock_emits_typed_capability_fact() {
-    let output = execute_plugin(
-        "V4ProviderReqOutbound09TransportRequest",
-        "request_outbound",
-        "relay_request",
-        9,
-        "v4.std.provider.capability_mock",
-        json!({"model": "m"}),
-        json!({}),
-        json!({}),
-    )
-    .expect("capability mock executes");
-    let kinds: Vec<&str> = output.diagnostics.iter().map(|f| f.kind.as_str()).collect();
-    assert!(
-        kinds
-            .iter()
-            .any(|k| *k == "node.provider_capability_validated"),
-        "capability mock must emit its typed diagnostic: {kinds:?}"
-    );
-    assert_eq!(output.control, json!({}));
 }
 
 #[test]
