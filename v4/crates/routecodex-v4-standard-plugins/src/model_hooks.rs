@@ -34,6 +34,17 @@ fn information_string(ctx: &mut ExecCtx<'_>, resource_id: &str) -> Result<String
         .ok_or_else(|| format!("{resource_id} is required"))
 }
 
+fn decode_direct_response_transport(value: Value) -> Result<Value, String> {
+    let Value::Object(object) = value else {
+        return Err("direct response payload must be an object".to_string());
+    };
+    if let Some(body) = object.get("_provider_http_body").and_then(Value::as_str) {
+        return serde_json::from_str(body)
+            .map_err(|error| format!("direct provider response JSON decode failed: {error}"));
+    }
+    Ok(Value::Object(object))
+}
+
 pub(crate) fn direct_model_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let value = object(ctx, "direct_model_passthrough")?;
     value
@@ -82,7 +93,7 @@ pub(crate) fn direct_response_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), S
             "Direct protocol mismatch: client={client_protocol} provider={provider_protocol}"
         ));
     }
-    ctx.write_data(Value::Object(value))
+    ctx.write_data(decode_direct_response_transport(Value::Object(value))?)
         .map_err(|error| error.to_string())
 }
 
@@ -280,6 +291,17 @@ pub(crate) fn handles() -> Vec<(&'static str, fn(&mut ExecCtx<'_>) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_response_unwraps_transport_envelope() {
+        let value = serde_json::json!({
+            "_provider_http_status": 200,
+            "_provider_http_body": "{\"id\":\"resp_test\",\"object\":\"response\"}"
+        });
+        let body = decode_direct_response_transport(value).expect("transport envelope must decode");
+        assert_eq!(body.get("object").and_then(Value::as_str), Some("response"));
+        assert_eq!(body.get("id").and_then(Value::as_str), Some("resp_test"));
+    }
 
     #[test]
     fn hook_ids_are_stable() {
