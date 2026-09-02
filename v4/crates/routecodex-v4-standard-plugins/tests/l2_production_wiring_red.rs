@@ -175,3 +175,19 @@ fn request_chat_process_has_executable_governance_handle() {
         "request Chat Process must execute governance through its plugin handle"
     );
 }
+
+#[test]
+fn target_selection_declares_every_information_resource_it_reads() {
+    let descriptor = standard_plugins()
+        .into_iter()
+        .find(|plugin| plugin.plugin_id == "v4.std.routing.target_selection")
+        .expect("target selection descriptor must exist");
+    assert!(
+        descriptor
+            .descriptor
+            .reads
+            .iter()
+            .any(|resource| resource == "v4.information.client_protocol"),
+        "target selection reads client protocol in its router handle and must declare the resource"
+    );
+}
