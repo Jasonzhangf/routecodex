@@ -1163,6 +1163,12 @@ fn error_stage(ctx: &mut ExecCtx<'_>, stage: &str) -> Result<(), String> {
     let object = chain
         .as_object_mut()
         .ok_or_else(|| format!("error stage {stage} requires typed error object"))?;
+    let code = object
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .filter(|code| !code.is_empty())
+        .ok_or_else(|| format!("error stage {stage} requires typed error code"))?;
+    let _ = code;
     object.insert("stage".to_string(), json!(stage));
     ctx.write_control_resource("v4.control.error_chain", chain)
         .map_err(|error| error.to_string())
