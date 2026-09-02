@@ -1872,6 +1872,38 @@ impl SkeletonRuntime {
         std::sync::Arc::clone(&self.diagnostic_bus)
     }
 
+    /// Consume published diagnostic facts for one request scope. Dispatch is
+    /// read-only observation; no result is fed back into routing, execution,
+    /// or business payload state.
+    pub fn dispatch_diagnostic_events(&self, request_id: &str) -> Result<usize, RuntimeFault> {
+        let mut bus = self
+            .diagnostic_bus
+            .lock()
+            .map_err(|_| RuntimeFault::new("diagnostic_bus", "diagnostic bus lock poisoned"))?;
+        let topics = [
+            SubscriptionTopic::NodeEvent,
+            SubscriptionTopic::StateTransition,
+            SubscriptionTopic::Diagnostic,
+            SubscriptionTopic::NodeEntry,
+            SubscriptionTopic::NodeExit,
+            SubscriptionTopic::NodeError,
+        ];
+        let mut dispatched = 0;
+        for topic in topics {
+            if !bus
+                .subscribers_for(&topic)
+                .any(|subscription| subscription.scope_key == request_id)
+            {
+                continue;
+            }
+            dispatched += bus
+                .dispatch(&topic, request_id)
+                .map_err(|error| RuntimeFault::new("diagnostic_bus", error.to_string()))?
+                .len();
+        }
+        Ok(dispatched)
+    }
+
     /// Use this runtime's admitted response-outbound registry for client
     /// error framing; stream processors do not own a duplicate registry.
     pub fn encode_client_error_sse(
@@ -2569,6 +2601,7 @@ impl SkeletonRuntime {
                 .map_err(|error| RuntimeFault::new("diagnostic_bus", error.to_string()))?;
             }
         }
+        self.dispatch_diagnostic_events(request_id)?;
         let compiled_plugins = lease
             .plugin_ids_for_chain(chain_id)
             .map_err(|error| RuntimeFault::new("production_plan_missing", error.to_string()))?;
