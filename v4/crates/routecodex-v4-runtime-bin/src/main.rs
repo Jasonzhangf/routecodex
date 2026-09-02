@@ -603,20 +603,22 @@ impl AsyncHttpHandler for PipelineHandler {
     fn handle_async<'a>(
         &'a self,
         request: HttpRequest,
-        _cancellation: CancellationToken,
+        cancellation: CancellationToken,
     ) -> Pin<Box<dyn Future<Output = HttpResponse> + Send + 'a>> {
         let handler = self.clone();
         let request_for_fault = request.clone();
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || handler.handle_request(request))
-                .await
-                .unwrap_or_else(|error| {
+            let work = tokio::task::spawn_blocking(move || handler.handle_request(request));
+            tokio::select! {
+                result = work => result.unwrap_or_else(|error| {
                     project_fault(
                         &request_for_fault,
                         RuntimeFault::new("request_worker_panicked", error.to_string()),
                         500,
                     )
-                })
+                }),
+                _ = cancellation.cancelled() => HttpResponse::error(499, "client disconnected"),
+            }
         })
     }
 }
