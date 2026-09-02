@@ -150,10 +150,10 @@ fn positive_responses_direct_console_observers_are_bound() {
     )
     .expect("direct Responses request console plan compiles");
     let response = compile_standard_plan(
-        "V4DirectResp01ProviderRaw",
-        "response_inbound",
+        "V4DirectResp03ClientProtocol",
+        "response_outbound",
         "direct_response",
-        1,
+        3,
         &["v4.std.diagnostic.direct_response_payload_console_render"],
     )
     .expect("direct Responses response console plan compiles");
