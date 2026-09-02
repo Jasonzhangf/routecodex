@@ -202,10 +202,10 @@ fn positive_direct_response_console_preserves_payload_and_emits_fact() {
         "private": "must-not-leak"
     });
     let output = execute_plugin(
-        "V4DirectResp01ProviderRaw",
-        "response_inbound",
+        "V4DirectResp03ClientProtocol",
+        "response_outbound",
         "direct_response",
-        1,
+        3,
         "v4.std.diagnostic.direct_response_payload_console_render",
         payload.clone(),
         json!({}),
@@ -229,10 +229,10 @@ fn positive_direct_response_console_preserves_payload_and_emits_fact() {
 #[test]
 fn negative_direct_response_console_rejects_non_object_payload() {
     let error = execute_plugin(
-        "V4DirectResp01ProviderRaw",
-        "response_inbound",
+        "V4DirectResp03ClientProtocol",
+        "response_outbound",
         "direct_response",
-        1,
+        3,
         "v4.std.diagnostic.direct_response_payload_console_render",
         json!("not-object"),
         json!({}),
