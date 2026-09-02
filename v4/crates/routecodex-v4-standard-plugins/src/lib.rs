@@ -542,21 +542,6 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
     );
     codec.descriptor.selection_group = Some("provider_wire_codec".to_string());
 
-    let mut codec_proto = plugin(
-        "v4.std.protocol.wire_codec_proto",
-        PluginCategory::Protocol,
-        "V4ProviderReqOutbound08WirePayload",
-        "request_outbound",
-        Some(8),
-        PluginKind::Operator,
-        PluginEffect::Semantic,
-        PluginPhase::Semantic,
-        201,
-        vec!["v4.request.provider_semantic"],
-        vec!["v4.request.provider_wire_payload"],
-    );
-    codec_proto.descriptor.selection_group = Some("provider_wire_codec".to_string());
-
     let mut plugins = vec![
         plugin(
             "v4.std.contract.input_validate",
@@ -780,7 +765,6 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             vec!["v4.control.error_chain"],
         ),
         codec,
-        codec_proto,
         plugin(
             "v4.std.chat_process.response_governance",
             PluginCategory::ChatProcess,
@@ -1283,15 +1267,6 @@ fn error_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn protocol_codec(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut data = ctx.read_data().clone();
-    let object = data
-        .as_object_mut()
-        .ok_or_else(|| "wire codec proto requires object payload".to_string())?;
-    object.insert("codec".to_string(), json!("mock"));
-    ctx.write_data(data).map_err(|error| error.to_string())
-}
-
 pub(crate) fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     ctx.read_data()
         .as_object()
@@ -1509,14 +1484,10 @@ impl StandardHandleRegistry {
             ("v4.std.error.runtime_classify", error_runtime_classify),
             ("v4.std.error.router_policy", error_router_policy),
             ("v4.std.error.execution_decision", error_execution_decision),
-            // Production provider wire construction is owned by the request
-            // wire-build plugin.  The old protocol_codec handle only added a
-            // mock `codec` field and was a false production binding.
             (
                 "v4.std.provider.wire_build",
                 request_plugins::wire_build,
             ),
-            ("v4.std.protocol.wire_codec_proto", protocol_codec),
             (
                 "v4.std.chat_process.response_governance",
                 response_governance,
@@ -1653,7 +1624,6 @@ mod tests {
             "v4.std.error.router_policy",
             "v4.std.error.execution_decision",
             "v4.std.provider.wire_build",
-            "v4.std.protocol.wire_codec_proto",
             "v4.std.chat_process.request_governance",
             "v4.std.chat_process.response_governance",
             "v4.std.chat_process.tool_harvest",
