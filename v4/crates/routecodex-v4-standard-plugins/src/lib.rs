@@ -252,10 +252,6 @@ pub fn standard_resource_registry() -> ResourceRegistry {
                 axis: ResourceAxis::Information,
             },
             ResourceEntry {
-                resource_id: "v4.information.model".to_string(),
-                axis: ResourceAxis::Information,
-            },
-            ResourceEntry {
                 resource_id: "v4.information.stream_terminal".to_string(),
                 axis: ResourceAxis::Information,
             },
@@ -406,8 +402,6 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.direct.request.client_payload".to_string(),
             "v4.information.client_protocol".to_string(),
             "v4.information.provider_protocol".to_string(),
-            "v4.information.model".to_string(),
-            "v4.control.route_facts".to_string(),
         ],
         "V4DirectResp02RelayContainer" => vec![
             "v4.direct.response.provider_raw".to_string(),
@@ -457,15 +451,8 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],
         "V4Error06ClientProjected" => vec!["v4.control.error_chain".to_string()],
-        "V4HubReqExecution04Planned" => vec![
-            "v4.information.entry_protocol".to_string(),
-            "v4.information.execution_lane".to_string(),
-            "v4.control.route_facts".to_string(),
-        ],
-        "V4HubReqTarget05Resolved" => vec![
-            "v4.control.route_facts".to_string(),
-            "v4.information.model".to_string(),
-        ],
+        "V4HubReqExecution04Planned" => Vec::new(),
+        "V4HubReqTarget05Resolved" => vec!["v4.control.route_facts".to_string()],
         "V4Router05RequestClassified" => vec!["v4.control.route_facts".to_string()],
         "V4Router06SelectionPlan" => vec!["v4.control.target_selection".to_string()],
         _ => Vec::new(),
@@ -480,10 +467,7 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
     match node_id {
         "V4Error02HostCaptured" | "V4Error03RuntimeClassified" | "V4Error04RouterPolicyApplied"
         | "V4Error05ExecutionDecision" => vec!["v4.control.error_chain".to_string()],
-        "V4DirectReq02RelayContainer" => vec![
-            "v4.direct.request.provider_wire".to_string(),
-            "v4.control.target_selection".to_string(),
-        ],
+        "V4DirectReq02RelayContainer" => vec!["v4.direct.request.provider_wire".to_string()],
         "V4DirectResp02RelayContainer" => vec!["v4.direct.response.client_payload".to_string()],
         "V4HubReqOutbound06ProviderSemantic" => vec!["v4.request.provider_semantic".to_string()],
         "V4HubReqInbound02Normalized" => Vec::new(),
@@ -801,7 +785,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::ControlOnly,
             PluginPhase::Semantic,
             300,
-            vec!["v4.control.route_facts"],
+            vec![],
             vec!["v4.control.route_facts"],
         ),
         plugin(
@@ -815,49 +799,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginPhase::Semantic,
             350,
             vec!["v4.control.route_facts"],
-            vec![],
-        ),
-        // Target selection itself is owned by routecodex-v4-router. The
-        // standard route-facts consumer remains a validator and is never
-        // replaced by a foreign handle in the production registry.
-        plugin(
-            "v4.std.routing.target_selection",
-            PluginCategory::Routing,
-            "V4HubReqTarget05Resolved",
-            "request_execution",
-            Some(5),
-            PluginKind::Operator,
-            PluginEffect::ControlOnly,
-            PluginPhase::Semantic,
-            360,
-            vec!["v4.control.route_facts", "v4.information.model"],
             vec!["v4.control.target_selection"],
-        ),
-        plugin(
-            "v4.std.routing.target_selection.direct",
-            PluginCategory::Routing,
-            "V4DirectReq02RelayContainer",
-            "request_outbound",
-            Some(2),
-            PluginKind::Operator,
-            PluginEffect::ControlOnly,
-            PluginPhase::Semantic,
-            361,
-            vec!["v4.information.model"],
-            vec!["v4.control.target_selection"],
-        ),
-        plugin(
-            "v4.std.provider.capability_mock",
-            PluginCategory::Provider,
-            "V4ProviderReqOutbound09TransportRequest",
-            "request_outbound",
-            Some(9),
-            PluginKind::Validator,
-            PluginEffect::ReadOnly,
-            PluginPhase::Semantic,
-            210,
-            vec!["v4.config.manifest"],
-            vec![],
         ),
         plugin(
             "v4.std.provider.auth_handle_mock",
@@ -1375,43 +1317,23 @@ fn required_string(object: &serde_json::Map<String, Value>, key: &str) -> Result
 }
 
 fn route_facts_produce(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut facts = ctx
-        .read_control_resource("v4.control.route_facts")
-        .map_err(|error| error.to_string())?
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    facts.insert("keyless".to_string(), json!(true));
-    ctx.write_control_resource("v4.control.route_facts", Value::Object(facts))
+    ctx.write_control_resource("v4.control.route_facts", json!({"keyless": true}))
         .map_err(|error| error.to_string())
 }
 
 fn route_facts_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let facts = ctx
+    if ctx
         .read_control_resource("v4.control.route_facts")
         .map_err(|error| error.to_string())?
-        .ok_or_else(|| "route facts consumer requires typed route facts".to_string())?;
-    if !facts.is_object() {
-        return Err("route facts must be a typed object".to_string());
+        .is_none()
+    {
+        return Err("route facts consumer requires typed route facts".to_string());
     }
-    Ok(())
-}
-
-fn direct_target_selection_fixture(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    ctx.read_information_resource("v4.information.model")
-        .map_err(|error| error.to_string())?
-        .and_then(Value::as_str)
-        .filter(|model| !model.trim().is_empty())
-        .ok_or_else(|| "direct target selection requires model".to_string())?;
-    Ok(())
-}
-
-fn capability_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    ctx.emit(
-        "node.provider_capability_validated",
-        "keyless provider capability validated",
-    );
-    Ok(())
+    ctx.write_control_resource(
+        "v4.control.target_selection",
+        json!({"selected": "keyless_mock"}),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn auth_handle_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -1495,11 +1417,6 @@ impl StandardHandleRegistry {
             ("v4.std.chat_process.tool_harvest", tool_harvest),
             ("v4.std.routing.route_facts_producer", route_facts_produce),
             ("v4.std.routing.route_facts_consumer", route_facts_consume),
-            // Legacy/test registry validates the typed selection produced by
-            // the router owner; production injects the distinct router handle.
-            ("v4.std.routing.target_selection", route_facts_consume),
-            ("v4.std.routing.target_selection.direct", direct_target_selection_fixture),
-            ("v4.std.provider.capability_mock", capability_mock),
             ("v4.std.provider.auth_handle_mock", auth_handle_mock),
             ("v4.std.provider.wire_mock", wire_mock),
             ("v4.std.provider.transport_mock", transport_mock),
@@ -1548,10 +1465,6 @@ impl Default for StandardHandleRegistry {
 impl HandleRegistry for StandardHandleRegistry {
     fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
         self.get_handle(plugin_id)
-    }
-
-    fn encode_client_error_sse(&self, entry_protocol: &str, message: &str) -> Result<Vec<u8>, String> {
-        self.encode_client_error_sse(entry_protocol, message)
     }
 }
 
@@ -1629,9 +1542,6 @@ mod tests {
             "v4.std.chat_process.tool_harvest",
             "v4.std.routing.route_facts_producer",
             "v4.std.routing.route_facts_consumer",
-            "v4.std.routing.target_selection",
-            "v4.std.routing.target_selection.direct",
-            "v4.std.provider.capability_mock",
             "v4.std.provider.auth_handle_mock",
             "v4.std.provider.wire_mock",
             "v4.std.provider.transport_mock",
