@@ -1016,6 +1016,7 @@ dependencies = [
  "routecodex-v4-base-node",
  "routecodex-v4-control",
  "routecodex-v4-cordis-bridge",
+ "routecodex-v4-debug",
  "routecodex-v4-error",
  "routecodex-v4-node-container",
  "routecodex-v4-plugin-contract",
