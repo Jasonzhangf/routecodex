@@ -1468,7 +1468,11 @@ impl HandleRegistry for StandardHandleRegistry {
         self.get_handle(plugin_id)
     }
 
-    fn encode_client_error_sse(&self, entry_protocol: &str, message: &str) -> Result<Vec<u8>, String> {
+    fn encode_client_error_sse(
+        &self,
+        entry_protocol: &str,
+        message: &str,
+    ) -> Result<Vec<u8>, String> {
         self.encode_client_error_sse(entry_protocol, message)
     }
 }
