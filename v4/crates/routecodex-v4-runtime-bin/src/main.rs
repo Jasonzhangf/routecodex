@@ -1909,6 +1909,13 @@ targets = ["mock"]
                 report.trace
             );
         }
+        let published = runtime
+            .diagnostic_bus()
+            .lock()
+            .expect("diagnostic bus lock")
+            .published_facts()
+            .len();
+        assert!(published > 0, "production plugin execution must publish diagnostic facts");
     }
 
     #[test]

@@ -20,6 +20,7 @@
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::MetadataCenter;
 use routecodex_v4_cordis_bridge::{HandleRegistry, ScopeSessionCommand, ScopeSessionOperation};
+use routecodex_v4_debug::{DiagnosticEventEnvelope, SubscriptionTopic, V4Debug02BusSubscription};
 use routecodex_v4_error::{
     ClientProjection, DecisionAction, ErrorCenter, ErrorChain, ErrorChainError, ExecutionDecision,
     RetryPolicy,
@@ -1594,6 +1595,7 @@ pub struct SkeletonRuntime {
     handle_registry: std::sync::Arc<dyn HandleRegistry>,
     active_requests: RefCell<HashSet<String>>,
     payload_cycles: RefCell<PayloadCycleRegistry>,
+    diagnostic_bus: std::sync::Arc<std::sync::Mutex<V4Debug02BusSubscription>>,
 }
 
 /// Request-owned admission lease retained through provider and response
@@ -1853,11 +1855,21 @@ impl SkeletonRuntime {
             handle_registry,
             active_requests: RefCell::new(HashSet::new()),
             payload_cycles: RefCell::new(PayloadCycleRegistry::new()),
+            diagnostic_bus: std::sync::Arc::new(std::sync::Mutex::new(
+                V4Debug02BusSubscription::new(),
+            )),
         })
     }
 
     pub fn plan(&self) -> &SkeletonPlan {
         &self.plan
+    }
+
+    /// Read-only access to the diagnostic bus owned by the debug module. The
+    /// bus carries observation facts only; it is never consulted for routing
+    /// or control decisions.
+    pub fn diagnostic_bus(&self) -> std::sync::Arc<std::sync::Mutex<V4Debug02BusSubscription>> {
+        std::sync::Arc::clone(&self.diagnostic_bus)
     }
 
     /// Use this runtime's admitted response-outbound registry for client
@@ -2530,6 +2542,26 @@ impl SkeletonRuntime {
             self.handle_registry.as_ref(),
         )
         .map_err(|error| RuntimeFault::new("execution_engine", error.to_string()))?;
+        let outcome_events = match &outcome {
+            NodeOutcome::Continue { events, .. } | NodeOutcome::Branch { events, .. } => events,
+            NodeOutcome::Terminal { .. } | NodeOutcome::Failure { .. } => &Vec::new(),
+        };
+        if !outcome_events.is_empty() {
+            let mut bus = self
+                .diagnostic_bus
+                .lock()
+                .map_err(|_| RuntimeFault::new("diagnostic_bus", "diagnostic bus lock poisoned"))?;
+            for event in outcome_events {
+                let payload_hash = format!("sha256:{:x}", Sha256::digest(event.message.as_bytes()));
+                bus.publish(DiagnosticEventEnvelope::new(
+                    SubscriptionTopic::NodeEvent,
+                    request_id,
+                    &event.plugin_id,
+                    &payload_hash,
+                ))
+                .map_err(|error| RuntimeFault::new("diagnostic_bus", error.to_string()))?;
+            }
+        }
         let compiled_plugins = lease
             .plugin_ids_for_chain(chain_id)
             .map_err(|error| RuntimeFault::new("production_plan_missing", error.to_string()))?;
