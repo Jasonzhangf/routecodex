@@ -106,6 +106,28 @@ fn provider_compat_decodes_raw_http_envelope_inside_response_plan() {
 }
 
 #[test]
+fn direct_response_hook_decodes_transport_envelope() {
+    let response = json!({
+        "id": "resp-direct-1",
+        "object": "response",
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let decoded = execute(
+        "V4DirectResp02RelayContainer",
+        2,
+        "v4.hook.direct.response",
+        json!({
+            "_provider_http_status": 200,
+            "_provider_http_content_type": "application/json",
+            "_provider_http_body": response.to_string()
+        }),
+        json!({"provider_protocol": "responses", "client_protocol": "responses"}),
+    )
+    .expect("direct response plugin must decode transport envelope");
+    assert_eq!(decoded, response);
+}
+
+#[test]
 fn protocol_decode_rejects_invalid_shape_and_control_leakage() {
     for response in [
         json!([]),
