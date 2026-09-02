@@ -2554,8 +2554,14 @@ impl SkeletonRuntime {
                 .map_err(|_| RuntimeFault::new("diagnostic_bus", "diagnostic bus lock poisoned"))?;
             for event in outcome_events {
                 let payload_hash = format!("sha256:{:x}", Sha256::digest(event.message.as_bytes()));
+                let topic = match event.kind.as_str() {
+                    "node.entry" => SubscriptionTopic::NodeEntry,
+                    "node.exit" => SubscriptionTopic::NodeExit,
+                    "state.transition" => SubscriptionTopic::StateTransition,
+                    _ => SubscriptionTopic::NodeEvent,
+                };
                 bus.publish(DiagnosticEventEnvelope::new(
-                    SubscriptionTopic::NodeEvent,
+                    topic,
                     request_id,
                     &event.plugin_id,
                     &payload_hash,

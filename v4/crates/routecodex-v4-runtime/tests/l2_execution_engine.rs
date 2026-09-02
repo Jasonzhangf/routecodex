@@ -22,14 +22,44 @@ fn engine_executes_exact_lease_order_and_preserves_adjacent_frame() {
             information: serde_json::json!({}),
             events: vec![
                 routecodex_v4_cordis_bridge::DiagnosticFact {
-                    kind: "plugin.executed".into(),
-                    plugin_id: "increment".into(),
-                    message: "typed handle executed".into(),
+                    kind: "node.entry".into(),
+                    plugin_id: "first".into(),
+                    message: "request".into(),
                 },
                 routecodex_v4_cordis_bridge::DiagnosticFact {
                     kind: "plugin.executed".into(),
                     plugin_id: "increment".into(),
                     message: "typed handle executed".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "node.exit".into(),
+                    plugin_id: "first".into(),
+                    message: "request".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "state.transition".into(),
+                    plugin_id: "first".into(),
+                    message: "executed".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "node.entry".into(),
+                    plugin_id: "second".into(),
+                    message: "request".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "plugin.executed".into(),
+                    plugin_id: "increment".into(),
+                    message: "typed handle executed".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "node.exit".into(),
+                    plugin_id: "second".into(),
+                    message: "request".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "state.transition".into(),
+                    plugin_id: "second".into(),
+                    message: "executed".into(),
                 },
             ],
         }
@@ -105,7 +135,23 @@ fn pinned_bridge_abi_preserves_typed_data_and_control() {
             data: serde_json::json!({"answer": 1}),
             control: serde_json::json!({"route": "typed"}),
             information: serde_json::json!({}),
-            events: vec![],
+            events: vec![
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "node.entry".into(),
+                    plugin_id: "bridge-node".into(),
+                    message: "request".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "node.exit".into(),
+                    plugin_id: "bridge-node".into(),
+                    message: "request".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "state.transition".into(),
+                    plugin_id: "bridge-node".into(),
+                    message: "executed".into(),
+                },
+            ],
         }
     );
 }

@@ -322,6 +322,53 @@ fn relay_request_runs_all_contract_bound_request_plugins() {
 }
 
 #[test]
+fn production_execution_publishes_lifecycle_event_topics() {
+    let runtime = active_runtime();
+    let bus = runtime.diagnostic_bus();
+    {
+        let mut bus = bus.lock().unwrap();
+        for (subscriber_id, topic) in [
+            ("entry-reader", routecodex_v4_debug::SubscriptionTopic::NodeEntry),
+            ("exit-reader", routecodex_v4_debug::SubscriptionTopic::NodeExit),
+            ("transition-reader", routecodex_v4_debug::SubscriptionTopic::StateTransition),
+        ] {
+            bus.subscribe(subscriber_id, topic, "r-production-events")
+                .unwrap();
+        }
+    }
+
+    runtime
+        .execute_request_json_scoped_for_target_with_lease(
+            r#"{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":[]}"#,
+            "chat",
+            "responses",
+            "m",
+            false,
+            "r-production-events",
+            5555,
+            "session-production-events",
+            "conversation-production-events",
+            Some("relay"),
+            None,
+        )
+        .expect("production request executes");
+
+    let bus = bus.lock().unwrap();
+    assert!(bus
+        .published_facts()
+        .iter()
+        .any(|fact| fact.envelope().topic() == &routecodex_v4_debug::SubscriptionTopic::NodeEntry));
+    assert!(bus
+        .published_facts()
+        .iter()
+        .any(|fact| fact.envelope().topic() == &routecodex_v4_debug::SubscriptionTopic::NodeExit));
+    assert!(bus
+        .published_facts()
+        .iter()
+        .any(|fact| fact.envelope().topic() == &routecodex_v4_debug::SubscriptionTopic::StateTransition));
+}
+
+#[test]
 fn relay_request_governance_plugin_rejects_invalid_tools_shape() {
     let runtime = active_runtime();
     let error = runtime

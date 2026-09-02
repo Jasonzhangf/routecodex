@@ -275,6 +275,11 @@ impl ExecutionEngine {
                     message: (*stage_id).to_string(),
                 });
             }
+            events.push(DiagnosticFact {
+                kind: "node.entry".to_string(),
+                plugin_id: node_id.clone(),
+                message: chain.to_string(),
+            });
             let output = lease
                 .execute(
                     &node_id,
@@ -287,6 +292,16 @@ impl ExecutionEngine {
                 )
                 .map_err(|error| ExecutionError::LeaseUnavailable(error.to_string()))?;
             events.extend(output.diagnostics);
+            events.push(DiagnosticFact {
+                kind: "node.exit".to_string(),
+                plugin_id: node_id.clone(),
+                message: chain.to_string(),
+            });
+            events.push(DiagnosticFact {
+                kind: "state.transition".to_string(),
+                plugin_id: node_id.clone(),
+                message: "executed".to_string(),
+            });
             frame = NodeExecutionFrame::with_side_channels(
                 output.data,
                 output.control,
