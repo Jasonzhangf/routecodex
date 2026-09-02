@@ -1,22 +1,22 @@
 {
-  "freeze_id": "freeze-fix-98f44c51cede",
+  "freeze_id": "freeze-fix-909f43fc372f",
   "issue_id": "v4-cordis-governance-reset-20260903",
   "module_id": "routecodex-v4-base-node",
   "active_version": "active-v1",
   "previous_active_version": null,
   "previous_active_immutable": true,
   "artifact_record_id": "candidate-1",
-  "promotion_id": "promotion-fix-98f44c51cede",
-  "promotion_record_hash": "sha256:e305b05cec86423dd6317ded329388dd5cb18bc02a21224bc6d70a077c585df8",
-  "regression_report_id": "regression-fix-98f44c51cede",
-  "regression_report_hash": "sha256:71b2a5f8a2bffea95d325447b7d3ded3fd07b4720c4f72d157c08cc946aabd41",
+  "promotion_id": "promotion-fix-909f43fc372f",
+  "promotion_record_hash": "sha256:49364436d02c243cea5e7cf54793ca089d6e155d74f5320cb9787dfd8ac61bf5",
+  "regression_report_id": "regression-fix-909f43fc372f",
+  "regression_report_hash": "sha256:1b85bf6f905b22adf9683afd002d93712a5f8587c4883bf9fe92e1a23a23130f",
   "library_hash": "sha256:0a7d33027e7b472443c04a29e677b2a3eb118a2c05c5026d62c6e170777a86ba",
   "public_api_hash": "sha256:7ea54624ce8b9e1bbf64281a86251ec51ce6ee24ead640eaa98432b257717ab7",
-  "source_commit_or_tag": "98f44c51cedeac1034b775a91074f4a197dae9a5",
-  "review_id": "review-fix-98f44c51cede",
+  "source_commit_or_tag": "909f43fc372f04cb7a9fcb3a8d28c74be88cab2e",
+  "review_id": "review-fix-909f43fc372f",
   "git_clean": true,
   "clean_scope": {
-    "base_commit": "909f43fc372f04cb7a9fcb3a8d28c74be88cab2e",
+    "base_commit": "747c3dff5519ebb12ca65da8e9522e70493c2382",
     "changed_paths": [
       "v4/.appsdk/**"
     ],
@@ -34,5 +34,5 @@
     "review": "v4-cordis-governance",
     "vcs": "git"
   },
-  "created_at": "2026-09-02T16:31:51.607Z"
+  "created_at": "2026-09-02T16:29:31.216Z"
 }
