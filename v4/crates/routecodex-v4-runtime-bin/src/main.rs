@@ -1,5 +1,6 @@
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_cordis_bridge::{HandleRegistry, PluginHandle};
+use routecodex_v4_skeleton::SkeletonPlan;
 use routecodex_v4_cli::{
     Cli, ConfigIntent, ConfigPathIntent, InitIntent, ManagedChildIntent, RestartIntent,
     ServerIntent, ServerStartIntent, ServertoolIntent, SnapshotIntent, StartIntent, StopIntent,
@@ -78,6 +79,98 @@ impl HandleRegistry for ProductionHandleRegistry {
         self.standard.encode_client_error_sse(entry_protocol, message)
     }
 
+}
+
+/// Cordis service readiness report produced by `cordis_service_readiness`.
+/// The numbers mirror what a CordisBoundNodeHost would observe after
+/// `mount()` + `beginExecution()` on the production plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CordisReadinessReport {
+    pub bound_plugin_count: usize,
+    pub missing_plugin_ids: Vec<String>,
+    pub service_binding_count: usize,
+    pub plan_node_count: usize,
+}
+
+/// Mirror of the CordisBoundNodeHost.mount() precondition for production.
+/// The runtime-bin production entry calls this before binding any TCP
+/// listener. A failure aborts startup with a typed error that names every
+/// runtime plugin missing a typed handle so the operator can repair the
+/// catalog before serving traffic. Compile-time config operators are already
+/// consumed by `compile_runtime_config` and are not runtime bindings.
+pub fn cordis_service_readiness(
+    skeleton: &SkeletonPlan,
+    registry: &dyn HandleRegistry,
+    service_binding_count: usize,
+) -> Result<CordisReadinessReport, String> {
+    let mut plugin_ids = std::collections::BTreeSet::new();
+    let mut plan_node_count = 0usize;
+    for chain in &skeleton.chains {
+        for node in &chain.nodes {
+            plan_node_count += 1;
+            if chain.chain_id == "config" {
+                continue;
+            }
+            for plugin in &node.plugins {
+                plugin_ids.insert(plugin.plugin_id.clone());
+            }
+        }
+    }
+    let mut bound_plugin_count = 0usize;
+    let mut missing_plugin_ids = Vec::new();
+    for plugin_id in &plugin_ids {
+        if registry.contains(plugin_id.as_str()) {
+            bound_plugin_count += 1;
+        } else {
+            missing_plugin_ids.push(plugin_id.clone());
+        }
+    }
+    missing_plugin_ids.sort();
+    let report = CordisReadinessReport {
+        bound_plugin_count,
+        missing_plugin_ids: missing_plugin_ids.clone(),
+        service_binding_count,
+        plan_node_count,
+    };
+    if !missing_plugin_ids.is_empty() {
+        return Err(format!(
+            "cordis service readiness failed: missing plugin handles for {} of {} compiled plugins: {}",
+            missing_plugin_ids.len(),
+            plugin_ids.len(),
+            missing_plugin_ids.join(", ")
+        ));
+    }
+    Ok(report)
+}
+
+/// Test helper that shadows a real registry with one whose first compiled
+/// plugin id resolves to None. Used by the negative red test.
+pub struct MissingStandardHandleRegistry<'a, R: HandleRegistry + ?Sized> {
+    inner: &'a R,
+    missing_plugin_id: String,
+}
+
+impl<'a, R: HandleRegistry + ?Sized> MissingStandardHandleRegistry<'a, R> {
+    pub fn new(inner: &'a R, missing_plugin_id: impl Into<String>) -> Self {
+        Self {
+            inner,
+            missing_plugin_id: missing_plugin_id.into(),
+        }
+    }
+}
+
+impl<'a, R: HandleRegistry + ?Sized> HandleRegistry for MissingStandardHandleRegistry<'a, R> {
+    fn get(&self, plugin_id: &str) -> Option<&dyn routecodex_v4_cordis_bridge::PluginHandle> {
+        if plugin_id == self.missing_plugin_id {
+            None
+        } else {
+            self.inner.get(plugin_id)
+        }
+    }
+
+    fn encode_client_error_sse(&self, entry_protocol: &str, message: &str) -> Result<Vec<u8>, String> {
+        self.inner.encode_client_error_sse(entry_protocol, message)
+    }
 }
 
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-v4");
@@ -464,10 +557,10 @@ fn spawn_servers(
                     .build()
                     .map_err(|error| error.to_string())?;
                 let result = runtime.block_on(async move {
+                    let handler = Arc::new(PipelineHandler::new(manifest)?);
                     let server = AsyncHttpServer::bind_persisted(&server)
                         .await
                         .map_err(|error| error.to_string())?;
-                    let handler = Arc::new(PipelineHandler::new(manifest)?);
                     let cancellation = CancellationToken::new();
                     let watcher = cancellation.clone();
                     tokio::spawn(async move {
@@ -549,6 +642,7 @@ struct PipelineHandler {
 impl PipelineHandler {
     fn new(manifest: RuntimeConfigManifest) -> Result<Self, String> {
         let registry = Arc::new(ProductionHandleRegistry::new(manifest.product.as_ref()));
+        cordis_service_readiness(&manifest.execution_epoch.skeleton, registry.as_ref(), 0)?;
         let runtime =
             SkeletonRuntime::from_compiled_plan_with_registry(manifest.execution_epoch.skeleton.clone(), registry)
                 .map_err(|error| error.to_string())?;
@@ -2206,5 +2300,71 @@ targets = ["mock"]
             "unexpected chat projection: {text}"
         );
         assert!(text.ends_with("data: [DONE]\n\n"));
+    }
+
+    #[test]
+    fn production_entry_cordis_service_readiness_binds_every_compiled_plugin() {
+        let manifest = test_manifest();
+        let registry = ProductionHandleRegistry::new(manifest.product.as_ref());
+        let plan = {
+            let handler = PipelineHandler::new(test_manifest())
+                .expect("production handler must initialize");
+            let plan = handler.runtime.lock().expect("runtime lock").plan().clone();
+            plan
+        };
+        let report = super::cordis_service_readiness(&plan, &registry, 0)
+            .expect("production readiness must succeed with the standard registry");
+        let compiled_plugin_ids: std::collections::BTreeSet<&str> = plan
+            .chains
+            .iter()
+            .filter(|chain| chain.chain_id != "config")
+            .flat_map(|chain| chain.nodes.iter())
+            .flat_map(|node| node.plugins.iter())
+            .map(|plugin| plugin.plugin_id.as_str())
+            .collect();
+        let missing_in_compiled_plan: std::collections::BTreeSet<&str> = report
+            .missing_plugin_ids
+            .iter()
+            .map(|id| id.as_str())
+            .collect();
+        assert!(
+            missing_in_compiled_plan.is_empty(),
+            "readiness must report every compiled plugin bound: missing={:?}",
+            missing_in_compiled_plan
+        );
+        assert!(
+            report.bound_plugin_count >= compiled_plugin_ids.len(),
+            "readiness must bind every compiled plugin ({} expected, {} bound)",
+            compiled_plugin_ids.len(),
+            report.bound_plugin_count
+        );
+        assert_eq!(report.service_binding_count, 0);
+    }
+
+    #[test]
+    fn production_entry_cordis_service_readiness_fails_when_a_plugin_handle_is_missing() {
+        let manifest = test_manifest();
+        let registry = ProductionHandleRegistry::new(manifest.product.as_ref());
+        let plan = {
+            let handler = PipelineHandler::new(test_manifest())
+                .expect("production handler must initialize");
+            let plan = handler.runtime.lock().expect("runtime lock").plan().clone();
+            plan
+        };
+        let missing_plugin_id = plan
+            .chains
+            .iter()
+            .flat_map(|chain| chain.nodes.iter())
+            .flat_map(|node| node.plugins.iter())
+            .map(|plugin| plugin.plugin_id.clone())
+            .next()
+            .expect("test plan must contain a compiled plugin");
+        let broken_registry = MissingStandardHandleRegistry::new(&registry, missing_plugin_id);
+        let error = super::cordis_service_readiness(&plan, &broken_registry, 1)
+            .expect_err("readiness must fail when a plugin handle is missing");
+        assert!(
+            error.contains("missing plugin handles"),
+            "error must identify the readiness gap: {error}"
+        );
     }
 }

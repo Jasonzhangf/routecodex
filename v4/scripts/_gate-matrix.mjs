@@ -51,6 +51,7 @@ export const RUST_GATES = [
   ['v4_runtime_shared_carrier_arc_red', 'cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_red_shared_carrier --features red-fixtures --locked --offline'],
   ['v4_control_typed_resource_command_red', 'cargo test --manifest-path Cargo.toml -p routecodex-v4-control --test l2_control typed_control_resource_command_is_owner_bound --locked --offline'],
   ['v4_cordis_host_typed_service_binding', 'node --test cordis/routecodex-v4-cordis-host/tests/host-typed-service-binding-red.test.mjs'],
+  ['v4_runtime_bin_cordis_service_readiness', 'cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime-bin --bin rccv4 production_entry_cordis_service_readiness --locked --offline'],
 ];
 
 export const RUST_GATES_RED = [

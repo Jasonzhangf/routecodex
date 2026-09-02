@@ -1045,6 +1045,7 @@ dependencies = [
  "routecodex-v4-runtime",
  "routecodex-v4-server",
  "routecodex-v4-servertool",
+ "routecodex-v4-skeleton",
  "routecodex-v4-standard-plugins",
  "serde_json",
  "tokio",

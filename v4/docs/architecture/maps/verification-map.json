@@ -2953,6 +2953,40 @@
       "required_for": [
         "v4.cordis.host_typed_service_binding:source_green"
       ]
+    },
+    {
+      "gate_id": "v4_runtime_bin_cordis_service_readiness",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-runtime-bin",
+      "feature_ids": [
+        "v4.runtime_bin.cordis_service_readiness"
+      ],
+      "command": "cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime-bin --bin rccv4 production_entry_cordis_service_readiness --locked --offline",
+      "argv": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "Cargo.toml",
+        "-p",
+        "routecodex-v4-runtime-bin",
+        "--bin",
+        "rccv4",
+        "production_entry_cordis_service_readiness",
+        "--locked",
+        "--offline"
+      ],
+      "producer": {
+        "adapter": "cargo",
+        "identity": "v4_runtime_bin_cordis_service_readiness"
+      },
+      "evidence_role": "positive_and_negative",
+      "input_paths": [
+        "crates/routecodex-v4-runtime-bin/src/main.rs",
+        "crates/routecodex-v4-runtime-bin/Cargo.toml"
+      ],
+      "required_for": [
+        "v4.runtime_bin.cordis_service_readiness:source_green"
+      ]
     }
   ]
 }
