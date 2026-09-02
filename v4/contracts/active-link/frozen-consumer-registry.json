@@ -112,6 +112,20 @@
       "manifest_path": "crates/routecodex-v4-router/Cargo.toml"
     },
     {
+      "consumer": "routecodex-v4-router",
+      "dependency": "routecodex-v4-cordis-bridge",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-router/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime",
+      "dependency": "routecodex-v4-debug",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-runtime/Cargo.toml"
+    },
+    {
       "consumer": "routecodex-v4-runtime-bin",
       "dependency": "routecodex-v4-cli",
       "mode": "source_path",
