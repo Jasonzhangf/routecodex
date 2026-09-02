@@ -1005,14 +1005,15 @@ fn handle_responses(
                     if policy.retry {
                         let mut excluded = unavailable_provider_ids.clone();
                         excluded.push(target.provider_id.clone());
-                        if let Ok(candidate) = select_product_target_excluding(
-                            product,
-                            &route_group.route_group_id,
-                            model,
+                        if let Ok(candidate) = select_target_via_cordis(
+                            runtime,
+                            request,
                             entry_protocol,
-                            &[],
-                            0,
-                            &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
+                            model,
+                            session_scope,
+                            conversation_scope,
+                            &route_group.route_group_id,
+                            &excluded,
                         ) {
                             let retry_body = execute_retry_wire(
                                 runtime,
@@ -1137,14 +1138,15 @@ fn handle_responses(
             if policy.retry {
                 let mut excluded = unavailable_provider_ids.clone();
                 excluded.push(target.provider_id.clone());
-                if let Ok(candidate) = select_product_target_excluding(
-                    product,
-                    &route_group.route_group_id,
-                    model,
+                if let Ok(candidate) = select_target_via_cordis(
+                    runtime,
+                    request,
                     entry_protocol,
-                    &[],
-                    0,
-                    &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
+                    model,
+                    session_scope,
+                    conversation_scope,
+                    &route_group.route_group_id,
+                    &excluded,
                 ) {
                     let retry_body = execute_retry_wire(
                         runtime,
