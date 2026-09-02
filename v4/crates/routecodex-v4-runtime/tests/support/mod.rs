@@ -30,10 +30,6 @@ pub fn active_runtime(contract_json: &str) -> SkeletonRuntime {
             let plugin_ids = descriptors
                 .iter()
                 .filter(|descriptor| descriptor.node_selector.node_id == node.node_id)
-                .filter(|descriptor| {
-                    descriptor.plugin_id != "v4.std.protocol.wire_codec_proto"
-                        && !descriptor.plugin_id.ends_with("_mock")
-                })
                 .map(|descriptor| descriptor.plugin_id.as_str())
                 .collect::<Vec<_>>();
             if plugin_ids.is_empty() {

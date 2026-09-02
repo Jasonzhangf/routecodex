@@ -13,7 +13,7 @@ M5 交付 V4 标准插件库的不可变描述符、确定性 artifact/contract 
 
 ## 类别与不可变 ID
 
-标准库按 8 个类别注册 23 个不可变插件 ID：
+标准库按 8 个类别注册 39 个不可变插件 ID：
 
 | 类别 | 插件 ID |
 | --- | --- |
@@ -21,10 +21,10 @@ M5 交付 V4 标准插件库的不可变描述符、确定性 artifact/contract 
 | diagnostic | `v4.std.diagnostic.debug_observe`, `v4.std.diagnostic.timing`, `v4.std.diagnostic.snapshot_record` |
 | control | `v4.std.control.scope_consume`, `v4.std.control.payload_cycle_record` |
 | error | `v4.std.error.typed_intake`, `v4.std.error.projection_adapter` |
-| protocol | `v4.std.protocol.wire_codec_proto`, `v4.std.response.protocol_decode`, `v4.std.response.client_semantic_projection`, `v4.std.response.sse_frame_boundary`, `v4.std.response.frame_build` |
+| protocol | `v4.std.response.protocol_decode`, `v4.std.response.client_semantic_projection`, `v4.std.response.sse_frame_boundary`, `v4.std.response.frame_build` |
 | chat_process | `v4.std.chat_process.request_governance`, `v4.std.chat_process.response_governance` |
 | routing | `v4.std.routing.route_facts_producer`, `v4.std.routing.route_facts_consumer` |
-| provider | `v4.std.provider.wire_build`, `v4.std.provider.capability_mock`, `v4.std.provider.auth_handle_mock`, `v4.std.provider.wire_mock`, `v4.std.provider.transport_mock` |
+| provider | `v4.std.provider.wire_build`, `v4.std.provider.transport_validate` |
 
 每个 `StandardPlugin` 都携带：
 

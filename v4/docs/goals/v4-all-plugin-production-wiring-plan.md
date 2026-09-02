@@ -6,7 +6,7 @@
 ## 1. 验收标准
 
 1. skeleton 中每个 active node 都有真实 NodeContainer、编译后的 immutable NodePluginPlan、typed handle 与 production execution evidence。
-2. standard plugin catalog 中的 28 个插件均有唯一 production owner、descriptor、handle、plan entry、visited evidence；mock/keyless 实现不得成为 production success path。
+2. standard plugin catalog 中的 39 个插件均有唯一 production owner、descriptor、handle、plan entry、visited evidence；mock/keyless 实现不得成为 production success path。
 3. `/v1/responses` 与 `/v1/chat/completions` 的 JSON/SSE 请求和响应均经过统一相邻节点链：
 
    ```text
@@ -24,7 +24,7 @@
 
 ### In scope
 
-- 28 个 standard plugin 的 production descriptor/handle/plan 接线；
+- 39 个 standard plugin 的 production descriptor/handle/plan 接线；
 - `V4ServerReqInbound01ClientRaw`、`V4ServerSseIn02FrameBoundary`、`V4HubReqInbound03Normalized`；
 - `V4HubReqChatProcess04Governed`、routing/target nodes、request outbound、provider wire/transport；
 - `V4ProviderSseIn01FrameBoundary`、response inbound/chat-process/outbound、client SSE/frame terminal；
@@ -121,4 +121,3 @@ compiled manifest
 2. 提交前证明已验证 tree、安装 binary、review candidate、commit 内容一致；不暂存或覆盖无关 dirty 文件。
 3. 定向 commit/push；push 后证明远端 commit 与本地 HEAD 一致，再清理 worktree/claim。
 4. 最终报告只引用可复核 evidence：变更路径、测试/gate、安装版本、重启身份、在线样本、AGY verdict、commit/remote HEAD 和剩余风险。
-

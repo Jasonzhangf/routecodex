@@ -34,10 +34,10 @@ claims real product semantics.
 | diagnostic | `v4.std.diagnostic.debug_observe`, `v4.std.diagnostic.timing`, `v4.std.diagnostic.snapshot_record` | debug/observer/snapshot / diagnostic_only | request_chat_process |
 | control | `v4.std.control.scope_consume`, `v4.std.control.payload_cycle_record` | control / control_only | metadata-center owner, payload-cycle owner |
 | error | `v4.std.error.typed_intake`, `v4.std.error.projection_adapter` | operator / control_only | error_source, error_projection |
-| protocol | `v4.std.protocol.wire_codec_proto`, `v4.std.response.protocol_decode`, `v4.std.response.client_semantic_projection`, `v4.std.response.sse_frame_boundary`, `v4.std.response.frame_build` | operator / semantic or projection | request_outbound, response_inbound, response_outbound |
+| protocol | `v4.std.response.protocol_decode`, `v4.std.response.client_semantic_projection`, `v4.std.response.sse_frame_boundary`, `v4.std.response.frame_build` | operator / semantic or projection | response_inbound, response_outbound |
 | chat-process | `v4.std.chat_process.request_governance`, `v4.std.chat_process.response_governance` | operator / semantic | request_chat_process, response_chat_process |
 | routing | `v4.std.routing.route_facts_producer`, `v4.std.routing.route_facts_consumer` | operator / control_only | request classification, selection plan |
-| provider | `v4.std.provider.wire_build`, `v4.std.provider.capability_mock`, `v4.std.provider.auth_handle_mock`, `v4.std.provider.wire_mock`, `v4.std.provider.transport_mock` | validator/read-only or operator/semantic | Hub provider-semantic projection, provider wire boundary |
+| provider | `v4.std.provider.wire_build`, `v4.std.provider.transport_validate` | validator/read-only or operator/semantic | Hub provider-semantic projection, provider wire boundary |
 
 Every descriptor declares an exact active `node_id` / `role_id` / `position`,
 valid resource axis (V4 resource map), effect, phase, order, owner

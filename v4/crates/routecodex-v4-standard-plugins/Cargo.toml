@@ -21,3 +21,7 @@ sha2 = "0.10"
 
 [dev-dependencies]
 routecodex-v4-node-container = { path = "../routecodex-v4-node-container" }
+
+[[test]]
+name = "l2_all_plugin_catalog_red"
+path = "tests/l2_all_plugin_catalog_red.rs"
