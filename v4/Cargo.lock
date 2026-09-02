@@ -1004,7 +1004,9 @@ name = "routecodex-v4-router"
 version = "0.1.0"
 dependencies = [
  "routecodex-v4-config",
+ "routecodex-v4-cordis-bridge",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

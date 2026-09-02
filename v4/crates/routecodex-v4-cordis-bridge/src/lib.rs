@@ -420,6 +420,7 @@ fn information_resource_key(resource_id: &str) -> Option<&'static str> {
         "v4.information.execution_lane" => Some("execution_lane"),
         "v4.information.client_protocol" => Some("client_protocol"),
         "v4.information.provider_protocol" => Some("provider_protocol"),
+        "v4.information.model" => Some("model"),
         "v4.information.stream_terminal" => Some("stream_terminal"),
         _ => None,
     }
@@ -435,6 +436,10 @@ pub trait PluginHandle: Send + Sync {
 /// Registry of typed handles visible to one NodeContainer.
 pub trait HandleRegistry: Send + Sync {
     fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle>;
+
+    fn encode_client_error_sse(&self, _entry_protocol: &str, _message: &str) -> Result<Vec<u8>, String> {
+        Err("client error SSE encoder is not registered".to_string())
+    }
 
     fn contains(&self, plugin_id: &str) -> bool {
         self.get(plugin_id).is_some()
