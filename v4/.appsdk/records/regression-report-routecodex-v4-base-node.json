@@ -1,7 +1,7 @@
 {
-  "regression_report_id": "regression-fix-daa15fd1a8bc",
+  "regression_report_id": "regression-fix-747c3dff5519",
   "module_id": "routecodex-v4-base-node",
-  "source_commit": "daa15fd1a8bc2cda5df0a136bf14cd75ffc69d97",
+  "source_commit": "747c3dff5519ebb12ca65da8e9522e70493c2382",
   "artifact_hash": "sha256:0a7d33027e7b472443c04a29e677b2a3eb118a2c05c5026d62c6e170777a86ba",
   "public_api_hash": "sha256:7ea54624ce8b9e1bbf64281a86251ec51ce6ee24ead640eaa98432b257717ab7",
   "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -29,5 +29,5 @@
     "whitebox": true,
     "blackbox": true
   },
-  "created_at": "2026-09-02T16:23:54.161Z"
+  "created_at": "2026-09-02T16:27:19.503Z"
 }

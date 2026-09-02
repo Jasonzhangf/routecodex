@@ -1,0 +1,38 @@
+{
+  "freeze_id": "freeze-fix-747c3dff5519",
+  "issue_id": "v4-cordis-governance-reset-20260903",
+  "module_id": "routecodex-v4-base-node",
+  "active_version": "active-v1",
+  "previous_active_version": null,
+  "previous_active_immutable": true,
+  "artifact_record_id": "candidate-1",
+  "promotion_id": "promotion-fix-747c3dff5519",
+  "promotion_record_hash": "sha256:fb1a80c1713a9a5e0c7b1e84359e5990237b81974daf21468447275250eb7884",
+  "regression_report_id": "regression-fix-747c3dff5519",
+  "regression_report_hash": "sha256:37c77edde0ea13b07d6fe7e8cdd5e056dee6c165740495c12f06bf1f8fd03893",
+  "library_hash": "sha256:0a7d33027e7b472443c04a29e677b2a3eb118a2c05c5026d62c6e170777a86ba",
+  "public_api_hash": "sha256:7ea54624ce8b9e1bbf64281a86251ec51ce6ee24ead640eaa98432b257717ab7",
+  "source_commit_or_tag": "747c3dff5519ebb12ca65da8e9522e70493c2382",
+  "review_id": "review-fix-747c3dff5519",
+  "git_clean": true,
+  "clean_scope": {
+    "base_commit": "daa15fd1a8bc2cda5df0a136bf14cd75ffc69d97",
+    "changed_paths": [
+      "v4/.appsdk/**"
+    ],
+    "ignored_paths": [
+      "v4/generated/**",
+      "v4/target/**",
+      "v4/active/**"
+    ],
+    "generated_policy": "excluded_from_source_clean"
+  },
+  "owners": {
+    "compiler": "appsdk-0.1.6",
+    "artifact_registry": "appsdk-active",
+    "api_extractor": "appsdk-0.1.6",
+    "review": "v4-cordis-governance",
+    "vcs": "git"
+  },
+  "created_at": "2026-09-02T16:27:19.503Z"
+}
