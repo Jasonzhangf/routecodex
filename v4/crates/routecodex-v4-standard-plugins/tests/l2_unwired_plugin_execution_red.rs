@@ -1,10 +1,18 @@
-//! Red tests for standard plugins that were not covered by an independent
+//! Red tests for standard plugins that are NOT covered by an independent
 //! `NodeContainer` execution red/green pair in this crate.
 //!
-//! Every plugin listed here is declared by `standard_plugins()` and registered
-//! in `StandardHandleRegistry`. This file locks the typed handle behaviour for
-//! the direct console observer plugins so future regressions cannot silently
-//! turn them into dead code.
+//! Each plugin listed here is declared by `standard_plugins()` and registered
+//! in `StandardHandleRegistry`, but every prior red/green owner covered the
+//! plugin only via static plan compilation, descriptor admission, or sibling
+//! handle aliases. This file locks the typed handle behaviour for the seven
+//! plugins so future regressions cannot silently turn them into dead code or
+//! let the ineligible variants reach a production node.
+//!
+//! All five `*_mock` plugins and `wire_codec_proto` are listed in
+//! `compile_production_execution_plans::EXCLUDED_PLUGINS` and must remain
+//! ineligible for the production lane; the red cases here only assert that
+//! their typed handles execute deterministically on a dedicated plan and
+//! must not leak into the compiled production node set.
 
 use routecodex_v4_cordis_bridge::{BridgeError, NodeExecutionInput};
 use routecodex_v4_node_container::{NodeContainer, NodeContainerError, PlanBindings};
@@ -22,6 +30,11 @@ use std::fs;
 const UNWIRED_PLUGINS: &[&str] = &[
     "v4.std.diagnostic.direct_request_payload_console_render",
     "v4.std.diagnostic.direct_response_payload_console_render",
+    "v4.std.protocol.wire_codec_proto",
+    "v4.std.provider.capability_mock",
+    "v4.std.provider.auth_handle_mock",
+    "v4.std.provider.wire_mock",
+    "v4.std.provider.transport_mock",
 ];
 
 fn plan_bindings(plan: &NodePluginPlan) -> PlanBindings {
@@ -125,6 +138,11 @@ fn every_unwired_plugin_has_a_typed_handle() {
 #[test]
 fn ineligible_unwired_plugins_must_not_appear_in_production_plans() {
     let ineligible = [
+        "v4.std.protocol.wire_codec_proto",
+        "v4.std.provider.capability_mock",
+        "v4.std.provider.auth_handle_mock",
+        "v4.std.provider.wire_mock",
+        "v4.std.provider.transport_mock",
     ];
     let in_production = production_plan_ids();
     let leaks: Vec<&&str> = ineligible
@@ -239,6 +257,186 @@ fn negative_direct_response_console_rejects_non_object_payload() {
         json!({}),
     )
     .expect_err("direct response console requires object payload");
+    assert!(matches!(
+        error,
+        NodeContainerError::Bridge(BridgeError::HandleError { .. })
+    ));
+}
+
+#[test]
+fn positive_wire_codec_proto_annotates_object_with_codec_field() {
+    let payload = json!({"model": "m", "messages": []});
+    let output = execute_plugin(
+        "V4ProviderReqOutbound08WirePayload",
+        "request_outbound",
+        "relay_request",
+        8,
+        "v4.std.protocol.wire_codec_proto",
+        payload.clone(),
+        json!({}),
+        json!({}),
+    )
+    .expect("wire codec proto executes on a dedicated plan");
+    assert_eq!(
+        output.data["codec"],
+        json!("mock"),
+        "wire codec proto must inject the legacy mock codec marker"
+    );
+    assert_eq!(
+        output.data["model"],
+        json!("m"),
+        "wire codec proto must preserve existing payload fields"
+    );
+    assert_eq!(output.control, json!({}));
+}
+
+#[test]
+fn negative_wire_codec_proto_rejects_non_object_payload() {
+    let error = execute_plugin(
+        "V4ProviderReqOutbound08WirePayload",
+        "request_outbound",
+        "relay_request",
+        8,
+        "v4.std.protocol.wire_codec_proto",
+        json!(["not-object"]),
+        json!({}),
+        json!({}),
+    )
+    .expect_err("wire codec proto requires object payload");
+    assert!(matches!(
+        error,
+        NodeContainerError::Bridge(BridgeError::HandleError { .. })
+    ));
+}
+
+#[test]
+fn positive_capability_mock_emits_typed_capability_fact() {
+    let output = execute_plugin(
+        "V4ProviderReqOutbound09TransportRequest",
+        "request_outbound",
+        "relay_request",
+        9,
+        "v4.std.provider.capability_mock",
+        json!({"model": "m"}),
+        json!({}),
+        json!({}),
+    )
+    .expect("capability mock executes");
+    let kinds: Vec<&str> = output.diagnostics.iter().map(|f| f.kind.as_str()).collect();
+    assert!(
+        kinds
+            .iter()
+            .any(|k| *k == "node.provider_capability_validated"),
+        "capability mock must emit its typed diagnostic: {kinds:?}"
+    );
+    assert_eq!(output.control, json!({}));
+}
+
+#[test]
+fn positive_auth_handle_mock_emits_typed_auth_fact() {
+    let output = execute_plugin(
+        "V4ProviderReqOutbound09TransportRequest",
+        "request_outbound",
+        "relay_request",
+        9,
+        "v4.std.provider.auth_handle_mock",
+        json!({"model": "m"}),
+        json!({}),
+        json!({}),
+    )
+    .expect("auth handle mock executes");
+    let kinds: Vec<&str> = output.diagnostics.iter().map(|f| f.kind.as_str()).collect();
+    assert!(
+        kinds
+            .iter()
+            .any(|k| *k == "node.provider_auth_handle_validated"),
+        "auth handle mock must emit its typed diagnostic: {kinds:?}"
+    );
+    assert_eq!(output.control, json!({}));
+}
+
+#[test]
+fn positive_wire_mock_annotates_object_with_wire_field() {
+    let payload = json!({"model": "m", "input": "hi"});
+    let output = execute_plugin(
+        "V4HubReqOutbound06ProviderSemantic",
+        "request_outbound",
+        "relay_request",
+        6,
+        "v4.std.provider.wire_mock",
+        payload.clone(),
+        json!({}),
+        json!({}),
+    )
+    .expect("wire mock executes");
+    assert_eq!(
+        output.data["wire"],
+        json!({"mock": true}),
+        "wire mock must inject the keyless wire marker"
+    );
+    assert_eq!(
+        output.data["model"],
+        json!("m"),
+        "wire mock must preserve existing payload fields"
+    );
+    assert_eq!(output.control, json!({}));
+}
+
+#[test]
+fn negative_wire_mock_rejects_non_object_payload() {
+    let error = execute_plugin(
+        "V4HubReqOutbound06ProviderSemantic",
+        "request_outbound",
+        "relay_request",
+        6,
+        "v4.std.provider.wire_mock",
+        json!(["not-object"]),
+        json!({}),
+        json!({}),
+    )
+    .expect_err("wire mock requires object payload");
+    assert!(matches!(
+        error,
+        NodeContainerError::Bridge(BridgeError::HandleError { .. })
+    ));
+}
+
+#[test]
+fn positive_transport_mock_emits_typed_transport_fact() {
+    let output = execute_plugin(
+        "V4ProviderReqOutbound09TransportRequest",
+        "request_outbound",
+        "relay_request",
+        9,
+        "v4.std.provider.transport_mock",
+        json!({"model": "m", "input": "hi"}),
+        json!({}),
+        json!({}),
+    )
+    .expect("transport mock executes");
+    let kinds: Vec<&str> = output.diagnostics.iter().map(|f| f.kind.as_str()).collect();
+    assert!(
+        kinds
+            .iter()
+            .any(|k| *k == "node.provider_transport_validated"),
+        "transport mock must emit its typed diagnostic: {kinds:?}"
+    );
+    assert_eq!(output.control, json!({}));
+}
+
+#[test]
+fn negative_transport_mock_rejects_non_object_payload() {
+    let error = execute_plugin(
+        "V4ProviderReqOutbound09TransportRequest",
+        "request_outbound",
+        "relay_request",
+        9,
+        "v4.std.provider.transport_mock",
+        json!(["not-object"]),
+        json!({}),
+        json!({}),
+    )
+    .expect_err("transport mock requires object wire payload");
     assert!(matches!(
         error,
         NodeContainerError::Bridge(BridgeError::HandleError { .. })
