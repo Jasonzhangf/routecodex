@@ -24,7 +24,8 @@ use routecodex_v4_provider::{
 };
 use routecodex_v4_router::{
     apply_product_error_policy,
-    TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
+    DirectTargetSelectionHandle, TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID,
+    TARGET_SELECTION_PLUGIN_ID,
 };
 use routecodex_v4_runtime::{
     parse_request_admission_facts, project_runtime_fault, project_runtime_fault_with_policy,
@@ -53,6 +54,7 @@ use tokio_util::sync::CancellationToken;
 struct ProductionHandleRegistry {
     standard: StandardHandleRegistry,
     router_target: Option<TargetSelectionHandle>,
+    direct_target: Option<DirectTargetSelectionHandle>,
 }
 
 impl ProductionHandleRegistry {
@@ -60,14 +62,20 @@ impl ProductionHandleRegistry {
         Self {
             standard: StandardHandleRegistry::new(),
             router_target: product.cloned().map(TargetSelectionHandle::new),
+            direct_target: product.cloned().map(DirectTargetSelectionHandle::new),
         }
     }
 }
 
 impl HandleRegistry for ProductionHandleRegistry {
     fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
-        if plugin_id == TARGET_SELECTION_PLUGIN_ID || plugin_id == DIRECT_TARGET_SELECTION_PLUGIN_ID {
+        if plugin_id == TARGET_SELECTION_PLUGIN_ID {
             if let Some(handle) = self.router_target.as_ref() {
+                return Some(handle as &dyn PluginHandle);
+            }
+        }
+        if plugin_id == DIRECT_TARGET_SELECTION_PLUGIN_ID {
+            if let Some(handle) = self.direct_target.as_ref() {
                 return Some(handle as &dyn PluginHandle);
             }
         }

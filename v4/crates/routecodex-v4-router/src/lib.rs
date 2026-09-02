@@ -28,9 +28,66 @@ pub struct TargetSelectionHandle {
     product: Arc<RuntimeProductConfig>,
 }
 
+/// Direct same-protocol selection has no route-facts producer. It selects
+/// from the compiled default route using only the protocol and model facts
+/// declared by its node contract.
+pub struct DirectTargetSelectionHandle {
+    product: Arc<RuntimeProductConfig>,
+}
+
 impl TargetSelectionHandle {
     pub fn new(product: RuntimeProductConfig) -> Self {
         Self { product: Arc::new(product) }
+    }
+}
+
+impl DirectTargetSelectionHandle {
+    pub fn new(product: RuntimeProductConfig) -> Self {
+        Self { product: Arc::new(product) }
+    }
+}
+
+impl PluginHandle for DirectTargetSelectionHandle {
+    fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
+        let protocol = ctx
+            .read_information_resource("v4.information.client_protocol")
+            .map_err(|error| error.to_string())?
+            .and_then(Value::as_str)
+            .ok_or_else(|| "direct target producer requires client protocol".to_string())?
+            .to_string();
+        let model = ctx
+            .read_information_resource("v4.information.model")
+            .map_err(|error| error.to_string())?
+            .and_then(Value::as_str)
+            .ok_or_else(|| "direct target producer requires model".to_string())?;
+        let group = self
+            .product
+            .route_groups
+            .first()
+            .map(|group| group.route_group_id.as_str())
+            .ok_or_else(|| "compiled product has no route group".to_string())?;
+        let selected = select_product_target_with_unavailable(
+            &self.product,
+            group,
+            model,
+            &protocol,
+            &[],
+            0,
+            &[],
+        )
+        .map_err(|error| error.to_string())?;
+        ctx.write_control_resource(
+            "v4.control.target_selection",
+            serde_json::json!({
+                "provider_id": selected.provider_id,
+                "config_path": selected.config_path,
+                "protocol": selected.protocol,
+                "wire_model": selected.wire_model,
+                "auth_alias": selected.auth_alias,
+                "execution_lane": "direct",
+            }),
+        )
+        .map_err(|error| error.to_string())
     }
 }
 
