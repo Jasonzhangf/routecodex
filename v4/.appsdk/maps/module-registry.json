@@ -7,6 +7,7 @@
       "owner": "routecodex-v4-governance",
       "owned_paths": [
         ".appsdk/**",
+        ".appsdk-prepare.json",
         ".appsdk/goal.json",
         ".appsdk/project.json",
         ".appsdk/sdk.lock",

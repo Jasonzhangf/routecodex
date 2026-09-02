@@ -56,6 +56,7 @@ export const RED_SUITES = [
   ['verify-v4-cordis-bridge.mjs', '--red-self-test'],
   ['verify-v4-execution-binding.mjs', '--red-self-test'],
   ['verify-v4-feature-layer-batches.mjs', '--red-self-test'],
+  ['verify-v4-semantic-parity-red.mjs', ''],
   ['verify-v4-feature-gap.mjs', '--red-self-test'],
   ['verify-v4-infrastructure.mjs', '--red-self-test'],
   ['verify-v4-node-graph.mjs', '--red-self-test'],

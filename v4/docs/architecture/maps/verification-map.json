@@ -185,6 +185,14 @@
       ]
     },
     {
+      "gate_id": "v4_parity_gate_semantic_parity_red",
+      "command": "node scripts/architecture/verify-v4-semantic-parity-red.mjs",
+      "required_for": [
+        "routecodex-v4-skeleton:architecture_stable",
+        "routecodex-v4-runtime:architecture_stable"
+      ]
+    },
+    {
       "gate_id": "v4_parity_gate_feature_gap",
       "command": "node scripts/architecture/verify-v4-feature-gap.mjs",
       "required_for": [
