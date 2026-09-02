@@ -402,6 +402,8 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.direct.request.client_payload".to_string(),
             "v4.information.client_protocol".to_string(),
             "v4.information.provider_protocol".to_string(),
+            "v4.information.model".to_string(),
+            "v4.control.route_facts".to_string(),
         ],
         "V4DirectResp02RelayContainer" => vec![
             "v4.direct.response.provider_raw".to_string(),
@@ -451,8 +453,16 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],
         "V4Error06ClientProjected" => vec!["v4.control.error_chain".to_string()],
-        "V4HubReqExecution04Planned" => Vec::new(),
-        "V4HubReqTarget05Resolved" => vec!["v4.control.route_facts".to_string()],
+        "V4HubReqExecution04Planned" => vec![
+            "v4.information.entry_protocol".to_string(),
+            "v4.information.execution_lane".to_string(),
+            "v4.control.route_facts".to_string(),
+        ],
+        "V4HubReqTarget05Resolved" => vec![
+            "v4.control.route_facts".to_string(),
+            "v4.control.target_selection".to_string(),
+            "v4.information.model".to_string(),
+        ],
         "V4Router05RequestClassified" => vec!["v4.control.route_facts".to_string()],
         "V4Router06SelectionPlan" => vec!["v4.control.target_selection".to_string()],
         _ => Vec::new(),
@@ -807,14 +817,43 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
         plugin(
             "v4.std.routing.route_facts_consumer",
             PluginCategory::Routing,
+            "V4HubReqExecution04Planned",
+            "request_execution",
+            Some(4),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            350,
+            vec!["v4.control.route_facts"],
+            vec![],
+        ),
+        // Target selection itself is owned by routecodex-v4-router. The
+        // standard route-facts consumer remains a validator and is never
+        // replaced by a foreign handle in the production registry.
+        plugin(
+            "v4.std.routing.target_selection",
+            PluginCategory::Routing,
             "V4HubReqTarget05Resolved",
             "request_execution",
             Some(5),
             PluginKind::Operator,
             PluginEffect::ControlOnly,
             PluginPhase::Semantic,
-            350,
-            vec!["v4.control.route_facts"],
+            360,
+            vec!["v4.control.route_facts", "v4.information.model"],
+            vec!["v4.control.target_selection"],
+        ),
+        plugin(
+            "v4.std.routing.target_selection.direct",
+            PluginCategory::Routing,
+            "V4DirectReq02RelayContainer",
+            "request_outbound",
+            Some(2),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            361,
+            vec!["v4.information.model"],
             vec!["v4.control.target_selection"],
         ),
         plugin(
@@ -1359,18 +1398,23 @@ fn route_facts_produce(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn route_facts_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    if ctx
+    let facts = ctx
         .read_control_resource("v4.control.route_facts")
         .map_err(|error| error.to_string())?
-        .is_none()
-    {
-        return Err("route facts consumer requires typed route facts".to_string());
+        .ok_or_else(|| "route facts consumer requires typed route facts".to_string())?;
+    if !facts.is_object() {
+        return Err("route facts must be a typed object".to_string());
     }
-    ctx.write_control_resource(
-        "v4.control.target_selection",
-        json!({"selected": "keyless_mock"}),
-    )
-    .map_err(|error| error.to_string())
+    Ok(())
+}
+
+fn direct_target_selection_fixture(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    ctx.read_information_resource("v4.information.model")
+        .map_err(|error| error.to_string())?
+        .and_then(Value::as_str)
+        .filter(|model| !model.trim().is_empty())
+        .ok_or_else(|| "direct target selection requires model".to_string())?;
+    Ok(())
 }
 
 fn capability_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -1465,6 +1509,10 @@ impl StandardHandleRegistry {
             ("v4.std.chat_process.tool_harvest", tool_harvest),
             ("v4.std.routing.route_facts_producer", route_facts_produce),
             ("v4.std.routing.route_facts_consumer", route_facts_consume),
+            // Legacy/test registry validates the typed selection produced by
+            // the router owner; production injects the distinct router handle.
+            ("v4.std.routing.target_selection", route_facts_consume),
+            ("v4.std.routing.target_selection.direct", direct_target_selection_fixture),
             ("v4.std.provider.capability_mock", capability_mock),
             ("v4.std.provider.auth_handle_mock", auth_handle_mock),
             ("v4.std.provider.wire_mock", wire_mock),
@@ -1592,6 +1640,8 @@ mod tests {
             "v4.std.chat_process.tool_harvest",
             "v4.std.routing.route_facts_producer",
             "v4.std.routing.route_facts_consumer",
+            "v4.std.routing.target_selection",
+            "v4.std.routing.target_selection.direct",
             "v4.std.provider.capability_mock",
             "v4.std.provider.auth_handle_mock",
             "v4.std.provider.wire_mock",

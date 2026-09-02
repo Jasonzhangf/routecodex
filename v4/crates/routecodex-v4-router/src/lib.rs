@@ -12,6 +12,89 @@ use routecodex_v4_config::{
     RuntimeProductConfig, RuntimeProductPolicyAction, RuntimeProductProvider, RuntimeProductTarget,
     RuntimeProviderCandidate, RuntimeRoute,
 };
+use routecodex_v4_cordis_bridge::{ExecCtx, PluginHandle};
+use serde_json::Value;
+use std::sync::Arc;
+
+/// Dedicated Cordis node operator for target selection. This identity is
+/// distinct from route-facts production/consumption and from direct model
+/// hooks; registry wiring must never replace another plugin by id.
+pub const TARGET_SELECTION_PLUGIN_ID: &str = "v4.std.routing.target_selection";
+pub const DIRECT_TARGET_SELECTION_PLUGIN_ID: &str = "v4.std.routing.target_selection.direct";
+
+/// Cordis-owned target producer. It is invoked by the compiled target node;
+/// callers never select a provider outside the NodePluginPlan.
+pub struct TargetSelectionHandle {
+    product: Arc<RuntimeProductConfig>,
+}
+
+impl TargetSelectionHandle {
+    pub fn new(product: RuntimeProductConfig) -> Self {
+        Self { product: Arc::new(product) }
+    }
+}
+
+impl PluginHandle for TargetSelectionHandle {
+    fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
+        let facts = ctx
+            .read_control_resource("v4.control.route_facts")
+            .map_err(|error| error.to_string())?
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Default::default()));
+        let facts = facts.as_object().expect("route facts object");
+        let protocol = if let Some(protocol) = facts.get("entry_protocol").and_then(Value::as_str) {
+            protocol.to_string()
+        } else {
+            ctx.read_information_resource("v4.information.client_protocol")
+                .map_err(|error| error.to_string())?
+                .and_then(Value::as_str)
+                .ok_or_else(|| "router target producer requires entry protocol".to_string())?
+                .to_string()
+        };
+        let model = ctx
+            .read_information_resource("v4.information.model")
+            .map_err(|error| error.to_string())?
+            .and_then(Value::as_str)
+            .ok_or_else(|| "router target producer requires model".to_string())?
+            .to_string();
+        let lane = facts
+            .get("execution_lane")
+            .and_then(Value::as_str)
+            .unwrap_or("direct");
+        let group = facts
+            .get("route_group_id")
+            .and_then(Value::as_str)
+            .or_else(|| self.product.route_groups.first().map(|group| group.route_group_id.as_str()))
+            .ok_or_else(|| "compiled product has no route group".to_string())?;
+        let unavailable = facts
+            .get("unavailable_provider_ids")
+            .and_then(Value::as_array)
+            .map(|ids| ids.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let selected = select_product_target_with_unavailable(
+            &self.product,
+            group,
+            &model,
+            &protocol,
+            &[],
+            0,
+            &unavailable,
+        )
+        .map_err(|error| error.to_string())?;
+        ctx.write_control_resource(
+            "v4.control.target_selection",
+            serde_json::json!({
+                "provider_id": selected.provider_id,
+                "config_path": selected.config_path,
+                "protocol": selected.protocol,
+                "wire_model": selected.wire_model,
+                "auth_alias": selected.auth_alias,
+                "execution_lane": lane,
+            }),
+        )
+        .map_err(|error| error.to_string())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedTarget {
