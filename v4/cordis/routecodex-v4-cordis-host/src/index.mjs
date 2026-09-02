@@ -516,8 +516,26 @@ export class CordisNodeHost {
   }
 
   async #disposeFibers(fibers) {
+    const failures = [];
     for (const mounted of [...fibers].reverse()) {
-      await mounted.fiber.dispose();
+      try {
+        await mounted.fiber.dispose();
+      } catch (error) {
+        failures.push({ pluginId: mounted.id, error });
+      }
+    }
+    if (failures.length > 0) {
+      const summary = failures
+        .map(({ pluginId, error }) => `${pluginId}: ${error?.message ?? String(error)}`)
+        .join('; ');
+      throw new CordisHostError('dispose_failure', `fiber disposal failed: ${summary}`, {
+        resource_id: 'v4.cordis.plugin_fibers',
+        operation: 'dispose',
+        failures: failures.map(({ pluginId, error }) => ({
+          plugin_id: pluginId,
+          message: error?.message ?? String(error),
+        })),
+      });
     }
   }
 }
