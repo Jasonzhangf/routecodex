@@ -363,8 +363,17 @@ fn ordered_serial_execution_in_plan_order_with_read_only_observer() {
         execute_plan(&plan, input(json!([]), json!({})), &registry).expect("node executes");
     assert_eq!(output.data, json!(["a", "b"]));
     assert_eq!(output.control, json!({}));
-    assert_eq!(output.diagnostics.len(), 1);
-    assert_eq!(output.diagnostics[0].kind, "node.observed");
+    assert!(output
+        .diagnostics
+        .iter()
+        .any(|fact| fact.kind == "node.observed"));
+    let executed = output
+        .diagnostics
+        .iter()
+        .filter(|fact| fact.kind == "plugin.executed")
+        .map(|fact| fact.plugin_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(executed, vec!["v4.request.a", "v4.request.b"]);
 }
 
 #[test]
@@ -605,5 +614,7 @@ fn read_only_handle_cannot_write_normal_data() {
     let output = execute_plan(&plan, input(input_data.clone(), json!({})), &registry)
         .expect("node executes without leak");
     assert_eq!(output.data, input_data);
-    assert!(output.diagnostics.is_empty());
+    assert!(output.diagnostics.iter().any(|fact| {
+        fact.kind == "plugin.executed" && fact.plugin_id == "v4.request.validate"
+    }));
 }

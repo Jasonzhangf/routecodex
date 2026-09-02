@@ -29,6 +29,7 @@ use sha2::{Digest, Sha256};
 
 pub mod chat_process;
 pub mod chat_to_responses;
+pub mod boundary;
 pub mod contracts;
 pub mod control;
 pub mod diagnostic;
@@ -1082,18 +1083,20 @@ impl PluginHandle for StandardHandle {
 
 fn validate_input(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let data = ctx.read_data();
-    if !data.is_object() {
-        return Err("input validator requires an object".to_string());
-    }
+    let object = data
+        .as_object()
+        .ok_or_else(|| "input validator requires an object".to_string())?;
+    boundary::reject_control_fields(object)?;
     ctx.emit("node.input_validated", "standard input validator");
     Ok(())
 }
 
 fn validate_output(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let data = ctx.read_data();
-    if !data.is_object() {
-        return Err("output validator requires an object".to_string());
-    }
+    let object = data
+        .as_object()
+        .ok_or_else(|| "output validator requires an object".to_string())?;
+    boundary::reject_response_control_fields(object)?;
     ctx.emit("node.output_validated", "standard output validator");
     Ok(())
 }
@@ -1122,7 +1125,7 @@ fn response_payload_console(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn chat_process_payload_console(ctx: &mut ExecCtx<'_>, direction: &str) -> Result<(), String> {
-    let line = diagnostic::format_chat_process_payload(direction, ctx.read_data());
+    let line = diagnostic::format_chat_process_payload(direction, ctx.read_data())?;
     ctx.emit("console.payload_ready", line);
     Ok(())
 }
@@ -1168,6 +1171,7 @@ pub(crate) fn error_intake(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = error_chain
         .as_object_mut()
         .ok_or_else(|| "error_intake requires typed error object".to_string())?;
+    require_required_string(object, "code", "error chain")?;
     object.insert("stage".to_string(), json!("source_raised"));
     object.insert("kind".to_string(), json!("keyless_mock"));
     ctx.write_control_resource("v4.control.error_chain", error_chain)
@@ -1183,9 +1187,23 @@ fn error_stage(ctx: &mut ExecCtx<'_>, stage: &str) -> Result<(), String> {
     let object = chain
         .as_object_mut()
         .ok_or_else(|| format!("error stage {stage} requires typed error object"))?;
+    require_required_string(object, "code", "error chain")?;
     object.insert("stage".to_string(), json!(stage));
     ctx.write_control_resource("v4.control.error_chain", chain)
         .map_err(|error| error.to_string())
+}
+
+fn require_required_string(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+    owner: &str,
+) -> Result<(), String> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(|_| ())
+        .ok_or_else(|| format!("{owner} requires non-empty string {key}"))
 }
 
 fn error_host_capture(ctx: &mut ExecCtx<'_>) -> Result<(), String> {

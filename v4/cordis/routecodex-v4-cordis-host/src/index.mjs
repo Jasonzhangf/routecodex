@@ -400,6 +400,9 @@ export class CordisNodeHost {
   #node;
   #fibers = [];
   #disposed = false;
+  #ready = false;
+  #acquired = new Set();
+  #releasedServices = new Set();
 
   constructor({ nodeId, services = [], descriptor }) {
     if (!nodeId || !descriptor) {
@@ -414,6 +417,38 @@ export class CordisNodeHost {
     for (const name of nodeServiceLabels(this.services)) {
       this.#node.isolate(name);
     }
+  }
+
+  acquireService(name) {
+    if (this.#disposed) {
+      throw new CordisHostError('service_disposed', `node service ${name} was released on dispose`);
+    }
+    if (!this.#ready) {
+      throw new CordisHostError(
+        'service_not_ready',
+        `node service ${name} is not ready before host mount`,
+      );
+    }
+    if (!this.services.includes(name)) {
+      throw new CordisHostError(
+        'service_not_declared',
+        `node service ${name} is not declared for ${this.nodeId}`,
+      );
+    }
+    const host = this;
+    const token = Object.freeze({
+      name,
+      nodeId: host.nodeId,
+      isValid() {
+        if (host.#disposed) return false;
+        if (!host.#ready) return false;
+        if (!host.services.includes(name)) return false;
+        if (host.#releasedServices.has(name)) return false;
+        return true;
+      },
+    });
+    this.#acquired.add(name);
+    return token;
   }
 
   get context() {
@@ -446,6 +481,7 @@ export class CordisNodeHost {
         }
       }
       this.#fibers = mounted;
+      this.#ready = true;
       return this;
     } catch (error) {
       await this.#disposeFibers(mounted);
@@ -465,14 +501,41 @@ export class CordisNodeHost {
 
   async dispose() {
     if (this.#disposed) return;
-    await this.#disposeFibers(this.#fibers);
-    this.#fibers = [];
-    this.#disposed = true;
+    const retained = [...this.#acquired];
+    try {
+      await this.#disposeFibers(this.#fibers);
+    } finally {
+      this.#ready = false;
+      this.#fibers = [];
+      for (const name of retained) {
+        this.#releasedServices.add(name);
+      }
+      this.#acquired.clear();
+      this.#disposed = true;
+    }
   }
 
   async #disposeFibers(fibers) {
+    const failures = [];
     for (const mounted of [...fibers].reverse()) {
-      await mounted.fiber.dispose();
+      try {
+        await mounted.fiber.dispose();
+      } catch (error) {
+        failures.push({ pluginId: mounted.id, error });
+      }
+    }
+    if (failures.length > 0) {
+      const summary = failures
+        .map(({ pluginId, error }) => `${pluginId}: ${error?.message ?? String(error)}`)
+        .join('; ');
+      throw new CordisHostError('dispose_failure', `fiber disposal failed: ${summary}`, {
+        resource_id: 'v4.cordis.plugin_fibers',
+        operation: 'dispose',
+        failures: failures.map(({ pluginId, error }) => ({
+          plugin_id: pluginId,
+          message: error?.message ?? String(error),
+        })),
+      });
     }
   }
 }

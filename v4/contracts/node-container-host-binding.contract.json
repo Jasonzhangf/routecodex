@@ -63,6 +63,9 @@
     "JS execution response decoder rejects malformed output",
     "Rust rejects metadata and business fields outside the selected lifecycle operation schema",
     "JS rejects undeclared lifecycle fields before writing to the port",
-    "lifecycle failure projection retains resource id, request id, node id, operation, typed code and message"
-  ]
+    "lifecycle failure projection retains resource id, request id, node id, operation, typed code and message",
+    "typed node services require readiness and release on dispose",
+    "typed node service is acquired only when ready and released on dispose"
+  ],
+  "service_binding_rule": "CordisNodeHost declares node services before mount; acquireService succeeds only after mount makes the host ready and only for declared services; dispose releases all acquired services before fibers are disposed; any acquire after dispose fails with a typed Host error; service handles are frozen tokens, not business payload or plugin config"
 }

@@ -486,6 +486,15 @@ pub fn execute_plan(
             plugin_id: entry.plugin_id.clone(),
             message,
         })?;
+        // Every semantic/control handle execution is observable on the typed
+        // diagnostic side channel. This is the production wiring witness:
+        // stage checkpoints alone are insufficient evidence that a plugin
+        // handle actually ran.
+        state.diagnostics.push(DiagnosticFact {
+            kind: "plugin.executed".to_string(),
+            plugin_id: entry.plugin_id.clone(),
+            message: "typed handle executed".to_string(),
+        });
     }
 
     // Diagnostic-only entries: read-only concurrent observers with a private

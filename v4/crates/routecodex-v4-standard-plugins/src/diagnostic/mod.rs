@@ -90,10 +90,13 @@ pub fn format_response(endpoint: &str, request_id: &str, status: u16, model: &st
 /// Render the canonical payload at Chat Process boundaries. The event carries
 /// only terminal-safe text; the business payload never enters the diagnostic
 /// side channel.
-pub fn format_chat_process_payload(direction: &str, payload: &serde_json::Value) -> String {
+pub fn format_chat_process_payload(
+    direction: &str,
+    payload: &serde_json::Value,
+) -> Result<String, String> {
     let object = payload
         .as_object()
-        .expect("Chat Process payload must be an object");
+        .ok_or_else(|| "Chat Process payload must be an object".to_string())?;
     let model = object
         .get("model")
         .and_then(serde_json::Value::as_str)
@@ -146,7 +149,7 @@ pub fn format_chat_process_payload(direction: &str, payload: &serde_json::Value)
         }
     });
     let line = format!("{icon} [{label}] {body}{session}");
-    colorize(headline_color, line)
+    Ok(colorize(headline_color, line))
 }
 
 pub fn format_error_event(payload: &serde_json::Value, class: &str) -> String {
@@ -198,7 +201,8 @@ mod tests {
         let rendered = format_chat_process_payload(
             "request",
             &json!({"model":"gpt-test","stream":true,"messages":[{},{}],"tools":[{}],"secret":"hidden"}),
-        );
+        )
+        .expect("request payload renders");
         assert!(rendered.contains("model=gpt-test"));
         assert!(rendered.contains("messages=2"));
         assert!(!rendered.contains("hidden"));
@@ -209,7 +213,8 @@ mod tests {
         let rendered = format_chat_process_payload(
             "response",
             &json!({"model":"gpt-test","output":[{}],"usage":{"input_tokens":3,"output_tokens":5},"content":"private"}),
-        );
+        )
+        .expect("response payload renders");
         assert!(rendered.contains("output_items=1"));
         assert!(rendered.contains("usage=3+5=8"));
         assert!(!rendered.contains("private"));

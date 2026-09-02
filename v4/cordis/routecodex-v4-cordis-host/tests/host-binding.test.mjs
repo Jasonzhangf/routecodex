@@ -369,8 +369,8 @@ test('real Cordis fibers drive ordered Rust NodePluginPlan execution', async (t)
   });
   assert.deepEqual(output.data, { steps: ['v4.test.echo'] });
   assert.deepEqual(output.control, {});
-  assert.equal(output.diagnostics.length, 1);
-  assert.equal(output.diagnostics[0].kind, 'node.observed');
+  assert.equal(output.diagnostics.filter(({ kind }) => kind === 'node.observed').length, 1);
+  assert.equal(output.diagnostics.filter(({ kind }) => kind === 'plugin.executed').length, 1);
   assert.equal(host.fibers.length, 2);
   assert.deepEqual(events, ['active', 'active']);
 

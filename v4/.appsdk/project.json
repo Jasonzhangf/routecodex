@@ -1564,14 +1564,25 @@
           "working_directory": "."
         },
         "input_paths": [
+          "crates/routecodex-v4-standard-plugins/src/boundary.rs",
+          "crates/routecodex-v4-standard-plugins/src/diagnostic/mod.rs",
           "crates/routecodex-v4-standard-plugins/src/lib.rs",
+          "crates/routecodex-v4-standard-plugins/src/request_plugins.rs",
           "crates/routecodex-v4-standard-plugins/src/response_inbound.rs",
           "crates/routecodex-v4-standard-plugins/src/response_outbound.rs",
           "crates/routecodex-v4-standard-plugins/tests/l2_catalog_admission.rs",
+          "crates/routecodex-v4-standard-plugins/tests/l2_contract_plugins_red.rs",
+          "crates/routecodex-v4-standard-plugins/tests/l2_direct_boundary_red.rs",
+          "crates/routecodex-v4-standard-plugins/tests/l2_error_stage_red.rs",
+          "crates/routecodex-v4-standard-plugins/tests/l2_node_container_blackbox.rs",
+          "crates/routecodex-v4-standard-plugins/tests/l2_payload_console_red.rs",
           "crates/routecodex-v4-standard-plugins/tests/l2_plan_compilation.rs",
+          "crates/routecodex-v4-standard-plugins/tests/l2_provider_inbound_red.rs",
+          "crates/routecodex-v4-standard-plugins/tests/l2_provider_outbound_red.rs",
+          "crates/routecodex-v4-standard-plugins/tests/l2_request_protocol_parse_red.rs",
           "crates/routecodex-v4-standard-plugins/tests/l2_response_chat_process_plugins.rs",
           "crates/routecodex-v4-standard-plugins/tests/l2_response_inbound_outbound.rs",
-          "crates/routecodex-v4-standard-plugins/tests/l2_node_container_blackbox.rs",
+          "crates/routecodex-v4-standard-plugins/tests/l2_routing_control_red.rs",
           "contracts/plugin-library.contract.json"
         ],
         "minimum_test_count": 31,
@@ -1626,7 +1637,7 @@
         "command": {
           "args": [
             "-c",
-            "cargo build --manifest-path Cargo.toml -p routecodex-v4-node-container --bin routecodex-v4-node-container-host --locked && node --test cordis/routecodex-v4-cordis-host/tests/host.test.mjs cordis/routecodex-v4-cordis-host/tests/host-binding.test.mjs"
+            "cargo build --manifest-path Cargo.toml -p routecodex-v4-node-container --bin routecodex-v4-node-container-host --locked && node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs"
           ],
           "program": "sh",
           "working_directory": "."
@@ -1635,6 +1646,8 @@
           "cordis/routecodex-v4-cordis-host/src/index.mjs",
           "cordis/routecodex-v4-cordis-host/tests/host.test.mjs",
           "cordis/routecodex-v4-cordis-host/tests/host-binding.test.mjs",
+          "cordis/routecodex-v4-cordis-host/tests/host-red-service-binding.test.mjs",
+          "cordis/routecodex-v4-cordis-host/tests/host-typed-service-binding-red.test.mjs",
           "cordis/routecodex-v4-cordis-host/tests/resources/**",
           "contracts/node-container.contract.json",
           "contracts/node-container-host-binding.contract.json"

@@ -24,6 +24,10 @@ for (const symbol of [
   'build_protocol_wire',
   'build_retry_wire',
   'normalize_provider_response_with_instructions',
+  'normalize_provider_response_for_relay',
+  'normalize_provider_sse_frame',
+  'normalize_provider_sse_frame_for_relay',
+  'find_frame_end',
   'ResponsesSseStream',
   'select_product_target_with_unavailable',
 ]) {

@@ -20,7 +20,18 @@ fn engine_executes_exact_lease_order_and_preserves_adjacent_frame() {
             data: serde_json::json!({"value": 3}),
             control: serde_json::json!({"route_facts": {"group": "thinking"}}),
             information: serde_json::json!({}),
-            events: vec![],
+            events: vec![
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "plugin.executed".into(),
+                    plugin_id: "increment".into(),
+                    message: "typed handle executed".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "plugin.executed".into(),
+                    plugin_id: "increment".into(),
+                    message: "typed handle executed".into(),
+                },
+            ],
         }
     );
 }

@@ -1832,6 +1832,28 @@ targets = ["mock"]
         );
     }
 
+    #[test]
+    fn production_epoch_pins_the_complete_plugin_plan_set() {
+        let handler = PipelineHandler::new(test_manifest()).expect("handler initializes");
+        let plugin_ids = handler
+            .runtime
+            .lock()
+            .expect("runtime lock")
+            .epoch_plugin_ids();
+        assert!(plugin_ids.len() > 2, "production must not admit only inbound plugins");
+        for required in [
+            "v4.std.request.responses_normalize",
+            "v4.std.request.responses_wire_build",
+            "v4.std.response.sse_frame_boundary",
+            "v4.std.response.frame_build",
+        ] {
+            assert!(
+                plugin_ids.iter().any(|plugin_id| plugin_id == required),
+                "compiled production epoch is missing {required}"
+            );
+        }
+    }
+
     struct MockSseSource {
         chunks: VecDeque<Result<Vec<u8>, String>>,
         wait_result: Result<(), String>,
