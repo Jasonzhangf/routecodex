@@ -584,7 +584,7 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     )
     .await
     .unwrap();
-    assert_eq!(output.status, 502);
+    assert_eq!(output.status, 429);
     let client_response = match output.client_body {
         V3OpenAiChatRelayClientBody::Json(value) => value,
         V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON error body"),
@@ -651,6 +651,12 @@ bind = "127.0.0.1"
 port = 1
 routing_group = "g"
 endpoints = ["openai_chat"]
+[servers.s.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.malformed_mm]
 type = "anthropic"
 base_url = "https://api.minimaxi.com/anthropic"
@@ -1723,6 +1729,12 @@ bind = "127.0.0.1"
 port = 1
 routing_group = "controlled"
 endpoints = ["openai_chat"]
+[servers.controlled.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.controlled]
 type = "openai_chat"
 base_url = "http://controlled.invalid/v1"
@@ -1757,6 +1769,12 @@ bind = "127.0.0.1"
 port = 1
 routing_group = "controlled"
 endpoints = ["openai_chat"]
+[servers.controlled.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.controlled]
 type = "openai_chat"
 base_url = "http://controlled.invalid/v1"
@@ -1792,6 +1810,12 @@ bind = "127.0.0.1"
 port = 1
 routing_group = "{identity}"
 endpoints = ["openai_chat"]
+[servers.{identity}.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = {{ allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }}
+attempt_store = {{}}
 [providers.{identity}]
 type = "openai_chat"
 base_url = "http://{identity}.invalid/v1"
@@ -1830,6 +1854,12 @@ bind = "127.0.0.1"
 port = 1
 routing_group = "__SCOPE__"
 endpoints = ["openai_chat"]
+[servers.__SCOPE__.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.__PRIMARY__]
 type = "openai_chat"
 base_url = "http://primary.invalid/v1"
@@ -1854,14 +1884,14 @@ capabilities = ["text", "tools", "web_search"]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "openai_chat", models = ["chat-client-alias"] }
 targets = [
-  { kind = "provider_model", provider = "__PRIMARY__", model = "chat-wire-model", key = "__PRIMARY__", priority = 1 },
-  { kind = "provider_model", provider = "__SECONDARY__", model = "chat-wire-model", key = "__SECONDARY__", priority = 2 }
+  { kind = "provider_model", provider = "__PRIMARY__", model = "chat-wire-model", key = "__PRIMARY__", priority = 2 },
+  { kind = "provider_model", provider = "__SECONDARY__", model = "chat-wire-model", key = "__SECONDARY__", priority = 1 }
 ]
 [route_groups.__SCOPE__.pools.default]
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "__PRIMARY__", model = "chat-wire-model", key = "__PRIMARY__", priority = 1 },
-  { kind = "provider_model", provider = "__SECONDARY__", model = "chat-wire-model", key = "__SECONDARY__", priority = 2 }
+  { kind = "provider_model", provider = "__PRIMARY__", model = "chat-wire-model", key = "__PRIMARY__", priority = 2 },
+  { kind = "provider_model", provider = "__SECONDARY__", model = "chat-wire-model", key = "__SECONDARY__", priority = 1 }
 ]
 "#
     .replace("__SCOPE__", scope)
@@ -2224,6 +2254,12 @@ bind = "127.0.0.1"
 port = 1
 routing_group = "cross_protocol"
 endpoints = ["openai_chat", "responses"]
+[servers.cross_protocol.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.__MM_PROVIDER__]
 type = "anthropic"
 base_url = "https://api.minimaxi.com/anthropic"
@@ -2321,6 +2357,12 @@ bind = "127.0.0.1"
 port = 1
 routing_group = "model_pool"
 endpoints = ["openai_chat", "responses"]
+[servers.model_pool.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.mm]
 type = "anthropic"
 base_url = "https://api.minimaxi.com/anthropic"
@@ -2362,6 +2404,12 @@ bind = "127.0.0.1"
 port = 1
 routing_group = "cross_protocol"
 endpoints = ["openai_chat", "responses"]
+[servers.cross_protocol.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.mm]
 type = "anthropic"
 base_url = "https://api.minimaxi.com/anthropic"
@@ -2570,6 +2618,12 @@ bind = "127.0.0.1"
 port = 1
 routing_group = "ws"
 endpoints = ["openai_chat"]
+[servers.ws.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.wschat]
 type = "openai_chat"
 base_url = "http://wschat.invalid/v1"
@@ -2665,6 +2719,12 @@ bind = "127.0.0.1"
 port = 1
 routing_group = "ws"
 endpoints = ["openai_chat"]
+[servers.ws.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.wschat]
 type = "openai_chat"
 base_url = "http://wschat.invalid/v1"
@@ -2807,6 +2867,12 @@ bind = "127.0.0.1"
 port = 1
 routing_group = "ws"
 endpoints = ["openai_chat"]
+[servers.ws.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.wschat]
 type = "openai_chat"
 base_url = "http://wschat.invalid/v1"
@@ -2902,6 +2968,12 @@ bind = "127.0.0.1"
 port = 1
 routing_group = "g"
 endpoints = ["openai_chat"]
+[servers.s.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.mm]
 type = "anthropic"
 base_url = "https://api.minimaxi.com/anthropic"

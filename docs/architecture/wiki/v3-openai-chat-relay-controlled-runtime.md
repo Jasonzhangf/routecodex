@@ -43,7 +43,7 @@ provider invocation, response governance, and Error01–06 projection.
 | Surface | Controlled evidence | Locked risk |
 |---|---|---|
 | JSON | Loopback captures one `/v1/chat/completions` request and returns exact Chat response | model wire rewrite without messages/tools/tool-result loss |
-| SSE | Shared incremental decoder; Runtime returns `V3OpenAiChatClientStream`; Server uses `Body::from_stream` | first frame does not wait for terminal; no full stream materialization |
+| SSE | Runtime seals one complete provider attempt; Server transports the typed committed stream | failed/intermediate attempts never commit client headers or frames |
 | Error | Loopback 429 enters `V3Error01SourceRaised` through `V3Error06ClientProjected` | provider failure never becomes Resp01/success |
 | Isolation | `metadata_center` fails before provider send; capture count stays unchanged | internal control truth never enters provider/client normal payload |
 

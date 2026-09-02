@@ -1616,14 +1616,14 @@ features:
   required_unit:
   - JSON preserves messages tools prior tool-call/result identity usage finish reason and selected wire model
   - SSE accepts arbitrary chunk boundaries and preserves tool deltas terminal finish reason and DONE order
-  - SSE first client frame is observable before provider terminal
+  - SSE provider attempts remain client-invisible until one attempt reaches a valid terminal
   - provider HTTP failure enters Error01-06 without Resp01 success projection
   - provider attempts and Error01-05 remain runtime-owned until success or candidate exhaustion; Server receives only final client semantic output or typed Error06
   - internal side-channel fields fail before provider transport
   required_blackbox:
   - loopback upstream receives exactly one POST /v1/chat/completions per valid request
   - Server JSON response preserves controlled provider semantics
-  - Server SSE uses Body::from_stream and delivers first frame before controlled terminal delay
+  - Server does not commit SSE response headers or frames before the controlled provider attempt reaches a valid terminal
   - Server 429 response exposes Error01-06 and does not wrap success
   - OpenAI Chat Relay has no secondary SSE accept worker and never serializes Error06 JSON as a normal Chat completion data frame
   - rejected metadata_center request produces zero upstream captures

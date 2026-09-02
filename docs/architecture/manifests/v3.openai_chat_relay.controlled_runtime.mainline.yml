@@ -1,5 +1,5 @@
 lifecycle_id: v3.openai_chat_relay.controlled_runtime
-summary: "Controlled OpenAI Chat /v1/chat/completions Relay through the sole Hub v1 lifecycle with incremental SSE client transport."
+summary: "Controlled OpenAI Chat /v1/chat/completions Relay through the sole Hub v1 lifecycle with terminal-sealed SSE client transport."
 owner_feature_id: v3.openai_chat_relay_runtime_integration
 entrypoint:
   node_id: V3OpenAiChatRelayRuntimeInput
@@ -64,7 +64,7 @@ error_path:
 isolation:
   provider_body_forbidden: [metadata_center, debug_snapshot, resource_handle, continuation_owner]
   client_body_forbidden: [metadata_center, debug_snapshot, resource_handle, selected_target]
-  sse_rule: "Runtime validates and emits frames incrementally; Server transports V3OpenAiChatClientStream with Body::from_stream and never materializes the full stream."
+  sse_rule: "Runtime keeps each provider-attempt stream private until terminal validation seals it; Server transports only the typed committed stream or typed Error06."
 verification:
   required_gates:
     - npm run test:v3-openai-chat-relay-runtime-integration

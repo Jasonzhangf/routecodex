@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const repo = process.cwd();
-const verifier = resolve(repo, 'scripts/architecture/verify-v3-openai-chat-relay-runtime-integration.mjs');
+const repo = basename(process.cwd()) === 'v3' ? resolve(process.cwd(), '..') : process.cwd();
+const verifier = resolve(repo, 'v3/scripts/architecture/verify-v3-openai-chat-relay-runtime-integration.mjs');
 const runtime = 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs';
 const relayCore = 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs';
 const cases = [

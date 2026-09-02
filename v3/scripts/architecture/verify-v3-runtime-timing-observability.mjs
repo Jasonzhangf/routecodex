@@ -328,8 +328,8 @@ requireMatch(
   "Relay timing must remain adjacent to the provider transport attempt",
 );
 requireMatch(
-  kernel,
-  /wrap_direct_sse_provider_event_json_observation_stream(?:_with_compat)?\([\s\S]*runtime_timing/,
+  directCore,
+  /wrap_direct_sse_provider_event_json_observation_stream(?:_with_compat)?(?:_hook)?\([\s\S]*runtime_timing/,
   "Direct SSE provider decoder must receive the Runtime timing state",
 );
 requireMatch(
@@ -343,8 +343,8 @@ requireMatch(
   "Direct SSE Runtime must collect the provider attempt into the bounded committed replay before client projection",
 );
 requireMatch(
-  kernel,
-  /wrap_direct_sse_provider_event_json_observation_stream_with_compat\([\s\S]*runtime_timing/,
+  directCore,
+  /wrap_direct_sse_provider_event_json_observation_stream_with_compat(?:_hook)?\([\s\S]*runtime_timing/,
   "Direct SSE outer Runtime closeout must receive the Runtime timing state",
 );
 requireMatch(

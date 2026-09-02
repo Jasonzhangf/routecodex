@@ -2397,7 +2397,7 @@ fn openai_chat_relay_terminal_error_keeps_http_error_projection() {
         stream_observation: None,
         provider_snapshots: None,
     };
-    let response = openai_chat_relay_output_response(output, None, Duration::from_secs(1));
+    let response = openai_chat_relay_output_response(output, None, Duration::from_secs(1), false);
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(response.headers()["content-type"], "application/json");
 }
@@ -3293,6 +3293,74 @@ async fn direct_stream_request_error06_projects_sse_error_not_json() {
 }
 
 #[test]
+fn non_responses_stream_error06_uses_protocol_error_event_once() {
+    for protocol in [
+        V3SseClientProtocol::OpenAiChat,
+        V3SseClientProtocol::Anthropic,
+        V3SseClientProtocol::Gemini,
+    ] {
+        let frame = V3Server16HttpFrame {
+            status: 502,
+            content_type: "application/json".to_string(),
+            body: V3Server16Body::Json(json!({
+                "error": {
+                    "code": "provider_pool_exhausted",
+                    "message": "provider unavailable"
+                }
+            })),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "V3Error06ClientProjected",
+            error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+            error_body: None,
+            node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
+            observability: None,
+            stream_observation: None,
+        };
+
+        let projected = project_v3_protocol_stream_error_frame_if_requested(frame, true, protocol);
+        assert_eq!(projected.content_type, "text/event-stream");
+        match projected.body {
+            V3Server16Body::Bytes(bytes) => {
+                let text = std::str::from_utf8(&bytes).unwrap();
+                assert!(text.starts_with("event: error\n"), "{text}");
+                assert!(!text.contains("response.failed"), "{text}");
+                assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
+            }
+            other => panic!("stream Error06 must project SSE body, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn stream_projection_requires_typed_error_chain() {
+    let frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {
+                "code": "provider_pool_exhausted",
+                "message": "untyped payload must remain payload"
+            }
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "V3Error06ClientProjected",
+        error_chain: Vec::new(),
+        error_body: None,
+        node_trace: vec!["V3Server16HttpFrame"],
+        observability: None,
+        stream_observation: None,
+    };
+
+    let projected = project_v3_protocol_stream_error_frame_if_requested(
+        frame,
+        true,
+        V3SseClientProtocol::OpenAiChat,
+    );
+    assert_eq!(projected.content_type, "application/json");
+    assert!(matches!(projected.body, V3Server16Body::Json(_)));
+}
+
+#[test]
 fn direct_stream_error_projection_response_uses_error_channel() {
     let frame = V3Server16HttpFrame {
         status: 502,
@@ -3787,7 +3855,7 @@ async fn anthropic_relay_output_consumes_typed_sealed_sse_body() {
         provider_snapshots: None,
     };
 
-    let response = anthropic_relay_output_response(output);
+    let response = anthropic_relay_output_response(output, false);
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get("content-type").unwrap(),

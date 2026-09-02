@@ -34,7 +34,7 @@ Hub hooks.
 
 - Controlled transport captures one real provider request and returns JSON/SSE/error fixtures.
 - The Server-owned /v1/chat/completions wrapper calls only the Runtime owner. A loopback HTTP
-  upstream validates the exact URL, wire model, auth, JSON projection, SSE first-frame timing,
+  upstream validates the exact URL, wire model, auth, JSON projection, SSE terminal commit timing,
   provider 429 Error01-06, and zero upstream capture for rejected side-channel input.
 - Source and mutation gates reject fabricated traces, fallback, Responses Direct re-entry, dynamic
   hooks, JSON payload round-trips, full raw SSE materialization, side-channel leakage, and a second
@@ -42,8 +42,8 @@ Hub hooks.
 
 ## Positive and negative locks
 
-- Positive: JSON and SSE complete the single request/response lifecycle; SSE first frame remains
-  observable while provider terminal is still delayed.
+- Positive: JSON and SSE complete the single request/response lifecycle; provider-attempt SSE
+  remains client-invisible until the attempt reaches a valid terminal, then replays unchanged.
 - Positive: a provider using `chat:deepseek-max` preserves the live DS4 terminal
   `delta: {}` plus `finish_reason: stop` frame and the following `[DONE]` marker.
 - Negative: 429 never enters Resp01; `[DONE]` before terminal fails; stream end without terminal

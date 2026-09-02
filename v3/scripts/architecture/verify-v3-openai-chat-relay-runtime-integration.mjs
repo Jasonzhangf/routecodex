@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
+
+if (basename(process.cwd()) === 'v3') process.chdir(resolve(process.cwd(), '..'));
 
 const runtimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs';
 const relayCorePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs';
@@ -81,7 +84,7 @@ for (const node of [
 for (const phrase of [
   'json_runtime_executes_one_hub_lifecycle_and_preserves_chat_semantics',
   'sse_runtime_preserves_split_frames_tool_delta_terminal_and_done_order',
-  'sse_first_client_frame_is_observable_before_provider_terminal',
+  'sse_provider_attempt_is_not_committed_before_provider_terminal',
   'sse_done_before_terminal_fails_and_terminal_without_done_succeeds',
   'provider_error_enters_error01_06_without_success_projection',
   'request_side_channel_is_rejected_before_provider_transport',
@@ -89,7 +92,7 @@ for (const phrase of [
 for (const phrase of [
   'server_executes_controlled_json_sse_error_and_isolation_without_second_owner',
   '/v1/chat/completions',
-  'client first frame must arrive before controlled terminal delay',
+  'provider semantic frames must remain client-invisible until terminal validation',
   'metadata_center',
 ]) requireText(serverTests, serverTestsPath, phrase);
 for (const phrase of ['Red baseline', 'MissingStatus', 'does not prove live provider compatibility']) {
@@ -99,16 +102,16 @@ for (const [text, owner, phrases] of [
   [functionMap, functionMapPath, ['feature_id: v3.openai_chat_relay_runtime_integration', 'v3.openai_chat.client_sse_stream']],
   [mainlineMap, mainlineMapPath, ['chain_id: v3.openai_chat_relay.controlled_runtime', 'v3-openai-chat-relay-15']],
   [resourceMap, resourceMapPath, ['resource_id: v3.openai_chat.client_sse_stream', 'allowed_readers: [openai_chat_relay_output_response]']],
-  [verificationMap, verificationMapPath, ['feature_id: v3.openai_chat_relay_runtime_integration', 'SSE first client frame is observable before provider terminal']],
+  [verificationMap, verificationMapPath, ['feature_id: v3.openai_chat_relay_runtime_integration', 'SSE provider attempts remain client-invisible until one attempt reaches a valid terminal']],
   [manifest, manifestPath, ['lifecycle_id: v3.openai_chat_relay.controlled_runtime', 'V3ServerRespOutbound06ClientFrame']],
-  [wiki, wikiPath, ['Single lifecycle', 'Body::from_stream', 'Live provider compatibility']],
-  [wikiHtml, wikiHtmlPath, ['Canonical Markdown source:', 'V3 OpenAI Chat Relay Controlled Runtime', 'Body::from_stream', 'No fallback']],
+  [wiki, wikiPath, ['Single lifecycle', 'typed committed stream', 'Live provider compatibility']],
+  [wikiHtml, wikiHtmlPath, ['Canonical Markdown source:', 'V3 OpenAI Chat Relay Controlled Runtime', 'client-invisible until a valid terminal', 'No fallback']],
 ]) for (const phrase of phrases) requireText(text, owner, phrase);
 requireText(hub, hubPath, 'mod openai_chat_relay_runtime;');
 for (const phrase of [
   'execute_v3_openai_chat_relay_runtime_with_default_transport',
-  'V3OpenAiChatRelayClientBody::Sse',
-  'Body::from_stream(',
+  'project_v3_protocol_stream_error_frame_if_requested',
+  'v3_client_sse_body(',
 ]) requireText(serverSurface, `${serverPath}+${serverExecutorsPath}`, phrase);
 forbid(openaiServer, serverExecutorsPath, [
   /client_response[\s\S]{0,200}get\("events"\)/,

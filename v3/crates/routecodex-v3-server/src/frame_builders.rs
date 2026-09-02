@@ -200,19 +200,28 @@ pub(crate) fn project_v3_responses_direct_stream_error_frame_if_requested(
     frame: V3Server16HttpFrame,
     requested_stream: bool,
 ) -> V3Server16HttpFrame {
-    project_v3_responses_stream_error_frame_if_requested(frame, requested_stream)
+    project_v3_protocol_stream_error_frame_if_requested(
+        frame,
+        requested_stream,
+        V3SseClientProtocol::Responses,
+    )
 }
 
 pub(crate) fn project_v3_responses_relay_stream_error_frame_if_requested(
     frame: V3Server16HttpFrame,
     requested_stream: bool,
 ) -> V3Server16HttpFrame {
-    project_v3_responses_stream_error_frame_if_requested(frame, requested_stream)
+    project_v3_protocol_stream_error_frame_if_requested(
+        frame,
+        requested_stream,
+        V3SseClientProtocol::Responses,
+    )
 }
 
-fn project_v3_responses_stream_error_frame_if_requested(
+pub(crate) fn project_v3_protocol_stream_error_frame_if_requested(
     mut frame: V3Server16HttpFrame,
     requested_stream: bool,
+    protocol: V3SseClientProtocol,
 ) -> V3Server16HttpFrame {
     if !requested_stream || frame.error_chain.is_empty() || frame.content_type != "application/json"
     {
@@ -238,11 +247,14 @@ fn project_v3_responses_stream_error_frame_if_requested(
         frame.error_body = Some(body);
     }
     frame.content_type = "text/event-stream".to_string();
-    frame.body = V3Server16Body::Bytes(v3_responses_sse_error_event_chunk(
-        frame.status,
-        &code,
-        &message,
-    ));
+    frame.body = V3Server16Body::Bytes(match protocol {
+        V3SseClientProtocol::Responses => {
+            v3_responses_sse_error_event_chunk(frame.status, &code, &message)
+        }
+        V3SseClientProtocol::OpenAiChat
+        | V3SseClientProtocol::Anthropic
+        | V3SseClientProtocol::Gemini => v3_sse_error_event_chunk(frame.status, &code, &message),
+    });
     frame
 }
 
@@ -310,6 +322,9 @@ fn v3_sse_runtime_error_source_chunk_for_protocol(
             v3_responses_sse_error_event_chunk(projected.status, &code, &message)
         }
         V3SseClientProtocol::OpenAiChat => {
+            v3_sse_error_event_chunk(projected.status, &code, &message)
+        }
+        V3SseClientProtocol::Anthropic | V3SseClientProtocol::Gemini => {
             v3_sse_error_event_chunk(projected.status, &code, &message)
         }
     }
@@ -446,6 +461,8 @@ pub(crate) type V3IoSseStream =
 pub(crate) enum V3SseClientProtocol {
     Responses,
     OpenAiChat,
+    Anthropic,
+    Gemini,
 }
 
 pub(crate) fn v3_client_sse_body(
@@ -724,7 +741,7 @@ fn v3_io_sse_body_for_protocol(
                 )),
             };
             match next {
-            Some((Ok(bytes), state)) => Some((Ok(bytes), state)),
+                Some((Ok(bytes), state)) => Some((Ok(bytes), state)),
                 Some((Err(error), (stream, interval, _, keepalive_chunk))) => {
                     let frame = v3_sse_runtime_error_source_chunk_for_protocol(
                         "V3ServerRespOutbound05ClientFrame",
