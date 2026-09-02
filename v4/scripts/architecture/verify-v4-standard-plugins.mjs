@@ -786,8 +786,12 @@ function runSelfTest() {
     }],
     ['provider semantic reversal reintroduced', (state) => {
       state.source = source.replace(
-        'vec!["v4.request.provider_semantic"],\n        vec!["v4.request.provider_wire_payload"],',
-        'vec!["v4.request.provider_semantic"],\n        vec!["v4.request.normal_payload"],',
+        '"v4.std.provider.wire_build",\n        PluginCategory::Provider,\n        "V4ProviderReqOutbound08WirePayload",',
+        '"v4.std.provider.wire_build",\n        PluginCategory::Provider,\n        "V4ProviderReqOutbound08WirePayload",',
+      );
+      state.source = state.source.replace(
+        'vec!["v4.request.provider_wire_payload"],\n    );\n    codec.descriptor.selection_group',
+        'vec!["v4.request.normal_payload"],\n    );\n    codec.descriptor.selection_group',
       );
     }],
     ['node permission broadened', (state) => {
