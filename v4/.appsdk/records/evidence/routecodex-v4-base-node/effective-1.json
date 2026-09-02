@@ -1,10 +1,10 @@
 {
   "evidence_id": "effective-1",
   "issue_id": "v4-cordis-governance-reset-20260903",
-  "experiment_id": "fix-e57124727c0a",
+  "experiment_id": "fix-8b94dfead128",
   "phase": "post_architecture_effectiveness",
   "kind": "sample_replay",
-  "source_commit": "e57124727c0a866e4a630e42523e1e722d5eb471",
+  "source_commit": "8b94dfead1289ab856a46f0e8d7c113372b56db0",
   "artifact_hash": "sha256:0a7d33027e7b472443c04a29e677b2a3eb118a2c05c5026d62c6e170777a86ba",
   "execution_surface": "deployed_blackbox",
   "environment_id": "local-v4-5520",
@@ -25,7 +25,7 @@
   ],
   "exit_status": 0,
   "result": "pass",
-  "created_at": "2026-09-03T00:00:00.000Z",
+  "created_at": "2026-09-03T00:00:03.000Z",
   "expires_at": "2026-09-10T00:00:00.000Z",
   "input_hashes": [
     "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",

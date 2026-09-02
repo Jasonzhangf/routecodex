@@ -1,14 +1,14 @@
 {
-  "worktree_id": "v4-cordis-e57124727c0a",
+  "worktree_id": "v4-cordis-8b94dfead128",
   "issue_id": "v4-cordis-governance-reset-20260903",
   "module_id": "routecodex-v4-base-node",
-  "base_ref": "51a67d202af5e9e28c04102b7565f5fad701df4f",
-  "base_commit": "51a67d202af5e9e28c04102b7565f5fad701df4f",
+  "base_ref": "e57124727c0a866e4a630e42523e1e722d5eb471",
+  "base_commit": "e57124727c0a866e4a630e42523e1e722d5eb471",
   "branch": "codex/v4-cordis-governance-reset-20260903",
-  "head_commit": "e57124727c0a866e4a630e42523e1e722d5eb471",
+  "head_commit": "8b94dfead1289ab856a46f0e8d7c113372b56db0",
   "initial_clean": true,
   "final_clean": true,
   "isolation_mode": "isolated_worktree",
   "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "created_at": "2026-09-03T00:00:00.000Z"
+  "created_at": "2026-09-03T00:00:03.000Z"
 }
