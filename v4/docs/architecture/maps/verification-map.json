@@ -774,7 +774,7 @@
     },
     {
       "gate_id": "v4_cordis_host_l3_regression",
-      "command": "cargo build --manifest-path Cargo.toml -p routecodex-v4-node-container --bin routecodex-v4-node-container-host --locked && node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs",
+      "command": "cargo test --manifest-path Cargo.toml -p routecodex-v4-node-container --bin routecodex-v4-node-container-host --locked && node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs",
       "required_for": [
         "routecodex-v4-cordis-host:architecture_stable",
         "routecodex-v4-cordis-host:active_link",
