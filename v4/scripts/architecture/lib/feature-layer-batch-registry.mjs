@@ -72,9 +72,9 @@ export const GATE_INPUT_SETS = {
   ],
 };
 const GATE_MATRIX_HASHES = {
-  architecture: 'sha256:831f30afef4abc0ad754041ddd5a4e8875ca78d5822b56ddf310153a7513ff8e',
-  red: 'sha256:d2904a0d75c7a644b711f9bec64777d953c08071bbf2015c7eef049cbac51a46',
-  packageScripts: 'sha256:36b7f79182f3f55d2ce5efc885880ffe3daa9f25334a2117d4e305d814a96762',
+  architecture: 'sha256:a6b16df227a079e439ef85e573be43fc9996cf2ec52101cfd873abd15255b6cb',
+  red: 'sha256:c00e69c63333d846079d62ea4477aea91d8c11f64836e4e26d983b22e9624d40',
+  packageScripts: 'sha256:d1ec246d8726d34ee438236ab58cbd68dd9535b7c34ddf36e77f89b9b230921e',
 };
 const PREFLIGHT_PREFIXES = new Map([
   ['build', ['buildSource', 'sha256:fb028d2b084eeb78e4afc9d45c954af15536ecc47379660a4a6dc5ccd42461b5', 'BUILD_PREFLIGHT_BINDING']],

@@ -81,6 +81,7 @@ export const RED_SUITES = [
   ['verify-v4-control-event-arc.mjs', '--red-self-test'],
   ['verify-v4-cli-plugin.mjs', '--red-self-test'],
   ['verify-v4-real-runtime-admission.mjs', '--red-self-test'],
+  ['verify-v4-semantic-parity-red.mjs', '--red-self-test'],
 ];
 
 export const CONSUMER_REGRESSIONS = [
