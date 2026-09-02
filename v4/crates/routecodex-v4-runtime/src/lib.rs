@@ -1876,7 +1876,7 @@ impl SkeletonRuntime {
     /// read-only observation; no result is fed back into routing, execution,
     /// or business payload state.
     pub fn dispatch_diagnostic_events(&self, request_id: &str) -> Result<usize, RuntimeFault> {
-        let mut bus = self
+        let bus = self
             .diagnostic_bus
             .lock()
             .map_err(|_| RuntimeFault::new("diagnostic_bus", "diagnostic bus lock poisoned"))?;
