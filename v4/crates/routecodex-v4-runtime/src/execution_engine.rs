@@ -226,6 +226,20 @@ impl ExecutionEngine {
         registry: &dyn HandleRegistry,
         stop_node: Option<&str>,
     ) -> Result<NodeOutcome, ExecutionError> {
+        Self::execute_pinned_node_from(chain, None, frame, lease, registry, stop_node)
+    }
+
+    /// Execute a declared suffix of a compiled chain.  This is used only for
+    /// production control pre-dispatch slices whose predecessor already ran
+    /// in the same request owner; it never reconstructs or sorts graph state.
+    pub fn execute_pinned_node_from(
+        chain: &str,
+        start_node: Option<&str>,
+        mut frame: NodeExecutionFrame,
+        lease: &EpochLease,
+        registry: &dyn HandleRegistry,
+        stop_node: Option<&str>,
+    ) -> Result<NodeOutcome, ExecutionError> {
         if chain.trim().is_empty() {
             return Err(ExecutionError::EmptyEntrypoint);
         }
@@ -234,9 +248,17 @@ impl ExecutionEngine {
         if snapshot.state == ExecutionEpochState::Disposed {
             return Err(ExecutionError::RetiredLease(snapshot.state));
         }
-        let mut node_id = lease
-            .entrypoint(chain)
-            .map_err(|error| ExecutionError::LeaseUnavailable(error.to_string()))?;
+        let mut node_id = match start_node {
+            Some(node_id) => {
+                lease
+                    .plan_hash(node_id)
+                    .map_err(|error| ExecutionError::LeaseUnavailable(error.to_string()))?;
+                node_id.to_string()
+            }
+            None => lease
+                .entrypoint(chain)
+                .map_err(|error| ExecutionError::LeaseUnavailable(error.to_string()))?,
+        };
         let mut visited = HashSet::new();
         loop {
             if !visited.insert(node_id.clone()) {
