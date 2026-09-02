@@ -73,17 +73,21 @@ export function createProductionContext() {
     io: createIo(),
     truth: createGitTruth({ repoRoot, v4Root }),
     now: Date.now(),
+    freshGovernanceReset: fs.existsSync(path.join(v4Root, '.appsdk/migrations/reset-governance.json')),
   };
 }
 
 export function validateFeatureLayerBatchAdmission(input, context, options = {}) {
   const mode = options.mode ?? 'definition';
+  const validationContext = mode === 'build-guard'
+    ? { ...context, resetLegacyEvidence: context.freshGovernanceReset === true }
+    : context;
   const failures = [];
   if (!VALID_MODES.has(mode) || ['self-test', 'boundary-self-test', 'red-self-test'].includes(mode)) {
     addFailure(failures, 'MODE_INVALID', `validator mode ${mode} is not a production validation mode`);
     return failures;
   }
-  failures.push(...validateFeatureLayerDefinition(input, context, {
+  failures.push(...validateFeatureLayerDefinition(input, validationContext, {
     allowPendingGuard: options.allowPendingGuard === true,
   }));
   if (mode === 'admission') {
@@ -91,7 +95,7 @@ export function validateFeatureLayerBatchAdmission(input, context, options = {})
   } else if (mode === 'build-guard') {
     let observed;
     try {
-      observed = observeWiring(input.manifest, context);
+      observed = observeWiring(input.manifest, validationContext);
     } catch (error) {
       addFailure(failures, 'WIRING_GRAPH_UNREADABLE', error.message);
       return failures;
@@ -106,7 +110,7 @@ export function validateFeatureLayerBatchAdmission(input, context, options = {})
         addFailure(failures, 'WIRING_GUARD_UNBOUND', 'build guard requires an exact source candidate');
       }
     } else if (observed.wiring_edges.length > 0) {
-      validateFeatureLayerAdmission(input, context, failures, {
+      validateFeatureLayerAdmission(input, validationContext, failures, {
         requireIntegrationRecords: false,
       });
     }

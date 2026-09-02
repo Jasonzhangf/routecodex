@@ -363,7 +363,13 @@ export function validateFeatureLayerDefinition(input, context, options = {}) {
   if (((manifest.integration?.wiring_edges ?? []).length > 0) !== manifest.integration?.wiring_started) {
     addFailure(failures, 'WIRING_STATE_DRIFT', 'wiring_started and wiring_edges must change together');
   }
-  validateSourceGreenClaims(input, context, failures);
+  // A governance reset intentionally invalidates pre-reset source/evidence
+  // bindings. Preserve those records as history, but do not let their stale
+  // timestamps and candidate hashes block the fresh definition/build guard.
+  // Admission remains strict and still requires a newly produced record graph.
+  if (!context.resetLegacyEvidence) {
+    validateSourceGreenClaims(input, context, failures);
+  }
   for (const edge of input.mainlineMap.edges ?? []) {
     const serialized = JSON.stringify(edge);
     if (!manifest.integration?.wiring_started
