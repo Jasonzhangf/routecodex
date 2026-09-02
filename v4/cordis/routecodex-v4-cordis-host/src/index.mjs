@@ -502,14 +502,17 @@ export class CordisNodeHost {
   async dispose() {
     if (this.#disposed) return;
     const retained = [...this.#acquired];
-    await this.#disposeFibers(this.#fibers);
-    this.#ready = false;
-    this.#fibers = [];
-    for (const name of retained) {
-      this.#releasedServices.add(name);
+    try {
+      await this.#disposeFibers(this.#fibers);
+    } finally {
+      this.#ready = false;
+      this.#fibers = [];
+      for (const name of retained) {
+        this.#releasedServices.add(name);
+      }
+      this.#acquired.clear();
+      this.#disposed = true;
     }
-    this.#acquired.clear();
-    this.#disposed = true;
   }
 
   async #disposeFibers(fibers) {
