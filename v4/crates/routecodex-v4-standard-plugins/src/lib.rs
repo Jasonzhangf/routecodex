@@ -634,14 +634,14 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
         plugin(
             "v4.std.diagnostic.direct_response_payload_console_render",
             PluginCategory::Diagnostic,
-            "V4DirectResp01ProviderRaw",
-            "response_inbound",
-            Some(1),
+            "V4DirectResp03ClientProtocol",
+            "response_outbound",
+            Some(3),
             PluginKind::Observer,
             PluginEffect::DiagnosticOnly,
             PluginPhase::Observation,
             903,
-            vec!["v4.direct.response.provider_raw"],
+            vec!["v4.direct.response.client_payload"],
             vec![],
         ),
         plugin(
@@ -1047,6 +1047,10 @@ fn response_payload_console(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     chat_process_payload_console(ctx, "response")
 }
 
+fn direct_response_payload_console(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    chat_process_payload_console(ctx, "response")
+}
+
 fn chat_process_payload_console(ctx: &mut ExecCtx<'_>, direction: &str) -> Result<(), String> {
     let line = diagnostic::format_chat_process_payload(direction, ctx.read_data())?;
     ctx.emit("console.payload_ready", line);
@@ -1331,7 +1335,7 @@ impl StandardHandleRegistry {
             ),
             (
                 "v4.std.diagnostic.direct_response_payload_console_render",
-                response_payload_console,
+                direct_response_payload_console,
             ),
             ("v4.std.control.scope_consume", scope_consume),
             ("v4.std.control.payload_cycle_record", payload_cycle_record),
