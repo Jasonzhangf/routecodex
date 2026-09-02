@@ -44,6 +44,11 @@ if (runtimeSource.includes('decode_provider_sse_frame(')
     || runtimeSource.includes('encode_client_sse_frame(')) {
   failures.push('SSE_SEMANTIC_BYPASS: runtime directly invokes SSE semantic codec outside NodePluginPlan');
 }
+if (productionSource.includes('SseIngressPlugin::new(')
+    || productionSource.includes('SseEgressPlugin::new(')
+    || !productionSource.includes('production_transport_pair(')) {
+  failures.push('SSE_TRANSPORT_CONSTRUCTION_BYPASS: runtime-bin must consume the opaque SSE transport pair from the transport owner');
+}
 const sendResponsesStart = providerSource.indexOf('pub fn send_responses(');
 const sendResponsesEnd = providerSource.indexOf('\npub fn send_responses_streaming(', sendResponsesStart);
 const sendResponsesSource = providerSource.slice(sendResponsesStart, sendResponsesEnd);
