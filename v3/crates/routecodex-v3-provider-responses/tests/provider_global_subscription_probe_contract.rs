@@ -84,7 +84,7 @@ fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
     for now_ms in 1..=3 {
         fail(&store, "session-a", "model-a", now_ms);
     }
-    let first_due = 60_003;
+    let first_due = 30_003;
     assert!(store
         .provider_cooldown_probe_keys_due(first_due - 1)
         .unwrap()
@@ -138,7 +138,7 @@ fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
     for now_ms in 1..=3 {
         fail(&store, "session-a", "model-a", now_ms);
     }
-    let first_due = 60_003;
+    let first_due = 30_003;
     assert!(store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
@@ -163,12 +163,12 @@ fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
             .available
     );
     assert!(store
-        .provider_cooldown_probe_keys_due(first_due + 5 * 60_000 - 1)
+        .provider_cooldown_probe_keys_due(first_due + 60_000 - 1)
         .unwrap()
         .is_empty());
     assert_eq!(
         store
-            .provider_cooldown_probe_keys_due(first_due + 5 * 60_000)
+            .provider_cooldown_probe_keys_due(first_due + 60_000)
             .unwrap()
             .len(),
         1

@@ -500,6 +500,9 @@ impl V3ProviderHealthStore {
                 })
                 .map(|(_, failure)| failure.failure_count)
                 .sum();
+            // Adaptive history stays diagnostic: without a configured policy
+            // its value then sizes the cooldown duration. The probe cadence
+            // itself is the fixed ladder (V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS).
             let adaptive_interval_ms = record_adaptive_failure(&mut state, &auth_key);
             let cooldown_interval_ms = if uses_configured_policy {
                 policy.cooldown_ms.max(1)
@@ -520,7 +523,7 @@ impl V3ProviderHealthStore {
                         model_id,
                         now_ms,
                         until_ms,
-                        adaptive_interval_ms,
+                        V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
                     );
                 }
                 state.auth_key_cooldowns.insert(
@@ -715,19 +718,9 @@ impl V3ProviderHealthStore {
         });
         let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         record_adaptive_success(&mut state, &auth_key, _now_ms);
-        // A real successful request in any session is an authoritative
-        // recovery observation for this provider/auth key.  Clear the shared
-        // provider cooldown as well as the session-local score so other
-        // sessions can re-enter before the next scheduled probe.
-        let completion = state
-            .provider_cooldown_probes
-            .remove(&auth_key)
-            .map(|probe_state| probe_state.completion);
-        state.auth_key_cooldowns.remove(&auth_key);
-        state.auth_key_consecutive_failures.remove(&auth_key);
-        if let Some(completion) = completion {
-            completion.send_replace(true);
-        }
+        // A business success resets session evidence only. A pending provider
+        // cooldown remains blocked until the typed probe owner reports probe
+        // success; business traffic must never resurrect it.
         persist_cooldown_state(state);
         Ok(())
     }
@@ -1057,10 +1050,10 @@ impl V3ProviderHealthStore {
             history.score_generation = history.score_generation.saturating_add(1);
             (history.attempts, history.failures)
         };
-        // Probe retry cadence is a fixed, observable contract: 1/5/15/60/180/300
-        // minutes.  Health history still records adaptive diagnostics, but must
-        // not skip the first recovery probes by turning one failure into 60m.
-        let next_interval = probe_backoff_ms(next_probe_failure_count);
+            // Probe retry cadence is a fixed, observable contract: 30s/1m/3m/15m/1h/3h,
+            // looping after the 3h step. Health history still records adaptive
+            // diagnostics, but must not reschedule the ladder.
+            let next_interval = probe_backoff_ms(next_probe_failure_count);
         let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
             return Ok(());
         };
@@ -1119,12 +1112,10 @@ impl V3ProviderHealthStore {
             history.attempts = history.attempts.saturating_add(1);
             history.failures = history.failures.saturating_add(1);
             history.score_generation = history.score_generation.saturating_add(1);
-            let interval = adaptive_probe_interval_ms(
-                history.attempts,
-                history.failures,
-                history.recovery_ewma_ms,
-                history.probe_failure_count,
-            );
+            // The first probe is always the fixed 30s ladder step; adaptive
+            // history (attempts/failures/EWMA above) stays diagnostic and
+            // never reschedules the cadence.
+            let interval = V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS;
             let should_block = history.score_milli == 0;
             if should_block {
                 upsert_provider_cooldown_probe_with_interval(
@@ -2291,13 +2282,13 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
             )
             .unwrap();
         assert_eq!(second.state, "cooldown");
-        assert_eq!(second.cooldown_until_ms, Some(60_101));
+        assert_eq!(second.cooldown_until_ms, Some(30_101));
         assert!(store
-            .provider_cooldown_probe_keys_due(60_100)
+            .provider_cooldown_probe_keys_due(30_100)
             .unwrap()
             .is_empty());
         assert_eq!(
-            store.provider_cooldown_probe_keys_due(60_101).unwrap(),
+            store.provider_cooldown_probe_keys_due(30_101).unwrap(),
             vec![(
                 "provider-a".to_string(),
                 Some("key-a".to_string()),
@@ -2426,7 +2417,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
     }
 
     #[test]
-    fn success_in_any_session_recovers_the_same_provider_key_and_model() {
+    fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
         let store = V3ProviderHealthStore::default();
         store
             .record_provider_cooldown_failure(
@@ -2438,7 +2429,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                 10,
             )
             .unwrap();
-        // 未到期的 provider cooldown 也由同一 key/model 的真实成功立即恢复。
+        // 未到期的 provider cooldown 不得由业务成功清除。
         store
             .record_provider_success_in_session(
                 &session("session-a"),
@@ -2449,7 +2440,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
             )
             .unwrap();
         assert!(
-            store
+            !store
                 .availability_for_session(
                     &session("session-a"),
                     "provider-a",
@@ -2458,7 +2449,32 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                     105,
                 )
                 .available,
-            "a real success must recover the exact provider key/model across sessions"
+            "a real success must not recover provider cooldown without probe success"
+        );
+
+        store
+            .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
+            .unwrap()
+            .expect("pending provider cooldown must acquire a probe");
+        store
+            .complete_provider_cooldown_probe_success_at(
+                "provider-a",
+                Some("key-a"),
+                Some("gpt-5.5"),
+                106,
+            )
+            .unwrap();
+        assert!(
+            store
+                .availability_for_session(
+                    &session("session-a"),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("gpt-5.5"),
+                    107,
+                )
+                .available,
+            "successful probe must recover the exact provider key/model"
         );
     }
 

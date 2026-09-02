@@ -1,14 +1,18 @@
+/// Fixed probe retry cadence, in milliseconds:
+/// 30s / 1m / 3m / 15m / 1h / 3h. The ladder loops: after the 3h step the
+/// next probe failure returns to 30s. Index 0 is the first probe scheduled
+/// when a key enters cooldown; index N is scheduled after probe failure N.
 const PROBE_BACKOFF_MS: [u64; 6] = [
+    30_000,
     60_000,
-    5 * 60_000,
+    3 * 60_000,
     15 * 60_000,
     60 * 60_000,
     3 * 60 * 60_000,
-    5 * 60 * 60_000,
 ];
 
 pub(crate) fn probe_backoff_ms(failure_count: u8) -> u64 {
-    PROBE_BACKOFF_MS[usize::from(failure_count).min(PROBE_BACKOFF_MS.len() - 1)]
+    PROBE_BACKOFF_MS[usize::from(failure_count) % PROBE_BACKOFF_MS.len()]
 }
 
 pub(crate) fn adaptive_probe_interval_ms(
@@ -54,12 +58,26 @@ pub(crate) fn adaptive_probe_interval_ms(
 
 #[cfg(test)]
 mod tests {
-    use super::adaptive_probe_interval_ms;
+    use super::{adaptive_probe_interval_ms, probe_backoff_ms};
 
     #[test]
     fn adaptive_probe_starts_fast_and_stretches_for_non_recovery() {
-        assert_eq!(adaptive_probe_interval_ms(3, 3, None, 0), 60_000);
-        assert!(adaptive_probe_interval_ms(10, 10, None, 1) >= 60 * 60_000);
+        assert_eq!(adaptive_probe_interval_ms(3, 3, None, 0), 30_000);
+        assert!(adaptive_probe_interval_ms(10, 10, None, 1) >= 15 * 60_000);
+    }
+
+    #[test]
+    fn probe_backoff_ladder_is_30s_1m_3m_15m_1h_3h_and_loops() {
+        assert_eq!(probe_backoff_ms(0), 30_000);
+        assert_eq!(probe_backoff_ms(1), 60_000);
+        assert_eq!(probe_backoff_ms(2), 3 * 60_000);
+        assert_eq!(probe_backoff_ms(3), 15 * 60_000);
+        assert_eq!(probe_backoff_ms(4), 60 * 60_000);
+        assert_eq!(probe_backoff_ms(5), 3 * 60 * 60_000);
+        // The ladder loops back to 30s after the 3h step.
+        assert_eq!(probe_backoff_ms(6), 30_000);
+        assert_eq!(probe_backoff_ms(7), 60_000);
+        assert_eq!(probe_backoff_ms(12), 30_000);
     }
 
     #[test]
