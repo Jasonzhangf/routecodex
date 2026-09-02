@@ -13,6 +13,12 @@ macro_rules! typed_immutable_carrier {
         #[derive(Debug, Clone, PartialEq, Eq)]
         pub struct $name(Arc<[u8]>);
 
+        impl Default for $name {
+            fn default() -> Self {
+                Self::from_bytes(&[])
+            }
+        }
+
         impl $name {
             pub fn from_bytes(bytes: &[u8]) -> Self {
                 Self(Arc::from(bytes))
