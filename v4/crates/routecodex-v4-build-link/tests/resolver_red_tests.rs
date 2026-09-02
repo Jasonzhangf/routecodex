@@ -1,7 +1,7 @@
 use routecodex_v4_build_link::error::ActiveLinkError;
 use routecodex_v4_build_link::identity::{canonical, recompute_artifact_hash, sha256_hex};
 use routecodex_v4_build_link::resolver::{
-    assert_outside_active, emit_link_flags, frozen_module_ids, host_triple, resolve,
+    assert_outside_active, emit_link_flags, host_triple, resolve,
     select_rlib_by_stem, source_dep_link_args,
 };
 use routecodex_v4_build_link::IndexBuilder;
@@ -534,8 +534,10 @@ fn index_is_deterministic_and_drift_detected() {
 #[test]
 fn red_source_deps_rejects_frozen_module() {
     let root = v4_root();
-    let frozen = frozen_module_ids(&root).expect("frozen registry must parse");
-    assert!(frozen.contains("routecodex-v4-error"));
+    // The fresh AppSDK governance surface intentionally has no published
+    // Frozen modules.  Keep this red test hermetic by modelling the input
+    // registry directly instead of coupling it to the current project state.
+    let frozen = HashSet::from(["routecodex-v4-error".to_string()]);
     let error = source_dep_link_args(&root, "routecodex-v4-error", &frozen)
         .expect_err("frozen module must never be linked as a mutable source dep");
     assert!(
