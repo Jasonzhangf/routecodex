@@ -22,22 +22,21 @@ fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject");
     let guidance = payload["tools"][0]["description"].as_str().unwrap();
-    assert!(guidance.contains("工具调用协议（只适用于本轮工具调用"));
-    assert!(guidance.contains("工具参数 JSON 对象本层"));
-    assert!(guidance.contains("Responses/Chat 的 `arguments`"));
+    assert!(guidance.contains("工具调用协议"));
+    assert!(guidance.contains("工具参数顶层三字段缺一不可"));
+    assert!(guidance.contains("字段放工具参数 JSON 顶层"));
     assert!(!guidance.contains("Anthropic native"));
     assert!(!guidance.contains("tool_use.input"));
-    assert!(guidance.contains("不超过 50 个字符"));
+    assert!(guidance.contains("<= 50 字，只说动机"));
     assert!(guidance.contains("goal_alignment_confidence"));
     assert!(guidance.contains("model_id"));
-    assert!(guidance.contains("必须同时填写"));
     assert!(!guidance.contains("可选"));
     assert!(!guidance.contains("如提供"));
     assert_eq!(payload["tools"][1]["description"], "internal");
     assert!(payload["instructions"]
         .as_str()
         .unwrap()
-        .contains("不超过 50 个字符"));
+        .contains("<= 50 字，只说动机"));
 }
 
 #[test]
@@ -65,12 +64,12 @@ fn req04_tool_thinking_keeps_apply_patch_raw_and_outside_reason_contract() {
     assert!(!apply_patch.to_string().contains("\"reason\""));
     assert!(!apply_patch
         .to_string()
-        .contains("工具调用协议（只适用于本轮工具调用"));
+        .contains("工具调用协议"));
 
     let pwd = &payload["tools"][1];
     assert!(pwd
         .to_string()
-        .contains("工具调用协议（只适用于本轮工具调用"));
+        .contains("工具调用协议"));
 }
 
 #[test]
@@ -166,7 +165,7 @@ fn req04_tool_thinking_guidance_mounts_anthropic_system_prompt() {
         .expect("enabled tool-thinking must inject");
     let system = payload["system"].as_str().unwrap();
     assert!(system.starts_with("existing system\n\n"));
-    assert!(system.contains("不超过 50 个字符"));
+    assert!(system.contains("<= 50 字，只说动机"));
 }
 
 #[test]
@@ -181,7 +180,7 @@ fn req04_tool_thinking_injects_into_canonical_chat_system_message() {
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject into canonical chat system");
     let content = payload["messages"][0]["content"].as_str().unwrap();
-    assert!(content.contains("工具调用协议（只适用于本轮工具调用"));
+    assert!(content.contains("工具调用协议"));
     assert_eq!(payload["messages"].as_array().unwrap().len(), 2);
 }
 
@@ -283,14 +282,14 @@ fn req04_tool_thinking_reaches_anthropic_wire_system_field() {
         .expect("canonical Chat payload must encode as Anthropic request");
     let tool_description = wire["tools"][0]["description"].to_string();
     assert!(
-        tool_description.contains("工具调用协议（只适用于本轮工具调用"),
+        tool_description.contains("工具调用协议"),
         "wire: {wire}"
     );
     assert!(
         wire["system"]
             .as_str()
             .unwrap()
-            .contains("不超过 50 个字符"),
+            .contains("<= 50 字，只说动机"),
         "wire: {wire}"
     );
     assert!(
@@ -314,7 +313,7 @@ fn req04_tool_thinking_injects_anthropic_tool_list_and_parameter_schema() {
     assert!(payload["system"]
         .as_str()
         .unwrap()
-        .contains("不超过 50 个字符"));
+        .contains("<= 50 字，只说动机"));
     assert!(payload["tools"][0]["description"]
         .as_str()
         .unwrap()
@@ -450,7 +449,7 @@ fn req04_tool_thinking_custom_tool_compiles_provider_wrapper() {
 }
 
 #[test]
-fn req04_tool_thinking_requires_true_model_self_report_without_request_identity_binding() {
+fn req04_tool_thinking_uses_short_model_id_description_without_request_identity_binding() {
     let mut payload = json!({
         "model": "client-route-alias",
         "request_id": "request-identity-must-not-be-model-id",
@@ -475,44 +474,48 @@ fn req04_tool_thinking_requires_true_model_self_report_without_request_identity_
         .as_str()
         .expect("custom model_id description");
     for description in [native_description, custom_description] {
-        assert!(description.contains("自身当前真实的模型 ID"));
-        assert!(description.contains("不得复制或推导"));
-        assert!(description.contains("不得读取或依据本轮上下文推断"));
-        assert!(description.contains("无法确定时不得猜测"));
+        assert_eq!(description, "非空模型 ID");
         assert!(!description.contains("client-route-alias"));
         assert!(!description.contains("request-identity-must-not-be-model-id"));
+        assert!(!description.contains("必须填写你自身当前真实"));
+        assert!(!description.contains("不得复制或推导"));
+        assert!(!description.contains("provider-bound wire model"));
     }
     let payload_text = payload.to_string();
     assert!(!payload_text.contains("<本次 provider-bound 请求的精确 model 值>"));
 }
 
 #[test]
-fn req04_tool_thinking_guidance_requires_model_self_report_in_both_protocols() {
+fn req04_tool_thinking_guidance_uses_short_neutral_form() {
     for guidance in [
         V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE,
         V3_TOOL_THINKING_ANTHROPIC_GUIDANCE,
     ] {
-        assert!(guidance.contains("必须填写你自身当前真实的模型 ID"));
-        assert!(guidance.contains("不得复制或推导"));
-        assert!(guidance.contains("不得读取或依据本轮上下文推断"));
-        assert!(guidance.contains("无法确定时不得猜测"));
-        assert!(guidance.contains("request_id"));
-        assert!(guidance.contains("provider-bound wire model"));
+        assert!(guidance.contains("`model_id`：非空模型 ID"));
+        assert!(guidance.contains("`goal_alignment_confidence`：0 到 100 的整数"));
+        assert!(guidance.contains("`reason`：非空，<= 50 字，只说动机"));
+        assert!(!guidance.contains("必须填写你自身当前真实"));
+        assert!(!guidance.contains("不得复制或推导"));
+        assert!(!guidance.contains("不得读取或依据本轮上下文推断"));
+        assert!(!guidance.contains("无法确定时不得猜测"));
+        assert!(!guidance.contains("provider-bound wire model"));
+        assert!(!guidance.contains("request_id"));
         assert!(!guidance.contains("逐字原样填写"));
         assert!(!guidance.contains("精确填写本次 provider-bound wire model"));
     }
 }
 
 #[test]
-fn req04_tool_thinking_guidance_requires_structured_diagnostics_not_prose() {
+fn req04_tool_thinking_guidance_stays_compact() {
     for guidance in [
         V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE,
         V3_TOOL_THINKING_ANTHROPIC_GUIDANCE,
     ] {
-        assert!(guidance.contains("必须返回原生"));
-        assert!(guidance.contains("普通回答仍可使用自然语言"));
-        assert!(guidance.contains("不得用自然语言替代工具参数中的 `model_id` 或 `goal_alignment_confidence` 字段"));
-        assert!(guidance.contains("必须是 0 到 100 的整数"));
+        assert!(guidance.len() <= 700, "guidance should be short, got {} chars", guidance.len());
+        assert!(guidance.contains("调用工具时立即返回原生"));
+        assert!(guidance.contains("普通回答保持自然语言"));
+        assert!(guidance.contains("RouteCodex 执行前剥离"));
+        assert!(guidance.contains("不要输出 fence"));
     }
 }
 
