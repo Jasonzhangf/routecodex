@@ -1044,7 +1044,8 @@ pub fn compile_production_execution_plans(
         "error",
         "control",
     ];
-    const EXCLUDED_PLUGINS: [&str; 4] = [
+    const EXCLUDED_PLUGINS: [&str; 5] = [
+        "v4.std.protocol.wire_codec_proto",
         "v4.std.provider.capability_mock",
         "v4.std.provider.auth_handle_mock",
         "v4.std.provider.wire_mock",
