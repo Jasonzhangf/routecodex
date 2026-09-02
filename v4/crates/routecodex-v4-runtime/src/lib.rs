@@ -2530,49 +2530,22 @@ impl SkeletonRuntime {
             self.handle_registry.as_ref(),
         )
         .map_err(|error| RuntimeFault::new("execution_engine", error.to_string()))?;
-        let required_plugins = match chain_id {
-            "relay_request" => &[
-                "v4.std.request.protocol_parse",
-                "v4.std.request.responses_normalize",
-                "v4.std.chat_process.request_governance",
-                "v4.std.routing.route_facts_producer",
-                "v4.std.routing.route_facts_consumer",
-                "v4.hook.relay.request",
-                "v4.std.request.responses_wire_build",
-                "v4.std.provider.wire_build",
-            ][..],
-            "relay_response" => &[
-                "v4.std.response.provider_raw_validate",
-                "v4.std.response.provider_compat",
-                "v4.std.response.protocol_decode",
-                "v4.std.chat_process.response_governance",
-                "v4.std.chat_process.tool_harvest",
-                "v4.hook.relay.response",
-                "v4.std.response.frame_build",
-            ][..],
-            "direct_request" => &[
-                "v4.hook.direct.request",
-                "v4.std.direct.request.wire_validate",
-            ][..],
-            "direct_response" => &[
-                "v4.std.direct.response.sse_frame_boundary",
-                "v4.hook.direct.response",
-                "v4.std.direct.response.client_validate",
-            ][..],
-            _ => &[][..],
+        let compiled_plugins = lease
+            .plugin_ids_for_chain(chain_id)
+            .map_err(|error| RuntimeFault::new("production_plan_missing", error.to_string()))?;
+        let executed_plugins = match &outcome {
+            NodeOutcome::Continue { events, .. } | NodeOutcome::Branch { events, .. } => events
+                .iter()
+                .filter(|event| event.kind == "plugin.executed")
+                .map(|event| event.plugin_id.clone())
+                .collect::<HashSet<_>>(),
+            NodeOutcome::Terminal { .. } | NodeOutcome::Failure { .. } => HashSet::new(),
         };
-        for plugin_id in required_plugins {
-            let executed = match &outcome {
-                NodeOutcome::Continue { events, .. }
-                | NodeOutcome::Branch { events, .. } => events.iter().any(|event| {
-                    event.kind == "plugin.executed" && event.plugin_id == *plugin_id
-                }),
-                NodeOutcome::Terminal { .. } | NodeOutcome::Failure { .. } => false,
-            };
-            if !executed {
+        for plugin_id in compiled_plugins {
+            if !executed_plugins.contains(&plugin_id) {
                 return Err(RuntimeFault::new(
                     "production_plugin_not_executed",
-                    format!("production chain {chain_id} did not execute plugin {plugin_id}"),
+                    format!("production chain {chain_id} did not execute compiled plugin {plugin_id}"),
                 ));
             }
         }

@@ -8,6 +8,7 @@
 use routecodex_v4_cordis_bridge::{
     execute_plan, BridgeError, HandleRegistry, NodeExecutionInput, NodeExecutionOutput,
 };
+use routecodex_v4_plugin_contract::PluginEffect;
 use routecodex_v4_plugin_plan::NodePluginPlan;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -949,6 +950,32 @@ impl EpochLease {
             .find(|node| node.chain() == chain)
             .map(|node| node.node_id().to_string())
             .ok_or_else(|| EpochError::UnknownChain(chain.to_string()))
+    }
+
+    /// Read plugin ids from the immutable compiled nodes for one chain.
+    pub fn plugin_ids_for_chain(&self, chain: &str) -> Result<Vec<String>, EpochError> {
+        let nodes = self
+            .epoch
+            .inner
+            .nodes
+            .lock()
+            .expect("epoch nodes lock poisoned");
+        let nodes = nodes.as_ref().ok_or(EpochError::LeaseUnavailable)?;
+        let mut ids = Vec::new();
+        for node in nodes.iter().filter(|node| node.chain() == chain) {
+            ids.extend(
+                node.container
+                    .plan()
+                    .entries
+                    .iter()
+                    .filter(|entry| entry.effect != PluginEffect::DiagnosticOnly)
+                    .map(|entry| entry.plugin_id.clone()),
+            );
+        }
+        if ids.is_empty() {
+            return Err(EpochError::UnknownChain(chain.to_string()));
+        }
+        Ok(ids)
     }
 
     pub fn next_node(&self, chain: &str, node_id: &str) -> Result<Option<String>, EpochError> {
