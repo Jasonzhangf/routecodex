@@ -18,6 +18,18 @@ use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
+fn apply_protocol_auth(
+    request: reqwest::blocking::RequestBuilder,
+    protocol: &str,
+    key: &str,
+) -> reqwest::blocking::RequestBuilder {
+    if protocol == "anthropic" || protocol == "responses" {
+        request.header("x-api-key", key)
+    } else {
+        request.bearer_auth(key)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct ProviderFile {
     #[serde(rename = "providerId")]
@@ -814,9 +826,7 @@ pub fn send_responses(
         })?;
     let key = materialize_auth(&profile.auth)?;
     let endpoint = format!("{}/responses", profile.base_url.trim_end_matches('/'));
-    let response = client
-        .post(endpoint)
-        .bearer_auth(key)
+    let response = apply_protocol_auth(client.post(endpoint), "responses", &key)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(payload)
         .send()
@@ -884,9 +894,7 @@ pub fn send_responses_streaming(
             message: error.to_string(),
             status: None,
         })?;
-    let response = client
-        .post(endpoint)
-        .bearer_auth(key)
+    let response = apply_protocol_auth(client.post(endpoint), "responses", &key)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(payload)
         .send()
@@ -1848,5 +1856,30 @@ impl V4Availability01SessionScoped {
         .map_or(true, |record| {
             record.state != AvailabilityState::Unavailable
         })
+    }
+}
+
+#[cfg(test)]
+mod protocol_auth_tests {
+    use super::apply_protocol_auth;
+
+    #[test]
+    fn responses_transport_uses_provider_api_key_header() {
+        let client = reqwest::blocking::Client::new();
+        let request = apply_protocol_auth(client.post("https://example.invalid"), "responses", "secret")
+            .build()
+            .expect("request builds");
+        assert_eq!(request.headers().get("x-api-key").and_then(|v| v.to_str().ok()), Some("secret"));
+        assert!(request.headers().get(reqwest::header::AUTHORIZATION).is_none());
+    }
+
+    #[test]
+    fn chat_transport_keeps_bearer_auth() {
+        let client = reqwest::blocking::Client::new();
+        let request = apply_protocol_auth(client.post("https://example.invalid"), "openai", "secret")
+            .build()
+            .expect("request builds");
+        assert!(request.headers().get(reqwest::header::AUTHORIZATION).is_some());
+        assert!(request.headers().get("x-api-key").is_none());
     }
 }
