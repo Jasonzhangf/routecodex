@@ -147,7 +147,7 @@ resources:
   - v4_direct_relay_sse_red
   resource_kind: typed_stream_event
   lifecycle: v4.transport.sse
-  owner_crate: routecodex-v4-runtime
+  owner_crate: routecodex-v4-router
   owner_node: V4Runtime01MainlineKernel
   owner_symbols:
   - ResponseStreamDisposition
@@ -264,6 +264,28 @@ resources:
   forbidden_writers:
   - SseIngressPlugin
   - SseEgressPlugin
+  binding_status: anchored
+- resource_id: v4.information.model
+  axis: information
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  resource_kind: request_information
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4HubReqInbound02Normalized
+  owner_symbols:
+  - ExecutionContext
+  allowed_writers:
+  - V4ServerReqInbound01ClientRaw
+  - V4HubReqInbound02Normalized
+  allowed_readers:
+  - V4HubReqTarget05Resolved
+  - V4DirectReq02RelayContainer
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4DebugSnapshotLedger
+  may_enter_provider_body: false
+  may_enter_client_body: false
   binding_status: anchored
 - resource_id: v4.information.entry_protocol
   axis: information
@@ -684,7 +706,7 @@ resources:
   - v4_parity_gate_plane_isolation
   resource_kind: control_contract
   lifecycle: v4.router.mainline
-  owner_crate: routecodex-v4-runtime
+  owner_crate: routecodex-v4-router
   owner_node: V4HubReqTarget05Resolved
   owner_symbols:
   - ExecutionContext
@@ -702,6 +724,8 @@ resources:
     provider_specific_branch: forbidden
   allowed_writers:
   - V4HubReqTarget05Resolved
+  - V4DirectReq02RelayContainer
+  - V4DirectReq02RelayContainer
   - V4Target07OpaqueTarget
   allowed_readers:
   - V4HubReqOutbound06ProviderSemantic

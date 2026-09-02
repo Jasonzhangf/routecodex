@@ -25,7 +25,7 @@ use routecodex_v4_provider::{
     ProviderInitAuth, ProviderInitOptions, ProviderResponseStream, V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
-    apply_product_error_policy, resolve_route_group,
+    apply_product_error_policy, select_product_target_excluding, select_target,
     TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
 };
 use routecodex_v4_runtime::{
@@ -78,6 +78,7 @@ impl HandleRegistry for ProductionHandleRegistry {
     fn encode_client_error_sse(&self, entry_protocol: &str, message: &str) -> Result<Vec<u8>, String> {
         self.standard.encode_client_error_sse(entry_protocol, message)
     }
+
 }
 
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-v4");
@@ -548,8 +549,9 @@ struct PipelineHandler {
 
 impl PipelineHandler {
     fn new(manifest: RuntimeConfigManifest) -> Result<Self, String> {
+        let registry = Arc::new(ProductionHandleRegistry::new(manifest.product.as_ref()));
         let runtime =
-            SkeletonRuntime::from_compiled_plan(manifest.execution_epoch.skeleton.clone())
+            SkeletonRuntime::from_compiled_plan_with_registry(manifest.execution_epoch.skeleton.clone(), registry)
                 .map_err(|error| error.to_string())?;
         let transaction_id = format!("runtime-config:{}", &manifest.manifest_digest[7..23]);
         runtime
