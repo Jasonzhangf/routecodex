@@ -19,7 +19,7 @@
 
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::MetadataCenter;
-use routecodex_v4_cordis_bridge::{HandleRegistry, NodeExecutionInput, ScopeSessionCommand, ScopeSessionOperation};
+use routecodex_v4_cordis_bridge::{HandleRegistry, ScopeSessionCommand, ScopeSessionOperation};
 use routecodex_v4_error::{
     ClientProjection, DecisionAction, ErrorCenter, ErrorChain, ErrorChainError, ExecutionDecision,
     RetryPolicy,
@@ -1977,7 +1977,7 @@ impl SkeletonRuntime {
             .epoch_store
             .admit()
             .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
-        let mut control = serde_json::json!({
+        let control = serde_json::json!({
             "route_facts": {
                 "route_group_id": route_group_id,
                 "entry_protocol": client_protocol,
@@ -1990,32 +1990,39 @@ impl SkeletonRuntime {
             "execution_lane": execution_lane,
             "model": model,
         });
-        let mut input = NodeExecutionInput {
-            data: serde_json::json!({}),
-            control: control.clone(),
-            information: information.clone(),
-        };
-        for node_id in ["V4HubReqExecution04Planned", "V4HubReqTarget05Resolved"] {
-            let output = lease
-                .execute(node_id, input, self.handle_registry.as_ref())
-                .map_err(|error| RuntimeFault::new("target_selection", error.to_string()))?;
-            control = output.control;
-            input = NodeExecutionInput {
-                data: serde_json::json!({}),
-                control: control.clone(),
-                information: information.clone(),
-            };
-            if node_id == "V4HubReqExecution04Planned" {
-                // The next iteration consumes the route-facts control output.
-                continue;
+        let frame = NodeExecutionFrame::with_information(
+            serde_json::json!({}),
+            control,
+            information,
+        );
+        let outcome = ExecutionEngine::execute_pinned_node_until(
+            "relay_request",
+            frame,
+            &lease,
+            self.handle_registry.as_ref(),
+            Some("V4HubReqTarget05Resolved"),
+        )
+        .map_err(|error| RuntimeFault::new("target_selection", error.to_string()))?;
+        let control = match outcome {
+            NodeOutcome::Continue { control, .. } => control,
+            NodeOutcome::Failure { error } => {
+                return Err(RuntimeFault::new(
+                    error.get("code").and_then(Value::as_str).unwrap_or("target_selection"),
+                    error.get("message").and_then(Value::as_str).unwrap_or("Cordis target selection failed"),
+                ));
             }
-            return control
-                .as_object()
-                .and_then(|object| object.get("target_selection"))
-                .cloned()
-                .ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target node produced no selection"));
-        }
-        unreachable!("target selection node sequence is non-empty")
+            NodeOutcome::Branch { .. } | NodeOutcome::Terminal { .. } => {
+                return Err(RuntimeFault::new(
+                    "target_selection",
+                    "Cordis target node did not return a continuation frame",
+                ));
+            }
+        };
+        control
+            .as_object()
+            .and_then(|object| object.get("target_selection"))
+            .cloned()
+            .ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target node produced no selection"))
     }
 
     /// Scope claim: a request id may only have one active closed loop.

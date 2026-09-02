@@ -208,9 +208,23 @@ impl ExecutionEngine {
     /// bundle and is never reconstructed or sorted here.
     pub fn execute_pinned_node(
         chain: &str,
+        frame: NodeExecutionFrame,
+        lease: &EpochLease,
+        registry: &dyn HandleRegistry,
+    ) -> Result<NodeOutcome, ExecutionError> {
+        Self::execute_pinned_node_until(chain, frame, lease, registry, None)
+    }
+
+    /// Execute a compiled chain through a declared node boundary. This is
+    /// used for control-only pre-dispatch slices (for example route facts and
+    /// target selection) while preserving the same NodeContainer/PluginHandle
+    /// execution owner as full request/response paths.
+    pub fn execute_pinned_node_until(
+        chain: &str,
         mut frame: NodeExecutionFrame,
         lease: &EpochLease,
         registry: &dyn HandleRegistry,
+        stop_node: Option<&str>,
     ) -> Result<NodeOutcome, ExecutionError> {
         if chain.trim().is_empty() {
             return Err(ExecutionError::EmptyEntrypoint);
@@ -258,6 +272,9 @@ impl ExecutionEngine {
                 events,
             );
             frame.validate()?;
+            if stop_node.is_some_and(|stop| stop == node_id) {
+                break;
+            }
             match lease
                 .next_node(chain, &node_id)
                 .map_err(|error| ExecutionError::LeaseUnavailable(error.to_string()))?
