@@ -3497,10 +3497,12 @@ features:
   - Error terminal rows and provider-attempt rows preserve the raw numeric provider status and error category.
   - Terminal rows are immutable; a later Started/Completed/Failed cannot reopen or rewrite a terminal result.
   - Per-record JSONL writes are bounded by the internal observability max record bytes setting.
+  - History writes compact oldest raw rows atomically before the byte limit, keep the new row, and remain bounded across repeated writes.
   required_negative:
   - Projection state does not enter provider/client payload, protocol metadata, continuation, or history.
   - Ordinary listeners do not expose /api/observability snapshot, stats, or events routes.
   - Admin does not use SSE, snapshot polling, or loopback HTTP transport to read request records.
+  - An oversized new row or corrupt existing JSONL fails explicitly without overwriting the store.
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store

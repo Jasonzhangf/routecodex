@@ -10,7 +10,8 @@ pub mod sample_store;
 pub mod observability_store;
 
 pub use observability_store::{
-    v3_webui_observability_append_row, v3_webui_observability_read_raw_rows,
+    v3_webui_observability_append_row, v3_webui_observability_append_row_with_retention,
+    v3_webui_observability_read_raw_rows,
     v3_webui_observability_read_rows, v3_webui_observability_read_rows_bounded,
     V3WebuiObservabilityStoreError, V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION,
 };

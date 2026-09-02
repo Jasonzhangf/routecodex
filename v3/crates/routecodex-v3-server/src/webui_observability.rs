@@ -580,26 +580,12 @@ impl V3WebuiObservability {
     ) -> Result<(), String> {
         let row = serde_json::to_value(row)
             .map_err(|error| format!("encode observability record failed: {error}"))?;
-        let next_row_bytes = serde_json::to_vec(&row)
-            .map_err(|error| format!("encode observability record failed: {error}"))?
-            .len() as u64;
-        let current_bytes = std::fs::metadata(path)
-            .map(|metadata| metadata.len())
-            .or_else(|error| {
-                if error.kind() == std::io::ErrorKind::NotFound {
-                    Ok(0)
-                } else {
-                    Err(error)
-                }
-            })
-            .map_err(|error| format!("read observability store size failed: {error}"))?;
-        if current_bytes.saturating_add(next_row_bytes) > max_history_bytes {
-            return Err(format!(
-                "observability history reached configured {max_history_bytes} byte limit"
-            ));
-        }
-        routecodex_v3_debug::v3_webui_observability_append_row(path, &row)
-            .map_err(|error| format!("write observability store failed: {error}"))
+        routecodex_v3_debug::v3_webui_observability_append_row_with_retention(
+            path,
+            &row,
+            max_history_bytes,
+        )
+        .map_err(|error| format!("write observability store failed: {error}"))
     }
 }
 
@@ -781,7 +767,7 @@ mod tests {
 
         let error = V3WebuiObservability::append_persisted_row_with_limit(&path, &row, 1)
             .expect_err("history limit must reject before append");
-        assert!(error.contains("history reached configured 1 byte limit"));
+        assert!(error.contains("record exceeds configured 1 byte limit"));
         assert!(!path.exists());
         assert_eq!(
             observability

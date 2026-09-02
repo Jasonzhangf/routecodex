@@ -7667,7 +7667,7 @@ chains:
 
 - chain_id: v3.server.internal_observability_projection
   owner_feature_id: v3.server_internal_observability_projection
-  summary: Server-owned typed diagnostic projection appends every lifecycle update to a per-listener JSONL store; Admin reads raw lifecycle rows, projects failed provider attempts, and folds terminal state without SSE or poll transport.
+  summary: Server-owned typed diagnostic projection appends every lifecycle update to a per-listener JSONL store; the store atomically reclaims oldest raw rows at its bounded history limit; Admin reads the retained raw lifecycle rows, projects failed provider attempts, and folds terminal state without SSE or poll transport.
   edges:
   - step_id: v3-server-observability-record
     from_node: V3ServerConsoleObservation

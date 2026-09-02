@@ -5923,7 +5923,8 @@ features:
   required_gates:
   - request mutex critical sections perform no open/write/flush
   - active and recent-terminal in-memory rows have explicit limits
-  - history files enforce a hard byte cap and startup loading is bounded
+  - history files enforce a hard byte cap by atomically reclaiming the oldest raw rows before append; the current row is never dropped and startup loading is bounded
+  - retention compaction validates all existing rows and preserves raw lifecycle rows within the configured retention window
   - config publishes path/policy but does not own runtime append execution
   - npm run verify:v3-execution-control-payload-architecture
   - git diff --check
