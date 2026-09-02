@@ -555,7 +555,6 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
         vec!["v4.request.provider_semantic"],
         vec!["v4.request.provider_wire_payload"],
     );
-    codec_proto.descriptor.selection_group = Some("provider_wire_codec".to_string());
 
     let mut plugins = vec![
         plugin(
