@@ -1,5 +1,5 @@
 {
-  "bundle_digest": "sha256:55f22b7f9edf468ca19ce4b759eef55a6385b4f16388d4b908a230b9c5d5434a",
+  "bundle_digest": "sha256:3770c9d7c48712a2d8e1bbb1f34b6a2adcc14bcae8ce286e9cfd07b25909edaa",
   "manifest_digest": "sha256:7d2b1ddb54d95f73fe4af5ce5a744def24eaa3f9371db6de3ea98ff7f5861710",
   "resources": [
     {
@@ -196,7 +196,7 @@
     },
     {
       "class": "docs",
-      "digest": "sha256:04a2ef7a7712364df63d198a0c2381ae1a256dbb8113c38dd9955bc75aa027a0",
+      "digest": "sha256:3507b8cd1b6f290ffa596c33f4ae7bda0fab0a971933d441a70cffb5e7aa0519",
       "path": ".appsdk/docs/design/appsdk-project-integration.md",
       "source": "docs/design/appsdk-project-integration.md"
     },
@@ -220,13 +220,13 @@
     },
     {
       "class": "rules",
-      "digest": "sha256:f26821b99e10c764e096629222232b799d43846a763aa8c1126ddf0c0c3ebe55",
+      "digest": "sha256:0dff26ee6908473e376976261da3e65340079da89c42a1328a4710362036f7f0",
       "path": ".appsdk/rules/appsdk-project-governance.md",
       "source": "skills/appsdk-project-governance/SKILL.md"
     },
     {
       "class": "skills",
-      "digest": "sha256:f26821b99e10c764e096629222232b799d43846a763aa8c1126ddf0c0c3ebe55",
+      "digest": "sha256:0dff26ee6908473e376976261da3e65340079da89c42a1328a4710362036f7f0",
       "path": ".appsdk/skills/appsdk-project-governance/SKILL.md",
       "source": "skills/appsdk-project-governance/SKILL.md"
     }

@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "preparation_id": "prepare-change-me",
+  "status": "confirmed",
+  "objective": "Complete V4 Cordis production NodePluginPlan and NodeContainer wiring with unified request/response/SSE/error execution.",
+  "change_kind": "project_refactor",
+  "project_root": ".",
+  "legacy_roots": ["../v3"],
+  "new_roots": ["crates", "contracts", "docs", "scripts"],
+  "protected_roots": ["protected"],
+  "runtime_forbidden_roots": ["../v3", ".appsdk-control"],
+  "boundary": {
+    "allowed_paths": ["crates/**", "contracts/**", "docs/**", "scripts/**"],
+    "forbidden_paths": ["../v3/**", "protected/**", ".appsdk-control/**"],
+    "payload_control_separation": "confirmed"
+  },
+  "acceptance_criteria": ["All production request/response/SSE/error paths execute through Skeleton->NodeContainer->NodePluginPlan", "No runtime-bin/provider duplicate semantic owner", "All declared V4 architecture and red gates pass"],
+  "non_goals": ["Modify or archive V3", "Publish to global main"],
+  "assumptions": ["V4 and V3 remain parallel", "Control and payload planes remain physically isolated"],
+  "questions": [
+    {"question_id":"scope-kind","question":"Is this a new project, module refactor, project refactor, or debug task?","status":"resolved"},
+    {"question_id":"project-root","question":"Which relative directory is the new AppSDK project root?","status":"resolved"},
+    {"question_id":"legacy-boundary","question":"Which existing directories remain read-only and outside the new project?","status":"resolved"},
+    {"question_id":"new-boundary","question":"Which directories may the new project create or modify?","status":"resolved"}
+  ],
+  "confirmed_by": "Jason",
+  "confirmed_at": "2026-09-03T00:00:00Z",
+  "created_at": "2026-01-01T00:00:00Z"
+}
