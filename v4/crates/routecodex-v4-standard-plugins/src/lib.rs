@@ -465,7 +465,6 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.control.route_facts".to_string(),
             "v4.control.target_selection".to_string(),
             "v4.information.model".to_string(),
-            "v4.information.client_protocol".to_string(),
         ],
         "V4Router05RequestClassified" => vec!["v4.control.route_facts".to_string()],
         "V4Router06SelectionPlan" => vec!["v4.control.target_selection".to_string()],
@@ -834,7 +833,6 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             vec![
                 "v4.control.route_facts",
                 "v4.information.model",
-                "v4.information.client_protocol",
             ],
             vec!["v4.control.target_selection"],
         ),
