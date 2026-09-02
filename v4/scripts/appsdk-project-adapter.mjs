@@ -37,6 +37,8 @@ const binary = path.join(root, 'target', 'release', 'rccv4');
 if (!fs.existsSync(binary)) run('cargo', ['build', '--release', '-p', 'routecodex-v4-runtime-bin', '--locked']);
 const installed = '/Users/fanzhang/.local/bin/rccv4';
 fs.copyFileSync(binary, installed); fs.chmodSync(installed, 0o755);
+run('codesign', ['--force', '--deep', '--sign', '-', installed]);
+run('codesign', ['--verify', '--verbose', installed]);
 writeEvidence(evidence('install-1', 'deployment_install', 'install', { adapter: 'project', identity: 'v4-cordis-install' }, ['cp', binary, installed], 'deployed_blackbox'));
 run(installed, ['restart']);
 writeEvidence(evidence('restart-1', 'deployment_restart', 'restart', { adapter: 'project', identity: 'v4-cordis-restart' }, [installed, 'restart'], 'deployed_blackbox'));
