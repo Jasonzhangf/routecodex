@@ -19,9 +19,7 @@ use routecodex_v4_lifecycle::{
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
-    send_anthropic_messages,
-    send_anthropic_messages_streaming, send_openai_chat, send_openai_chat_streaming,
-    send_responses, send_responses_streaming, validate_auth_alias, write_provider_profile,
+    send_protocol, validate_auth_alias, write_provider_profile, ProviderTransportResult,
     ProviderInitAuth, ProviderInitOptions, ProviderResponseStream, V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
@@ -1615,13 +1613,11 @@ fn send_target_nonstream(
     routecodex_v4_provider::ProviderTransportError,
 > {
     validate_auth_alias(&target.config_path, target.auth_alias.as_deref())?;
-    match target.protocol.as_str() {
-        "responses" => send_responses(&target.config_path, &target.wire_model, wire_body, false),
-        "openai" | "chat" => send_openai_chat(&target.config_path, wire_body),
-        "anthropic" => send_anthropic_messages(&target.config_path, wire_body),
-        other => Err(routecodex_v4_provider::ProviderTransportError {
-            code: "provider_protocol_unsupported".to_string(),
-            message: format!("provider protocol {other} has no transport owner"),
+    match send_protocol(&target.protocol, &target.config_path, &target.wire_model, wire_body, false)? {
+        ProviderTransportResult::Response(response) => Ok(response),
+        ProviderTransportResult::Stream(_) => Err(routecodex_v4_provider::ProviderTransportError {
+            code: "provider_transport_shape".to_string(),
+            message: "non-stream dispatch returned stream transport".to_string(),
             status: None,
         }),
     }
@@ -1632,13 +1628,11 @@ fn send_target_streaming(
     wire_body: &serde_json::Value,
 ) -> Result<ProviderResponseStream, routecodex_v4_provider::ProviderTransportError> {
     validate_auth_alias(&target.config_path, target.auth_alias.as_deref())?;
-    match target.protocol.as_str() {
-        "responses" => send_responses_streaming(&target.config_path, &target.wire_model, wire_body),
-        "openai" | "chat" => send_openai_chat_streaming(&target.config_path, wire_body),
-        "anthropic" => send_anthropic_messages_streaming(&target.config_path, wire_body),
-        other => Err(routecodex_v4_provider::ProviderTransportError {
-            code: "provider_protocol_unsupported".to_string(),
-            message: format!("provider protocol {other} has no streaming transport owner"),
+    match send_protocol(&target.protocol, &target.config_path, &target.wire_model, wire_body, true)? {
+        ProviderTransportResult::Stream(stream) => Ok(stream),
+        ProviderTransportResult::Response(_) => Err(routecodex_v4_provider::ProviderTransportError {
+            code: "provider_transport_shape".to_string(),
+            message: "stream dispatch returned non-stream transport".to_string(),
             status: None,
         }),
     }

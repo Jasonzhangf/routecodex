@@ -31,8 +31,14 @@ for (const symbol of [
   'find_frame_end',
   'ResponsesSseStream',
   'select_product_target_with_unavailable',
+  'send_openai_chat',
+  'send_anthropic_messages',
+  'send_responses',
 ]) {
   if (productionSource.includes(symbol)) failures.push(`RUNTIME_BIN_DIRECT_BUSINESS_HELPER: ${symbol}`);
+}
+if (!productionSource.includes('send_protocol(')) {
+  failures.push('PROVIDER_TRANSPORT_UNBOUND: runtime-bin must use provider-owned protocol dispatch');
 }
 if (!runtimeBin.includes('execute_provider_response_scoped')) {
   failures.push('RESPONSE_CHAIN_UNBOUND: runtime-bin does not consume response chain output');
