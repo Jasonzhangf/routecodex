@@ -5827,3 +5827,41 @@ Tags: #v4 #cordis #direct #relay #sse #node-container #hook-owner
 # 2026-09-01 V4 takeover correction
 - Production plugin wiring must be judged from the real Cordis execution path, not descriptor/contract or mock trace gates. `runtime-bin::PipelineHandler` currently executes the Rust engine with a skeleton-derived bundle, while direct provider/client/SSE semantics remain in `runtime-bin`/provider; empty node plans can therefore make contracts green without production dispatch. Treat this as an architecture failure requiring production NodePluginPlan dispatch and live `/v1/responses` evidence.
 - 2026-09-03: Production Cordis wiring cannot be proven by compiled descriptors or diagnostic `plugin.executed` traces alone. Transport construction and semantic execution must be owned at their declared layer; runtime-bin may consume only owner-provided opaque transport pairs, with a static red gate forbidding direct construction. Tags: #v4 #cordis #sse #production-wiring #red-gate
+### 2026-08-27 WebUI auto-refresh from persisted records
+- WebUI pages now poll the persisted records API instead of requiring manual Reload: Requests 5s, Dashboard/Providers 10s, Routes remains manual.
+- Shared helper `startAutoRefresh(loadFn, intervalMs)` in `v3/admin-webui/app.embedded.txt`; skips hidden tabs and overlapping fetches.
+- Committed `7a335e2c8`, installed 0.90.4633 sha256=c159949e, restart 7777/4444/8777 200, camo browser smoke passed.
+
+### 2026-08-26 V4 Cordis execution correction
+- Trigger: repeated turns only re-read the same goal/prompt and reported `blocked` without auditing the current design plan, deriving gaps, dispatching parallel lanes, or advancing the branch.
+- Future rule: for a long-running V4 goal, every continuation must perform one evidence-backed action toward the next plan gate; if blocked, inspect current worktrees/claims and either dispatch/merge/fix or record a genuinely new external blocker. Never emit unchanged blocked status as progress.
+- Current architecture: `v4-cordis` is the sole refactor tree; local/relay continuation is retired, direct provider-owned Responses continuation remains.
+Tags: #v4 #cordis #workflow-correction #evidence-first
+# 2026-08-27 provider health window / restart runtime correction
+- Health score is process-local and uses only the latest 100 calls; startup no longer restores cooldown/probe state from `provider-cooldowns.json`.
+- Provider SSE/transport failures enter the shared recoverable health path (`-5`, 3 failures cooldown); success is `+1`, unrecoverable is `-20`.
+- Live evidence before installation showed the reported 502 was not an SSE parser fault: a 275,714-token request exceeded most candidate context windows, then the only selected `mimo-v2.5-free` candidate returned provider 429 three times. The pre-fix binary was still serving until global install and aggregate restart.
+- 2026-08-28 Collab correction: independent tasks use independent declared worktrees; do not treat a worker's existing claim as a filesystem conflict. Preserve the existing claim/task unless the Collab server explicitly requires a lifecycle transition; create the new task/worktree and coordinate ownership without releasing unrelated work.
+
+### 2026-08-28 Config authoring simplification migration lock
+- Simplified user config must use a new filename and a parallel new parser/compiler module; do not mutate the active `config.v3.toml` schema or parser in place.
+- Before wiring runtime/CLI/WebUI, compile both old and new authoring inputs into normalized manifests and prove equivalent usable output with positive, negative, and real-config differential gates.
+- Keep current config path and implementation active until the new module works independently; wire only after standalone verification, cut over only after integrated/live verification, then physically retire the old implementation. No early deletion, fallback parser, or silent dual-source precedence.
+
+### 2026-08-29 execution correction
+- Long-running runtime goals must continue through the next evidence gate after reporting a gap; an incomplete report is not a stopping point. For toolreason, proceed from typed observation tests to build/install/restart/online replay and console/client evidence before any completion report.
+
+### 2026-08-30 V3 provider health failback contract
+- Configured priority is operator intent and must never be numerically adjusted by adaptive health score. Health only controls provider/auth/model availability; once a generation-guarded semantic probe succeeds, the target immediately regains its configured priority.
+- Provider Health owns score, streak, rolling deltas, cooldown, probe backoff, generation, and atomic probe completion. Runtime owns one scheduled/rescue probe orchestration path; Server only schedules it; Target consumes read-only availability and configured priority. A stale permit may release its waiter but must not mutate a newer health epoch.
+- Probe success starts a clean health epoch: score 1000, empty delta window, reset streak/backoff, cooldown removed, generation advanced. Business cooldown and `next_probe_at` are independent; 503 is a three-count recoverable error; HTTP 2xx is insufficient without a valid protocol terminal.
+- Installed `0.90.4739` passed build/install/aggregate restart and live Responses smoke on 7777; AGY review `v3-health-scheduler-failback-20260830` passed with no findings. Production fault-injection replay remains intentionally absent because no cooldown entry existed and mutating live config/health or driving repeated provider failures was not authorized.
+
+### 2026-08-31 Responses inbound normalization / outbound whitelist boundary
+- Responses protocol fields are normalized at ReqInbound into registered semantic Chat extensions without lossy deletion; each provider outbound codec consumes only its target-protocol whitelist and raises `UnmappedOutboundFields` for unsupported nested fields. Do not couple field handling to MiniMax/provider special cases, SSE, handler, or client projection.
+Tags: #responses #req-inbound #outbound-whitelist #fail-fast #no-silent-strip
+
+### 2026-08-31 V4 governance ownership correction
+- Trigger: repeated V4 turns treated AppSDK migration drift as a reason to stop and report instead of repairing the governance records and recovery path in the v4-cordis tree.
+- Future rule: governance recovery is part of the master task. On any AppSDK mismatch, inspect the canonical lifecycle implementation and repair the project-owned records/transaction state in an isolated worktree; do not hand the governance blocker back to Jason or repeat unchanged status reports.
+Tags: #v4 #appsdk #governance #workflow-correction

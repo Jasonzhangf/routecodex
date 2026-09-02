@@ -46,7 +46,7 @@ fn recoverable_failures_lower_score_then_cool_at_zero() {
 }
 
 #[test]
-fn adaptive_provider_probe_starts_at_one_minute_after_three_same_key_failures() {
+fn fixed_probe_ladder_starts_at_30s_after_three_same_key_failures() {
     let store = V3ProviderHealthStore::default();
     let session = V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
         .expect("session scope");
@@ -72,12 +72,12 @@ fn adaptive_provider_probe_starts_at_one_minute_after_three_same_key_failures() 
     }
 
     assert!(store
-        .provider_cooldown_probe_keys_due(60_101)
+        .provider_cooldown_probe_keys_due(30_101)
         .expect("probe due query")
         .is_empty());
     assert_eq!(
         store
-            .provider_cooldown_probe_keys_due(60_102)
+            .provider_cooldown_probe_keys_due(30_102)
             .expect("probe due query"),
         vec![(
             "provider-a".into(),

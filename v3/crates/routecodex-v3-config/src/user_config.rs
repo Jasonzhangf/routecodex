@@ -14,17 +14,59 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+const STANDARD_ROUTE_POOLS: &[&str] = &[
+    "default",
+    "compact",
+    "thinking",
+    "coding",
+    "longcontext",
+    "multimodal",
+    "web_search",
+    "search",
+    "tools",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3UserConfig01FileSource {
     pub path: std::path::PathBuf,
     pub raw_toml: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct V3UserConfig02RoutingSelectionParsed {
     pub version: u16,
-    pub route_groups: BTreeMap<String, BTreeMap<String, V3UserRoutePool>>,
+    #[serde(default)]
+    pub servers: BTreeMap<String, V3UserServerAuthoringConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct V3UserServerAuthoringConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub bind: String,
+    pub port: u16,
+    #[serde(default = "default_all_entry_protocols")]
+    pub endpoints: Vec<String>,
+    #[serde(default)]
+    pub features: BTreeMap<String, bool>,
+    #[serde(default)]
+    pub execution: Option<crate::V3ServerExecutionAuthoringConfig>,
+    #[serde(default)]
+    pub expose_models: Vec<String>,
+    pub routes: BTreeMap<String, V3UserRoutePool>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_all_entry_protocols() -> Vec<String> {
+    ["responses", "anthropic", "gemini", "openai_chat"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -208,21 +250,26 @@ fn validate_v3_user_config_02_routing(
     if parsed.version != 3 {
         return Err(validation("user config version must be 3"));
     }
-    if parsed.route_groups.is_empty() {
-        return Err(validation("user config route_groups must not be empty"));
+    if parsed.servers.is_empty() {
+        return Err(validation("user config must declare at least one server"));
     }
 
-    for (group_id, pools) in &mut parsed.route_groups {
-        if group_id.trim().is_empty() {
-            return Err(validation("user config route group id must not be empty"));
+    for (server_id, server) in &mut parsed.servers {
+        if server_id.trim().is_empty() {
+            return Err(validation("user config server id must not be empty"));
         }
-        if !pools.contains_key("default") {
+        if !server.routes.contains_key("default") {
             return Err(validation(format!(
-                "user config route group {group_id:?} must declare default pool"
+                "user config server {server_id:?} must declare default route pool"
             )));
         }
-        for (pool_id, pool) in pools {
-            validate_pool(group_id, pool_id, pool)?;
+        for (pool_id, pool) in &mut server.routes {
+            if !STANDARD_ROUTE_POOLS.contains(&pool_id.as_str()) {
+                return Err(validation(format!(
+                    "user config server {server_id:?} references non-standard route pool {pool_id:?}"
+                )));
+            }
+            validate_pool(server_id, pool_id, pool)?;
         }
     }
     Ok(parsed)
@@ -234,64 +281,70 @@ pub fn project_v3_user_config_03_authoring(
     provider_catalogue: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<V3Config02AuthoringParsed, V3ConfigError> {
     let user = validate_v3_user_config_02_routing(user)?;
-    let mut projected_targets = BTreeMap::new();
-    let declared_groups = user.route_groups.keys().cloned().collect::<BTreeSet<_>>();
-    for group_id in &declared_groups {
-        if !internal.route_groups.contains_key(group_id) {
+    let template = internal
+        .route_groups
+        .get("routecodex_v3_4444")
+        .cloned()
+        .ok_or_else(|| validation("internal route pool template is missing"))?;
+    internal.route_groups.clear();
+    // internal.toml must not declare servers or bind/port; listeners are
+    // user-only runtime configuration that projects into the final authoring.
+    debug_assert!(internal.servers.is_empty());
+    let mut combined_servers = BTreeMap::new();
+    for (server_id, server) in user.servers {
+        if server.bind.trim().is_empty() {
             return Err(validation(format!(
-                "user config references unknown route group {group_id:?}"
+                "user config server {server_id} bind is empty"
             )));
         }
-    }
-    for server in internal.servers.values() {
-        if !declared_groups.contains(&server.routing_group) {
+        if server.port == 0 {
             return Err(validation(format!(
-                "user config must declare internally enabled route group {:?}",
-                server.routing_group
+                "user config server {server_id} port must be non-zero"
             )));
         }
+        let default_targets = compile_pool_targets(
+            server
+                .routes
+                .get("default")
+                .cloned()
+                .expect("validated default"),
+            provider_catalogue,
+        )?;
+        let mut group = template.clone();
+        for (pool_id, pool) in &mut group.pools {
+            pool.selection = V3SelectionPolicy {
+                strategy: V3SelectionStrategy::Priority,
+            };
+            pool.targets = match server.routes.get(pool_id) {
+                Some(user_pool) => compile_pool_targets(user_pool.clone(), provider_catalogue)?,
+                None => default_targets.clone(),
+            };
+        }
+        internal.route_groups.insert(server_id.clone(), group);
+        combined_servers.insert(
+            server_id.clone(),
+            crate::V3ServerAuthoringConfig {
+                enabled: server.enabled,
+                bind: server.bind,
+                port: server.port,
+                routing_group: server_id,
+                endpoints: server.endpoints,
+                features: server.features,
+                execution: server.execution,
+                expose_models: server.expose_models,
+            },
+        );
     }
 
-    for (group_id, user_pools) in user.route_groups {
-        let internal_group = internal.route_groups.get(&group_id).ok_or_else(|| {
-            validation(format!(
-                "user config references unknown route group {group_id:?}"
-            ))
-        })?;
-
-        for (pool_id, user_pool) in user_pools {
-            if !internal_group.pools.contains_key(&pool_id) {
-                return Err(validation(format!(
-                    "user config references unknown route pool {group_id}.{pool_id}"
-                )));
+    for group in internal.route_groups.values_mut() {
+        for pool in group.pools.values_mut() {
+            if pool.targets.is_empty() {
+                return Err(validation("user config route pool compiled empty"));
             }
-
-            let targets = compile_pool_targets(user_pool, provider_catalogue)?;
-            projected_targets.insert((group_id.clone(), pool_id), targets);
-        }
-
-        let default_targets = projected_targets
-            .get(&(group_id.clone(), "default".to_string()))
-            .expect("parser requires each route group to declare default")
-            .clone();
-        for pool_id in internal_group.pools.keys() {
-            projected_targets
-                .entry((group_id.clone(), pool_id.clone()))
-                .or_insert_with(|| default_targets.clone());
         }
     }
 
-    for ((group_id, pool_id), targets) in projected_targets {
-        let pool = internal
-            .route_groups
-            .get_mut(&group_id)
-            .and_then(|group| group.pools.get_mut(&pool_id))
-            .expect("validated route group and pool must remain present");
-        pool.selection = V3SelectionPolicy {
-            strategy: V3SelectionStrategy::Priority,
-        };
-        pool.targets = targets;
-    }
+    internal.servers = combined_servers;
 
     Ok(internal)
 }
@@ -341,8 +394,8 @@ fn collect_user_provider_models(
     user: &V3UserConfig02RoutingSelectionParsed,
 ) -> BTreeMap<String, BTreeSet<String>> {
     let mut referenced = BTreeMap::<String, BTreeSet<String>>::new();
-    for pools in user.route_groups.values() {
-        for pool in pools.values() {
+    for server in user.servers.values() {
+        for pool in server.routes.values() {
             for tier in &pool.tiers {
                 for member in tier {
                     referenced
@@ -357,18 +410,18 @@ fn collect_user_provider_models(
 }
 
 fn validate_pool(
-    group_id: &str,
+    server_id: &str,
     pool_id: &str,
     pool: &mut V3UserRoutePool,
 ) -> Result<(), V3ConfigError> {
     if pool_id.trim().is_empty() {
         return Err(validation(format!(
-            "user config route group {group_id:?} contains an empty pool id"
+            "user config server {server_id:?} contains an empty pool id"
         )));
     }
     if pool.tiers.is_empty() {
         return Err(validation(format!(
-            "user config pool {group_id}.{pool_id} must contain at least one tier"
+            "user config pool {server_id}.{pool_id} must contain at least one tier"
         )));
     }
 
@@ -376,7 +429,7 @@ fn validate_pool(
     for (tier_index, tier) in pool.tiers.iter_mut().enumerate() {
         if tier.is_empty() {
             return Err(validation(format!(
-                "user config pool {group_id}.{pool_id} tier {} must not be empty",
+                "user config pool {server_id}.{pool_id} tier {} must not be empty",
                 tier_index + 1
             )));
         }
@@ -384,7 +437,7 @@ fn validate_pool(
         let has_implicit_weight = tier.iter().any(|member| member.weight.is_none());
         if tier.len() > 1 && has_explicit_weight && has_implicit_weight {
             return Err(validation(format!(
-                "user config pool {group_id}.{pool_id} tier {} must either set every weight or omit every weight",
+                "user config pool {server_id}.{pool_id} tier {} must either set every weight or omit every weight",
                 tier_index + 1
             )));
         }
@@ -392,12 +445,12 @@ fn validate_pool(
         for member in tier {
             if matches!(member.weight, Some(0)) {
                 return Err(validation(format!(
-                    "user config pool {group_id}.{pool_id} weights must be positive"
+                    "user config pool {server_id}.{pool_id} weights must be positive"
                 )));
             }
             let (provider, model) = parse_provider_model_ref(&member.use_ref).map_err(|message| {
                 validation(format!(
-                    "user config pool {group_id}.{pool_id} has invalid use reference {:?}: {message}",
+                    "user config pool {server_id}.{pool_id} has invalid use reference {:?}: {message}",
                     member.use_ref
                 ))
             })?;
@@ -405,7 +458,7 @@ fn validate_pool(
             member.model = model.to_string();
             if !pool_members.insert((member.provider.clone(), member.model.clone())) {
                 return Err(validation(format!(
-                    "user config pool {group_id}.{pool_id} repeats provider/model {}/{}",
+                    "user config pool {server_id}.{pool_id} repeats provider/model {}/{}",
                     member.provider, member.model
                 )));
             }

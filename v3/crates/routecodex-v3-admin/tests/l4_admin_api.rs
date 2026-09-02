@@ -47,10 +47,16 @@ supportsStreaming = true
         &path,
         r#"version = 3
 
-[route_groups.routecodex_v3_4444.default]
+[servers.routecodex_v3_4444]
+bind = "127.0.0.1"
+port = 4444
+[servers.routecodex_v3_4444.routes.default]
 tiers = [[{ use = "p1/m1" }]]
 
-[route_groups.responses_v3_7777.default]
+[servers.responses_v3_7777]
+bind = "127.0.0.1"
+port = 7777
+[servers.responses_v3_7777.routes.default]
 tiers = [[{ use = "p1/m1" }]]
 "#,
     )
@@ -223,7 +229,7 @@ async fn routes_get_returns_tree() {
     assert!(response.status().is_success());
     let body: serde_json::Value = response.json().await.expect("routes json");
     let groups = body
-        .get("groups")
+        .get("servers")
         .and_then(|v| v.as_array())
         .expect("groups array");
     assert!(!groups.is_empty(), "groups populated from user config");
@@ -249,8 +255,8 @@ async fn routes_get_returns_tree() {
 async fn routes_validate_rejects_invalid_target() {
     let (base, _state, _home) = bind_test_server().await;
     let body = serde_json::json!({
-        "groups": [{
-            "group_id": "routecodex_v3_4444",
+        "servers": [{
+            "server_id": "routecodex_v3_4444", "port": 4444,
             "pools": [{
                 "name": "default",
                 "tiers": [{
@@ -272,8 +278,8 @@ async fn routes_validate_rejects_invalid_target() {
     assert!(payload.get("error").is_some(), "error message present");
 
     let zero_weight = serde_json::json!({
-        "groups": [{
-            "group_id": "routecodex_v3_4444",
+        "servers": [{
+            "server_id": "routecodex_v3_4444", "port": 4444,
             "pools": [{
                 "name": "default",
                 "tiers": [{

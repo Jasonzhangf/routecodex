@@ -17,30 +17,30 @@ use std::sync::Arc;
 const STOPLESS_CALL_ID: &str = "call_stopless_reasoning";
 const STOPLESS_CLI_COMMAND: &str = "routecodex hook run reasoningStop";
 
-pub(crate) const V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE: &str = r#"工具调用协议（只适用于本轮工具调用，不适用于普通回答）：
+pub(crate) const V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE: &str = r#"工具调用协议：
 
-每次发起工具调用时，必须同时填写以下三个字段，缺一不可；字段必须位于工具参数 JSON 对象本层，并立即输出工具调用：
-`reason`：非空字符串；现在调用该工具的唯一直接动机；只说动机，不写计划、步骤、结果或工具参数；不超过 50 个字符。
-`goal_alignment_confidence`：0 到 100 的整数；表示当前工具调用与用户上一轮目标的一致性。
-`model_id`：非空字符串；必须填写你自身当前真实的模型 ID；不得复制或推导请求中的 `model`、`request_id`、`session_id`、客户端别名、路由标签、selected target、schema 描述或 provider-bound wire model。
+调用工具时立即返回原生调用；普通回答保持自然语言。工具参数顶层三字段缺一不可：
 
-字段必须和原生工具参数处于同一个参数对象层级；对于 Responses/Chat 的 `arguments`，字段放在该参数对象的顶层。不要把字段嵌套到命令参数对象内部；RouteCodex 会在工具执行前剥离这三个辅助字段。
+`reason`：非空，<= 50 字，只说动机。
+`goal_alignment_confidence`：0 到 100 的整数。
+`model_id`：非空模型 ID。
+字段放工具参数 JSON 顶层；RouteCodex 执行前剥离。不要输出 fence、preamble 或解释。
 
-错误：`{"name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"metadata\":{\"reason\":\"确认当前工作目录\"}}"}`
+同轮多次调用每条都填三字段。
 
-同一轮多个工具调用时，每个工具调用对象都必须分别填写完整三字段。不要输出 fence、preamble、普通解释或第二份原因文本。
+例外：`apply_patch` 是 raw free-form，参数保持原始 patch 文本，不要把 `reason` 写入 patch。
 
-例外：`apply_patch` 是 raw free-form 控制工具，参数必须保持一份原始 patch 文本；不要把它包装成 JSON，也不要把 `reason` 写进 patch。
+
 "#;
 
-pub(crate) const V3_TOOL_THINKING_ANTHROPIC_GUIDANCE: &str = r#"Anthropic native 工具调用协议（只适用于本轮工具调用，不适用于普通回答）：
+pub(crate) const V3_TOOL_THINKING_ANTHROPIC_GUIDANCE: &str = r#"Anthropic native 工具调用协议：
 
-决定调用工具时，必须立即只返回原生 `tool_use` 块；不要把工具调用写成普通文本段、Markdown 代码块或通用 JSON wrapper。
-每个 `tool_use.input` 顶层必须同时填写以下三个字段，缺一不可：
-`reason`：非空字符串；只写现在调用该工具的唯一直接动机，不写计划、步骤、结果或工具参数，不超过 50 个字符。
-`goal_alignment_confidence`：0 到 100 的整数；表示当前工具调用与用户上一轮目标的一致性。
-`model_id`：非空字符串；必须填写你自身当前真实的模型 ID；不得复制或推导请求中的 `model`、`request_id`、`session_id`、客户端别名、路由标签、selected target、`input_schema` 描述或 provider-bound wire model。
-同一轮多个工具调用时，每个原生 `tool_use` 块都必须分别填写完整三字段。不要输出 fence、preamble、普通解释或第二份原因文本。
+调用工具时立即返回原生 `tool_use` 块；普通回答保持自然语言。`tool_use.input` 顶层三字段缺一不可：
+`reason`：非空，<= 50 字，只说动机。
+`goal_alignment_confidence`：0 到 100 的整数。
+`model_id`：非空模型 ID。
+字段放 `tool_use.input` 顶层；RouteCodex 执行前剥离。不要输出 fence、preamble 或解释。
+同轮多次调用每个 `tool_use` 块都填三字段。
 "#;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -196,9 +196,9 @@ fn wrap_v3_custom_tools_at_req04(
             "type":"object",
             "properties":{
                 "input":{"type":"string","description":"原生 custom tool 的完整输入，原样填写"},
-                "reason":{"type":"string","minLength":1,"maxLength":50,"description":"必填。当前工具调用的唯一直接动机，只说动机，不超过 50 个字符"},
-                "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100,"description":"必填。当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"},
-                "model_id":{"type":"string","minLength":1,"description":"必填。填写你自身当前真实的模型 ID；不得复制或推导请求中的 model、request_id、session_id、客户端别名、路由标签、selected target、schema 描述或 provider-bound wire model"}
+                "reason":{"type":"string","minLength":1,"maxLength":50,"description":"非空，<= 50 字，只说动机"},
+                "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100,"description":"0 到 100 的整数"},
+                "model_id":{"type":"string","minLength":1,"description":"非空模型 ID"}
             },
             "required":["input","reason","goal_alignment_confidence","model_id"],
             "additionalProperties":false
@@ -326,7 +326,7 @@ pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> 
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 50,
-                "description": "必填。当前工具调用的唯一直接动机，只说动机，不超过 50 个字符"
+                "description": "非空，<= 50 字，只说动机"
             }),
         );
         properties.insert(
@@ -335,7 +335,7 @@ pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> 
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 100,
-                "description": "必填。当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"
+                "description": "0 到 100 的整数"
             }),
         );
         properties.insert(
@@ -343,7 +343,7 @@ pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> 
             json!({
                 "type": "string",
                 "minLength": 1,
-                "description": "必填。填写你自身当前真实的模型 ID；不得复制或推导请求中的 model、request_id、session_id、客户端别名、路由标签、selected target、schema 描述或 provider-bound wire model"
+                "description": "非空模型 ID"
             }),
         );
     }
@@ -425,7 +425,7 @@ fn is_v3_tool_thinking_guidance_anchor(tool: &Value) -> bool {
 fn append_v3_tool_thinking_guidance_to_text(value: &mut Value, provider_guidance: &'static str) {
     if value
         .to_string()
-        .contains("工具调用协议（只适用于本轮工具调用")
+        .contains("RouteCodex 执行前剥离")
     {
         return;
     }
