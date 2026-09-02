@@ -1279,8 +1279,14 @@ fn handle_responses(
             conversation_scope,
         )
         .map_err(|fault| project_fault(request, fault, 599))?;
-        let response_stream =
-            CordisSseTransportStream::new(stream, Arc::clone(runtime), response_processor);
+        let response_stream = CordisSseTransportStream::new(
+            stream,
+            Arc::clone(runtime),
+            response_processor,
+            request.clone(),
+            target.provider_id.clone(),
+            target.wire_model.clone(),
+        );
         return Ok(HttpResponse::streaming(
             client_status,
             "text/event-stream",
@@ -1504,6 +1510,9 @@ struct CordisSseTransportStream<S = ProviderResponseStream> {
     ingress: SseIngressPlugin,
     egress: SseEgressPlugin,
     close_after_pending: bool,
+    request: HttpRequest,
+    provider: String,
+    model: String,
 }
 
 impl<S: ProviderSseSource> CordisSseTransportStream<S> {
@@ -1511,6 +1520,9 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
         stream: S,
         runtime: Arc<Mutex<SkeletonRuntime>>,
         processor: ResponseStreamProcessor,
+        request: HttpRequest,
+        provider: String,
+        model: String,
     ) -> Self {
         let (ingress, egress) = production_transport_pair(std::time::Instant::now())
             .expect("constant SSE transport policy");
@@ -1521,6 +1533,9 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
             ingress,
             egress,
             close_after_pending: false,
+            request,
+            provider,
+            model,
         }
     }
 
@@ -1630,6 +1645,16 @@ impl<S: ProviderSseSource> ResponseStream for CordisSseTransportStream<S> {
                         {
                             Ok((disposition, report)) => {
                                 if let Some(report) = report {
+                                    emit_payload_console_events(
+                                        &report.trace,
+                                        &self.request,
+                                        &self.request.path,
+                                        &self.provider,
+                                        &self.model,
+                                        true,
+                                        None,
+                                        std::time::Duration::ZERO,
+                                    );
                                     if report.client_frame.is_none() {
                                         Err(RuntimeFault::new(
                                             "response_frame_missing",
@@ -2240,6 +2265,17 @@ targets = ["mock"]
             },
             runtime,
             processor,
+            HttpRequest {
+                method: "POST".into(),
+                path: "/v1/responses".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                request_id: "request-1".into(),
+                server_id: "test".into(),
+                port,
+            },
+            "test-provider".into(),
+            "m".into(),
         )
     }
 
