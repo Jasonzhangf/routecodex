@@ -47,24 +47,40 @@ pub struct NodeExecutionFrame {
     pub control: Value,
     pub information: Value,
     pub events: Vec<DiagnosticFact>,
+    #[serde(skip)]
+    pub shared_data: crate::ImmutableDataCarrier,
+    #[serde(skip)]
+    pub shared_information: crate::ImmutableInformationCarrier,
+    #[serde(skip)]
+    pub shared_diagnostic: crate::ImmutableDiagnosticCarrier,
 }
 
 impl NodeExecutionFrame {
     pub fn new(data: Value, control: Value) -> Self {
+        let shared_data = crate::ImmutableDataCarrier::from_value(&data)
+            .expect("JSON data must be encodable");
         Self {
             data,
             control,
             information: Value::Object(Default::default()),
             events: Vec::new(),
+            shared_data,
+            shared_information: crate::ImmutableInformationCarrier::new("unknown", "unknown"),
+            shared_diagnostic: crate::ImmutableDiagnosticCarrier::new("unbound"),
         }
     }
 
     pub fn with_information(data: Value, control: Value, information: Value) -> Self {
+        let shared_data = crate::ImmutableDataCarrier::from_value(&data)
+            .expect("JSON data must be encodable");
         Self {
             data,
             control,
             information,
             events: Vec::new(),
+            shared_data,
+            shared_information: crate::ImmutableInformationCarrier::new("unknown", "unknown"),
+            shared_diagnostic: crate::ImmutableDiagnosticCarrier::new("unbound"),
         }
     }
 
@@ -74,12 +90,55 @@ impl NodeExecutionFrame {
         information: Value,
         events: Vec<DiagnosticFact>,
     ) -> Self {
+        let shared_data = crate::ImmutableDataCarrier::from_value(&data)
+            .expect("JSON data must be encodable");
         Self {
             data,
             control,
             information,
             events,
+            shared_data,
+            shared_information: crate::ImmutableInformationCarrier::new("unknown", "unknown"),
+            shared_diagnostic: crate::ImmutableDiagnosticCarrier::new("unbound"),
         }
+    }
+
+    pub fn with_shared_carriers(
+        data: Value,
+        control: Value,
+        information: Value,
+        events: Vec<DiagnosticFact>,
+        shared_data: crate::ImmutableDataCarrier,
+        shared_information: crate::ImmutableInformationCarrier,
+        shared_diagnostic: crate::ImmutableDiagnosticCarrier,
+    ) -> Self {
+        Self {
+            data,
+            control,
+            information,
+            events,
+            shared_data,
+            shared_information,
+            shared_diagnostic,
+        }
+    }
+
+    pub fn shares_immutable_carriers_with(&self, other: &Self) -> bool {
+        self.shared_data.shares_storage_with(&other.shared_data)
+            && self.shared_information.shares_storage_with(&other.shared_information)
+            && self.shared_diagnostic.shares_storage_with(&other.shared_diagnostic)
+    }
+
+    pub fn shared_data(&self) -> &crate::ImmutableDataCarrier {
+        &self.shared_data
+    }
+
+    pub fn shared_information(&self) -> &crate::ImmutableInformationCarrier {
+        &self.shared_information
+    }
+
+    pub fn shared_diagnostic(&self) -> &crate::ImmutableDiagnosticCarrier {
+        &self.shared_diagnostic
     }
 
     fn validate(&self) -> Result<(), ExecutionError> {
@@ -208,9 +267,37 @@ impl ExecutionEngine {
     /// bundle and is never reconstructed or sorted here.
     pub fn execute_pinned_node(
         chain: &str,
+        frame: NodeExecutionFrame,
+        lease: &EpochLease,
+        registry: &dyn HandleRegistry,
+    ) -> Result<NodeOutcome, ExecutionError> {
+        Self::execute_pinned_node_until(chain, frame, lease, registry, None)
+    }
+
+    /// Execute a compiled chain through a declared node boundary. This is
+    /// used for control-only pre-dispatch slices (for example route facts and
+    /// target selection) while preserving the same NodeContainer/PluginHandle
+    /// execution owner as full request/response paths.
+    pub fn execute_pinned_node_until(
+        chain: &str,
         mut frame: NodeExecutionFrame,
         lease: &EpochLease,
         registry: &dyn HandleRegistry,
+        stop_node: Option<&str>,
+    ) -> Result<NodeOutcome, ExecutionError> {
+        Self::execute_pinned_node_from(chain, None, frame, lease, registry, stop_node)
+    }
+
+    /// Execute a declared suffix of a compiled chain.  This is used only for
+    /// production control pre-dispatch slices whose predecessor already ran
+    /// in the same request owner; it never reconstructs or sorts graph state.
+    pub fn execute_pinned_node_from(
+        chain: &str,
+        start_node: Option<&str>,
+        mut frame: NodeExecutionFrame,
+        lease: &EpochLease,
+        registry: &dyn HandleRegistry,
+        stop_node: Option<&str>,
     ) -> Result<NodeOutcome, ExecutionError> {
         if chain.trim().is_empty() {
             return Err(ExecutionError::EmptyEntrypoint);
@@ -220,9 +307,17 @@ impl ExecutionEngine {
         if snapshot.state == ExecutionEpochState::Disposed {
             return Err(ExecutionError::RetiredLease(snapshot.state));
         }
-        let mut node_id = lease
-            .entrypoint(chain)
-            .map_err(|error| ExecutionError::LeaseUnavailable(error.to_string()))?;
+        let mut node_id = match start_node {
+            Some(node_id) => {
+                lease
+                    .plan_hash(node_id)
+                    .map_err(|error| ExecutionError::LeaseUnavailable(error.to_string()))?;
+                node_id.to_string()
+            }
+            None => lease
+                .entrypoint(chain)
+                .map_err(|error| ExecutionError::LeaseUnavailable(error.to_string()))?,
+        };
         let mut visited = HashSet::new();
         loop {
             if !visited.insert(node_id.clone()) {
@@ -239,6 +334,11 @@ impl ExecutionEngine {
                     message: (*stage_id).to_string(),
                 });
             }
+            events.push(DiagnosticFact {
+                kind: "node.entry".to_string(),
+                plugin_id: node_id.clone(),
+                message: chain.to_string(),
+            });
             let output = lease
                 .execute(
                     &node_id,
@@ -251,13 +351,29 @@ impl ExecutionEngine {
                 )
                 .map_err(|error| ExecutionError::LeaseUnavailable(error.to_string()))?;
             events.extend(output.diagnostics);
-            frame = NodeExecutionFrame::with_side_channels(
+            events.push(DiagnosticFact {
+                kind: "node.exit".to_string(),
+                plugin_id: node_id.clone(),
+                message: chain.to_string(),
+            });
+            events.push(DiagnosticFact {
+                kind: "state.transition".to_string(),
+                plugin_id: node_id.clone(),
+                message: "executed".to_string(),
+            });
+            frame = NodeExecutionFrame::with_shared_carriers(
                 output.data,
                 output.control,
                 output.information,
                 events,
+                frame.shared_data,
+                frame.shared_information,
+                frame.shared_diagnostic,
             );
             frame.validate()?;
+            if stop_node.is_some_and(|stop| stop == node_id) {
+                break;
+            }
             match lease
                 .next_node(chain, &node_id)
                 .map_err(|error| ExecutionError::LeaseUnavailable(error.to_string()))?

@@ -1,4 +1,6 @@
 use routecodex_v4_base_node::Scope;
+use routecodex_v4_cordis_bridge::{HandleRegistry, PluginHandle};
+use routecodex_v4_skeleton::SkeletonPlan;
 use routecodex_v4_cli::{
     Cli, ConfigIntent, ConfigPathIntent, InitIntent, ManagedChildIntent, RestartIntent,
     ServerIntent, ServerStartIntent, ServertoolIntent, SnapshotIntent, StartIntent, StopIntent,
@@ -9,7 +11,6 @@ use routecodex_v4_config::{
     write_runtime_authoring, write_runtime_manifest_atomic, RuntimeConfigManifest,
     RuntimeInitOptions, RuntimeProductConfig, RuntimeProductRouteGroup,
 };
-use routecodex_v4_debug::{DiagnosticEventEnvelope, SubscriptionTopic, V4Debug02BusSubscription};
 use routecodex_v4_error::ErrorChain;
 use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
@@ -19,23 +20,26 @@ use routecodex_v4_lifecycle::{
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
-    write_provider_profile, ProviderInitAuth, ProviderInitOptions, ProviderResponseStream,
-    V4Availability01SessionScoped,
+    send_protocol, validate_auth_alias, write_provider_profile, ProviderTransportResult,
+    ProviderInitAuth, ProviderInitOptions, ProviderResponseStream, V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
-    apply_product_error_policy, select_product_target_excluding, select_target,
+    apply_product_error_policy,
+    TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
 };
 use routecodex_v4_runtime::{
-    project_runtime_fault, project_runtime_fault_with_policy, ResponseStreamDisposition,
-    ResponseStreamProcessor, RuntimeFault, SkeletonRuntime,
+    parse_request_admission_facts, project_runtime_fault, project_runtime_fault_with_policy,
+    ResponseStreamDisposition, ResponseStreamProcessor, RuntimeFault, SkeletonRuntime,
 };
 use routecodex_v4_server::{
     AsyncHttpHandler, AsyncHttpServer, HttpHandler, HttpRequest, HttpResponse, ResponseStream,
 };
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
 use routecodex_v4_standard_plugins::diagnostic;
+use routecodex_v4_standard_plugins::StandardHandleRegistry;
+use serde_json::Value;
 use routecodex_v4_standard_plugins::sse_transport::{
-    SseEgressPlugin, SseIngressPlugin, SseTransportPolicy,
+    production_transport_pair, SseEgressPlugin, SseIngressPlugin,
 };
 use std::future::Future;
 use std::io::Write;
@@ -45,8 +49,129 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
+
+struct ProductionHandleRegistry {
+    standard: StandardHandleRegistry,
+    router_target: Option<TargetSelectionHandle>,
+}
+
+impl ProductionHandleRegistry {
+    fn new(product: Option<&RuntimeProductConfig>) -> Self {
+        Self {
+            standard: StandardHandleRegistry::new(),
+            router_target: product.cloned().map(TargetSelectionHandle::new),
+        }
+    }
+}
+
+impl HandleRegistry for ProductionHandleRegistry {
+    fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
+        if plugin_id == TARGET_SELECTION_PLUGIN_ID || plugin_id == DIRECT_TARGET_SELECTION_PLUGIN_ID {
+            if let Some(handle) = self.router_target.as_ref() {
+                return Some(handle as &dyn PluginHandle);
+            }
+        }
+        self.standard.get(plugin_id)
+    }
+
+    fn encode_client_error_sse(&self, entry_protocol: &str, message: &str) -> Result<Vec<u8>, String> {
+        self.standard.encode_client_error_sse(entry_protocol, message)
+    }
+
+}
+
+/// Cordis service readiness report produced by `cordis_service_readiness`.
+/// The numbers mirror what a CordisBoundNodeHost would observe after
+/// `mount()` + `beginExecution()` on the production plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CordisReadinessReport {
+    pub bound_plugin_count: usize,
+    pub missing_plugin_ids: Vec<String>,
+    pub service_binding_count: usize,
+    pub plan_node_count: usize,
+}
+
+/// Mirror of the CordisBoundNodeHost.mount() precondition for production.
+/// The runtime-bin production entry calls this before binding any TCP
+/// listener. A failure aborts startup with a typed error that names every
+/// runtime plugin missing a typed handle so the operator can repair the
+/// catalog before serving traffic. Compile-time config operators are already
+/// consumed by `compile_runtime_config` and are not runtime bindings.
+pub fn cordis_service_readiness(
+    skeleton: &SkeletonPlan,
+    registry: &dyn HandleRegistry,
+    service_binding_count: usize,
+) -> Result<CordisReadinessReport, String> {
+    let mut plugin_ids = std::collections::BTreeSet::new();
+    let mut plan_node_count = 0usize;
+    for chain in &skeleton.chains {
+        for node in &chain.nodes {
+            plan_node_count += 1;
+            if chain.chain_id == "config" {
+                continue;
+            }
+            for plugin in &node.plugins {
+                plugin_ids.insert(plugin.plugin_id.clone());
+            }
+        }
+    }
+    let mut bound_plugin_count = 0usize;
+    let mut missing_plugin_ids = Vec::new();
+    for plugin_id in &plugin_ids {
+        if registry.contains(plugin_id.as_str()) {
+            bound_plugin_count += 1;
+        } else {
+            missing_plugin_ids.push(plugin_id.clone());
+        }
+    }
+    missing_plugin_ids.sort();
+    let report = CordisReadinessReport {
+        bound_plugin_count,
+        missing_plugin_ids: missing_plugin_ids.clone(),
+        service_binding_count,
+        plan_node_count,
+    };
+    if !missing_plugin_ids.is_empty() {
+        return Err(format!(
+            "cordis service readiness failed: missing plugin handles for {} of {} compiled plugins: {}",
+            missing_plugin_ids.len(),
+            plugin_ids.len(),
+            missing_plugin_ids.join(", ")
+        ));
+    }
+    Ok(report)
+}
+
+/// Test helper that shadows a real registry with one whose first compiled
+/// plugin id resolves to None. Used by the negative red test.
+pub struct MissingStandardHandleRegistry<'a, R: HandleRegistry + ?Sized> {
+    inner: &'a R,
+    missing_plugin_id: String,
+}
+
+impl<'a, R: HandleRegistry + ?Sized> MissingStandardHandleRegistry<'a, R> {
+    pub fn new(inner: &'a R, missing_plugin_id: impl Into<String>) -> Self {
+        Self {
+            inner,
+            missing_plugin_id: missing_plugin_id.into(),
+        }
+    }
+}
+
+impl<'a, R: HandleRegistry + ?Sized> HandleRegistry for MissingStandardHandleRegistry<'a, R> {
+    fn get(&self, plugin_id: &str) -> Option<&dyn routecodex_v4_cordis_bridge::PluginHandle> {
+        if plugin_id == self.missing_plugin_id {
+            None
+        } else {
+            self.inner.get(plugin_id)
+        }
+    }
+
+    fn encode_client_error_sse(&self, entry_protocol: &str, message: &str) -> Result<Vec<u8>, String> {
+        self.inner.encode_client_error_sse(entry_protocol, message)
+    }
+}
 
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-v4");
 pub const RCCV4_BINARY_IDENTITY: &str = "rccv4";
@@ -432,10 +557,10 @@ fn spawn_servers(
                     .build()
                     .map_err(|error| error.to_string())?;
                 let result = runtime.block_on(async move {
+                    let handler = Arc::new(PipelineHandler::new(manifest)?);
                     let server = AsyncHttpServer::bind_persisted(&server)
                         .await
                         .map_err(|error| error.to_string())?;
-                    let handler = Arc::new(PipelineHandler::new(manifest)?);
                     let cancellation = CancellationToken::new();
                     let watcher = cancellation.clone();
                     tokio::spawn(async move {
@@ -512,13 +637,14 @@ struct PipelineHandler {
     runtime: Arc<Mutex<SkeletonRuntime>>,
     execution_epoch: ExecutionEpochSnapshot,
     availability: Arc<Mutex<V4Availability01SessionScoped>>,
-    event_bus: Arc<Mutex<V4Debug02BusSubscription>>,
 }
 
 impl PipelineHandler {
     fn new(manifest: RuntimeConfigManifest) -> Result<Self, String> {
+        let registry = Arc::new(ProductionHandleRegistry::new(manifest.product.as_ref()));
+        cordis_service_readiness(&manifest.execution_epoch.skeleton, registry.as_ref(), 0)?;
         let runtime =
-            SkeletonRuntime::from_compiled_plan(manifest.execution_epoch.skeleton.clone())
+            SkeletonRuntime::from_compiled_plan_with_registry(manifest.execution_epoch.skeleton.clone(), registry)
                 .map_err(|error| error.to_string())?;
         let transaction_id = format!("runtime-config:{}", &manifest.manifest_digest[7..23]);
         runtime
@@ -543,7 +669,6 @@ impl PipelineHandler {
             runtime: Arc::new(Mutex::new(runtime)),
             execution_epoch,
             availability: Arc::new(Mutex::new(V4Availability01SessionScoped::new())),
-            event_bus: Arc::new(Mutex::new(V4Debug02BusSubscription::new())),
         })
     }
 }
@@ -568,7 +693,6 @@ impl PipelineHandler {
                 &self.manifest,
                 &self.runtime,
                 &self.availability,
-                &self.event_bus,
                 &request,
                 "responses",
                 "direct",
@@ -578,7 +702,6 @@ impl PipelineHandler {
                 &self.manifest,
                 &self.runtime,
                 &self.availability,
-                &self.event_bus,
                 &request,
                 "chat",
                 "relay",
@@ -603,22 +726,20 @@ impl AsyncHttpHandler for PipelineHandler {
     fn handle_async<'a>(
         &'a self,
         request: HttpRequest,
-        cancellation: CancellationToken,
+        _cancellation: CancellationToken,
     ) -> Pin<Box<dyn Future<Output = HttpResponse> + Send + 'a>> {
         let handler = self.clone();
         let request_for_fault = request.clone();
         Box::pin(async move {
-            let work = tokio::task::spawn_blocking(move || handler.handle_request(request));
-            tokio::select! {
-                result = work => result.unwrap_or_else(|error| {
+            tokio::task::spawn_blocking(move || handler.handle_request(request))
+                .await
+                .unwrap_or_else(|error| {
                     project_fault(
                         &request_for_fault,
                         RuntimeFault::new("request_worker_panicked", error.to_string()),
                         500,
                     )
-                }),
-                _ = cancellation.cancelled() => HttpResponse::error(499, "client disconnected"),
-            }
+                })
         })
     }
 }
@@ -715,75 +836,63 @@ fn route_group_for_request<'a>(
     }
 }
 
+fn select_target_via_cordis(
+    runtime: &Arc<Mutex<SkeletonRuntime>>,
+    request: &HttpRequest,
+    entry_protocol: &str,
+    model: &str,
+    session_scope: &str,
+    conversation_scope: &str,
+    route_group_id: &str,
+    unavailable_provider_ids: &[String],
+) -> Result<routecodex_v4_router::SelectedTarget, RuntimeFault> {
+    let selection = runtime
+        .lock()
+        .map_err(|_| RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"))?
+        .execute_target_selection(
+            &request.request_id,
+            request.port,
+            session_scope,
+            conversation_scope,
+            entry_protocol,
+            if entry_protocol == "responses" { "direct" } else { "relay" },
+            model,
+            route_group_id,
+            unavailable_provider_ids,
+        )?;
+    let object = selection.as_object().ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target selection is not an object"))?;
+    Ok(routecodex_v4_router::SelectedTarget {
+        provider_id: object.get("provider_id").and_then(Value::as_str).ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target selection missing provider_id"))?.to_string(),
+        config_path: object.get("config_path").and_then(Value::as_str).ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target selection missing config_path"))?.to_string(),
+        protocol: object.get("protocol").and_then(Value::as_str).ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target selection missing protocol"))?.to_string(),
+        wire_model: object.get("wire_model").and_then(Value::as_str).ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target selection missing wire_model"))?.to_string(),
+        auth_alias: object.get("auth_alias").and_then(Value::as_str).map(str::to_string),
+    })
+}
+
 fn handle_responses(
     manifest: &RuntimeConfigManifest,
     runtime: &Arc<Mutex<SkeletonRuntime>>,
     availability: &Arc<Mutex<V4Availability01SessionScoped>>,
-    event_bus: &Arc<Mutex<V4Debug02BusSubscription>>,
     request: &HttpRequest,
     entry_protocol: &str,
     continuation_owner: &str,
 ) -> Result<HttpResponse, HttpResponse> {
     let started_at = std::time::Instant::now();
-    let body: serde_json::Value = serde_json::from_slice(&request.body).map_err(|error| {
-        project_fault(
-            request,
-            RuntimeFault::new("invalid_request", format!("invalid JSON: {error}")),
-            400,
-        )
-    })?;
-    if entry_protocol == "responses"
-        && continuation_owner == "relay"
-        && body.get("previous_response_id").is_some()
-    {
-        return Err(project_fault(
-            request,
-            RuntimeFault::new(
-                "continuation_unsupported",
-                "local relay continuation is not implemented",
-            ),
-            400,
-        ));
-    }
-    if entry_protocol != "responses" && body.get("previous_response_id").is_some() {
-        return Err(project_fault(
-            request,
-            RuntimeFault::new(
-                "continuation_entry_protocol_mismatch",
-                "previous_response_id is only valid on the Responses entry protocol",
-            ),
-            400,
-        ));
-    }
+    let admission = parse_request_admission_facts(
+        &request.body,
+        entry_protocol,
+        continuation_owner,
+    )
+    .map_err(|fault| project_fault(request, fault, 400))?;
     let session_scope = request
         .header("x-rccv4-session-id")
         .unwrap_or(&request.request_id);
     let conversation_scope = request
         .header("x-rccv4-conversation-id")
         .unwrap_or(session_scope);
-    let model = body
-        .get("model")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            project_fault(
-                request,
-                RuntimeFault::new("invalid_request", "model is required"),
-                400,
-            )
-        })?;
-    let stream_mode = body
-        .get("stream")
-        .map(|value| {
-            value.as_bool().ok_or_else(|| {
-                project_fault(
-                    request,
-                    RuntimeFault::new("invalid_request", "stream must be a boolean"),
-                    400,
-                )
-            })
-        })
-        .transpose()?
-        .unwrap_or(false);
+    let model = admission.model.as_str();
+    let stream_mode = admission.stream;
     let unavailable_provider_ids = if let Some(product) = &manifest.product {
         let group = route_group_for_request(product, request)
             .map_err(|error| project_fault(request, error, 500))?;
@@ -813,20 +922,26 @@ fn handle_responses(
     let mut target = if let Some(product) = &manifest.product {
         let route_group = route_group_for_request(product, request)
             .map_err(|error| project_fault(request, error, 500))?;
-        select_product_target_excluding(
-            product,
-            &route_group.route_group_id,
-            model,
+        select_target_via_cordis(
+            runtime,
+            request,
             entry_protocol,
-            &[],
-            0,
-            &unavailable_provider_ids
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
+            model,
+            session_scope,
+            conversation_scope,
+            &route_group.route_group_id,
+            &unavailable_provider_ids,
         )
+        .map_err(|error| routecodex_v4_router::TargetSelectionError::ProductPoolUnavailable(error.message))
     } else {
-        select_target(&manifest.providers, &manifest.routes, model)
+        return Err(project_fault(
+            request,
+            RuntimeFault::new(
+                "product_route_config_missing",
+                "production Cordis routing requires a compiled product route graph",
+            ),
+            500,
+        ));
     }
     .map_err(|error| {
         let status = if !unavailable_provider_ids.is_empty()
@@ -895,7 +1010,6 @@ fn handle_responses(
         )
         .map_err(|fault| project_fault(request, fault, 598))?;
     emit_payload_console_events(
-        event_bus,
         &request_report.trace,
         request,
         &request.path,
@@ -918,10 +1032,7 @@ fn handle_responses(
     })?;
     let wire_body = semantic_body;
     if stream_mode {
-        let mut stream = routecodex_v4_provider::send_target_streaming(
-            &target.protocol, &target.config_path, target.auth_alias.as_deref(),
-            &target.wire_model, &wire_body,
-        ).map_err(|error| {
+        let mut stream = send_target_streaming(&target, &wire_body).map_err(|error| {
             project_fault(
                 request,
                 RuntimeFault::new(error.code.as_str(), error.message)
@@ -948,14 +1059,15 @@ fn handle_responses(
                     if policy.retry {
                         let mut excluded = unavailable_provider_ids.clone();
                         excluded.push(target.provider_id.clone());
-                        if let Ok(candidate) = select_product_target_excluding(
-                            product,
-                            &route_group.route_group_id,
-                            model,
+                        if let Ok(candidate) = select_target_via_cordis(
+                            runtime,
+                            request,
                             entry_protocol,
-                            &[],
-                            0,
-                            &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
+                            model,
+                            session_scope,
+                            conversation_scope,
+                            &route_group.route_group_id,
+                            &excluded,
                         ) {
                             let retry_body = execute_retry_wire(
                                 runtime,
@@ -972,10 +1084,8 @@ fn handle_responses(
                             )
                             .map_err(|fault| project_fault(request, fault, 598))?;
                             target = candidate;
-                            stream = routecodex_v4_provider::send_target_streaming(
-                                &target.protocol, &target.config_path, target.auth_alias.as_deref(),
-                                &target.wire_model, &retry_body,
-                            ).map_err(|error| {
+                            stream =
+                                send_target_streaming(&target, &retry_body).map_err(|error| {
                                     project_provider_fault(
                                         request,
                                         RuntimeFault::new(&error.code, error.message),
@@ -1039,25 +1149,15 @@ fn handle_responses(
             conversation_scope,
         )
         .map_err(|fault| project_fault(request, fault, 599))?;
-        let response_stream = CordisSseTransportStream::new(
-            stream,
-            Arc::clone(runtime),
-            response_processor,
-            request.clone(),
-            target.provider_id.clone(),
-            target.wire_model.clone(),
-            Arc::clone(event_bus),
-        );
+        let response_stream =
+            CordisSseTransportStream::new(stream, Arc::clone(runtime), response_processor);
         return Ok(HttpResponse::streaming(
             client_status,
             "text/event-stream",
             Box::new(response_stream),
         ));
     }
-    let mut raw = routecodex_v4_provider::send_target(
-        &target.protocol, &target.config_path, target.auth_alias.as_deref(),
-        &target.wire_model, &wire_body, false,
-    ).map_err(|error| {
+    let mut raw = send_target_nonstream(&target, &wire_body).map_err(|error| {
         project_provider_fault(
             request,
             RuntimeFault::new(error.code.as_str(), error.message),
@@ -1092,14 +1192,15 @@ fn handle_responses(
             if policy.retry {
                 let mut excluded = unavailable_provider_ids.clone();
                 excluded.push(target.provider_id.clone());
-                if let Ok(candidate) = select_product_target_excluding(
-                    product,
-                    &route_group.route_group_id,
-                    model,
+                if let Ok(candidate) = select_target_via_cordis(
+                    runtime,
+                    request,
                     entry_protocol,
-                    &[],
-                    0,
-                    &excluded.iter().map(String::as_str).collect::<Vec<_>>(),
+                    model,
+                    session_scope,
+                    conversation_scope,
+                    &route_group.route_group_id,
+                    &excluded,
                 ) {
                     let retry_body = execute_retry_wire(
                         runtime,
@@ -1117,10 +1218,7 @@ fn handle_responses(
                     .map_err(|fault| project_fault(request, fault, 598))?;
                     target = candidate;
                     reselected = true;
-                    raw = routecodex_v4_provider::send_target(
-                        &target.protocol, &target.config_path, target.auth_alias.as_deref(),
-                        &target.wire_model, &retry_body, false,
-                    ).map_err(|error| {
+                    raw = send_target_nonstream(&target, &retry_body).map_err(|error| {
                         project_provider_fault(
                             request,
                             RuntimeFault::new(&error.code, error.message),
@@ -1241,7 +1339,6 @@ fn handle_responses(
                 raw.status
             };
             emit_payload_console_events(
-                event_bus,
                 &report.trace,
                 request,
                 &request.path,
@@ -1277,11 +1374,6 @@ struct CordisSseTransportStream<S = ProviderResponseStream> {
     ingress: SseIngressPlugin,
     egress: SseEgressPlugin,
     close_after_pending: bool,
-    request: HttpRequest,
-    provider: String,
-    model: String,
-    started_at: std::time::Instant,
-    event_bus: Arc<Mutex<V4Debug02BusSubscription>>,
 }
 
 impl<S: ProviderSseSource> CordisSseTransportStream<S> {
@@ -1289,31 +1381,16 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
         stream: S,
         runtime: Arc<Mutex<SkeletonRuntime>>,
         processor: ResponseStreamProcessor,
-        request: HttpRequest,
-        provider: String,
-        model: String,
-        event_bus: Arc<Mutex<V4Debug02BusSubscription>>,
     ) -> Self {
+        let (ingress, egress) = production_transport_pair(std::time::Instant::now())
+            .expect("constant SSE transport policy");
         Self {
             stream,
             runtime,
             processor,
-            ingress: SseIngressPlugin::new(
-                SseTransportPolicy::new(1024 * 1024, 1024 * 1024, Duration::from_secs(30))
-                    .expect("constant SSE transport policy"),
-                std::time::Instant::now(),
-            ),
-            egress: SseEgressPlugin::new(
-                SseTransportPolicy::new(1024 * 1024, 1024 * 1024, Duration::from_secs(30))
-                    .expect("constant SSE transport policy"),
-                std::time::Instant::now(),
-            ),
+            ingress,
+            egress,
             close_after_pending: false,
-            request,
-            provider,
-            model,
-            started_at: std::time::Instant::now(),
-            event_bus,
         }
     }
 
@@ -1422,19 +1499,6 @@ impl<S: ProviderSseSource> ResponseStream for CordisSseTransportStream<S> {
                             .execute_provider_response_scoped(&runtime, frame)
                         {
                             Ok((disposition, report)) => {
-                                if let Some(report) = report.as_ref() {
-                                    emit_payload_console_events(
-                                        &self.event_bus,
-                                        &report.trace,
-                                        &self.request,
-                                        &self.request.path,
-                                        &self.provider,
-                                        &self.model,
-                                        true,
-                                        None,
-                                        self.started_at.elapsed(),
-                                    );
-                                }
                                 if let Some(report) = report {
                                     if report.client_frame.is_none() {
                                         Err(RuntimeFault::new(
@@ -1469,7 +1533,6 @@ impl<S: ProviderSseSource> ResponseStream for CordisSseTransportStream<S> {
 }
 
 fn emit_payload_console_events(
-    event_bus: &Arc<Mutex<V4Debug02BusSubscription>>,
     trace: &[String],
     request: &HttpRequest,
     endpoint: &str,
@@ -1479,80 +1542,14 @@ fn emit_payload_console_events(
     status: Option<u16>,
     elapsed: std::time::Duration,
 ) {
-    publish_diagnostic_events(event_bus, request, trace);
-    let mut rendered_response = false;
-    let saw_response_event = trace.iter().any(|entry| {
-        entry.contains(":console.payload_ready:✅ [resp]")
-    });
     for event in trace {
         if let Some(line) = render_payload_console_event(
             event, request, endpoint, provider, model, stream, status, elapsed,
         ) {
             println!("{line}");
             let _ = std::io::stdout().flush();
-            rendered_response |= line.contains("responseStatus=");
         }
     }
-    if should_render_sse_terminal_summary(stream, rendered_response, trace)
-        || (!stream && !rendered_response && !saw_response_event)
-    {
-        let headline = diagnostic::format_response(
-            endpoint,
-            &request.request_id,
-            status.unwrap_or(200),
-            model,
-        );
-        let debug = format!(
-            "event=completed responseStatus=completed finish_reason=stop provider={} model={} chain=provider>resp_inbound>resp_chatprocess>resp_outbound elapsedMs={} transport=sse",
-            provider,
-            model,
-            elapsed.as_millis(),
-        );
-        println!("{}", format_console_layered(headline, debug));
-        let _ = std::io::stdout().flush();
-    }
-}
-
-fn should_render_sse_terminal_summary(stream: bool, rendered_response: bool, trace: &[String]) -> bool {
-    stream
-        && !rendered_response
-        && trace
-            .iter()
-            .any(|entry| entry.contains(":provider_sse_disposition:completed"))
-}
-
-/// Publish diagnostic facts to the process-local read-only event bus before
-/// rendering them. The bus is a side-channel observer: payload bytes and
-/// control decisions never cross this boundary, and dispatch is scoped to the
-/// immutable request id.
-fn publish_diagnostic_events(
-    event_bus: &Arc<Mutex<V4Debug02BusSubscription>>,
-    request: &HttpRequest,
-    trace: &[String],
-) {
-    let Ok(mut bus) = event_bus.lock() else {
-        return;
-    };
-    let _ = bus.subscribe(
-        &format!("console:{}", request.request_id),
-        SubscriptionTopic::Diagnostic,
-        &request.request_id,
-    );
-    for entry in trace {
-        let Some((plugin_id, _)) = entry.split_once(':') else {
-            continue;
-        };
-        let mut hasher = Sha256::new();
-        hasher.update(entry.as_bytes());
-        let payload_hash = format!("sha256:{:x}", hasher.finalize());
-        let _ = bus.publish(DiagnosticEventEnvelope::new(
-            SubscriptionTopic::Diagnostic,
-            &request.request_id,
-            plugin_id,
-            &payload_hash,
-        ));
-    }
-    let _ = bus.dispatch(&SubscriptionTopic::Diagnostic, &request.request_id);
 }
 
 fn render_payload_console_event(
@@ -1702,6 +1699,39 @@ fn project_provider_fault(
     }
 }
 
+fn send_target_nonstream(
+    target: &routecodex_v4_router::SelectedTarget,
+    wire_body: &serde_json::Value,
+) -> Result<
+    routecodex_v4_provider::ProviderRawResponse,
+    routecodex_v4_provider::ProviderTransportError,
+> {
+    validate_auth_alias(&target.config_path, target.auth_alias.as_deref())?;
+    match send_protocol(&target.protocol, &target.config_path, &target.wire_model, wire_body, false)? {
+        ProviderTransportResult::Response(response) => Ok(response),
+        ProviderTransportResult::Stream(_) => Err(routecodex_v4_provider::ProviderTransportError {
+            code: "provider_transport_shape".to_string(),
+            message: "non-stream dispatch returned stream transport".to_string(),
+            status: None,
+        }),
+    }
+}
+
+fn send_target_streaming(
+    target: &routecodex_v4_router::SelectedTarget,
+    wire_body: &serde_json::Value,
+) -> Result<ProviderResponseStream, routecodex_v4_provider::ProviderTransportError> {
+    validate_auth_alias(&target.config_path, target.auth_alias.as_deref())?;
+    match send_protocol(&target.protocol, &target.config_path, &target.wire_model, wire_body, true)? {
+        ProviderTransportResult::Stream(stream) => Ok(stream),
+        ProviderTransportResult::Response(_) => Err(routecodex_v4_provider::ProviderTransportError {
+            code: "provider_transport_shape".to_string(),
+            message: "stream dispatch returned non-stream transport".to_string(),
+            status: None,
+        }),
+    }
+}
+
 fn record_provider_failure(
     availability: &Arc<Mutex<V4Availability01SessionScoped>>,
     request: &HttpRequest,
@@ -1769,7 +1799,7 @@ mod tests {
             body: Vec::new(),
             request_id: "test-server-day-00000001".to_string(),
             server_id: "rccv4".to_string(),
-            port: 5500,
+            port: 5520,
         }
     }
 
@@ -1858,43 +1888,6 @@ mod tests {
         assert!(rendered.contains("responseStatus=completed"));
     }
 
-    #[test]
-    fn sse_terminal_trace_requires_response_summary() {
-        let trace = vec![
-            "v4.std.diagnostic.response_payload_console_render:console.payload_ready:✅ [resp] model=- output_items=0".to_string(),
-            "v4.std.direct.response.sse_frame_boundary:provider_sse_disposition:completed".to_string(),
-        ];
-        assert!(should_render_sse_terminal_summary(true, false, &trace));
-        assert!(!should_render_sse_terminal_summary(true, true, &trace));
-        assert!(!should_render_sse_terminal_summary(false, false, &trace));
-    }
-
-    #[test]
-    fn production_trace_publishes_scoped_diagnostic_events() {
-        let bus = Arc::new(Mutex::new(V4Debug02BusSubscription::new()));
-        let request = HttpRequest {
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            headers: Vec::new(),
-            body: Vec::new(),
-            request_id: "req-event-bus".to_string(),
-            server_id: "rccv4".to_string(),
-            port: 5500,
-        };
-        publish_diagnostic_events(
-            &bus,
-            &request,
-            &["node-a:plugin.executed:typed handle executed".to_string()],
-        );
-        let guard = bus.lock().expect("event bus lock");
-        assert_eq!(guard.published_facts().len(), 1);
-        let view = guard
-            .subscriber_view("console:req-event-bus")
-            .expect("console subscriber view");
-        assert_eq!(view.events().len(), 1);
-        assert_eq!(view.scope_key(), "req-event-bus");
-    }
-
     fn test_manifest() -> RuntimeConfigManifest {
         compile_runtime_config(
             r#"
@@ -1971,6 +1964,87 @@ targets = ["mock"]
             assert!(
                 plugin_ids.iter().any(|plugin_id| plugin_id == required),
                 "compiled production epoch is missing {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn production_request_report_witnesses_real_cordis_handles() {
+        let handler = PipelineHandler::new(test_manifest()).expect("handler initializes");
+        let runtime = handler.runtime.lock().expect("runtime lock");
+        let lease = runtime.admit_request("request-plugin-witness").expect("request lease");
+        let report = runtime
+            .execute_request_json_scoped_for_target_with_lease(
+                r#"{"model":"mock-model","messages":[{"role":"user","content":"hello"}]}"#,
+                "chat",
+                "responses",
+                "mock-model",
+                false,
+                "request-plugin-witness",
+                5520,
+                "session-plugin-witness",
+                "conversation-plugin-witness",
+                Some("relay"),
+                Some(&lease),
+            )
+            .expect("request chain executes");
+        for plugin_id in [
+            "v4.std.request.protocol_parse",
+            "v4.std.request.responses_normalize",
+            "v4.std.chat_process.request_governance",
+            "v4.std.request.responses_wire_build",
+            "v4.std.provider.wire_build",
+        ] {
+            assert!(
+                report.trace.iter().any(|entry| {
+                    entry.starts_with(plugin_id) && entry.contains("plugin.executed")
+                }),
+                "production request report missing typed handle witness for {plugin_id}: {:?}",
+                report.trace
+            );
+        }
+        let published = runtime
+            .diagnostic_bus()
+            .lock()
+            .expect("diagnostic bus lock")
+            .published_facts()
+            .len();
+        assert!(published > 0, "production plugin execution must publish diagnostic facts");
+    }
+
+    #[test]
+    fn production_response_report_witnesses_real_cordis_handles() {
+        let handler = PipelineHandler::new(test_manifest()).expect("handler initializes");
+        let runtime = handler.runtime.lock().expect("runtime lock");
+        let lease = runtime.admit_request("response-plugin-witness").expect("response lease");
+        let report = runtime
+            .execute_provider_response_scoped_for_target_with_lease(
+                r#"{"id":"resp_1","model":"mock-model","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}"#,
+                "response-plugin-witness",
+                5520,
+                "session-response-plugin-witness",
+                "conversation-response-plugin-witness",
+                "chat",
+                "responses",
+                "relay",
+                Some(&lease),
+            )
+            .expect("response chain executes");
+        for plugin_id in [
+            "v4.std.response.provider_raw_validate",
+            "v4.std.response.provider_compat",
+            "v4.std.response.protocol_decode",
+            "v4.std.chat_process.response_governance",
+            "v4.std.chat_process.tool_harvest",
+            "v4.hook.relay.response",
+            "v4.std.response.frame_build",
+        ] {
+            assert!(
+                report.trace.iter().any(|entry| {
+                    entry.starts_with(plugin_id) && entry.contains("plugin.executed")
+                }),
+                "production response report missing typed handle witness for {plugin_id}: {:?}",
+                report.trace
             );
         }
     }
@@ -2068,18 +2142,6 @@ targets = ["mock"]
             },
             runtime,
             processor,
-            HttpRequest {
-                method: "POST".to_string(),
-                path: "/v1/responses".to_string(),
-                headers: Vec::new(),
-                body: Vec::new(),
-                request_id: "request-1".to_string(),
-                server_id: "127.0.0.1:5500-day-test".to_string(),
-                port,
-            },
-            "test-provider".to_string(),
-            "m".to_string(),
-            Arc::new(Mutex::new(V4Debug02BusSubscription::new())),
         )
     }
 
@@ -2238,5 +2300,71 @@ targets = ["mock"]
             "unexpected chat projection: {text}"
         );
         assert!(text.ends_with("data: [DONE]\n\n"));
+    }
+
+    #[test]
+    fn production_entry_cordis_service_readiness_binds_every_compiled_plugin() {
+        let manifest = test_manifest();
+        let registry = ProductionHandleRegistry::new(manifest.product.as_ref());
+        let plan = {
+            let handler = PipelineHandler::new(test_manifest())
+                .expect("production handler must initialize");
+            let plan = handler.runtime.lock().expect("runtime lock").plan().clone();
+            plan
+        };
+        let report = super::cordis_service_readiness(&plan, &registry, 0)
+            .expect("production readiness must succeed with the standard registry");
+        let compiled_plugin_ids: std::collections::BTreeSet<&str> = plan
+            .chains
+            .iter()
+            .filter(|chain| chain.chain_id != "config")
+            .flat_map(|chain| chain.nodes.iter())
+            .flat_map(|node| node.plugins.iter())
+            .map(|plugin| plugin.plugin_id.as_str())
+            .collect();
+        let missing_in_compiled_plan: std::collections::BTreeSet<&str> = report
+            .missing_plugin_ids
+            .iter()
+            .map(|id| id.as_str())
+            .collect();
+        assert!(
+            missing_in_compiled_plan.is_empty(),
+            "readiness must report every compiled plugin bound: missing={:?}",
+            missing_in_compiled_plan
+        );
+        assert!(
+            report.bound_plugin_count >= compiled_plugin_ids.len(),
+            "readiness must bind every compiled plugin ({} expected, {} bound)",
+            compiled_plugin_ids.len(),
+            report.bound_plugin_count
+        );
+        assert_eq!(report.service_binding_count, 0);
+    }
+
+    #[test]
+    fn production_entry_cordis_service_readiness_fails_when_a_plugin_handle_is_missing() {
+        let manifest = test_manifest();
+        let registry = ProductionHandleRegistry::new(manifest.product.as_ref());
+        let plan = {
+            let handler = PipelineHandler::new(test_manifest())
+                .expect("production handler must initialize");
+            let plan = handler.runtime.lock().expect("runtime lock").plan().clone();
+            plan
+        };
+        let missing_plugin_id = plan
+            .chains
+            .iter()
+            .flat_map(|chain| chain.nodes.iter())
+            .flat_map(|node| node.plugins.iter())
+            .map(|plugin| plugin.plugin_id.clone())
+            .next()
+            .expect("test plan must contain a compiled plugin");
+        let broken_registry = MissingStandardHandleRegistry::new(&registry, missing_plugin_id);
+        let error = super::cordis_service_readiness(&plan, &broken_registry, 1)
+            .expect_err("readiness must fail when a plugin handle is missing");
+        assert!(
+            error.contains("missing plugin handles"),
+            "error must identify the readiness gap: {error}"
+        );
     }
 }

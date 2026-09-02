@@ -19,7 +19,8 @@
 
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::MetadataCenter;
-use routecodex_v4_cordis_bridge::{ScopeSessionCommand, ScopeSessionOperation};
+use routecodex_v4_cordis_bridge::{HandleRegistry, ScopeSessionCommand, ScopeSessionOperation};
+use routecodex_v4_debug::{DiagnosticEventEnvelope, SubscriptionTopic, V4Debug02BusSubscription};
 use routecodex_v4_error::{
     ClientProjection, DecisionAction, ErrorCenter, ErrorChain, ErrorChainError, ExecutionDecision,
     RetryPolicy,
@@ -66,6 +67,55 @@ pub struct ResponsesWireRequest {
 pub enum ResponsesProviderPayload {
     Json(Value),
     Sse(Vec<u8>),
+}
+
+/// Typed request facts extracted at the request-inbound owner boundary.
+/// Runtime-bin consumes these facts for routing and transport selection; it
+/// must not parse protocol payload fields itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestAdmissionFacts {
+    pub model: String,
+    pub stream: bool,
+}
+
+pub fn parse_request_admission_facts(
+    raw_body: &[u8],
+    entry_protocol: &str,
+    continuation_owner: &str,
+) -> Result<RequestAdmissionFacts, RuntimeFault> {
+    let body: Value = serde_json::from_slice(raw_body)
+        .map_err(|error| RuntimeFault::new("invalid_request", format!("invalid JSON: {error}")))?;
+    if entry_protocol == "responses"
+        && continuation_owner == "relay"
+        && body.get("previous_response_id").is_some()
+    {
+        return Err(RuntimeFault::new(
+            "continuation_unsupported",
+            "local relay continuation is not implemented",
+        ));
+    }
+    if entry_protocol != "responses" && body.get("previous_response_id").is_some() {
+        return Err(RuntimeFault::new(
+            "continuation_entry_protocol_mismatch",
+            "previous_response_id is only valid on the Responses entry protocol",
+        ));
+    }
+    let model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|model| !model.is_empty())
+        .ok_or_else(|| RuntimeFault::new("invalid_request", "model is required"))?
+        .to_string();
+    let stream = body
+        .get("stream")
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| RuntimeFault::new("invalid_request", "stream must be a boolean"))
+        })
+        .transpose()?
+        .unwrap_or(false);
+    Ok(RequestAdmissionFacts { model, stream })
 }
 
 /// Build the only provider-bound Responses request shape. The input is the
@@ -804,10 +854,6 @@ pub struct ExecutionContext {
     pub control: ControlView,
     pub information: InformationView,
     pub diagnostic: DiagnosticView,
-    /// Node-scoped immutable service bindings. The registry is request-local
-    /// and carries Arc-backed data/information/diagnostic carriers alongside
-    /// the typed execution frame; it is never serialized into payload.
-    services: Option<NodeServiceRegistry>,
 }
 
 impl ExecutionContext {
@@ -858,7 +904,6 @@ impl ExecutionContext {
             },
             information: InformationView::default(),
             diagnostic: DiagnosticView::default(),
-            services: None,
         }
     }
 
@@ -892,10 +937,6 @@ impl ExecutionContext {
 
     pub fn record_trace(&mut self, entry: impl Into<String>) {
         self.diagnostic.trace.push(entry.into());
-    }
-
-    pub fn service_registry(&self) -> Option<&NodeServiceRegistry> {
-        self.services.as_ref()
     }
 
     /// Project the adjacent business payload back into the legacy report
@@ -975,11 +1016,13 @@ impl ExecutionContext {
         context.control.continuation_restored = control.continuation_restored;
         context.information = serde_json::from_value(frame.information.clone())
             .map_err(|error| RuntimeFault::new("execution_frame_information", error.to_string()))?;
-        context.services = self.services.clone();
         for event in &frame.events {
             if event.kind == "stage.checkpoint" {
                 context.diagnostic.trace.push(event.message.clone());
-            } else {
+            } else if !matches!(
+                event.kind.as_str(),
+                "node.entry" | "node.exit" | "state.transition" | "node.error"
+            ) {
                 context.diagnostic.trace.push(format!(
                     "{}:{}:{}",
                     event.plugin_id, event.kind, event.message
@@ -1552,9 +1595,10 @@ pub struct ExecutionReport {
 pub struct SkeletonRuntime {
     plan: SkeletonPlan,
     epoch_store: ActiveEpochStore,
-    handle_registry: StandardHandleRegistry,
+    handle_registry: std::sync::Arc<dyn HandleRegistry>,
     active_requests: RefCell<HashSet<String>>,
     payload_cycles: RefCell<PayloadCycleRegistry>,
+    diagnostic_bus: std::sync::Arc<std::sync::Mutex<V4Debug02BusSubscription>>,
 }
 
 /// Request-owned admission lease retained through provider and response
@@ -1799,19 +1843,36 @@ impl SkeletonRuntime {
     }
 
     pub fn from_compiled_plan(plan: SkeletonPlan) -> Result<Self, RuntimeFault> {
+        Self::from_compiled_plan_with_registry(plan, std::sync::Arc::new(StandardHandleRegistry::new()))
+    }
+
+    pub fn from_compiled_plan_with_registry(
+        plan: SkeletonPlan,
+        handle_registry: std::sync::Arc<dyn HandleRegistry>,
+    ) -> Result<Self, RuntimeFault> {
         plan.verify()
             .map_err(|error| RuntimeFault::new("plan_invalid", error.to_string()))?;
         Ok(Self {
             plan,
             epoch_store: ActiveEpochStore::empty(),
-            handle_registry: StandardHandleRegistry::new(),
+            handle_registry,
             active_requests: RefCell::new(HashSet::new()),
             payload_cycles: RefCell::new(PayloadCycleRegistry::new()),
+            diagnostic_bus: std::sync::Arc::new(std::sync::Mutex::new(
+                V4Debug02BusSubscription::new(),
+            )),
         })
     }
 
     pub fn plan(&self) -> &SkeletonPlan {
         &self.plan
+    }
+
+    /// Read-only access to the diagnostic bus owned by the debug module. The
+    /// bus carries observation facts only; it is never consulted for routing
+    /// or control decisions.
+    pub fn diagnostic_bus(&self) -> std::sync::Arc<std::sync::Mutex<V4Debug02BusSubscription>> {
+        std::sync::Arc::clone(&self.diagnostic_bus)
     }
 
     /// Use this runtime's admitted response-outbound registry for client
@@ -1872,7 +1933,7 @@ impl SkeletonRuntime {
             candidate,
             expected_graph_hash,
             expected_manifest_hash,
-            &self.handle_registry,
+            self.handle_registry.as_ref(),
         )
         .map_err(|error| RuntimeFault::new("execution_epoch_materialize", error.to_string()))?;
         self.prepare_execution_epoch(
@@ -1910,6 +1971,74 @@ impl SkeletonRuntime {
             binding,
             lease,
         })
+    }
+
+    /// Execute the Cordis-owned route-facts and target-selection nodes before
+    /// provider protocol dispatch. Runtime callers receive only the typed
+    /// control projection; they never invoke router selection helpers.
+    pub fn execute_target_selection(
+        &self,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        client_protocol: &str,
+        execution_lane: &str,
+        model: &str,
+        route_group_id: &str,
+        unavailable_provider_ids: &[String],
+    ) -> Result<Value, RuntimeFault> {
+        let lease = self
+            .epoch_store
+            .admit()
+            .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
+        let control = serde_json::json!({
+            "route_facts": {
+                "route_group_id": route_group_id,
+                "entry_protocol": client_protocol,
+                "execution_lane": execution_lane,
+                "unavailable_provider_ids": unavailable_provider_ids,
+            }
+        });
+        let information = serde_json::json!({
+            "client_protocol": client_protocol,
+            "execution_lane": execution_lane,
+            "model": model,
+        });
+        let frame = NodeExecutionFrame::with_information(
+            serde_json::json!({"model": model}),
+            control,
+            information,
+        );
+        let outcome = ExecutionEngine::execute_pinned_node_from(
+            "relay_request",
+            Some("V4HubReqExecution04Planned"),
+            frame,
+            &lease,
+            self.handle_registry.as_ref(),
+            Some("V4HubReqTarget05Resolved"),
+        )
+        .map_err(|error| RuntimeFault::new("target_selection", error.to_string()))?;
+        let control = match outcome {
+            NodeOutcome::Continue { control, .. } => control,
+            NodeOutcome::Failure { error } => {
+                return Err(RuntimeFault::new(
+                    error.get("code").and_then(Value::as_str).unwrap_or("target_selection"),
+                    error.get("message").and_then(Value::as_str).unwrap_or("Cordis target selection failed"),
+                ));
+            }
+            NodeOutcome::Branch { .. } | NodeOutcome::Terminal { .. } => {
+                return Err(RuntimeFault::new(
+                    "target_selection",
+                    "Cordis target node did not return a continuation frame",
+                ));
+            }
+        };
+        control
+            .as_object()
+            .and_then(|object| object.get("target_selection"))
+            .cloned()
+            .ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target node produced no selection"))
     }
 
     /// Scope claim: a request id may only have one active closed loop.
@@ -2403,43 +2532,96 @@ impl SkeletonRuntime {
         };
         let mut ctx = ExecutionContext::with_scope(
             request_id,
-            binding.clone(),
+            binding,
             port,
             session_scope,
             conversation_scope,
         );
         seed(&mut ctx);
         let initial_frame = ctx.clone().into_frame(chain_id)?;
-        let mut services = NodeServiceRegistry::new(
-            chain_id,
-            request_id,
-            &binding.plan_hash,
-            binding.plan_epoch,
-        );
-        services
-            .bind_data(ImmutableDataCarrier::from_value(&initial_frame.data).map_err(|error| {
-                RuntimeFault::new("service_data_carrier", error.to_string())
-            })?)
-            .map_err(|error| RuntimeFault::new("service_data_bind", error.to_string()))?;
-        let information_bytes = serde_json::to_vec(&initial_frame.information)
-            .map_err(|error| RuntimeFault::new("service_information_carrier", error.to_string()))?;
-        services
-            .bind_information(ImmutableInformationCarrier::from_bytes(&information_bytes))
-            .map_err(|error| RuntimeFault::new("service_information_bind", error.to_string()))?;
-        services
-            .bind_diagnostic(ImmutableDiagnosticCarrier::new(request_id))
-            .map_err(|error| RuntimeFault::new("service_diagnostic_bind", error.to_string()))?;
-        services
-            .execute()
-            .map_err(|error| RuntimeFault::new("service_injection", error.to_string()))?;
-        ctx.services = Some(services);
-        let outcome = ExecutionEngine::execute_pinned_node(
+        let outcome = match ExecutionEngine::execute_pinned_node(
             chain_id,
             initial_frame,
             lease,
-            &self.handle_registry,
-        )
-        .map_err(|error| RuntimeFault::new("execution_engine", error.to_string()))?;
+            self.handle_registry.as_ref(),
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let message = error.to_string();
+                let payload_hash = format!("sha256:{:x}", Sha256::digest(message.as_bytes()));
+                let mut bus = self
+                    .diagnostic_bus
+                    .lock()
+                    .map_err(|_| RuntimeFault::new("diagnostic_bus", "diagnostic bus lock poisoned"))?;
+                bus.publish(DiagnosticEventEnvelope::new(
+                    SubscriptionTopic::NodeError,
+                    request_id,
+                    "routecodex-v4-runtime",
+                    &payload_hash,
+                ))
+                .map_err(|bus_error| RuntimeFault::new("diagnostic_bus", bus_error.to_string()))?;
+                if bus
+                    .subscribers_for(&SubscriptionTopic::NodeError)
+                    .any(|subscription| subscription.scope_key == request_id)
+                {
+                    bus.dispatch(&SubscriptionTopic::NodeError, request_id)
+                        .map_err(|bus_error| RuntimeFault::new("diagnostic_bus", bus_error.to_string()))?;
+                }
+                return Err(RuntimeFault::new("execution_engine", message));
+            }
+        };
+        let outcome_events = match &outcome {
+            NodeOutcome::Continue { events, .. } | NodeOutcome::Branch { events, .. } => events,
+            NodeOutcome::Terminal { .. } | NodeOutcome::Failure { .. } => &Vec::new(),
+        };
+        if !outcome_events.is_empty() {
+            let mut bus = self
+                .diagnostic_bus
+                .lock()
+                .map_err(|_| RuntimeFault::new("diagnostic_bus", "diagnostic bus lock poisoned"))?;
+            for event in outcome_events {
+                let payload_hash = format!("sha256:{:x}", Sha256::digest(event.message.as_bytes()));
+                let topic = match event.kind.as_str() {
+                    "node.entry" => SubscriptionTopic::NodeEntry,
+                    "node.exit" => SubscriptionTopic::NodeExit,
+                    "state.transition" => SubscriptionTopic::StateTransition,
+                    _ => SubscriptionTopic::NodeEvent,
+                };
+                bus.publish(DiagnosticEventEnvelope::new(
+                    topic.clone(),
+                    request_id,
+                    &event.plugin_id,
+                    &payload_hash,
+                ))
+                .map_err(|error| RuntimeFault::new("diagnostic_bus", error.to_string()))?;
+                if bus
+                    .subscribers_for(&topic)
+                    .any(|subscription| subscription.scope_key == request_id)
+                {
+                    bus.dispatch(&topic, request_id)
+                        .map_err(|error| RuntimeFault::new("diagnostic_bus", error.to_string()))?;
+                }
+            }
+        }
+        let compiled_plugins = lease
+            .plugin_ids_for_chain(chain_id)
+            .map_err(|error| RuntimeFault::new("production_plan_missing", error.to_string()))?;
+        let executed_plugins = match &outcome {
+            NodeOutcome::Continue { events, .. } | NodeOutcome::Branch { events, .. } => events
+                .iter()
+                .filter(|event| event.kind == "plugin.executed")
+                .map(|event| event.plugin_id.clone())
+                .collect::<HashSet<_>>(),
+            NodeOutcome::Terminal { .. } | NodeOutcome::Failure { .. } => HashSet::new(),
+        };
+        for plugin_id in compiled_plugins {
+            if !executed_plugins.contains(&plugin_id) {
+                return Err(RuntimeFault::new(
+                    "production_plugin_not_executed",
+                    format!("production chain {chain_id} did not execute compiled plugin {plugin_id}"),
+                ));
+            }
+        }
         if let NodeOutcome::Failure { error } = &outcome {
             let mut fault = RuntimeFault::new(
                 error

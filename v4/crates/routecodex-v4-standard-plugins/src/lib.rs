@@ -1281,11 +1281,7 @@ fn route_facts_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     {
         return Err("route facts consumer requires typed route facts".to_string());
     }
-    ctx.write_control_resource(
-        "v4.control.target_selection",
-        json!({"selected": "keyless_mock"}),
-    )
-    .map_err(|error| error.to_string())
+    Ok(())
 }
 
 fn transport_validate(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -1397,6 +1393,14 @@ impl Default for StandardHandleRegistry {
 impl HandleRegistry for StandardHandleRegistry {
     fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
         self.get_handle(plugin_id)
+    }
+
+    fn encode_client_error_sse(
+        &self,
+        entry_protocol: &str,
+        message: &str,
+    ) -> Result<Vec<u8>, String> {
+        self.encode_client_error_sse(entry_protocol, message)
     }
 }
 

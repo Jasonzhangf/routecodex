@@ -22,6 +22,7 @@ routecodex-v4-plugin-plan = { path = "../routecodex-v4-plugin-plan" }
 routecodex-v4-provider = { path = "../routecodex-v4-provider" }
 routecodex-v4-router = { path = "../routecodex-v4-router" }
 routecodex-v4-runtime = { path = "../routecodex-v4-runtime" }
+routecodex-v4-skeleton = { path = "../routecodex-v4-skeleton" }
 routecodex-v4-server = { path = "../routecodex-v4-server" }
 routecodex-v4-servertool = { path = "../routecodex-v4-servertool" }
 routecodex-v4-standard-plugins = { path = "../routecodex-v4-standard-plugins" }

@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const runtimeBin = fs.readFileSync(path.join(root, 'crates/routecodex-v4-runtime-bin/src/main.rs'), 'utf8');
 const runtimeSource = fs.readFileSync(path.join(root, 'crates/routecodex-v4-runtime/src/lib.rs'), 'utf8');
+const providerSource = fs.readFileSync(path.join(root, 'crates/routecodex-v4-provider/src/lib.rs'), 'utf8');
 const productionSource = runtimeBin.split('#[cfg(test)]', 1)[0];
 const failures = [];
 
@@ -30,8 +31,14 @@ for (const symbol of [
   'find_frame_end',
   'ResponsesSseStream',
   'select_product_target_with_unavailable',
+  'send_openai_chat',
+  'send_anthropic_messages',
+  'send_responses',
 ]) {
   if (productionSource.includes(symbol)) failures.push(`RUNTIME_BIN_DIRECT_BUSINESS_HELPER: ${symbol}`);
+}
+if (!productionSource.includes('send_protocol(')) {
+  failures.push('PROVIDER_TRANSPORT_UNBOUND: runtime-bin must use provider-owned protocol dispatch');
 }
 if (!runtimeBin.includes('execute_provider_response_scoped')) {
   failures.push('RESPONSE_CHAIN_UNBOUND: runtime-bin does not consume response chain output');
@@ -42,6 +49,17 @@ if (!/execute_provider_response_scoped[\s\S]*?report\.client_frame/.test(product
 if (runtimeSource.includes('decode_provider_sse_frame(')
     || runtimeSource.includes('encode_client_sse_frame(')) {
   failures.push('SSE_SEMANTIC_BYPASS: runtime directly invokes SSE semantic codec outside NodePluginPlan');
+}
+if (productionSource.includes('SseIngressPlugin::new(')
+    || productionSource.includes('SseEgressPlugin::new(')
+    || !productionSource.includes('production_transport_pair(')) {
+  failures.push('SSE_TRANSPORT_CONSTRUCTION_BYPASS: runtime-bin must consume the opaque SSE transport pair from the transport owner');
+}
+const sendResponsesStart = providerSource.indexOf('pub fn send_responses(');
+const sendResponsesEnd = providerSource.indexOf('\npub fn send_responses_streaming(', sendResponsesStart);
+const sendResponsesSource = providerSource.slice(sendResponsesStart, sendResponsesEnd);
+if (/normalize_provider_(?:response|sse_frame)/.test(sendResponsesSource)) {
+  failures.push('PROVIDER_TRANSPORT_SEMANTIC_BYPASS: send_responses performs response/SSE normalization before RespInbound');
 }
 const sseStreamStart = productionSource.indexOf('struct CordisSseTransportStream');
 if (sseStreamStart < 0

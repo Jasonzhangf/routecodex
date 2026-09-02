@@ -403,14 +403,30 @@ export class CordisNodeHost {
   #ready = false;
   #acquired = new Set();
   #releasedServices = new Set();
+  #serviceBindings = new Map();
 
-  constructor({ nodeId, services = [], descriptor }) {
+  constructor({ nodeId, services = [], descriptor, serviceBindings }) {
     if (!nodeId || !descriptor) {
       throw new CordisHostError('invalid_node_descriptor', 'nodeId and descriptor are required');
     }
     this.nodeId = nodeId;
     this.descriptor = Object.freeze({ ...descriptor });
     this.services = Object.freeze([...services]);
+    if (serviceBindings !== undefined && !(serviceBindings instanceof Map)) {
+      throw new CordisHostError(
+        'invalid_service_bindings',
+        'serviceBindings must be a Map of typed node service values',
+      );
+    }
+    this.#serviceBindings = new Map(serviceBindings ? [...serviceBindings] : []);
+    for (const name of this.#serviceBindings.keys()) {
+      if (!this.services.includes(name)) {
+        throw new CordisHostError(
+          'service_not_declared',
+          `node service ${name} bound without a host declaration`,
+        );
+      }
+    }
     this.#root = new Context();
     this.#pipeline = this.#root.extend();
     this.#node = this.#pipeline.extend();
@@ -466,6 +482,9 @@ export class CordisNodeHost {
   async mount(plugins) {
     if (this.#disposed) {
       throw new CordisHostError('host_disposed', `node ${this.nodeId} is disposed`);
+    }
+    for (const [name, value] of this.#serviceBindings) {
+      this.#node.provide(name, value);
     }
     const mounted = [];
     try {

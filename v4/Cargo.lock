@@ -937,6 +937,7 @@ dependencies = [
  "routecodex-v4-cordis-bridge",
  "routecodex-v4-plugin-contract",
  "routecodex-v4-plugin-plan",
+ "routecodex-v4-standard-plugins",
  "serde",
  "serde_ignored",
  "serde_json",
@@ -1004,7 +1005,9 @@ name = "routecodex-v4-router"
 version = "0.1.0"
 dependencies = [
  "routecodex-v4-config",
+ "routecodex-v4-cordis-bridge",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1014,6 +1017,7 @@ dependencies = [
  "routecodex-v4-base-node",
  "routecodex-v4-control",
  "routecodex-v4-cordis-bridge",
+ "routecodex-v4-debug",
  "routecodex-v4-error",
  "routecodex-v4-node-container",
  "routecodex-v4-plugin-contract",
@@ -1043,6 +1047,7 @@ dependencies = [
  "routecodex-v4-runtime",
  "routecodex-v4-server",
  "routecodex-v4-servertool",
+ "routecodex-v4-skeleton",
  "routecodex-v4-standard-plugins",
  "serde_json",
  "sha2",

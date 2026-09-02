@@ -22,14 +22,44 @@ fn engine_executes_exact_lease_order_and_preserves_adjacent_frame() {
             information: serde_json::json!({}),
             events: vec![
                 routecodex_v4_cordis_bridge::DiagnosticFact {
-                    kind: "plugin.executed".into(),
-                    plugin_id: "increment".into(),
-                    message: "typed handle executed".into(),
+                    kind: "node.entry".into(),
+                    plugin_id: "first".into(),
+                    message: "request".into(),
                 },
                 routecodex_v4_cordis_bridge::DiagnosticFact {
                     kind: "plugin.executed".into(),
                     plugin_id: "increment".into(),
                     message: "typed handle executed".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "node.exit".into(),
+                    plugin_id: "first".into(),
+                    message: "request".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "state.transition".into(),
+                    plugin_id: "first".into(),
+                    message: "executed".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "node.entry".into(),
+                    plugin_id: "second".into(),
+                    message: "request".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "plugin.executed".into(),
+                    plugin_id: "increment".into(),
+                    message: "typed handle executed".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "node.exit".into(),
+                    plugin_id: "second".into(),
+                    message: "request".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "state.transition".into(),
+                    plugin_id: "second".into(),
+                    message: "executed".into(),
                 },
             ],
         }
@@ -47,6 +77,25 @@ fn engine_rejects_execution_without_a_declared_path() {
     )
     .expect_err("missing entrypoint must fail");
     assert!(error.to_string().contains("chain"));
+}
+
+#[test]
+fn adjacent_frames_reuse_immutable_carriers_without_payload_serialization() {
+    let first = NodeExecutionFrame::new(
+        serde_json::json!({"value": 1}),
+        serde_json::json!({}),
+    );
+    let second = NodeExecutionFrame::with_shared_carriers(
+        serde_json::json!({"value": 2}),
+        serde_json::json!({}),
+        serde_json::json!({}),
+        Vec::new(),
+        first.shared_data().clone(),
+        first.shared_information().clone(),
+        first.shared_diagnostic().clone(),
+    );
+    assert!(first.shares_immutable_carriers_with(&second));
+    assert_eq!(second.shared_data().as_bytes(), first.shared_data().as_bytes());
 }
 
 #[test]
@@ -105,7 +154,23 @@ fn pinned_bridge_abi_preserves_typed_data_and_control() {
             data: serde_json::json!({"answer": 1}),
             control: serde_json::json!({"route": "typed"}),
             information: serde_json::json!({}),
-            events: vec![],
+            events: vec![
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "node.entry".into(),
+                    plugin_id: "bridge-node".into(),
+                    message: "request".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "node.exit".into(),
+                    plugin_id: "bridge-node".into(),
+                    message: "request".into(),
+                },
+                routecodex_v4_cordis_bridge::DiagnosticFact {
+                    kind: "state.transition".into(),
+                    plugin_id: "bridge-node".into(),
+                    message: "executed".into(),
+                },
+            ],
         }
     );
 }

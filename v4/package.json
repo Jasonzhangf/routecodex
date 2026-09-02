@@ -31,7 +31,7 @@
     "verify:v4-cordis-concurrency-reconciliation-red": "node scripts/verify-v4-cordis-concurrency-reconciliation.mjs --red-self-test",
     "verify:v4-foundation": "node scripts/verify.mjs",
     "verify:v4-foundation-red": "node scripts/verify-red.mjs",
-    "test:cordis-host": "cargo build --manifest-path Cargo.toml -p routecodex-v4-node-container --bin routecodex-v4-node-container-host --locked && node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs"
+    "test:cordis-host": "cargo test --manifest-path Cargo.toml -p routecodex-v4-node-container --bin routecodex-v4-node-container-host --locked && node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs"
   },
   "dependencies": {
     "cordis": "^4.0.0-rc.8",

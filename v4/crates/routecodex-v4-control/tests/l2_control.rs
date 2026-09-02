@@ -1,6 +1,6 @@
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::{
-    ControlError, ControlSignal, ControlSignalKind, MetadataCenter, MetadataOperation, PayloadGate,
+    ControlError, ControlResource, ControlSignal, ControlSignalKind, MetadataCenter, MetadataOperation, PayloadGate,
 };
 
 fn scope_a() -> Scope {
@@ -45,6 +45,22 @@ fn control_lifecycle_full_cycle_success() {
     assert_eq!(center.records().count(), 3);
     assert_eq!(reg.sequence, 1);
     assert_eq!(rel.sequence, 3);
+}
+
+#[test]
+fn typed_control_resource_command_is_owner_bound() {
+    let scope = scope_a();
+    let mut center = MetadataCenter::new(scope.clone());
+    center
+        .commit(ControlResource::RouteFact.register("sha256:facts".into(), scope.clone()))
+        .unwrap();
+    center
+        .commit(ControlResource::RouteFact.consume(scope.clone()))
+        .unwrap();
+    let error = center
+        .commit(ControlResource::TargetSelection.consume(scope))
+        .unwrap_err();
+    assert!(matches!(error, ControlError::NotRegistered));
 }
 
 #[test]
