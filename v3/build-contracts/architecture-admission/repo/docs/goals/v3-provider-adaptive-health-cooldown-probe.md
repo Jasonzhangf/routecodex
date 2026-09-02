@@ -15,8 +15,9 @@ channel; it never enters request/response payload or protocol metadata.
   it owns no state or persistence.
 - `V3ProviderGlobalSubscriptionHealthStore` and `V3ProviderCooldownCoordinator`
   are retired; runtime probe orchestration enters `V3ProviderHealthStore`.
-- `adaptive_probe_interval_ms` consumes error-rate, recovery EWMA, and probe-failure
-  history for the bounded 1/5/15/60/180/300 minute ladder.
+- `probe_backoff_ms` owns the fixed probe ladder 30s/1m/3m/15m/1h/3h, looping
+  after the 3h step; `adaptive_probe_interval_ms` keeps error-rate and recovery
+  EWMA diagnostics for the no-configured-policy cooldown-duration source.
 - Managed runtime initialization loads the provider-owned cooldown pool before
   listener readiness; malformed state fails startup explicitly.
 
@@ -41,15 +42,16 @@ single `next_probe_at_ms`; only a successful probe clears the block.
 
 Defaults are bounded and deterministic:
 
-- trigger: exactly 3 consecutive provider-health failures for the same
-  `(provider_id, auth_alias, model_id)` key; any successful real request resets
-  the streak;
-- initial interval: 1 minute when no recovery history exists;
-- score: `0.6 * failure_rate + 0.4 * recovery_factor`, each normalized to
-  `[0, 1]`; failure rate uses the configured EWMA/window and recovery factor is
-  recovery EWMA divided by the configured target, capped at 1;
-- bands: 1m, 5m, 15m, 1h, 3h, 5h for ascending score bands;
-- failed probe records another failure and recomputes the next interval;
+- trigger: 3 consecutive provider-health failures (adaptive score to 0) for the
+  same `(provider_id, auth_alias, model_id)` key block the key for every session;
+  while the probe entry exists, only a successful probe (or an explicit operator
+  removal) resurrects the key;
+- cadence: fixed ladder 30s / 1m / 3m / 15m / 1h / 3h. The first probe is due
+  30s after the block; each failed probe advances to the next step; after the
+  3h step the ladder loops back to 30s.
+- the adaptive score (`0.6 * failure_rate + 0.4 * recovery_factor`) is a
+  diagnostic signal and, without a configured policy, the cooldown-duration
+  source; it never reschedules the probe ladder;
 - successful probe records recovery duration, resets streak, and removes
   cooldown state;
 - state is persisted by the provider cooldown coordinator and loaded on managed

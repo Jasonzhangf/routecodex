@@ -186,22 +186,33 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         sse_response.headers().get("content-type").unwrap(),
         "text/event-stream"
     );
-    let mut body_stream = sse_response.bytes_stream();
-    let first = tokio::time::timeout(Duration::from_millis(150), body_stream.next())
+    let mut stream = sse_response.bytes_stream();
+    let mut frames = Vec::new();
+    match tokio::time::timeout(Duration::from_millis(150), stream.next()).await {
+        Ok(Some(Ok(bytes))) => {
+            assert_eq!(
+                bytes.as_ref(),
+                b": keepalive\n\n",
+                "provider semantic frames must remain client-invisible until terminal validation"
+            );
+            frames.push(bytes);
+        }
+        Ok(Some(Err(error))) => panic!("pre-terminal client stream failed: {error}"),
+        Ok(None) => panic!("client stream closed before the provider attempt reached terminal"),
+        Err(_) => {}
+    }
+    let remaining_frames = tokio::time::timeout(Duration::from_secs(1), stream.collect::<Vec<_>>())
         .await
-        .expect("client first frame must arrive before controlled terminal delay")
-        .unwrap()
         .unwrap();
-    assert!(String::from_utf8(first.to_vec()).unwrap().contains("first"));
-    let rest = tokio::time::timeout(Duration::from_secs(1), body_stream.collect::<Vec<_>>())
-        .await
-        .unwrap();
-    let rest = rest
+    frames.extend(remaining_frames.into_iter().map(Result::unwrap));
+    let body = frames
         .into_iter()
-        .map(Result::unwrap)
         .flat_map(|bytes| bytes.to_vec())
         .collect::<Vec<_>>();
-    assert!(String::from_utf8(rest).unwrap().contains("data: [DONE]"));
+    let body = String::from_utf8(body).unwrap();
+    assert!(body.contains("first"));
+    assert!(body.contains(r#""finish_reason":"stop""#));
+    assert_eq!(body.matches("data: [DONE]").count(), 1, "{body}");
     let _sse_capture = captures_rx.recv().await.unwrap();
 
     let error_response = client
@@ -216,7 +227,7 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .unwrap();
     assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
     let error_body: Value = error_response.json().await.unwrap();
-    assert_eq!(error_body["error"]["message"], "controlled rate limit");
+    assert_eq!(error_body["error"]["message"], "rate_limit_error");
     assert_eq!(error_body["error"]["code"], "rate_limit_error");
     assert!(
         error_body["error"].get("class").is_none()
@@ -251,10 +262,7 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .send()
         .await
         .unwrap();
-    assert_eq!(
-        isolation_response.status(),
-        StatusCode::INTERNAL_SERVER_ERROR
-    );
+    assert_eq!(isolation_response.status().as_u16(), 598);
     assert!(
         tokio::time::timeout(Duration::from_millis(100), captures_rx.recv())
             .await

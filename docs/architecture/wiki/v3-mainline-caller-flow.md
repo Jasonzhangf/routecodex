@@ -21,7 +21,6 @@ flowchart TD
   module_routecodex_v3_admin["routecodex-v3-admin"]
   module_routecodex_v3_route_classifier["routecodex-v3-route-classifier"]
   module_routecodex_v3_sse["routecodex-v3-sse"]
-  module_scripts["scripts"]
   module_v3_cli["v3-cli"]
   module_v3_config["v3-config"]
   module_v3_debug["v3-debug"]
@@ -38,8 +37,6 @@ flowchart TD
   module_routecodex_v3_admin -->|1 edges / 1 paths| module_v3_debug
   module_routecodex_v3_route_classifier -->|3 edges / 2 paths| module_routecodex_v3_route_classifier
   module_routecodex_v3_sse -->|2 edges / 1 paths| module_routecodex_v3_sse
-  module_scripts -->|2 edges / 1 paths| module_docs
-  module_scripts -->|1 edges / 1 paths| module_docs__manifest
   module_v3_cli -->|1 edges / 1 paths| module_v3_lifecycle
   module_v3_config -->|1 edges / 1 paths| module_docs__manifest
   module_v3_config -->|16 edges / 7 paths| module_v3_config
@@ -72,6 +69,8 @@ flowchart TD
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
   module_v3_server -->|31 edges / 18 paths| module_v3_server
   module_v3_target -->|1 edges / 1 paths| module_v3_provider_responses
+  module_v3_scripts -->|2 edges / 1 paths| module_docs
+  module_v3_scripts -->|1 edges / 1 paths| module_docs__manifest
   module_v3_scripts -->|6 edges / 3 paths| module_v3_scripts
 ```
 
@@ -81,8 +80,6 @@ flowchart TD
 | routecodex-v3-admin | v3-debug | 1 | `v3.server.internal_observability_projection` |
 | routecodex-v3-route-classifier | routecodex-v3-route-classifier | 3 | `v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
 | routecodex-v3-sse | routecodex-v3-sse | 2 | `v3.sse.transport_boundary` |
-| scripts | docs | 2 | `v3.live_provider_compat.parity` |
-| scripts | docs::manifest | 1 | `v3.live_provider_compat.parity` |
 | v3-cli | v3-lifecycle | 1 | `v3.server.managed_lifecycle` |
 | v3-config | docs::manifest | 1 | `v3.entry_protocol_endpoint_binding.mainline` |
 | v3-config | v3-config | 16 | `v3.config.compact_hub_v1_defaults`<br/>`v3.config.compile`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.config.server_manifest_compile.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.entry_protocol_registry_contract.mainline`<br/>`v3.user_config.compile` |
@@ -115,6 +112,8 @@ flowchart TD
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
 | v3-server | v3-server | 31 | `v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-target | v3-provider-responses | 1 | `v3.provider_key_health_model_granularity` |
+| v3/scripts | docs | 2 | `v3.live_provider_compat.parity` |
+| v3/scripts | docs::manifest | 1 | `v3.live_provider_compat.parity` |
 | v3/scripts | v3/scripts | 6 | `v3.build_test_artifact_budget`<br/>`v3.direct.request_key_hooks`<br/>`v3.global_binary_install` |
 
 ## Auto audit /补救清单
@@ -464,9 +463,9 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-user-cfg-01` | `V3UserConfig01FileSource` → `V3UserConfig02RoutingSelectionParsed` | active | V3UserConfigStore::read_routing_selection<br/><small>routecodex-v3-config/src/user_config.rs</small> | parse_v3_user_config_02_routing<br/><small>routecodex-v3-config/src/user_config.rs</small> | `v3.simplified_user_config` |
-| `v3-user-cfg-02` | `V3UserConfig02RoutingSelectionParsed` → `V3Config02AuthoringParsed` | active | V3UserConfigStore::read_authoring<br/><small>routecodex-v3-config/src/user_config.rs</small> | project_v3_user_config_03_authoring<br/><small>routecodex-v3-config/src/user_config.rs</small> | `v3.simplified_user_config` |
-| `v3-user-cfg-03` | `V3Config05ManifestPublished` → `V3Lifecycle01ValidatedConfig` | active | V3ManagedLifecycle::declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | load_v3_config_snapshot_from_path<br/><small>routecodex-v3-config/src/store.rs</small> | `v3.simplified_user_config` |
+| `v3-user-cfg-01` | `V3UserConfig01FileSource` → `V3UserConfig02RoutingSelectionParsed` | anchored | V3UserConfigStore::read_routing_selection<br/><small>routecodex-v3-config/src/user_config.rs</small> | parse_v3_user_config_02_routing<br/><small>routecodex-v3-config/src/user_config.rs</small> | `v3.simplified_user_config` |
+| `v3-user-cfg-02` | `V3UserConfig02RoutingSelectionParsed` → `V3Config02AuthoringParsed` | anchored | V3UserConfigStore::read_authoring<br/><small>routecodex-v3-config/src/user_config.rs</small> | project_v3_user_config_03_authoring<br/><small>routecodex-v3-config/src/user_config.rs</small> | `v3.simplified_user_config` |
+| `v3-user-cfg-03` | `V3Config05ManifestPublished` → `V3Lifecycle01ValidatedConfig` | anchored | V3ManagedLifecycle::declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | load_v3_config_snapshot_from_path<br/><small>routecodex-v3-config/src/store.rs</small> | `v3.simplified_user_config` |
 
 ## v3.config.compile
 
@@ -1439,7 +1438,7 @@ flowchart TD
   subgraph c_36_v3_openai_chat_relay_controlled_runtime_m_v3_server["v3-server"]
     c_36_v3_openai_chat_relay_controlled_runtime_0["v3-server<br/>execute_v3_openai_chat_completions_request<br/><small>routecodex-v3-server/src/executors.rs</small>"]
     c_36_v3_openai_chat_relay_controlled_runtime_20["v3-server<br/>openai_chat_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small>"]
-    c_36_v3_openai_chat_relay_controlled_runtime_21["v3-server<br/>Body::from_stream<br/><small>routecodex-v3-server/src/executors.rs</small>"]
+    c_36_v3_openai_chat_relay_controlled_runtime_21["v3-server<br/>v3_client_sse_body<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
   end
   c_36_v3_openai_chat_relay_controlled_runtime_0 -->|v3-openai-chat-relay-01<br/>V3OpenAiChatRelayRuntimeInput → V3HubReqInbound01ClientRaw| c_36_v3_openai_chat_relay_controlled_runtime_1
   c_36_v3_openai_chat_relay_controlled_runtime_2 -->|v3-openai-chat-relay-02<br/>V3HubReqInbound01ClientRaw → V3HubReqInbound02Normalized| c_36_v3_openai_chat_relay_controlled_runtime_3
@@ -1478,7 +1477,7 @@ flowchart TD
 | `v3-openai-chat-relay-14` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | V3HubRelayResponseHookRegistry::govern<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.openai_chat_relay_runtime_integration` |
 | `v3-openai-chat-relay-15` | `V3HubRespChatProcess03Governed` → `V3HubRespContinuation04Committed` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | V3HubRelayResponseHookRegistry::commit<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.openai_chat_relay_runtime_integration` |
 | `v3-openai-chat-relay-16` | `V3HubRespContinuation04Committed` → `V3HubRespOutbound05ClientSemantic` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small> | `v3.openai_chat_relay_runtime_integration` |
-| `v3-openai-chat-relay-17` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | openai_chat_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small> | Body::from_stream<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.openai_chat_relay_runtime_integration` |
+| `v3-openai-chat-relay-17` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | openai_chat_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small> | v3_client_sse_body<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | `v3.openai_chat_relay_runtime_integration` |
 
 ## v3.gemini_relay.controlled_runtime
 
@@ -1515,7 +1514,7 @@ flowchart TD
   subgraph c_37_v3_gemini_relay_controlled_runtime_m_v3_server["v3-server"]
     c_37_v3_gemini_relay_controlled_runtime_0["v3-server<br/>execute_v3_gemini_generate_content_request<br/><small>routecodex-v3-server/src/executors.rs</small>"]
     c_37_v3_gemini_relay_controlled_runtime_20["v3-server<br/>gemini_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small>"]
-    c_37_v3_gemini_relay_controlled_runtime_21["v3-server<br/>Body::from_stream<br/><small>routecodex-v3-server/src/executors.rs</small>"]
+    c_37_v3_gemini_relay_controlled_runtime_21["v3-server<br/>v3_client_sse_body<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
   end
   c_37_v3_gemini_relay_controlled_runtime_0 -->|v3-gemini-relay-01<br/>V3GeminiRelayRuntimeInput → V3HubReqInbound01ClientRaw| c_37_v3_gemini_relay_controlled_runtime_1
   c_37_v3_gemini_relay_controlled_runtime_2 -->|v3-gemini-relay-02<br/>V3HubReqInbound01ClientRaw → V3HubReqInbound02Normalized| c_37_v3_gemini_relay_controlled_runtime_3
@@ -1554,7 +1553,7 @@ flowchart TD
 | `v3-gemini-relay-14` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | V3HubRelayResponseHookRegistry::govern<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.gemini_relay_runtime_integration` |
 | `v3-gemini-relay-15` | `V3HubRespChatProcess03Governed` → `V3HubRespContinuation04Committed` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | V3HubRelayResponseHookRegistry::commit<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.gemini_relay_runtime_integration` |
 | `v3-gemini-relay-16` | `V3HubRespContinuation04Committed` → `V3HubRespOutbound05ClientSemantic` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small> | `v3.gemini_relay_runtime_integration` |
-| `v3-gemini-relay-17` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | gemini_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small> | Body::from_stream<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.gemini_relay_runtime_integration` |
+| `v3-gemini-relay-17` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | gemini_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small> | v3_client_sse_body<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | `v3.gemini_relay_runtime_integration` |
 
 ## v3.entry_protocol_registry_contract.mainline
 
@@ -1710,8 +1709,8 @@ flowchart TD
     c_42_v3_sse_transport_boundary_3["v3-provider-responses<br/>validated_sse_stream<br/><small>routecodex-v3-provider-responses/src/shared.rs</small>"]
   end
   subgraph c_42_v3_sse_transport_boundary_m_v3_server["v3-server"]
-    c_42_v3_sse_transport_boundary_5["v3-server<br/>execute_v3_responses_relay_request<br/><small>routecodex-v3-server/src/executors.rs</small>"]
-    c_42_v3_sse_transport_boundary_6["v3-server<br/>Body::from_stream<br/><small>routecodex-v3-server/src/executors.rs</small>"]
+    c_42_v3_sse_transport_boundary_5["v3-server<br/>responses_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small>"]
+    c_42_v3_sse_transport_boundary_6["v3-server<br/>v3_client_sse_body<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
   end
   c_42_v3_sse_transport_boundary_0 -->|v3-sse-transport-01<br/>V3SseTransportIn01RawChunk → V3SseTransportIn02DecodedFrame| c_42_v3_sse_transport_boundary_1
   c_42_v3_sse_transport_boundary_0 -->|v3-sse-transport-02<br/>V3SseTransportIn02DecodedFrame → V3SseTransportIn03ValidatedFrameStream| c_42_v3_sse_transport_boundary_2
@@ -1724,7 +1723,7 @@ flowchart TD
 | `v3-sse-transport-01` | `V3SseTransportIn01RawChunk` → `V3SseTransportIn02DecodedFrame` | anchored | SseIncrementalDecoder::push<br/><small>routecodex-v3-sse/src/lib.rs</small> | build_v3_sse_transport_in_02_from_fields<br/><small>routecodex-v3-sse/src/lib.rs</small> | `v3.sse_transport_core_independent` |
 | `v3-sse-transport-02` | `V3SseTransportIn02DecodedFrame` → `V3SseTransportIn03ValidatedFrameStream` | anchored | SseIncrementalDecoder::push<br/><small>routecodex-v3-sse/src/lib.rs</small> | build_v3_sse_transport_in_03_from_v3_sse_transport_in_02<br/><small>routecodex-v3-sse/src/lib.rs</small> | `v3.sse_transport_core_independent` |
 | `v3-sse-transport-03` | `V3SseTransportIn03ValidatedFrameStream` → `V3SseTransportOut04EncodedChunk` | anchored | validated_sse_stream<br/><small>routecodex-v3-provider-responses/src/shared.rs</small> | build_v3_sse_transport_out_04_from_v3_sse_transport_in_03<br/><small>routecodex-v3-sse/src/lib.rs</small> | `v3.sse_transport_core_independent` |
-| `v3-sse-server-frame-04` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | execute_v3_responses_relay_request<br/><small>routecodex-v3-server/src/executors.rs</small> | Body::from_stream<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.sse_transport_core_independent` |
+| `v3-sse-server-frame-04` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | responses_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small> | v3_client_sse_body<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | `v3.sse_transport_core_independent` |
 
 ## v3.protocol_conversion_field_parity
 
@@ -2040,8 +2039,8 @@ flowchart TD
   subgraph c_51_v3_live_provider_compat_parity_m_docs__manifest["docs::manifest"]
     c_51_v3_live_provider_compat_parity_1["docs::manifest<br/>lifecycle_id<br/><small>docs/architecture/manifests/v3.live_provider_compat.parity.yml</small>"]
   end
-  subgraph c_51_v3_live_provider_compat_parity_m_scripts["scripts"]
-    c_51_v3_live_provider_compat_parity_0["scripts<br/>verifierName<br/><small>scripts/architecture/verify-v3-live-provider-compat-parity.mjs</small>"]
+  subgraph c_51_v3_live_provider_compat_parity_m_v3_scripts["v3/scripts"]
+    c_51_v3_live_provider_compat_parity_0["v3/scripts<br/>verifierName<br/><small>v3/scripts/architecture/verify-v3-live-provider-compat-parity.mjs</small>"]
   end
   c_51_v3_live_provider_compat_parity_0 -->|v3-live-compat-01<br/>V3LiveCompat01MatrixDeclared → V3LiveCompat02ControlledEvidenceBound| c_51_v3_live_provider_compat_parity_1
   c_51_v3_live_provider_compat_parity_0 -->|v3-live-compat-02<br/>V3LiveCompat02ControlledEvidenceBound → V3LiveCompat03LiveEvidenceBound| c_51_v3_live_provider_compat_parity_2
@@ -2050,9 +2049,9 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-live-compat-01` | `V3LiveCompat01MatrixDeclared` → `V3LiveCompat02ControlledEvidenceBound` | anchored | verifierName<br/><small>scripts/architecture/verify-v3-live-provider-compat-parity.mjs</small> | lifecycle_id<br/><small>docs/architecture/manifests/v3.live_provider_compat.parity.yml</small> | `v3.live_provider_compat_parity_closeout` |
-| `v3-live-compat-02` | `V3LiveCompat02ControlledEvidenceBound` → `V3LiveCompat03LiveEvidenceBound` | anchored | verifierName<br/><small>scripts/architecture/verify-v3-live-provider-compat-parity.mjs</small> | v3.live_provider_compat.parity<br/><small>docs/architecture/wiki/v3-live-provider-compat-parity.md</small> | `v3.live_provider_compat_parity_closeout` |
-| `v3-live-compat-03` | `V3LiveCompat03LiveEvidenceBound` → `V3LiveCompat04ProductionReadinessProjected` | anchored | verifierName<br/><small>scripts/architecture/verify-v3-live-provider-compat-parity.mjs</small> | v3.live_provider_compat_parity_closeout<br/><small>docs/architecture/v3-verification-map.yml</small> | `v3.live_provider_compat_parity_closeout` |
+| `v3-live-compat-01` | `V3LiveCompat01MatrixDeclared` → `V3LiveCompat02ControlledEvidenceBound` | anchored | verifierName<br/><small>v3/scripts/architecture/verify-v3-live-provider-compat-parity.mjs</small> | lifecycle_id<br/><small>docs/architecture/manifests/v3.live_provider_compat.parity.yml</small> | `v3.live_provider_compat_parity_closeout` |
+| `v3-live-compat-02` | `V3LiveCompat02ControlledEvidenceBound` → `V3LiveCompat03LiveEvidenceBound` | anchored | verifierName<br/><small>v3/scripts/architecture/verify-v3-live-provider-compat-parity.mjs</small> | v3.live_provider_compat.parity<br/><small>docs/architecture/wiki/v3-live-provider-compat-parity.md</small> | `v3.live_provider_compat_parity_closeout` |
+| `v3-live-compat-03` | `V3LiveCompat03LiveEvidenceBound` → `V3LiveCompat04ProductionReadinessProjected` | anchored | verifierName<br/><small>v3/scripts/architecture/verify-v3-live-provider-compat-parity.mjs</small> | v3.live_provider_compat_parity_closeout<br/><small>docs/architecture/v3-verification-map.yml</small> | `v3.live_provider_compat_parity_closeout` |
 
 ## v3.responses.inbound_websocket_proxy
 
@@ -2217,8 +2216,8 @@ flowchart TD
   subgraph c_56_v3_console_request_count_visibility_mainline_m_v3_server["v3-server"]
     c_56_v3_console_request_count_visibility_mainline_0["v3-server<br/>spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_56_v3_console_request_count_visibility_mainline_1["v3-server<br/>V3RequestIdCounter::new<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_56_v3_console_request_count_visibility_mainline_2["v3-server<br/>next_v3_console_request_identity<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
-    c_56_v3_console_request_count_visibility_mainline_3["v3-server<br/>next_request_identity<br/><small>routecodex-v3-server/src/request_id.rs</small>"]
+    c_56_v3_console_request_count_visibility_mainline_2["v3-server<br/>next_v3_console_request_identity<br/><small>routecodex-v3-server/src/request_identity.rs</small>"]
+    c_56_v3_console_request_count_visibility_mainline_3["v3-server<br/>V3RequestIdCounter::next_request_identity<br/><small>routecodex-v3-server/src/request_id.rs</small>"]
     c_56_v3_console_request_count_visibility_mainline_4["v3-server<br/>render_v3_request_console_block<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
     c_56_v3_console_request_count_visibility_mainline_5["v3-server<br/>format_v3_console_request_count<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
     c_56_v3_console_request_count_visibility_mainline_6["v3-server<br/>render_v3_response_console_block<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
@@ -2232,7 +2231,7 @@ flowchart TD
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-console-count-01` | `V3RequestCounter01AggregateOwned` → `V3RequestCounter02ListenerShared` | anchored | spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small> | V3RequestIdCounter::new<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.console_request_count_visibility` |
-| `v3-console-count-02` | `V3RequestCounter02ListenerShared` → `V3RequestIdentity03Allocated` | anchored | next_v3_console_request_identity<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | next_request_identity<br/><small>routecodex-v3-server/src/request_id.rs</small> | `v3.console_request_count_visibility` |
+| `v3-console-count-02` | `V3RequestCounter02ListenerShared` → `V3RequestIdentity03Allocated` | anchored | next_v3_console_request_identity<br/><small>routecodex-v3-server/src/request_identity.rs</small> | V3RequestIdCounter::next_request_identity<br/><small>routecodex-v3-server/src/request_id.rs</small> | `v3.console_request_count_visibility` |
 | `v3-console-count-03` | `V3RequestIdentity03Allocated` → `V3ConsoleReq02HumanBlock` | anchored | render_v3_request_console_block<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | format_v3_console_request_count<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | `v3.console_request_count_visibility` |
 | `v3-console-count-04` | `V3RequestIdentity03Allocated` → `V3ConsoleResp03HumanBlock` | anchored | render_v3_response_console_block<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | format_v3_console_request_count<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | `v3.console_request_count_visibility` |
 
@@ -2960,7 +2959,7 @@ flowchart TD
 
 ## v3.direct_sse_accept_skeleton
 
-Responses SSE establishes a shared Front client transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only the runtime projected client frame crosses the channel.
+Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only runtime-projected client frames or typed Error06 terminal frames cross the channel, never reparsed HTTP JSON.
 
 Owner feature: `v3.direct_sse_accept_skeleton`
 Manifest: `docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml`

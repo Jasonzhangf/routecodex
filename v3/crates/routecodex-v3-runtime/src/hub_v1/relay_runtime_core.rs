@@ -11,9 +11,7 @@
 //! 收敛；JSON 响应链（resp01->02->03->04->05->06）经 `project_json_response` 收敛。
 
 use super::*;
-use crate::nodes::{
-    V3AttemptStoreError, V3CommittedClientSseBuilder, V3RequestExecutionControl,
-};
+use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder, V3RequestExecutionControl};
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     resolve_v3_relay_target_outcome, resolve_v3_relay_target_outcome_with_rescue,
@@ -268,7 +266,7 @@ mod response_header_timeout_contract_tests {
     }
 
     #[test]
-    fn relay_transport_header_timeout_defaults_and_zero_fallback() {
+    fn relay_transport_header_timeout_defaults_and_zero_use_default_timeout() {
         assert_eq!(
             v3_relay_transport_response_timeout_from_ms(None),
             std::time::Duration::from_millis(300_000)
@@ -1093,7 +1091,9 @@ where
                                     if let Err(error) =
                                         committed_attempt.mark_last_frame_as_terminal()
                                     {
-                                        break Some(V3RelayAttemptCollectFailure::LocalStore(error));
+                                        break Some(V3RelayAttemptCollectFailure::LocalStore(
+                                            error,
+                                        ));
                                     }
                                 }
                                 Ok(false) => {}
@@ -1498,7 +1498,10 @@ mod tests {
         );
         let mut observed = observe_v3_provider_sse(stream, observation.clone());
 
-        assert_eq!(observed.next().await.unwrap().unwrap(), b"data: semantic\n\n");
+        assert_eq!(
+            observed.next().await.unwrap().unwrap(),
+            b"data: semantic\n\n"
+        );
         assert_eq!(
             observation.snapshot().unwrap().provider_raw_sse,
             "data: semantic\n\n"

@@ -132,6 +132,7 @@ Provider SSE 的兼容修复只能修复传输语法和格式，不得根据响�
 - 代码/配置编辑、长 gate、提交、合并前，先刷新 `.agent-collab/` 视图：`runs/*/heartbeat.json`、`claims/*/owner.json`、最近 `events.jsonl`、`handoff/`、`merge-queue/`、`KILL_SWITCH`。
 - 写入前 claim 语义 owner，不 claim 裸文件路径；优先 `feature_id`、`resource_id`、`mainline_node_id`、`gate_id`，用 `mkdir .agent-collab/claims/<semantic_id>` 作为本地原子占用。
 - 保留并行 worker 的无关 dirty worktree；禁止用 checkout/reset/broad cleanup 清理他人改动。
+- 本地主 tree 的 `main` 只作只读状态核验；即使用户要求“合并到 main”，也必须在从最新 `origin/main` 新建的独立 clean integration worktree 完成 merge、验证与 push，绝不能把 feature commit 或生成产物写入 dirty local main。
 - 心跳 stale 不等于接管授权；生产写入、删除、迁移、发布、鉴权、密钥、global install、live runtime 变更仍需明确授权或 checked handoff。
 - 可修复 blocker 不等于等待：如果目标被 map/source anchor、gate wiring、review surface drift、窄测试 fixture drift 等非破坏性问题挡住，且当前 source truth 可验证，应主动做 forward fix。先记录 evidence；有空 claim 就 claim 后修；若 active claim 正占用同语义，先写 handoff，再对低风险 forward-only 一致性修复做最小 patch，不用 reset/checkout/blocked 代替修复。
 - 其他 worker 的无关 claim / handoff / dirty diff 不是当前任务的 blanket blocker。只要目标修改能用定向 patch 保留现有 diff，且没有真实同一语义冲突，就继续自己的 feature/gate；只在同一代码区域出现无法安全合并的直接冲突时停。
