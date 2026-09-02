@@ -123,6 +123,56 @@ pub enum ControlCommand {
     },
 }
 
+/// Owner-specific control resources. Runtime callers must select a declared
+/// resource kind before constructing a command; arbitrary control keys remain
+/// unavailable through this facade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlResource {
+    ContinuationScope,
+    ContinuationOwner,
+    ExecutionMode,
+    ExecutionPlan,
+    RouteFact,
+    TargetSelection,
+    RouteExit,
+}
+
+impl ControlResource {
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::ContinuationScope => "continuation_scope",
+            Self::ContinuationOwner => "continuation_owner",
+            Self::ExecutionMode => "execution_mode",
+            Self::ExecutionPlan => "execution_plan",
+            Self::RouteFact => "route_facts",
+            Self::TargetSelection => "target_selection",
+            Self::RouteExit => "route_exit",
+        }
+    }
+
+    pub fn register(self, value: String, scope: Scope) -> ControlCommand {
+        ControlCommand::Register {
+            resource: self.key().to_string(),
+            value,
+            scope,
+        }
+    }
+
+    pub fn consume(self, scope: Scope) -> ControlCommand {
+        ControlCommand::Consume {
+            resource: self.key().to_string(),
+            scope,
+        }
+    }
+
+    pub fn release(self, scope: Scope) -> ControlCommand {
+        ControlCommand::Release {
+            resource: self.key().to_string(),
+            scope,
+        }
+    }
+}
+
 impl ControlCommand {
     pub fn resource(&self) -> &str {
         match self {
