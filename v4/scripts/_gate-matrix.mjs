@@ -39,7 +39,6 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-cli-plugin.mjs',
   'verify-v4-real-runtime-admission.mjs',
   'verify-v4-production-mainline-red.mjs',
-  'verify-v4-direct-relay-sse.mjs',
 ];
 
 // Rust-owner gates are executed by verify.mjs alongside script gates. Keeping

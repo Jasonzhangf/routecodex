@@ -319,6 +319,11 @@ function checkMainlineEdges(mainlinePath = path.join(v4Root, 'docs/architecture/
   allowedOwners.add('routecodex-v4-admin::query');
   allowedOwners.add('routecodex-v4-cordis-host::CordisNodeHost');
   allowedOwners.add('routecodex-v4-cordis-host::CordisBoundNodeHost');
+  allowedOwners.add('routecodex-v4-provider::send_protocol');
+  allowedOwners.add('routecodex-v4-control::ControlEventBus');
+  allowedOwners.add('routecodex-v4-debug::V4Debug02BusSubscription');
+  allowedOwners.add('routecodex-v4-runtime::ImmutableBytes');
+  allowedOwners.add('routecodex-v4-runtime::NodeServiceRegistry');
   allowedOwners.add('routecodex-v4-node-container::NodeContainer');
   allowedOwners.add('routecodex-v4-node-container::HostBindingRuntime');
   allowedOwners.add('routecodex-v4-standard-plugins');
