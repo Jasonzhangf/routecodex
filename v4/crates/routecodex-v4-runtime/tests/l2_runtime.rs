@@ -358,6 +358,11 @@ fn production_execution_publishes_lifecycle_event_topics() {
         )
         .expect("production request executes");
 
+    assert!(runtime
+        .dispatch_diagnostic_events("r-production-events")
+        .expect("production diagnostic consumer dispatches")
+        > 0);
+
     let bus = bus.lock().unwrap();
     assert!(bus
         .published_facts()
