@@ -1,11 +1,11 @@
 {
-  "fix_candidate_id": "fix-5eaff61a00d8",
+  "fix_candidate_id": "fix-3f4be3b09c58",
   "issue_id": "v4-cordis-governance-reset-20260903",
   "module_id": "routecodex-v4-base-node",
-  "worktree_id": "v4-cordis-5eaff61a00d8",
-  "base_commit": "339dc6f8d79b4be62ffc8c78565934d20b57479f",
-  "head_commit": "5eaff61a00d8b2badd9ca4a66f9de349be71a7a9",
-  "tree_hash": "8886e1616947827fa3a0eedfc5e67c3e49123ed8",
+  "worktree_id": "v4-cordis-3f4be3b09c58",
+  "base_commit": "5eaff61a00d8b2badd9ca4a66f9de349be71a7a9",
+  "head_commit": "3f4be3b09c58075591ee8914489a87710cace012",
+  "tree_hash": "a9f7432a9782881dd5e236e2f33bf056b8aad867",
   "diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "design_id": "v4-feature-completion-plan-28",
   "owner": "routecodex-v4-runtime",
@@ -14,7 +14,8 @@
   "verification_evidence_ids": [
     "candidate-1",
     "positive-1",
-    "negative-1"
+    "negative-1",
+    "whitebox-1"
   ],
   "created_at": "2026-09-02T23:59:50.000Z"
 }

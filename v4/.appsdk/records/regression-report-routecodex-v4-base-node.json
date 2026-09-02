@@ -1,7 +1,7 @@
 {
-  "regression_report_id": "regression-fix-5eaff61a00d8",
+  "regression_report_id": "regression-fix-3f4be3b09c58",
   "module_id": "routecodex-v4-base-node",
-  "source_commit": "5eaff61a00d8b2badd9ca4a66f9de349be71a7a9",
+  "source_commit": "3f4be3b09c58075591ee8914489a87710cace012",
   "artifact_hash": "sha256:0a7d33027e7b472443c04a29e677b2a3eb118a2c05c5026d62c6e170777a86ba",
   "public_api_hash": "sha256:7ea54624ce8b9e1bbf64281a86251ec51ce6ee24ead640eaa98432b257717ab7",
   "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
