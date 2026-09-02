@@ -15,7 +15,7 @@
   },
   "manifest_hash": "sha256:pending-config-v2-manifest",
   "plan_epoch": 2,
-  "plan_hash": "sha256:105ceca8a3d5b8e693ca9368adec2fd4af74695519e3e28b8ad00f8475d42861",
+  "plan_hash": "sha256:296bd11cb87faec6476c560d13298928af912d4f139605ede38a8bcca2db529f",
   "direct_protocol_contract": {
     "same_protocol": true,
     "mismatch": "fail_fast"
