@@ -32,7 +32,8 @@
     <input id="search-filter" type="search" placeholder="Search pools, providers, or models" autocomplete="off">
   </div>
 
-  <div class="route-group-tabs" id="group-tabs" role="tablist" aria-label="Route groups"></div>
+  <label for="server-selector">Server</label>
+  <select id="server-selector" aria-label="Server"></select>
   <section id="route-tree" class="route-editor" aria-busy="true"></section>
 </main>
 
@@ -58,9 +59,9 @@
 <script src="/app.embedded.txt"></script>
 <script>
 const state = {
-  groups: [],
+  servers: [],
   baseline: "",
-  activeGroup: null,
+  activeServer: null,
   query: "",
   providers: null,
   pickerTarget: null,
@@ -74,6 +75,10 @@ const saveButton = document.getElementById("save-btn");
 const discardButton = document.getElementById("discard-btn");
 const saveState = document.getElementById("save-state");
 const picker = document.getElementById("provider-picker");
+document.getElementById("server-selector").addEventListener("change", event => {
+  state.activeServer = event.target.value;
+  renderRoutes();
+});
 
 function esc(value) {
   const node = document.createElement("span");
@@ -82,7 +87,7 @@ function esc(value) {
 }
 
 function snapshot() {
-  return JSON.stringify(state.groups);
+  return JSON.stringify(state.servers);
 }
 
 function isDirty() {
@@ -109,24 +114,17 @@ function markDirty() {
   announce("info", "Changes are local until you save.");
 }
 
-function currentGroup() {
-  return state.groups.find(group => group.group_id === state.activeGroup) || null;
+function currentServer() {
+  return state.servers.find(server => server.server_id === state.activeServer) || null;
 }
 
-function renderTabs() {
-  const tabs = document.getElementById("group-tabs");
-  if (!state.activeGroup && state.groups.length) state.activeGroup = state.groups[0].group_id;
-  tabs.innerHTML = state.groups.map(group => {
-    const active = group.group_id === state.activeGroup;
-    return `<button class="route-group-tab" role="tab" aria-selected="${active}" tabindex="${active ? 0 : -1}" data-group="${esc(group.group_id)}">${esc(group.group_id)}</button>`;
-  }).join("");
-  tabs.querySelectorAll("[data-group]").forEach(button => {
-    button.addEventListener("click", () => {
-      state.activeGroup = button.dataset.group;
-      renderTabs();
-      renderRoutes();
-    });
-  });
+function renderServerSelector() {
+  const selector = document.getElementById("server-selector");
+  if (!state.activeServer && state.servers.length) state.activeServer = state.servers[0].server_id;
+  selector.innerHTML = state.servers.map(server =>
+    `<option value="${esc(server.server_id)}">${esc(server.server_id)}:${esc(server.port)}</option>`
+  ).join("");
+  selector.value = state.activeServer || "";
 }
 
 function memberMatches(member, query) {
@@ -134,10 +132,10 @@ function memberMatches(member, query) {
 }
 
 function renderRoutes() {
-  const group = currentGroup();
+  const group = currentServer();
   const query = state.query.trim().toLowerCase();
   if (!group) {
-    tree.innerHTML = `<div class="route-empty"><h2>No route groups</h2><p>Run <code>rccv3 init</code> after adding a provider.</p></div>`;
+    tree.innerHTML = `<div class="route-empty"><h2>No servers</h2><p>Run <code>rccv3 init</code> after adding a provider.</p></div>`;
     tree.setAttribute("aria-busy", "false");
     return;
   }
@@ -190,7 +188,7 @@ function renderTier(pool, poolIndex, tier, tierIndex) {
 }
 
 function poolFrom(target) {
-  return currentGroup()?.pools[Number(target.dataset.pool)];
+  return currentServer()?.pools[Number(target.dataset.pool)];
 }
 
 tree.addEventListener("click", event => {
@@ -275,7 +273,7 @@ picker.addEventListener("keydown", event => {
 });
 picker.addEventListener("close", () => {
   if (picker.returnValue !== "default" || !state.pickerSelected) return;
-  const pool = currentGroup()?.pools[state.pickerTarget.poolIndex];
+  const pool = currentServer()?.pools[state.pickerTarget.poolIndex];
   if (!pool) return;
   const duplicate = pool.tiers.some(tier => tier.members.some(member => member.use === state.pickerSelected));
   if (duplicate) {
@@ -293,10 +291,10 @@ async function load() {
   announce("info", "Loading routes…");
   try {
     const data = await api("/api/routes");
-    state.groups = data.groups || [];
+    state.servers = data.servers || [];
     state.baseline = snapshot();
-    state.activeGroup = state.groups[0]?.group_id || null;
-    renderTabs(); renderRoutes();
+    state.activeServer = state.servers[0]?.server_id || null;
+    renderServerSelector(); renderRoutes();
     announce("ok", "Routes loaded. Tier 1 is tried first.");
     setBusy(false, "Saved");
   } catch (error) {
@@ -313,7 +311,7 @@ document.getElementById("search-filter").addEventListener("input", event => {
 document.getElementById("validate-btn").addEventListener("click", async () => {
   setBusy(true, "Validating"); announce("info", "Validating routes…");
   try {
-    const result = await api("/api/routes/validate", { method: "POST", body: JSON.stringify({ groups: state.groups, reason: "webui validate" }) });
+    const result = await api("/api/routes/validate", { method: "POST", body: JSON.stringify({ servers: state.servers, reason: "webui validate" }) });
     announce(result.ok ? "ok" : "err", result.ok ? "Configuration is valid." : `Invalid configuration: ${result.error}`);
   } catch (error) { announce("err", `Validation failed: ${error.message}`); }
   finally { setBusy(false, isDirty() ? "Unsaved changes" : "Saved"); }
@@ -321,15 +319,15 @@ document.getElementById("validate-btn").addEventListener("click", async () => {
 saveButton.addEventListener("click", async () => {
   setBusy(true, "Saving"); announce("info", "Validating and saving routes…");
   try {
-    const result = await api("/api/routes", { method: "PUT", body: JSON.stringify({ groups: state.groups, reason: "webui routes update" }) });
-    state.groups = result.groups; state.baseline = snapshot();
-    renderTabs(); renderRoutes();
+    const result = await api("/api/routes", { method: "PUT", body: JSON.stringify({ servers: state.servers, reason: "webui routes update" }) });
+    state.servers = result.servers; state.baseline = snapshot();
+    renderServerSelector(); renderRoutes();
     announce("ok", `Routes saved as revision #${result.revision_seq}.`);
     setBusy(false, "Saved");
   } catch (error) { announce("err", `Save failed: ${error.message}`); setBusy(false, "Save failed"); }
 });
 discardButton.addEventListener("click", () => {
-  state.groups = JSON.parse(state.baseline); renderTabs(); renderRoutes();
+  state.servers = JSON.parse(state.baseline); renderServerSelector(); renderRoutes();
   announce("info", "Unsaved changes discarded."); setBusy(false, "Saved");
 });
 window.addEventListener("beforeunload", event => { if (isDirty()) { event.preventDefault(); event.returnValue = ""; } });

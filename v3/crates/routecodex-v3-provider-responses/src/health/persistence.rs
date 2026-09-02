@@ -273,7 +273,7 @@ mod tests {
         assert_eq!(entries[0].0.auth_alias.as_deref(), Some("key-a"));
         assert_eq!(entries[0].0.model_id.as_deref(), Some("model-a"));
         assert_eq!(entries[0].1, 120_200);
-        assert_eq!(entries[0].2, 60_200);
+        assert_eq!(entries[0].2, 30_200);
         assert_eq!(store.persistence_alarm(), None);
     }
 

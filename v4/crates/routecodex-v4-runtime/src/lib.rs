@@ -33,8 +33,66 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::Arc;
 
 mod control_resources;
+
+/// Immutable data-plane bytes shared across adjacent owners. Construction is
+/// the only allocation; cloning a carrier only clones the Arc handle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImmutableBytes {
+    bytes: Arc<[u8]>,
+}
+
+impl ImmutableBytes {
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        Self { bytes: Arc::from(bytes) }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn shares_allocation_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.bytes, &other.bytes)
+    }
+
+    pub fn copy_count(&self) -> usize {
+        1
+    }
+}
+
+macro_rules! immutable_carrier {
+    ($name:ident) => {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub struct $name(ImmutableBytes);
+
+        impl $name {
+            pub fn from_bytes(bytes: &[u8]) -> Self {
+                Self(ImmutableBytes::from_bytes(bytes))
+            }
+
+            pub fn as_bytes(&self) -> &[u8] {
+                self.0.as_bytes()
+            }
+
+            pub fn shares_allocation_with(&self, other: &Self) -> bool {
+                self.0.shares_allocation_with(&other.0)
+            }
+
+            pub fn copy_count(&self) -> usize {
+                self.0.copy_count()
+            }
+        }
+    };
+}
+
+immutable_carrier!(ImmutableRequest);
+immutable_carrier!(ImmutableResponse);
+immutable_carrier!(ImmutableProviderRaw);
+immutable_carrier!(ImmutableSemantic);
+immutable_carrier!(ImmutableWireBytes);
+immutable_carrier!(ImmutableContinuationSnapshot);
 
 pub mod request_port;
 pub mod response_error_port;

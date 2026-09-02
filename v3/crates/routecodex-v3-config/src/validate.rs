@@ -12,7 +12,9 @@ pub(crate) fn validate_schema(
         return Err(validation("config.v3.toml version must be 3"));
     }
     if authoring.servers.is_empty() {
-        return Err(validation("at least one server is required"));
+        return Err(validation(
+            "at least one [servers.<id>] block with bind and port is required in config.toml",
+        ));
     }
     if authoring.providers.is_empty() {
         return Err(validation("at least one provider is required"));

@@ -20,6 +20,7 @@ pub const INTERNAL_CONFIG_TOML: &str = include_str!("internal.toml");
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InternalConfig {
+    #[serde(default)]
     user_config_base_toml: String,
     #[serde(default)]
     model_families: BTreeMap<String, ModelFamily>,
@@ -48,22 +49,10 @@ pub fn v3_internal_user_config_authoring() -> crate::V3Config02AuthoringParsed {
             authoring.forwarders.is_empty(),
             "internal user-config base must not contain provider forwarders"
         );
-        for server in authoring.servers.values() {
-            let group = authoring
-                .route_groups
-                .get(&server.routing_group)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "internal user-config server references missing route group {}",
-                        server.routing_group
-                    )
-                });
-            assert!(
-                group.pools.contains_key("default"),
-                "internal user-config route group {} must contain default pool",
-                server.routing_group
-            );
-        }
+        assert!(
+            authoring.servers.is_empty(),
+            "internal.toml must not declare servers or listener ports"
+        );
         authoring
     });
     AUTHORING.clone()
@@ -471,30 +460,17 @@ mod tests {
 
     #[test]
     fn invalid_internal_assets_fail_fast() {
-        let missing_family: InternalConfig =
-            toml::from_str("[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[hidden_models]\nexact = [\"gpt-5.6\"]\n")
-                .expect("syntactically valid");
-        let missing_builtin_defaults: InternalConfig =
-            toml::from_str("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[hidden_models]\nexact = [\"gpt-5.6\"]\n")
-                .expect("syntactically valid");
-        let empty_ids: InternalConfig =
-            toml::from_str("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = []\n[hidden_models]\nexact = [\"gpt-5.6\"]\n")
-                .expect("syntactically valid");
-        let missing_hidden: InternalConfig =
-            toml::from_str("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n")
-                .expect("syntactically valid");
-        let unnormalized_builtin_id: InternalConfig =
-            toml::from_str("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\" GPT-5.5 \"]\n[[builtin_catalog_models.defaults]]\nmodel_id = \"gpt-5.5\"\ncapabilities = [\"text\"]\ndescription = \"x\"\ndefault_reasoning_level = \"medium\"\nreasoning_efforts = [\"low\"]\nminimal_client_version = \"0.98.0\"\n[hidden_models]\nexact = [\"gpt-5.6\"]\n")
-                .expect("syntactically valid");
-        let empty_reasoning_defaults: InternalConfig =
-            toml::from_str("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[[builtin_catalog_models.defaults]]\nmodel_id = \"gpt-5.5\"\ncapabilities = [\"text\"]\ndescription = \"x\"\ndefault_reasoning_level = \"medium\"\nreasoning_efforts = []\nminimal_client_version = \"0.98.0\"\n[hidden_models]\nexact = [\"gpt-5.6\"]\n")
-                .expect("syntactically valid");
-        let duplicate_builtin_defaults: InternalConfig =
-            toml::from_str("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[[builtin_catalog_models.defaults]]\nmodel_id = \"gpt-5.5\"\ncapabilities = [\"text\"]\ndescription = \"x\"\ndefault_reasoning_level = \"medium\"\nreasoning_efforts = [\"low\"]\nminimal_client_version = \"0.98.0\"\n[[builtin_catalog_models.defaults]]\nmodel_id = \"gpt-5.5\"\ncapabilities = [\"text\"]\ndescription = \"x\"\ndefault_reasoning_level = \"medium\"\nreasoning_efforts = [\"low\"]\nminimal_client_version = \"0.98.0\"\n[hidden_models]\nexact = [\"gpt-5.6\"]\n")
-                .expect("syntactically valid");
-        let empty_hidden_prefix: InternalConfig =
-            toml::from_str("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[[builtin_catalog_models.defaults]]\nmodel_id = \"gpt-5.5\"\ncapabilities = [\"text\"]\ndescription = \"x\"\ndefault_reasoning_level = \"medium\"\nreasoning_efforts = [\"low\"]\nminimal_client_version = \"0.98.0\"\n[hidden_models]\nprefixes = [\"\"]\n")
-                .expect("syntactically valid");
+        fn parse(raw: &str) -> InternalConfig {
+            toml::from_str(raw).expect("syntactically valid")
+        }
+        let missing_family = parse("[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");
+        let missing_builtin_defaults = parse("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");
+        let empty_ids = parse("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = []\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");
+        let missing_hidden = parse("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n");
+        let unnormalized_builtin_id = parse("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\" GPT-5.5 \"]\n[[builtin_catalog_models.defaults]]\nmodel_id = \"gpt-5.5\"\ncapabilities = [\"text\"]\ndescription = \"x\"\ndefault_reasoning_level = \"medium\"\nreasoning_efforts = [\"low\"]\nminimal_client_version = \"0.98.0\"\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");
+        let empty_reasoning_defaults = parse("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[[builtin_catalog_models.defaults]]\nmodel_id = \"gpt-5.5\"\ncapabilities = [\"text\"]\ndescription = \"x\"\ndefault_reasoning_level = \"medium\"\nreasoning_efforts = []\nminimal_client_version = \"0.98.0\"\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");
+        let duplicate_builtin_defaults = parse("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[[builtin_catalog_models.defaults]]\nmodel_id = \"gpt-5.5\"\ncapabilities = [\"text\"]\ndescription = \"x\"\ndefault_reasoning_level = \"medium\"\nreasoning_efforts = [\"low\"]\nminimal_client_version = \"0.98.0\"\n[[builtin_catalog_models.defaults]]\nmodel_id = \"gpt-5.5\"\ncapabilities = [\"text\"]\ndescription = \"x\"\ndefault_reasoning_level = \"medium\"\nreasoning_efforts = [\"low\"]\nminimal_client_version = \"0.98.0\"\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");
+        let empty_hidden_prefix = parse("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[[builtin_catalog_models.defaults]]\nmodel_id = \"gpt-5.5\"\ncapabilities = [\"text\"]\ndescription = \"x\"\ndefault_reasoning_level = \"medium\"\nreasoning_efforts = [\"low\"]\nminimal_client_version = \"0.98.0\"\n[hidden_models]\nprefixes = [\"\"]\n");
         for invalid in [
             missing_family,
             missing_builtin_defaults,

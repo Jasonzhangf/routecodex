@@ -2,11 +2,11 @@
 // `rccv3 init` only selects an existing provider/model and writes minimal config.toml.
 
 use routecodex_v3_config::{
-    internal::v3_internal_user_config_authoring, V3UserConfig02RoutingSelectionParsed,
-    V3UserRouteMember, V3UserRoutePool,
+    V3UserConfig02RoutingSelectionParsed, V3UserRouteMember, V3UserRoutePool,
+    V3UserServerAuthoringConfig,
 };
 use routecodex_v3_config_mgmt::{list_provider_ids, read_provider_file, ConfigMgmtStore};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::io::{self, Write};
 
 pub struct InitOptions {
@@ -14,6 +14,8 @@ pub struct InitOptions {
     pub force: bool,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub bind: Option<String>,
+    pub port: Option<u16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +57,12 @@ pub fn run_init(options: &InitOptions) -> Result<(), String> {
         options.provider.as_deref(),
         options.model.as_deref(),
     )?;
-    let selection = minimal_user_config(&choice.provider, &choice.model);
+    let selection = minimal_user_config(
+        &choice.provider,
+        &choice.model,
+        options.bind.as_deref(),
+        options.port,
+    )?;
     ConfigMgmtStore::new(&options.config_path)
         .commit_user_routing_with_backup(&selection, "init", "rcc init")
         .map_err(|error| error.to_string())?;
@@ -148,30 +155,48 @@ fn select_provider_model(
     })
 }
 
-fn minimal_user_config(provider: &str, model: &str) -> V3UserConfig02RoutingSelectionParsed {
-    let internal = v3_internal_user_config_authoring();
-    let groups = internal
-        .servers
-        .values()
-        .filter(|server| server.enabled)
-        .map(|server| server.routing_group.clone())
-        .collect::<BTreeSet<_>>();
-    let route_groups = groups
-        .into_iter()
-        .map(|group_id| {
-            let pools = BTreeMap::from([(
-                "default".to_string(),
-                V3UserRoutePool {
-                    tiers: vec![vec![V3UserRouteMember::new(provider, model, None)]],
-                },
-            )]);
-            (group_id, pools)
-        })
-        .collect();
-    V3UserConfig02RoutingSelectionParsed {
-        version: 3,
-        route_groups,
+fn minimal_user_config(
+    provider: &str,
+    model: &str,
+    bind: Option<&str>,
+    port: Option<u16>,
+) -> Result<V3UserConfig02RoutingSelectionParsed, String> {
+    let port = port.ok_or_else(|| {
+        "init requires --port because listener ports belong to user config.toml".to_string()
+    })?;
+    if port == 0 {
+        return Err("init --port must be non-zero".to_string());
     }
+    let bind = bind.unwrap_or("127.0.0.1").trim();
+    if bind.is_empty() {
+        return Err("init --bind must not be empty".to_string());
+    }
+    Ok(V3UserConfig02RoutingSelectionParsed {
+        version: 3,
+        servers: BTreeMap::from([(
+            "default".to_string(),
+            V3UserServerAuthoringConfig {
+                enabled: true,
+                bind: bind.to_string(),
+                port,
+                endpoints: vec![
+                    "responses".to_string(),
+                    "anthropic".to_string(),
+                    "gemini".to_string(),
+                    "openai_chat".to_string(),
+                ],
+                features: BTreeMap::new(),
+                execution: None,
+                expose_models: Vec::new(),
+                routes: BTreeMap::from([(
+                    "default".to_string(),
+                    V3UserRoutePool {
+                        tiers: vec![vec![V3UserRouteMember::new(provider, model, None)]],
+                    },
+                )]),
+            },
+        )]),
+    })
 }
 
 fn prompt(message: &str) -> Result<String, String> {

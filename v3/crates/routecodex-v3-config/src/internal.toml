@@ -143,32 +143,6 @@ snapshots = true
 dry_run = true
 retention = { raw_requests = 16, raw_responses = 16, events = 256 }
 
-[servers.routecodex_v3_4444]
-bind = "0.0.0.0"
-port = 4444
-routing_group = "routecodex_v3_4444"
-expose_models = ["gpt-5.5"]
-features = { tool_thinking = true, toolreason_client_projection = true }
-
-[servers.routecodex_v3_4444.execution]
-allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
-allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
-
-[servers.responses_v3_7777]
-bind = "0.0.0.0"
-port = 7777
-routing_group = "responses_v3_7777"
-expose_models = ["gpt-5.5"]
-features = { tool_thinking = false, toolreason_client_projection = false }
-
-[servers.responses_v3_7777.execution]
-allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
-allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
-
 [admin_webui]
 enabled = true
 bind = "127.0.0.1"

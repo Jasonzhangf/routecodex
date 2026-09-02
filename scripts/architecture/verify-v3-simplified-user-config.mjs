@@ -117,7 +117,7 @@ export function verifySimplifiedUserConfig(sources) {
   const parsedStruct = sources.userSource.match(
     /struct V3UserConfig02RoutingSelectionParsed\s*\{(?<body>[\s\S]*?)\n\}/u,
   )?.groups?.body ?? '';
-  for (const field of ['servers', 'pipelines', 'providers', 'features', 'error', 'debug', 'admin_webui']) {
+  for (const field of ['route_groups', 'pipelines', 'providers', 'features', 'error', 'debug', 'admin_webui']) {
     if (new RegExp(`\\bpub\\s+${field}\\s*:`, 'u').test(parsedStruct)) {
       failures.push(`strict user schema must not expose internal field ${field}`);
     }

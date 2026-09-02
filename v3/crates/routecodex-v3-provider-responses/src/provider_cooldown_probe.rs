@@ -3,8 +3,9 @@
 //! 冷却到期后后台 probe 循环消费 `V3ProviderHealthStore` 的 probe API；
 //! 类型与 key 构造保持独立模块，避免 health.rs 超过文件尺寸门限。
 
-/// 首次复活探针间隔。后续由 adaptive score 推进动态退避。
-pub const V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS: u64 = 60_000;
+/// 首次复活探针间隔（probe backoff ladder 第 0 档：30s）。
+/// 重启只重置 probe 历史，下一次冷却仍从 30s 档开始。
+pub const V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS: u64 = 30_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct V3ProviderCooldownProbeKey {

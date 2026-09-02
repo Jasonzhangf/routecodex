@@ -18,7 +18,6 @@ pub fn routes() -> Router<AppState> {
 pub struct PortStatus {
     pub server_id: String,
     pub port: u16,
-    pub routing_group: String,
     pub endpoints: Vec<String>,
     pub healthy: bool,
     pub http_status: u16,
@@ -83,7 +82,6 @@ async fn overview(State(state): State<AppState>) -> Response {
         probes.push(probe_port(
             server_id.to_string(),
             server.port,
-            server.routing_group.clone(),
             server.endpoints.clone(),
         ));
     }
@@ -232,12 +230,7 @@ async fn futures_join_all<T>(futures: Vec<impl std::future::Future<Output = T>>)
     results
 }
 
-async fn probe_port(
-    server_id: String,
-    port: u16,
-    routing_group: String,
-    endpoints: Vec<String>,
-) -> PortStatus {
+async fn probe_port(server_id: String, port: u16, endpoints: Vec<String>) -> PortStatus {
     let url = format!("http://127.0.0.1:{port}/health");
     let (healthy, http_status) = match tokio::time::timeout(
         std::time::Duration::from_secs(2),
@@ -252,11 +245,9 @@ async fn probe_port(
         Ok(Ok(response)) => (response.status().is_success(), response.status().as_u16()),
         _ => (false, 0),
     };
-    let _ = routing_group;
     PortStatus {
         server_id,
         port,
-        routing_group,
         endpoints,
         healthy,
         http_status,

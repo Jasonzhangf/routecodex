@@ -82,6 +82,10 @@ enum Command {
         provider: Option<String>,
         #[arg(long)]
         model: Option<String>,
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+        #[arg(long)]
+        port: Option<u16>,
     },
     #[command(hide = true)]
     Server {
@@ -210,6 +214,8 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             force,
             provider,
             model,
+            bind,
+            port,
         } => {
             let config_path = resolve_user_config_path(config)?;
             init::run_init(&init::InitOptions {
@@ -217,6 +223,8 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 force,
                 provider,
                 model,
+                bind: Some(bind),
+                port,
             })?;
         }
         Command::Servertool {
