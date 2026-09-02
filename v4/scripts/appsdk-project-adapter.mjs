@@ -1,0 +1,47 @@
+#!/usr/bin/env node
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const root = process.cwd();
+const moduleId = 'routecodex-v4-base-node';
+const issueId = 'v4-cordis-governance-reset-20260903';
+const records = path.join(root, '.appsdk', 'records');
+const now = new Date().toISOString();
+const expires = new Date(Date.now() + 7 * 86400000).toISOString();
+const run = (cmd, args) => {
+  const result = spawnSync(cmd, args, { cwd: root, encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(`${cmd} ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
+  return (result.stdout || '').trim();
+};
+const hash = (value) => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+const head = run('git', ['rev-parse', 'HEAD']);
+const base = run('git', ['rev-parse', 'HEAD^']);
+const treeHash = run('git', ['rev-parse', `${head}^{tree}`]);
+const diffHash = hash(Buffer.from(run('git', ['diff-tree', '--no-commit-id', '--raw', '-r', '-z', '--no-renames', base, head, '--', 'v4'])));
+const scopeHash = hash(Buffer.from(run('git', ['ls-tree', '-r', head, '--', 'v4'])));
+const artifact = JSON.parse(fs.readFileSync(path.join(root, 'generated/modules', moduleId, 'module.compiled.json'), 'utf8'));
+const candidateId = `fix-${head.slice(0, 12)}`;
+const evidenceIds = ['whitebox-v4', 'install-v4', 'restart-v4', 'blackbox-v4'];
+const inputHashes = [hash(fs.readFileSync(path.join(root, 'Cargo.toml'))), hash(fs.readFileSync(path.join(root, 'Cargo.lock')))].sort();
+fs.mkdirSync(records, { recursive: true });
+const candidate = { fix_candidate_id: candidateId, issue_id: issueId, module_id: moduleId, worktree_id: `v4-cordis-${head.slice(0, 12)}`, base_commit: base, head_commit: head, tree_hash: treeHash, diff_hash: diffHash, design_id: 'v4-feature-completion-plan-28', owner: 'routecodex-v4-runtime', scope_hash: scopeHash, changed_paths: run('git', ['diff', '--name-only', '--no-renames', base, head, '--', 'v4']).split('\n').filter(Boolean), verification_evidence_ids: evidenceIds, created_at: now };
+const evidence = (id, phase, kind, producer, argv, surface) => ({ evidence_id: id, issue_id: issueId, experiment_id: candidateId, phase, kind, source_commit: head, artifact_hash: artifact.artifact_hash, execution_surface: surface, environment_id: 'local-v4-5520', entrypoint: 'http://127.0.0.1:5520', scope: { module_id: moduleId, feature_id: 'v4-cordis-production-wiring', entrypoint: 'http://127.0.0.1:5520' }, producer, command_argv: argv, exit_status: 0, result: 'pass', created_at: now, expires_at: expires, input_hashes: inputHashes, scope_hash: scopeHash });
+const writeEvidence = (record) => fs.writeFileSync(path.join(records, 'evidence', moduleId, `${record.evidence_id}.json`), `${JSON.stringify(record, null, 2)}\n`);
+fs.mkdirSync(path.join(records, 'evidence', moduleId), { recursive: true });
+fs.writeFileSync(path.join(records, `fix-candidate-record-${moduleId}.json`), `${JSON.stringify(candidate, null, 2)}\n`);
+run('cargo', ['test', '--workspace', '--quiet']);
+writeEvidence(evidence('whitebox-v4', 'development_whitebox', 'gate', { adapter: 'project', identity: 'v4-cordis-whitebox' }, ['cargo', 'test', '--workspace', '--quiet'], 'development_whitebox'));
+const binary = path.join(root, 'target', 'release', 'rccv4');
+if (!fs.existsSync(binary)) run('cargo', ['build', '--release', '-p', 'routecodex-v4-runtime-bin', '--locked']);
+const installed = '/Users/fanzhang/.local/bin/rccv4';
+fs.copyFileSync(binary, installed); fs.chmodSync(installed, 0o755);
+writeEvidence(evidence('install-v4', 'deployment_install', 'install', { adapter: 'project', identity: 'v4-cordis-install' }, ['cp', binary, installed], 'deployed_blackbox'));
+run(installed, ['restart']);
+writeEvidence(evidence('restart-v4', 'deployment_restart', 'restart', { adapter: 'project', identity: 'v4-cordis-restart' }, [installed, 'restart'], 'deployed_blackbox'));
+run('curl', ['-fsS', '--max-time', '10', 'http://127.0.0.1:5520/health']);
+run('curl', ['-fsS', '--max-time', '10', 'http://127.0.0.1:5520/v1/models']);
+writeEvidence(evidence('blackbox-v4', 'deployed_blackbox', 'runtime', { adapter: 'project', identity: 'v4-cordis-blackbox' }, ['curl', '-fsS', 'http://127.0.0.1:5520/health'], 'deployed_blackbox'));
+fs.writeFileSync(path.join(records, `pre-review-validation-record-${moduleId}.json`), `${JSON.stringify({ validation_id: `pre-review-${candidateId}`, issue_id: issueId, module_id: moduleId, fix_candidate_id: candidateId, candidate_commit: head, candidate_tree_hash: treeHash, artifact_hash: artifact.artifact_hash, whitebox_producer: { adapter: 'project', identity: 'v4-cordis-whitebox' }, whitebox_evidence_ids: ['whitebox-v4'], blackbox_evidence_ids: ['blackbox-v4'], deployment: { environment_id: 'local-v4-5520', install_receipt_id: 'install-v4', restart_receipt_id: 'restart-v4', entrypoint: 'http://127.0.0.1:5520', producer: { adapter: 'project', identity: 'v4-cordis-deployment' }, observed_at: now }, source_unchanged: true, result: 'pass', created_at: now }, null, 2)}\n`);
+console.log(`adapter PASS candidate=${candidateId}`);

@@ -1433,12 +1433,12 @@ fn protocol_codec(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn capability_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    ctx.emit("node.provider_capability_validated", "provider capability validated");
+    let _ = ctx;
     Ok(())
 }
 
 fn auth_handle_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    ctx.emit("node.provider_auth_handle_validated", "provider auth handle validated");
+    let _ = ctx;
     Ok(())
 }
 
