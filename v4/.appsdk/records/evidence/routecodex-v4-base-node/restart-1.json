@@ -1,10 +1,10 @@
 {
   "evidence_id": "restart-1",
   "issue_id": "v4-cordis-governance-reset-20260903",
-  "experiment_id": "fix-98f44c51cede",
+  "experiment_id": "fix-51a67d202af5",
   "phase": "deployment_restart",
   "kind": "restart",
-  "source_commit": "98f44c51cedeac1034b775a91074f4a197dae9a5",
+  "source_commit": "51a67d202af5e9e28c04102b7565f5fad701df4f",
   "artifact_hash": "sha256:0a7d33027e7b472443c04a29e677b2a3eb118a2c05c5026d62c6e170777a86ba",
   "execution_surface": "deployed_blackbox",
   "environment_id": "local-v4-5520",
@@ -24,8 +24,8 @@
   ],
   "exit_status": 0,
   "result": "pass",
-  "created_at": "2026-09-02T16:31:51.607Z",
-  "expires_at": "2026-09-09T16:31:51.608Z",
+  "created_at": "2026-09-02T16:35:14.000Z",
+  "expires_at": "2026-09-09T16:35:14.001Z",
   "input_hashes": [
     "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
     "sha256:b127c2535c22f61d066c05e08fbfd327703008cb988f45ec11b4c9eb71e1f6d7"
