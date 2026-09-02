@@ -1399,7 +1399,14 @@ fn required_string(object: &serde_json::Map<String, Value>, key: &str) -> Result
 }
 
 fn route_facts_produce(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    ctx.write_control_resource("v4.control.route_facts", json!({"keyless": true}))
+    let mut facts = ctx
+        .read_control_resource("v4.control.route_facts")
+        .map_err(|error| error.to_string())?
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    facts.insert("keyless".to_string(), json!(true));
+    ctx.write_control_resource("v4.control.route_facts", Value::Object(facts))
         .map_err(|error| error.to_string())
 }
 
