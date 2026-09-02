@@ -998,6 +998,42 @@ pub fn send_anthropic_messages(
     send_wire_request(profile_path, input, "anthropic", "messages")
 }
 
+/// Provider-owned transport dispatch. Runtime orchestration passes the typed
+/// protocol selection; protocol-specific endpoint and auth behavior remains
+/// entirely in this crate.
+pub fn send_protocol(
+    protocol: &str,
+    profile_path: &str,
+    model: &str,
+    input: &Value,
+    stream: bool,
+) -> Result<ProviderTransportResult, ProviderTransportError> {
+    match (protocol, stream) {
+        ("responses", false) => send_responses(profile_path, model, input, false)
+            .map(ProviderTransportResult::Response),
+        ("responses", true) => send_responses_streaming(profile_path, model, input)
+            .map(ProviderTransportResult::Stream),
+        ("openai" | "chat", false) => send_openai_chat(profile_path, input)
+            .map(ProviderTransportResult::Response),
+        ("anthropic", false) => send_anthropic_messages(profile_path, input)
+            .map(ProviderTransportResult::Response),
+        ("openai" | "chat", true) => send_openai_chat_streaming(profile_path, input)
+            .map(ProviderTransportResult::Stream),
+        ("anthropic", true) => send_anthropic_messages_streaming(profile_path, input)
+            .map(ProviderTransportResult::Stream),
+        (other, _) => Err(ProviderTransportError {
+            code: "provider_protocol_unsupported".to_string(),
+            message: format!("provider protocol {other} has no transport owner"),
+            status: None,
+        }),
+    }
+}
+
+pub enum ProviderTransportResult {
+    Response(ProviderRawResponse),
+    Stream(ProviderResponseStream),
+}
+
 fn send_wire_streaming(
     profile_path: &str,
     input: &Value,
