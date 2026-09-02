@@ -38,6 +38,8 @@ resources:
   allowed_writers: [V4Runtime01MainlineKernel]
   allowed_readers: [V4HubReqChatProcess03Governed, V4HubRespChatProcess04Governed]
   forbidden_writers: []
+  may_enter_provider_body: false
+  may_enter_client_body: false
   binding_status: anchored
 - resource_id: v4.data.immutable_arc_carriers
   axis: data
@@ -86,6 +88,9 @@ resources:
   allowed_writers: [V4Runtime01MainlineKernel]
   allowed_readers: [V4HubReqChatProcess03Governed, V4HubRespChatProcess04Governed]
   forbidden_writers: []
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  semantic_contract: {may_enter_metadata_center: false}
   binding_status: anchored
 - resource_id: v4.runtime.node_service_registry
   axis: control
@@ -98,6 +103,8 @@ resources:
   allowed_writers: [V4Runtime01MainlineKernel]
   allowed_readers: [V4HubReqInbound02Normalized, V4HubRespInbound03Normalized]
   forbidden_writers: []
+  may_enter_provider_body: false
+  may_enter_client_body: false
   binding_status: anchored
 - resource_id: v4.cordis.typed_node_services
   axis: control
@@ -110,6 +117,8 @@ resources:
   allowed_writers: [V4Runtime01MainlineKernel]
   allowed_readers: [V4HubReqChatProcess03Governed, V4HubRespChatProcess04Governed]
   forbidden_writers: []
+  may_enter_provider_body: false
+  may_enter_client_body: false
   binding_status: anchored
 - resource_id: v4.direct.request.client_payload
   axis: data

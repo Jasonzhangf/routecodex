@@ -342,7 +342,8 @@ function runSelfTest() {
       );
     }],
     ['project stage downgraded', (state) => {
-      state.project.modules.find((entry) => entry.module_id === MODULE_ID).stage = 'design';
+      const projectModule = state.project.modules.find((entry) => entry.module_id === MODULE_ID);
+      if (projectModule) projectModule.stage = 'design';
     }],
     ['verification gate missing', (state) => {
       state.verificationMap.gates = state.verificationMap.gates.filter(
