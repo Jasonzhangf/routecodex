@@ -38,6 +38,7 @@ use routecodex_v4_server::{
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
 use routecodex_v4_standard_plugins::diagnostic;
 use routecodex_v4_standard_plugins::StandardHandleRegistry;
+use serde_json::Value;
 use routecodex_v4_standard_plugins::sse_transport::{
     SseEgressPlugin, SseIngressPlugin, SseTransportPolicy,
 };
@@ -743,6 +744,40 @@ fn route_group_for_request<'a>(
     }
 }
 
+fn select_target_via_cordis(
+    runtime: &Arc<Mutex<SkeletonRuntime>>,
+    request: &HttpRequest,
+    entry_protocol: &str,
+    model: &str,
+    session_scope: &str,
+    conversation_scope: &str,
+    route_group_id: &str,
+    unavailable_provider_ids: &[String],
+) -> Result<routecodex_v4_router::SelectedTarget, RuntimeFault> {
+    let selection = runtime
+        .lock()
+        .map_err(|_| RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"))?
+        .execute_target_selection(
+            &request.request_id,
+            request.port,
+            session_scope,
+            conversation_scope,
+            entry_protocol,
+            if entry_protocol == "responses" { "direct" } else { "relay" },
+            model,
+            route_group_id,
+            unavailable_provider_ids,
+        )?;
+    let object = selection.as_object().ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target selection is not an object"))?;
+    Ok(routecodex_v4_router::SelectedTarget {
+        provider_id: object.get("provider_id").and_then(Value::as_str).ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target selection missing provider_id"))?.to_string(),
+        config_path: object.get("config_path").and_then(Value::as_str).ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target selection missing config_path"))?.to_string(),
+        protocol: object.get("protocol").and_then(Value::as_str).ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target selection missing protocol"))?.to_string(),
+        wire_model: object.get("wire_model").and_then(Value::as_str).ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target selection missing wire_model"))?.to_string(),
+        auth_alias: object.get("auth_alias").and_then(Value::as_str).map(str::to_string),
+    })
+}
+
 fn handle_responses(
     manifest: &RuntimeConfigManifest,
     runtime: &Arc<Mutex<SkeletonRuntime>>,
@@ -840,18 +875,17 @@ fn handle_responses(
     let mut target = if let Some(product) = &manifest.product {
         let route_group = route_group_for_request(product, request)
             .map_err(|error| project_fault(request, error, 500))?;
-        select_product_target_excluding(
-            product,
-            &route_group.route_group_id,
-            model,
+        select_target_via_cordis(
+            runtime,
+            request,
             entry_protocol,
-            &[],
-            0,
-            &unavailable_provider_ids
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
+            model,
+            session_scope,
+            conversation_scope,
+            &route_group.route_group_id,
+            &unavailable_provider_ids,
         )
+        .map_err(|error| routecodex_v4_router::TargetSelectionError::ProductPoolUnavailable(error.message))
     } else {
         select_target(&manifest.providers, &manifest.routes, model)
     }
