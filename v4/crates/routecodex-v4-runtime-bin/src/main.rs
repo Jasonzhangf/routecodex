@@ -1478,14 +1478,40 @@ fn emit_payload_console_events(
     elapsed: std::time::Duration,
 ) {
     publish_diagnostic_events(event_bus, request, trace);
+    let mut rendered_response = false;
     for event in trace {
         if let Some(line) = render_payload_console_event(
             event, request, endpoint, provider, model, stream, status, elapsed,
         ) {
             println!("{line}");
             let _ = std::io::stdout().flush();
+            rendered_response |= line.contains("responseStatus=");
         }
     }
+    if should_render_sse_terminal_summary(stream, rendered_response, trace) {
+        let headline = diagnostic::format_response(
+            endpoint,
+            &request.request_id,
+            status.unwrap_or(200),
+            model,
+        );
+        let debug = format!(
+            "event=completed responseStatus=completed finish_reason=stop provider={} model={} chain=provider>resp_inbound>resp_chatprocess>resp_outbound elapsedMs={} transport=sse",
+            provider,
+            model,
+            elapsed.as_millis(),
+        );
+        println!("{}", format_console_layered(headline, debug));
+        let _ = std::io::stdout().flush();
+    }
+}
+
+fn should_render_sse_terminal_summary(stream: bool, rendered_response: bool, trace: &[String]) -> bool {
+    stream
+        && !rendered_response
+        && trace
+            .iter()
+            .any(|entry| entry.contains(":provider_sse_disposition:completed"))
 }
 
 /// Publish diagnostic facts to the process-local read-only event bus before
@@ -1823,6 +1849,17 @@ mod tests {
         .expect("direct Responses response summary is rendered");
         assert!(rendered.contains("[/v1/responses]"));
         assert!(rendered.contains("responseStatus=completed"));
+    }
+
+    #[test]
+    fn sse_terminal_trace_requires_response_summary() {
+        let trace = vec![
+            "v4.std.diagnostic.response_payload_console_render:console.payload_ready:✅ [resp] model=- output_items=0".to_string(),
+            "v4.std.direct.response.sse_frame_boundary:provider_sse_disposition:completed".to_string(),
+        ];
+        assert!(should_render_sse_terminal_summary(true, false, &trace));
+        assert!(!should_render_sse_terminal_summary(true, true, &trace));
+        assert!(!should_render_sse_terminal_summary(false, false, &trace));
     }
 
     #[test]
