@@ -931,14 +931,6 @@ pub fn compile_production_execution_plans(
         "error",
         "control",
     ];
-    const EXCLUDED_PLUGINS: [&str; 5] = [
-        "v4.std.provider.capability_mock",
-        "v4.std.provider.auth_handle_mock",
-        "v4.std.provider.wire_mock",
-        "v4.std.provider.transport_mock",
-        "v4.std.protocol.wire_codec_proto",
-    ];
-
     let plugins = standard_plugins();
     let mut plans = Vec::new();
     let mut artifact_hashes = Vec::new();
@@ -956,7 +948,6 @@ pub fn compile_production_execution_plans(
             let selected = plugins
                 .iter()
                 .filter(|plugin| plugin.descriptor.node_selector.node_id == node.node_id)
-                .filter(|plugin| !EXCLUDED_PLUGINS.contains(&plugin.plugin_id.as_str()))
                 .collect::<Vec<_>>();
             let plan = if selected.is_empty() {
                 return Err(routecodex_v4_plugin_plan::PlanError::NodeContractInvalid {

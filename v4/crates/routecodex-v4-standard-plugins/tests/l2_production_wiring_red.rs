@@ -62,15 +62,7 @@ fn every_standard_plugin_is_bound_in_production_chain_contract() {
     let by_node = plugin_ids_by_node(&contract);
     let mut missing = Vec::new();
 
-    // Codec alternates and *_mock descriptors are not production chain nodes.
-    // They have separate owners or are explicitly ineligible for publication;
-    // requiring them in this graph would turn the red gate into a false
-    // positive.
-    let side_channel_or_ineligible: [&str; 0] = [];
-    for plugin in standard_plugins()
-        .into_iter()
-        .filter(|plugin| !side_channel_or_ineligible.contains(&plugin.plugin_id.as_str()))
-    {
+    for plugin in standard_plugins().into_iter() {
         let node_id = &plugin.descriptor.node_selector.node_id;
         let bound = by_node
             .get(node_id)
