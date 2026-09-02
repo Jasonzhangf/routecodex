@@ -1,5 +1,36 @@
 use super::*;
 
+pub(crate) fn is_control_client_disconnect(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::UnexpectedEof
+            | std::io::ErrorKind::ConnectionReset
+    )
+}
+
+pub(crate) async fn write_control_response(
+    stream: &mut UnixStream,
+    response: &ControlResponse,
+) -> Result<bool, V3LifecycleError> {
+    let payload = serde_json::to_vec(response)?;
+    for bytes in [payload.as_slice(), b"\n"] {
+        if let Err(error) = stream.write_all(bytes).await {
+            if is_control_client_disconnect(&error) {
+                return Ok(false);
+            }
+            return Err(error.into());
+        }
+    }
+    if let Err(error) = stream.flush().await {
+        if is_control_client_disconnect(&error) {
+            return Ok(false);
+        }
+        return Err(error.into());
+    }
+    Ok(true)
+}
+
 pub(crate) fn observe_status_if_changed<F>(
     observe: &mut F,
     last_observed_status: &mut Option<(V3ManagedRunState, Option<String>)>,
@@ -222,4 +253,34 @@ pub(crate) async fn send_control_without_timeout(
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line).await?;
     Ok(serde_json::from_str(&line)?)
+}
+
+pub(crate) fn listener_set_is_available(listeners: &[V3ManagedListenerDeclaration]) -> bool {
+    listeners
+        .iter()
+        .all(|listener| listener_address_is_available(&listener.bind, listener.port))
+}
+
+pub(crate) fn occupied_listener_ports(listeners: &[V3ManagedListenerDeclaration]) -> BTreeSet<u16> {
+    listeners
+        .iter()
+        .filter(|listener| !listener_address_is_available(&listener.bind, listener.port))
+        .map(|listener| listener.port)
+        .collect()
+}
+
+pub(crate) async fn wait_for_listener_set_available(
+    listeners: &[V3ManagedListenerDeclaration],
+    timeout: Duration,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if listener_set_is_available(listeners) {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return listener_set_is_available(listeners);
+        }
+        tokio::time::sleep(START_TAKEOVER_POLL).await;
+    }
 }

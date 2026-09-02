@@ -4,6 +4,42 @@ use tempfile::TempDir;
 
 static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
+#[test]
+fn control_client_disconnect_is_not_a_managed_runtime_failure() {
+    assert!(is_control_client_disconnect(&std::io::Error::new(
+        std::io::ErrorKind::BrokenPipe,
+        "control client closed",
+    )));
+    assert!(is_control_client_disconnect(&std::io::Error::new(
+        std::io::ErrorKind::UnexpectedEof,
+        "control client closed",
+    )));
+    assert!(is_control_client_disconnect(&std::io::Error::new(
+        std::io::ErrorKind::ConnectionReset,
+        "control client closed",
+    )));
+    assert!(!is_control_client_disconnect(&std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "control socket denied",
+    )));
+}
+
+#[tokio::test]
+async fn control_response_broken_pipe_is_nonfatal() {
+    let (mut server, client) = UnixStream::pair().unwrap();
+    drop(client);
+    let response = ControlResponse {
+        schema_version: SCHEMA_VERSION,
+        instance_id: "v3-test".to_string(),
+        accepted: true,
+        state: V3ManagedRunState::Running,
+        message: "identity verified".to_string(),
+    };
+    assert!(!write_control_response(&mut server, &response)
+        .await
+        .unwrap());
+}
+
 fn fixture(root: &TempDir) -> (PathBuf, PathBuf, PathBuf) {
     fixture_with_port(root, 45499)
 }

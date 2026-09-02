@@ -675,6 +675,36 @@ impl V3ManagedLifecycle {
                 let previous_owner =
                     find_live_previous_owner_for_restart(&self.state_root, &declaration)?;
                 let Some((previous_instance_dir, previous_declaration)) = previous_owner else {
+                    let status_path = instance_dir.join("status.json");
+                    if instance_dir.join("instance.json").exists() && status_path.exists() {
+                        let status: V3ManagedStatusRecord = read_json(&status_path)?;
+                        if status.instance_id != declaration.instance_id {
+                            return Err(V3LifecycleError::IdentityMismatch(
+                                "managed stopped state does not match restart declaration"
+                                    .to_string(),
+                            ));
+                        }
+                        if matches!(status.state, V3ManagedRunState::Stopped | V3ManagedRunState::Failed)
+                            && listener_set_is_available(&declaration.listeners)
+                        {
+                            validate_auth_handles(&manifest)?;
+                            reap_inactive_runtime_files(&instance_dir, &declaration)?;
+                            write_json_atomic(&instance_dir.join("instance.json"), &declaration)?;
+                            write_status(
+                                &instance_dir,
+                                &declaration.instance_id,
+                                V3ManagedRunState::Starting,
+                                Some("restart bootstrapped stopped owned runtime".to_string()),
+                            )?;
+                            return self
+                                .spawn_managed_child_after_state_published(
+                                    executable_path.as_ref(),
+                                    &declaration,
+                                    timeout,
+                                )
+                                .await;
+                        }
+                    }
                     return Err(V3LifecycleError::NotRunning(
                         declaration.instance_id.clone(),
                     ));
@@ -965,7 +995,12 @@ impl V3ManagedLifecycle {
             };
             let (mut stream, _) = accepted;
             let mut line = String::new();
-            BufReader::new(&mut stream).read_line(&mut line).await?;
+            match BufReader::new(&mut stream).read_line(&mut line).await {
+                Ok(0) => continue,
+                Ok(_) => {}
+                Err(error) if is_control_client_disconnect(&error) => continue,
+                Err(error) => return Err(error.into()),
+            }
             let request: ControlRequest = serde_json::from_str(&line)?;
             let valid_identity = request.schema_version == SCHEMA_VERSION
                 && request.instance_id == declaration.instance_id
@@ -981,9 +1016,9 @@ impl V3ManagedLifecycle {
                             state: V3ManagedRunState::Running,
                             message,
                         };
-                        stream.write_all(&serde_json::to_vec(&response)?).await?;
-                        stream.write_all(b"\n").await?;
-                        stream.flush().await?;
+                        if !write_control_response(&mut stream, &response).await? {
+                            continue;
+                        }
                         continue;
                     }
                 }
@@ -1001,9 +1036,9 @@ impl V3ManagedLifecycle {
                             state: V3ManagedRunState::Running,
                             message,
                         };
-                        stream.write_all(&serde_json::to_vec(&response)?).await?;
-                        stream.write_all(b"\n").await?;
-                        stream.flush().await?;
+                        if !write_control_response(&mut stream, &response).await? {
+                            continue;
+                        }
                         continue;
                     }
                 }
@@ -1032,9 +1067,9 @@ impl V3ManagedLifecycle {
                     "instance id or start nonce mismatch".to_string()
                 },
             };
-            stream.write_all(&serde_json::to_vec(&response)?).await?;
-            stream.write_all(b"\n").await?;
-            stream.flush().await?;
+            if !write_control_response(&mut stream, &response).await? {
+                continue;
+            }
             if should_stop {
                 let handle = handle.take().ok_or_else(|| {
                     V3LifecycleError::Validation(
@@ -1461,36 +1496,5 @@ async fn release_foreign_managed_listener_ports_for_start(
     }
     Ok(())
 }
-
-fn listener_set_is_available(listeners: &[V3ManagedListenerDeclaration]) -> bool {
-    listeners
-        .iter()
-        .all(|listener| listener_address_is_available(&listener.bind, listener.port))
-}
-
-fn occupied_listener_ports(listeners: &[V3ManagedListenerDeclaration]) -> BTreeSet<u16> {
-    listeners
-        .iter()
-        .filter(|listener| !listener_address_is_available(&listener.bind, listener.port))
-        .map(|listener| listener.port)
-        .collect()
-}
-
-async fn wait_for_listener_set_available(
-    listeners: &[V3ManagedListenerDeclaration],
-    timeout: Duration,
-) -> bool {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        if listener_set_is_available(listeners) {
-            return true;
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return listener_set_is_available(listeners);
-        }
-        tokio::time::sleep(START_TAKEOVER_POLL).await;
-    }
-}
-
 #[cfg(test)]
 mod tests;
