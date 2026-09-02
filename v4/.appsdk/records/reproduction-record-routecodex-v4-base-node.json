@@ -1,9 +1,9 @@
 {
-  "reproduction_id": "reproduction-fix-339dc6f8d79b",
+  "reproduction_id": "reproduction-fix-5eaff61a00d8",
   "issue_id": "v4-cordis-governance-reset-20260903",
   "module_id": "routecodex-v4-base-node",
-  "worktree_id": "v4-cordis-339dc6f8d79b",
-  "base_commit": "8b94dfead1289ab856a46f0e8d7c113372b56db0",
+  "worktree_id": "v4-cordis-5eaff61a00d8",
+  "base_commit": "339dc6f8d79b4be62ffc8c78565934d20b57479f",
   "input_hashes": [
     "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
     "sha256:b127c2535c22f61d066c05e08fbfd327703008cb988f45ec11b4c9eb71e1f6d7"
