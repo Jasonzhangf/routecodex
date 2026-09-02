@@ -369,6 +369,44 @@ fn production_execution_publishes_lifecycle_event_topics() {
 }
 
 #[test]
+fn production_execution_publishes_node_error_event_topic() {
+    let runtime = active_runtime();
+    let bus = runtime.diagnostic_bus();
+    {
+        let mut bus = bus.lock().unwrap();
+        bus.subscribe(
+            "error-reader",
+            routecodex_v4_debug::SubscriptionTopic::NodeError,
+            "r-production-node-error",
+        )
+        .unwrap();
+    }
+
+    let error = runtime
+        .execute_request_json_scoped_for_target_with_lease(
+            r#"{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":{}}"#,
+            "chat",
+            "responses",
+            "m",
+            false,
+            "r-production-node-error",
+            5555,
+            "session-production-node-error",
+            "conversation-production-node-error",
+            Some("relay"),
+            None,
+        )
+        .expect_err("invalid tools shape must fail in production execution");
+    assert_eq!(error.code, "execution_engine");
+
+    let bus = bus.lock().unwrap();
+    assert!(bus.published_facts().iter().any(|fact| {
+        fact.envelope().topic() == &routecodex_v4_debug::SubscriptionTopic::NodeError
+            && fact.envelope().scope_key() == "r-production-node-error"
+    }));
+}
+
+#[test]
 fn relay_request_governance_plugin_rejects_invalid_tools_shape() {
     let runtime = active_runtime();
     let error = runtime

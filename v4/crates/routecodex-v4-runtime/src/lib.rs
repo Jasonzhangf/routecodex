@@ -1019,7 +1019,10 @@ impl ExecutionContext {
         for event in &frame.events {
             if event.kind == "stage.checkpoint" {
                 context.diagnostic.trace.push(event.message.clone());
-            } else {
+            } else if !matches!(
+                event.kind.as_str(),
+                "node.entry" | "node.exit" | "state.transition" | "node.error"
+            ) {
                 context.diagnostic.trace.push(format!(
                     "{}:{}:{}",
                     event.plugin_id, event.kind, event.message
@@ -2536,13 +2539,37 @@ impl SkeletonRuntime {
         );
         seed(&mut ctx);
         let initial_frame = ctx.clone().into_frame(chain_id)?;
-        let outcome = ExecutionEngine::execute_pinned_node(
+        let outcome = match ExecutionEngine::execute_pinned_node(
             chain_id,
             initial_frame,
             lease,
             self.handle_registry.as_ref(),
-        )
-        .map_err(|error| RuntimeFault::new("execution_engine", error.to_string()))?;
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let message = error.to_string();
+                let payload_hash = format!("sha256:{:x}", Sha256::digest(message.as_bytes()));
+                let mut bus = self
+                    .diagnostic_bus
+                    .lock()
+                    .map_err(|_| RuntimeFault::new("diagnostic_bus", "diagnostic bus lock poisoned"))?;
+                bus.publish(DiagnosticEventEnvelope::new(
+                    SubscriptionTopic::NodeError,
+                    request_id,
+                    "routecodex-v4-runtime",
+                    &payload_hash,
+                ))
+                .map_err(|bus_error| RuntimeFault::new("diagnostic_bus", bus_error.to_string()))?;
+                if bus
+                    .subscribers_for(&SubscriptionTopic::NodeError)
+                    .any(|subscription| subscription.scope_key == request_id)
+                {
+                    bus.dispatch(&SubscriptionTopic::NodeError, request_id)
+                        .map_err(|bus_error| RuntimeFault::new("diagnostic_bus", bus_error.to_string()))?;
+                }
+                return Err(RuntimeFault::new("execution_engine", message));
+            }
+        };
         let outcome_events = match &outcome {
             NodeOutcome::Continue { events, .. } | NodeOutcome::Branch { events, .. } => events,
             NodeOutcome::Terminal { .. } | NodeOutcome::Failure { .. } => &Vec::new(),
