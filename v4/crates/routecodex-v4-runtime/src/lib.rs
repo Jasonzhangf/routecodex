@@ -68,6 +68,55 @@ pub enum ResponsesProviderPayload {
     Sse(Vec<u8>),
 }
 
+/// Typed request facts extracted at the request-inbound owner boundary.
+/// Runtime-bin consumes these facts for routing and transport selection; it
+/// must not parse protocol payload fields itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestAdmissionFacts {
+    pub model: String,
+    pub stream: bool,
+}
+
+pub fn parse_request_admission_facts(
+    raw_body: &[u8],
+    entry_protocol: &str,
+    continuation_owner: &str,
+) -> Result<RequestAdmissionFacts, RuntimeFault> {
+    let body: Value = serde_json::from_slice(raw_body)
+        .map_err(|error| RuntimeFault::new("invalid_request", format!("invalid JSON: {error}")))?;
+    if entry_protocol == "responses"
+        && continuation_owner == "relay"
+        && body.get("previous_response_id").is_some()
+    {
+        return Err(RuntimeFault::new(
+            "continuation_unsupported",
+            "local relay continuation is not implemented",
+        ));
+    }
+    if entry_protocol != "responses" && body.get("previous_response_id").is_some() {
+        return Err(RuntimeFault::new(
+            "continuation_entry_protocol_mismatch",
+            "previous_response_id is only valid on the Responses entry protocol",
+        ));
+    }
+    let model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|model| !model.is_empty())
+        .ok_or_else(|| RuntimeFault::new("invalid_request", "model is required"))?
+        .to_string();
+    let stream = body
+        .get("stream")
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| RuntimeFault::new("invalid_request", "stream must be a boolean"))
+        })
+        .transpose()?
+        .unwrap_or(false);
+    Ok(RequestAdmissionFacts { model, stream })
+}
+
 /// Build the only provider-bound Responses request shape. The input is the
 /// client data-plane object; runtime writes only the selected upstream model
 /// and stream flag. Control carriers are never serialized here.
