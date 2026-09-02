@@ -572,7 +572,8 @@
         "send_anthropic_messages_streaming",
         "normalize_provider_response",
         "normalize_provider_sse_frame",
-        "send_responses_streaming"
+        "send_responses_streaming",
+        "send_protocol"
       ],
       "required_gates": [
         "v4_provider_l2_regression",
