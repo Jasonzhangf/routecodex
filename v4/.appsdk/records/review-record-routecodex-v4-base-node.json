@@ -1,10 +1,10 @@
 {
-  "review_id": "review-fix-747c3dff5519",
+  "review_id": "review-fix-909f43fc372f",
   "issue_id": "v4-cordis-governance-reset-20260903",
-  "promotion_id": "promotion-fix-747c3dff5519",
+  "promotion_id": "promotion-fix-909f43fc372f",
   "review_kind": "architecture",
-  "fix_candidate_id": "fix-747c3dff5519",
-  "pre_review_validation_id": "pre-review-fix-747c3dff5519",
+  "fix_candidate_id": "fix-909f43fc372f",
+  "pre_review_validation_id": "pre-review-fix-909f43fc372f",
   "reviewer": {
     "adapter": "agy-review",
     "identity": "v4-cordis-final-20260903"
@@ -16,8 +16,8 @@
     "positive-1",
     "negative-1"
   ],
-  "reviewed_commit": "747c3dff5519ebb12ca65da8e9522e70493c2382",
-  "reviewed_tree_hash": "e74b672733f84ec408b84b8d1d29b328c786daca",
+  "reviewed_commit": "909f43fc372f04cb7a9fcb3a8d28c74be88cab2e",
+  "reviewed_tree_hash": "d0531887530a8b029213935dc38975cfe8fb9d01",
   "reviewed_diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "reviewed_artifact_hash": "sha256:0a7d33027e7b472443c04a29e677b2a3eb118a2c05c5026d62c6e170777a86ba",
   "reviewed_scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -27,5 +27,5 @@
   "verification_map_hash": "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
   "ai_confidence": 1,
   "confidence_rationale": "AGY controller returned pass with no blocking findings",
-  "created_at": "2026-09-02T16:27:19.503Z"
+  "created_at": "2026-09-02T16:29:31.216Z"
 }
