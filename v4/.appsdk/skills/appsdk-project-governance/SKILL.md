@@ -162,6 +162,49 @@ mapping, or unauthorized cleanup/reset remain forbidden. The old valid state
 is accepted as evidence until the authorized migration completes; it is not
 silently reinterpreted under the new rules.
 
+### Residual state removal and idempotent cleanup
+
+Migration is not a sequence of ad-hoc patches. Before changing a legacy
+project, classify every old object and choose one canonical owner for the
+transition. Use the following disposition table:
+
+| Class | Disposition | Who may change it |
+|---|---|---|
+| Historical evidence, migration snapshots, source identities, task/claim/journal history | Retain immutably | Nobody during ordinary cleanup |
+| Active and Protected artifacts, Freeze/Promotion/Review records | Retain and rehydrate through their canonical lifecycle | Canonical lifecycle producer only |
+| Failed transaction staging, abandoned leases, duplicate runtime projections | Remove after ownership and staleness are proven | Owning transaction/cleanup adapter |
+| Generated or Active projections whose source binding is stale | Rebuild from the canonical source commit | Canonical compiler/rehydrate owner |
+| Unmapped legacy objects | Preserve, classify, and assign an explicit disposition | Authorized migration owner |
+
+The cleanup procedure is:
+
+```text
+inspect and snapshot -> classify -> authorize ownership transfer
+  -> canonical cleanup of only disposable state
+  -> verify cleanup is idempotent
+  -> regenerate projections from canonical source
+  -> run verify and continue the lifecycle
+```
+
+Cleanup must be safe to run twice: the second run reports no-op for already
+removed disposable state and never recreates, overwrites, or deletes immutable
+history. Do not delete a failed record merely because it blocks a retry; retain
+its audit snapshot and create a new transaction namespace bound to the new
+candidate. Do not hand-edit hashes, timestamps, lock fields, lifecycle JSON,
+or receipts. If a canonical cleanup command or adapter does not exist, add
+that capability at its owner before touching residual state; do not emulate it
+with shell deletion or repeated field patches. A cleanup failure must expose
+the first object and owner that blocked it, the retained evidence, whether a
+retry is safe, and the single next transition. `retry_allowed: false` means
+stop and change the route, never loop on the same command.
+
+For a combined AppSDK and Collab migration, clean the two planes separately:
+preserve independent snapshots, reconcile explicit mappings, then clean only
+authorized disposable state in each plane. Never merge roots, identities,
+mailboxes, records, or histories by concatenating files. After reconciliation,
+zero only approved runtime/temporary state and verify one owner/one truth for
+each retained object.
+
 ## Existing project bootstrap
 
 For an existing project, begin with a preparation record instead of manually creating governance directories:
@@ -255,13 +298,27 @@ For a frozen module change, run `appsdk begin-version <project> --module <id> --
 
 When migrating a 0.1.5 project to AppSDK 0.1.6, run the 0.1.6 binary's `pin-lock` once. SDK canonical maps and project governance maps are separate resources: only maps that exactly match the 0.1.5 SDK canonical source are migrated to the 0.1.6 canonical target. Custom project maps are snapshotted, bound, and preserved in place; `pin-lock` must never overwrite them. Do not copy new maps or edit ReviewRecord hashes. Frozen ReviewRecord hashes resolve through the immutable migration snapshot. If an earlier 0.1.6 pin stopped after updating project/lock, rerun the same command; exact source maps or the existing migration record are required, and mixed/drifted state fails closed.
 
+Migration entry is intentionally less strict than delivery admission. A legacy project may enter the 0.1.6 governance environment when its project contract and maps are structurally readable, even if a non-frozen module has no passing ReviewRecord yet. Record that condition as `pending_reviews` and report `PASS_WITH_WARNINGS`; do not rewrite the module stage, fabricate a verdict, or block migration solely because adapter, deployment, review, or delivery evidence belongs to a later phase. Hash integrity, ownership, supported-version boundaries, immutable Active/Protected state, malformed existing records, and mixed migration state remain hard failures. `PASS_WITH_WARNINGS` permits only the next declared transition; it never permits review admission, merge, publish, or freeze before their own gates pass.
+
+The ReviewRecord schema's canonical PASS value is lowercase `pass`. A historical migration record may retain the bundle digest used at migration time; the current `sdk.lock` owns the current bundle digest, while migration snapshots and map target hashes remain exact. Older 0.1.6 records that duplicated one source-stage review in both review lists may be accepted only when module, review ID, stage, snapshots, and map hashes all validate; new records must keep source-stage reviews only in `legacy_reconciled_reviews` and frozen/retired reviews only in `frozen_reviews`.
+
 `rehydrate-frozen` is transactionally resumable. Never delete its partial generated/Protected/Active outputs by hand. Rerun the command: it resumes only an exact marker-owned module/version/artifact projection, or idempotently verifies a fully complete exact projection. Unowned partial Active state and any hash mismatch remain hard failures.
+
+The canonical module build runner injects a Rust `--remap-path-prefix` for the current project root. This keeps compiler metadata independent of the absolute worktree path, so `compile` and `rehydrate-frozen` can reproduce the frozen artifact from different clean checkouts. The runner preserves caller `RUSTFLAGS` and appends the remap; it must not modify the artifact hash, copy another checkout's artifact, or strip business data. A path-dependent artifact remains a hard failure.
 
 In a clean checkout, ignored generated and Active projections may be absent. Never copy them from another worktree or hand-build their records. Ensure the current Protected archive is not ignored, then run `appsdk rehydrate-frozen <project> --module <id>`. AppSDK derives the current version from FreezeRecord, rebuilds with the declared build command, requires the rebuilt artifact hash to match the immutable freeze/promotion graph, reconstructs Protected and Active projections, and runs full verification. Committed source drift, an ignored Protected archive, hash mismatch, or missing previous version history fails closed. Only after rehydrate passes may `begin-version` open the next version.
 
 When the project is pinned to AppSDK 0.1.5, execute the target 0.1.6 binary itself and pass that exact file to `pin-lock` before rehydrate. This is the only supported 0.1.5 → 0.1.6 migration; it advances Bundle resources, lock, and project version together. Never hand-edit version fields or run an older CLI against a newer `--binary`. Unsupported source versions and byte-mismatched binaries fail closed.
 
 A clean worktree may no longer contain the local issue branch named by an immutable MergeRecord. AppSDK resolves that recorded name only when the exact ref exists or exactly one remote-tracking ref has the same branch name. Missing or ambiguous matches fail closed; never create a local branch or choose a remote to make verification pass.
+
+For older supported locks, `pin-lock` performs the official ordered chain
+`0.1.3 -> 0.1.5 -> 0.1.6` or `0.1.4 -> 0.1.5 -> 0.1.6`. Each intermediate
+step snapshots the project's actual maps and is idempotent; never rewrite the
+lock by hand or retry after `retry_allowed: false`. Bind one selected executable
+path and verify its reported SDK version once at transaction start. Do not
+recheck binary content hashes at project gates or deployment gates; binary
+identity is not a reason to repeatedly stop an otherwise valid migration.
 
 ## Debug flow
 
@@ -297,6 +354,10 @@ gates is forbidden.
 - final review with explicit PASS from Jason's selected review tool, or the default route when no tool was specified
 
 Do not claim lifecycle completion from unit tests alone. A missing external adapter, review verdict, installation, restart, or online evidence is an explicit remaining gap.
+
+Every refusal must expose the first failing gate, current project/module/lifecycle state,
+retry permission, preserved state, owner, and exactly one actionable next transition.
+Never emit only a generic blocked message.
 
 ## Admission failures and upgrade recovery
 

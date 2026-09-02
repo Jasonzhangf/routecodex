@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "preparation_id": "prepare-routecodex-v4-governance-reset-20260903",
+  "status": "confirmed",
+  "objective": "Reset legacy AppSDK governance and establish a fresh V4 production plugin wiring governance surface.",
+  "change_kind": "project_refactor",
+  "project_root": ".",
+  "legacy_roots": [".appsdk", ".appsdk-control", "generated", "active"],
+  "new_roots": [".appsdk", ".appsdk-control", "generated", "active"],
+  "protected_roots": ["protected"],
+  "runtime_forbidden_roots": ["playground/**", "generated/**"],
+  "boundary": {
+    "allowed_paths": ["crates/**", "cordis/**", "contracts/**", "docs/**", "scripts/**", ".appsdk/**", "generated/**", "active/**"],
+    "forbidden_paths": ["../v3/**", "protected/**", "../**", "../../**"],
+    "payload_control_separation": "confirmed: control semantics remain typed side-channel and never enter business payload"
+  },
+  "acceptance_criteria": ["appsdk verify and review admission pass", "canonical build/install/restart pass", "real V4 request and response entrypoints pass"],
+  "non_goals": ["modify V3", "merge into global main", "delete protected history"],
+  "assumptions": ["v4-cordis is the V4 integration mainline", "AppSDK 0.1.6 is the target governance engine"],
+  "questions": [
+    {"question_id":"scope-kind","question":"Is this a new project, module refactor, project refactor, or debug task?","status":"answered"},
+    {"question_id":"project-root","question":"Which relative directory is the new AppSDK project root?","status":"answered"},
+    {"question_id":"legacy-boundary","question":"Which existing directories remain read-only and outside the new project?","status":"answered"},
+    {"question_id":"new-boundary","question":"Which directories may the new project create or modify?","status":"answered"}
+  ],
+  "confirmed_by": "Jason",
+  "confirmed_at": "2026-09-03T00:00:00Z",
+  "created_at": "2026-01-01T00:00:00Z"
+}
