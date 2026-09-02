@@ -198,7 +198,12 @@ fn positive_request_chain_produces_wire_and_stable_binding() {
     let semantic_trace = report
         .trace
         .iter()
-        .filter(|entry| !entry.contains(":plugin.executed:"))
+        .filter(|entry| {
+            !entry.contains(":plugin.executed:")
+                && !entry.contains(":node.entry:")
+                && !entry.contains(":node.exit:")
+                && !entry.contains(":state.transition:")
+        })
         .cloned()
         .collect::<Vec<_>>();
     assert_eq!(
