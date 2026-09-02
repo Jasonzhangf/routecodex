@@ -114,6 +114,8 @@ const NODE_PERMISSIONS = new Map([
       'v4.direct.request.client_payload',
       'v4.information.client_protocol',
       'v4.information.provider_protocol',
+      'v4.information.model',
+      'v4.control.route_facts',
     ],
     writes: ['v4.direct.request.provider_wire'],
   }],
@@ -234,7 +236,7 @@ const NODE_PERMISSIONS = new Map([
     reads: ['v4.control.error_chain'], writes: ['v4.control.error_chain'],
   }],
   ['V4HubReqExecution04Planned', {
-    reads: [], writes: ['v4.control.route_facts'],
+    reads: ['v4.information.entry_protocol', 'v4.information.execution_lane', 'v4.control.route_facts'], writes: ['v4.control.route_facts'],
   }],
   ['V4HubReqTarget05Resolved', {
     reads: ['v4.control.route_facts'], writes: ['v4.control.target_selection'],
@@ -585,8 +587,8 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 39) {
-      failures.push(`${MODULE}: expected 39 active standard descriptors, got ${activeDescriptors.length}`);
+    if (activeDescriptors.length !== 46) {
+      failures.push(`${MODULE}: expected 46 active standard descriptors, got ${activeDescriptors.length}`);
     }
     if (!activeDescriptors.some(
       (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',
