@@ -25,7 +25,7 @@ use routecodex_v4_provider::{
     ProviderInitAuth, ProviderInitOptions, ProviderResponseStream, V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
-    apply_product_error_policy, select_product_target_excluding, select_target,
+    apply_product_error_policy,
     TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
 };
 use routecodex_v4_runtime::{
@@ -887,7 +887,14 @@ fn handle_responses(
         )
         .map_err(|error| routecodex_v4_router::TargetSelectionError::ProductPoolUnavailable(error.message))
     } else {
-        select_target(&manifest.providers, &manifest.routes, model)
+        return Err(project_fault(
+            request,
+            RuntimeFault::new(
+                "product_route_config_missing",
+                "production Cordis routing requires a compiled product route graph",
+            ),
+            500,
+        ));
     }
     .map_err(|error| {
         let status = if !unavailable_provider_ids.is_empty()
