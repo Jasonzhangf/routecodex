@@ -147,7 +147,7 @@ resources:
   - v4_direct_relay_sse_red
   resource_kind: typed_stream_event
   lifecycle: v4.transport.sse
-  owner_crate: routecodex-v4-router
+  owner_crate: routecodex-v4-runtime
   owner_node: V4Runtime01MainlineKernel
   owner_symbols:
   - ResponseStreamDisposition
@@ -709,9 +709,7 @@ resources:
   owner_crate: routecodex-v4-router
   owner_node: V4HubReqTarget05Resolved
   owner_symbols:
-  - ExecutionContext
-  - ControlView
-  - SkeletonRuntime
+  - TargetSelectionHandle
   identity:
   - requestId
   - serverId
@@ -724,7 +722,6 @@ resources:
     provider_specific_branch: forbidden
   allowed_writers:
   - V4HubReqTarget05Resolved
-  - V4DirectReq02RelayContainer
   - V4DirectReq02RelayContainer
   - V4Target07OpaqueTarget
   allowed_readers:
