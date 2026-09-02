@@ -2003,12 +2003,13 @@ impl SkeletonRuntime {
             "model": model,
         });
         let frame = NodeExecutionFrame::with_information(
-            serde_json::json!({}),
+            serde_json::json!({"model": model}),
             control,
             information,
         );
-        let outcome = ExecutionEngine::execute_pinned_node_until(
+        let outcome = ExecutionEngine::execute_pinned_node_from(
             "relay_request",
+            Some("V4HubReqExecution04Planned"),
             frame,
             &lease,
             self.handle_registry.as_ref(),
