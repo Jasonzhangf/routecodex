@@ -1993,7 +1993,7 @@ impl SkeletonRuntime {
             skeleton_version: self.plan.skeleton_version.clone(),
             manifest_hash: snapshot.manifest_hash,
             plan_epoch: snapshot.plan_epoch,
-            plan_hash: snapshot.execution_identity,
+            plan_hash: snapshot.execution_identity.clone(),
         };
         Ok(RuntimeLease {
             request_id: request_id.to_string(),
@@ -2557,7 +2557,7 @@ impl SkeletonRuntime {
             skeleton_version: self.plan.skeleton_version.clone(),
             manifest_hash: snapshot.manifest_hash,
             plan_epoch: snapshot.plan_epoch,
-            plan_hash: snapshot.execution_identity,
+            plan_hash: snapshot.execution_identity.clone(),
         };
         let mut ctx = ExecutionContext::with_scope(
             request_id,
@@ -2567,6 +2567,30 @@ impl SkeletonRuntime {
             conversation_scope,
         );
         seed(&mut ctx);
+        let mut services = NodeServiceRegistry::new(
+            chain_id,
+            request_id,
+            &snapshot.execution_identity,
+            snapshot.plan_epoch,
+        );
+        let data_carrier = ImmutableDataCarrier::from_value(
+            &serde_json::to_value(&ctx.data)
+                .map_err(|error| RuntimeFault::new("node_services", error.to_string()))?,
+        )
+        .map_err(|error| RuntimeFault::new("node_services", error.to_string()))?;
+        services
+            .bind_data(data_carrier)
+            .map_err(|error| RuntimeFault::new("node_services", error.to_string()))?;
+        services.bind_information(ImmutableInformationCarrier::new(
+            ctx.information.protocol.as_deref().unwrap_or("unknown"),
+            ctx.information.model.as_deref().unwrap_or("unknown"),
+        )).map_err(|error| RuntimeFault::new("node_services", error.to_string()))?;
+        services
+            .bind_diagnostic(ImmutableDiagnosticCarrier::new(request_id))
+            .map_err(|error| RuntimeFault::new("node_services", error.to_string()))?;
+        services
+            .execute()
+            .map_err(|error| RuntimeFault::new("node_services", error.to_string()))?;
         let initial_frame = ctx.clone().into_frame(chain_id)?;
         let outcome = ExecutionEngine::execute_pinned_node(
             chain_id,
