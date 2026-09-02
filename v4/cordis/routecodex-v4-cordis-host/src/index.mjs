@@ -502,21 +502,14 @@ export class CordisNodeHost {
   async dispose() {
     if (this.#disposed) return;
     const retained = [...this.#acquired];
+    await this.#disposeFibers(this.#fibers);
     this.#ready = false;
+    this.#fibers = [];
     for (const name of retained) {
       this.#releasedServices.add(name);
     }
     this.#acquired.clear();
-    await this.#disposeFibers(this.#fibers);
-    this.#fibers = [];
     this.#disposed = true;
-    for (const name of retained) {
-      if (this.#releasedServices.has(name)) continue;
-      throw new CordisHostError(
-        'service_not_released',
-        `node service ${name} remained valid after dispose`,
-      );
-    }
   }
 
   async #disposeFibers(fibers) {
