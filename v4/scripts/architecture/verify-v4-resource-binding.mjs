@@ -62,6 +62,7 @@ const isKnownOwner = (crate) => CRATE_DIRS.includes(crate) || CORDIS_DIRS.includ
 // count, so `owner_symbols` cannot be satisfied by text presence alone.
 const DECL_RE = /^(?:pub(?:\([^)]*\))?\s+)?(struct|enum|trait|fn|type|const|static)\s+([A-Za-z_][A-Za-z0-9_]*)\b/gm;
 const REUSE_RE = /^pub use [^\n]*\b([A-Za-z_][A-Za-z0-9_]*)\b/gm;
+const MACRO_DECL_RE = /^typed_immutable_carrier!\(([A-Za-z_][A-Za-z0-9_]*)\)/gm;
 const JS_DECL_RE = /^(?:export\s+)?(?:async\s+)?(?:class|function|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b/gm;
 
 function collectDeclaredSymbols(crate) {
@@ -90,6 +91,10 @@ function collectDeclaredSymbols(crate) {
           if (symbol) {
             symbols.add(symbol);
           }
+        }
+        for (const match of source.matchAll(MACRO_DECL_RE)) {
+          const symbol = match[1];
+          if (symbol) symbols.add(symbol);
         }
       }
     }

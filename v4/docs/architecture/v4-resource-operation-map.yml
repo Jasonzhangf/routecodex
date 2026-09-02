@@ -3301,6 +3301,133 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
+- resource_id: v4.control.event_bus
+  axis: control
+  verification_gate:
+  - v4_parity_gate_control_event_arc
+  resource_kind: control_event_bus
+  lifecycle: v4.control.event_lifecycle
+  owner_crate: routecodex-v4-control
+  owner_node: V4Control02RecordLedger
+  owner_symbols:
+  - ControlCommittedEvent
+  allowed_writers:
+  - V4Control02RecordLedger
+  allowed_readers:
+  - V4Control02RecordLedger
+  forbidden_writers:
+  - V4HubReqChatProcess03Governed
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.data.immutable_arc_carriers
+  axis: data
+  verification_gate:
+  - v4_parity_gate_control_event_arc
+  resource_kind: immutable_arc_carrier
+  lifecycle: v4.node_container.execution
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4NodeContainer
+  owner_symbols:
+  - ImmutableDataCarrier
+  allowed_writers:
+  - V4NodeContainer
+  allowed_readers:
+  - V4NodeContainer
+  forbidden_writers: []
+  may_enter_provider_body: true
+  may_enter_client_body: true
+  binding_status: anchored
+- resource_id: v4.runtime.immutable_data_carrier
+  axis: data
+  verification_gate:
+  - v4_parity_gate_control_event_arc
+  resource_kind: immutable_data_carrier
+  lifecycle: v4.node_container.execution
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4NodeContainer
+  owner_symbols:
+  - ImmutableDataCarrier
+  allowed_writers:
+  - V4NodeContainer
+  allowed_readers:
+  - V4NodeContainer
+  forbidden_writers: []
+  may_enter_provider_body: true
+  may_enter_client_body: true
+  binding_status: anchored
+- resource_id: v4.runtime.immutable_information_carrier
+  axis: information
+  verification_gate:
+  - v4_parity_gate_control_event_arc
+  resource_kind: immutable_information_carrier
+  lifecycle: v4.node_container.execution
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4NodeContainer
+  owner_symbols:
+  - ImmutableInformationCarrier
+  allowed_writers:
+  - V4NodeContainer
+  allowed_readers:
+  - V4NodeContainer
+  forbidden_writers: []
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.runtime.immutable_diagnostic_carrier
+  axis: diagnostic
+  verification_gate:
+  - v4_parity_gate_control_event_arc
+  resource_kind: immutable_diagnostic_carrier
+  lifecycle: v4.node_container.execution
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4NodeContainer
+  owner_symbols:
+  - ImmutableDiagnosticCarrier
+  allowed_writers:
+  - V4NodeContainer
+  allowed_readers:
+  - V4NodeContainer
+  forbidden_writers: []
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.runtime.node_service_registry
+  axis: control
+  verification_gate:
+  - v4_parity_gate_control_event_arc
+  resource_kind: node_service_registry
+  lifecycle: v4.node_container.execution
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4NodeContainer
+  owner_symbols:
+  - NodeServiceRegistry
+  allowed_writers:
+  - V4NodeContainer
+  allowed_readers:
+  - V4NodeContainer
+  forbidden_writers: []
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.cordis.typed_node_services
+  axis: control
+  verification_gate:
+  - v4_parity_gate_control_event_arc
+  resource_kind: typed_node_services
+  lifecycle: v4.cordis_bridge
+  owner_crate: routecodex-v4-cordis-host
+  owner_node: V4CordisNodeHost
+  owner_symbols:
+  - CordisBoundNodeHost
+  allowed_writers:
+  - V4CordisNodeHost
+  allowed_readers:
+  - V4NodeContainer
+  forbidden_writers: []
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
 forbidden_direct_edges:
 - from: v4.config.manifest
   to: v4.request.normal_payload
