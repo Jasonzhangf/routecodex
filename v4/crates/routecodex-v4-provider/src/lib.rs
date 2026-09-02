@@ -837,33 +837,10 @@ pub fn send_responses(
         message: error.to_string(),
         status: Some(status),
     })?;
-    let body = if status < 400
-        && content_type
-            .to_ascii_lowercase()
-            .contains("application/json")
-    {
-        let value: Value = serde_json::from_slice(&body).map_err(|error| ProviderTransportError {
-            code: "provider_json_parse".into(),
-            message: error.to_string(),
-            status: Some(status),
-        })?;
-        // Transport normalization cannot enforce client-entry instruction
-        // binding: this response may be relayed to Chat.  The runtime
-        // response boundary applies the strict check only for direct
-        // /v1/responses requests with the original request instructions.
-        serde_json::to_vec(&normalize_provider_response_for_relay("responses", &value)?)
-            .map_err(|error| ProviderTransportError {
-                code: "provider_json_encode".into(),
-                message: error.to_string(),
-                status: Some(status),
-            })?
-    } else {
-        body.to_vec()
-    };
     Ok(ProviderRawResponse {
         status,
         content_type,
-        body,
+        body: body.to_vec(),
     })
 }
 

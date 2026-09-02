@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const runtimeBin = fs.readFileSync(path.join(root, 'crates/routecodex-v4-runtime-bin/src/main.rs'), 'utf8');
 const runtimeSource = fs.readFileSync(path.join(root, 'crates/routecodex-v4-runtime/src/lib.rs'), 'utf8');
+const providerSource = fs.readFileSync(path.join(root, 'crates/routecodex-v4-provider/src/lib.rs'), 'utf8');
 const productionSource = runtimeBin.split('#[cfg(test)]', 1)[0];
 const failures = [];
 
@@ -42,6 +43,12 @@ if (!/execute_provider_response_scoped[\s\S]*?report\.client_frame/.test(product
 if (runtimeSource.includes('decode_provider_sse_frame(')
     || runtimeSource.includes('encode_client_sse_frame(')) {
   failures.push('SSE_SEMANTIC_BYPASS: runtime directly invokes SSE semantic codec outside NodePluginPlan');
+}
+const sendResponsesStart = providerSource.indexOf('pub fn send_responses(');
+const sendResponsesEnd = providerSource.indexOf('\npub fn send_responses_streaming(', sendResponsesStart);
+const sendResponsesSource = providerSource.slice(sendResponsesStart, sendResponsesEnd);
+if (/normalize_provider_(?:response|sse_frame)/.test(sendResponsesSource)) {
+  failures.push('PROVIDER_TRANSPORT_SEMANTIC_BYPASS: send_responses performs response/SSE normalization before RespInbound');
 }
 const sseStreamStart = productionSource.indexOf('struct CordisSseTransportStream');
 if (sseStreamStart < 0
