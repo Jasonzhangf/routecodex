@@ -1853,6 +1853,32 @@ mod tests {
         assert!(rendered.contains("responseStatus=completed"));
     }
 
+    #[test]
+    fn production_trace_publishes_scoped_diagnostic_events() {
+        let bus = Arc::new(Mutex::new(V4Debug02BusSubscription::new()));
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+            request_id: "req-event-bus".to_string(),
+            server_id: "rccv4".to_string(),
+            port: 5520,
+        };
+        publish_diagnostic_events(
+            &bus,
+            &request,
+            &["node-a:plugin.executed:typed handle executed".to_string()],
+        );
+        let guard = bus.lock().expect("event bus lock");
+        assert_eq!(guard.published_facts().len(), 1);
+        let view = guard
+            .subscriber_view("console:req-event-bus")
+            .expect("console subscriber view");
+        assert_eq!(view.events().len(), 1);
+        assert_eq!(view.scope_key(), "req-event-bus");
+    }
+
     fn test_manifest() -> RuntimeConfigManifest {
         compile_runtime_config(
             r#"
