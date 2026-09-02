@@ -1240,9 +1240,10 @@ fn error_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 
 fn protocol_codec(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut data = ctx.read_data().clone();
-    if let Some(object) = data.as_object_mut() {
-        object.insert("codec".to_string(), json!("mock"));
-    }
+    let object = data
+        .as_object_mut()
+        .ok_or_else(|| "wire codec proto requires object payload".to_string())?;
+    object.insert("codec".to_string(), json!("mock"));
     ctx.write_data(data).map_err(|error| error.to_string())
 }
 
@@ -1391,9 +1392,10 @@ fn auth_handle_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 
 fn wire_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut data = ctx.read_data().clone();
-    if let Some(object) = data.as_object_mut() {
-        object.insert("wire".to_string(), json!({"mock": true}));
-    }
+    let object = data
+        .as_object_mut()
+        .ok_or_else(|| "wire mock requires object payload".to_string())?;
+    object.insert("wire".to_string(), json!({"mock": true}));
     ctx.write_data(data).map_err(|error| error.to_string())
 }
 
