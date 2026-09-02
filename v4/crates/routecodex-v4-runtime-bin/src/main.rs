@@ -1,4 +1,5 @@
 use routecodex_v4_base_node::Scope;
+use routecodex_v4_cordis_bridge::{HandleRegistry, PluginHandle};
 use routecodex_v4_cli::{
     Cli, ConfigIntent, ConfigPathIntent, InitIntent, ManagedChildIntent, RestartIntent,
     ServerIntent, ServerStartIntent, ServertoolIntent, SnapshotIntent, StartIntent, StopIntent,
@@ -24,7 +25,8 @@ use routecodex_v4_provider::{
     ProviderInitAuth, ProviderInitOptions, ProviderResponseStream, V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
-    apply_product_error_policy, select_product_target_excluding, select_target,
+    apply_product_error_policy, resolve_route_group,
+    TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
 };
 use routecodex_v4_runtime::{
     project_runtime_fault, project_runtime_fault_with_policy, ResponseStreamDisposition,
@@ -35,6 +37,7 @@ use routecodex_v4_server::{
 };
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
 use routecodex_v4_standard_plugins::diagnostic;
+use routecodex_v4_standard_plugins::StandardHandleRegistry;
 use routecodex_v4_standard_plugins::sse_transport::{
     SseEgressPlugin, SseIngressPlugin, SseTransportPolicy,
 };
@@ -47,6 +50,35 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+
+struct ProductionHandleRegistry {
+    standard: StandardHandleRegistry,
+    router_target: Option<TargetSelectionHandle>,
+}
+
+impl ProductionHandleRegistry {
+    fn new(product: Option<&RuntimeProductConfig>) -> Self {
+        Self {
+            standard: StandardHandleRegistry::new(),
+            router_target: product.cloned().map(TargetSelectionHandle::new),
+        }
+    }
+}
+
+impl HandleRegistry for ProductionHandleRegistry {
+    fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
+        if plugin_id == TARGET_SELECTION_PLUGIN_ID || plugin_id == DIRECT_TARGET_SELECTION_PLUGIN_ID {
+            if let Some(handle) = self.router_target.as_ref() {
+                return Some(handle as &dyn PluginHandle);
+            }
+        }
+        self.standard.get(plugin_id)
+    }
+
+    fn encode_client_error_sse(&self, entry_protocol: &str, message: &str) -> Result<Vec<u8>, String> {
+        self.standard.encode_client_error_sse(entry_protocol, message)
+    }
+}
 
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-v4");
 pub const RCCV4_BINARY_IDENTITY: &str = "rccv4";
