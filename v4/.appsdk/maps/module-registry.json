@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "modules": [{
-    "module_id": "app-core",
+    "module_id": "routecodex-v4-base-node",
     "status": "active",
-    "owner": "app-core",
-    "owned_paths": ["playground/experiments/**", "tests/core/**"],
+    "owner": "routecodex-v4-base-node",
+    "owned_paths": ["Cargo.toml", "Cargo.lock", "crates/**", "cordis/**", "scripts/**"],
     "forbidden_paths": ["active/lib/**", "protected/**", "generated/**"],
     "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
   }]

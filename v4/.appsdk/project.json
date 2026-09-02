@@ -79,14 +79,14 @@
   },
   "modules": [
     {
-      "active_artifact": "active/lib/app-core/**",
+      "active_artifact": "active/lib/routecodex-v4-base-node/**",
       "artifact_paths": [
-        "app-core.placeholder"
+        "rccv4"
       ],
       "build": {
         "args": [
           "-c",
-          "mkdir -p generated/modules/app-core/lib && printf 'app-core placeholder\\n' > generated/modules/app-core/lib/app-core.placeholder"
+          "mkdir -p generated/modules/routecodex-v4-base-node/lib && cargo build --release --locked --manifest-path Cargo.toml && cp target/release/rccv4 generated/modules/routecodex-v4-base-node/lib/rccv4"
         ],
         "program": "sh",
         "working_directory": "."
@@ -99,11 +99,13 @@
       "generated_outputs": [
         "generated/**"
       ],
-      "module_id": "app-core",
+      "module_id": "routecodex-v4-base-node",
       "owned_paths": [
-        "playground/experiments/**",
-        "protected/source/**",
-        "tests/core/**"
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/**",
+        "cordis/**",
+        "scripts/**"
       ],
       "regression": {
         "allow_skipped": false,
@@ -115,8 +117,7 @@
           "working_directory": "."
         },
         "input_paths": [
-          "playground/experiments/**",
-          "tests/core/**"
+          "crates/**"
         ],
         "minimum_test_count": 1,
         "ordinary_mode_after_freeze": "disabled",
@@ -128,9 +129,9 @@
           "dependency_change"
         ],
         "required_before_freeze": true,
-        "suite_id": "app-core-regression"
+        "suite_id": "routecodex-v4-base-node-regression"
       },
-      "source_owner": "app-core",
+      "source_owner": "routecodex-v4-base-node",
       "stage": "source_implemented"
     }
   ],
