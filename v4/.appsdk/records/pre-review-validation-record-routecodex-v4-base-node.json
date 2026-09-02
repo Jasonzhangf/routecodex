@@ -1,10 +1,10 @@
 {
-  "validation_id": "pre-review-fix-909f43fc372f",
+  "validation_id": "pre-review-fix-98f44c51cede",
   "issue_id": "v4-cordis-governance-reset-20260903",
   "module_id": "routecodex-v4-base-node",
-  "fix_candidate_id": "fix-909f43fc372f",
-  "candidate_commit": "909f43fc372f04cb7a9fcb3a8d28c74be88cab2e",
-  "candidate_tree_hash": "d0531887530a8b029213935dc38975cfe8fb9d01",
+  "fix_candidate_id": "fix-98f44c51cede",
+  "candidate_commit": "98f44c51cedeac1034b775a91074f4a197dae9a5",
+  "candidate_tree_hash": "b24257c466be0571645e35325f6de89c8199632c",
   "artifact_hash": "sha256:0a7d33027e7b472443c04a29e677b2a3eb118a2c05c5026d62c6e170777a86ba",
   "whitebox_producer": {
     "adapter": "project",
@@ -25,9 +25,9 @@
       "adapter": "project",
       "identity": "v4-cordis-deployment"
     },
-    "observed_at": "2026-09-02T16:29:31.216Z"
+    "observed_at": "2026-09-02T16:31:48.608Z"
   },
   "source_unchanged": true,
   "result": "pass",
-  "created_at": "2026-09-02T16:29:31.216Z"
+  "created_at": "2026-09-02T16:31:48.608Z"
 }
