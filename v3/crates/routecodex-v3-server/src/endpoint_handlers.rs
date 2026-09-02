@@ -1865,16 +1865,20 @@ pub(crate) use request_identity::*;
 mod front_sse_contract_tests {
     use super::{
         v3_front_chunk_is_transport_keepalive, v3_front_json_body_to_sse_frame,
-        v3_front_sse_worker_panic_frame,
+        v3_front_sse_worker_panic_frame, V3SseClientProtocol,
     };
 
     #[test]
     fn front_sse_worker_panic_projects_internal_error_and_done() {
-        let frame = v3_front_sse_worker_panic_frame("worker panic");
-        assert_eq!(
-            frame,
-            b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"front_sse_worker_panicked\",\"message\":\"worker panic\"},\"status\":\"failed\"},\"type\":\"response.failed\"}\n\n"
+        let frame = v3_front_sse_worker_panic_frame(
+            "worker panic",
+            V3SseClientProtocol::OpenAiChat,
         );
+        let text = String::from_utf8(frame).expect("panic frame is UTF-8");
+        assert!(text.starts_with("event: error\n"), "{text}");
+        assert!(text.contains("front_sse_worker_panicked"), "{text}");
+        assert!(!text.contains("response.failed"), "{text}");
+        assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
     }
 
     #[test]
@@ -1890,15 +1894,25 @@ mod front_sse_contract_tests {
 
     #[test]
     fn front_json_error_is_projected_as_one_sse_failure_terminal() {
-        assert_eq!(
-            v3_front_json_body_to_sse_frame(br#"{"error":{"code":"internal"}}"#),
-            b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"internal\"},\"status\":\"failed\"},\"type\":\"response.failed\"}\n\ndata: [DONE]\n\n"
+        let frame = v3_front_json_body_to_sse_frame(
+            br#"{"error":{"code":"internal"}}"#,
+            V3SseClientProtocol::OpenAiChat,
+            502,
         );
+        let text = String::from_utf8(frame).expect("terminal frame is UTF-8");
+        assert!(text.starts_with("event: error\n"), "{text}");
+        assert!(text.contains("internal"), "{text}");
+        assert!(!text.contains("response.failed"), "{text}");
+        assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
     }
 
     #[test]
     fn malformed_error06_body_enters_typed_projection_without_front_json_error() {
-        let frame = v3_front_json_body_to_sse_frame(b"not-json");
+        let frame = v3_front_json_body_to_sse_frame(
+            b"not-json",
+            V3SseClientProtocol::OpenAiChat,
+            502,
+        );
         let text = String::from_utf8(frame).expect("SSE frame is UTF-8");
         assert!(text.contains("front_error06_body_parse_failed"));
         assert!(!text.contains("front_json_error"));
@@ -1906,9 +1920,33 @@ mod front_sse_contract_tests {
 
     #[test]
     fn front_empty_json_body_does_not_fake_a_success_frame() {
-        assert!(v3_front_json_body_to_sse_frame(b"").is_empty() == false);
+        assert!(v3_front_json_body_to_sse_frame(
+            b"",
+            V3SseClientProtocol::OpenAiChat,
+            502,
+        )
+        .is_empty()
+            == false);
         assert!(!v3_front_chunk_is_transport_keepalive(
-            &v3_front_json_body_to_sse_frame(b"{}")
+            &v3_front_json_body_to_sse_frame(
+                b"{}",
+                V3SseClientProtocol::OpenAiChat,
+                200,
+            )
         ));
+    }
+
+    #[test]
+    fn front_non_sse_success_enters_internal_error_chain_instead_of_reparsed_success() {
+        let frame = v3_front_json_body_to_sse_frame(
+            br#"{"id":"chatcmpl-success","choices":[]}"#,
+            V3SseClientProtocol::OpenAiChat,
+            200,
+        );
+        let text = String::from_utf8(frame).expect("contract failure frame is UTF-8");
+        assert!(text.starts_with("event: error\n"), "{text}");
+        assert!(text.contains("front_sse_inner_response_not_sse"), "{text}");
+        assert!(!text.contains("chatcmpl-success"), "{text}");
+        assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
     }
 }

@@ -3617,6 +3617,19 @@ fn relay_chat_sse_json_projection_has_explicit_terminal_marker() {
     assert!(frame.ends_with(b"data: [DONE]\n\n"));
 }
 
+#[test]
+fn openai_chat_relay_has_no_secondary_client_sse_accept_or_error06_payload_wrapper() {
+    let source = include_str!("../executors.rs");
+    assert!(
+        !source.contains("fn v3_openai_chat_relay_sse_accept_response("),
+        "Relay runtime must finish provider retry/reselection before Server projects a client response"
+    );
+    assert!(
+        !source.contains("append_v3_openai_chat_relay_sse_done(&data_frame)"),
+        "Server must not reparse Error06 JSON and wrap it as a normal Chat data frame"
+    );
+}
+
 #[tokio::test]
 async fn successful_responses_sse_emits_immediate_and_idle_periodic_keepalive_comments() {
     let provider = futures_util::stream::pending::<Result<Vec<u8>, io::Error>>();

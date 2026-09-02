@@ -28,7 +28,7 @@ edges:
     to_node: V3DirectSseAccept03ProjectedClientFrame
     owner_feature_id: v3.direct_sse_accept_skeleton
     status: anchored
-    contract: only the existing Direct or Relay runtime client projection is forwarded; provider raw SSE is never forwarded
+    contract: only the existing Direct or Relay runtime client projection or typed Error06 terminal frame is forwarded; provider raw SSE and reparsed HTTP JSON are never forwarded
 supporting_edges:
   - step_id: v3-direct-sse-accept-skeleton-intent-01
     caller: pending_endpoint_after_responses_admission
@@ -49,6 +49,7 @@ return_path:
   precommit_provider_failure: Error01 -> Error03 -> Error04 -> Error05 -> reselect; client semantic channel remains uncommitted
   replacement_success: only the complete replacement attempt crosses V3DirectSseAccept03ProjectedClientFrame; no mixed-provider prefix is allowed
   candidate_exhaustion: Error06 client projection; no partial provider attempt is exposed
+  inner_non_sse_contract_violation: internal response-stage Error01 -> Error06; Front never reparses HTTP JSON to infer provider or control state
   unexpected_post_commit_failure: only transport/client disconnect after semantic commit; provider failure after commit is forbidden by this lifecycle
 forbidden_paths:
   - provider raw SSE -> client
@@ -59,6 +60,7 @@ forbidden_paths:
   - feature -> replacement of V3DirectSseAccept01ClientChannel
   - feature -> replacement of V3DirectSseAccept02RuntimeWorker
   - front -> protocol selection from request-stage execution plan
+  - front -> HTTP JSON payload reparsing to reconstruct Error06 or provider state
 canonical_docs:
   - docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
   - docs/goals/v3-sse-transport-json-semantic-decoupling-audit.md
