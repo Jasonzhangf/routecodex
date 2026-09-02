@@ -804,6 +804,10 @@ pub struct ExecutionContext {
     pub control: ControlView,
     pub information: InformationView,
     pub diagnostic: DiagnosticView,
+    /// Node-scoped immutable service bindings. The registry is request-local
+    /// and carries Arc-backed data/information/diagnostic carriers alongside
+    /// the typed execution frame; it is never serialized into payload.
+    services: Option<NodeServiceRegistry>,
 }
 
 impl ExecutionContext {
@@ -854,6 +858,7 @@ impl ExecutionContext {
             },
             information: InformationView::default(),
             diagnostic: DiagnosticView::default(),
+            services: None,
         }
     }
 
@@ -887,6 +892,10 @@ impl ExecutionContext {
 
     pub fn record_trace(&mut self, entry: impl Into<String>) {
         self.diagnostic.trace.push(entry.into());
+    }
+
+    pub fn service_registry(&self) -> Option<&NodeServiceRegistry> {
+        self.services.as_ref()
     }
 
     /// Project the adjacent business payload back into the legacy report
@@ -966,6 +975,7 @@ impl ExecutionContext {
         context.control.continuation_restored = control.continuation_restored;
         context.information = serde_json::from_value(frame.information.clone())
             .map_err(|error| RuntimeFault::new("execution_frame_information", error.to_string()))?;
+        context.services = self.services.clone();
         for event in &frame.events {
             if event.kind == "stage.checkpoint" {
                 context.diagnostic.trace.push(event.message.clone());
@@ -2393,13 +2403,36 @@ impl SkeletonRuntime {
         };
         let mut ctx = ExecutionContext::with_scope(
             request_id,
-            binding,
+            binding.clone(),
             port,
             session_scope,
             conversation_scope,
         );
         seed(&mut ctx);
         let initial_frame = ctx.clone().into_frame(chain_id)?;
+        let mut services = NodeServiceRegistry::new(
+            chain_id,
+            request_id,
+            &binding.plan_hash,
+            binding.plan_epoch,
+        );
+        services
+            .bind_data(ImmutableDataCarrier::from_value(&initial_frame.data).map_err(|error| {
+                RuntimeFault::new("service_data_carrier", error.to_string())
+            })?)
+            .map_err(|error| RuntimeFault::new("service_data_bind", error.to_string()))?;
+        let information_bytes = serde_json::to_vec(&initial_frame.information)
+            .map_err(|error| RuntimeFault::new("service_information_carrier", error.to_string()))?;
+        services
+            .bind_information(ImmutableInformationCarrier::from_bytes(&information_bytes))
+            .map_err(|error| RuntimeFault::new("service_information_bind", error.to_string()))?;
+        services
+            .bind_diagnostic(ImmutableDiagnosticCarrier::new(request_id))
+            .map_err(|error| RuntimeFault::new("service_diagnostic_bind", error.to_string()))?;
+        services
+            .execute()
+            .map_err(|error| RuntimeFault::new("service_injection", error.to_string()))?;
+        ctx.services = Some(services);
         let outcome = ExecutionEngine::execute_pinned_node(
             chain_id,
             initial_frame,
