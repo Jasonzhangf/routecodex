@@ -29,8 +29,8 @@ use routecodex_v4_router::{
     TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
 };
 use routecodex_v4_runtime::{
-    project_runtime_fault, project_runtime_fault_with_policy, ResponseStreamDisposition,
-    ResponseStreamProcessor, RuntimeFault, SkeletonRuntime,
+    parse_request_admission_facts, project_runtime_fault, project_runtime_fault_with_policy,
+    ResponseStreamDisposition, ResponseStreamProcessor, RuntimeFault, SkeletonRuntime,
 };
 use routecodex_v4_server::{
     AsyncHttpHandler, AsyncHttpServer, HttpHandler, HttpRequest, HttpResponse, ResponseStream,
@@ -787,65 +787,20 @@ fn handle_responses(
     continuation_owner: &str,
 ) -> Result<HttpResponse, HttpResponse> {
     let started_at = std::time::Instant::now();
-    let body: serde_json::Value = serde_json::from_slice(&request.body).map_err(|error| {
-        project_fault(
-            request,
-            RuntimeFault::new("invalid_request", format!("invalid JSON: {error}")),
-            400,
-        )
-    })?;
-    if entry_protocol == "responses"
-        && continuation_owner == "relay"
-        && body.get("previous_response_id").is_some()
-    {
-        return Err(project_fault(
-            request,
-            RuntimeFault::new(
-                "continuation_unsupported",
-                "local relay continuation is not implemented",
-            ),
-            400,
-        ));
-    }
-    if entry_protocol != "responses" && body.get("previous_response_id").is_some() {
-        return Err(project_fault(
-            request,
-            RuntimeFault::new(
-                "continuation_entry_protocol_mismatch",
-                "previous_response_id is only valid on the Responses entry protocol",
-            ),
-            400,
-        ));
-    }
+    let admission = parse_request_admission_facts(
+        &request.body,
+        entry_protocol,
+        continuation_owner,
+    )
+    .map_err(|fault| project_fault(request, fault, 400))?;
     let session_scope = request
         .header("x-rccv4-session-id")
         .unwrap_or(&request.request_id);
     let conversation_scope = request
         .header("x-rccv4-conversation-id")
         .unwrap_or(session_scope);
-    let model = body
-        .get("model")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            project_fault(
-                request,
-                RuntimeFault::new("invalid_request", "model is required"),
-                400,
-            )
-        })?;
-    let stream_mode = body
-        .get("stream")
-        .map(|value| {
-            value.as_bool().ok_or_else(|| {
-                project_fault(
-                    request,
-                    RuntimeFault::new("invalid_request", "stream must be a boolean"),
-                    400,
-                )
-            })
-        })
-        .transpose()?
-        .unwrap_or(false);
+    let model = admission.model.as_str();
+    let stream_mode = admission.stream;
     let unavailable_provider_ids = if let Some(product) = &manifest.product {
         let group = route_group_for_request(product, request)
             .map_err(|error| project_fault(request, error, 500))?;
