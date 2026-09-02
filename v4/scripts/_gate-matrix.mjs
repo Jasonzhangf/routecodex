@@ -46,6 +46,11 @@ export const ARCHITECTURE_GATES = [
 // the identifiers here lets isolation verify declared/executed parity too.
 export const RUST_GATES = [
   ['v4_control_event_domains', 'cargo test -p routecodex-v4-control --locked --offline'],
+  ['v4_runtime_lifecycle_event_bus', 'cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_runtime --locked --offline'],
+  ['v4_runtime_node_error_event_red', 'cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_runtime production_execution_publishes_node_error_event_topic --locked --offline'],
+  ['v4_runtime_shared_carrier_arc_red', 'cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_red_shared_carrier --features red-fixtures --locked --offline'],
+  ['v4_control_typed_resource_command_red', 'cargo test --manifest-path Cargo.toml -p routecodex-v4-control --test l2_control typed_control_resource_command_is_owner_bound --locked --offline'],
+  ['v4_cordis_host_typed_service_binding', 'node --test cordis/routecodex-v4-cordis-host/tests/host-typed-service-binding-red.test.mjs'],
 ];
 
 export const RUST_GATES_RED = [
