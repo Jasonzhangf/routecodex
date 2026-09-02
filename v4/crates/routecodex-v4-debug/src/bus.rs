@@ -32,6 +32,7 @@ pub struct DiagnosticEventEnvelope {
     scope_key: String,
     source_node: String,
     payload_hash: String,
+    sequence: u64,
 }
 
 impl DiagnosticEventEnvelope {
@@ -49,6 +50,7 @@ impl DiagnosticEventEnvelope {
             scope_key: scope_key.to_string(),
             source_node: source_node.to_string(),
             payload_hash: payload_hash.to_string(),
+            sequence: 0,
         }
     }
 
@@ -66,6 +68,15 @@ impl DiagnosticEventEnvelope {
 
     pub fn payload_hash(&self) -> &str {
         &self.payload_hash
+    }
+
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    fn with_sequence(mut self, sequence: u64) -> Self {
+        self.sequence = sequence;
+        self
     }
 }
 
@@ -134,6 +145,7 @@ pub struct V4Debug02BusSubscription {
     subscriptions: Vec<Subscription>,
     disposed: BTreeSet<String>,
     published: Vec<PublishedEventFact>,
+    next_sequence: u64,
 }
 
 impl V4Debug02BusSubscription {
@@ -184,7 +196,17 @@ impl V4Debug02BusSubscription {
         &mut self,
         envelope: DiagnosticEventEnvelope,
     ) -> Result<PublishedEventFact, DebugError> {
-        let fact = PublishedEventFact::new(envelope);
+        if envelope.scope_key.is_empty()
+            || envelope.source_node.is_empty()
+            || envelope.payload_hash.is_empty()
+        {
+            return Err(DebugError::InvalidEnvelope);
+        }
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or(DebugError::InvalidEnvelope)?;
+        let fact = PublishedEventFact::new(envelope.with_sequence(self.next_sequence));
         self.published.push(fact.clone());
         Ok(fact)
     }
