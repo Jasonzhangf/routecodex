@@ -236,7 +236,7 @@ const NODE_PERMISSIONS = new Map([
     reads: ['v4.control.error_chain'], writes: ['v4.control.error_chain'],
   }],
   ['V4HubReqExecution04Planned', {
-    reads: ['v4.information.entry_protocol', 'v4.information.execution_lane', 'v4.control.route_facts'], writes: ['v4.control.route_facts'],
+    reads: ['v4.information.execution_lane', 'v4.control.route_facts'], writes: ['v4.control.route_facts'],
   }],
   ['V4HubReqTarget05Resolved', {
     reads: ['v4.control.route_facts', 'v4.control.target_selection', 'v4.information.model'], writes: ['v4.control.target_selection'],

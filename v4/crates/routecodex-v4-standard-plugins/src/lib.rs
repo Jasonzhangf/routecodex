@@ -458,7 +458,6 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],
         "V4Error06ClientProjected" => vec!["v4.control.error_chain".to_string()],
         "V4HubReqExecution04Planned" => vec![
-            "v4.information.entry_protocol".to_string(),
             "v4.information.execution_lane".to_string(),
             "v4.control.route_facts".to_string(),
         ],
@@ -542,6 +541,21 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
         vec!["v4.request.provider_wire_payload"],
     );
     codec.descriptor.selection_group = Some("provider_wire_codec".to_string());
+
+    let mut codec_proto = plugin(
+        "v4.std.protocol.wire_codec_proto",
+        PluginCategory::Protocol,
+        "V4ProviderReqOutbound08WirePayload",
+        "request_outbound",
+        Some(8),
+        PluginKind::Operator,
+        PluginEffect::Semantic,
+        PluginPhase::Semantic,
+        201,
+        vec!["v4.request.provider_semantic"],
+        vec!["v4.request.provider_wire_payload"],
+    );
+    codec_proto.descriptor.selection_group = Some("provider_wire_codec".to_string());
 
     let mut plugins = vec![
         plugin(
@@ -766,6 +780,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             vec!["v4.control.error_chain"],
         ),
         codec,
+        codec_proto,
         plugin(
             "v4.std.chat_process.response_governance",
             PluginCategory::ChatProcess,
@@ -802,11 +817,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::ControlOnly,
             PluginPhase::Semantic,
             300,
-            vec![
-                "v4.information.entry_protocol",
-                "v4.information.execution_lane",
-                "v4.control.route_facts",
-            ],
+            vec!["v4.information.execution_lane", "v4.control.route_facts"],
             vec!["v4.control.route_facts"],
         ),
         plugin(
@@ -850,6 +861,58 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             361,
             vec!["v4.information.model"],
             vec!["v4.control.target_selection"],
+        ),
+        plugin(
+            "v4.std.provider.capability_mock",
+            PluginCategory::Provider,
+            "V4ProviderReqOutbound09TransportRequest",
+            "request_outbound",
+            Some(9),
+            PluginKind::Validator,
+            PluginEffect::ReadOnly,
+            PluginPhase::Semantic,
+            210,
+            vec!["v4.config.manifest"],
+            vec![],
+        ),
+        plugin(
+            "v4.std.provider.auth_handle_mock",
+            PluginCategory::Provider,
+            "V4ProviderReqOutbound09TransportRequest",
+            "request_outbound",
+            Some(9),
+            PluginKind::Validator,
+            PluginEffect::ReadOnly,
+            PluginPhase::Semantic,
+            220,
+            vec!["v4.secret.provider_auth_handle"],
+            vec![],
+        ),
+        plugin(
+            "v4.std.provider.wire_mock",
+            PluginCategory::Provider,
+            "V4HubReqOutbound06ProviderSemantic",
+            "request_outbound",
+            Some(6),
+            PluginKind::Operator,
+            PluginEffect::Semantic,
+            PluginPhase::Projection,
+            500,
+            vec!["v4.request.normal_payload"],
+            vec!["v4.request.provider_semantic"],
+        ),
+        plugin(
+            "v4.std.provider.transport_mock",
+            PluginCategory::Provider,
+            "V4ProviderReqOutbound09TransportRequest",
+            "request_outbound",
+            Some(9),
+            PluginKind::Validator,
+            PluginEffect::ReadOnly,
+            PluginPhase::Projection,
+            550,
+            vec!["v4.request.provider_wire_payload"],
+            vec![],
         ),
         plugin(
             "v4.std.provider.transport_validate",
@@ -981,6 +1044,12 @@ pub fn compile_production_execution_plans(
         "error",
         "control",
     ];
+    const EXCLUDED_PLUGINS: [&str; 4] = [
+        "v4.std.provider.capability_mock",
+        "v4.std.provider.auth_handle_mock",
+        "v4.std.provider.wire_mock",
+        "v4.std.provider.transport_mock",
+    ];
     let plugins = standard_plugins();
     let mut plans = Vec::new();
     let mut artifact_hashes = Vec::new();
@@ -998,6 +1067,7 @@ pub fn compile_production_execution_plans(
             let selected = plugins
                 .iter()
                 .filter(|plugin| plugin.descriptor.node_selector.node_id == node.node_id)
+                .filter(|plugin| !EXCLUDED_PLUGINS.contains(&plugin.plugin_id.as_str()))
                 .collect::<Vec<_>>();
             let plan = if selected.is_empty() {
                 return Err(routecodex_v4_plugin_plan::PlanError::NodeContractInvalid {
@@ -1320,13 +1390,6 @@ fn route_facts_produce(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .cloned()
         .and_then(|value| value.as_object().cloned())
         .unwrap_or_default();
-    if let Some(entry_protocol) = ctx
-        .read_information_resource("v4.information.entry_protocol")
-        .map_err(|error| error.to_string())?
-        .and_then(Value::as_str)
-    {
-        facts.insert("entry_protocol".to_string(), Value::String(entry_protocol.to_string()));
-    }
     if let Some(execution_lane) = ctx
         .read_information_resource("v4.information.execution_lane")
         .map_err(|error| error.to_string())?
@@ -1359,6 +1422,37 @@ fn direct_target_selection_fixture(ctx: &mut ExecCtx<'_>) -> Result<(), String> 
         .and_then(Value::as_str)
         .filter(|model| !model.trim().is_empty())
         .ok_or_else(|| "direct target selection requires model".to_string())?;
+    Ok(())
+}
+
+fn protocol_codec(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    if !ctx.read_data().is_object() {
+        return Err("protocol codec requires provider semantic object".to_string());
+    }
+    Ok(())
+}
+
+fn capability_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    ctx.emit("node.provider_capability_validated", "provider capability validated");
+    Ok(())
+}
+
+fn auth_handle_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    ctx.emit("node.provider_auth_handle_validated", "provider auth handle validated");
+    Ok(())
+}
+
+fn wire_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    if !ctx.read_data().is_object() {
+        return Err("wire mock requires semantic object".to_string());
+    }
+    Ok(())
+}
+
+fn transport_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    if !ctx.read_data().is_object() {
+        return Err("transport mock requires provider wire object".to_string());
+    }
     Ok(())
 }
 
@@ -1419,6 +1513,11 @@ impl StandardHandleRegistry {
                 "v4.std.provider.wire_build",
                 request_plugins::wire_build,
             ),
+            ("v4.std.protocol.wire_codec_proto", protocol_codec),
+            ("v4.std.provider.capability_mock", capability_mock),
+            ("v4.std.provider.auth_handle_mock", auth_handle_mock),
+            ("v4.std.provider.wire_mock", wire_mock),
+            ("v4.std.provider.transport_mock", transport_mock),
             (
                 "v4.std.chat_process.response_governance",
                 response_governance,
