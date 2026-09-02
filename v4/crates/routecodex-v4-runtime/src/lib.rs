@@ -2561,12 +2561,19 @@ impl SkeletonRuntime {
                     _ => SubscriptionTopic::NodeEvent,
                 };
                 bus.publish(DiagnosticEventEnvelope::new(
-                    topic,
+                    topic.clone(),
                     request_id,
                     &event.plugin_id,
                     &payload_hash,
                 ))
                 .map_err(|error| RuntimeFault::new("diagnostic_bus", error.to_string()))?;
+                if bus
+                    .subscribers_for(&topic)
+                    .any(|subscription| subscription.scope_key == request_id)
+                {
+                    bus.dispatch(&topic, request_id)
+                        .map_err(|error| RuntimeFault::new("diagnostic_bus", error.to_string()))?;
+                }
             }
         }
         let compiled_plugins = lease
