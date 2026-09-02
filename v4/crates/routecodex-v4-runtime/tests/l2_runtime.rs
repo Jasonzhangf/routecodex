@@ -596,6 +596,31 @@ fn positive_provider_response_chain_projects_client_frame() {
     assert!(!report.continuation_committed);
 }
 
+#[test]
+fn direct_response_chain_projects_raw_http_envelope_body() {
+    let runtime = active_runtime();
+    let report = runtime
+        .execute_provider_response_scoped_for_target_with_lease(
+            r#"{"_provider_http_status":200,"_provider_http_content_type":"application/json","_provider_http_body":"{\"id\":\"resp_env\",\"object\":\"response\",\"output\":[]}"}"#,
+            "r-response-envelope",
+            5555,
+            "session-response-envelope",
+            "conversation-response-envelope",
+            "responses",
+            "responses",
+            "direct",
+            None,
+        )
+        .expect("direct response envelope must traverse response plan");
+    let frame: serde_json::Value = serde_json::from_str(
+        report.client_frame.as_deref().expect("client frame produced"),
+    )
+    .expect("client frame is JSON");
+    assert_eq!(frame["id"], "resp_env");
+    assert_eq!(frame["object"], "response");
+    assert!(frame.get("_provider_http_body").is_none());
+}
+
 fn response_stream_processor(
     runtime: &SkeletonRuntime,
     request_id: &str,
