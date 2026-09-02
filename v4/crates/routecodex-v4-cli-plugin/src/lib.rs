@@ -57,7 +57,7 @@ enum Command {
     /// Print one plugin descriptor by id. Fails fast if unknown.
     #[command(name = "describe-plugin")]
     DescribePlugin {
-        /// The plugin id to describe (e.g. `v4.std.protocol.wire_codec_proto`).
+        /// The plugin id to describe (e.g. `v4.std.provider.wire_build`).
         plugin_id: String,
     },
     /// Print the standard resource registry (id + axis only).

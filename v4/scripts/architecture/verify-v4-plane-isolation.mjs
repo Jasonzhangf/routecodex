@@ -84,8 +84,8 @@ function validatePhysicalSources(sourceInputs, failures) {
     failures.push(failure('WIRE_CONTROL_REJECTION_SOURCE',
       'provider/client response boundaries must reject control fields before projection'));
   }
-  const providerWirePair = /vec!\["v4\.request\.provider_semantic"\],[\s\S]{0,500}?vec!\["v4\.request\.provider_wire_payload"\]/g;
-  if ((sourceInputs.standardPlugins.match(providerWirePair) ?? []).length !== 2
+  const providerWirePair = /vec!\[[\s\S]{0,500}?"v4\.request\.provider_semantic"[\s\S]{0,500}?\],[\s\S]{0,100}?vec!\["v4\.request\.provider_wire_payload"\]/g;
+  if ((sourceInputs.standardPlugins.match(providerWirePair) ?? []).length !== 1
       || sourceInputs.standardPlugins.includes('write_control_resource("v4.request.provider_wire_payload"')
       || sourceInputs.standardPlugins.includes('write_control_resource("v4.response.client_wire_payload"')) {
     failures.push(failure('PROVIDER_WIRE_SOURCE_BINDING',
@@ -324,8 +324,8 @@ export function runPlaneIsolationRedSelfTest(resourceMap, boundaryContract, sour
       name: 'provider wire descriptor bypasses provider semantic',
       mutate(_map, _contract, sources) {
         sources.standardPlugins = sources.standardPlugins.replace(
-          'vec!["v4.request.provider_semantic"],',
-          'vec!["v4.request.normal_payload"],',
+          '"v4.request.provider_semantic",\n            "v4.information.client_protocol",\n            "v4.information.provider_protocol",\n        ],\n        vec!["v4.request.provider_wire_payload"],',
+          '"v4.request.normal_payload",\n            "v4.information.client_protocol",\n            "v4.information.provider_protocol",\n        ],\n        vec!["v4.request.provider_wire_payload"],',
         );
       },
       expected: ['PROVIDER_WIRE_SOURCE_BINDING'],

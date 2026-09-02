@@ -19,21 +19,26 @@ function run(...args) {
 assert.match(run('version'), /^rccv4-plugin version \S+ owner routecodex-v4-standard-plugins$/);
 
 const plugins = JSON.parse(run('list-plugins'));
-assert.equal(plugins.length, 23);
-assert.ok(plugins.includes('v4.std.protocol.wire_codec_proto'));
+assert.equal(plugins.length, 39);
+assert.ok(plugins.includes('v4.std.provider.wire_build'));
+assert.ok(plugins.includes('v4.std.provider.transport_validate'));
 
-const descriptor = JSON.parse(run('describe-plugin', 'v4.std.protocol.wire_codec_proto'));
-assert.equal(descriptor.plugin_id, 'v4.std.protocol.wire_codec_proto');
-assert.equal(descriptor.node_id, 'V4ProviderReqCompat06Compat');
+const descriptor = JSON.parse(run('describe-plugin', 'v4.std.provider.wire_build'));
+assert.equal(descriptor.plugin_id, 'v4.std.provider.wire_build');
+assert.equal(descriptor.node_id, 'V4ProviderReqOutbound08WirePayload');
 
 const resources = JSON.parse(run('list-resources'));
 assert.ok(resources.some((entry) => entry.resource_id === 'v4.response.client_object'));
 
 const permissions = JSON.parse(run('node-permissions', 'V4ServerRespOutbound06ClientFrame'));
-assert.deepEqual(permissions.reads, ['v4.response.client_wire_payload']);
+assert.deepEqual(permissions.reads, [
+  'v4.response.client_wire_payload',
+  'v4.information.entry_protocol',
+  'v4.information.stream_terminal',
+]);
 assert.deepEqual(permissions.writes, ['v4.response.client_object']);
 
-const zeroPermissions = JSON.parse(run('node-permissions', 'V4HubReqInbound03Normalized'));
+const zeroPermissions = JSON.parse(run('node-permissions', 'V4HubReqInbound02Normalized'));
 assert.deepEqual(zeroPermissions.reads, ['v4.request.normal_payload']);
 assert.deepEqual(zeroPermissions.writes, []);
 
