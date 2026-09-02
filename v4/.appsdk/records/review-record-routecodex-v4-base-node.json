@@ -1,10 +1,10 @@
 {
-  "review_id": "review-fix-8b94dfead128",
+  "review_id": "review-fix-339dc6f8d79b",
   "issue_id": "v4-cordis-governance-reset-20260903",
-  "promotion_id": "promotion-fix-8b94dfead128",
+  "promotion_id": "promotion-fix-339dc6f8d79b",
   "review_kind": "architecture",
-  "fix_candidate_id": "fix-8b94dfead128",
-  "pre_review_validation_id": "pre-review-fix-8b94dfead128",
+  "fix_candidate_id": "fix-339dc6f8d79b",
+  "pre_review_validation_id": "pre-review-fix-339dc6f8d79b",
   "reviewer": {
     "adapter": "agy-review",
     "identity": "v4-cordis-final-20260903"
@@ -15,8 +15,8 @@
     "positive-1",
     "negative-1"
   ],
-  "reviewed_commit": "8b94dfead1289ab856a46f0e8d7c113372b56db0",
-  "reviewed_tree_hash": "a89f6ef9fc04cadc4a9d47248b9fa5332f925202",
+  "reviewed_commit": "339dc6f8d79b4be62ffc8c78565934d20b57479f",
+  "reviewed_tree_hash": "a84a96aca2426a68bd2273f533fa2fd6b8db8475",
   "reviewed_diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "reviewed_artifact_hash": "sha256:0a7d33027e7b472443c04a29e677b2a3eb118a2c05c5026d62c6e170777a86ba",
   "reviewed_scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
