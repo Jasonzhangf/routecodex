@@ -22,7 +22,6 @@ use std::fs;
 const UNWIRED_PLUGINS: &[&str] = &[
     "v4.std.diagnostic.direct_request_payload_console_render",
     "v4.std.diagnostic.direct_response_payload_console_render",
-    "v4.std.provider.wire_mock",
     "v4.std.provider.transport_mock",
 ];
 
@@ -127,7 +126,6 @@ fn every_unwired_plugin_has_a_typed_handle() {
 #[test]
 fn ineligible_unwired_plugins_must_not_appear_in_production_plans() {
     let ineligible = [
-        "v4.std.provider.wire_mock",
         "v4.std.provider.transport_mock",
     ];
     let in_production = production_plan_ids();
@@ -243,52 +241,6 @@ fn negative_direct_response_console_rejects_non_object_payload() {
         json!({}),
     )
     .expect_err("direct response console requires object payload");
-    assert!(matches!(
-        error,
-        NodeContainerError::Bridge(BridgeError::HandleError { .. })
-    ));
-}
-
-#[test]
-fn positive_wire_mock_annotates_object_with_wire_field() {
-    let payload = json!({"model": "m", "input": "hi"});
-    let output = execute_plugin(
-        "V4HubReqOutbound06ProviderSemantic",
-        "request_outbound",
-        "relay_request",
-        6,
-        "v4.std.provider.wire_mock",
-        payload.clone(),
-        json!({}),
-        json!({}),
-    )
-    .expect("wire mock executes");
-    assert_eq!(
-        output.data["wire"],
-        json!({"mock": true}),
-        "wire mock must inject the keyless wire marker"
-    );
-    assert_eq!(
-        output.data["model"],
-        json!("m"),
-        "wire mock must preserve existing payload fields"
-    );
-    assert_eq!(output.control, json!({}));
-}
-
-#[test]
-fn negative_wire_mock_rejects_non_object_payload() {
-    let error = execute_plugin(
-        "V4HubReqOutbound06ProviderSemantic",
-        "request_outbound",
-        "relay_request",
-        6,
-        "v4.std.provider.wire_mock",
-        json!(["not-object"]),
-        json!({}),
-        json!({}),
-    )
-    .expect_err("wire mock requires object payload");
     assert!(matches!(
         error,
         NodeContainerError::Bridge(BridgeError::HandleError { .. })

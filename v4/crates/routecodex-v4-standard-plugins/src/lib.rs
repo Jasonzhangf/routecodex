@@ -802,19 +802,6 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             vec!["v4.control.target_selection"],
         ),
         plugin(
-            "v4.std.provider.wire_mock",
-            PluginCategory::Provider,
-            "V4HubReqOutbound06ProviderSemantic",
-            "request_outbound",
-            Some(6),
-            PluginKind::Operator,
-            PluginEffect::Semantic,
-            PluginPhase::Projection,
-            500,
-            vec!["v4.request.normal_payload"],
-            vec!["v4.request.provider_semantic"],
-        ),
-        plugin(
             "v4.std.provider.transport_mock",
             PluginCategory::Provider,
             "V4ProviderReqOutbound09TransportRequest",
@@ -1323,15 +1310,6 @@ fn route_facts_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     .map_err(|error| error.to_string())
 }
 
-fn wire_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut data = ctx.read_data().clone();
-    let object = data
-        .as_object_mut()
-        .ok_or_else(|| "wire mock requires object payload".to_string())?;
-    object.insert("wire".to_string(), json!({"mock": true}));
-    ctx.write_data(data).map_err(|error| error.to_string())
-}
-
 fn transport_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     if !ctx.read_data().is_object() {
         return Err("transport validator requires provider wire object".to_string());
@@ -1396,7 +1374,6 @@ impl StandardHandleRegistry {
             ("v4.std.chat_process.tool_harvest", tool_harvest),
             ("v4.std.routing.route_facts_producer", route_facts_produce),
             ("v4.std.routing.route_facts_consumer", route_facts_consume),
-            ("v4.std.provider.wire_mock", wire_mock),
             ("v4.std.provider.transport_mock", transport_mock),
             ("v4.std.provider.transport_validate", transport_mock),
         ] {
@@ -1520,7 +1497,6 @@ mod tests {
             "v4.std.chat_process.tool_harvest",
             "v4.std.routing.route_facts_producer",
             "v4.std.routing.route_facts_consumer",
-            "v4.std.provider.wire_mock",
             "v4.std.provider.transport_mock",
             "v4.std.provider.transport_validate",
             "v4.std.response.protocol_decode",
