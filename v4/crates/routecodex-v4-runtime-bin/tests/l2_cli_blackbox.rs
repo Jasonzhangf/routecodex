@@ -228,6 +228,28 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
 }
 
 #[test]
+fn failed_cordis_readiness_reaps_owned_host_and_socket() {
+    let test_root = root("cordis-readiness-failure");
+    let state_root = test_root.join("state");
+    let config = initialize(&test_root, free_port());
+    let runner = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../cordis/routecodex-v4-cordis-host/tests/resources/daemon-never-ready.mjs");
+    let output = Command::new(env!("CARGO_BIN_EXE_rccv4"))
+        .current_dir("/tmp")
+        .env("RCCV4_STATE_ROOT", &state_root)
+        .env("HOME", &test_root)
+        .env("RCCV4_CORDIS_HOST_RUNNER", &runner)
+        .args(["start", "-c", config.to_str().expect("config")])
+        .output()
+        .expect("failed readiness start");
+    assert!(!output.status.success(), "readiness failure must fail closed");
+    let diagnostic = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(diagnostic.contains("managed child exited before control became ready") || diagnostic.contains("did not become ready"), "{diagnostic}");
+    assert!(!state_root.join("cordis.sock").exists(), "owned socket must be removed");
+    assert!(!state_root.join("instance.json").exists(), "managed record must not persist");
+}
+
+#[test]
 fn restart_cold_starts_when_no_managed_instance_exists() {
     let test_root = root("cold-restart");
     let state_root = std::path::PathBuf::from("/tmp").join(format!(

@@ -658,6 +658,15 @@ fn ensure_cordis_host_socket(
         std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
         return Ok(Some(child));
     }
+    // The host process and socket are owned by this managed start attempt.
+    // Readiness failure must be failure-atomic: do not leave a daemon or
+    // socket that can poison the next lifecycle transaction.
+    let mut child = child;
+    let _ = child.kill();
+    let _ = child.wait();
+    if socket.exists() {
+        let _ = std::fs::remove_file(&socket);
+    }
     Err("Cordis host socket did not become ready".to_string())
 }
 

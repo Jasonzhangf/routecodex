@@ -1072,6 +1072,19 @@
       "status": "active"
     },
     {
+      "from": "routecodex-v4-runtime-bin::run_managed_child",
+      "to": "routecodex-v4-runtime-bin::CordisAdmission",
+      "owner": "routecodex-v4-runtime-bin::run_managed_child",
+      "edge_type": "managed_child_cordis_admission_and_liveness",
+      "caller_feature_id": "v4.lifecycle.managed_instance",
+      "callee_feature_id": "v4.cordis.production_admission",
+      "caller_symbols": ["run_managed_child", "ensure_cordis_host_socket"],
+      "callee_symbols": ["CordisAdmission::admit", "preflight_cordis_admission"],
+      "resource_id": "v4.cordis.production_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    },
+    {
       "from": "routecodex-v4-runtime-bin",
       "to": "routecodex-v4-server",
       "owner": "routecodex-v4-runtime-bin::run_managed_child",
