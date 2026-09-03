@@ -16,11 +16,12 @@ use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
     exec_managed_restart, release_for_foreground, repair_stale, request_restart, request_stop,
     start_managed, status_managed, LifecycleError, ManagedAction, ManagedControlPlane,
-    ManagedInstanceRecord, ManagedSpawnOptions, V4LifecyclePaths,
+    ManagedInstanceRecord, ManagedSpawnOptions, ManagedStatus, V4LifecyclePaths,
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
-    dispatch_nonstream, dispatch_streaming, write_provider_profile,
+    send_target_nonstream as provider_send_target_nonstream,
+    send_target_streaming as provider_send_target_streaming, write_provider_profile,
     ProviderInitAuth, ProviderInitOptions, ProviderResponseStream, V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
@@ -36,7 +37,7 @@ use routecodex_v4_server::{
 };
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
 use routecodex_v4_standard_plugins::diagnostic;
-use routecodex_v4_standard_plugins::StandardHandleRegistry;
+use routecodex_v4_standard_plugins::{compile_production_execution_plans, StandardHandleRegistry};
 use serde_json::Value;
 use routecodex_v4_standard_plugins::sse_transport::{
     production_transport_pair, SseEgressPlugin, SseIngressPlugin,
@@ -45,6 +46,7 @@ use std::future::Future;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -139,7 +141,6 @@ impl HandleRegistry for ProductionHandleRegistry {
 /// The numbers mirror what a CordisBoundNodeHost would observe after
 /// `mount()` + `beginExecution()` on the production plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg(test)]
 pub struct CordisReadinessReport {
     pub bound_plugin_count: usize,
     pub missing_plugin_ids: Vec<String>,
@@ -153,7 +154,6 @@ pub struct CordisReadinessReport {
 /// runtime plugin missing a typed handle so the operator can repair the
 /// catalog before serving traffic. Compile-time config operators are already
 /// consumed by `compile_runtime_config` and are not runtime bindings.
-#[cfg(test)]
 pub fn cordis_service_readiness(
     skeleton: &SkeletonPlan,
     registry: &dyn HandleRegistry,
@@ -175,7 +175,11 @@ pub fn cordis_service_readiness(
     let mut bound_plugin_count = 0usize;
     let mut missing_plugin_ids = Vec::new();
     for plugin_id in &plugin_ids {
-        if registry.contains(plugin_id.as_str()) {
+        let cordis_service_bound = matches!(
+            plugin_id.as_str(),
+            TARGET_SELECTION_PLUGIN_ID | DIRECT_TARGET_SELECTION_PLUGIN_ID
+        );
+        if registry.contains(plugin_id.as_str()) || cordis_service_bound {
             bound_plugin_count += 1;
         } else {
             missing_plugin_ids.push(plugin_id.clone());
@@ -201,13 +205,11 @@ pub fn cordis_service_readiness(
 
 /// Test helper that shadows a real registry with one whose first compiled
 /// plugin id resolves to None. Used by the negative red test.
-#[cfg(test)]
 pub struct MissingStandardHandleRegistry<'a, R: HandleRegistry + ?Sized> {
     inner: &'a R,
     missing_plugin_id: String,
 }
 
-#[cfg(test)]
 impl<'a, R: HandleRegistry + ?Sized> MissingStandardHandleRegistry<'a, R> {
     pub fn new(inner: &'a R, missing_plugin_id: impl Into<String>) -> Self {
         Self {
@@ -217,7 +219,6 @@ impl<'a, R: HandleRegistry + ?Sized> MissingStandardHandleRegistry<'a, R> {
     }
 }
 
-#[cfg(test)]
 impl<'a, R: HandleRegistry + ?Sized> HandleRegistry for MissingStandardHandleRegistry<'a, R> {
     fn get(&self, plugin_id: &str) -> Option<&dyn routecodex_v4_cordis_bridge::PluginHandle> {
         if plugin_id == self.missing_plugin_id {
@@ -401,16 +402,47 @@ fn start(intent: StartIntent) -> Result<String, String> {
     })?;
     if intent.foreground {
         let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
-        print_startup(&manifest);
         let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
         release_for_foreground(&paths, Duration::from_secs(15))
             .map_err(|error| error.to_string())?;
-        run_foreground(manifest)?;
+        let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
+        if let Err(error) = preflight_cordis_admission(&manifest) {
+            if let Some(mut child) = cordis_child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            return Err(error);
+        }
+        print_startup(&manifest);
+        let result = run_foreground(manifest);
+        if let Some(mut child) = cordis_child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        result?;
         return Ok("state=stopped identity=rccv4 foreground=true".to_string());
     }
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
+    // Stop the exact previous V4 instance before creating a replacement
+    // Cordis host.  The managed child owns its Cordis child; starting the new
+    // host first lets the old child tear down the replacement socket during
+    // its normal shutdown.
+    if routecodex_v4_lifecycle::read_record(&paths)
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        match status_managed(&paths).map_err(|error| error.to_string())? {
+            ManagedStatus { state, .. } if state == "running" => {
+                release_for_foreground(&paths, Duration::from_secs(15))
+                    .map_err(|error| error.to_string())?;
+            }
+            ManagedStatus { state, .. } if state == "stale" => {
+                repair_stale(&paths).map_err(|error| error.to_string())?;
+            }
+            _ => {}
+        }
+    }
     print_startup(&manifest);
-    preflight_cordis_admission(&manifest)?;
     if routecodex_v4_lifecycle::read_record(&paths)
         .map_err(|error| error.to_string())?
         .is_none()
@@ -418,15 +450,17 @@ fn start(intent: StartIntent) -> Result<String, String> {
         release_unmanaged_listeners(&manifest)?;
     }
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    let record = start_managed(
+    let record = match start_managed(
         &paths,
         &executable,
         &config,
         &paths.manifest_path,
         &spawn_options(&intent.snapshot),
         Duration::from_secs(15),
-    )
-    .map_err(|error| error.to_string())?;
+    ) {
+        Ok(record) => record,
+        Err(error) => return Err(error.to_string()),
+    };
     println!(
         "state=running identity=rccv4 pid={} listeners={}",
         record.pid,
@@ -435,9 +469,6 @@ fn start(intent: StartIntent) -> Result<String, String> {
     Ok(format_status("running", &record))
 }
 
-/// Validate the complete external Cordis admission before taking over a
-/// managed listener. A connectable but stale/rejecting socket must not stop a
-/// healthy V4 child only to discover that its replacement cannot admit.
 fn preflight_cordis_admission(manifest: &RuntimeConfigManifest) -> Result<(), String> {
     let epoch_id = manifest.execution_epoch.candidate["epoch_id"]
         .as_str()
@@ -473,41 +504,65 @@ fn repair_stale_state(intent: ConfigPathIntent) -> Result<String, String> {
 
 fn restart(intent: RestartIntent) -> Result<String, String> {
     let (config, manifest, paths) = compile_for_lifecycle(intent.config)?;
-    // Admission must succeed before restart can stop the currently healthy
-    // child. This preserves the managed instance on Cordis failure.
-    preflight_cordis_admission(&manifest)?;
     let timeout = Duration::from_millis(intent.timeout_ms);
-    match request_restart(&paths, &manifest.manifest_digest, timeout) {
-        Ok(record) => Ok(format_status("restarted", &record)),
-        Err(LifecycleError::NotRunning) => {
-            release_unmanaged_listeners(&manifest)?;
-            let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-            let record = start_managed(
-                &paths,
-                &executable,
-                &config,
-                &paths.manifest_path,
-                &ManagedSpawnOptions::default(),
-                timeout,
-            )
-            .map_err(|error| error.to_string())?;
-            Ok(format_status("running", &record))
+    if routecodex_v4_lifecycle::read_record(&paths)
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        match status_managed(&paths).map_err(|error| error.to_string())? {
+            ManagedStatus { state, .. } if state == "running" => {
+                if prepare_existing_cordis_host(&paths).is_ok() {
+                    match preflight_cordis_admission(&manifest) {
+                        Ok(()) => match request_restart(&paths, &manifest.manifest_digest, timeout) {
+                            Ok(record) => return Ok(format_status("restarted", &record)),
+                            Err(LifecycleError::NotRunning) => {}
+                            Err(error) => return Err(error.to_string()),
+                        },
+                        Err(error)
+                            if error.contains("Cordis admission socket connect failed")
+                                || error.contains("Cordis admission requires") =>
+                        {
+                            release_for_foreground(&paths, timeout)
+                                .map_err(|release| release.to_string())?;
+                            // The failed admission proved the inherited
+                            // socket is stale. Clear the inherited binding so
+                            // the cold-start path can create a fresh host.
+                            std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
+                        }
+                        Err(error) => return Err(error),
+                    }
+                } else {
+                    release_for_foreground(&paths, timeout)
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+            ManagedStatus { state, .. } if state == "stale" => {
+                repair_stale(&paths).map_err(|error| error.to_string())?;
+            }
+            _ => {}
         }
-        Err(error) => Err(error.to_string()),
     }
+    release_unmanaged_listeners(&manifest)?;
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let record = start_managed(
+        &paths,
+        &executable,
+        &config,
+        &paths.manifest_path,
+        &ManagedSpawnOptions::default(),
+        timeout,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(format_status("running", &record))
 }
 
-/// Apply V3-compatible takeover only to exact, unmanaged rccv4 listeners.
-/// Managed instances are released by `start_managed`; this pass handles a
-/// prior process that exited before publishing its lifecycle record.
 fn release_unmanaged_listeners(manifest: &RuntimeConfigManifest) -> Result<(), String> {
-    let paths = manifest
-        .listeners
-        .iter()
-        .map(|listener| listener.address.as_str());
-    for address in paths {
-        routecodex_v4_lifecycle::release_unmanaged_listener(address, Duration::from_secs(15))
-            .map_err(|error| error.to_string())?;
+    for listener in &manifest.listeners {
+        routecodex_v4_lifecycle::release_unmanaged_listener(
+            &listener.address,
+            Duration::from_secs(15),
+        )
+        .map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -530,13 +585,11 @@ fn server_start(intent: ServerStartIntent) -> Result<String, String> {
             snapshot: intent.snapshot,
         });
     }
-    let config = config_path(ConfigPathIntent {
+    start(StartIntent {
         config: intent.config,
-    })?;
-    let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
-    print_startup(&manifest);
-    run_foreground(manifest)?;
-    Ok("state=stopped identity=rccv4 foreground=true".to_string())
+        foreground: true,
+        snapshot: intent.snapshot,
+    })
 }
 
 fn print_startup(manifest: &RuntimeConfigManifest) {
@@ -555,12 +608,122 @@ fn print_startup(manifest: &RuntimeConfigManifest) {
     let _ = std::io::stdout().flush();
 }
 
+fn ensure_cordis_host_socket(
+    manifest_path: &std::path::Path,
+    paths: &V4LifecyclePaths,
+) -> Result<Option<Child>, String> {
+    if let Some(existing) = std::env::var_os("RCCV4_CORDIS_HOST_SOCKET") {
+        let existing = PathBuf::from(existing);
+        // An explicitly supplied socket is owned by the caller. Do not probe
+        // it with an empty or synthetic connection; admission performs the
+        // authoritative protocol handshake.
+        if existing.exists() {
+            return Ok(None);
+        }
+        std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
+    }
+    let socket = paths.state_root.join("cordis.sock");
+    let runner = std::env::var_os("RCCV4_CORDIS_HOST_RUNNER")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/lib/rccv4/cordis-daemon.mjs")))
+        .ok_or_else(|| "Cordis admission requires RCCV4_CORDIS_HOST_RUNNER or HOME".to_string())?;
+    if !runner.is_file() {
+        return Err(format!("Cordis host runner missing: {}", runner.display()));
+    }
+    if socket.exists() {
+        if cordis_handshake_ready(
+            &socket,
+            manifest_path,
+            std::time::Instant::now() + Duration::from_secs(1),
+        ) {
+            std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
+            return Ok(None);
+        }
+        std::fs::remove_file(&socket)
+            .map_err(|error| format!("Cordis stale socket cleanup failed: {error}"))?;
+    }
+    let state = paths.state_root.clone();
+    let child = Command::new("node")
+        .arg(&runner)
+        .arg(&state)
+        .arg(&socket)
+        .arg(manifest_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Cordis host spawn failed: {error}"))?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    if cordis_handshake_ready(&socket, manifest_path, deadline) {
+        std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
+        return Ok(Some(child));
+    }
+    // The host process and socket are owned by this managed start attempt.
+    // Readiness failure must be failure-atomic: do not leave a daemon or
+    // socket that can poison the next lifecycle transaction.
+    let mut child = child;
+    let _ = child.kill();
+    let _ = child.wait();
+    if socket.exists() {
+        let _ = std::fs::remove_file(&socket);
+    }
+    Err("Cordis host socket did not become ready".to_string())
+}
+
+fn prepare_existing_cordis_host(paths: &V4LifecyclePaths) -> Result<(), String> {
+    let socket = paths.state_root.join("cordis.sock");
+    if !socket.exists() {
+        return Err("Cordis host socket path is absent".to_string());
+    }
+    std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", socket);
+    Ok(())
+}
+
+fn cordis_handshake_ready(
+    socket: &std::path::Path,
+    manifest_path: &std::path::Path,
+    deadline: std::time::Instant,
+) -> bool {
+    let manifest = match load_runtime_manifest(manifest_path) {
+        Ok(manifest) => manifest,
+        Err(_) => return false,
+    };
+    while std::time::Instant::now() < deadline {
+        if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket) {
+            let request = format!(
+                "{{\"op\":\"handshake\",\"protocolVersion\":1,\"graphHash\":\"{}\"}}\n",
+                manifest.execution_epoch.graph_hash
+            );
+            if stream.write_all(request.as_bytes()).is_ok() {
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+                let mut response = String::new();
+                if stream.read_to_string(&mut response).is_ok() {
+                    if serde_json::from_str::<Value>(response.trim())
+                        .ok()
+                        .and_then(|value| value.get("ok").cloned())
+                        == Some(Value::Bool(true))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+
 fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     let manifest = load_runtime_manifest(&intent.manifest).map_err(|error| error.to_string())?;
     let servers = bind_servers(&manifest)?;
     let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
     if paths.manifest_path != intent.manifest {
         return Err("managed manifest path does not match V4 lifecycle owner".to_string());
+    }
+    let mut cordis_child = ensure_cordis_host_socket(&intent.manifest, &paths)?;
+    if let Err(error) = preflight_cordis_admission(&manifest) {
+        terminate_cordis_child(&mut cordis_child);
+        return Err(error);
     }
     let record = ManagedInstanceRecord {
         runtime_identity: manifest.runtime_identity.clone(),
@@ -578,7 +741,13 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
             .map(|listener| listener.address.clone())
             .collect(),
     };
-    let control = ManagedControlPlane::bind(paths, record).map_err(|error| error.to_string())?;
+    let control = match ManagedControlPlane::bind(paths.clone(), record) {
+        Ok(control) => control,
+        Err(error) => {
+            terminate_cordis_child(&mut cordis_child);
+            return Err(error.to_string());
+        }
+    };
     let listeners = manifest
         .listeners
         .iter()
@@ -594,21 +763,81 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     let _ = std::io::stdout().flush();
     let stop = Arc::new(AtomicBool::new(false));
     let handles = spawn_servers(servers, manifest.clone(), Arc::clone(&stop));
+    let cordis_socket = std::env::var_os("RCCV4_CORDIS_HOST_SOCKET")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| paths.state_root.join("cordis.sock"));
+    let mut next_cordis_probe = std::time::Instant::now();
+    let mut cordis_probe_failures = 0u8;
     let action = loop {
+        if let Some(child) = cordis_child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    stop.store(true, Ordering::Release);
+                    let join_result = join_servers(handles);
+                    terminate_cordis_child(&mut cordis_child);
+                    control.clear_record().map_err(|error| error.to_string())?;
+                    join_result?;
+                    return Err(format!("Cordis host exited before lifecycle stop: {status}"));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    stop.store(true, Ordering::Release);
+                    let join_result = join_servers(handles);
+                    terminate_cordis_child(&mut cordis_child);
+                    control.clear_record().map_err(|clear| clear.to_string())?;
+                    join_result?;
+                    return Err(format!("Cordis host liveness check failed: {error}"));
+                }
+            }
+        }
+        if cordis_child.is_none() && std::time::Instant::now() >= next_cordis_probe {
+            next_cordis_probe = std::time::Instant::now() + Duration::from_millis(250);
+            if cordis_handshake_ready(
+                &cordis_socket,
+                &intent.manifest,
+                std::time::Instant::now() + Duration::from_millis(250),
+            ) {
+                cordis_probe_failures = 0;
+            } else {
+                cordis_probe_failures = cordis_probe_failures.saturating_add(1);
+            }
+            if cordis_probe_failures >= 3 {
+                stop.store(true, Ordering::Release);
+                let join_result = join_servers(handles);
+                control.clear_record().map_err(|error| error.to_string())?;
+                join_result?;
+                return Err("Cordis host became unavailable during managed run".to_string());
+            }
+        }
         if handles.iter().any(thread::JoinHandle::is_finished) {
             stop.store(true, Ordering::Release);
-            join_servers(handles)?;
+            let join_result = join_servers(handles);
+            terminate_cordis_child(&mut cordis_child);
             control.clear_record().map_err(|error| error.to_string())?;
+            join_result?;
             return Err("V4 listener exited before lifecycle stop or restart".to_string());
         }
-        match control.poll().map_err(|error| error.to_string())? {
-            ManagedAction::Continue => thread::sleep(Duration::from_millis(10)),
-            action => break action,
+        match control.poll() {
+            Ok(ManagedAction::Continue) => thread::sleep(Duration::from_millis(10)),
+            Ok(action) => break action,
+            Err(error) => {
+                stop.store(true, Ordering::Release);
+                let join_result = join_servers(handles);
+                terminate_cordis_child(&mut cordis_child);
+                control.clear_record().map_err(|clear| clear.to_string())?;
+                join_result?;
+                return Err(error.to_string());
+            }
         }
     };
     stop.store(true, Ordering::Release);
-    join_servers_for_shutdown(handles)?;
+    if let Err(error) = join_servers_for_shutdown(handles) {
+        terminate_cordis_child(&mut cordis_child);
+        control.clear_record().map_err(|clear| clear.to_string())?;
+        return Err(error);
+    }
     control.clear_record().map_err(|error| error.to_string())?;
+    terminate_cordis_child(&mut cordis_child);
     drop(control);
     if action == ManagedAction::Restart {
         // macOS may retain the just-closed TCP listener briefly after the
@@ -625,6 +854,13 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
         return Err(error.to_string());
     }
     Ok(())
+}
+
+fn terminate_cordis_child(child: &mut Option<Child>) {
+    if let Some(mut child) = child.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 fn run_foreground(manifest: RuntimeConfigManifest) -> Result<(), String> {
@@ -755,6 +991,17 @@ impl PipelineHandler {
         manifest: RuntimeConfigManifest,
         require_cordis_admission: bool,
     ) -> Result<Self, String> {
+        let production_plans = compile_production_execution_plans(&manifest.execution_epoch.skeleton)
+            .map_err(|error| format!("production plugin plan compilation failed: {error}"))?;
+        let declared_artifact_set = manifest.execution_epoch.candidate["plugin_artifact_set_hash"]
+            .as_str()
+            .ok_or_else(|| "runtime candidate has no plugin_artifact_set_hash".to_string())?;
+        if production_plans.artifact_set_hash != declared_artifact_set {
+            return Err(format!(
+                "production plugin artifact set drift: compiled={} candidate={}",
+                production_plans.artifact_set_hash, declared_artifact_set
+            ));
+        }
         let registry = Arc::new(ProductionHandleRegistry::new(manifest.product.as_ref()));
         let cordis_admission_receipt = if require_cordis_admission {
             Some(CordisAdmission::admit(
@@ -766,11 +1013,9 @@ impl PipelineHandler {
         } else {
             None
         };
-        let runtime = SkeletonRuntime::from_compiled_plan_with_registry(
-            manifest.execution_epoch.skeleton.clone(),
-            registry,
-        )
-        .map_err(|error| error.to_string())?;
+        let runtime =
+            SkeletonRuntime::from_compiled_plan_with_registry(manifest.execution_epoch.skeleton.clone(), registry)
+                .map_err(|error| error.to_string())?;
         let transaction_id = format!("runtime-config:{}", &manifest.manifest_digest[7..23]);
         runtime
             .prepare_compiled_execution_epoch(
@@ -1162,7 +1407,7 @@ fn handle_responses(
     })?;
     let wire_body = semantic_body;
     if stream_mode {
-        let mut stream = dispatch_streaming(&target.protocol, &target.config_path, target.auth_alias.as_deref(), &target.wire_model, &wire_body).map_err(|error| {
+        let mut stream = provider_send_target_streaming(&target.protocol, &target.config_path, &target.wire_model, target.auth_alias.as_deref(), &wire_body).map_err(|error| {
             project_fault(
                 request,
                 RuntimeFault::new(error.code.as_str(), error.message)
@@ -1215,7 +1460,7 @@ fn handle_responses(
                             .map_err(|fault| project_fault(request, fault, 598))?;
                             target = candidate;
                             stream =
-                                dispatch_streaming(&target.protocol, &target.config_path, target.auth_alias.as_deref(), &target.wire_model, &retry_body).map_err(|error| {
+                                provider_send_target_streaming(&target.protocol, &target.config_path, &target.wire_model, target.auth_alias.as_deref(), &retry_body).map_err(|error| {
                                     project_provider_fault(
                                         request,
                                         RuntimeFault::new(&error.code, error.message),
@@ -1283,17 +1528,15 @@ fn handle_responses(
             stream,
             Arc::clone(runtime),
             response_processor,
-            request.clone(),
-            target.provider_id.clone(),
-            target.wire_model.clone(),
-        );
+        )
+        .with_console_context(&request.request_id, &request.path);
         return Ok(HttpResponse::streaming(
             client_status,
             "text/event-stream",
             Box::new(response_stream),
         ));
     }
-    let mut raw = dispatch_nonstream(&target.protocol, &target.config_path, target.auth_alias.as_deref(), &target.wire_model, &wire_body).map_err(|error| {
+    let mut raw = provider_send_target_nonstream(&target.protocol, &target.config_path, &target.wire_model, target.auth_alias.as_deref(), &wire_body).map_err(|error| {
         project_provider_fault(
             request,
             RuntimeFault::new(error.code.as_str(), error.message),
@@ -1354,7 +1597,7 @@ fn handle_responses(
                     .map_err(|fault| project_fault(request, fault, 598))?;
                     target = candidate;
                     reselected = true;
-                    raw = dispatch_nonstream(&target.protocol, &target.config_path, target.auth_alias.as_deref(), &target.wire_model, &retry_body).map_err(|error| {
+                    raw = provider_send_target_nonstream(&target.protocol, &target.config_path, &target.wire_model, target.auth_alias.as_deref(), &retry_body).map_err(|error| {
                         project_provider_fault(
                             request,
                             RuntimeFault::new(&error.code, error.message),
@@ -1510,9 +1753,8 @@ struct CordisSseTransportStream<S = ProviderResponseStream> {
     ingress: SseIngressPlugin,
     egress: SseEgressPlugin,
     close_after_pending: bool,
-    request: HttpRequest,
-    provider: String,
-    model: String,
+    console_request_id: Option<String>,
+    console_endpoint: Option<String>,
 }
 
 impl<S: ProviderSseSource> CordisSseTransportStream<S> {
@@ -1520,9 +1762,6 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
         stream: S,
         runtime: Arc<Mutex<SkeletonRuntime>>,
         processor: ResponseStreamProcessor,
-        request: HttpRequest,
-        provider: String,
-        model: String,
     ) -> Self {
         let (ingress, egress) = production_transport_pair(std::time::Instant::now())
             .expect("constant SSE transport policy");
@@ -1533,10 +1772,15 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
             ingress,
             egress,
             close_after_pending: false,
-            request,
-            provider,
-            model,
+            console_request_id: None,
+            console_endpoint: None,
         }
+    }
+
+    fn with_console_context(mut self, request_id: &str, endpoint: &str) -> Self {
+        self.console_request_id = Some(request_id.to_string());
+        self.console_endpoint = Some(endpoint.to_string());
+        self
     }
 
     fn enqueue_disposition(
@@ -1558,6 +1802,14 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
     }
 
     fn enqueue_runtime_failure(&mut self, fault: RuntimeFault) -> Result<(), std::io::Error> {
+        eprintln!(
+            "event=error endpoint={} req={} code={} message={}",
+            self.console_endpoint.as_deref().unwrap_or("/v1/responses"),
+            self.console_request_id.as_deref().unwrap_or("unknown"),
+            fault.code,
+            fault.message
+        );
+        let _ = std::io::stderr().flush();
         let disposition = {
             let runtime = self
                 .runtime
@@ -1645,16 +1897,6 @@ impl<S: ProviderSseSource> ResponseStream for CordisSseTransportStream<S> {
                         {
                             Ok((disposition, report)) => {
                                 if let Some(report) = report {
-                                    emit_payload_console_events(
-                                        &report.trace,
-                                        &self.request,
-                                        &self.request.path,
-                                        &self.provider,
-                                        &self.model,
-                                        true,
-                                        None,
-                                        std::time::Duration::ZERO,
-                                    );
                                     if report.client_frame.is_none() {
                                         Err(RuntimeFault::new(
                                             "response_frame_missing",
@@ -1853,7 +2095,6 @@ fn project_provider_fault(
         ),
     }
 }
-
 
 fn record_provider_failure(
     availability: &Arc<Mutex<V4Availability01SessionScoped>>,
@@ -2265,17 +2506,6 @@ targets = ["mock"]
             },
             runtime,
             processor,
-            HttpRequest {
-                method: "POST".into(),
-                path: "/v1/responses".into(),
-                headers: Vec::new(),
-                body: Vec::new(),
-                request_id: "request-1".into(),
-                server_id: "test".into(),
-                port,
-            },
-            "test-provider".into(),
-            "m".into(),
         )
     }
 
@@ -2414,7 +2644,9 @@ targets = ["mock"]
                 &body,
             )
             .expect("chat request must project to Responses input");
-        assert_eq!(projected["input"], body["messages"]);
+        assert_eq!(projected["input"][0]["role"], "user");
+        assert_eq!(projected["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(projected["input"][0]["content"][0]["text"], "hello");
         assert_eq!(projected["tools"][0]["name"], "lookup");
         assert_eq!(projected["debug"], body["debug"]);
     }
@@ -2501,4 +2733,5 @@ targets = ["mock"]
             "error must identify the readiness gap: {error}"
         );
     }
+
 }
