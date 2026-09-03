@@ -423,7 +423,7 @@ test('execution plan hash mismatch fails before Rust handles run', async (t) => 
 
   await host.mount([plugin(nodePlan.entries[0])]);
   await assert.rejects(
-    host.executeNode('0'.repeat(64), {
+    host.executeNode(`sha256:${'0'.repeat(64)}`, {
       data: { steps: [] },
       control: {},
       information: {},
@@ -431,7 +431,7 @@ test('execution plan hash mismatch fails before Rust handles run', async (t) => 
     (error) => error instanceof CordisHostError && error.code === 'plan_hash_mismatch',
   );
   await assert.rejects(
-    port.executeNode('0'.repeat(64), {
+    port.executeNode(`sha256:${'0'.repeat(64)}`, {
       data: { steps: [] },
       control: {},
       information: {},
@@ -484,7 +484,7 @@ test('JS and Rust reject undeclared execution fields', async (t) => {
   const port = new RustNodeContainerPort({ binaryPath });
   t.after(() => port.close());
   assert.throws(
-    () => port.executeNode('0'.repeat(64), {
+    () => port.executeNode(`sha256:${'0'.repeat(64)}`, {
       data: {},
       control: {},
       information: {},
@@ -496,7 +496,7 @@ test('JS and Rust reject undeclared execution fields', async (t) => {
   const response = await sendRawLifecycleRequest({
     op: 'execute_node',
     request_id: 'raw-execution-field',
-    plan_hash: '0'.repeat(64),
+    plan_hash: `sha256:${'0'.repeat(64)}`,
     input: { data: {}, control: {}, information: {}, extra: true },
   });
   assert.equal(response.ok, false);
@@ -536,7 +536,7 @@ test('JS execution response decoder rejects malformed output', async (t) => {
   });
   t.after(() => port.close());
   await assert.rejects(
-    withTimeout(port.executeNode('0'.repeat(64), {
+    withTimeout(port.executeNode(`sha256:${'0'.repeat(64)}`, {
       data: {},
       control: {},
       information: {},
@@ -554,7 +554,7 @@ test('JS execution response decoder rejects missing output', async (t) => {
   });
   t.after(() => port.close());
   await assert.rejects(
-    withTimeout(port.executeNode('0'.repeat(64), {
+    withTimeout(port.executeNode(`sha256:${'0'.repeat(64)}`, {
       data: {},
       control: {},
       information: {},
@@ -570,7 +570,7 @@ test('execution failure response rejects top-level node identity', async (t) => 
   });
   t.after(() => port.close());
   await assert.rejects(
-    withTimeout(port.executeNode('0'.repeat(64), {
+    withTimeout(port.executeNode(`sha256:${'0'.repeat(64)}`, {
       data: {},
       control: {},
       information: {},
