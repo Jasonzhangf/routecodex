@@ -1,35 +1,24 @@
 {
-  "fix_candidate_id": "fix-22cbbc5369a8",
+  "fix_candidate_id": "fix-82037722de5d",
   "issue_id": "v4-cordis-production-wiring",
   "module_id": "routecodex-v4-base-node",
-  "worktree_id": "v4-cordis-22cbbc5369a8",
-  "base_commit": "7ca30719472474a7351e623cf00e04e50819b585",
-  "head_commit": "22cbbc5369a8211cf493e99ce5bf0576d5ba03b0",
-  "tree_hash": "3b12145f89fe2b5ce28403165a679f52a61f88d1",
-  "diff_hash": "sha256:68830964856d8a72c1aff01814bf3ac15f206efbff6eb7a7d96e6bdcc64c24cd",
+  "worktree_id": "v4-cordis-82037722de5d",
+  "base_commit": "d3c3af60d00a549923b90cf9c081a2648157850c",
+  "head_commit": "82037722de5d2a14331d087ed3f04c9c9f745e2c",
+  "tree_hash": "87ea542d277de25b180844125e46beac7d87ee02",
+  "diff_hash": "sha256:1ef530e820ad973ea53c2eea808b60c9b704c435f8a020dd3318245b4b073345",
   "design_id": "v4-feature-completion-plan-28",
   "owner": "routecodex-v4-runtime",
-  "scope_hash": "sha256:5a3aaeb5d1caf31687e139e77a6fb69425b4739fd07950a382eab14e42dbe4e0",
+  "scope_hash": "sha256:1198bfdf980e51e0b730c03003d3ce468b70b93f208a31b65ab79487b24e8763",
   "changed_paths": [
-    "v4/.appsdk/records/evidence-record-routecodex-v4-base-node.json",
-    "v4/.appsdk/records/evidence-record.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/blackbox-1.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/blackbox-models.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/blackbox-responses.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/install-1.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/negative-1.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/positive-1.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/restart-1.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/whitebox-1.json",
-    "v4/.appsdk/records/fix-candidate-record-routecodex-v4-base-node.json",
-    "v4/.appsdk/records/pre-review-validation-record-routecodex-v4-base-node.json",
-    "v4/.appsdk/records/reproduction-record-routecodex-v4-base-node.json",
-    "v4/.appsdk/records/worktree-record-routecodex-v4-base-node.json"
+    "v4/crates/routecodex-v4-runtime-bin/src/main.rs",
+    "v4/crates/routecodex-v4-runtime/tests/l2_runtime.rs",
+    "v4/scripts/appsdk-runtime-adapter.mjs"
   ],
   "verification_evidence_ids": [
     "whitebox-1",
     "positive-1",
     "negative-1"
   ],
-  "created_at": "2026-09-03T06:36:30.430Z"
+  "created_at": "2026-09-03T08:53:18.628Z"
 }

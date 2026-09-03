@@ -1,11 +1,11 @@
 {
   "evidence_id": "install-1",
   "issue_id": "v4-cordis-production-wiring",
-  "experiment_id": "fix-22cbbc5369a8",
+  "experiment_id": "fix-82037722de5d",
   "phase": "deployment_install",
   "kind": "install",
-  "source_commit": "22cbbc5369a8211cf493e99ce5bf0576d5ba03b0",
-  "artifact_hash": "sha256:6e07a4fa26ba051d2c39b482126dd3ad8dd57c5d4c3f85a1943a61c9838f526b",
+  "source_commit": "82037722de5d2a14331d087ed3f04c9c9f745e2c",
+  "artifact_hash": "sha256:60841b649729588fdc471eb2300e08659dcbcbfb867bf2b45bbadaef27f9d649",
   "execution_surface": "deployed_blackbox",
   "environment_id": "local-v4-5520",
   "entrypoint": "http://127.0.0.1:5520",
@@ -27,11 +27,11 @@
   ],
   "exit_status": 0,
   "result": "pass",
-  "created_at": "2026-09-03T06:37:49.472Z",
-  "expires_at": "2026-09-10T06:37:49.472Z",
+  "created_at": "2026-09-03T08:53:25.834Z",
+  "expires_at": "2026-09-10T08:53:25.834Z",
   "input_hashes": [
     "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
-    "sha256:b127c2535c22f61d066c05e08fbfd327703008cb988f45ec11b4c9eb71e1f6d7"
+    "sha256:bd10c558d90956ee382b260984979b4dc106589a795a476d8ba5b49ec66980a6"
   ],
-  "scope_hash": "sha256:5a3aaeb5d1caf31687e139e77a6fb69425b4739fd07950a382eab14e42dbe4e0"
+  "scope_hash": "sha256:1198bfdf980e51e0b730c03003d3ce468b70b93f208a31b65ab79487b24e8763"
 }
