@@ -1029,6 +1029,43 @@ pub fn send_protocol(
     }
 }
 
+/// Provider-owned selected-target transport boundary.
+pub fn send_target_nonstream(
+    protocol: &str,
+    profile_path: &str,
+    model: &str,
+    auth_alias: Option<&str>,
+    input: &Value,
+) -> Result<ProviderRawResponse, ProviderTransportError> {
+    validate_auth_alias(profile_path, auth_alias)?;
+    match send_protocol(protocol, profile_path, model, input, false)? {
+        ProviderTransportResult::Response(response) => Ok(response),
+        ProviderTransportResult::Stream(_) => Err(ProviderTransportError {
+            code: "provider_transport_shape".to_string(),
+            message: "non-stream dispatch returned stream transport".to_string(),
+            status: None,
+        }),
+    }
+}
+
+pub fn send_target_streaming(
+    protocol: &str,
+    profile_path: &str,
+    model: &str,
+    auth_alias: Option<&str>,
+    input: &Value,
+) -> Result<ProviderResponseStream, ProviderTransportError> {
+    validate_auth_alias(profile_path, auth_alias)?;
+    match send_protocol(protocol, profile_path, model, input, true)? {
+        ProviderTransportResult::Stream(stream) => Ok(stream),
+        ProviderTransportResult::Response(_) => Err(ProviderTransportError {
+            code: "provider_transport_shape".to_string(),
+            message: "stream dispatch returned non-stream transport".to_string(),
+            status: None,
+        }),
+    }
+}
+
 pub enum ProviderTransportResult {
     Response(ProviderRawResponse),
     Stream(ProviderResponseStream),
