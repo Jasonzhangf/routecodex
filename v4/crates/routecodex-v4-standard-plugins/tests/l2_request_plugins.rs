@@ -190,6 +190,21 @@ fn wire_builder_preserves_chat_shape_for_same_protocol() {
 }
 
 #[test]
+fn wire_builder_projects_chat_text_to_responses_input_items() {
+    let wire = execute_with_information(
+        "V4ProviderReqCompat07ProviderCompat",
+        "request_outbound",
+        7,
+        "v4.std.request.responses_wire_build",
+        json!({"model": "m", "messages": [{"role": "user", "content": "hello"}]}),
+        json!({"client_protocol": "chat", "provider_protocol": "responses"}),
+    )
+    .expect("Chat-to-Responses wire must compile");
+    assert_eq!(wire["input"][0]["content"][0]["type"], "input_text");
+    assert_eq!(wire["input"][0]["content"][0]["text"], "hello");
+}
+
+#[test]
 fn wire_builder_rejects_missing_protocol_side_channel() {
     assert!(execute_with_information(
         "V4ProviderReqCompat07ProviderCompat",
