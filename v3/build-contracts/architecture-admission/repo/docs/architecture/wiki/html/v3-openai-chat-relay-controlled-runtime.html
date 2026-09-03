@@ -76,7 +76,7 @@ flowchart TD
   N0 --&gt;|provider compat before Hub parse| N1
   N1 --&gt;|normalize then govern response| N2
   N2 --&gt;|save continuation then project client semantic| N3
-  N3 --&gt;|Body::from_stream / JSON body transport only| N4
+  N3 --&gt;|typed committed SSE / JSON body transport only| N4
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;
   class N0,N1,N2,N3,N4 node;</pre></div></section>
       </div>
@@ -90,7 +90,7 @@ flowchart TD
   </article>
 <article class="logic-card">
     <h3>SSE stays streaming transport</h3>
-    <p>Controlled SSE evidence proves first frame does not wait for terminal and no full-stream materialization.</p>
+    <p>Controlled SSE evidence proves provider-attempt frames remain client-invisible until a valid terminal seals the attempt.</p>
   </article>
 <article class="logic-card">
     <h3>Error and isolation are explicit</h3>

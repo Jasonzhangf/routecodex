@@ -112,11 +112,11 @@ locked_items:
     chain_id: v3.sse.transport_boundary
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-07-24T12:00:00+08:00'
+    locked_at: '2026-09-02T08:25:54-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md#sse-edge-sop
-    fingerprint: sha256:15a4d27494d94a69aca744218bfb150880934ec8039e1befd2b02b478d2dc2bc
-    last_manual_authorization_id: auth-20260827-v3-sse-client-provider-decoupling-lock-refresh
+    fingerprint: sha256:c93ca1386d58b91b17f73d32e9d474f634382918f3e73769dc41f6eaf3705068
+    last_manual_authorization_id: auth-20260902-v3-silent-failure-sse-transport
   - item_id: chain:v3.global_binary_install
     chain_id: v3.global_binary_install
     status: audited_locked
@@ -273,18 +273,18 @@ locked_items:
     chain_id: v3.openai_chat_relay.controlled_runtime
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-02T08:25:54-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:7e310de964d84354f29532a96c00b23073b32c12e1b338ff72d224cfb5b13268
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:3e256371053adc2487cb72c43af44a974d9473b2aa68bbfc9caedc5648bd4be5
+    last_manual_authorization_id: auth-20260902-v3-silent-failure-openai-chat
   - item_id: chain:v3.gemini_relay.controlled_runtime
     chain_id: v3.gemini_relay.controlled_runtime
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-02T08:25:54-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:ae1365e9430f60935cd01a5b77fcf083efeb1673fe85eeba4308c3f14d52d2f2
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:8c1c30122b323785c0aaf6a3c7d5856c0a54fa0864b50899f027e117e35f3471
+    last_manual_authorization_id: auth-20260902-v3-admission-owner-drift-gemini
   - item_id: chain:v3.entry_protocol_registry_contract.mainline
     chain_id: v3.entry_protocol_registry_contract.mainline
     status: audited_locked
@@ -377,10 +377,10 @@ locked_items:
     chain_id: v3.live_provider_compat.parity
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-02T08:25:54-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:0fd1c6b97be5b3ca20552b1f981df12488d76f01c8c2747757ab7fab42e1647f
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:afd82ef37aeac087631b9b3be483d106f4327c7f224e42b03031e6b413c7ba1a
+    last_manual_authorization_id: auth-20260902-v3-admission-path-drift-live-compat
   - item_id: chain:v3.responses.inbound_websocket_proxy
     chain_id: v3.responses.inbound_websocket_proxy
     status: audited_locked
@@ -409,10 +409,10 @@ locked_items:
     chain_id: v3.console_request_count_visibility.mainline
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-02T08:25:54-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:77ca1fb4f529bba3cdc6485a29e8785cffe43d1fcef1d2885b2ad3c46e109f4d
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:c5c28e9e2b5d5779bfbac0f240f191bec91904f292d4a090023a041ea6b57712
+    last_manual_authorization_id: auth-20260902-v3-admission-owner-drift-request-count
   - item_id: chain:v3.console_human_readable_layering.mainline
     chain_id: v3.console_human_readable_layering.mainline
     status: audited_locked
@@ -494,6 +494,41 @@ locked_items:
     fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
     last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
 manual_authorizations:
+  - authorization_id: auth-20260902-v3-silent-failure-sse-transport
+    item_id: chain:v3.sse.transport_boundary
+    approved_by: Jason
+    approved_at: '2026-09-02T08:25:54-07:00'
+    reason: "Jason explicitly authorized repairing V3 silent SSE failures, merging, rebuilding, restarting, and pushing. The refreshed edge binds finalized typed client SSE transport to v3_client_sse_body without provider-payload error reconstruction."
+    fingerprint_before: sha256:15a4d27494d94a69aca744218bfb150880934ec8039e1befd2b02b478d2dc2bc
+    fingerprint_after: sha256:c93ca1386d58b91b17f73d32e9d474f634382918f3e73769dc41f6eaf3705068
+  - authorization_id: auth-20260902-v3-silent-failure-openai-chat
+    item_id: chain:v3.openai_chat_relay.controlled_runtime
+    approved_by: Jason
+    approved_at: '2026-09-02T08:25:54-07:00'
+    reason: "Jason explicitly authorized repairing V3 silent SSE failures. The refreshed chain keeps provider attempts client-invisible until terminal validation and projects only typed committed success or typed Error06."
+    fingerprint_before: sha256:7e310de964d84354f29532a96c00b23073b32c12e1b338ff72d224cfb5b13268
+    fingerprint_after: sha256:3e256371053adc2487cb72c43af44a974d9473b2aa68bbfc9caedc5648bd4be5
+  - authorization_id: auth-20260902-v3-admission-owner-drift-gemini
+    item_id: chain:v3.gemini_relay.controlled_runtime
+    approved_by: Jason
+    approved_at: '2026-09-02T08:25:54-07:00'
+    reason: "Jason authorized completing the V3 architecture gates before merge. This refresh records the existing v3_client_sse_body owner after the stale Body::from_stream binding was corrected."
+    fingerprint_before: sha256:ae1365e9430f60935cd01a5b77fcf083efeb1673fe85eeba4308c3f14d52d2f2
+    fingerprint_after: sha256:8c1c30122b323785c0aaf6a3c7d5856c0a54fa0864b50899f027e117e35f3471
+  - authorization_id: auth-20260902-v3-admission-path-drift-live-compat
+    item_id: chain:v3.live_provider_compat.parity
+    approved_by: Jason
+    approved_at: '2026-09-02T08:25:54-07:00'
+    reason: "Jason authorized completing the V3 architecture gates before merge. This refresh records the existing V3-local verifier path after correcting the stale root-relative binding."
+    fingerprint_before: sha256:0fd1c6b97be5b3ca20552b1f981df12488d76f01c8c2747757ab7fab42e1647f
+    fingerprint_after: sha256:afd82ef37aeac087631b9b3be483d106f4327c7f224e42b03031e6b413c7ba1a
+  - authorization_id: auth-20260902-v3-admission-owner-drift-request-count
+    item_id: chain:v3.console_request_count_visibility.mainline
+    approved_by: Jason
+    approved_at: '2026-09-02T08:25:54-07:00'
+    reason: "Jason authorized completing the V3 architecture gates before merge. This refresh records request_identity.rs and V3RequestIdCounter::next_request_identity as the existing unique request identity owner."
+    fingerprint_before: sha256:77ca1fb4f529bba3cdc6485a29e8785cffe43d1fcef1d2885b2ad3c46e109f4d
+    fingerprint_after: sha256:c5c28e9e2b5d5779bfbac0f240f191bec91904f292d4a090023a041ea6b57712
   - authorization_id: auth-20260829-v3-health-scheduler-failback
     item_id: chain:v3.provider_global_subscription_probe
     approved_by: Jason

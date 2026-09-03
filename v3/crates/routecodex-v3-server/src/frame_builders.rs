@@ -200,19 +200,28 @@ pub(crate) fn project_v3_responses_direct_stream_error_frame_if_requested(
     frame: V3Server16HttpFrame,
     requested_stream: bool,
 ) -> V3Server16HttpFrame {
-    project_v3_responses_stream_error_frame_if_requested(frame, requested_stream)
+    project_v3_protocol_stream_error_frame_if_requested(
+        frame,
+        requested_stream,
+        V3SseClientProtocol::Responses,
+    )
 }
 
 pub(crate) fn project_v3_responses_relay_stream_error_frame_if_requested(
     frame: V3Server16HttpFrame,
     requested_stream: bool,
 ) -> V3Server16HttpFrame {
-    project_v3_responses_stream_error_frame_if_requested(frame, requested_stream)
+    project_v3_protocol_stream_error_frame_if_requested(
+        frame,
+        requested_stream,
+        V3SseClientProtocol::Responses,
+    )
 }
 
-fn project_v3_responses_stream_error_frame_if_requested(
+pub(crate) fn project_v3_protocol_stream_error_frame_if_requested(
     mut frame: V3Server16HttpFrame,
     requested_stream: bool,
+    protocol: V3SseClientProtocol,
 ) -> V3Server16HttpFrame {
     if !requested_stream || frame.error_chain.is_empty() || frame.content_type != "application/json"
     {
@@ -238,11 +247,14 @@ fn project_v3_responses_stream_error_frame_if_requested(
         frame.error_body = Some(body);
     }
     frame.content_type = "text/event-stream".to_string();
-    frame.body = V3Server16Body::Bytes(v3_responses_sse_error_event_chunk(
-        frame.status,
-        &code,
-        &message,
-    ));
+    frame.body = V3Server16Body::Bytes(match protocol {
+        V3SseClientProtocol::Responses => {
+            v3_responses_sse_error_event_chunk(frame.status, &code, &message)
+        }
+        V3SseClientProtocol::OpenAiChat
+        | V3SseClientProtocol::Anthropic
+        | V3SseClientProtocol::Gemini => v3_sse_error_event_chunk(frame.status, &code, &message),
+    });
     frame
 }
 
@@ -310,6 +322,9 @@ fn v3_sse_runtime_error_source_chunk_for_protocol(
             v3_responses_sse_error_event_chunk(projected.status, &code, &message)
         }
         V3SseClientProtocol::OpenAiChat => {
+            v3_sse_error_event_chunk(projected.status, &code, &message)
+        }
+        V3SseClientProtocol::Anthropic | V3SseClientProtocol::Gemini => {
             v3_sse_error_event_chunk(projected.status, &code, &message)
         }
     }
@@ -446,6 +461,8 @@ pub(crate) type V3IoSseStream =
 pub(crate) enum V3SseClientProtocol {
     Responses,
     OpenAiChat,
+    Anthropic,
+    Gemini,
 }
 
 pub(crate) fn v3_client_sse_body(
@@ -490,74 +507,6 @@ pub(crate) fn v3_live_client_sse_body_for_protocol(
         item.map_err(|_| io::Error::other("response stream terminated before completion"))
     }));
     v3_io_sse_body_for_protocol(Box::pin(stream), keepalive_interval, protocol)
-}
-
-pub(crate) fn wrap_v3_sse_io_dump_stream(
-    stream: V3IoSseStream,
-    sse_dump_enabled: bool,
-    port: u16,
-    endpoint: &str,
-    request_id: &str,
-) -> V3IoSseStream {
-    if !sse_dump_enabled {
-        return stream;
-    }
-    let Some(home) = std::env::var_os("HOME") else {
-        return stream;
-    };
-    let endpoint_segment = endpoint.trim_start_matches('/');
-    let dump_dir = PathBuf::from(home.as_os_str())
-        .join(".rcc")
-        .join("sse-dumps")
-        .join(endpoint_segment)
-        .join("ports")
-        .join(port.to_string())
-        .join(request_id);
-    if let Err(error) = std::fs::create_dir_all(&dump_dir) {
-        eprintln!("[v3-sse-dump] create_dir_all failed: {error}");
-        return stream;
-    }
-    let dump_path = dump_dir.join("sse-client.bin");
-    let mut file = match std::fs::File::create(&dump_path) {
-        Ok(file) => file,
-        Err(error) => {
-            eprintln!("[v3-sse-dump] create failed: {error}");
-            return stream;
-        }
-    };
-    if let Err(error) = file.write_all(
-        format!("# sse dump start endpoint={endpoint} port={port} request_id={request_id}\n")
-            .as_bytes(),
-    ) {
-        eprintln!("[v3-sse-dump] header write failed: {error}");
-        return stream;
-    }
-    Box::pin(stream::unfold(
-        (stream, Some(file)),
-        |(mut stream, mut file)| async move {
-            match stream.next().await {
-                Some(Ok(chunk)) => {
-                    if let Some(file) = file.as_mut() {
-                        let _ = file.write_all(&chunk);
-                    }
-                    Some((Ok(chunk), (stream, file)))
-                }
-                Some(Err(error)) => {
-                    if let Some(file) = file.as_mut() {
-                        let _ =
-                            file.write_all(format!("\n# sse stream error: {error}\n").as_bytes());
-                    }
-                    Some((Err(error), (stream, file)))
-                }
-                None => {
-                    if let Some(file) = file.as_mut() {
-                        let _ = file.write_all(b"\n# sse stream eof\n");
-                    }
-                    None
-                }
-            }
-        },
-    ))
 }
 
 pub(crate) fn wrap_v3_committed_sse_dump_stream(
@@ -792,7 +741,7 @@ fn v3_io_sse_body_for_protocol(
                 )),
             };
             match next {
-            Some((Ok(bytes), state)) => Some((Ok(bytes), state)),
+                Some((Ok(bytes), state)) => Some((Ok(bytes), state)),
                 Some((Err(error), (stream, interval, _, keepalive_chunk))) => {
                     let frame = v3_sse_runtime_error_source_chunk_for_protocol(
                         "V3ServerRespOutbound05ClientFrame",

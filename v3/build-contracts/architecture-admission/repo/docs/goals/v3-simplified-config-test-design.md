@@ -19,7 +19,7 @@ The new owner stops at `V3Config02AuthoringParsed`. It must not implement schema
 
 Positive:
 
-- one group, one default pool, one provider/model member;
+- one server with one default pool and one provider/model member; routes are nested under the server;
 - multiple outer tiers preserve order by assigning the first tier the highest generated numeric priority (`N..1`), matching the current V3 Target runtime;
 - one inner tier with omitted weights materializes equal weights;
 - explicit valid same-tier weights preserve ratios;
@@ -33,7 +33,7 @@ Negative:
 - malformed `use`, missing provider/model, disabled provider, or duplicate member;
 - zero weight and mixed omitted/explicit weight in one tier;
 - user-authored `priority`, `match`, `servers`, `pipelines`, `features`, `error`, `debug`, `admin_webui`, auth, endpoint, or execution fields;
-- unknown group or pool not present in typed internal topology.
+- unknown custom pool; user-authored route-group fields are rejected;
 
 ## Module black-box tests
 

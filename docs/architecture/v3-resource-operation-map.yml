@@ -2223,8 +2223,8 @@ resources:
     binding_status: design
 
   - resource_id: v3.sse.direct.accept_skeleton
-    resource_kind: responses_sse_front_client_accept_channel
-    lifecycle: v3.responses.sse.front.accept_and_project
+    resource_kind: protocol_typed_sse_front_client_accept_channel
+    lifecycle: v3.client.sse.front.accept_and_project
     owner_feature_id: v3.direct_sse_accept_skeleton
     owner_crate: routecodex-v3-server
     owner_module: endpoint_handlers
@@ -2233,7 +2233,7 @@ resources:
     identity: [requestId, serverId, entryProtocol, clientStreamIntent]
     allowed_writers: [pending_endpoint_after_responses_admission, V3DirectSseAccept01ClientChannel]
     allowed_readers: [v3_request_wants_sse, pending_endpoint_after_responses_admission, execute_responses_direct_server_outcome, v3_io_sse_body, V3DirectSseAccept02RuntimeWorker]
-    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, provider.wire_payload, response.raw_provider_sse]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, provider.wire_payload, response.raw_provider_sse, response.http_json_reparse]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false

@@ -12,49 +12,36 @@ fn v3_front_chunk_is_transport_keepalive(bytes: &[u8]) -> bool {
     bytes == b": keepalive\n\n"
 }
 
-fn v3_front_json_body_to_sse_frame(bytes: &[u8]) -> Vec<u8> {
-    let value = match serde_json::from_slice::<Value>(bytes) {
-        Ok(value) => value,
-        Err(error) => {
-            let projected = project_v3_post_commit_sse_source(
-                raise_v3_sse_runtime_failure(
-                    "V3ServerRespOutbound05ClientFrame",
-                    "front_error06_body_parse_failed",
-                    error.to_string(),
+fn v3_front_non_sse_body_error_frame(protocol: V3SseClientProtocol, inner_status: u16) -> Vec<u8> {
+    v3_front_projected_error_sse_frame(
+        project_v3_post_commit_sse_source(
+            raise_v3_sse_runtime_failure(
+                "V3ServerRespOutbound05ClientFrame",
+                "front_sse_inner_response_not_sse",
+                format!(
+                    "accepted SSE channel received non-SSE inner response with status {inner_status}"
                 ),
-                599,
-            );
-            return v3_front_projected_error_sse_frame(projected);
-        }
-    };
-    let error = value.get("error").cloned().unwrap_or(value);
-    let event = json!({
-        "type": "response.failed",
-        "response": {"status": "failed", "error": error}
-    });
-    format!("event: response.failed\ndata: {event}\n\ndata: [DONE]\n\n").into_bytes()
+            ),
+            599,
+        ),
+        protocol,
+    )
 }
 
 fn v3_front_projected_error_sse_frame(
     projected: routecodex_v3_error::V3Error06ClientProjected,
+    protocol: V3SseClientProtocol,
 ) -> Vec<u8> {
-    let error = projected
-        .body
-        .get("error")
-        .cloned()
-        .unwrap_or(projected.body);
-    let event = json!({
-        "type": "response.failed",
-        "response": {"status": "failed", "error": error}
-    });
-    match serde_json::to_vec(&event) {
-        Ok(bytes) => {
-            let mut frame = b"event: response.failed\ndata: ".to_vec();
-            frame.extend_from_slice(&bytes);
-            frame.extend_from_slice(b"\n\n");
-            frame
+    let (code, message) = v3_error_body_code_message(&projected.body);
+    match protocol {
+        V3SseClientProtocol::Responses => {
+            v3_responses_sse_error_event_chunk(projected.status, &code, &message)
         }
-        Err(_) => b"event: response.failed\ndata: {\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"front_error06_serialization_failed\"}},\"type\":\"response.failed\"}\n\ndata: [DONE]\n\n".to_vec(),
+        V3SseClientProtocol::OpenAiChat
+        | V3SseClientProtocol::Anthropic
+        | V3SseClientProtocol::Gemini => {
+            v3_sse_error_event_chunk(projected.status, &code, &message)
+        }
     }
 }
 
@@ -66,15 +53,21 @@ fn record_v3_front_client_disconnect() {
     eprintln!("V3 client disconnect Error06 client-suppressed receipt: {receipt:?}");
 }
 
-pub(crate) fn v3_front_sse_worker_panic_frame(message: &str) -> Vec<u8> {
-    v3_front_projected_error_sse_frame(project_v3_post_commit_sse_source(
-        raise_v3_sse_runtime_failure(
-            "V3ServerRespOutbound05ClientFrame",
-            "front_sse_worker_panicked",
-            message,
+pub(crate) fn v3_front_sse_worker_panic_frame(
+    message: &str,
+    protocol: V3SseClientProtocol,
+) -> Vec<u8> {
+    v3_front_projected_error_sse_frame(
+        project_v3_post_commit_sse_source(
+            raise_v3_sse_runtime_failure(
+                "V3ServerRespOutbound05ClientFrame",
+                "front_sse_worker_panicked",
+                message,
+            ),
+            599,
         ),
-        599,
-    ))
+        protocol,
+    )
 }
 
 pub(crate) async fn pending_endpoint_after_responses_admission(
@@ -138,6 +131,13 @@ impl V3FrontSseAcceptSkeleton {
         request_purpose: V3RequestPurpose,
         payload: Value,
     ) -> Response<Body> {
+        let client_protocol = match entry_protocol.as_str() {
+            "responses" => V3SseClientProtocol::Responses,
+            "openai_chat" => V3SseClientProtocol::OpenAiChat,
+            "anthropic" => V3SseClientProtocol::Anthropic,
+            "gemini" => V3SseClientProtocol::Gemini,
+            other => panic!("unsupported SSE client protocol: {other}"),
+        };
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(32);
         let front_transport_broker = state.front_transport_broker.clone();
         let keepalive_interval =
@@ -160,6 +160,7 @@ impl V3FrontSseAcceptSkeleton {
                     true,
                 )
                 .await;
+                let inner_status = response.status().as_u16();
                 let response_is_sse = response
                     .headers()
                     .get(axum::http::header::CONTENT_TYPE)
@@ -169,12 +170,10 @@ impl V3FrontSseAcceptSkeleton {
                     });
                 let mut body = response.into_body().into_data_stream();
                 let mut emitted_response_frame = false;
-                let mut buffered_json_body = Vec::new();
                 while let Some(chunk) = body.next().await {
                     match chunk {
                         Ok(bytes) => {
                             if !response_is_sse {
-                                buffered_json_body.extend_from_slice(&bytes);
                                 continue;
                             }
                             if !v3_front_chunk_is_transport_keepalive(&bytes) {
@@ -195,7 +194,10 @@ impl V3FrontSseAcceptSkeleton {
                                 599,
                             );
                             if tx
-                                .send(Ok(v3_front_projected_error_sse_frame(projected)))
+                                .send(Ok(v3_front_projected_error_sse_frame(
+                                    projected,
+                                    client_protocol,
+                                )))
                                 .await
                                 .is_err()
                             {
@@ -205,17 +207,16 @@ impl V3FrontSseAcceptSkeleton {
                         }
                     }
                 }
-                if !response_is_sse && !buffered_json_body.is_empty() {
+                if !response_is_sse {
                     emitted_response_frame = true;
                     if tx
-                        .send(Ok(v3_front_json_body_to_sse_frame(&buffered_json_body)))
+                        .send(Ok(v3_front_non_sse_body_error_frame(
+                            client_protocol,
+                            inner_status,
+                        )))
                         .await
                         .is_err()
                     {
-                        record_v3_front_client_disconnect();
-                        return;
-                    }
-                    if tx.send(Ok(b"data: [DONE]\n\n".to_vec())).await.is_err() {
                         record_v3_front_client_disconnect();
                         return;
                     }
@@ -230,7 +231,10 @@ impl V3FrontSseAcceptSkeleton {
                         599,
                     );
                     if tx
-                        .send(Ok(v3_front_projected_error_sse_frame(projected)))
+                        .send(Ok(v3_front_projected_error_sse_frame(
+                            projected,
+                            client_protocol,
+                        )))
                         .await
                         .is_err()
                     {
@@ -245,7 +249,10 @@ impl V3FrontSseAcceptSkeleton {
                     .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
                     .unwrap_or("Front SSE worker panicked");
                 if panic_tx
-                    .send(Ok(v3_front_sse_worker_panic_frame(message)))
+                    .send(Ok(v3_front_sse_worker_panic_frame(
+                        message,
+                        client_protocol,
+                    )))
                     .await
                     .is_err()
                 {
@@ -259,11 +266,20 @@ impl V3FrontSseAcceptSkeleton {
         let body = v3_io_sse_body(Box::pin(client_stream), Some(keepalive_interval));
         if let Some(identity) = front_connection_identity {
             front_transport_broker.front_socket(identity).map(|socket| {
-                socket.set_exec_closeout_frame(v3_responses_sse_error_event_chunk(
-                    503,
-                    "server_restart_in_progress",
-                    "RouteCodex restarted before this response completed",
-                ))
+                socket.set_exec_closeout_frame(match client_protocol {
+                    V3SseClientProtocol::Responses => v3_responses_sse_error_event_chunk(
+                        503,
+                        "server_restart_in_progress",
+                        "RouteCodex restarted before this response completed",
+                    ),
+                    V3SseClientProtocol::OpenAiChat
+                    | V3SseClientProtocol::Anthropic
+                    | V3SseClientProtocol::Gemini => v3_sse_error_event_chunk(
+                        503,
+                        "server_restart_in_progress",
+                        "RouteCodex restarted before this response completed",
+                    ),
+                })
             });
         }
         Response::builder()
@@ -1060,6 +1076,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             output,
             stream_console_finalizer,
             Duration::from_millis(state.server.http_sse_keepalive_ms),
+            front_transport_owns_keepalive,
         );
     }
     if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -1182,7 +1199,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 );
             }
         }
-        return anthropic_relay_output_response(output);
+        return anthropic_relay_output_response(output, front_transport_owns_keepalive);
     }
     if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let output = match execute_v3_gemini_relay_runtime_with_default_transport_provider_health(
@@ -1252,6 +1269,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             output,
             stream_console_finalizer,
             Duration::from_millis(state.server.http_sse_keepalive_ms),
+            front_transport_owns_keepalive,
         );
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -1864,17 +1882,19 @@ pub(crate) use request_identity::*;
 #[cfg(test)]
 mod front_sse_contract_tests {
     use super::{
-        v3_front_chunk_is_transport_keepalive, v3_front_json_body_to_sse_frame,
-        v3_front_sse_worker_panic_frame,
+        v3_front_chunk_is_transport_keepalive, v3_front_non_sse_body_error_frame,
+        v3_front_sse_worker_panic_frame, V3SseClientProtocol,
     };
 
     #[test]
     fn front_sse_worker_panic_projects_internal_error_and_done() {
-        let frame = v3_front_sse_worker_panic_frame("worker panic");
-        assert_eq!(
-            frame,
-            b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"front_sse_worker_panicked\",\"message\":\"worker panic\"},\"status\":\"failed\"},\"type\":\"response.failed\"}\n\n"
-        );
+        let frame =
+            v3_front_sse_worker_panic_frame("worker panic", V3SseClientProtocol::OpenAiChat);
+        let text = String::from_utf8(frame).expect("panic frame is UTF-8");
+        assert!(text.starts_with("event: error\n"), "{text}");
+        assert!(text.contains("front_sse_worker_panicked"), "{text}");
+        assert!(!text.contains("response.failed"), "{text}");
+        assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
     }
 
     #[test]
@@ -1890,25 +1910,38 @@ mod front_sse_contract_tests {
 
     #[test]
     fn front_json_error_is_projected_as_one_sse_failure_terminal() {
-        assert_eq!(
-            v3_front_json_body_to_sse_frame(br#"{"error":{"code":"internal"}}"#),
-            b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"internal\"},\"status\":\"failed\"},\"type\":\"response.failed\"}\n\ndata: [DONE]\n\n"
-        );
+        let frame = v3_front_non_sse_body_error_frame(V3SseClientProtocol::OpenAiChat, 502);
+        let text = String::from_utf8(frame).expect("terminal frame is UTF-8");
+        assert!(text.starts_with("event: error\n"), "{text}");
+        assert!(text.contains("front_sse_inner_response_not_sse"), "{text}");
+        assert!(!text.contains("response.failed"), "{text}");
+        assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
     }
 
     #[test]
     fn malformed_error06_body_enters_typed_projection_without_front_json_error() {
-        let frame = v3_front_json_body_to_sse_frame(b"not-json");
+        let frame = v3_front_non_sse_body_error_frame(V3SseClientProtocol::OpenAiChat, 502);
         let text = String::from_utf8(frame).expect("SSE frame is UTF-8");
-        assert!(text.contains("front_error06_body_parse_failed"));
+        assert!(text.contains("front_sse_inner_response_not_sse"));
         assert!(!text.contains("front_json_error"));
     }
 
     #[test]
     fn front_empty_json_body_does_not_fake_a_success_frame() {
-        assert!(v3_front_json_body_to_sse_frame(b"").is_empty() == false);
+        assert!(
+            !v3_front_non_sse_body_error_frame(V3SseClientProtocol::OpenAiChat, 502).is_empty()
+        );
         assert!(!v3_front_chunk_is_transport_keepalive(
-            &v3_front_json_body_to_sse_frame(b"{}")
+            &v3_front_non_sse_body_error_frame(V3SseClientProtocol::OpenAiChat, 200)
         ));
+    }
+
+    #[test]
+    fn front_non_sse_success_enters_internal_error_chain_instead_of_reparsed_success() {
+        let frame = v3_front_non_sse_body_error_frame(V3SseClientProtocol::OpenAiChat, 200);
+        let text = String::from_utf8(frame).expect("contract failure frame is UTF-8");
+        assert!(text.starts_with("event: error\n"), "{text}");
+        assert!(text.contains("front_sse_inner_response_not_sse"), "{text}");
+        assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
     }
 }
