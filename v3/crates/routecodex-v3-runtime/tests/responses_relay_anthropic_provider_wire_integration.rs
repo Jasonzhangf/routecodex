@@ -202,6 +202,57 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
 }
 
 #[tokio::test]
+async fn responses_relay_anthropic_json_schema_name_is_consumed_at_provider_wire_boundary() {
+    let transport = AnthropicProviderJsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-anthropic-format-name".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[{"role":"user","content":[{"type":"input_text","text":"Return structured output"}]}],
+                "text":{"format":{
+                    "type":"json_schema",
+                    "name":"contract_name",
+                    "schema":{"type":"object","properties":{"answer":{"type":"string"}}},
+                    "strict":true
+                }},
+                "stream":false,
+                "max_output_tokens":64
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("Responses json_schema.name must not reject Anthropic outbound");
+
+    assert_eq!(output.status, 200, "{output:?}");
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    assert_eq!(
+        captured["output_config"]["format"],
+        json!({
+            "type":"json_schema",
+            "schema":{"type":"object","properties":{"answer":{"type":"string"}}}
+        }),
+        "Anthropic wire must receive its target shape without Responses-only name: {captured}"
+    );
+    assert!(
+        captured["output_config"]["format"].get("name").is_none(),
+        "Responses-only format.name must not leak into Anthropic wire: {captured}"
+    );
+}
+
+#[tokio::test]
 async fn responses_relay_anthropic_wire_preserves_typed_tool_result_error_status() {
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),

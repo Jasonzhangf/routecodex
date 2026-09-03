@@ -2353,20 +2353,22 @@ fn anthropic_reasoning_effort_maps_non_intersection_values_to_closest_legal_leve
 }
 
 #[test]
-fn anthropic_rejects_unmapped_responses_text_format_nested_fields() {
+fn anthropic_consumes_responses_json_schema_name_in_outbound_projection() {
     let mut json_schema_name = base_chat_for_field_projection();
     json_schema_name["routecodex_chat_extension"] = json!({"responses_request":{"text":{"format":{
         "type":"json_schema",
         "name":"contract_name",
         "schema":{"type":"object"}
     }}}});
-    let error = encode_v3_responses_semantic_as_anthropic_request(json_schema_name)
-        .expect_err("Anthropic cannot preserve Responses json_schema.name");
+    let wire = encode_v3_responses_semantic_as_anthropic_request(json_schema_name)
+        .expect("Anthropic outbound must consume Responses json_schema.name");
     assert!(
-        error
-            .to_string()
-            .contains("$.request.text.output_config.format.name"),
-        "{error}"
+        wire["output_config"]["format"].get("name").is_none(),
+        "Responses-only schema name must not enter Anthropic wire: {wire}"
+    );
+    assert_eq!(
+        wire["output_config"]["format"],
+        json!({"type":"json_schema","schema":{"type":"object"}})
     );
 
     let mut text_extra = base_chat_for_field_projection();

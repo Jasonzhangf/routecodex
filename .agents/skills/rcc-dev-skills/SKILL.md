@@ -26,6 +26,12 @@ NO FALLBACK! FUCK FALLBACK!!!
 
 ## P0 请求/响应问题标准流程
 
+### Build/test 与真实 provider 网络隔离
+
+- `build`、`test`、`verify` 和架构 gate 默认必须是离线或 mock-only；不得在其调用闭包中间接执行 `verify-health`、live replay、e2e provider probe、`curl /v1/*` 或其他真实 provider 请求。
+- 真实请求脚本必须保持独立入口，并要求显式 opt-in；不能被普通 build/test/verify 生命周期调用。发现 live 请求时，先区分“项目子进程发请求”与“当前 Codex/DSH 工具会话发请求”，不得把后者归因给 build。
+- 验证 build/test 是否发请求时，必须同时检查 package lifecycle/脚本闭包、子进程 cwd/命令和 4444 客户端 PID；仅凭 RouteCodex 日志时间相邻不能归因。
+
 ### 根因优先与历史回归锁（最高优先级）
 
 遇到请求或响应问题时，目标是找到并修复根因，使同类问题不再发生；禁止把“客户端暂时成功”当作修复。不得通过关闭能力、裁剪请求/响应、换 provider、改路由优先级、fallback、静默吞错或 handler/SSE/outbound 补偿绕过问题。
@@ -402,6 +408,11 @@ Provider SSE 的兼容修复只能修复传输语法和格式，不得根据响�
 - Ownership: inbound validators inspect only the inbound protocol node; Chat validators inspect only canonical Chat semantics/extensions; outbound validators inspect the completed selected target-protocol payload.
 - Required outbound order: `source/canonical projection -> complete target payload -> target protocol validation -> wire build/transport`. Never validate a source DTO, temporarily remove a field to pass validation, then project it into the target afterward.
 - Required lock: positive inbound preservation plus negative post-projection target validation, a static order assertion, and a red mutation that swaps projection and validation. Do not repair in MetadataCenter, provider transport, SSE, handler, or by truncation/silent strip.
+
+## V3 protocol direction fidelity invariant
+- `inbound` is always full-fidelity: preserve every source field and convert it into canonical Chat semantics or a registered protocol extension. Inbound must not裁切、清洗或因目标协议缺少对应字段而拒绝真实源字段。
+- `outbound` is the only target-protocol adaptation boundary: perform explicit semantic mapping there, then apply the target protocol whitelist/blacklist. A source-only field with no target wire slot may be explicitly consumed at this owner only when the target-valid projection and regression test document that decision; otherwise fail-fast.
+- If a field is rejected, locate the direction first: inbound loss belongs to the inbound owner; outbound rejection or wire leakage belongs to the outbound projection owner. Never push outbound constraints backward into inbound truncation.
 
 ## V3 final route/usage diagnosis guard
 - Trigger: console shows a lower-priority provider/model in `[virtual-router-hit]` or `[usage]`, or usage says `usage=unreported` for a streaming OpenAI Chat provider.

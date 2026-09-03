@@ -1840,6 +1840,7 @@ features:
     save without MetadataCenter, headers, or outbound repair.
   - Responses text.verbosity remains output verbosity. Anthropic consumes valid low/medium/high values only as a registered local style hint; it never maps them to output_config.effort because that field
     is reasoning effort, not verbosity.
+  - "Responses text.format.json_schema.name is a source-only schema identity: inbound preserves it, while Anthropic outbound consumes it and emits only the target-valid `{type:json_schema,schema}` format. Unknown nested format fields and malformed strict values remain explicit outbound failures."
   - ? Responses custom tool declarations map exactly to native OpenAI Chat custom tools. Anthropic uses the registered `v3.custom_tool.anthropic_string_input_wrapper.v1` compatibility projection
     : exact raw input becomes `tool_use.input={"input":raw}`, declaration description/schema carries free-form or exact grammar information without claiming native enforcement, and reverse projection requires
       governed custom declaration identity plus the exact wrapper shape. Responses web_search/web_search_preview maps to OpenAI Chat web_search_options only for the text-only target subset, while image
@@ -1873,6 +1874,8 @@ features:
   - anthropic_malformed_function_wrapper_restores_exact_raw_arguments
   - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
   - responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak
+  - responses_relay_anthropic_json_schema_name_is_consumed_at_provider_wire_boundary
+  - anthropic_consumes_responses_json_schema_name_in_outbound_projection
   - openai_chat_wire_projects_responses_web_search_tool_to_options
   - responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history
   - openai_chat_wire_consumes_registered_codex_client_metadata_as_local_context
