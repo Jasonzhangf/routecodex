@@ -387,20 +387,7 @@ pub fn start_managed(
         .spawn()
         .map_err(|error| io_error(executable, error))?;
     let record = wait_child_ready(paths, &mut child, timeout)?;
-    if std::io::stdout().is_terminal() {
-        wait_for_attached_instance(paths)?;
-    }
     Ok(record)
-}
-
-fn wait_for_attached_instance(paths: &V4LifecyclePaths) -> Result<(), LifecycleError> {
-    loop {
-        match status_managed(paths) {
-            Ok(status) if status.state == "running" => thread::sleep(Duration::from_millis(100)),
-            Ok(_) => return Ok(()),
-            Err(error) => return Err(error),
-        }
-    }
 }
 
 pub fn request_stop(paths: &V4LifecyclePaths, timeout: Duration) -> Result<(), LifecycleError> {
