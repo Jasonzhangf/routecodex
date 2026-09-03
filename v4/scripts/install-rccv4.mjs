@@ -19,6 +19,7 @@ const source = path.join(root, 'target/release/rccv4');
 const directory = path.join(os.homedir(), '.local/bin');
 const destination = path.join(directory, 'rccv4');
 const temporary = path.join(directory, `.rccv4.${process.pid}.installing`);
+const hostDirectory = path.join(os.homedir(), '.local/lib/rccv4');
 
 if (!fs.existsSync(source)) {
   throw new Error(`release binary missing: ${source}`);
@@ -47,4 +48,13 @@ const installedDigest = digest(destination);
 if (stagedDigest !== installedDigest) {
   throw new Error(`installed hash drift: staged=${stagedDigest} installed=${installedDigest}`);
 }
+fs.mkdirSync(hostDirectory, { recursive: true });
+fs.copyFileSync(
+  path.join(root, 'cordis/routecodex-v4-cordis-host/src/daemon.mjs'),
+  path.join(hostDirectory, 'daemon.mjs'),
+);
+fs.copyFileSync(
+  path.join(root, 'cordis/routecodex-v4-cordis-host/src/daemon-runner.mjs'),
+  path.join(hostDirectory, 'cordis-daemon.mjs'),
+);
 console.log(`installed ${destination} sha256=${installedDigest} codesign=valid`);
