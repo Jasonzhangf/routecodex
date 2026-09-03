@@ -410,7 +410,16 @@ fn start(intent: StartIntent) -> Result<String, String> {
         return Ok("state=stopped identity=rccv4 foreground=true".to_string());
     }
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
-    preflight_cordis_admission(&manifest)?;
+    // Admission is checked by this parent process before the managed child
+    // starts. Ensure the project-owned Cordis daemon exists first.
+    let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
+    if let Err(error) = preflight_cordis_admission(&manifest) {
+        if let Some(mut child) = cordis_child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        return Err(error);
+    }
     // Startup is a lifecycle admission event, not a config-compilation
     // event.  Do not announce a listener before the Cordis owner has
     // accepted the exact graph/manifest/epoch; otherwise a rejected start
@@ -423,15 +432,23 @@ fn start(intent: StartIntent) -> Result<String, String> {
         release_unmanaged_listeners(&manifest)?;
     }
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    let record = start_managed(
+    let record = match start_managed(
         &paths,
         &executable,
         &config,
         &paths.manifest_path,
         &spawn_options(&intent.snapshot),
         Duration::from_secs(15),
-    )
-    .map_err(|error| error.to_string())?;
+    ) {
+        Ok(record) => record,
+        Err(error) => {
+            if let Some(mut child) = cordis_child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            return Err(error.to_string());
+        }
+    };
     println!(
         "state=running identity=rccv4 pid={} listeners={}",
         record.pid,
@@ -600,6 +617,8 @@ fn ensure_cordis_host_socket(
     while std::time::Instant::now() < deadline {
         if socket.exists() {
             std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
+            std::env::set_var("RCCV4_CORDIS_HOST_AUTOSTARTED", "1");
+            std::env::set_var("RCCV4_CORDIS_HOST_PID", child.id().to_string());
             return Ok(Some(child));
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -665,6 +684,12 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     if let Some(mut child) = cordis_child.take() {
         let _ = child.kill();
         let _ = child.wait();
+    } else if std::env::var("RCCV4_CORDIS_HOST_AUTOSTARTED").as_deref() == Ok("1") {
+        if let Ok(pid) = std::env::var("RCCV4_CORDIS_HOST_PID") {
+            if let Ok(pid) = pid.parse::<libc::pid_t>() {
+                let _ = unsafe { libc::kill(pid, libc::SIGTERM) };
+            }
+        }
     }
     drop(control);
     if action == ManagedAction::Restart {
@@ -776,7 +801,14 @@ fn spawn_options(snapshot: &SnapshotIntent) -> ManagedSpawnOptions {
         debug: snapshot.debug,
         sse_dump: snapshot.sse_dump,
         env: std::env::vars()
-            .filter(|(name, _)| name == "RCCV4_CORDIS_HOST_SOCKET")
+            .filter(|(name, _)| {
+                matches!(
+                    name.as_str(),
+                    "RCCV4_CORDIS_HOST_SOCKET"
+                        | "RCCV4_CORDIS_HOST_AUTOSTARTED"
+                        | "RCCV4_CORDIS_HOST_PID"
+                )
+            })
             .collect(),
     }
 }
