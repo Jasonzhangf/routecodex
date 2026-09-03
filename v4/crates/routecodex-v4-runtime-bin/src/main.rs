@@ -20,7 +20,8 @@ use routecodex_v4_lifecycle::{
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
-    send_protocol, validate_auth_alias, write_provider_profile, ProviderTransportResult,
+    send_target_nonstream as provider_send_target_nonstream,
+    send_target_streaming as provider_send_target_streaming, write_provider_profile,
     ProviderInitAuth, ProviderInitOptions, ProviderResponseStream, V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
@@ -1114,7 +1115,14 @@ fn handle_responses(
     })?;
     let wire_body = semantic_body;
     if stream_mode {
-        let mut stream = send_target_streaming(&target, &wire_body).map_err(|error| {
+        let mut stream = provider_send_target_streaming(
+            &target.protocol,
+            &target.config_path,
+            &target.wire_model,
+            target.auth_alias.as_deref(),
+            &wire_body,
+        )
+        .map_err(|error| {
             project_fault(
                 request,
                 RuntimeFault::new(error.code.as_str(), error.message)
@@ -1167,7 +1175,14 @@ fn handle_responses(
                             .map_err(|fault| project_fault(request, fault, 598))?;
                             target = candidate;
                             stream =
-                                send_target_streaming(&target, &retry_body).map_err(|error| {
+                                provider_send_target_streaming(
+                                    &target.protocol,
+                                    &target.config_path,
+                                    &target.wire_model,
+                                    target.auth_alias.as_deref(),
+                                    &retry_body,
+                                )
+                                .map_err(|error| {
                                     project_provider_fault(
                                         request,
                                         RuntimeFault::new(&error.code, error.message),
@@ -1239,7 +1254,14 @@ fn handle_responses(
             Box::new(response_stream),
         ));
     }
-    let mut raw = send_target_nonstream(&target, &wire_body).map_err(|error| {
+    let mut raw = provider_send_target_nonstream(
+        &target.protocol,
+        &target.config_path,
+        &target.wire_model,
+        target.auth_alias.as_deref(),
+        &wire_body,
+    )
+    .map_err(|error| {
         project_provider_fault(
             request,
             RuntimeFault::new(error.code.as_str(), error.message),
@@ -1300,7 +1322,14 @@ fn handle_responses(
                     .map_err(|fault| project_fault(request, fault, 598))?;
                     target = candidate;
                     reselected = true;
-                    raw = send_target_nonstream(&target, &retry_body).map_err(|error| {
+                    raw = provider_send_target_nonstream(
+                        &target.protocol,
+                        &target.config_path,
+                        &target.wire_model,
+                        target.auth_alias.as_deref(),
+                        &retry_body,
+                    )
+                    .map_err(|error| {
                         project_provider_fault(
                             request,
                             RuntimeFault::new(&error.code, error.message),
@@ -1778,39 +1807,6 @@ fn project_provider_fault(
             500,
             format!("provider error policy projection failed: {error:?}"),
         ),
-    }
-}
-
-fn send_target_nonstream(
-    target: &routecodex_v4_router::SelectedTarget,
-    wire_body: &serde_json::Value,
-) -> Result<
-    routecodex_v4_provider::ProviderRawResponse,
-    routecodex_v4_provider::ProviderTransportError,
-> {
-    validate_auth_alias(&target.config_path, target.auth_alias.as_deref())?;
-    match send_protocol(&target.protocol, &target.config_path, &target.wire_model, wire_body, false)? {
-        ProviderTransportResult::Response(response) => Ok(response),
-        ProviderTransportResult::Stream(_) => Err(routecodex_v4_provider::ProviderTransportError {
-            code: "provider_transport_shape".to_string(),
-            message: "non-stream dispatch returned stream transport".to_string(),
-            status: None,
-        }),
-    }
-}
-
-fn send_target_streaming(
-    target: &routecodex_v4_router::SelectedTarget,
-    wire_body: &serde_json::Value,
-) -> Result<ProviderResponseStream, routecodex_v4_provider::ProviderTransportError> {
-    validate_auth_alias(&target.config_path, target.auth_alias.as_deref())?;
-    match send_protocol(&target.protocol, &target.config_path, &target.wire_model, wire_body, true)? {
-        ProviderTransportResult::Stream(stream) => Ok(stream),
-        ProviderTransportResult::Response(_) => Err(routecodex_v4_provider::ProviderTransportError {
-            code: "provider_transport_shape".to_string(),
-            message: "stream dispatch returned non-stream transport".to_string(),
-            status: None,
-        }),
     }
 }
 
