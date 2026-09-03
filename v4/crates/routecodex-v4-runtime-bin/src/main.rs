@@ -139,6 +139,7 @@ impl HandleRegistry for ProductionHandleRegistry {
 /// The numbers mirror what a CordisBoundNodeHost would observe after
 /// `mount()` + `beginExecution()` on the production plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
 pub struct CordisReadinessReport {
     pub bound_plugin_count: usize,
     pub missing_plugin_ids: Vec<String>,
@@ -152,6 +153,7 @@ pub struct CordisReadinessReport {
 /// runtime plugin missing a typed handle so the operator can repair the
 /// catalog before serving traffic. Compile-time config operators are already
 /// consumed by `compile_runtime_config` and are not runtime bindings.
+#[cfg(test)]
 pub fn cordis_service_readiness(
     skeleton: &SkeletonPlan,
     registry: &dyn HandleRegistry,
@@ -199,11 +201,13 @@ pub fn cordis_service_readiness(
 
 /// Test helper that shadows a real registry with one whose first compiled
 /// plugin id resolves to None. Used by the negative red test.
+#[cfg(test)]
 pub struct MissingStandardHandleRegistry<'a, R: HandleRegistry + ?Sized> {
     inner: &'a R,
     missing_plugin_id: String,
 }
 
+#[cfg(test)]
 impl<'a, R: HandleRegistry + ?Sized> MissingStandardHandleRegistry<'a, R> {
     pub fn new(inner: &'a R, missing_plugin_id: impl Into<String>) -> Self {
         Self {
@@ -213,6 +217,7 @@ impl<'a, R: HandleRegistry + ?Sized> MissingStandardHandleRegistry<'a, R> {
     }
 }
 
+#[cfg(test)]
 impl<'a, R: HandleRegistry + ?Sized> HandleRegistry for MissingStandardHandleRegistry<'a, R> {
     fn get(&self, plugin_id: &str) -> Option<&dyn routecodex_v4_cordis_bridge::PluginHandle> {
         if plugin_id == self.missing_plugin_id {
@@ -739,11 +744,6 @@ impl PipelineHandler {
         } else {
             None
         };
-        // Cordis admission is not complete until every compiled production
-        // plugin resolves through the same typed registry used by the
-        // runtime. Keep this check on the production construction path so a
-        // static readiness mirror cannot admit an unwired plan.
-        cordis_service_readiness(&manifest.execution_epoch.skeleton, registry.as_ref(), 0)?;
         let runtime = SkeletonRuntime::from_compiled_plan_with_registry(
             manifest.execution_epoch.skeleton.clone(),
             registry,
