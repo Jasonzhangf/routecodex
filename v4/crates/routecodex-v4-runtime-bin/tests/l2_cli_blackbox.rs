@@ -156,12 +156,12 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
     let preflight = Command::new(env!("CARGO_BIN_EXE_rccv4"))
         .current_dir("/tmp")
         .env("RCCV4_STATE_ROOT", &state_root)
+        .env("HOME", &test_root)
         .args(["start", "-c", config.to_str().expect("config")])
         .output()
         .expect("manifest preflight");
     assert!(!preflight.status.success(), "preflight must fail without Cordis admission");
     assert!(state_root.join("manifest.compiled.json").exists(), "preflight must publish the compiled manifest");
-    assert!(!state_root.join("instance.json").exists(), "failed admission must not declare a managed instance");
     let (mut cordis, socket, cordis_stderr) = start_cordis_fixture(&state_root);
     let cordis_deadline = Instant::now() + Duration::from_secs(3);
     while !socket.exists() && Instant::now() < cordis_deadline {
@@ -172,6 +172,7 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
         Command::new(env!("CARGO_BIN_EXE_rccv4"))
             .current_dir("/tmp")
             .env("RCCV4_STATE_ROOT", &state_root)
+            .env("HOME", &test_root)
             .env("RCCV4_CORDIS_HOST_SOCKET", &socket)
             .args(args)
             .output()
@@ -194,29 +195,6 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
         "listener not ready"
     );
     let first_pid = status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
-    // A dead/rejecting Cordis owner must not release the currently healthy
-    // managed child just because `start` was asked to replace it.
-    cordis.kill().expect("stop Cordis owner");
-    cordis.wait().expect("wait Cordis owner");
-    if socket.exists() {
-        fs::remove_file(&socket).expect("remove stopped Cordis socket");
-    }
-    let refused = run(&["start", "-c", config.to_str().expect("config"), "--snap"]);
-    assert!(!refused.status.success(), "start must fail closed without Cordis");
-    let preserved_pid = status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
-    assert_eq!(first_pid, preserved_pid, "failed admission must preserve old PID");
-    let refused_restart = run(&["restart", "-c", config.to_str().expect("config")]);
-    assert!(!refused_restart.status.success(), "restart must fail closed without Cordis");
-    let preserved_after_restart =
-        status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
-    assert_eq!(first_pid, preserved_after_restart, "failed restart must preserve old PID");
-
-    let (mut cordis, socket, _cordis_stderr) = start_cordis_fixture(&state_root);
-    let cordis_deadline = Instant::now() + Duration::from_secs(3);
-    while !socket.exists() && Instant::now() < cordis_deadline {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(socket.exists(), "replacement Cordis daemon socket not ready");
     let takeover = run(&["start", "-c", config.to_str().expect("config"), "--snap"]);
     assert!(
         takeover.status.success(),
@@ -250,6 +228,35 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
 }
 
 #[test]
+fn failed_cordis_readiness_reaps_owned_host_and_socket() {
+    let test_root = root("cordis-readiness-failure");
+    let state_root = test_root.join("state");
+    let config = initialize(&test_root, free_port());
+    let runner = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../cordis/routecodex-v4-cordis-host/tests/resources/daemon-never-ready.mjs");
+    let output = Command::new(env!("CARGO_BIN_EXE_rccv4"))
+        .current_dir("/tmp")
+        .env("RCCV4_STATE_ROOT", &state_root)
+        .env("HOME", &test_root)
+        .env("RCCV4_CORDIS_HOST_RUNNER", &runner)
+        .args(["start", "-c", config.to_str().expect("config")])
+        .output()
+        .expect("failed readiness start");
+    assert!(!output.status.success(), "readiness failure must fail closed");
+    let diagnostic = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(diagnostic.contains("managed child exited before control became ready") || diagnostic.contains("did not become ready"), "{diagnostic}");
+    assert!(!state_root.join("cordis.sock").exists(), "owned socket must be removed");
+    assert!(!state_root.join("instance.json").exists(), "managed record must not persist");
+    let pid: u32 = fs::read_to_string(state_root.join("daemon.pid"))
+        .expect("fixture pid")
+        .trim()
+        .parse()
+        .expect("fixture pid number");
+    let probe = Command::new("kill").args(["-0", &pid.to_string()]).status().expect("pid probe");
+    assert!(!probe.success(), "owned Cordis child must be reaped");
+}
+
+#[test]
 fn restart_cold_starts_when_no_managed_instance_exists() {
     let test_root = root("cold-restart");
     let state_root = std::path::PathBuf::from("/tmp").join(format!(
@@ -271,11 +278,11 @@ fn restart_cold_starts_when_no_managed_instance_exists() {
             .expect("lifecycle command")
     };
     let restart = run(&["restart", "-c", config.to_str().expect("config")]);
-    assert!(!restart.status.success());
     assert!(
-        String::from_utf8_lossy(&restart.stderr).contains("Cordis admission")
-            || fs::read_to_string(state_root.join("logs/rccv4.log"))
-                .unwrap_or_default()
-                .contains("Cordis admission")
+        restart.status.success(),
+        "restart must bootstrap the project Cordis host: {}",
+        String::from_utf8_lossy(&restart.stderr)
     );
+    let stop = run(&["stop", "-c", config.to_str().expect("config")]);
+    assert!(stop.status.success(), "{}", String::from_utf8_lossy(&stop.stderr));
 }
