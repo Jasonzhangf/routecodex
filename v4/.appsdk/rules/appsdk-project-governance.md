@@ -19,6 +19,44 @@ Use the external AppSDK implementation as the governance engine. Keep only proje
 
 Never copy the AppSDK source, compiler, or harness into the business project. Never put committed project maps or lifecycle records in `.appsdk-control/`.
 
+## Git main protection
+
+Project Git policy has two layers:
+
+- AppSDK mutation commands reject `main`/`master` and require the declared clean
+  owner worktree. This is the authoritative governance boundary.
+- Every governed project must add tracked `.githooks/pre-commit` and
+  `.githooks/pre-push` hooks as a local enforcement layer. `pre-commit` must reject commits whose
+  current branch is `main`/`master`; `pre-push` must reject updates whose
+  destination ref is `refs/heads/main` (and `master` when protected). Both
+  hooks must run the project's declared local/CI verification profile and must
+  be installed through an idempotent project setup command using
+  `core.hooksPath`.
+
+Hooks protect Git transitions, not arbitrary filesystem edits. They must not
+be treated as proof of review, delivery, merge, install, restart, freeze, or
+runtime behavior. Hook bypass, direct ref manipulation, or editing main is
+forbidden for governed changes; a hook failure is fixed at its owner rather
+than bypassed. CI must run the same clean-checkout verification profile used by
+`pre-push`, while AppSDK review admission remains the explicit release gate.
+
+Project admission is incomplete until the protection is present and enabled:
+the repository must contain both executable hooks, the setup command, a
+verification entry that checks their presence and behavior, and a clean
+`core.hooksPath` configuration. Existing projects must add this protection in
+their next governance remediation; never retrofit it by editing another
+worker's checkout or by changing `main` directly.
+
+The canonical AppSDK check is:
+
+```bash
+appsdk verify-git-main-protection <project-root>
+```
+
+Run it after the project agent creates the hooks and after every hook/setup
+change. It is a Git-boundary check, not a replacement for `appsdk verify` or
+release admission.
+
 ## Governance is part of the work
 
 AppSDK governance is an execution responsibility, not an external
