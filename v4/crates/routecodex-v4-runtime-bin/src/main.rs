@@ -739,9 +739,16 @@ impl PipelineHandler {
         } else {
             None
         };
-        let runtime =
-            SkeletonRuntime::from_compiled_plan_with_registry(manifest.execution_epoch.skeleton.clone(), registry)
-                .map_err(|error| error.to_string())?;
+        // Cordis admission is not complete until every compiled production
+        // plugin resolves through the same typed registry used by the
+        // runtime. Keep this check on the production construction path so a
+        // static readiness mirror cannot admit an unwired plan.
+        cordis_service_readiness(&manifest.execution_epoch.skeleton, registry.as_ref(), 0)?;
+        let runtime = SkeletonRuntime::from_compiled_plan_with_registry(
+            manifest.execution_epoch.skeleton.clone(),
+            registry,
+        )
+        .map_err(|error| error.to_string())?;
         let transaction_id = format!("runtime-config:{}", &manifest.manifest_digest[7..23]);
         runtime
             .prepare_compiled_execution_epoch(
