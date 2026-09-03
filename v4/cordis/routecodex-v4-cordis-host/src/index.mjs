@@ -767,7 +767,7 @@ export class CordisBoundNodeHost extends CordisNodeHost {
   }
 
   async mount(plugins) {
-    this.#verifyGraph(plugins);
+    this.#verifyEntries(plugins);
     const hash = this.#plan.hash;
     await this.#port.declare(this.nodeId, this.#plan, {
       graph_hash: hash,
@@ -776,6 +776,7 @@ export class CordisBoundNodeHost extends CordisNodeHost {
     });
     try {
       await this.#port.contextCreated();
+      this.#verifyServices(plugins);
       await super.mount(plugins);
       await this.#port.pluginsMounted();
       await this.#port.publish();
@@ -848,7 +849,17 @@ export class CordisBoundNodeHost extends CordisNodeHost {
     this.#mounted = false;
   }
 
-  #verifyGraph(plugins) {
+  #verifyEntries(plugins) {
+    const entries = plugins.map((plugin) => plugin.planEntry);
+    if (entries.some((entry) => !entry)) {
+      throw new CordisHostError('graph_binding_missing', 'every plugin requires planEntry');
+    }
+    if (canonicalJson(entries) !== canonicalJson(this.#plan.entries)) {
+      throw new CordisHostError('graph_hash_mismatch', 'actual Cordis graph differs from plan');
+    }
+  }
+
+  #verifyServices(plugins) {
     for (const plugin of plugins) {
       const injected = Array.isArray(plugin?.factory?.inject) ? plugin.factory.inject : [];
       const undeclared = injected.find((name) => !NODE_SERVICES.includes(name));
@@ -858,13 +869,6 @@ export class CordisBoundNodeHost extends CordisNodeHost {
           `node service ${undeclared} is not declared for ${this.nodeId}`,
         );
       }
-    }
-    const entries = plugins.map((plugin) => plugin.planEntry);
-    if (entries.some((entry) => !entry)) {
-      throw new CordisHostError('graph_binding_missing', 'every plugin requires planEntry');
-    }
-    if (canonicalJson(entries) !== canonicalJson(this.#plan.entries)) {
-      throw new CordisHostError('graph_hash_mismatch', 'actual Cordis graph differs from plan');
     }
   }
 }
