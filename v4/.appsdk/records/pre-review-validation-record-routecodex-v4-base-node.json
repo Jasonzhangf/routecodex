@@ -1,11 +1,11 @@
 {
-  "validation_id": "pre-review-fix-c394f30ffde5",
+  "validation_id": "pre-review-fix-1a58bcfa589a",
   "issue_id": "v4-cordis-production-wiring",
   "module_id": "routecodex-v4-base-node",
-  "fix_candidate_id": "fix-c394f30ffde5",
-  "candidate_commit": "c394f30ffde5389cfa0409ed65f69edc6898bbbe",
-  "candidate_tree_hash": "9e6d37c5a37b5bbeb12c629f81670231d9a7b024",
-  "artifact_hash": "sha256:29fbc044ff27068ced680735f6638740bdad1ba66e160ec3aaca4e93d9c9e466",
+  "fix_candidate_id": "fix-1a58bcfa589a",
+  "candidate_commit": "1a58bcfa589a572008092aab5a2259964bc84473",
+  "candidate_tree_hash": "5231b858eefb176927c0590e97ec718d33107e95",
+  "artifact_hash": "sha256:114168b22c2dec1b7b9e062a849356917da27a06709606a8edd71165179f1141",
   "whitebox_producer": {
     "adapter": "project",
     "identity": "v4-cordis-whitebox"
@@ -25,9 +25,9 @@
       "adapter": "project",
       "identity": "v4-cordis-deployment"
     },
-    "observed_at": "2026-09-03T21:59:27.200Z"
+    "observed_at": "2026-09-03T22:18:34.986Z"
   },
   "source_unchanged": true,
   "result": "pass",
-  "created_at": "2026-09-03T21:59:27.200Z"
+  "created_at": "2026-09-03T22:18:34.986Z"
 }
