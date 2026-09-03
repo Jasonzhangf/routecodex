@@ -66,29 +66,26 @@ pub(super) fn anthropic_tool_use_as_responses_call(
             field: "tool_use.input",
         })?;
     if context.is_governed_custom_tool(name) {
-        let (raw, wrapper) = match input.as_object().filter(|wrapper| {
+        let wrapper = input.as_object().filter(|wrapper| {
             wrapper.get("input").and_then(Value::as_str).is_some()
                 && wrapper.keys().all(|key| {
-                matches!(
-                    key.as_str(),
-                    "input" | "reason" | "goal_alignment_confidence" | "model_id"
-                )
-            })
-        }) {
-            Some(wrapper) => {
-                let raw = wrapper.get("input").and_then(Value::as_str).ok_or(
-                    V3AnthropicCodecError::MalformedField {
-                        field: "custom tool_use.input.input",
-                    },
-                )?;
-                (raw.to_owned(), Some(wrapper))
-            }
-            None => (
-                serde_json::to_string(input).map_err(|_| V3AnthropicCodecError::MalformedField {
+                    matches!(
+                        key.as_str(),
+                        "input" | "reason" | "goal_alignment_confidence" | "model_id"
+                    )
+                })
+        });
+        let raw = match wrapper {
+            Some(wrapper) => wrapper
+                .get("input")
+                .and_then(Value::as_str)
+                .expect("custom wrapper input was validated as a string")
+                .to_owned(),
+            None => serde_json::to_string(input).map_err(|_| {
+                V3AnthropicCodecError::MalformedField {
                     field: "custom tool_use.input",
-                })?,
-                None,
-            ),
+                }
+            })?,
         };
         let mut output = json!({
             "type":"custom_tool_call",
