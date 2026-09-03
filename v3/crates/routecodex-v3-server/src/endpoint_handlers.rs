@@ -985,6 +985,15 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         .await;
     }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay {
+        let console_payload = payload.clone();
+        let console_context = build_v3_console_emission_context(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_identity,
+            &request_headers,
+            &console_payload,
+        );
         let output =
             match execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(
                 &state.manifest,
@@ -1039,15 +1048,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         ) {
             return response;
         }
-        let console_payload = payload.clone();
-        let console_context = build_v3_console_emission_context(
-            &state,
-            &entry_protocol,
-            &path,
-            &request_identity,
-            &request_headers,
-            &console_payload,
-        );
         let stream_console_finalizer = match (
             output.stream_observation.clone(),
             output.observability.clone(),

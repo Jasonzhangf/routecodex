@@ -1240,7 +1240,7 @@ pub(crate) fn emit_v3_toolreason_console_line(
         return Ok(());
     };
     let line = format!(
-        "TOOLREASON {} source={} stage={} session_id={} request_id={} tool={} confidence={} thinking={} model={}",
+        "TOOLREASON {} source={} stage={} session_id={} request_id={} tool={} confidence={} thinking={}",
         toolreason.status,
         toolreason.source,
         toolreason.stage,
@@ -1251,7 +1251,6 @@ pub(crate) fn emit_v3_toolreason_console_line(
             .confidence
             .map_or("<missing>".to_string(), |value| value.to_string()),
         toolreason.reason.as_deref().unwrap_or("<missing>"),
-        toolreason.model_id.as_deref().unwrap_or("<missing>"),
     );
     append_v3_human_console_line(&context.state, &line);
     eprintln!("{line}");

@@ -2383,6 +2383,25 @@ fn openai_chat_relay_does_not_accept_sse_before_terminal_provider_outcome() {
 }
 
 #[test]
+fn openai_chat_relay_records_started_before_runtime_can_project_terminal_error() {
+    let source = include_str!("../endpoint_handlers.rs");
+    let branch_start = source
+        .find("if entry_protocol == \"openai_chat\" && execution_mode == V3EntryProtocolExecutionMode::Relay")
+        .expect("OpenAI Chat Relay branch");
+    let branch = &source[branch_start..];
+    let context = branch
+        .find("let console_context = build_v3_console_emission_context(")
+        .expect("OpenAI Chat Relay observability context");
+    let runtime = branch
+        .find("execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(")
+        .expect("OpenAI Chat Relay runtime");
+    assert!(
+        context < runtime,
+        "request.started must be recorded before relay runtime can project Error06"
+    );
+}
+
+#[test]
 fn openai_chat_relay_terminal_error_keeps_http_error_projection() {
     let output = routecodex_v3_runtime::V3OpenAiChatRelayRuntimeOutput {
         status: 502,
