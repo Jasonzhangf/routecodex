@@ -2,6 +2,9 @@ use routecodex_v3_sse::SseField;
 use serde_json::Value;
 
 use super::{V3HubProviderWireProtocol, V3RuntimeStreamObservation};
+#[path = "provider_responses_event_classification.rs"]
+mod provider_responses_event_classification;
+pub(crate) use provider_responses_event_classification::classify_v3_provider_responses_json_event;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum V3ProviderResponsesJsonFrameOutcome {
@@ -361,205 +364,7 @@ fn is_v3_provider_sse_keepalive_event_name(event_name: Option<&str>) -> bool {
     })
 }
 
-pub(crate) fn classify_v3_provider_responses_json_event(
-    event: &Value,
-) -> Result<V3ProviderResponsesJsonFrameOutcome, String> {
-    let event_type = event
-        .get("type")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "provider Responses JSON event requires a non-empty type".to_string())?;
-
-    if matches!(event_type, "error" | "response.error") {
-        let error = event
-            .get("error")
-            .and_then(Value::as_object)
-            .unwrap_or_else(|| event.as_object().expect("JSON event is an object"));
-        let code = error
-            .get("code")
-            .or_else(|| error.get("type"))
-            .and_then(Value::as_str)
-            .unwrap_or(event_type);
-        let message = error
-            .get("message")
-            .or_else(|| error.get("detail"))
-            .and_then(Value::as_str)
-            .unwrap_or("provider emitted a JSON error event");
-        return Ok(V3ProviderResponsesJsonFrameOutcome::Failure {
-            code: code.to_string(),
-            message: message.to_string(),
-        });
-    }
-
-    // response.incomplete 是 Responses 协议的合法终态（max_output_tokens 截断 /
-    // content_filter 触发），不是 provider 流错误：分类为 Terminal，客户端按协议
-    // 接收 status=incomplete 的完整响应，网关不得 abort 流或记录 provider 失败。
-    // 缺少 incomplete_details.reason 属于畸形终帧，继续走下方失败分组显式报错。
-    if event_type == "response.incomplete" {
-        if event
-            .pointer("/response/incomplete_details/reason")
-            .or_else(|| event.pointer("/incomplete_details/reason"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .is_some_and(|value| !value.is_empty())
-        {
-            return Ok(V3ProviderResponsesJsonFrameOutcome::Terminal);
-        }
-    }
-
-    if matches!(
-        event_type,
-        "response.failed" | "response.incomplete" | "response.cancelled" | "response.canceled"
-    ) {
-        let error = event
-            .pointer("/response/error")
-            .or_else(|| event.get("error"))
-            .and_then(Value::as_object)
-            .ok_or_else(|| format!("{event_type} requires a response error object"))?;
-        let code = error
-            .get("code")
-            .or_else(|| error.get("type"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| format!("{event_type} requires a non-empty error code"))?;
-        let message = error
-            .get("message")
-            .or_else(|| error.get("detail"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| format!("{event_type} requires a non-empty error message"))?;
-        return Ok(V3ProviderResponsesJsonFrameOutcome::Failure {
-            code: code.to_string(),
-            message: message.to_string(),
-        });
-    }
-
-    if event_type == "response.completed" {
-        return Ok(if response_terminal_has_client_output(event)? {
-            V3ProviderResponsesJsonFrameOutcome::Terminal
-        } else {
-            V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput
-        });
-    }
-    if matches!(event_type, "response.created" | "response.in_progress") {
-        return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
-    }
-    if matches!(
-        event_type,
-        "response.output_item.added" | "response.output_item.done"
-    ) {
-        let item = event
-            .get("item")
-            .ok_or_else(|| format!("{event_type} requires an item object"))?;
-        return Ok(if response_output_item_has_client_output(item)? {
-            V3ProviderResponsesJsonFrameOutcome::StartClientStream
-        } else {
-            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
-        });
-    }
-    if matches!(
-        event_type,
-        "response.content_part.added" | "response.content_part.done"
-    ) {
-        let part = event
-            .get("part")
-            .ok_or_else(|| format!("{event_type} requires a part object"))?;
-        return Ok(if response_message_part_has_client_output(part)? {
-            V3ProviderResponsesJsonFrameOutcome::StartClientStream
-        } else {
-            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
-        });
-    }
-    if matches!(
-        event_type,
-        "response.output_text.delta"
-            | "response.output_text.done"
-            | "response.refusal.delta"
-            | "response.refusal.done"
-            | "response.reasoning_text.delta"
-            | "response.reasoning_text.done"
-            | "response.reasoning_summary_text.delta"
-            | "response.reasoning_summary_text.done"
-            | "response.function_call_arguments.delta"
-            | "response.function_call_arguments.done"
-            | "response.custom_tool_call_input.delta"
-            | "response.custom_tool_call_input.done"
-            | "response.mcp_call.arguments.delta"
-            | "response.mcp_call.arguments.done"
-            | "response.code_interpreter_call_code.delta"
-            | "response.code_interpreter_call_code.done"
-            | "response.audio.delta"
-            | "response.audio_transcript.delta"
-            | "response.audio_transcript.done"
-    ) {
-        let has_output = [
-            "delta",
-            "text",
-            "refusal",
-            "arguments",
-            "input",
-            "code",
-            "transcript",
-        ]
-        .iter()
-        .any(|field| has_non_empty_string(event.get(*field)));
-        return Ok(if has_output {
-            V3ProviderResponsesJsonFrameOutcome::StartClientStream
-        } else {
-            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
-        });
-    }
-    if event_type == "response.requires_action" {
-        if event.get("required_action").is_none()
-            && event.pointer("/response/required_action").is_none()
-        {
-            return Err("response.requires_action requires required_action".to_string());
-        }
-        return Ok(V3ProviderResponsesJsonFrameOutcome::StartClientStream);
-    }
-    if matches!(
-        event_type,
-        "response.reasoning_signature.delta"
-            | "response.reasoning_image.delta"
-            | "response.reasoning_summary_part.added"
-            | "response.reasoning_summary_part.done"
-            | "response.output_text.annotation.added"
-            | "response.web_search_call.in_progress"
-            | "response.web_search_call.searching"
-            | "response.web_search_call.completed"
-            | "response.file_search_call.in_progress"
-            | "response.file_search_call.searching"
-            | "response.file_search_call.completed"
-            | "response.mcp_call.in_progress"
-            | "response.mcp_call.completed"
-            | "response.computer_call.in_progress"
-            | "response.computer_call_output.in_progress"
-            | "response.computer_call_output.completed"
-            | "response.code_interpreter_call.in_progress"
-            | "response.code_interpreter_call.completed"
-            | "response.image_generation_call.in_progress"
-            | "response.image_generation_call.partial_image"
-            | "response.image_generation_call.completed"
-            | "response.audio.done"
-            | "response.done"
-    ) {
-        return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
-    }
-    // Provider-owned Responses extensions are valid inbound data-plane events.
-    // Keep the complete frame available for normalization/observation, but do
-    // not abort a valid stream before its registered semantic terminal event.
-    if event_type.starts_with("codex.") {
-        return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
-    }
-    Err(format!(
-        "provider Responses SSE event type {event_type:?} is not registered"
-    ))
-}
-
-fn response_terminal_has_client_output(event: &Value) -> Result<bool, String> {
+pub(super) fn response_terminal_has_client_output(event: &Value) -> Result<bool, String> {
     let output = event
         .pointer("/response/output")
         .or_else(|| event.get("output"))
@@ -573,7 +378,7 @@ fn response_terminal_has_client_output(event: &Value) -> Result<bool, String> {
     Ok(has_output)
 }
 
-fn response_output_item_has_client_output(item: &Value) -> Result<bool, String> {
+pub(super) fn response_output_item_has_client_output(item: &Value) -> Result<bool, String> {
     let item = item
         .as_object()
         .ok_or_else(|| "provider Responses output item must be an object".to_string())?;
@@ -659,7 +464,7 @@ pub(crate) fn is_v3_provider_sse_transport_keepalive_data(data: &str) -> bool {
             .is_some_and(|value| value.is_null())
 }
 
-fn response_message_part_has_client_output(part: &Value) -> Result<bool, String> {
+pub(super) fn response_message_part_has_client_output(part: &Value) -> Result<bool, String> {
     if let Some(text) = part.as_str() {
         return Ok(!text.trim().is_empty());
     }
@@ -686,7 +491,7 @@ fn response_message_part_has_client_output(part: &Value) -> Result<bool, String>
     Ok(!text.trim().is_empty())
 }
 
-fn response_reasoning_part_has_client_output(part: &Value) -> Result<bool, String> {
+pub(super) fn response_reasoning_part_has_client_output(part: &Value) -> Result<bool, String> {
     let part = part
         .as_object()
         .ok_or_else(|| "provider Responses reasoning content part must be an object".to_string())?;
@@ -705,7 +510,7 @@ fn response_reasoning_part_has_client_output(part: &Value) -> Result<bool, Strin
     Ok(!text.trim().is_empty())
 }
 
-fn require_non_empty_output_string(
+pub(super) fn require_non_empty_output_string(
     item: &serde_json::Map<String, Value>,
     output_type: &str,
     field: &str,
@@ -718,7 +523,7 @@ fn require_non_empty_output_string(
     Ok(())
 }
 
-fn require_output_string(
+pub(super) fn require_output_string(
     item: &serde_json::Map<String, Value>,
     output_type: &str,
     field: &str,
@@ -1021,7 +826,7 @@ fn has_string(value: Option<&Value>) -> Result<bool, String> {
         .unwrap_or_else(|| Err("provider SSE output field is missing".to_string()))
 }
 
-fn has_non_empty_string(value: Option<&Value>) -> bool {
+pub(super) fn has_non_empty_string(value: Option<&Value>) -> bool {
     value
         .and_then(Value::as_str)
         .is_some_and(|value| !value.is_empty())
@@ -1116,6 +921,23 @@ mod provider_sse_json_codec_tests {
         )
         .expect("provider extension frame must normalize");
         assert_eq!(normalized, data);
+    }
+
+    #[test]
+    fn responses_accepts_provider_owned_responsesapi_extension_without_terminal() {
+        let data = r#"{"type":"responsesapi.websocket_timing","elapsed_ms":12}"#;
+        assert_eq!(
+            classify_v3_provider_responses_json_event(&serde_json::from_str(data).unwrap()),
+            Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
+        );
+    }
+
+    #[test]
+    fn unknown_responses_extension_namespace_still_fails_closed() {
+        let data = serde_json::json!({"type":"provider_private.websocket_timing"});
+        let error = classify_v3_provider_responses_json_event(&data)
+            .expect_err("unregistered provider namespace must remain explicit");
+        assert!(error.contains("not registered"));
     }
 
     #[test]

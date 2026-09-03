@@ -32,6 +32,7 @@ pub enum V3TableKind {
     ToolChoice,
     Usage,
     RequestField,
+    ProviderResponseEvent,
 }
 
 impl V3TableKind {
@@ -44,6 +45,7 @@ impl V3TableKind {
             V3TableKind::ToolChoice => "tool_choice_map",
             V3TableKind::Usage => "usage_map",
             V3TableKind::RequestField => "request_field_map",
+            V3TableKind::ProviderResponseEvent => "provider_response_event_map",
         }
     }
 }
@@ -188,6 +190,10 @@ const TABLE_SOURCES: &[(&str, &str)] = &[
     (
         "request_field_map",
         include_str!("../tables/request_field_map.json"),
+    ),
+    (
+        "provider_response_event_map",
+        include_str!("../tables/provider_response_event_map.json"),
     ),
 ];
 

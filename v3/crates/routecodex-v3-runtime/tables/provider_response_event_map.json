@@ -1,0 +1,10 @@
+{
+  "table_id": "provider_response_event_map",
+  "kind": "protocol_value_map",
+  "protocols": ["responses"],
+  "description": "Provider-owned Responses events that are preserved as inbound data-plane extensions.",
+  "values": [
+    { "hub": "provider_owned_codex_rate_limits", "responses": "codex.rate_limits", "direction": "inbound" },
+    { "hub": "provider_owned_responsesapi_websocket_timing", "responses": "responsesapi.websocket_timing", "direction": "inbound" }
+  ]
+}

@@ -66,38 +66,43 @@ pub(super) fn anthropic_tool_use_as_responses_call(
             field: "tool_use.input",
         })?;
     if context.is_governed_custom_tool(name) {
-        let wrapper = input
-            .as_object()
-            .filter(|wrapper| {
-                wrapper.keys().all(|key| {
-                    matches!(
-                        key.as_str(),
-                        "input" | "reason" | "goal_alignment_confidence" | "model_id"
-                    )
-                })
-            })
-            .ok_or(V3AnthropicCodecError::MalformedField {
-                field: "custom tool_use.input wrapper",
-            })?;
-        let raw = wrapper.get("input").and_then(Value::as_str).ok_or(
-            V3AnthropicCodecError::MalformedField {
-                field: "custom tool_use.input.input",
-            },
-        )?;
-        let mut output = json!({
-            "type":"custom_tool_call",
-            "call_id":call_id,
-            "name":name,
-            "input":raw
-        });
-        if let Some(output) = output.as_object_mut() {
+        let wrapper = input.as_object().filter(|value| value.contains_key("input"));
+        let mut output = Map::from_iter([
+            ("type".to_string(), Value::String("custom_tool_call".to_string())),
+            ("call_id".to_string(), Value::String(call_id.to_owned())),
+            ("name".to_string(), Value::String(name.to_owned())),
+        ]);
+        let raw = if let Some(wrapper) = wrapper {
+            if !wrapper.keys().all(|key| {
+                matches!(
+                    key.as_str(),
+                    "input" | "reason" | "goal_alignment_confidence" | "model_id"
+                )
+            }) || wrapper.get("input").and_then(Value::as_str).is_none()
+            {
+                return Err(V3AnthropicCodecError::MalformedField {
+                    field: "custom tool_use.input",
+                });
+            }
             for key in ["reason", "goal_alignment_confidence", "model_id"] {
                 if let Some(value) = wrapper.get(key) {
                     output.insert(key.to_string(), value.clone());
                 }
             }
-        }
-        return Ok(output);
+            wrapper
+                .get("input")
+                .and_then(Value::as_str)
+                .expect("validated custom wrapper input")
+                .to_owned()
+        } else {
+            serde_json::to_string(input).map_err(|_| {
+                V3AnthropicCodecError::MalformedField {
+                    field: "custom tool_use.input",
+                }
+            })?
+        };
+        output.insert("input".to_string(), Value::String(raw));
+        return Ok(Value::Object(output));
     }
     Ok(json!({
         "type":"function_call",
@@ -106,4 +111,53 @@ pub(super) fn anthropic_tool_use_as_responses_call(
         "arguments":serde_json::to_string(input)
             .map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use.input" })?
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn governed_custom_tool_accepts_unwrapped_native_input_after_guidance_removal() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "custom", "name": "apply_patch"}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({
+                "type": "tool_use",
+                "id": "call_native_input",
+                "name": "apply_patch",
+                "input": {"patch": "*** Begin Patch\n*** End Patch"}
+            }),
+            &context,
+        )
+        .expect("unwrapped custom input must remain projectable");
+
+        assert_eq!(call["type"], "custom_tool_call");
+        assert_eq!(call["input"], "{\"patch\":\"*** Begin Patch\\n*** End Patch\"}");
+        assert!(call.get("model_id").is_none());
+    }
+
+    #[test]
+    fn governed_custom_tool_accepts_empty_native_input_after_guidance_removal() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "custom", "name": "apply_patch"}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({
+                "type": "tool_use",
+                "id": "call_empty_input",
+                "name": "apply_patch",
+                "input": {}
+            }),
+            &context,
+        )
+        .expect("empty native input must remain projectable");
+
+        assert_eq!(call["type"], "custom_tool_call");
+        assert_eq!(call["input"], "{}");
+        assert!(call.get("model_id").is_none());
+    }
 }
