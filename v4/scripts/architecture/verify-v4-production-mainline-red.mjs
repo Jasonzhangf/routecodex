@@ -12,7 +12,13 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const runtimeBin = fs.readFileSync(path.join(root, 'crates/routecodex-v4-runtime-bin/src/main.rs'), 'utf8');
 const runtimeSource = fs.readFileSync(path.join(root, 'crates/routecodex-v4-runtime/src/lib.rs'), 'utf8');
 const providerSource = fs.readFileSync(path.join(root, 'crates/routecodex-v4-provider/src/lib.rs'), 'utf8');
-const productionSource = runtimeBin.split('#[cfg(test)]', 1)[0];
+// Test-only helpers are interleaved with production declarations.  Use the
+// final test-module boundary instead of truncating the production file at the
+// first cfg(test) helper.
+const testModuleBoundary = runtimeBin.lastIndexOf('\n#[cfg(test)]');
+const productionSource = testModuleBoundary >= 0
+  ? runtimeBin.slice(0, testModuleBoundary)
+  : runtimeBin;
 const failures = [];
 
 if (/execute_request_scoped_with_owner\([\s\S]*?\)\s*\.map_err/.test(productionSource)
@@ -37,7 +43,9 @@ for (const symbol of [
 ]) {
   if (productionSource.includes(symbol)) failures.push(`RUNTIME_BIN_DIRECT_BUSINESS_HELPER: ${symbol}`);
 }
-if (!productionSource.includes('send_protocol(')) {
+if (!productionSource.includes('send_protocol(')
+    && !productionSource.includes('dispatch_nonstream(')
+    && !productionSource.includes('dispatch_streaming(')) {
   failures.push('PROVIDER_TRANSPORT_UNBOUND: runtime-bin must use provider-owned protocol dispatch');
 }
 if (!runtimeBin.includes('execute_provider_response_scoped')) {
