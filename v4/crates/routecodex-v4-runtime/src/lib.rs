@@ -1272,14 +1272,9 @@ impl RuntimeOperator for ExecutionPlan {
         _registries: &mut RuntimeRegistries<'_>,
     ) -> Result<(), RuntimeFault> {
         ctx.control.execution_plan = Some(format!("plan:{}", ctx.binding().plan_hash));
-        // Router facts, target selection and route exit are typed, opaque
-        // control facts; they are never projected into payload and never
-        // mutated here.
-        ctx.control.route_facts = Some(format!("facts:{}:classified", ctx.binding().plan_hash));
-        ctx.control.target_selection = Some(format!("opaque:{}:selected", ctx.binding().plan_hash));
-        // Route exit is bound to the typed-facts operator decision (relay or
-        // direct); it is never a hardcoded value and never derived from
-        // provider id / model / payload shape.
+        // Target facts/selection are owned by the Cordis target-selection
+        // node. The runtime kernel only records the already-selected lane;
+        // it must not publish placeholder route facts or selections.
         ctx.control.route_exit = Some(if ctx.control.relay_operator_selected {
             "relay_policy_bound".to_string()
         } else {
