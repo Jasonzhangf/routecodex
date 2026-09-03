@@ -48,80 +48,29 @@
   "prerequisites": [
     {
       "feature_id": "V4-RUNTIME-002",
-      "status": "pass",
-      "gap_detected": true,
-      "epoch_closure_lane_status": "source_green",
-      "audit_commit": "fa64444e9cb6f8029accaf80b1dd9e4349876613",
-      "source_paths": ["crates/routecodex-v4-node-container/src/lib.rs"],
-      "evidence_refs": [
-        {"role":"closure_audit","gate_id":"v4_node_container_epoch_closure_audit","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/closure-audit.json"}
-      ]
+      "status": "pending",
+      "gap_detected": null,
+      "epoch_closure_lane_status": "pending",
+      "audit_commit": null,
+      "source_paths": [],
+      "evidence_refs": []
     }
   ],
   "batches": [
     {
       "batch_id": "A",
       "conditional": false,
-      "owner_binding_status": "bound",
-      "owner_function_id": "v4.parity.product_ledger",
-      "module_ids": ["routecodex-v4-parity"],
-      "owned_paths": [
-        "scripts/architecture/verify-v4-product-differential.mjs",
-        "scripts/architecture/verify-v4-product-parity-ledger.mjs",
-        "scripts/architecture/verify-v4-product-parity-status.mjs",
-        "scripts/architecture/verify-v4-v3-baseline-delta.mjs"
-      ],
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
       "source_dependencies": [],
-      "status": "source_green",
+      "status": "pending",
       "tasks": [
-        {
-          "task_id":"V4-PARITY-001","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate.json",
-          "function_ids":["v4.parity.product_ledger"],"resource_ids":["v4.parity.product_ledger"],
-          "source_paths":["scripts/architecture/verify-v4-product-parity-ledger.mjs"],"support_paths":[],
-          "required_gate_ids":["v4_parity_ledger_positive","v4_parity_ledger_red","v4_parity_ledger_boundary","v4_parity_ledger_plane"],"mainline_binding":"forbidden_before_integration",
-          "evidence_refs":[
-            {"role":"positive","gate_id":"v4_parity_ledger_positive","path":"docs/evidence/feature-completion/M1/V4-PARITY-001/positive.json"},
-            {"role":"red_gate","gate_id":"v4_parity_ledger_red","path":"docs/evidence/feature-completion/M1/V4-PARITY-001/red-gate.json"},
-            {"role":"boundary_audit","gate_id":"v4_parity_ledger_boundary","path":"docs/evidence/feature-completion/M1/V4-PARITY-001/boundary-audit.json"},
-            {"role":"plane_isolation","gate_id":"v4_parity_ledger_plane","path":"docs/evidence/feature-completion/M1/V4-PARITY-001/plane-isolation.json"}
-          ]
-        },
-        {
-          "task_id":"V4-PARITY-002","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate.json",
-          "function_ids":["v4.parity.baseline_delta"],"resource_ids":["v4.parity.baseline_delta"],
-          "source_paths":["scripts/architecture/verify-v4-v3-baseline-delta.mjs"],"support_paths":[],
-          "required_gate_ids":["v4_parity_ledger_positive","v4_parity_ledger_red","v4_parity_ledger_boundary","v4_parity_ledger_plane"],"mainline_binding":"forbidden_before_integration",
-          "evidence_refs":[
-            {"role":"positive","gate_id":"v4_parity_ledger_positive","path":"docs/evidence/feature-completion/M1/V4-PARITY-002/positive.json"},
-            {"role":"red_gate","gate_id":"v4_parity_ledger_red","path":"docs/evidence/feature-completion/M1/V4-PARITY-002/red-gate.json"},
-            {"role":"boundary_audit","gate_id":"v4_parity_ledger_boundary","path":"docs/evidence/feature-completion/M1/V4-PARITY-002/boundary-audit.json"},
-            {"role":"plane_isolation","gate_id":"v4_parity_ledger_plane","path":"docs/evidence/feature-completion/M1/V4-PARITY-002/plane-isolation.json"}
-          ]
-        },
-        {
-          "task_id":"V4-PARITY-003","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate.json",
-          "function_ids":["v4.parity.status_gate"],"resource_ids":["v4.parity.status_gate"],
-          "source_paths":["scripts/architecture/verify-v4-product-parity-status.mjs"],"support_paths":[],
-          "required_gate_ids":["v4_parity_ledger_positive","v4_parity_ledger_red","v4_parity_ledger_boundary","v4_parity_ledger_plane"],"mainline_binding":"forbidden_before_integration",
-          "evidence_refs":[
-            {"role":"positive","gate_id":"v4_parity_ledger_positive","path":"docs/evidence/feature-completion/M1/V4-PARITY-003/positive.json"},
-            {"role":"red_gate","gate_id":"v4_parity_ledger_red","path":"docs/evidence/feature-completion/M1/V4-PARITY-003/red-gate.json"},
-            {"role":"boundary_audit","gate_id":"v4_parity_ledger_boundary","path":"docs/evidence/feature-completion/M1/V4-PARITY-003/boundary-audit.json"},
-            {"role":"plane_isolation","gate_id":"v4_parity_ledger_plane","path":"docs/evidence/feature-completion/M1/V4-PARITY-003/plane-isolation.json"}
-          ]
-        },
-        {
-          "task_id":"V4-PARITY-HARNESS-001","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate.json",
-          "function_ids":["v4.parity.differential_harness"],"resource_ids":["v4.parity.differential_harness"],
-          "source_paths":["scripts/architecture/verify-v4-product-differential.mjs"],"support_paths":[],
-          "required_gate_ids":["v4_parity_ledger_positive","v4_parity_ledger_red","v4_parity_ledger_boundary","v4_parity_ledger_plane"],"mainline_binding":"forbidden_before_integration",
-          "evidence_refs":[
-            {"role":"positive","gate_id":"v4_parity_ledger_positive","path":"docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/positive.json"},
-            {"role":"red_gate","gate_id":"v4_parity_ledger_red","path":"docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/red-gate.json"},
-            {"role":"boundary_audit","gate_id":"v4_parity_ledger_boundary","path":"docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/boundary-audit.json"},
-            {"role":"plane_isolation","gate_id":"v4_parity_ledger_plane","path":"docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/plane-isolation.json"}
-          ]
-        }
+        {"task_id":"V4-PARITY-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PARITY-002","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PARITY-003","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PARITY-HARNESS-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
       ]
     },
     {
@@ -160,62 +109,46 @@
     {
       "batch_id": "C",
       "conditional": false,
-      "owner_binding_status": "bound",
-      "owner_function_id": "v4.runtime.cordis_mount_candidate",
-      "module_ids": ["routecodex-v4-cordis-bridge"],
-      "owned_paths": ["crates/routecodex-v4-cordis-bridge/**"],
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
       "source_dependencies": [],
-      "status": "source_green",
+      "status": "pending",
       "tasks": [
-        {
-          "task_id":"V4-RUNTIME-004",
-          "status":"source_green",
-          "candidate_record":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/fix-candidate.json",
-          "function_ids":["v4.runtime.cordis_mount_candidate"],
-          "resource_ids":["v4.cordis.mount_candidate"],
-          "source_paths":["crates/routecodex-v4-cordis-bridge/src/lib.rs"],
-          "support_paths":[],
-          "required_gate_ids":["v4_runtime_004_mount_positive","v4_runtime_004_mount_red","v4_runtime_004_mount_boundary","v4_runtime_004_mount_plane"],
-          "mainline_binding":"forbidden_before_integration",
-          "evidence_refs":[
-            {"role":"positive","gate_id":"v4_runtime_004_mount_positive","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/positive.json"},
-            {"role":"red_gate","gate_id":"v4_runtime_004_mount_red","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/red-gate.json"},
-            {"role":"boundary_audit","gate_id":"v4_runtime_004_mount_boundary","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/boundary-audit.json"},
-            {"role":"plane_isolation","gate_id":"v4_runtime_004_mount_plane","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-004/plane-isolation.json"}
-          ]
-        }
+        {"task_id":"V4-RUNTIME-004","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
       ]
     },
     {
       "batch_id": "D",
       "conditional": false,
-      "owner_binding_status": "bound",
-      "owner_function_id": "v4.plugin.request.responses_normalize",
-      "module_ids": ["routecodex-v4-standard-plugins"],
-      "owned_paths": ["crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs","crates/routecodex-v4-standard-plugins/src/provider_semantic.rs","crates/routecodex-v4-standard-plugins/src/request_governance.rs","crates/routecodex-v4-standard-plugins/src/request_normalize.rs","crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs"],
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
       "source_dependencies": [],
-      "status": "source_green",
+      "status": "pending",
       "tasks": [
-        {"task_id":"V4-PLUGIN-001","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate.json","function_ids":["v4.plugin.request.responses_normalize"],"resource_ids":["v4.plugin.request.responses_normalize"],"source_paths":["crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/src/request_normalize.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_request_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-001/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_request_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-001/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_request_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-001/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_request_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-001/plane-isolation.json"}]},
-        {"task_id":"V4-PLUGIN-002","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate.json","function_ids":["v4.plugin.request.chat_to_responses"],"resource_ids":["v4.plugin.request.chat_to_responses"],"source_paths":["crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_request_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-002/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_request_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-002/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_request_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-002/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_request_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-002/plane-isolation.json"}]},
-        {"task_id":"V4-PLUGIN-003","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate.json","function_ids":["v4.plugin.request.governance"],"resource_ids":["v4.plugin.request.governance"],"source_paths":["crates/routecodex-v4-standard-plugins/src/request_governance.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_request_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-003/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_request_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-003/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_request_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-003/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_request_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-003/plane-isolation.json"}]},
-        {"task_id":"V4-PLUGIN-004","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate.json","function_ids":["v4.plugin.request.provider_semantic"],"resource_ids":["v4.plugin.request.provider_semantic"],"source_paths":["crates/routecodex-v4-standard-plugins/src/provider_semantic.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_request_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-004/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_request_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-004/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_request_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-004/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_request_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-004/plane-isolation.json"}]},
-        {"task_id":"V4-PLUGIN-005","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate.json","function_ids":["v4.plugin.request.responses_wire_build"],"resource_ids":["v4.plugin.request.responses_wire_build"],"source_paths":["crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_request_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-005/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_request_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-005/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_request_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-005/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_request_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-005/plane-isolation.json"}]}
+        {"task_id":"V4-PLUGIN-001","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PLUGIN-002","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PLUGIN-003","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PLUGIN-004","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PLUGIN-005","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
       ]
     },
     {
       "batch_id": "E",
       "conditional": false,
-      "owner_binding_status": "bound",
-      "owner_function_id": "v4.plugin.response.decode",
-      "module_ids": ["routecodex-v4-standard-plugins"],
-      "owned_paths": ["crates/routecodex-v4-standard-plugins/src/response_decode.rs","crates/routecodex-v4-standard-plugins/src/response_governance.rs","crates/routecodex-v4-standard-plugins/src/response_fault.rs"],
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
       "source_dependencies": [],
-      "status": "source_green",
+      "status": "pending",
       "tasks": [
-        {"task_id":"V4-PLUGIN-006","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-E/fix-candidate.json","function_ids":["v4.plugin.response.decode"],"resource_ids":["v4.plugin.response.decode"],"source_paths":["crates/routecodex-v4-standard-plugins/src/response_decode.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_response_positive","v4_plugin_response_red","v4_plugin_response_boundary","v4_plugin_response_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_response_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-006/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_response_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-006/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_response_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-006/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_response_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-006/plane-isolation.json"}]},
-        {"task_id":"V4-PLUGIN-007","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-E/fix-candidate.json","function_ids":["v4.plugin.response.governance"],"resource_ids":["v4.plugin.response.governance"],"source_paths":["crates/routecodex-v4-standard-plugins/src/response_governance.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_response_positive","v4_plugin_response_red","v4_plugin_response_boundary","v4_plugin_response_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_response_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-007/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_response_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-007/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_response_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-007/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_response_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-007/plane-isolation.json"}]},
-        {"task_id":"V4-PLUGIN-008","status":"source_green","candidate_record":"docs/evidence/feature-completion/M1/V4-LAYER-BATCH-E/fix-candidate.json","function_ids":["v4.plugin.response.fault_intake"],"resource_ids":["v4.plugin.response.fault_intake"],"source_paths":["crates/routecodex-v4-standard-plugins/src/response_fault.rs"],"support_paths":[],"required_gate_ids":["v4_plugin_response_positive","v4_plugin_response_red","v4_plugin_response_boundary","v4_plugin_response_plane"],"mainline_binding":"forbidden_before_integration","evidence_refs":[{"role":"positive","gate_id":"v4_plugin_response_positive","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-008/positive.json"},{"role":"red_gate","gate_id":"v4_plugin_response_red","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-008/red-gate.json"},{"role":"boundary_audit","gate_id":"v4_plugin_response_boundary","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-008/boundary-audit.json"},{"role":"plane_isolation","gate_id":"v4_plugin_response_plane","path":"docs/evidence/feature-completion/M1/V4-PLUGIN-008/plane-isolation.json"}]}
+        {"task_id":"V4-PLUGIN-006","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PLUGIN-007","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]},
+        {"task_id":"V4-PLUGIN-008","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
       ]
     },
     {
@@ -270,30 +203,14 @@
     {
       "batch_id": "H",
       "conditional": true,
-      "owner_binding_status": "bound",
-      "owner_function_id": "v4.node_container.execution_epoch",
-      "module_ids": ["routecodex-v4-node-container"],
-      "owned_paths": ["crates/routecodex-v4-node-container/**"],
+      "owner_binding_status": "pending",
+      "owner_function_id": null,
+      "module_ids": [],
+      "owned_paths": [],
       "source_dependencies": [],
-      "status": "source_green",
+      "status": "pending",
       "tasks": [
-        {
-          "task_id":"V4-RUNTIME-002",
-          "status":"source_green",
-          "candidate_record":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/fix-candidate.json",
-          "function_ids":["v4.node_container.execution_epoch"],
-          "resource_ids":["v4.node_container.execution_epoch"],
-          "source_paths":["crates/routecodex-v4-node-container/src/lib.rs","crates/routecodex-v4-node-container/tests/l2_epoch.rs"],
-          "support_paths":[],
-          "required_gate_ids":["v4_node_container_epoch_positive","v4_node_container_epoch_red","v4_node_container_epoch_boundary","v4_node_container_epoch_plane"],
-          "mainline_binding":"forbidden_before_integration",
-          "evidence_refs":[
-            {"role":"positive","gate_id":"v4_node_container_epoch_positive","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/positive.json"},
-            {"role":"red_gate","gate_id":"v4_node_container_epoch_red","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/red-gate.json"},
-            {"role":"boundary_audit","gate_id":"v4_node_container_epoch_boundary","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/boundary-audit.json"},
-            {"role":"plane_isolation","gate_id":"v4_node_container_epoch_plane","path":"docs/evidence/feature-completion/M1/V4-RUNTIME-002/plane-isolation.json"}
-          ]
-        }
+        {"task_id":"V4-RUNTIME-002","status":"pending","candidate_record":null,"function_ids":[],"resource_ids":[],"source_paths":[],"support_paths":[],"required_gate_ids":[],"mainline_binding":"forbidden_before_integration","evidence_refs":[]}
       ]
     }
   ],
