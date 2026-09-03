@@ -223,7 +223,7 @@ test('Cordis mount failure fails and disposes the Rust candidate', async (t) => 
 
   await assert.rejects(
     host.mount([failing]),
-    (error) => error instanceof CordisHostError && error.code === 'plugin_not_active',
+    (error) => error instanceof CordisHostError && error.code === 'service_not_declared',
   );
   assert.equal((await port.status()).state, 'disposed');
   assert.equal(host.disposed, true);
