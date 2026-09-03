@@ -1,10 +1,10 @@
 {
   "evidence_id": "install-1",
   "issue_id": "v4-cordis-production-wiring",
-  "experiment_id": "fix-24b50bd90e8c",
+  "experiment_id": "fix-b179f3d94ca7",
   "phase": "deployment_install",
   "kind": "install",
-  "source_commit": "24b50bd90e8cf534964e1cfd55ed811668fd8006",
+  "source_commit": "b179f3d94ca7f508d0b281d0ebcabd7a9da8770e",
   "artifact_hash": "sha256:5dcb6c6c6777be32bbecf40025ed19676aad32d1c6a2b643ea3cd53d342ef316",
   "execution_surface": "deployed_blackbox",
   "environment_id": "local-v4-5520",
@@ -27,8 +27,8 @@
   ],
   "exit_status": 0,
   "result": "pass",
-  "created_at": "2026-09-03T09:37:51.374Z",
-  "expires_at": "2026-09-10T09:37:51.374Z",
+  "created_at": "2026-09-03T14:21:26.680Z",
+  "expires_at": "2026-09-10T14:21:26.680Z",
   "input_hashes": [
     "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
     "sha256:bd10c558d90956ee382b260984979b4dc106589a795a476d8ba5b49ec66980a6"
