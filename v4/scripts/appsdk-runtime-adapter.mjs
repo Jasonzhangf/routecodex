@@ -92,7 +92,8 @@ const candidate = {
   fix_candidate_id: candidateId, issue_id: issueId, module_id: moduleId, worktree_id: worktreeId,
   base_commit: base, head_commit: head, tree_hash: tree, diff_hash: diffHash,
   design_id: 'v4-feature-completion-plan-28', owner: 'routecodex-v4-runtime', scope_hash: scopeHash,
-  changed_paths: run('git', ['diff', '--name-only', '--no-renames', base, head, '--', ...ownedPaths]).output.split('\n').filter(Boolean),
+  changed_paths: run('git', ['diff', '--name-only', '--no-renames', base, head, '--', ...ownedPaths])
+    .output.split('\n').filter(Boolean).map((file) => file.startsWith('v4/') ? file.slice(3) : file),
   verification_evidence_ids: ['whitebox-1', 'positive-1', 'negative-1'], created_at: candidateCreatedAt,
 };
 fs.writeFileSync(path.join(records, `fix-candidate-record-${moduleId}.json`), `${JSON.stringify(candidate, null, 2)}\n`);

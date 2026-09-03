@@ -1,11 +1,11 @@
 {
-  "fix_candidate_id": "fix-f73e0037720b",
+  "fix_candidate_id": "fix-24b50bd90e8c",
   "issue_id": "v4-cordis-production-wiring",
   "module_id": "routecodex-v4-base-node",
-  "worktree_id": "v4-cordis-f73e0037720b",
-  "base_commit": "b1275000310168c7b1f5ab7f53336c5f86343d5d",
-  "head_commit": "f73e0037720ba55fa3a5fde66308ac06f1585861",
-  "tree_hash": "f79258d5d331850d60177c4c85fd336f7b64249c",
+  "worktree_id": "v4-cordis-24b50bd90e8c",
+  "base_commit": "f73e0037720ba55fa3a5fde66308ac06f1585861",
+  "head_commit": "24b50bd90e8cf534964e1cfd55ed811668fd8006",
+  "tree_hash": "447728ff9b052922e01f3abcdff1e650517c7845",
   "diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "design_id": "v4-feature-completion-plan-28",
   "owner": "routecodex-v4-runtime",
@@ -16,5 +16,5 @@
     "positive-1",
     "negative-1"
   ],
-  "created_at": "2026-09-03T09:35:05.317Z"
+  "created_at": "2026-09-03T09:37:44.142Z"
 }

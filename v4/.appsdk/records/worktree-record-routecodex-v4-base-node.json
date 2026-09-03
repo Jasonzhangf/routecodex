@@ -1,14 +1,14 @@
 {
-  "worktree_id": "v4-cordis-f73e0037720b",
+  "worktree_id": "v4-cordis-24b50bd90e8c",
   "issue_id": "v4-cordis-production-wiring",
   "module_id": "routecodex-v4-base-node",
-  "base_ref": "b1275000310168c7b1f5ab7f53336c5f86343d5d",
-  "base_commit": "b1275000310168c7b1f5ab7f53336c5f86343d5d",
+  "base_ref": "f73e0037720ba55fa3a5fde66308ac06f1585861",
+  "base_commit": "f73e0037720ba55fa3a5fde66308ac06f1585861",
   "branch": "codex/v4-cordis-production-owner-0903-r3",
-  "head_commit": "f73e0037720ba55fa3a5fde66308ac06f1585861",
+  "head_commit": "24b50bd90e8cf534964e1cfd55ed811668fd8006",
   "initial_clean": true,
   "final_clean": true,
   "isolation_mode": "isolated_worktree",
   "scope_hash": "sha256:61114c81e76e622ea6219a07fbda6a8203ca94eaacf9fed4ac615eb56546b617",
-  "created_at": "2026-09-03T09:35:24.041Z"
+  "created_at": "2026-09-03T09:38:04.531Z"
 }
