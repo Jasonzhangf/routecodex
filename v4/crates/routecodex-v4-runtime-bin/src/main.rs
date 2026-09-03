@@ -24,7 +24,7 @@ use routecodex_v4_provider::{
 };
 use routecodex_v4_router::{
     apply_product_error_policy,
-    TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
+    TargetSelectionHandle, TARGET_SELECTION_PLUGIN_ID,
 };
 use routecodex_v4_runtime::{
     parse_request_admission_facts, project_runtime_fault, project_runtime_fault_with_policy,
@@ -66,7 +66,7 @@ impl ProductionHandleRegistry {
 
 impl HandleRegistry for ProductionHandleRegistry {
     fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
-        if plugin_id == TARGET_SELECTION_PLUGIN_ID || plugin_id == DIRECT_TARGET_SELECTION_PLUGIN_ID {
+        if plugin_id == TARGET_SELECTION_PLUGIN_ID {
             if let Some(handle) = self.router_target.as_ref() {
                 return Some(handle as &dyn PluginHandle);
             }
