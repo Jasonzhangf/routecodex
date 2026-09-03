@@ -382,7 +382,7 @@ export function createCordisPluginFactory({ catalog, implementations }) {
 
 export function computeNodePluginPlanHash(plan) {
   const { hash: _hash, ...body } = plan;
-  return createHash('sha256').update(canonicalJson(body)).digest('hex');
+  return `sha256:${createHash('sha256').update(canonicalJson(body)).digest('hex')}`;
 }
 
 export class CordisHostError extends Error {
@@ -625,7 +625,12 @@ export class RustNodeContainerPort {
 
   executeNode(planHash, input, ...extra) {
     if (extra.length > 0) this.#rejectFields('execute_node');
-    if (typeof planHash !== 'string' || planHash.length !== 64) {
+    if (
+      typeof planHash !== 'string'
+      || planHash.length !== 71
+      || !planHash.startsWith('sha256:')
+      || !/^[0-9a-f]{64}$/.test(planHash.slice(7))
+    ) {
       throw new CordisHostError('binding_protocol', 'execute_node requires a sha256 plan hash');
     }
     validateExecutionInput(input);
