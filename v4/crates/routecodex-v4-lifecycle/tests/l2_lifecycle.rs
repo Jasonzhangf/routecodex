@@ -95,6 +95,16 @@ fn repair_stale_removes_dead_instance_record_and_socket() {
 }
 
 #[test]
+fn repair_stale_removes_socket_only_after_owner_probe_fails() {
+    let paths = V4LifecyclePaths::for_state_root(test_root("socket-only"));
+    paths.prepare().expect("prepare");
+    std::os::unix::net::UnixListener::bind(&paths.control_socket).expect("socket");
+    repair_stale(&paths).expect("repair socket-only stale state");
+    assert!(!paths.control_socket.exists());
+    fs::remove_dir_all(&paths.state_root).expect("cleanup exact test root");
+}
+
+#[test]
 fn unmanaged_takeover_never_signals_foreign_listener() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener");
     let address = listener.local_addr().expect("address").to_string();
