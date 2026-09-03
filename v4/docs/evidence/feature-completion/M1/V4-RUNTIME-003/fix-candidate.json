@@ -2,14 +2,14 @@
   "fix_candidate_id": "v4-runtime-003-plan-bundle-candidate",
   "issue_id": "V4-RUNTIME-003",
   "module_id": "routecodex-v4-plugin-plan",
-  "worktree_id": "v4-feature-completion-20260824T190611Z-Macstudio-v4branch",
-  "base_commit": "de5d311933329c5de0a0dd2b6433ce0cfcaf8434",
-  "head_commit": "661b55b8580b0cad3e42fffaa91470a68eee7a11",
-  "tree_hash": "662b26a9b66607b2c3d5fe362e05151760d4fcd3",
-  "diff_hash": "sha256:958c27639aac1d4408c6d8c0cecc12f74aa45f680f26cf0953b6cf5da90c326c",
+  "worktree_id": "v4-cordis-remediation-c0-20260902",
+  "base_commit": "2efc9e09e9cc22bd60d0b66da7710c1250e11d53",
+  "head_commit": "2e5b27cd27e9cdb221b9b8f1170bd5db97caf66c",
+  "tree_hash": "66e8ef1c50d09ebb612482c5c1a43ff245ce1f7c",
+  "diff_hash": "sha256:4678627564bd7f8a0bdd9a2980f29486a121e759f02d793dfa2704d0beeb7941",
   "design_id": "v4-feature-completion-runtime-003a-plan-bundle",
   "owner": "routecodex-v4-plugin-plan",
-  "scope_hash": "sha256:d5f2b4372551c97beb8c24cf20677de75f58efddb08f688c68a355be7a6c6bc1",
+  "scope_hash": "sha256:e4db861c06ceb4af3b11e2ec838704d1b5fa648f272c59a135791a36666d62cc",
   "changed_paths": [
     "v4/crates/routecodex-v4-plugin-plan/src/lib.rs",
     "v4/docs/architecture/maps/function-map.json",
@@ -17,7 +17,7 @@
     "v4/docs/architecture/maps/verification-map.json"
   ],
   "verification_evidence_ids": ["boundary-audit", "plane-isolation", "positive", "red-gate"],
-  "created_at": "2026-08-24T05:10:00Z",
+  "created_at": "2026-09-02T22:30:00Z",
   "batch_id": "B",
   "task_ids": ["V4-RUNTIME-003"]
 }
