@@ -66,43 +66,43 @@ pub(super) fn anthropic_tool_use_as_responses_call(
             field: "tool_use.input",
         })?;
     if context.is_governed_custom_tool(name) {
-        let wrapper = input.as_object().filter(|wrapper| {
-            wrapper.get("input").and_then(Value::as_str).is_some()
-                && wrapper.keys().all(|key| {
-                    matches!(
-                        key.as_str(),
-                        "input" | "reason" | "goal_alignment_confidence" | "model_id"
-                    )
-                })
-        });
-        let raw = match wrapper {
-            Some(wrapper) => wrapper
+        let wrapper = input.as_object().filter(|value| value.contains_key("input"));
+        let mut output = Map::from_iter([
+            ("type".to_string(), Value::String("custom_tool_call".to_string())),
+            ("call_id".to_string(), Value::String(call_id.to_owned())),
+            ("name".to_string(), Value::String(name.to_owned())),
+        ]);
+        let raw = if let Some(wrapper) = wrapper {
+            if !wrapper.keys().all(|key| {
+                matches!(
+                    key.as_str(),
+                    "input" | "reason" | "goal_alignment_confidence" | "model_id"
+                )
+            }) || wrapper.get("input").and_then(Value::as_str).is_none()
+            {
+                return Err(V3AnthropicCodecError::MalformedField {
+                    field: "custom tool_use.input",
+                });
+            }
+            for key in ["reason", "goal_alignment_confidence", "model_id"] {
+                if let Some(value) = wrapper.get(key) {
+                    output.insert(key.to_string(), value.clone());
+                }
+            }
+            wrapper
                 .get("input")
                 .and_then(Value::as_str)
-                .expect("custom wrapper input was validated as a string")
-                .to_owned(),
-            None => serde_json::to_string(input).map_err(|_| {
+                .expect("validated custom wrapper input")
+                .to_owned()
+        } else {
+            serde_json::to_string(input).map_err(|_| {
                 V3AnthropicCodecError::MalformedField {
                     field: "custom tool_use.input",
                 }
-            })?,
+            })?
         };
-        let mut output = json!({
-            "type":"custom_tool_call",
-            "call_id":call_id,
-            "name":name,
-            "input":raw
-        });
-        if let Some(output) = output.as_object_mut() {
-            if let Some(wrapper) = wrapper {
-                for key in ["reason", "goal_alignment_confidence", "model_id"] {
-                    if let Some(value) = wrapper.get(key) {
-                        output.insert(key.to_string(), value.clone());
-                    }
-                }
-            }
-        }
-        return Ok(output);
+        output.insert("input".to_string(), Value::String(raw));
+        return Ok(Value::Object(output));
     }
     Ok(json!({
         "type":"function_call",
