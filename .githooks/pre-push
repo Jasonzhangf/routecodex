@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+set -eu
+
+z40="0000000000000000000000000000000000000000"
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$z40" ] && continue
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      echo "RouteCodex governance: updates to $remote_ref are disabled. Use a clean owner worktree and a review integration path." >&2
+      exit 1
+      ;;
+    *)
+      ;;
+  esac
+done
+
+if command -v npm >/dev/null 2>&1 && test -f package.json; then
+  npm run --silent verify:ci
+else
+  echo "RouteCodex governance: cannot run Git main protection verification (npm/package.json missing)." >&2
+  exit 1
+fi
