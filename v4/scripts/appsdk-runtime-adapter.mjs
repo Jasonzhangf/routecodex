@@ -8,7 +8,10 @@ import { spawnSync } from 'node:child_process';
 const root = process.cwd();
 const moduleId = 'routecodex-v4-base-node';
 const issueId = 'v4-cordis-production-wiring';
-const producer = { adapter: 'routecodex-v4-project-adapter', identity: 'v4-cordis-runtime-adapter' };
+const producers = {
+  whitebox: { adapter: 'project', identity: 'v4-cordis-whitebox' },
+  deployment: { adapter: 'project', identity: 'v4-cordis-deployment' },
+};
 const environment = 'local-v4-5520';
 const entrypoint = 'http://127.0.0.1:5520';
 const records = path.join(root, '.appsdk', 'records');
@@ -41,18 +44,19 @@ const evidence = (id, phase, kind, command, surface = 'development_whitebox') =>
   source_commit: head, artifact_hash: artifact.artifact_hash, execution_surface: surface,
   environment_id: surface === 'deployed_blackbox' ? environment : undefined,
   entrypoint: surface === 'deployed_blackbox' ? entrypoint : undefined,
-  scope: { module_id: moduleId, feature_id: issueId, entrypoint }, producer,
-  command_argv: command, result: 'pass', created_at: now, expires_at: expires,
+  scope: { module_id: moduleId, feature_id: issueId, entrypoint },
+  producer: surface === 'deployed_blackbox' ? producers.deployment : producers.whitebox,
+  command_argv: command, exit_status: 0, result: 'pass', created_at: now, expires_at: expires,
   input_hashes: inputHashes, scope_hash: scopeHash,
 });
 const write = (id, record) => fs.writeFileSync(path.join(evidenceDir, `${id}.json`), `${JSON.stringify(record, (_, value) => value === undefined ? undefined : value, 2)}\n`);
 
 const whitebox = run('cargo', ['test', '--workspace', '--quiet'], { timeout: 1800000 });
-write('development-whitebox', evidence('development-whitebox', 'development_whitebox', 'gate', whitebox.argv));
+write('whitebox-1', evidence('whitebox-1', 'development_whitebox', 'gate', whitebox.argv));
 const positive = run('cargo', ['test', '-p', 'routecodex-v4-standard-plugins'], { timeout: 900000 });
-write('positive-intervention', evidence('positive-intervention', 'positive_intervention', 'positive_test', positive.argv));
+write('positive-1', evidence('positive-1', 'positive_intervention', 'positive_test', positive.argv));
 const negative = run('node', ['scripts/architecture/verify-v4-production-mainline-red.mjs']);
-write('negative-intervention', evidence('negative-intervention', 'negative_intervention', 'negative_test', negative.argv));
+write('negative-1', evidence('negative-1', 'negative_intervention', 'negative_test', negative.argv));
 run('appsdk', ['compile-module', '.', '--module', moduleId], { timeout: 1800000 });
 const binary = path.join(root, 'generated', 'modules', moduleId, 'lib', 'rccv4');
 if (!fs.existsSync(binary)) throw new Error(`compiled artifact missing: ${binary}`);
@@ -60,24 +64,25 @@ const installTarget = path.join(os.homedir(), '.local', 'bin', 'rccv4');
 fs.copyFileSync(binary, installTarget);
 fs.chmodSync(installTarget, 0o755);
 const install = run('/usr/bin/codesign', ['--force', '--sign', '-', installTarget]);
-write('deployment-install', evidence('deployment-install', 'deployment_install', 'install', install.argv, 'deployed_blackbox'));
+write('install-1', evidence('install-1', 'deployment_install', 'install', install.argv, 'deployed_blackbox'));
 const restart = run(installTarget, ['restart', '-c', path.join(os.homedir(), '.rcc', 'config.v4.toml')], { timeout: 120000 });
-write('deployment-restart', evidence('deployment-restart', 'deployment_restart', 'restart', restart.argv, 'deployed_blackbox'));
+write('restart-1', evidence('restart-1', 'deployment_restart', 'restart', restart.argv, 'deployed_blackbox'));
 const health = run('curl', ['-fsS', '--max-time', '10', `${entrypoint}/health`]);
-write('deployed-health', evidence('deployed-health', 'deployed_blackbox', 'runtime', health.argv, 'deployed_blackbox'));
+write('blackbox-1', evidence('blackbox-1', 'deployed_blackbox', 'runtime', health.argv, 'deployed_blackbox'));
 const models = run('curl', ['-fsS', '--max-time', '10', `${entrypoint}/v1/models`]);
-write('deployed-models', evidence('deployed-models', 'deployed_blackbox', 'runtime', models.argv, 'deployed_blackbox'));
+write('blackbox-models', evidence('blackbox-models', 'deployed_blackbox', 'runtime', models.argv, 'deployed_blackbox'));
 const responses = run('curl', ['-fsS', '--max-time', '30', '-H', 'content-type: application/json', '-d', '{"model":"gpt-5.5","input":"ping"}', `${entrypoint}/v1/responses`], { timeout: 60000 });
-write('deployed-responses', evidence('deployed-responses', 'deployed_blackbox', 'sample_replay', responses.argv, 'deployed_blackbox'));
+write('blackbox-responses', evidence('blackbox-responses', 'deployed_blackbox', 'sample_replay', responses.argv, 'deployed_blackbox'));
 const candidate = {
   fix_candidate_id: candidateId, issue_id: issueId, module_id: moduleId, worktree_id: worktreeId,
   base_commit: base, head_commit: head, tree_hash: tree, diff_hash: diffHash,
   design_id: 'v4-feature-completion-plan-28', owner: 'routecodex-v4-runtime', scope_hash: scopeHash,
   changed_paths: run('git', ['diff', '--name-only', '--no-renames', base, head, '--', '.']).output.split('\n').filter(Boolean),
-  verification_evidence_ids: ['development-whitebox', 'positive-intervention', 'negative-intervention'], created_at: now,
+  verification_evidence_ids: ['whitebox-1', 'positive-1', 'negative-1'], created_at: now,
 };
 fs.writeFileSync(path.join(records, `fix-candidate-record-${moduleId}.json`), `${JSON.stringify(candidate, null, 2)}\n`);
 fs.writeFileSync(path.join(records, `worktree-record-${moduleId}.json`), `${JSON.stringify({ worktree_id: worktreeId, issue_id: issueId, module_id: moduleId, base_ref: base, base_commit: base, branch: run('git', ['branch', '--show-current']).output, head_commit: head, initial_clean: true, final_clean: true, isolation_mode: 'isolated_worktree', scope_hash: scopeHash, created_at: now }, null, 2)}\n`);
 fs.writeFileSync(path.join(records, `reproduction-record-${moduleId}.json`), `${JSON.stringify({ reproduction_id: `reproduction-${candidateId}`, issue_id: issueId, module_id: moduleId, worktree_id: worktreeId, base_commit: base, input_hashes: inputHashes, baseline_evidence_id: 'negative-intervention', first_divergence: 'v4-production-route-facts-binding', result: 'reproduced', created_at: now }, null, 2)}\n`);
-fs.writeFileSync(path.join(records, `pre-review-validation-record-${moduleId}.json`), `${JSON.stringify({ validation_id: `pre-review-${candidateId}`, issue_id: issueId, module_id: moduleId, fix_candidate_id: candidateId, candidate_commit: head, candidate_tree_hash: tree, artifact_hash: artifact.artifact_hash, whitebox_producer: producer, whitebox_evidence_ids: ['development-whitebox', 'positive-intervention', 'negative-intervention'], blackbox_evidence_ids: ['deployed-health', 'deployed-models', 'deployed-responses'], deployment: { environment_id: environment, install_receipt_id: 'deployment-install', restart_receipt_id: 'deployment-restart', entrypoint, producer, observed_at: now }, source_unchanged: true, result: 'pass', created_at: now }, null, 2)}\n`);
+fs.writeFileSync(path.join(records, `pre-review-validation-record-${moduleId}.json`), `${JSON.stringify({ validation_id: `pre-review-${candidateId}`, issue_id: issueId, module_id: moduleId, fix_candidate_id: candidateId, candidate_commit: head, candidate_tree_hash: tree, artifact_hash: artifact.artifact_hash, whitebox_producer: producers.whitebox, whitebox_evidence_ids: ['whitebox-1', 'positive-1', 'negative-1'], blackbox_evidence_ids: ['blackbox-1', 'blackbox-models', 'blackbox-responses'], deployment: { environment_id: environment, install_receipt_id: 'install-1', restart_receipt_id: 'restart-1', entrypoint, producer: producers.deployment, observed_at: now }, source_unchanged: true, result: 'pass', created_at: now }, null, 2)}\n`);
+fs.writeFileSync(path.join(records, 'evidence-record.json'), `${JSON.stringify(evidence('evidence-set-root-1', 'artifact', 'artifact', ['node', 'scripts/appsdk-runtime-adapter.mjs']), null, 2)}\n`);
 console.log(`adapter PASS candidate=${candidateId} artifact=${artifact.artifact_hash}`);
