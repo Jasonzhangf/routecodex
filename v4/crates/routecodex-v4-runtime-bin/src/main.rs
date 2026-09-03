@@ -524,17 +524,16 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
     {
         match status_managed(&paths).map_err(|error| error.to_string())? {
             ManagedStatus { state, .. } if state == "running" => {
-                if let Err(error) = preflight_cordis_admission(&manifest) {
-                    return Err(error);
-                }
-                match request_restart(&paths, &manifest.manifest_digest, timeout) {
-                    Ok(record) => return Ok(format_status("restarted", &record)),
-                    Err(LifecycleError::NotRunning) => {
-                        // The child may have exited between the status probe and
-                        // the control request. Continue through the cold-start
-                        // path instead of reporting a false lifecycle failure.
+                if prepare_existing_cordis_host(&paths).is_ok() {
+                    preflight_cordis_admission(&manifest)?;
+                    match request_restart(&paths, &manifest.manifest_digest, timeout) {
+                        Ok(record) => return Ok(format_status("restarted", &record)),
+                        Err(LifecycleError::NotRunning) => {}
+                        Err(error) => return Err(error.to_string()),
                     }
-                    Err(error) => return Err(error.to_string()),
+                } else {
+                    release_for_foreground(&paths, timeout)
+                        .map_err(|error| error.to_string())?;
                 }
             }
             ManagedStatus { state, .. } if state == "stale" => {
@@ -663,6 +662,15 @@ fn ensure_cordis_host_socket(
         return Ok(Some(child));
     }
     Err("Cordis host socket did not become ready".to_string())
+}
+
+fn prepare_existing_cordis_host(paths: &V4LifecyclePaths) -> Result<(), String> {
+    let socket = paths.state_root.join("cordis.sock");
+    if !socket.exists() {
+        return Err("Cordis host socket path is absent".to_string());
+    }
+    std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", socket);
+    Ok(())
 }
 
 fn wait_for_cordis_socket(socket: &std::path::Path, deadline: std::time::Instant) -> bool {
