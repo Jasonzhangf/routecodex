@@ -114,6 +114,7 @@ const NODE_PERMISSIONS = new Map([
       'v4.direct.request.client_payload',
       'v4.control.route_facts',
       'v4.information.client_protocol',
+      'v4.information.model',
       'v4.information.provider_protocol',
     ],
     writes: ['v4.direct.request.provider_wire', 'v4.control.target_selection'],
