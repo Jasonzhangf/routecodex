@@ -217,7 +217,12 @@ Provider SSE 的兼容修复只能修复传输语法和格式，不得根据响�
 
 ## 全局安装 / release 验证硬规则
 
-- 交付顺序固定：定向测试 -> 编译构建 -> 全局安装 -> 聚合重启 -> 全部成员 health -> 真实旧样本/同入口在线 replay -> Codex review -> 精准 commit/push。禁止在全局安装和在线验证前运行交付 review；review 后若代码、测试、构建或运行配置发生变化，旧 PASS 作废，必须从受影响验证重新跑到在线 replay，再重新 review。
+- 统一 candidate 生命周期：`git fetch origin` 后从最新 `origin/main` 创建干净 owner worktree；先 red/基线，再形成 candidate commit。candidate commit 不是最终交付提交，不能把“review 前禁止任何 commit”与 AppSDK candidate 绑定混为一谈。
+- 运行时 candidate 必须按同一 tree 完成 `定向测试 -> build -> global install -> routecodex restart -> 全部配置成员 health -> 同入口在线 replay`，再写 PreReviewValidationRecord / 启动 architecture review。build/test 默认离线或 mock-only，live replay 必须是独立、显式步骤。
+- review 后只能对未改变的 candidate 做 effectiveness replay；源码、测试、构建配置、运行配置或 artifact 任一变化，candidate、安装、在线证据和 review 全部失效，必须从受影响 gate 重新开始。
+- merge 只允许精确合入已 review/effectiveness 通过的 change set；main 验证与 local/remote mainline receipt 完成前，不得释放 claim 或清理 worktree。
+- AppSDK governed 任务在上述生命周期上增加 `appsdk verify --review-admission`、candidate/artifact/evidence hash graph、RegressionReport、Active/Protected freeze 和 CleanupRecord；AppSDK governance records 也只能在 owner worktree 写入，`.appsdk-control/` 不得替代 `.appsdk/` 真源。
+- 交付顺序固定：candidate commit -> 定向测试 -> 编译构建 -> 全局安装 -> 聚合重启 -> 全部成员 health -> 真实旧样本/同入口在线 replay -> AGY architecture review -> unchanged-source effectiveness -> 精准 delivery merge/commit/push。禁止在全局安装和在线验证前运行交付 review；review 后若代码、测试、构建或运行配置发生变化，旧 PASS 作废，必须从受影响验证重新跑到在线 replay，再重新 review。
 - Codex review 不能替代自验证，也不能与 source/live gate 并行抢跑；只有当前工作树对应产物已完成上述 install/restart/同入口 replay 并留下证据后，才允许启动 review。review 请求、旧 PASS、源码静态判断都不能豁免前置验证。
 - 所有交付级 RouteCodex 测试必须使用全局安装版本。单元测试、编译、repo-local build 只能作为前置 gate，不能作为“已修复/已启动/已可用”的最终证据。
 - Hub Pipeline / runtime rustification 的每个实现轮次必须按顺序完成：定向测试 -> native/build -> release/global install -> 无参数 `routecodex restart` 聚合重启一次 -> 配置全部成员端口 `/health.version` 一致 -> 检查目标 server log/样本目录错误 -> 修复发现的问题。缺任一项只能声明 source gate 通过，不能声明本轮完成；只有需要覆盖非默认配置时才传 `-c <config>`。

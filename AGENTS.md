@@ -201,9 +201,14 @@ client-visible error
 4. 如属 debug / 生命周期 / 架构问题，先进入 `.agents/skills/rcc-dev-skills/SKILL.md`，再按其路由表选引用文件。
 5. 打开对应路由文档与相关 skill 文档执行。
 6. 任何会改实现的任务，先查 `function map` / `mainline call map` / `verification map` / `mainline source` / `wiki`，锁唯一 owner 与边界，再动手。
-7. 验证结束后做 architecture review，检查是否正确但架构错误、是否 fallback、是否临时绕路、是否补丁式修复。
-8. 执行后先检查相关 skills 是否已经覆盖这次用到的流程和经验；缺少则按项目 skill 规则沉淀，再回报。
-9. 执行后用证据回报：变更、验证、剩余缺口、下一步。
+7. 代码和治理记录只能在从最新 `origin/main` 创建的干净 owner worktree 中修改；禁止直接改 `main`、dirty main 或旧 worktree。
+8. 先建立 red/基线证据，再形成 candidate commit；candidate commit 只锁定候选源码/tree，不等于最终 delivery commit。
+9. 对运行时变更，按 `定向测试 -> build -> global install -> routecodex restart -> 全部 listener health -> 同入口在线 replay` 验证同一 candidate，再启动 architecture review。
+10. review 通过后，在源码未变化的前提下完成 effectiveness replay；之后才精确 merge 到 `main`，在 main 验证并取得 local/remote commit receipt。
+11. 只有 merge、远端 receipt、worktree clean、无未合并提交且 claim 可释放时，才能清理 worktree。
+12. 若任务受 AppSDK governance 管辖，额外执行 `appsdk verify --review-admission`、candidate/artifact/evidence 绑定、RegressionReport、Active/Protected freeze 和 CleanupRecord；治理记录与业务代码服从同一 owner worktree 生命周期。
+13. 执行后先检查相关 skills 是否已经覆盖这次用到的流程和经验；缺少则按项目 skill 规则沉淀，再回报。
+14. 执行后用证据回报：变更、验证、剩余缺口、下一步。
 
 ## 维护原则
 - 本文件保持短小：只保留入口、护栏、路径。
