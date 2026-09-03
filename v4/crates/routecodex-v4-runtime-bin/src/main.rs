@@ -559,6 +559,14 @@ fn ensure_cordis_host_socket(
         std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
         return Ok(Some(child));
     }
+    // A host that never exposes a connectable socket is not a usable
+    // lifecycle dependency. Reap it here; otherwise every subsequent start
+    // inherits an orphaned Cordis process and a stale declaration.
+    let mut child = Some(child);
+    terminate_cordis_child(&mut child);
+    if socket.exists() {
+        let _ = std::fs::remove_file(&socket);
+    }
     Err("Cordis host socket did not become ready".to_string())
 }
 
