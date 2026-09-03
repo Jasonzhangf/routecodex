@@ -1,16 +1,24 @@
 # RouteCodex Agent Contract
 
-## Project
+## Correctness
 
-RouteCodex is a multi-protocol, multi-entry proxy gateway.
+Right:
 
-```text
-client -> HTTP server -> Hub Pipeline -> Provider V2 -> upstream
-```
+- Transparent proxy behavior.
+- Meaning preserved across protocols and hops.
+- Compatibility retained where target protocol supports it.
+- Necessary semantic changes explicit, minimal, and contract-bound.
+- Invalid or unsupported semantics fail visibly at owning boundary.
 
-Direction: preserve meaning; normalize before governance; keep semantic runtime ownership in Rust Chat Process; keep control state outside business payload; fail fast on invalid or unsupported semantics.
+Wrong:
 
-## Highest Rules
+- Hidden payload rewrite, history rewrite, guessed repair, silent drop, or fallback.
+- Provider-specific behavior in shared Hub/Router logic.
+- Control state in business payload.
+- One semantic rule implemented by multiple owners.
+- Claiming runtime completion from local tests alone.
+
+## Total Rules
 
 1. History immutable. No history rewrite.
 2. No request cleanup, guessed repair, fallback, downgrade, silent drop, or compensation path.
@@ -19,6 +27,22 @@ Direction: preserve meaning; normalize before governance; keep semantic runtime 
 5. One semantic owner, one implementation, adjacent pipeline conversion only.
 6. No edits to `main`, dirty worktrees, or another worker's files.
 7. No semantic bulk replacement scripts. Read, verify context, use reviewable `apply_patch` hunks.
+
+## Project
+
+RouteCodex is a multi-protocol, multi-entry proxy gateway:
+
+```text
+client -> HTTP server -> Hub Pipeline -> Provider V2 -> upstream
+```
+
+Proxy baseline:
+
+- Transparent: preserve request/response intent and observable protocol behavior.
+- Minimal change: normalize only where required; preserve semantic fields and ordering.
+- Compatible: support equivalent protocol shapes and required client behavior.
+- Not absolute: when protocols differ, make the smallest explicit semantic projection; do not pretend unequal semantics are identical.
+- Boundary ownership: normalize first, govern in Rust Chat Process, project at adjacent protocol edges.
 
 ## Pipeline
 
