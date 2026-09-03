@@ -1,11 +1,11 @@
 {
   "evidence_id": "positive-1",
   "issue_id": "v4-cordis-production-wiring",
-  "experiment_id": "fix-34edc02c1f0a",
+  "experiment_id": "fix-530265792571",
   "phase": "positive_intervention",
   "kind": "positive_test",
-  "source_commit": "34edc02c1f0aa614224fb85640f77b72e48dfc3b",
-  "artifact_hash": "sha256:fa82c2120b0888ee27903aa335ad2b3675b0b0be78a6be5664700587c95cf852",
+  "source_commit": "53026579257106c4bf1ef784cd2884118896f498",
+  "artifact_hash": "sha256:3592bbf4c550e266e381893ca5d61c6ac0579e0d8dbf8c049356b04aa2c9caef",
   "execution_surface": "development_whitebox",
   "scope": {
     "module_id": "routecodex-v4-base-node",
@@ -24,11 +24,11 @@
   ],
   "exit_status": 0,
   "result": "pass",
-  "created_at": "2026-09-03T15:49:04.476Z",
-  "expires_at": "2026-09-10T15:49:04.476Z",
+  "created_at": "2026-09-03T21:21:53.552Z",
+  "expires_at": "2026-09-10T21:21:53.552Z",
   "input_hashes": [
     "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
     "sha256:bd10c558d90956ee382b260984979b4dc106589a795a476d8ba5b49ec66980a6"
   ],
-  "scope_hash": "sha256:7bd9b67be82301b25254daad6dfe25dd3055a9f99834606f0315850228ff6276"
+  "scope_hash": "sha256:52ded34265b3af2e5d146e6a610f1a0d164bf28bb771bb060bdf5cef96ca563f"
 }
