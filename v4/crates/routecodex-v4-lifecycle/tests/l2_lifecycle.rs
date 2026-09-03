@@ -1,6 +1,6 @@
 use routecodex_v4_lifecycle::{
-    repair_stale, status_managed, ManagedAction, ManagedControlPlane, ManagedInstanceRecord,
-    V4LifecyclePaths,
+    release_unmanaged_listener, repair_stale, status_managed, ManagedAction, ManagedControlPlane,
+    ManagedInstanceRecord, V4LifecyclePaths,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -92,4 +92,12 @@ fn repair_stale_removes_dead_instance_record_and_socket() {
     assert!(!paths.record_path.exists());
     assert!(!paths.control_socket.exists());
     fs::remove_dir_all(&paths.state_root).expect("cleanup exact test root");
+}
+
+#[test]
+fn unmanaged_takeover_never_signals_foreign_listener() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener");
+    let address = listener.local_addr().expect("address").to_string();
+    release_unmanaged_listener(&address, Duration::from_millis(100)).expect("safe no-op");
+    assert!(std::net::TcpStream::connect(&address).is_ok());
 }

@@ -411,6 +411,12 @@ fn start(intent: StartIntent) -> Result<String, String> {
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
     print_startup(&manifest);
     preflight_cordis_admission(&manifest)?;
+    if routecodex_v4_lifecycle::read_record(&paths)
+        .map_err(|error| error.to_string())?
+        .is_none()
+    {
+        release_unmanaged_listeners(&manifest)?;
+    }
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let record = start_managed(
         &paths,
@@ -474,6 +480,7 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
     match request_restart(&paths, &manifest.manifest_digest, timeout) {
         Ok(record) => Ok(format_status("restarted", &record)),
         Err(LifecycleError::NotRunning) => {
+            release_unmanaged_listeners(&manifest)?;
             let executable = std::env::current_exe().map_err(|error| error.to_string())?;
             let record = start_managed(
                 &paths,
@@ -488,6 +495,21 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
         }
         Err(error) => Err(error.to_string()),
     }
+}
+
+/// Apply V3-compatible takeover only to exact, unmanaged rccv4 listeners.
+/// Managed instances are released by `start_managed`; this pass handles a
+/// prior process that exited before publishing its lifecycle record.
+fn release_unmanaged_listeners(manifest: &RuntimeConfigManifest) -> Result<(), String> {
+    let paths = manifest
+        .listeners
+        .iter()
+        .map(|listener| listener.address.as_str());
+    for address in paths {
+        routecodex_v4_lifecycle::release_unmanaged_listener(address, Duration::from_secs(15))
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn stop(intent: StopIntent) -> Result<String, String> {
