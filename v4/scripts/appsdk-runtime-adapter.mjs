@@ -25,6 +25,20 @@ const run = (command, args, options = {}) => {
   }
   return { output, argv: [command, ...args] };
 };
+const waitForHealth = () => {
+  const deadline = Date.now() + 120_000;
+  let lastOutput = '';
+  while (Date.now() < deadline) {
+    const probe = spawnSync('curl', ['-fsS', '--max-time', '10', `${entrypoint}/health`], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    if (probe.status === 0) return { output: probe.stdout.trim(), argv: ['curl', '-fsS', '--max-time', '10', `${entrypoint}/health`] };
+    lastOutput = `${probe.stdout ?? ''}${probe.stderr ?? ''}`.trim();
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+  }
+  throw new Error(`health probe timed out: ${lastOutput}`);
+};
 const read = (file) => fs.readFileSync(path.join(root, file));
 const head = run('git', ['rev-parse', 'HEAD']).output;
 const base = run('git', ['rev-parse', 'HEAD^']).output;
@@ -67,7 +81,7 @@ const install = run('/usr/bin/codesign', ['--force', '--sign', '-', installTarge
 write('install-1', evidence('install-1', 'deployment_install', 'install', install.argv, 'deployed_blackbox'));
 const restart = run(installTarget, ['restart', '-c', path.join(os.homedir(), '.rcc', 'config.v4.toml')], { timeout: 120000 });
 write('restart-1', evidence('restart-1', 'deployment_restart', 'restart', restart.argv, 'deployed_blackbox'));
-const health = run('curl', ['-fsS', '--max-time', '10', `${entrypoint}/health`]);
+const health = waitForHealth();
 write('blackbox-1', evidence('blackbox-1', 'deployed_blackbox', 'runtime', health.argv, 'deployed_blackbox'));
 const models = run('curl', ['-fsS', '--max-time', '10', `${entrypoint}/v1/models`]);
 write('blackbox-models', evidence('blackbox-models', 'deployed_blackbox', 'runtime', models.argv, 'deployed_blackbox'));
