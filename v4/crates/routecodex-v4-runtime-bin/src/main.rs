@@ -773,6 +773,27 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     let stop = Arc::new(AtomicBool::new(false));
     let handles = spawn_servers(servers, manifest.clone(), Arc::clone(&stop));
     let action = loop {
+        if let Some(child) = cordis_child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    stop.store(true, Ordering::Release);
+                    let join_result = join_servers(handles);
+                    terminate_cordis_child(&mut cordis_child);
+                    control.clear_record().map_err(|error| error.to_string())?;
+                    join_result?;
+                    return Err(format!("Cordis host exited before lifecycle stop: {status}"));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    stop.store(true, Ordering::Release);
+                    let join_result = join_servers(handles);
+                    terminate_cordis_child(&mut cordis_child);
+                    control.clear_record().map_err(|clear| clear.to_string())?;
+                    join_result?;
+                    return Err(format!("Cordis host liveness check failed: {error}"));
+                }
+            }
+        }
         if handles.iter().any(thread::JoinHandle::is_finished) {
             stop.store(true, Ordering::Release);
             let join_result = join_servers(handles);
