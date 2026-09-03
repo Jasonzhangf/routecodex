@@ -156,6 +156,10 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
     let preflight = Command::new(env!("CARGO_BIN_EXE_rccv4"))
         .current_dir("/tmp")
         .env("RCCV4_STATE_ROOT", &state_root)
+        .env(
+            "RCCV4_CORDIS_HOST_RUNNER",
+            state_root.join("missing-cordis-runner.mjs"),
+        )
         .args(["start", "-c", config.to_str().expect("config")])
         .output()
         .expect("manifest preflight");
