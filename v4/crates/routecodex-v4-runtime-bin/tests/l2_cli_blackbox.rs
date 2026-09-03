@@ -160,6 +160,15 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
         .output()
         .expect("manifest preflight");
     assert!(!preflight.status.success(), "preflight must fail without Cordis admission");
+    let preflight_stdout = String::from_utf8_lossy(&preflight.stdout);
+    let preflight_stderr = String::from_utf8_lossy(&preflight.stderr);
+    assert!(
+        !preflight_stdout.contains("Server started")
+            && !preflight_stdout.contains("event=started")
+            && !preflight_stderr.contains("Server started")
+            && !preflight_stderr.contains("event=started"),
+        "admission failure must not publish startup lifecycle output; stdout={preflight_stdout:?} stderr={preflight_stderr:?}"
+    );
     assert!(state_root.join("manifest.compiled.json").exists(), "preflight must publish the compiled manifest");
     assert!(!state_root.join("instance.json").exists(), "failed admission must not declare a managed instance");
     let (mut cordis, socket, cordis_stderr) = start_cordis_fixture(&state_root);
