@@ -34,8 +34,7 @@ const diffHash = sha(run('git', ['diff-tree', '--no-commit-id', '--raw', '-r', '
 const inputHashes = ['Cargo.toml', 'Cargo.lock'].map(read).map(sha).sort();
 const artifactPath = path.join(root, 'generated', 'modules', moduleId, 'module.compiled.json');
 const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
-const now = new Date().toISOString();
-const expires = new Date(Date.now() + 7 * 86400000).toISOString();
+const timestamp = () => new Date().toISOString();
 const candidateId = `fix-${head.slice(0, 12)}`;
 const worktreeId = `v4-cordis-${head.slice(0, 12)}`;
 fs.mkdirSync(evidenceDir, { recursive: true });
@@ -46,7 +45,7 @@ const evidence = (id, phase, kind, command, surface = 'development_whitebox') =>
   entrypoint: surface === 'deployed_blackbox' ? entrypoint : undefined,
   scope: { module_id: moduleId, feature_id: issueId, entrypoint },
   producer: surface === 'deployed_blackbox' ? producers.deployment : producers.whitebox,
-  command_argv: command, exit_status: 0, result: 'pass', created_at: now, expires_at: expires,
+  command_argv: command, exit_status: 0, result: 'pass', created_at: timestamp(), expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
   input_hashes: inputHashes, scope_hash: scopeHash,
 });
 const write = (id, record) => fs.writeFileSync(path.join(evidenceDir, `${id}.json`), `${JSON.stringify(record, (_, value) => value === undefined ? undefined : value, 2)}\n`);
@@ -78,11 +77,11 @@ const candidate = {
   base_commit: base, head_commit: head, tree_hash: tree, diff_hash: diffHash,
   design_id: 'v4-feature-completion-plan-28', owner: 'routecodex-v4-runtime', scope_hash: scopeHash,
   changed_paths: run('git', ['diff', '--name-only', '--no-renames', base, head, '--', '.']).output.split('\n').filter(Boolean),
-  verification_evidence_ids: ['whitebox-1', 'positive-1', 'negative-1'], created_at: now,
+  verification_evidence_ids: ['whitebox-1', 'positive-1', 'negative-1'], created_at: timestamp(),
 };
 fs.writeFileSync(path.join(records, `fix-candidate-record-${moduleId}.json`), `${JSON.stringify(candidate, null, 2)}\n`);
-fs.writeFileSync(path.join(records, `worktree-record-${moduleId}.json`), `${JSON.stringify({ worktree_id: worktreeId, issue_id: issueId, module_id: moduleId, base_ref: base, base_commit: base, branch: run('git', ['branch', '--show-current']).output, head_commit: head, initial_clean: true, final_clean: true, isolation_mode: 'isolated_worktree', scope_hash: scopeHash, created_at: now }, null, 2)}\n`);
-fs.writeFileSync(path.join(records, `reproduction-record-${moduleId}.json`), `${JSON.stringify({ reproduction_id: `reproduction-${candidateId}`, issue_id: issueId, module_id: moduleId, worktree_id: worktreeId, base_commit: base, input_hashes: inputHashes, baseline_evidence_id: 'negative-intervention', first_divergence: 'v4-production-route-facts-binding', result: 'reproduced', created_at: now }, null, 2)}\n`);
-fs.writeFileSync(path.join(records, `pre-review-validation-record-${moduleId}.json`), `${JSON.stringify({ validation_id: `pre-review-${candidateId}`, issue_id: issueId, module_id: moduleId, fix_candidate_id: candidateId, candidate_commit: head, candidate_tree_hash: tree, artifact_hash: artifact.artifact_hash, whitebox_producer: producers.whitebox, whitebox_evidence_ids: ['whitebox-1', 'positive-1', 'negative-1'], blackbox_evidence_ids: ['blackbox-1', 'blackbox-models', 'blackbox-responses'], deployment: { environment_id: environment, install_receipt_id: 'install-1', restart_receipt_id: 'restart-1', entrypoint, producer: producers.deployment, observed_at: now }, source_unchanged: true, result: 'pass', created_at: now }, null, 2)}\n`);
+fs.writeFileSync(path.join(records, `worktree-record-${moduleId}.json`), `${JSON.stringify({ worktree_id: worktreeId, issue_id: issueId, module_id: moduleId, base_ref: base, base_commit: base, branch: run('git', ['branch', '--show-current']).output, head_commit: head, initial_clean: true, final_clean: true, isolation_mode: 'isolated_worktree', scope_hash: scopeHash, created_at: timestamp() }, null, 2)}\n`);
+fs.writeFileSync(path.join(records, `reproduction-record-${moduleId}.json`), `${JSON.stringify({ reproduction_id: `reproduction-${candidateId}`, issue_id: issueId, module_id: moduleId, worktree_id: worktreeId, base_commit: base, input_hashes: inputHashes, baseline_evidence_id: 'negative-1', first_divergence: 'v4-production-route-facts-binding', result: 'reproduced', created_at: timestamp() }, null, 2)}\n`);
+fs.writeFileSync(path.join(records, `pre-review-validation-record-${moduleId}.json`), `${JSON.stringify({ validation_id: `pre-review-${candidateId}`, issue_id: issueId, module_id: moduleId, fix_candidate_id: candidateId, candidate_commit: head, candidate_tree_hash: tree, artifact_hash: artifact.artifact_hash, whitebox_producer: producers.whitebox, whitebox_evidence_ids: ['whitebox-1'], blackbox_evidence_ids: ['blackbox-1'], deployment: { environment_id: environment, install_receipt_id: 'install-1', restart_receipt_id: 'restart-1', entrypoint, producer: producers.deployment, observed_at: timestamp() }, source_unchanged: true, result: 'pass', created_at: timestamp() }, null, 2)}\n`);
 fs.writeFileSync(path.join(records, 'evidence-record.json'), `${JSON.stringify(evidence('evidence-set-root-1', 'artifact', 'artifact', ['node', 'scripts/appsdk-runtime-adapter.mjs']), null, 2)}\n`);
 console.log(`adapter PASS candidate=${candidateId} artifact=${artifact.artifact_hash}`);
