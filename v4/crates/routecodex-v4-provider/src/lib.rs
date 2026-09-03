@@ -1034,6 +1034,45 @@ pub enum ProviderTransportResult {
     Stream(ProviderResponseStream),
 }
 
+/// Provider-owned transport dispatch. Runtime orchestration passes only the
+/// selected provider's wire inputs; authentication and protocol selection stay
+/// inside the provider boundary.
+pub fn dispatch_nonstream(
+    protocol: &str,
+    config_path: &str,
+    auth_alias: Option<&str>,
+    wire_model: &str,
+    wire_body: &serde_json::Value,
+) -> Result<ProviderRawResponse, ProviderTransportError> {
+    validate_auth_alias(config_path, auth_alias)?;
+    match send_protocol(protocol, config_path, wire_model, wire_body, false)? {
+        ProviderTransportResult::Response(response) => Ok(response),
+        ProviderTransportResult::Stream(_) => Err(ProviderTransportError {
+            code: "provider_transport_shape".to_string(),
+            message: "non-stream dispatch returned stream transport".to_string(),
+            status: None,
+        }),
+    }
+}
+
+pub fn dispatch_streaming(
+    protocol: &str,
+    config_path: &str,
+    auth_alias: Option<&str>,
+    wire_model: &str,
+    wire_body: &serde_json::Value,
+) -> Result<ProviderResponseStream, ProviderTransportError> {
+    validate_auth_alias(config_path, auth_alias)?;
+    match send_protocol(protocol, config_path, wire_model, wire_body, true)? {
+        ProviderTransportResult::Stream(stream) => Ok(stream),
+        ProviderTransportResult::Response(_) => Err(ProviderTransportError {
+            code: "provider_transport_shape".to_string(),
+            message: "stream dispatch returned non-stream transport".to_string(),
+            status: None,
+        }),
+    }
+}
+
 fn send_wire_streaming(
     profile_path: &str,
     input: &Value,
