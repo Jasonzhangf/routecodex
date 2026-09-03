@@ -518,8 +518,12 @@ fn ensure_cordis_host_socket(
     manifest_path: &std::path::Path,
     paths: &V4LifecyclePaths,
 ) -> Result<Option<Child>, String> {
-    if std::env::var_os("RCCV4_CORDIS_HOST_SOCKET").is_some() {
-        return Ok(None);
+    if let Some(existing) = std::env::var_os("RCCV4_CORDIS_HOST_SOCKET") {
+        let existing = PathBuf::from(existing);
+        if std::os::unix::net::UnixStream::connect(&existing).is_ok() {
+            return Ok(None);
+        }
+        std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
     }
     let socket = paths.state_root.join("cordis.sock");
     let runner = std::env::var_os("RCCV4_CORDIS_HOST_RUNNER")
@@ -1288,8 +1292,12 @@ fn handle_responses(
             conversation_scope,
         )
         .map_err(|fault| project_fault(request, fault, 599))?;
-        let response_stream =
-            CordisSseTransportStream::new(stream, Arc::clone(runtime), response_processor);
+        let response_stream = CordisSseTransportStream::new(
+            stream,
+            Arc::clone(runtime),
+            response_processor,
+        )
+        .with_console_context(&request.request_id, &request.path);
         return Ok(HttpResponse::streaming(
             client_status,
             "text/event-stream",
@@ -1513,6 +1521,8 @@ struct CordisSseTransportStream<S = ProviderResponseStream> {
     ingress: SseIngressPlugin,
     egress: SseEgressPlugin,
     close_after_pending: bool,
+    console_request_id: Option<String>,
+    console_endpoint: Option<String>,
 }
 
 impl<S: ProviderSseSource> CordisSseTransportStream<S> {
@@ -1530,7 +1540,15 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
             ingress,
             egress,
             close_after_pending: false,
+            console_request_id: None,
+            console_endpoint: None,
         }
+    }
+
+    fn with_console_context(mut self, request_id: &str, endpoint: &str) -> Self {
+        self.console_request_id = Some(request_id.to_string());
+        self.console_endpoint = Some(endpoint.to_string());
+        self
     }
 
     fn enqueue_disposition(
@@ -1552,6 +1570,14 @@ impl<S: ProviderSseSource> CordisSseTransportStream<S> {
     }
 
     fn enqueue_runtime_failure(&mut self, fault: RuntimeFault) -> Result<(), std::io::Error> {
+        eprintln!(
+            "event=error endpoint={} req={} code={} message={}",
+            self.console_endpoint.as_deref().unwrap_or("/v1/responses"),
+            self.console_request_id.as_deref().unwrap_or("unknown"),
+            fault.code,
+            fault.message
+        );
+        let _ = std::io::stderr().flush();
         let disposition = {
             let runtime = self
                 .runtime
