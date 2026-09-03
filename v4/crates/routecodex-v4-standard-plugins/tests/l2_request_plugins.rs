@@ -205,6 +205,20 @@ fn wire_builder_projects_chat_text_to_responses_input_items() {
 }
 
 #[test]
+fn wire_builder_rejects_malformed_chat_content_item() {
+    let error = execute_with_information(
+        "V4ProviderReqCompat07ProviderCompat",
+        "request_outbound",
+        7,
+        "v4.std.request.responses_wire_build",
+        json!({"model": "m", "messages": [{"role": "user", "content": ["hello"]}]}),
+        json!({"client_protocol": "chat", "provider_protocol": "responses"}),
+    )
+    .expect_err("malformed Chat content must fail at the projection owner");
+    assert!(error.to_string().contains("Chat content item must be an object"));
+}
+
+#[test]
 fn wire_builder_rejects_missing_protocol_side_channel() {
     assert!(execute_with_information(
         "V4ProviderReqCompat07ProviderCompat",

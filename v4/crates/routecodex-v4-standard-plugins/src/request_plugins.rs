@@ -55,13 +55,16 @@ pub fn project_chat_request_to_responses(body: &Value) -> Result<Value, String> 
                         items
                             .into_iter()
                             .map(|item| {
-                                let mut item = item.as_object().cloned().unwrap_or_default();
+                                let mut item = item
+                                    .as_object()
+                                    .cloned()
+                                    .ok_or_else(|| "Chat content item must be an object".to_string())?;
                                 if item.get("type").and_then(Value::as_str) == Some("text") {
                                     item.insert("type".to_string(), json!("input_text"));
                                 }
-                                Value::Object(item)
+                                Ok(Value::Object(item))
                             })
-                            .collect(),
+                            .collect::<Result<Vec<_>, String>>()?,
                     ),
                     other => other,
                 };
