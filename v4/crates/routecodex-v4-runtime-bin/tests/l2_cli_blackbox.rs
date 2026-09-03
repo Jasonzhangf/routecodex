@@ -156,6 +156,7 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
     let preflight = Command::new(env!("CARGO_BIN_EXE_rccv4"))
         .current_dir("/tmp")
         .env("RCCV4_STATE_ROOT", &state_root)
+        .env("HOME", &test_root)
         .args(["start", "-c", config.to_str().expect("config")])
         .output()
         .expect("manifest preflight");
@@ -171,6 +172,7 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
         Command::new(env!("CARGO_BIN_EXE_rccv4"))
             .current_dir("/tmp")
             .env("RCCV4_STATE_ROOT", &state_root)
+            .env("HOME", &test_root)
             .env("RCCV4_CORDIS_HOST_SOCKET", &socket)
             .args(args)
             .output()
@@ -247,11 +249,11 @@ fn restart_cold_starts_when_no_managed_instance_exists() {
             .expect("lifecycle command")
     };
     let restart = run(&["restart", "-c", config.to_str().expect("config")]);
-    assert!(!restart.status.success());
     assert!(
-        String::from_utf8_lossy(&restart.stderr).contains("Cordis admission")
-            || fs::read_to_string(state_root.join("logs/rccv4.log"))
-                .unwrap_or_default()
-                .contains("Cordis admission")
+        restart.status.success(),
+        "restart must bootstrap the project Cordis host: {}",
+        String::from_utf8_lossy(&restart.stderr)
     );
+    let stop = run(&["stop", "-c", config.to_str().expect("config")]);
+    assert!(stop.status.success(), "{}", String::from_utf8_lossy(&stop.stderr));
 }
