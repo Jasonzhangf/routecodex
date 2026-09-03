@@ -9,6 +9,8 @@ Right:
 - Compatibility retained where target protocol supports it.
 - Necessary semantic changes explicit, minimal, and contract-bound.
 - Invalid or unsupported semantics fail visibly at owning boundary.
+- Governance chain is part of the engineering product; its quality gate is mandatory and outranks local code convenience.
+- Engineering quality is actively managed; a quality blocker requires a repair path, not passive waiting.
 
 Wrong:
 
@@ -17,6 +19,10 @@ Wrong:
 - Control state in business payload.
 - One semantic rule implemented by multiple owners.
 - Claiming runtime completion from local tests alone.
+- Inbound cleanup, semantic deletion, or early protocol conversion.
+- Fallback used to hide an unhandled case.
+- Code changed before error reproduction, root-cause proof, and edit-owner decision.
+- Unreviewed architecture merged into the project.
 
 ## Total Rules
 
@@ -39,10 +45,12 @@ client -> HTTP server -> Hub Pipeline -> Provider V2 -> upstream
 Proxy baseline:
 
 - Transparent: preserve request/response intent and observable protocol behavior.
-- Minimal change: normalize only where required; preserve semantic fields and ordering.
-- Compatible: support equivalent protocol shapes and required client behavior.
-- Not absolute: when protocols differ, make the smallest explicit semantic projection; do not pretend unequal semantics are identical.
-- Boundary ownership: normalize first, govern in Rust Chat Process, project at adjacent protocol edges.
+- Minimal change: inbound performs field-level normalization only; no cleanup or semantic loss.
+- Chat Process: receives normalized fields and owns semantic governance.
+- Compatible: outbound converts according to target protocol and preserves compatible semantics.
+- Necessary loss: discard only when target is incompatible and no compatible projection exists; make loss explicit and observable.
+- No fallback: handle each case explicitly; do not hide unsupported behavior with a second path.
+- Boundary ownership: inbound normalizes, Chat Process governs, outbound converts for target.
 
 ## Pipeline
 
@@ -75,11 +83,15 @@ ErrorErr01SourceRaised -> ErrorErr02HostCaptured
 
 No skipped, duplicated, or local error policy.
 
-## Work
+## Governance And Work
 
-Before code: read `05-foundation-contract.md`; locate owner, resource edges, mainline edges, gates, allowed/forbidden paths; record baseline and red evidence; create clean owner worktree from latest `origin/main`.
+Governance chain is required code infrastructure, not paperwork. Manage engineering quality as a first-class lifecycle. A quality problem is a repair task; do not wait for external rescue when a forward repair is possible.
 
-After code: audit diff boundaries; run targeted gates; runtime change requires build, install, `routecodex restart`, all health endpoints, same-entry replay; review only after validation; merge only reviewed unchanged verified changes.
+Error workflow: observe the failure -> build a repeatable reproduction -> locate first divergence -> prove root cause -> choose unique owner and edit method -> patch.
+
+Before edit: read `05-foundation-contract.md`; locate owner, resource edges, mainline edges, gates, allowed/forbidden paths; record baseline and red evidence; create clean owner worktree from latest `origin/main`. Until edit method and owner are confirmed, draft only in `playground/`.
+
+After code: audit diff boundaries and architecture; run targeted gates; runtime change requires build, install, `routecodex restart`, all health endpoints, same-entry replay; review must confirm architecture correctness before merge; merge only reviewed unchanged verified changes.
 
 Build/test offline or mock-only. Live replay explicit.
 
