@@ -39,6 +39,7 @@ fs.mkdirSync(evidenceDir, { recursive: true });
 run('appsdk', ['compile-module', '.', '--module', moduleId], { timeout: 1800000 });
 const artifactPath = path.join(root, 'generated', 'modules', moduleId, 'module.compiled.json');
 const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+const candidateCreatedAt = timestamp();
 const evidence = (id, phase, kind, command, surface = 'development_whitebox') => ({
   evidence_id: id, issue_id: issueId, experiment_id: candidateId, phase, kind,
   source_commit: head, artifact_hash: artifact.artifact_hash, execution_surface: surface,
@@ -77,7 +78,7 @@ const candidate = {
   base_commit: base, head_commit: head, tree_hash: tree, diff_hash: diffHash,
   design_id: 'v4-feature-completion-plan-28', owner: 'routecodex-v4-runtime', scope_hash: scopeHash,
   changed_paths: run('git', ['diff', '--name-only', '--no-renames', base, head, '--', '.']).output.split('\n').filter(Boolean),
-  verification_evidence_ids: ['whitebox-1', 'positive-1', 'negative-1'], created_at: timestamp(),
+  verification_evidence_ids: ['whitebox-1', 'positive-1', 'negative-1'], created_at: candidateCreatedAt,
 };
 fs.writeFileSync(path.join(records, `fix-candidate-record-${moduleId}.json`), `${JSON.stringify(candidate, null, 2)}\n`);
 fs.writeFileSync(path.join(records, `worktree-record-${moduleId}.json`), `${JSON.stringify({ worktree_id: worktreeId, issue_id: issueId, module_id: moduleId, base_ref: base, base_commit: base, branch: run('git', ['branch', '--show-current']).output, head_commit: head, initial_clean: true, final_clean: true, isolation_mode: 'isolated_worktree', scope_hash: scopeHash, created_at: timestamp() }, null, 2)}\n`);
