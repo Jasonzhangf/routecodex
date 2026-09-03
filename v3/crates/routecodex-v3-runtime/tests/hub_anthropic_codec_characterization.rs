@@ -361,7 +361,7 @@ fn responses_custom_tool_projects_registered_anthropic_wrapper() {
     );
     assert_eq!(
         tool["input_schema"]["required"],
-        json!(["input", "reason", "goal_alignment_confidence", "model_id"])
+        json!(["input"])
     );
     assert_eq!(tool["input_schema"]["additionalProperties"], false);
     let description = tool["description"].as_str().expect("tool description");
