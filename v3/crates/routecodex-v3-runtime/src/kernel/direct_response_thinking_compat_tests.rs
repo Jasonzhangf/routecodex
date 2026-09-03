@@ -75,6 +75,21 @@ fn direct_sse_thinking_tag_compat_strips_unpaired_open_tag_only() {
 }
 
 #[test]
+fn direct_sse_thinking_tag_compat_strips_orphan_close_tag() {
+    let input = tagged_sse(&["before ", "</thinking>", " after"], "before </thinking> after");
+    let output = rewrite_v3_direct_thinking_tag_sse_bytes(&input).unwrap();
+    let text = String::from_utf8(output).unwrap();
+    assert!(text.contains("response.output_text.delta"), "{text}");
+    assert!(text.contains("before "), "{text}");
+    assert!(text.contains(" after"), "{text}");
+    assert!(
+        !text.contains("response.reasoning_summary_text.delta"),
+        "{text}"
+    );
+    assert!(!text.contains("</thinking>"), "{text}");
+}
+
+#[test]
 fn direct_sse_thinking_tag_compat_keeps_ordinary_response_byte_exact() {
     let input = tagged_sse(&["ordinary"], "ordinary");
     assert_eq!(
