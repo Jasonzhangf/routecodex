@@ -525,11 +525,20 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
         match status_managed(&paths).map_err(|error| error.to_string())? {
             ManagedStatus { state, .. } if state == "running" => {
                 if prepare_existing_cordis_host(&paths).is_ok() {
-                    preflight_cordis_admission(&manifest)?;
-                    match request_restart(&paths, &manifest.manifest_digest, timeout) {
-                        Ok(record) => return Ok(format_status("restarted", &record)),
-                        Err(LifecycleError::NotRunning) => {}
-                        Err(error) => return Err(error.to_string()),
+                    match preflight_cordis_admission(&manifest) {
+                        Ok(()) => match request_restart(&paths, &manifest.manifest_digest, timeout) {
+                            Ok(record) => return Ok(format_status("restarted", &record)),
+                            Err(LifecycleError::NotRunning) => {}
+                            Err(error) => return Err(error.to_string()),
+                        },
+                        Err(error)
+                            if error.contains("Cordis admission socket connect failed")
+                                || error.contains("Cordis admission requires") =>
+                        {
+                            release_for_foreground(&paths, timeout)
+                                .map_err(|release| release.to_string())?;
+                        }
+                        Err(error) => return Err(error),
                     }
                 } else {
                     release_for_foreground(&paths, timeout)
