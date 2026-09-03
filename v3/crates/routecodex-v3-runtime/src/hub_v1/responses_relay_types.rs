@@ -288,7 +288,6 @@ pub struct V3RuntimeToolreasonObservation {
     pub tool: String,
     pub reason: Option<String>,
     pub confidence: Option<u8>,
-    pub model_id: Option<String>,
 }
 
 pub(crate) struct V3ResponsesRelayProviderFailure {
