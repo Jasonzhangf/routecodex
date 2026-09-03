@@ -1,11 +1,11 @@
 {
   "evidence_id": "restart-1",
   "issue_id": "v4-cordis-production-wiring",
-  "experiment_id": "fix-7ca307194724",
+  "experiment_id": "fix-22cbbc5369a8",
   "phase": "deployment_restart",
   "kind": "restart",
-  "source_commit": "7ca30719472474a7351e623cf00e04e50819b585",
-  "artifact_hash": "sha256:8349767257e7b81c04a51a4d7f895ba3dccbf120caf0e92d3e5b68d3203f3031",
+  "source_commit": "22cbbc5369a8211cf493e99ce5bf0576d5ba03b0",
+  "artifact_hash": "sha256:6e07a4fa26ba051d2c39b482126dd3ad8dd57c5d4c3f85a1943a61c9838f526b",
   "execution_surface": "deployed_blackbox",
   "environment_id": "local-v4-5520",
   "entrypoint": "http://127.0.0.1:5520",
@@ -26,11 +26,11 @@
   ],
   "exit_status": 0,
   "result": "pass",
-  "created_at": "2026-09-03T06:23:10.944Z",
-  "expires_at": "2026-09-10T06:23:10.944Z",
+  "created_at": "2026-09-03T06:37:50.757Z",
+  "expires_at": "2026-09-10T06:37:50.757Z",
   "input_hashes": [
     "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
     "sha256:b127c2535c22f61d066c05e08fbfd327703008cb988f45ec11b4c9eb71e1f6d7"
   ],
-  "scope_hash": "sha256:3676ad01ecadf8ce2ea1440acf09c3d3276e9882c187d9b0aaa87cff98cce47e"
+  "scope_hash": "sha256:5a3aaeb5d1caf31687e139e77a6fb69425b4739fd07950a382eab14e42dbe4e0"
 }
