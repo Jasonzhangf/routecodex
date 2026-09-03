@@ -537,6 +537,10 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
                         {
                             release_for_foreground(&paths, timeout)
                                 .map_err(|release| release.to_string())?;
+                            // The failed admission proved the inherited
+                            // socket is stale. Clear the inherited binding so
+                            // the cold-start path can create a fresh host.
+                            std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
                         }
                         Err(error) => return Err(error),
                     }
