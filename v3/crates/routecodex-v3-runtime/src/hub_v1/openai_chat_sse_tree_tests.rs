@@ -310,6 +310,46 @@ fn chat_reducer_materializes_one_typed_completion_from_delta_tree() {
 }
 
 #[test]
+fn chat_reducer_preserves_tool_name_when_provider_repeats_empty_name_delta() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_empty_name_delta",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"exec_command","arguments":""}}]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_empty_name_delta",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"","arguments":"{\"cmd\":\"pwd\"}"}}]},"finish_reason":"tool_calls"}]
+        }))
+        .unwrap();
+
+    let output = reducer.materialize_completion().unwrap();
+    assert_eq!(
+        output["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+}
+
+#[test]
+fn chat_reducer_still_rejects_tool_call_that_never_has_a_name() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_missing_name",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"","arguments":"{}"}}]},"finish_reason":"tool_calls"}]
+        }))
+        .unwrap();
+
+    let error = reducer.materialize_completion().unwrap_err();
+    assert!(error.to_string().contains("missing function name"));
+}
+
+#[test]
 fn chat_reducer_keeps_tool_call_when_terminal_delta_also_has_empty_content() {
     let mut reducer = V3OpenAiChatSseReducerState::default();
     reducer

@@ -138,7 +138,11 @@ impl V3OpenAiChatSseMaterializedChoice {
                 if call.call_id.is_some() {
                     tool_call.call_id = call.call_id.clone();
                 }
-                if call.name.is_some() {
+                if call
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| !name.trim().is_empty())
+                {
                     tool_call.function_name = call.name.clone();
                 }
                 if let Some(arguments) = &call.arguments {
