@@ -405,6 +405,7 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         ],
         "V4DirectReq02RelayContainer" => vec![
             "v4.direct.request.client_payload".to_string(),
+            "v4.control.route_facts".to_string(),
             "v4.information.client_protocol".to_string(),
             "v4.information.provider_protocol".to_string(),
         ],
@@ -476,7 +477,10 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
     match node_id {
         "V4Error02HostCaptured" | "V4Error03RuntimeClassified" | "V4Error04RouterPolicyApplied"
         | "V4Error05ExecutionDecision" => vec!["v4.control.error_chain".to_string()],
-        "V4DirectReq02RelayContainer" => vec!["v4.direct.request.provider_wire".to_string()],
+        "V4DirectReq02RelayContainer" => vec![
+            "v4.direct.request.provider_wire".to_string(),
+            "v4.control.target_selection".to_string(),
+        ],
         "V4DirectResp02RelayContainer" => vec!["v4.direct.response.client_payload".to_string()],
         "V4HubReqOutbound06ProviderSemantic" => vec!["v4.request.provider_semantic".to_string()],
         "V4HubReqInbound02Normalized" => Vec::new(),
@@ -812,6 +816,36 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
                 "v4.information.client_protocol",
                 "v4.information.model",
             ],
+            vec!["v4.control.target_selection"],
+        ),
+        plugin(
+            "v4.std.routing.target_selection",
+            PluginCategory::Routing,
+            "V4HubReqTarget05Resolved",
+            "request_execution",
+            Some(5),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            360,
+            vec![
+                "v4.control.route_facts",
+                "v4.information.client_protocol",
+                "v4.information.model",
+            ],
+            vec!["v4.control.target_selection"],
+        ),
+        plugin(
+            "v4.std.routing.target_selection.direct",
+            PluginCategory::Routing,
+            "V4DirectReq02RelayContainer",
+            "request_outbound",
+            Some(2),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            360,
+            vec!["v4.control.route_facts"],
             vec!["v4.control.target_selection"],
         ),
         plugin(
@@ -1297,6 +1331,14 @@ fn route_facts_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     Ok(())
 }
 
+fn external_target_selection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    ctx.write_control_resource(
+        "v4.control.target_selection",
+        json!({"provider_id": "keyless", "wire_model": "keyless"}),
+    )
+    .map_err(|error| error.to_string())
+}
+
 fn transport_validate(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     if !ctx.read_data().is_object() {
         return Err("transport validator requires provider wire object".to_string());
@@ -1361,6 +1403,8 @@ impl StandardHandleRegistry {
             ("v4.std.chat_process.tool_harvest", tool_harvest),
             ("v4.std.routing.route_facts_producer", route_facts_produce),
             ("v4.std.routing.route_facts_consumer", route_facts_consume),
+            ("v4.std.routing.target_selection", external_target_selection),
+            ("v4.std.routing.target_selection.direct", external_target_selection),
             ("v4.std.provider.transport_validate", transport_validate),
         ] {
             handles.insert(id, StandardHandle { execute_fn });
@@ -1491,6 +1535,8 @@ mod tests {
             "v4.std.chat_process.tool_harvest",
             "v4.std.routing.route_facts_producer",
             "v4.std.routing.route_facts_consumer",
+            "v4.std.routing.target_selection",
+            "v4.std.routing.target_selection.direct",
             "v4.std.provider.transport_validate",
             "v4.std.response.protocol_decode",
             "v4.std.response.frame_build",
