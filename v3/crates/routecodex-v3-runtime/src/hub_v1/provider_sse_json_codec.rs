@@ -548,10 +548,20 @@ pub(crate) fn classify_v3_provider_responses_json_event(
     ) {
         return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
     }
-    // Provider-owned Responses extensions are valid inbound data-plane events.
-    // Keep the complete frame available for normalization/observation, but do
-    // not abort a valid stream before its registered semantic terminal event.
-    if event_type.starts_with("codex.") || event_type.starts_with("responsesapi.") {
+    // Provider-owned events are valid only when registered in the protocol
+    // conversion tables. Keep the complete frame available for normalization
+    // and observation, but do not abort before its registered terminal event.
+    if event_type.starts_with("codex.")
+        || crate::protocol_tables::map_value(
+            crate::protocol_tables::V3TableKind::ProviderResponseEvent,
+            "responses",
+            event_type,
+            crate::protocol_tables::V3TableDirection::Inbound,
+        )
+        .ok()
+        .flatten()
+        .is_some()
+    {
         return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
     }
     Err(format!(

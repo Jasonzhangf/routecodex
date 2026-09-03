@@ -67,7 +67,8 @@ pub(super) fn anthropic_tool_use_as_responses_call(
         })?;
     if context.is_governed_custom_tool(name) {
         let (raw, wrapper) = match input.as_object().filter(|wrapper| {
-            wrapper.keys().all(|key| {
+            wrapper.get("input").and_then(Value::as_str).is_some()
+                && wrapper.keys().all(|key| {
                 matches!(
                     key.as_str(),
                     "input" | "reason" | "goal_alignment_confidence" | "model_id"
@@ -138,6 +139,28 @@ mod tests {
 
         assert_eq!(call["type"], "custom_tool_call");
         assert_eq!(call["input"], "{\"patch\":\"*** Begin Patch\\n*** End Patch\"}");
+        assert!(call.get("model_id").is_none());
+    }
+
+    #[test]
+    fn governed_custom_tool_accepts_empty_native_input_after_guidance_removal() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "custom", "name": "apply_patch"}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({
+                "type": "tool_use",
+                "id": "call_empty_input",
+                "name": "apply_patch",
+                "input": {}
+            }),
+            &context,
+        )
+        .expect("empty native input must remain projectable");
+
+        assert_eq!(call["type"], "custom_tool_call");
+        assert_eq!(call["input"], "{}");
         assert!(call.get("model_id").is_none());
     }
 }
