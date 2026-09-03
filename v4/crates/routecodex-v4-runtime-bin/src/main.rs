@@ -36,7 +36,7 @@ use routecodex_v4_server::{
 };
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
 use routecodex_v4_standard_plugins::diagnostic;
-use routecodex_v4_standard_plugins::StandardHandleRegistry;
+use routecodex_v4_standard_plugins::{compile_production_execution_plans, StandardHandleRegistry};
 use serde_json::Value;
 use routecodex_v4_standard_plugins::sse_transport::{
     production_transport_pair, SseEgressPlugin, SseIngressPlugin,
@@ -779,6 +779,10 @@ impl PipelineHandler {
         manifest: RuntimeConfigManifest,
         require_cordis_admission: bool,
     ) -> Result<Self, String> {
+        if require_cordis_admission {
+            compile_production_execution_plans(&manifest.execution_epoch.skeleton)
+                .map_err(|error| format!("production plugin plan compilation failed: {error}"))?;
+        }
         let registry = Arc::new(ProductionHandleRegistry::new(manifest.product.as_ref()));
         let cordis_admission_receipt = if require_cordis_admission {
             Some(CordisAdmission::admit(
