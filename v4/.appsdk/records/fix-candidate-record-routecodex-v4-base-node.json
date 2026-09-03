@@ -1,22 +1,22 @@
 {
-  "fix_candidate_id": "fix-4fe9c6249d1d",
+  "fix_candidate_id": "fix-b4026b0a1fcb",
   "issue_id": "v4-cordis-production-wiring",
   "module_id": "routecodex-v4-base-node",
-  "worktree_id": "v4-cordis-4fe9c6249d1d",
-  "base_commit": "82eb64c76263cd5ed1f8ac2e378eebcbeabdf035",
-  "head_commit": "4fe9c6249d1d55cf465f67f61b32d2531442930e",
-  "tree_hash": "e072fdd9bbc1fd38a33dd49a59d7b8860fddf1b4",
-  "diff_hash": "sha256:e5527d5fdc51634fe934b25bd43ea1683be7bf7359593e0bf763757cd79e9878",
+  "worktree_id": "v4-cordis-b4026b0a1fcb",
+  "base_commit": "b300728956956076a24079e7f7ad2887aa93805e",
+  "head_commit": "b4026b0a1fcbf6426d7af8d18853cd1eeee38d4a",
+  "tree_hash": "c28ae41ce268316fea91d693f6a3ec8ed57540c4",
+  "diff_hash": "sha256:83285e853f0e738e35e9a62d33f63b7dc25c439233fa62ed89881f173850942d",
   "design_id": "v4-feature-completion-plan-28",
   "owner": "routecodex-v4-runtime",
-  "scope_hash": "sha256:f543fc1c0e1854f7f17cf9304cb8a61143c5efe1832776de69b35657e5b76358",
+  "scope_hash": "sha256:6592d9ca9549baf169d4b261b4f426cb603d5013e2fa33c8892d8a74bfa45139",
   "changed_paths": [
-    "v4/crates/routecodex-v4-runtime-bin/src/main.rs"
+    "v4/docs/architecture/v4-resource-operation-map.yml"
   ],
   "verification_evidence_ids": [
     "whitebox-1",
     "positive-1",
     "negative-1"
   ],
-  "created_at": "2026-09-03T09:03:39.150Z"
+  "created_at": "2026-09-03T09:09:20.395Z"
 }
