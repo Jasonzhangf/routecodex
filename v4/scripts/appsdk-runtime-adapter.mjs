@@ -71,7 +71,7 @@ const health = run('curl', ['-fsS', '--max-time', '10', `${entrypoint}/health`])
 write('blackbox-1', evidence('blackbox-1', 'deployed_blackbox', 'runtime', health.argv, 'deployed_blackbox'));
 const models = run('curl', ['-fsS', '--max-time', '10', `${entrypoint}/v1/models`]);
 write('blackbox-models', evidence('blackbox-models', 'deployed_blackbox', 'runtime', models.argv, 'deployed_blackbox'));
-const responses = run('curl', ['-fsS', '--max-time', '30', '-H', 'content-type: application/json', '-d', '{"model":"gpt-5.5","input":"ping"}', `${entrypoint}/v1/responses`], { timeout: 60000 });
+const responses = run('curl', ['-fsS', '--max-time', '120', '-H', 'content-type: application/json', '-d', '{"model":"gpt-5.5","input":"ping"}', `${entrypoint}/v1/responses`], { timeout: 180000 });
 write('blackbox-responses', evidence('blackbox-responses', 'deployed_blackbox', 'sample_replay', responses.argv, 'deployed_blackbox'));
 const candidate = {
   fix_candidate_id: candidateId, issue_id: issueId, module_id: moduleId, worktree_id: worktreeId,

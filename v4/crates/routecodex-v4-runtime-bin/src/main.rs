@@ -2454,7 +2454,9 @@ targets = ["mock"]
                 &body,
             )
             .expect("chat request must project to Responses input");
-        assert_eq!(projected["input"], body["messages"]);
+        assert_eq!(projected["input"][0]["role"], "user");
+        assert_eq!(projected["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(projected["input"][0]["content"][0]["text"], "hello");
         assert_eq!(projected["tools"][0]["name"], "lookup");
         assert_eq!(projected["debug"], body["debug"]);
     }
