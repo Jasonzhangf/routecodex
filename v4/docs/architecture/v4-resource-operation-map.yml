@@ -2814,6 +2814,9 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     fail_closed_on_identity_drift: true
+  may_enter_metadata_center: false
+  may_enter_provider_body: false
+  may_enter_client_body: false
   allowed_writers:
   - CordisHost
   allowed_readers:

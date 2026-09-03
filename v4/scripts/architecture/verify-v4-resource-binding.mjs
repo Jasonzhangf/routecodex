@@ -357,7 +357,10 @@ function runSelfTest() {
       resource.allowed_readers.push('V4GhostReader99');
     }],
     ['forbidden writer is also allowed', (m) => {
-      const resource = m.resources.find((r) => r.binding_status === 'anchored');
+      const resource = m.resources.find(
+        (r) => r.binding_status === 'anchored' && (r.forbidden_writers ?? []).length > 0,
+      );
+      if (!resource) throw new Error('red fixture requires an anchored resource with a forbidden writer');
       resource.allowed_writers.push(resource.forbidden_writers[0]);
     }],
     ['appsdk owner symbol not declared', (appsdk) => {
