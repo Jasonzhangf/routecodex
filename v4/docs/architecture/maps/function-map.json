@@ -1156,6 +1156,7 @@
         "crates/routecodex-v4-lifecycle/src/lib.rs"
       ],
       "required_gates": [
+        "v4_cordis_lifecycle_failure_atomic",
         "v4_lifecycle_l2_regression",
         "v4_infrastructure_contract",
         "v4_infrastructure_contract_red"

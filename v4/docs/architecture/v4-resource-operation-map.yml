@@ -3025,6 +3025,7 @@ resources:
   verification_gate:
   - v4_lifecycle_l2_regression
   - v4_infrastructure_contract
+  - v4_cordis_lifecycle_failure_atomic
   resource_kind: managed_instance_state
   lifecycle: v4.lifecycle.managed_instance
   owner_crate: routecodex-v4-lifecycle
@@ -3057,6 +3058,7 @@ resources:
   verification_gate:
   - v4_lifecycle_l2_regression
   - v4_infrastructure_contract
+  - v4_cordis_lifecycle_failure_atomic
   resource_kind: managed_control_socket
   lifecycle: v4.lifecycle.managed_instance
   owner_crate: routecodex-v4-lifecycle
