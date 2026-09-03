@@ -405,6 +405,7 @@ fn start(intent: StartIntent) -> Result<String, String> {
     }
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
     print_startup(&manifest);
+    preflight_cordis_socket()?;
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let record = start_managed(
         &paths,
@@ -421,6 +422,18 @@ fn start(intent: StartIntent) -> Result<String, String> {
         record.listeners.join(",")
     );
     Ok(format_status("running", &record))
+}
+
+/// Validate the external Cordis admission owner before taking over a managed
+/// listener.  A start must never stop a healthy V4 child only to discover that
+/// its replacement cannot complete admission.
+fn preflight_cordis_socket() -> Result<(), String> {
+    use std::os::unix::net::UnixStream;
+    let socket_path = std::env::var("RCCV4_CORDIS_HOST_SOCKET")
+        .map_err(|_| "Cordis admission requires RCCV4_CORDIS_HOST_SOCKET".to_string())?;
+    UnixStream::connect(&socket_path)
+        .map(|_| ())
+        .map_err(|error| format!("Cordis admission socket connect failed: {error}"))
 }
 
 fn status(intent: ConfigPathIntent) -> Result<String, String> {
