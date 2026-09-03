@@ -779,9 +779,16 @@ impl PipelineHandler {
         manifest: RuntimeConfigManifest,
         require_cordis_admission: bool,
     ) -> Result<Self, String> {
-        if require_cordis_admission {
-            compile_production_execution_plans(&manifest.execution_epoch.skeleton)
-                .map_err(|error| format!("production plugin plan compilation failed: {error}"))?;
+        let production_plans = compile_production_execution_plans(&manifest.execution_epoch.skeleton)
+            .map_err(|error| format!("production plugin plan compilation failed: {error}"))?;
+        let declared_artifact_set = manifest.execution_epoch.candidate["plugin_artifact_set_hash"]
+            .as_str()
+            .ok_or_else(|| "runtime candidate has no plugin_artifact_set_hash".to_string())?;
+        if production_plans.artifact_set_hash != declared_artifact_set {
+            return Err(format!(
+                "production plugin artifact set drift: compiled={} candidate={}",
+                production_plans.artifact_set_hash, declared_artifact_set
+            ));
         }
         let registry = Arc::new(ProductionHandleRegistry::new(manifest.product.as_ref()));
         let cordis_admission_receipt = if require_cordis_admission {
