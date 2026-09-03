@@ -1,0 +1,19 @@
+#!/usr/bin/env sh
+set -eu
+
+current="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+case "$current" in
+  main|master)
+    echo "RouteCodex governance: commits on $current are disabled. Use a clean owner worktree." >&2
+    exit 1
+    ;;
+  *)
+    ;;
+esac
+
+if command -v npm >/dev/null 2>&1 && test -f package.json; then
+  npm run --silent verify:local
+else
+  echo "RouteCodex governance: cannot run Git main protection verification (npm/package.json missing)." >&2
+  exit 1
+fi

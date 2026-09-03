@@ -1728,10 +1728,11 @@ fn harvest_v3_think_text(text: &str) -> V3ThinkHarvest {
     let mut changed = false;
     while let Some(relative_start) = text[cursor..].find("<think>") {
         let start = cursor + relative_start;
-        output.push_str(&text[cursor..start]);
+        output.push_str(&text[cursor..start].replace("</think>", ""));
         let content_start = start + "<think>".len();
         let Some(relative_end) = text[content_start..].find("</think>") else {
-            output.push_str(&text[start..]);
+            output.push_str(&text[content_start..]);
+            changed = true;
             return V3ThinkHarvest {
                 visible_text: output,
                 reasoning_segments,
@@ -1745,7 +1746,13 @@ fn harvest_v3_think_text(text: &str) -> V3ThinkHarvest {
         cursor = end + "</think>".len();
         changed = true;
     }
-    output.push_str(&text[cursor..]);
+    let trailing = &text[cursor..];
+    if trailing.contains("</think>") {
+        output.push_str(&trailing.replace("</think>", ""));
+        changed = true;
+    } else {
+        output.push_str(trailing);
+    }
     V3ThinkHarvest {
         visible_text: output,
         reasoning_segments,
@@ -4785,6 +4792,36 @@ mod tests {
 
         assert!(harvest.changed);
         assert_eq!(harvest.visible_text, "  before\n after  ");
+        assert_eq!(harvest.reasoning_segments, vec!["private".to_string()]);
+    }
+
+    #[test]
+    fn resp03_think_harvest_removes_orphan_open_tag_and_keeps_content() {
+        let harvest = harvest_v3_think_text("before <think>visible continuation");
+        assert!(harvest.changed);
+        assert_eq!(harvest.visible_text, "before visible continuation");
+        assert!(harvest.reasoning_segments.is_empty());
+    }
+
+    #[test]
+    fn resp03_think_harvest_removes_orphan_close_tag() {
+        let harvest = harvest_v3_think_text("before </think> after");
+        assert!(harvest.changed);
+        assert_eq!(harvest.visible_text, "before  after");
+        assert!(harvest.reasoning_segments.is_empty());
+    }
+
+    #[test]
+    fn resp03_think_harvest_collects_multiple_paired_blocks_in_order() {
+        let harvest = harvest_v3_think_text("A<think> first </think>B<think>second</think>C");
+        assert_eq!(harvest.visible_text, "ABC");
+        assert_eq!(harvest.reasoning_segments, vec!["first".to_string(), "second".to_string()]);
+    }
+
+    #[test]
+    fn resp03_think_harvest_removes_orphan_close_before_paired_block() {
+        let harvest = harvest_v3_think_text("A</think>B<think>private</think>C");
+        assert_eq!(harvest.visible_text, "ABC");
         assert_eq!(harvest.reasoning_segments, vec!["private".to_string()]);
     }
 
