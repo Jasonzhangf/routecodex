@@ -598,7 +598,13 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
             .map(|listener| listener.address.clone())
             .collect(),
     };
-    let control = ManagedControlPlane::bind(paths, record).map_err(|error| error.to_string())?;
+    let control = match ManagedControlPlane::bind(paths, record) {
+        Ok(control) => control,
+        Err(error) => {
+            terminate_cordis_child(&mut cordis_child);
+            return Err(error.to_string());
+        }
+    };
     let listeners = manifest
         .listeners
         .iter()
@@ -617,22 +623,33 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     let action = loop {
         if handles.iter().any(thread::JoinHandle::is_finished) {
             stop.store(true, Ordering::Release);
-            join_servers(handles)?;
+            let join_result = join_servers(handles);
+            terminate_cordis_child(&mut cordis_child);
             control.clear_record().map_err(|error| error.to_string())?;
+            join_result?;
             return Err("V4 listener exited before lifecycle stop or restart".to_string());
         }
-        match control.poll().map_err(|error| error.to_string())? {
-            ManagedAction::Continue => thread::sleep(Duration::from_millis(10)),
-            action => break action,
+        match control.poll() {
+            Ok(ManagedAction::Continue) => thread::sleep(Duration::from_millis(10)),
+            Ok(action) => break action,
+            Err(error) => {
+                stop.store(true, Ordering::Release);
+                let join_result = join_servers(handles);
+                terminate_cordis_child(&mut cordis_child);
+                control.clear_record().map_err(|clear| clear.to_string())?;
+                join_result?;
+                return Err(error.to_string());
+            }
         }
     };
     stop.store(true, Ordering::Release);
-    join_servers_for_shutdown(handles)?;
-    control.clear_record().map_err(|error| error.to_string())?;
-    if let Some(mut child) = cordis_child.take() {
-        let _ = child.kill();
-        let _ = child.wait();
+    if let Err(error) = join_servers_for_shutdown(handles) {
+        terminate_cordis_child(&mut cordis_child);
+        control.clear_record().map_err(|clear| clear.to_string())?;
+        return Err(error);
     }
+    control.clear_record().map_err(|error| error.to_string())?;
+    terminate_cordis_child(&mut cordis_child);
     drop(control);
     if action == ManagedAction::Restart {
         // macOS may retain the just-closed TCP listener briefly after the
@@ -649,6 +666,13 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
         return Err(error.to_string());
     }
     Ok(())
+}
+
+fn terminate_cordis_child(child: &mut Option<Child>) {
+    if let Some(mut child) = child.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 fn run_foreground(manifest: RuntimeConfigManifest) -> Result<(), String> {
