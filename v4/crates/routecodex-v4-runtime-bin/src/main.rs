@@ -544,7 +544,7 @@ fn ensure_cordis_host_socket(
         }
     }
     let state = paths.state_root.clone();
-    let child = Command::new("node")
+    let mut child = Command::new("node")
         .arg(&runner)
         .arg(&state)
         .arg(&socket)
@@ -555,17 +555,44 @@ fn ensure_cordis_host_socket(
         .spawn()
         .map_err(|error| format!("Cordis host spawn failed: {error}"))?;
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    if wait_for_cordis_socket(&socket, deadline) {
-        std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
-        return Ok(Some(child));
+    if let Err(error) = wait_for_cordis_socket_with_child(&socket, &mut child, deadline) {
+        let mut child = Some(child);
+        terminate_cordis_child(&mut child);
+        if socket.exists() {
+            let _ = std::fs::remove_file(&socket);
+        }
+        return Err(error);
     }
-    // A host that never exposes a connectable socket is not a usable
-    // lifecycle dependency. Reap it here; otherwise every subsequent start
-    // inherits an orphaned Cordis process and a stale declaration.
-    let mut child = Some(child);
-    terminate_cordis_child(&mut child);
-    if socket.exists() {
-        let _ = std::fs::remove_file(&socket);
+    std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
+    Ok(Some(child))
+}
+
+fn wait_for_cordis_socket_with_child(
+    socket: &std::path::Path,
+    child: &mut Child,
+    deadline: std::time::Instant,
+) -> Result<(), String> {
+    while std::time::Instant::now() < deadline {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("Cordis host status check failed: {error}"))?
+        {
+            return Err(format!("Cordis host exited before admission: {status}"));
+        }
+        if std::os::unix::net::UnixStream::connect(socket).is_ok() {
+            // A socket can become connectable just as the child exits. Check
+            // once more before publishing it to the production admission
+            // path, otherwise the next request observes a misleading
+            // connection-refused failure.
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|error| format!("Cordis host status check failed: {error}"))?
+            {
+                return Err(format!("Cordis host exited before admission: {status}"));
+            }
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
     Err("Cordis host socket did not become ready".to_string())
 }
@@ -2611,5 +2638,29 @@ targets = ["mock"]
         ));
         let _listener = listener.join().expect("listener thread must finish");
         let _ = std::fs::remove_file(socket);
+    }
+
+    #[test]
+    fn cordis_socket_readiness_rejects_host_that_exits_before_admission() {
+        let socket = std::env::temp_dir().join(format!(
+            "rccv4-cordis-dead-host-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock must be valid")
+                .as_nanos()
+        ));
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "sleep 0.05"])
+            .spawn()
+            .expect("dead host fixture must spawn");
+        let error = wait_for_cordis_socket_with_child(
+            &socket,
+            &mut child,
+            std::time::Instant::now() + std::time::Duration::from_secs(1),
+        )
+        .expect_err("an exited Cordis host must fail readiness");
+        assert!(error.contains("exited before admission"), "unexpected error: {error}");
+        let _ = child.wait();
     }
 }
