@@ -37,7 +37,9 @@ for (const symbol of [
 ]) {
   if (productionSource.includes(symbol)) failures.push(`RUNTIME_BIN_DIRECT_BUSINESS_HELPER: ${symbol}`);
 }
-if (!productionSource.includes('send_protocol(')) {
+if (!productionSource.includes('send_protocol(')
+    && !productionSource.includes('provider_send_target_nonstream(')
+    && !productionSource.includes('provider_send_target_streaming(')) {
   failures.push('PROVIDER_TRANSPORT_UNBOUND: runtime-bin must use provider-owned protocol dispatch');
 }
 if (!runtimeBin.includes('execute_provider_response_scoped')) {
