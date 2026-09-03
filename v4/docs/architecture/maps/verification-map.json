@@ -2987,6 +2987,21 @@
       "required_for": [
         "v4.runtime_bin.cordis_service_readiness:source_green"
       ]
+    },
+    {
+      "gate_id": "v4_cordis_production_admission",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-runtime-bin",
+      "feature_ids": ["v4.cordis.production_admission"],
+      "command": "node scripts/architecture/verify-v4-cordis-production-admission.mjs",
+      "argv": ["node", "scripts/architecture/verify-v4-cordis-production-admission.mjs"],
+      "producer": {"adapter": "node", "identity": "v4_cordis_production_admission"},
+      "evidence_role": "positive_and_negative",
+      "input_paths": [
+        "crates/routecodex-v4-runtime-bin/src/main.rs",
+        "scripts/architecture/verify-v4-cordis-production-admission.mjs"
+      ],
+      "required_for": ["v4.cordis.production_admission:source_green"]
     }
   ]
 }

@@ -2,6 +2,19 @@
   "schema_version": 1,
   "functions": [
     {
+      "function_id": "v4.cordis.production_admission",
+      "owner": "routecodex-v4-runtime-bin",
+      "status": "active",
+      "binding_status": "binding_pending",
+      "entry_symbols": ["PipelineHandler::new", "CordisAdmission"],
+      "entry_paths": [
+        "crates/routecodex-v4-runtime-bin/src/main.rs",
+        "scripts/architecture/verify-v4-cordis-production-admission.mjs"
+      ],
+      "required_gates": ["v4_cordis_production_admission"],
+      "resource_bindings": ["v4.cordis.production_admission"]
+    },
+    {
       "function_id": "goal_clarification",
       "owner": "appsdk::goal",
       "entry_symbols": [
