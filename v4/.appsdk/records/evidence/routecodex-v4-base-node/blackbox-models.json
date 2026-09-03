@@ -1,11 +1,11 @@
 {
   "evidence_id": "blackbox-models",
   "issue_id": "v4-cordis-production-wiring",
-  "experiment_id": "fix-530265792571",
+  "experiment_id": "fix-f066c9097404",
   "phase": "deployed_blackbox",
   "kind": "runtime",
-  "source_commit": "53026579257106c4bf1ef784cd2884118896f498",
-  "artifact_hash": "sha256:3592bbf4c550e266e381893ca5d61c6ac0579e0d8dbf8c049356b04aa2c9caef",
+  "source_commit": "f066c90974043fe242af54a4bd9c975063493c04",
+  "artifact_hash": "sha256:3df882f39e7343e3b660a7625ba4f0fdbed0979848bd2be07734262c4f54f03f",
   "execution_surface": "deployed_blackbox",
   "environment_id": "local-v4-5520",
   "entrypoint": "http://127.0.0.1:5520",
@@ -27,11 +27,11 @@
   ],
   "exit_status": 0,
   "result": "pass",
-  "created_at": "2026-09-03T21:21:54.301Z",
-  "expires_at": "2026-09-10T21:21:54.301Z",
+  "created_at": "2026-09-03T21:27:21.078Z",
+  "expires_at": "2026-09-10T21:27:21.078Z",
   "input_hashes": [
     "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
     "sha256:bd10c558d90956ee382b260984979b4dc106589a795a476d8ba5b49ec66980a6"
   ],
-  "scope_hash": "sha256:52ded34265b3af2e5d146e6a610f1a0d164bf28bb771bb060bdf5cef96ca563f"
+  "scope_hash": "sha256:a0fcd631e7f46a2c56533fce20f6d62f73165a294902ca18926e8a146e3369ae"
 }
