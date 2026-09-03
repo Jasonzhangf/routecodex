@@ -45,6 +45,7 @@ use std::future::Future;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -559,6 +560,53 @@ fn print_startup(manifest: &RuntimeConfigManifest) {
     let _ = std::io::stdout().flush();
 }
 
+fn ensure_cordis_host_socket(
+    manifest_path: &std::path::Path,
+    paths: &V4LifecyclePaths,
+) -> Result<Option<Child>, String> {
+    if std::env::var_os("RCCV4_CORDIS_HOST_SOCKET").is_some() {
+        return Ok(None);
+    }
+    let socket = paths.state_root.join("cordis.sock");
+    let runner = std::env::var_os("RCCV4_CORDIS_HOST_RUNNER")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/lib/rccv4/cordis-daemon.mjs")))
+        .ok_or_else(|| "Cordis admission requires RCCV4_CORDIS_HOST_RUNNER or HOME".to_string())?;
+    if !runner.is_file() {
+        return Err(format!("Cordis host runner missing: {}", runner.display()));
+    }
+    if socket.exists() {
+        match std::os::unix::net::UnixStream::connect(&socket) {
+            Ok(_) => {
+                std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
+                return Ok(None);
+            }
+            Err(_) => std::fs::remove_file(&socket)
+                .map_err(|error| format!("Cordis stale socket cleanup failed: {error}"))?,
+        }
+    }
+    let state = paths.state_root.clone();
+    let child = Command::new("node")
+        .arg(&runner)
+        .arg(&state)
+        .arg(&socket)
+        .arg(manifest_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Cordis host spawn failed: {error}"))?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if socket.exists() {
+            std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
+            return Ok(Some(child));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    Err("Cordis host socket did not become ready".to_string())
+}
+
 fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     let manifest = load_runtime_manifest(&intent.manifest).map_err(|error| error.to_string())?;
     let servers = bind_servers(&manifest)?;
@@ -566,6 +614,7 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     if paths.manifest_path != intent.manifest {
         return Err("managed manifest path does not match V4 lifecycle owner".to_string());
     }
+    let mut cordis_child = ensure_cordis_host_socket(&intent.manifest, &paths)?;
     let record = ManagedInstanceRecord {
         runtime_identity: manifest.runtime_identity.clone(),
         pid: std::process::id(),
@@ -613,6 +662,10 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     stop.store(true, Ordering::Release);
     join_servers_for_shutdown(handles)?;
     control.clear_record().map_err(|error| error.to_string())?;
+    if let Some(mut child) = cordis_child.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
     drop(control);
     if action == ManagedAction::Restart {
         // macOS may retain the just-closed TCP listener briefly after the
