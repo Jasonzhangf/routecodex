@@ -551,7 +551,7 @@ pub(crate) fn classify_v3_provider_responses_json_event(
     // Provider-owned Responses extensions are valid inbound data-plane events.
     // Keep the complete frame available for normalization/observation, but do
     // not abort a valid stream before its registered semantic terminal event.
-    if event_type.starts_with("codex.") {
+    if event_type.starts_with("codex.") || event_type.starts_with("responsesapi.") {
         return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
     }
     Err(format!(
@@ -1116,6 +1116,23 @@ mod provider_sse_json_codec_tests {
         )
         .expect("provider extension frame must normalize");
         assert_eq!(normalized, data);
+    }
+
+    #[test]
+    fn responses_accepts_provider_owned_responsesapi_extension_without_terminal() {
+        let data = r#"{"type":"responsesapi.websocket_timing","elapsed_ms":12}"#;
+        assert_eq!(
+            classify_v3_provider_responses_json_event(&serde_json::from_str(data).unwrap()),
+            Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
+        );
+    }
+
+    #[test]
+    fn unknown_responses_extension_namespace_still_fails_closed() {
+        let data = serde_json::json!({"type":"provider_private.websocket_timing"});
+        let error = classify_v3_provider_responses_json_event(&data)
+            .expect_err("unregistered provider namespace must remain explicit");
+        assert!(error.contains("not registered"));
     }
 
     #[test]
