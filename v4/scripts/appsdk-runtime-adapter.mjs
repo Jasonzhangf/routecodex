@@ -32,8 +32,6 @@ const tree = run('git', ['rev-parse', `${head}^{tree}`]).output;
 const scopeHash = sha(run('git', ['ls-tree', '-r', head, '--', '.']).output);
 const diffHash = sha(run('git', ['diff-tree', '--no-commit-id', '--raw', '-r', '-z', '--no-renames', base, head, '--', '.']).output);
 const inputHashes = ['Cargo.toml', 'Cargo.lock'].map(read).map(sha).sort();
-const artifactPath = path.join(root, 'generated', 'modules', moduleId, 'module.compiled.json');
-const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
 const timestamp = () => new Date().toISOString();
 const candidateId = `fix-${head.slice(0, 12)}`;
 const worktreeId = `v4-cordis-${head.slice(0, 12)}`;
@@ -57,6 +55,8 @@ write('positive-1', evidence('positive-1', 'positive_intervention', 'positive_te
 const negative = run('node', ['scripts/architecture/verify-v4-production-mainline-red.mjs']);
 write('negative-1', evidence('negative-1', 'negative_intervention', 'negative_test', negative.argv));
 run('appsdk', ['compile-module', '.', '--module', moduleId], { timeout: 1800000 });
+const artifactPath = path.join(root, 'generated', 'modules', moduleId, 'module.compiled.json');
+const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
 const binary = path.join(root, 'generated', 'modules', moduleId, 'lib', 'rccv4');
 if (!fs.existsSync(binary)) throw new Error(`compiled artifact missing: ${binary}`);
 const installTarget = path.join(os.homedir(), '.local', 'bin', 'rccv4');
