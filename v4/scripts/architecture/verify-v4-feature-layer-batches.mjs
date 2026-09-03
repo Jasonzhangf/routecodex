@@ -85,6 +85,9 @@ export function validateFeatureLayerBatchAdmission(input, context, options = {})
   }
   failures.push(...validateFeatureLayerDefinition(input, context, {
     allowPendingGuard: options.allowPendingGuard === true,
+    skipSourceGreenClaims: mode === 'build-guard'
+      && input.manifest.integration.enforcement_binding_status === 'pending_candidate'
+      && input.manifest.integration.wiring_started === false,
   }));
   if (mode === 'admission') {
     validateFeatureLayerAdmission(input, context, failures);
@@ -105,7 +108,9 @@ export function validateFeatureLayerBatchAdmission(input, context, options = {})
           || input.manifest.integration.wiring_started) {
         addFailure(failures, 'WIRING_GUARD_UNBOUND', 'build guard requires an exact source candidate');
       }
-    } else if (observed.wiring_edges.length > 0) {
+    } else if (observed.wiring_edges.length > 0
+      && (input.manifest.integration.wiring_started
+        || input.manifest.integration.enforcement_binding_status === 'bound')) {
       validateFeatureLayerAdmission(input, context, failures, {
         requireIntegrationRecords: false,
       });

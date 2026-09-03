@@ -1,5 +1,6 @@
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_cordis_bridge::{HandleRegistry, PluginHandle};
+use routecodex_v4_skeleton::SkeletonPlan;
 use routecodex_v4_cli::{
     Cli, ConfigIntent, ConfigPathIntent, InitIntent, ManagedChildIntent, RestartIntent,
     ServerIntent, ServerStartIntent, ServertoolIntent, SnapshotIntent, StartIntent, StopIntent,
@@ -24,7 +25,7 @@ use routecodex_v4_provider::{
 };
 use routecodex_v4_router::{
     apply_product_error_policy,
-    TargetSelectionHandle, TARGET_SELECTION_PLUGIN_ID,
+    TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
 };
 use routecodex_v4_runtime::{
     parse_request_admission_facts, project_runtime_fault, project_runtime_fault_with_policy,
@@ -41,7 +42,7 @@ use routecodex_v4_standard_plugins::sse_transport::{
     production_transport_pair, SseEgressPlugin, SseIngressPlugin,
 };
 use std::future::Future;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -49,6 +50,57 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CordisAdmission {
+    generation: u64,
+    graph_hash: String,
+}
+
+impl CordisAdmission {
+    fn admit(
+        expected_graph_hash: &str,
+        expected_manifest_hash: &str,
+        expected_epoch_id: &str,
+    ) -> Result<Self, String> {
+        use std::os::unix::net::UnixStream;
+        let socket_path = std::env::var("RCCV4_CORDIS_HOST_SOCKET")
+            .map_err(|_| "Cordis admission requires RCCV4_CORDIS_HOST_SOCKET".to_string())?;
+        let mut handshake_stream = UnixStream::connect(&socket_path)
+            .map_err(|error| format!("Cordis admission socket connect failed: {error}"))?;
+        handshake_stream
+            .write_all(format!("{{\"op\":\"handshake\",\"protocolVersion\":1,\"graphHash\":\"{expected_graph_hash}\"}}\n").as_bytes())
+            .map_err(|error| format!("Cordis admission request failed: {error}"))?;
+        let mut handshake = String::new();
+        handshake_stream.read_to_string(&mut handshake).map_err(|error| error.to_string())?;
+        let value: Value = serde_json::from_str(handshake.trim()).map_err(|error| error.to_string())?;
+        if value.get("ok") != Some(&Value::Bool(true)) {
+            return Err("Cordis admission handshake rejected".to_string());
+        }
+        let generation = value["snapshot"]["generation"]
+            .as_u64().ok_or_else(|| "Cordis admission snapshot has no generation".to_string())?;
+        let mut stream = UnixStream::connect(&socket_path).map_err(|error| error.to_string())?;
+        let request = serde_json::json!({
+            "op": "admission", "protocolVersion": 1, "generation": generation,
+            "graphHash": expected_graph_hash, "manifestHash": expected_manifest_hash,
+            "epochId": expected_epoch_id,
+        });
+        stream.write_all(format!("{request}\n").as_bytes()).map_err(|error| error.to_string())?;
+        let mut response = String::new();
+        stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
+        let response: Value = serde_json::from_str(response.trim()).map_err(|error| error.to_string())?;
+        if response.get("ok") != Some(&Value::Bool(true)) {
+            return Err(format!("Cordis admission rejected: {}", response["message"].as_str().unwrap_or("unknown error")));
+        }
+        let active = response["admission"]["active_epoch"].clone();
+        if active["graph_hash"].as_str() != Some(expected_graph_hash)
+            || active["manifest_hash"].as_str() != Some(expected_manifest_hash)
+            || active["epoch_id"].as_str() != Some(expected_epoch_id) {
+            return Err("Cordis admission active epoch identity mismatch".to_string());
+        }
+        Ok(Self { generation, graph_hash: expected_graph_hash.to_string() })
+    }
+}
 
 struct ProductionHandleRegistry {
     standard: StandardHandleRegistry,
@@ -66,7 +118,10 @@ impl ProductionHandleRegistry {
 
 impl HandleRegistry for ProductionHandleRegistry {
     fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
-        if plugin_id == TARGET_SELECTION_PLUGIN_ID {
+        if plugin_id == TARGET_SELECTION_PLUGIN_ID
+            || plugin_id == DIRECT_TARGET_SELECTION_PLUGIN_ID
+            || plugin_id == "v4.std.routing.route_facts_consumer"
+        {
             if let Some(handle) = self.router_target.as_ref() {
                 return Some(handle as &dyn PluginHandle);
             }
@@ -78,6 +133,98 @@ impl HandleRegistry for ProductionHandleRegistry {
         self.standard.encode_client_error_sse(entry_protocol, message)
     }
 
+}
+
+/// Cordis service readiness report produced by `cordis_service_readiness`.
+/// The numbers mirror what a CordisBoundNodeHost would observe after
+/// `mount()` + `beginExecution()` on the production plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CordisReadinessReport {
+    pub bound_plugin_count: usize,
+    pub missing_plugin_ids: Vec<String>,
+    pub service_binding_count: usize,
+    pub plan_node_count: usize,
+}
+
+/// Mirror of the CordisBoundNodeHost.mount() precondition for production.
+/// The runtime-bin production entry calls this before binding any TCP
+/// listener. A failure aborts startup with a typed error that names every
+/// runtime plugin missing a typed handle so the operator can repair the
+/// catalog before serving traffic. Compile-time config operators are already
+/// consumed by `compile_runtime_config` and are not runtime bindings.
+pub fn cordis_service_readiness(
+    skeleton: &SkeletonPlan,
+    registry: &dyn HandleRegistry,
+    service_binding_count: usize,
+) -> Result<CordisReadinessReport, String> {
+    let mut plugin_ids = std::collections::BTreeSet::new();
+    let mut plan_node_count = 0usize;
+    for chain in &skeleton.chains {
+        for node in &chain.nodes {
+            plan_node_count += 1;
+            if chain.chain_id == "config" {
+                continue;
+            }
+            for plugin in &node.plugins {
+                plugin_ids.insert(plugin.plugin_id.clone());
+            }
+        }
+    }
+    let mut bound_plugin_count = 0usize;
+    let mut missing_plugin_ids = Vec::new();
+    for plugin_id in &plugin_ids {
+        if registry.contains(plugin_id.as_str()) {
+            bound_plugin_count += 1;
+        } else {
+            missing_plugin_ids.push(plugin_id.clone());
+        }
+    }
+    missing_plugin_ids.sort();
+    let report = CordisReadinessReport {
+        bound_plugin_count,
+        missing_plugin_ids: missing_plugin_ids.clone(),
+        service_binding_count,
+        plan_node_count,
+    };
+    if !missing_plugin_ids.is_empty() {
+        return Err(format!(
+            "cordis service readiness failed: missing plugin handles for {} of {} compiled plugins: {}",
+            missing_plugin_ids.len(),
+            plugin_ids.len(),
+            missing_plugin_ids.join(", ")
+        ));
+    }
+    Ok(report)
+}
+
+/// Test helper that shadows a real registry with one whose first compiled
+/// plugin id resolves to None. Used by the negative red test.
+pub struct MissingStandardHandleRegistry<'a, R: HandleRegistry + ?Sized> {
+    inner: &'a R,
+    missing_plugin_id: String,
+}
+
+impl<'a, R: HandleRegistry + ?Sized> MissingStandardHandleRegistry<'a, R> {
+    pub fn new(inner: &'a R, missing_plugin_id: impl Into<String>) -> Self {
+        Self {
+            inner,
+            missing_plugin_id: missing_plugin_id.into(),
+        }
+    }
+}
+
+impl<'a, R: HandleRegistry + ?Sized> HandleRegistry for MissingStandardHandleRegistry<'a, R> {
+    fn get(&self, plugin_id: &str) -> Option<&dyn routecodex_v4_cordis_bridge::PluginHandle> {
+        if plugin_id == self.missing_plugin_id {
+            None
+        } else {
+            self.inner.get(plugin_id)
+        }
+    }
+
+    fn encode_client_error_sse(&self, entry_protocol: &str, message: &str) -> Result<Vec<u8>, String> {
+        self.inner.encode_client_error_sse(entry_protocol, message)
+    }
 }
 
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-v4");
@@ -464,10 +611,10 @@ fn spawn_servers(
                     .build()
                     .map_err(|error| error.to_string())?;
                 let result = runtime.block_on(async move {
+                    let handler = Arc::new(PipelineHandler::new_production(manifest)?);
                     let server = AsyncHttpServer::bind_persisted(&server)
                         .await
                         .map_err(|error| error.to_string())?;
-                    let handler = Arc::new(PipelineHandler::new(manifest)?);
                     let cancellation = CancellationToken::new();
                     let watcher = cancellation.clone();
                     tokio::spawn(async move {
@@ -525,6 +672,9 @@ fn spawn_options(snapshot: &SnapshotIntent) -> ManagedSpawnOptions {
         snap_stages: snapshot.snap_stages.clone(),
         debug: snapshot.debug,
         sse_dump: snapshot.sse_dump,
+        env: std::env::vars()
+            .filter(|(name, _)| name == "RCCV4_CORDIS_HOST_SOCKET")
+            .collect(),
     }
 }
 
@@ -548,7 +698,28 @@ struct PipelineHandler {
 
 impl PipelineHandler {
     fn new(manifest: RuntimeConfigManifest) -> Result<Self, String> {
+        Self::new_with_admission(manifest, false)
+    }
+
+    fn new_production(manifest: RuntimeConfigManifest) -> Result<Self, String> {
+        Self::new_with_admission(manifest, true)
+    }
+
+    fn new_with_admission(
+        manifest: RuntimeConfigManifest,
+        require_cordis_admission: bool,
+    ) -> Result<Self, String> {
         let registry = Arc::new(ProductionHandleRegistry::new(manifest.product.as_ref()));
+        let cordis_admission_receipt = if require_cordis_admission {
+            Some(CordisAdmission::admit(
+                &manifest.execution_epoch.graph_hash,
+                &manifest.execution_epoch.manifest_hash,
+                manifest.execution_epoch.candidate["epoch_id"].as_str()
+                    .ok_or_else(|| "runtime candidate has no epoch_id".to_string())?,
+            )?)
+        } else {
+            None
+        };
         let runtime =
             SkeletonRuntime::from_compiled_plan_with_registry(manifest.execution_epoch.skeleton.clone(), registry)
                 .map_err(|error| error.to_string())?;
@@ -563,6 +734,11 @@ impl PipelineHandler {
                 &manifest.execution_epoch.manifest_hash,
             )
             .map_err(|error| error.to_string())?;
+        if let Some(receipt) = cordis_admission_receipt {
+            if receipt.graph_hash != manifest.execution_epoch.graph_hash || receipt.generation == 0 {
+                return Err("Cordis admission receipt is invalid".to_string());
+            }
+        }
         runtime
             .commit_execution_epoch(&transaction_id)
             .map_err(|error| error.to_string())?;
@@ -2206,5 +2382,71 @@ targets = ["mock"]
             "unexpected chat projection: {text}"
         );
         assert!(text.ends_with("data: [DONE]\n\n"));
+    }
+
+    #[test]
+    fn production_entry_cordis_service_readiness_binds_every_compiled_plugin() {
+        let manifest = test_manifest();
+        let registry = ProductionHandleRegistry::new(manifest.product.as_ref());
+        let plan = {
+            let handler = PipelineHandler::new(test_manifest())
+                .expect("production handler must initialize");
+            let plan = handler.runtime.lock().expect("runtime lock").plan().clone();
+            plan
+        };
+        let report = super::cordis_service_readiness(&plan, &registry, 0)
+            .expect("production readiness must succeed with the standard registry");
+        let compiled_plugin_ids: std::collections::BTreeSet<&str> = plan
+            .chains
+            .iter()
+            .filter(|chain| chain.chain_id != "config")
+            .flat_map(|chain| chain.nodes.iter())
+            .flat_map(|node| node.plugins.iter())
+            .map(|plugin| plugin.plugin_id.as_str())
+            .collect();
+        let missing_in_compiled_plan: std::collections::BTreeSet<&str> = report
+            .missing_plugin_ids
+            .iter()
+            .map(|id| id.as_str())
+            .collect();
+        assert!(
+            missing_in_compiled_plan.is_empty(),
+            "readiness must report every compiled plugin bound: missing={:?}",
+            missing_in_compiled_plan
+        );
+        assert!(
+            report.bound_plugin_count >= compiled_plugin_ids.len(),
+            "readiness must bind every compiled plugin ({} expected, {} bound)",
+            compiled_plugin_ids.len(),
+            report.bound_plugin_count
+        );
+        assert_eq!(report.service_binding_count, 0);
+    }
+
+    #[test]
+    fn production_entry_cordis_service_readiness_fails_when_a_plugin_handle_is_missing() {
+        let manifest = test_manifest();
+        let registry = ProductionHandleRegistry::new(manifest.product.as_ref());
+        let plan = {
+            let handler = PipelineHandler::new(test_manifest())
+                .expect("production handler must initialize");
+            let plan = handler.runtime.lock().expect("runtime lock").plan().clone();
+            plan
+        };
+        let missing_plugin_id = plan
+            .chains
+            .iter()
+            .flat_map(|chain| chain.nodes.iter())
+            .flat_map(|node| node.plugins.iter())
+            .map(|plugin| plugin.plugin_id.clone())
+            .next()
+            .expect("test plan must contain a compiled plugin");
+        let broken_registry = MissingStandardHandleRegistry::new(&registry, missing_plugin_id);
+        let error = super::cordis_service_readiness(&plan, &broken_registry, 1)
+            .expect_err("readiness must fail when a plugin handle is missing");
+        assert!(
+            error.contains("missing plugin handles"),
+            "error must identify the readiness gap: {error}"
+        );
     }
 }

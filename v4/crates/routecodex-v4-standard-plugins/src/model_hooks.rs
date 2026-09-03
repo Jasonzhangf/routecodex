@@ -82,7 +82,18 @@ pub(crate) fn direct_response_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), S
             "Direct protocol mismatch: client={client_protocol} provider={provider_protocol}"
         ));
     }
-    ctx.write_data(Value::Object(value))
+    // HTTP transport envelopes are an inbound carrier, not the client
+    // response shape. Decode the raw body at this direct response plugin
+    // boundary; transport remains byte-preserving and owns no projection.
+    let projected = match value.get("_provider_http_body").and_then(Value::as_str) {
+        Some(body) => serde_json::from_str(body)
+            .map_err(|error| format!("direct response JSON decode failed: {error}"))?,
+        None => Value::Object(value),
+    };
+    if !projected.is_object() {
+        return Err("direct response payload must be an object".to_string());
+    }
+    ctx.write_data(projected)
         .map_err(|error| error.to_string())
 }
 

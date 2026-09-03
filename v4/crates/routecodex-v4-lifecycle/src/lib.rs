@@ -305,6 +305,7 @@ pub struct ManagedSpawnOptions {
     pub snap_stages: Option<String>,
     pub debug: bool,
     pub sse_dump: bool,
+    pub env: Vec<(String, String)>,
 }
 
 pub fn start_managed(
@@ -370,6 +371,9 @@ pub fn start_managed(
     // group prevents shell teardown from terminating the listener.
     command.process_group(0);
     append_spawn_options(&mut command, options);
+    for (name, value) in &options.env {
+        command.env(name, value);
+    }
     let mut child = command
         .spawn()
         .map_err(|error| io_error(executable, error))?;
@@ -508,6 +512,9 @@ pub fn exec_managed_restart(
         .arg(config_path)
         .current_dir("/");
     append_spawn_options(&mut command, options);
+    for (name, value) in &options.env {
+        command.env(name, value);
+    }
     let error = command.exec();
     LifecycleError::Exec(error.to_string())
 }

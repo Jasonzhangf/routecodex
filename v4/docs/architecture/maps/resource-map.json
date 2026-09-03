@@ -2,6 +2,13 @@
   "schema_version": 1,
   "resources": [
     {
+      "resource_id": "v4.cordis.production_admission",
+      "owner": "routecodex-v4-runtime-bin::CordisAdmission",
+      "truth_store": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "allowed_operations": ["read", "validate"],
+      "status": "active"
+    },
+    {
       "resource_id": "project_contract",
       "owner": "appsdk::project_contract",
       "truth_store": ".appsdk/project.json",

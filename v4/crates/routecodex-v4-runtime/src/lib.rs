@@ -1019,7 +1019,10 @@ impl ExecutionContext {
         for event in &frame.events {
             if event.kind == "stage.checkpoint" {
                 context.diagnostic.trace.push(event.message.clone());
-            } else {
+            } else if !matches!(
+                event.kind.as_str(),
+                "node.entry" | "node.exit" | "state.transition" | "node.error"
+            ) {
                 context.diagnostic.trace.push(format!(
                     "{}:{}:{}",
                     event.plugin_id, event.kind, event.message
@@ -1872,38 +1875,6 @@ impl SkeletonRuntime {
         std::sync::Arc::clone(&self.diagnostic_bus)
     }
 
-    /// Consume published diagnostic facts for one request scope. Dispatch is
-    /// read-only observation; no result is fed back into routing, execution,
-    /// or business payload state.
-    pub fn dispatch_diagnostic_events(&self, request_id: &str) -> Result<usize, RuntimeFault> {
-        let bus = self
-            .diagnostic_bus
-            .lock()
-            .map_err(|_| RuntimeFault::new("diagnostic_bus", "diagnostic bus lock poisoned"))?;
-        let topics = [
-            SubscriptionTopic::NodeEvent,
-            SubscriptionTopic::StateTransition,
-            SubscriptionTopic::Diagnostic,
-            SubscriptionTopic::NodeEntry,
-            SubscriptionTopic::NodeExit,
-            SubscriptionTopic::NodeError,
-        ];
-        let mut dispatched = 0;
-        for topic in topics {
-            if !bus
-                .subscribers_for(&topic)
-                .any(|subscription| subscription.scope_key == request_id)
-            {
-                continue;
-            }
-            dispatched += bus
-                .dispatch(&topic, request_id)
-                .map_err(|error| RuntimeFault::new("diagnostic_bus", error.to_string()))?
-                .len();
-        }
-        Ok(dispatched)
-    }
-
     /// Use this runtime's admitted response-outbound registry for client
     /// error framing; stream processors do not own a duplicate registry.
     pub fn encode_client_error_sse(
@@ -1993,7 +1964,7 @@ impl SkeletonRuntime {
             skeleton_version: self.plan.skeleton_version.clone(),
             manifest_hash: snapshot.manifest_hash,
             plan_epoch: snapshot.plan_epoch,
-            plan_hash: snapshot.execution_identity.clone(),
+            plan_hash: snapshot.execution_identity,
         };
         Ok(RuntimeLease {
             request_id: request_id.to_string(),
@@ -2557,7 +2528,7 @@ impl SkeletonRuntime {
             skeleton_version: self.plan.skeleton_version.clone(),
             manifest_hash: snapshot.manifest_hash,
             plan_epoch: snapshot.plan_epoch,
-            plan_hash: snapshot.execution_identity.clone(),
+            plan_hash: snapshot.execution_identity,
         };
         let mut ctx = ExecutionContext::with_scope(
             request_id,
@@ -2567,38 +2538,38 @@ impl SkeletonRuntime {
             conversation_scope,
         );
         seed(&mut ctx);
-        let mut services = NodeServiceRegistry::new(
-            chain_id,
-            request_id,
-            &snapshot.execution_identity,
-            snapshot.plan_epoch,
-        );
-        let data_carrier = ImmutableDataCarrier::from_value(
-            &serde_json::to_value(&ctx.data)
-                .map_err(|error| RuntimeFault::new("node_services", error.to_string()))?,
-        )
-        .map_err(|error| RuntimeFault::new("node_services", error.to_string()))?;
-        services
-            .bind_data(data_carrier)
-            .map_err(|error| RuntimeFault::new("node_services", error.to_string()))?;
-        services.bind_information(ImmutableInformationCarrier::new(
-            ctx.information.protocol.as_deref().unwrap_or("unknown"),
-            ctx.information.model.as_deref().unwrap_or("unknown"),
-        )).map_err(|error| RuntimeFault::new("node_services", error.to_string()))?;
-        services
-            .bind_diagnostic(ImmutableDiagnosticCarrier::new(request_id))
-            .map_err(|error| RuntimeFault::new("node_services", error.to_string()))?;
-        services
-            .execute()
-            .map_err(|error| RuntimeFault::new("node_services", error.to_string()))?;
         let initial_frame = ctx.clone().into_frame(chain_id)?;
-        let outcome = ExecutionEngine::execute_pinned_node(
+        let outcome = match ExecutionEngine::execute_pinned_node(
             chain_id,
             initial_frame,
             lease,
             self.handle_registry.as_ref(),
-        )
-        .map_err(|error| RuntimeFault::new("execution_engine", error.to_string()))?;
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let message = error.to_string();
+                let payload_hash = format!("sha256:{:x}", Sha256::digest(message.as_bytes()));
+                let mut bus = self
+                    .diagnostic_bus
+                    .lock()
+                    .map_err(|_| RuntimeFault::new("diagnostic_bus", "diagnostic bus lock poisoned"))?;
+                bus.publish(DiagnosticEventEnvelope::new(
+                    SubscriptionTopic::NodeError,
+                    request_id,
+                    "routecodex-v4-runtime",
+                    &payload_hash,
+                ))
+                .map_err(|bus_error| RuntimeFault::new("diagnostic_bus", bus_error.to_string()))?;
+                if bus
+                    .subscribers_for(&SubscriptionTopic::NodeError)
+                    .any(|subscription| subscription.scope_key == request_id)
+                {
+                    bus.dispatch(&SubscriptionTopic::NodeError, request_id)
+                        .map_err(|bus_error| RuntimeFault::new("diagnostic_bus", bus_error.to_string()))?;
+                }
+                return Err(RuntimeFault::new("execution_engine", message));
+            }
+        };
         let outcome_events = match &outcome {
             NodeOutcome::Continue { events, .. } | NodeOutcome::Branch { events, .. } => events,
             NodeOutcome::Terminal { .. } | NodeOutcome::Failure { .. } => &Vec::new(),
@@ -2617,15 +2588,21 @@ impl SkeletonRuntime {
                     _ => SubscriptionTopic::NodeEvent,
                 };
                 bus.publish(DiagnosticEventEnvelope::new(
-                    topic,
+                    topic.clone(),
                     request_id,
                     &event.plugin_id,
                     &payload_hash,
                 ))
                 .map_err(|error| RuntimeFault::new("diagnostic_bus", error.to_string()))?;
+                if bus
+                    .subscribers_for(&topic)
+                    .any(|subscription| subscription.scope_key == request_id)
+                {
+                    bus.dispatch(&topic, request_id)
+                        .map_err(|error| RuntimeFault::new("diagnostic_bus", error.to_string()))?;
+                }
             }
         }
-        self.dispatch_diagnostic_events(request_id)?;
         let compiled_plugins = lease
             .plugin_ids_for_chain(chain_id)
             .map_err(|error| RuntimeFault::new("production_plan_missing", error.to_string()))?;

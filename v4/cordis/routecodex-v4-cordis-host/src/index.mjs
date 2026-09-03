@@ -403,21 +403,30 @@ export class CordisNodeHost {
   #ready = false;
   #acquired = new Set();
   #releasedServices = new Set();
+  #serviceBindings = new Map();
 
-  constructor({ nodeId, services = [], descriptor }) {
+  constructor({ nodeId, services = [], descriptor, serviceBindings }) {
     if (!nodeId || !descriptor) {
       throw new CordisHostError('invalid_node_descriptor', 'nodeId and descriptor are required');
     }
     this.nodeId = nodeId;
     this.descriptor = Object.freeze({ ...descriptor });
-    const typedServices = [
-      'nodeControl',
-      'nodeInformation',
-      'nodeDiagnostics',
-    ];
-    this.services = Object.freeze([
-      ...new Set([...typedServices, ...services]),
-    ]);
+    this.services = Object.freeze([...services]);
+    if (serviceBindings !== undefined && !(serviceBindings instanceof Map)) {
+      throw new CordisHostError(
+        'invalid_service_bindings',
+        'serviceBindings must be a Map of typed node service values',
+      );
+    }
+    this.#serviceBindings = new Map(serviceBindings ? [...serviceBindings] : []);
+    for (const name of this.#serviceBindings.keys()) {
+      if (!this.services.includes(name)) {
+        throw new CordisHostError(
+          'service_not_declared',
+          `node service ${name} bound without a host declaration`,
+        );
+      }
+    }
     this.#root = new Context();
     this.#pipeline = this.#root.extend();
     this.#node = this.#pipeline.extend();
@@ -462,10 +471,6 @@ export class CordisNodeHost {
     return this.#node;
   }
 
-  serviceBindings() {
-    return Object.freeze([...this.services]);
-  }
-
   get fibers() {
     return Object.freeze([...this.#fibers]);
   }
@@ -478,19 +483,15 @@ export class CordisNodeHost {
     if (this.#disposed) {
       throw new CordisHostError('host_disposed', `node ${this.nodeId} is disposed`);
     }
+    for (const [name, value] of this.#serviceBindings) {
+      this.#node.provide(name, value);
+    }
     const mounted = [];
     try {
       for (const plugin of plugins) {
         const fiber = this.#node.plugin(plugin.factory, plugin.config);
         mounted.push({ id: plugin.id, fiber });
-        try {
-          await fiber.await();
-        } catch (cause) {
-          throw new CordisHostError(
-            'plugin_not_active',
-            `plugin ${plugin.id} did not reach ACTIVE: ${cause?.message ?? cause}`,
-          );
-        }
+        await fiber.await();
         if (fiber.state !== FiberState.ACTIVE) {
           throw new CordisHostError(
             'plugin_not_active',
@@ -751,12 +752,7 @@ export class CordisBoundNodeHost extends CordisNodeHost {
     this.#plan = Object.freeze(structuredClone(plan));
   }
 
-  serviceBindings() {
-    return super.serviceBindings();
-  }
-
   async mount(plugins) {
-    this.#assertTypedServicesReady(plugins);
     this.#verifyGraph(plugins);
     const hash = this.#plan.hash;
     await this.#port.declare(this.nodeId, this.#plan, {
@@ -814,21 +810,6 @@ export class CordisBoundNodeHost extends CordisNodeHost {
     }
     const response = await this.#port.executeNode(planHash, input);
     return response.output;
-  }
-
-  #assertTypedServicesReady(plugins) {
-    const declared = new Set(this.serviceBindings());
-    for (const plugin of plugins) {
-      const injected = plugin?.factory?.inject ?? [];
-      for (const service of injected) {
-        if (!declared.has(service)) {
-          throw new CordisHostError(
-            'service_not_declared',
-            `plugin ${plugin?.id ?? '(unknown)'} injects undeclared service ${service}`,
-          );
-        }
-      }
-    }
   }
 
   async drain() {

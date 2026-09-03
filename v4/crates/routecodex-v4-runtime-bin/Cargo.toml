@@ -13,6 +13,7 @@ path = "src/main.rs"
 routecodex-v4-base-node = { path = "../routecodex-v4-base-node" }
 routecodex-v4-cli = { path = "../routecodex-v4-cli" }
 routecodex-v4-cordis-bridge = { path = "../routecodex-v4-cordis-bridge" }
+routecodex-v4-debug = { path = "../routecodex-v4-debug" }
 routecodex-v4-config = { path = "../routecodex-v4-config" }
 routecodex-v4-error = { path = "../routecodex-v4-error" }
 routecodex-v4-lifecycle = { path = "../routecodex-v4-lifecycle" }
@@ -21,9 +22,11 @@ routecodex-v4-plugin-plan = { path = "../routecodex-v4-plugin-plan" }
 routecodex-v4-provider = { path = "../routecodex-v4-provider" }
 routecodex-v4-router = { path = "../routecodex-v4-router" }
 routecodex-v4-runtime = { path = "../routecodex-v4-runtime" }
+routecodex-v4-skeleton = { path = "../routecodex-v4-skeleton" }
 routecodex-v4-server = { path = "../routecodex-v4-server" }
 routecodex-v4-servertool = { path = "../routecodex-v4-servertool" }
 routecodex-v4-standard-plugins = { path = "../routecodex-v4-standard-plugins" }
 serde_json = "1"
+sha2 = "0.10"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }

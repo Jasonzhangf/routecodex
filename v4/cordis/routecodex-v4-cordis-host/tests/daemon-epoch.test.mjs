@@ -45,6 +45,7 @@ const bundle = (candidateId, epochId, planEpoch = Number(epochId.split('-').at(-
     direct_response: 'direct-resp',
     relay_request: 'relay-req',
     relay_response: 'relay-resp',
+    control: 'control-node',
     error: 'err',
   },
   pipelines: {
@@ -52,6 +53,7 @@ const bundle = (candidateId, epochId, planEpoch = Number(epochId.split('-').at(-
     direct_response: ['direct-resp'],
     relay_request: ['relay-req'],
     relay_response: ['relay-resp'],
+    control: ['control-node'],
     error: ['err'],
   },
   nodes: [
@@ -59,6 +61,7 @@ const bundle = (candidateId, epochId, planEpoch = Number(epochId.split('-').at(-
     node(candidateId, epochId, 'direct-resp', 'direct_response'),
     node(candidateId, epochId, 'relay-req', 'relay_request'),
     node(candidateId, epochId, 'relay-resp', 'relay_response'),
+    node(candidateId, epochId, 'control-node', 'control'),
     node(candidateId, epochId, 'err', 'error'),
   ],
   policies: {
@@ -204,4 +207,39 @@ test('RollbackEpoch restores the previously active immutable bundle', async (t) 
   assert.equal(rolledBack.result.state, 'RolledBack');
   const queried = await client.queryActiveEpoch(command('QueryActiveEpoch', 'query-rollback', {}));
   assert.deepEqual(queried.result.active_epoch, active);
+});
+
+test('admission returns a matching active epoch witness and rejects identity drift', async (t) => {
+  const stateDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'rccv4-admission-'));
+  const socketPath = path.join(stateDirectory, 'cordis.sock');
+  const active = bundle('candidate-1', 'epoch-1');
+  const daemon = await startCordisHostDaemon({
+    stateDirectory,
+    socketPath,
+    graphHash: active.graph_hash,
+    version: 'test',
+    initialBundle: active,
+  });
+  const client = await CordisHostDaemonClient.connect({ socketPath, graphHash: active.graph_hash });
+  t.after(async () => {
+    await client.close();
+    await daemon.shutdown();
+    await fs.rm(stateDirectory, { recursive: true, force: true });
+  });
+  const admission = await client.admit({
+    generation: client.snapshot().generation,
+    graphHash: active.graph_hash,
+    manifestHash: active.manifest_hash,
+    epochId: active.epoch_id,
+  });
+  assert.deepEqual(admission.active_epoch, active);
+  await assert.rejects(
+    client.admit({
+      generation: client.snapshot().generation,
+      graphHash: active.graph_hash,
+      manifestHash: active.manifest_hash,
+      epochId: 'epoch-missing',
+    }),
+    (error) => error instanceof CordisHostDaemonError && error.code === 'epoch_identity_mismatch',
+  );
 });

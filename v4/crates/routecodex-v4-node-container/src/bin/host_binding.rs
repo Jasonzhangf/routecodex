@@ -8,6 +8,7 @@ use routecodex_v4_node_container::{
     NodeContainer, NodeContainerError, NodeContainerState, NodeExecutionGuard, PlanBindings,
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
+use routecodex_v4_standard_plugins::StandardHandleRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_json::{json, Value};
@@ -290,6 +291,7 @@ impl PluginHandle for ObserveHandle {
 }
 
 struct BuiltinHandleRegistry {
+    standard: StandardHandleRegistry,
     handles: HashMap<String, Box<dyn PluginHandle>>,
 }
 
@@ -304,13 +306,19 @@ impl BuiltinHandleRegistry {
             }),
         );
         handles.insert("v4.test.observe".to_string(), Box::new(ObserveHandle));
-        Self { handles }
+        Self {
+            standard: StandardHandleRegistry::new(),
+            handles,
+        }
     }
 }
 
 impl HandleRegistry for BuiltinHandleRegistry {
     fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
-        self.handles.get(plugin_id).map(|boxed| boxed.as_ref())
+        self.handles
+            .get(plugin_id)
+            .map(|boxed| boxed.as_ref())
+            .or_else(|| self.standard.get(plugin_id))
     }
 }
 
@@ -599,4 +607,25 @@ fn main() -> io::Result<()> {
         write_response(&mut stdout, &response)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BuiltinHandleRegistry;
+    use routecodex_v4_cordis_bridge::HandleRegistry;
+    use routecodex_v4_standard_plugins::standard_plugins;
+
+    #[test]
+    fn host_binding_registers_every_standard_plugin_handle() {
+        let registry = BuiltinHandleRegistry::new();
+        let missing: Vec<String> = standard_plugins()
+            .into_iter()
+            .map(|plugin| plugin.plugin_id)
+            .filter(|plugin_id| registry.get(plugin_id).is_none())
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "Cordis host binding is missing standard plugin handles: {missing:?}"
+        );
+    }
 }

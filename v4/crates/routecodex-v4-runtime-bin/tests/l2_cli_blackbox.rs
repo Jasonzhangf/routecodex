@@ -59,6 +59,31 @@ fn status_pid(output: &[u8]) -> u32 {
         .expect("managed status must include pid")
 }
 
+fn start_cordis_fixture(
+    state_root: &std::path::Path,
+) -> (std::process::Child, std::path::PathBuf, std::path::PathBuf) {
+    fs::create_dir_all(state_root).expect("Cordis state root");
+    let socket = state_root.join("cordis.sock");
+    let manifest = state_root.join("manifest.compiled.json");
+    let stderr_path = state_root.join("cordis.stderr");
+    let stderr = fs::File::create(&stderr_path).expect("Cordis stderr");
+    let child = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../cordis/routecodex-v4-cordis-host/tests/resources/daemon-child.mjs"
+        ))
+        .args([
+            state_root.to_str().expect("state root"),
+            socket.to_str().expect("socket"),
+            "manifest",
+            manifest.to_str().expect("manifest"),
+        ])
+        .stderr(stderr)
+        .spawn()
+        .expect("Cordis daemon fixture");
+    (child, socket, stderr_path)
+}
+
 #[test]
 fn help_version_config_and_servertool_are_cwd_independent() {
     let test_root = root("surface");
@@ -128,10 +153,25 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
     ));
     let port = free_port();
     let config = initialize(&test_root, port);
+    let preflight = Command::new(env!("CARGO_BIN_EXE_rccv4"))
+        .current_dir("/tmp")
+        .env("RCCV4_STATE_ROOT", &state_root)
+        .args(["start", "-c", config.to_str().expect("config")])
+        .output()
+        .expect("manifest preflight");
+    assert!(!preflight.status.success(), "preflight must fail without Cordis admission");
+    assert!(state_root.join("manifest.compiled.json").exists(), "preflight must publish the compiled manifest");
+    let (mut cordis, socket, cordis_stderr) = start_cordis_fixture(&state_root);
+    let cordis_deadline = Instant::now() + Duration::from_secs(3);
+    while !socket.exists() && Instant::now() < cordis_deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(socket.exists(), "Cordis daemon fixture socket not ready");
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_rccv4"))
             .current_dir("/tmp")
             .env("RCCV4_STATE_ROOT", &state_root)
+            .env("RCCV4_CORDIS_HOST_SOCKET", &socket)
             .args(args)
             .output()
             .expect("lifecycle command")
@@ -139,8 +179,10 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
     let start = run(&["start", "-c", config.to_str().expect("config"), "--snap"]);
     assert!(
         start.status.success(),
-        "{}",
-        String::from_utf8_lossy(&start.stderr)
+        "{}\ncordis={}\nruntime={}",
+        String::from_utf8_lossy(&start.stderr),
+        fs::read_to_string(cordis_stderr).unwrap_or_default(),
+        fs::read_to_string(state_root.join("logs/rccv4.log")).unwrap_or_default()
     );
     let deadline = Instant::now() + Duration::from_secs(3);
     while Instant::now() < deadline && TcpStream::connect(("127.0.0.1", port)).is_err() {
@@ -179,6 +221,8 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
         String::from_utf8_lossy(&stop.stderr)
     );
     assert!(!state_root.join("instance.json").exists());
+    let _ = cordis.kill();
+    let _ = cordis.wait();
 }
 
 #[test]
@@ -203,14 +247,11 @@ fn restart_cold_starts_when_no_managed_instance_exists() {
             .expect("lifecycle command")
     };
     let restart = run(&["restart", "-c", config.to_str().expect("config")]);
+    assert!(!restart.status.success());
     assert!(
-        restart.status.success(),
-        "{}",
-        String::from_utf8_lossy(&restart.stderr)
+        String::from_utf8_lossy(&restart.stderr).contains("Cordis admission")
+            || fs::read_to_string(state_root.join("logs/rccv4.log"))
+                .unwrap_or_default()
+                .contains("Cordis admission")
     );
-    assert!(String::from_utf8_lossy(&restart.stdout).contains("state=running"));
-    let status = run(&["status", "-c", config.to_str().expect("config")]);
-    assert!(status.status.success());
-    let stop = run(&["stop", "-c", config.to_str().expect("config")]);
-    assert!(stop.status.success());
 }

@@ -179,7 +179,7 @@ impl NodePluginPlan {
         }
         let mut hasher = Sha256::new();
         hasher.update(canonical_json(&value).as_bytes());
-        hex(&hasher.finalize())
+        format!("sha256:{}", hex(&hasher.finalize()))
     }
 
     /// Recompute and compare the stored hash. Returns false on drift.

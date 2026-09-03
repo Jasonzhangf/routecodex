@@ -19,7 +19,7 @@ async function tempState(name) {
 }
 
 async function startChild(stateDirectory, socketPath, graphHash = 'graph-a') {
-  const processChild = spawn(process.execPath, [child, stateDirectory, socketPath, graphHash], {
+  const processChild = spawn(process.execPath, [child, stateDirectory, socketPath, 'graph', graphHash], {
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   await new Promise((resolve, reject) => {
@@ -102,7 +102,7 @@ test('daemon refuses a second owner for an existing socket/state', async (t) => 
     await stopChild(processChild);
     await fs.rm(stateDirectory, { recursive: true, force: true });
   });
-  const duplicate = spawn(process.execPath, [child, stateDirectory, socketPath, 'graph-a'], {
+  const duplicate = spawn(process.execPath, [child, stateDirectory, socketPath, 'graph', 'graph-a'], {
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   const stderr = new Promise((resolve) => duplicate.stderr.once('data', (data) => resolve(data.toString())));

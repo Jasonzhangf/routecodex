@@ -80,6 +80,25 @@ fn engine_rejects_execution_without_a_declared_path() {
 }
 
 #[test]
+fn adjacent_frames_reuse_immutable_carriers_without_payload_serialization() {
+    let first = NodeExecutionFrame::new(
+        serde_json::json!({"value": 1}),
+        serde_json::json!({}),
+    );
+    let second = NodeExecutionFrame::with_shared_carriers(
+        serde_json::json!({"value": 2}),
+        serde_json::json!({}),
+        serde_json::json!({}),
+        Vec::new(),
+        first.shared_data().clone(),
+        first.shared_information().clone(),
+        first.shared_diagnostic().clone(),
+    );
+    assert!(first.shares_immutable_carriers_with(&second));
+    assert_eq!(second.shared_data().as_bytes(), first.shared_data().as_bytes());
+}
+
+#[test]
 fn pinned_bridge_abi_preserves_typed_data_and_control() {
     let plan = routecodex_v4_plugin_plan::NodePluginPlan {
         node_id: "bridge-node".into(),

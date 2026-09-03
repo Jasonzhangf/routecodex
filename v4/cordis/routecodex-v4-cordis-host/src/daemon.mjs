@@ -18,6 +18,7 @@ const PRODUCTION_CHAINS = Object.freeze([
   'direct_response',
   'relay_request',
   'relay_response',
+  'control',
   'error',
 ]);
 
@@ -373,6 +374,7 @@ export async function startCordisHostDaemon({
           snapshot: ['op'],
           heartbeat: ['op', 'generation'],
           reconcile: ['op', 'generation', 'graphHash'],
+          admission: ['op', 'protocolVersion', 'generation', 'graphHash', 'manifestHash', 'epochId'],
           shutdown: ['op'],
         }[request.op];
         if (!allowed) throw new CordisHostDaemonError('protocol_error', `unknown daemon operation ${request.op}`);
@@ -397,6 +399,28 @@ export async function startCordisHostDaemon({
             () => reply(socket, { ok: true, snapshot }),
             (error) => reply(socket, failure('state_write', error.message)),
           );
+        } else if (request.op === 'admission') {
+          if (request.protocolVersion !== CORDIS_HOST_PROTOCOL_VERSION) {
+            throw new CordisHostDaemonError('protocol_version_mismatch', 'daemon protocol version mismatch');
+          }
+          if (request.generation !== snapshot.generation) {
+            throw new CordisHostDaemonError('generation_mismatch', 'daemon generation mismatch');
+          }
+          if (request.graphHash !== snapshot.graphHash) {
+            throw new CordisHostDaemonError('graph_hash_mismatch', 'daemon graph hash mismatch');
+          }
+          if (!snapshot.capabilities.includes('epoch-control')) {
+            throw new CordisHostDaemonError('capability_missing', 'Cordis Host lacks epoch-control capability');
+          }
+          if (!epochState.active) {
+            throw new CordisHostDaemonError('epoch_not_active', 'Cordis Host has no active epoch');
+          }
+          if (epochState.active.graph_hash !== request.graphHash
+              || epochState.active.manifest_hash !== request.manifestHash
+              || epochState.active.epoch_id !== request.epochId) {
+            throw new CordisHostDaemonError('epoch_identity_mismatch', 'Cordis active epoch does not match runtime manifest');
+          }
+          reply(socket, { ok: true, admission: { snapshot, active_epoch: epochState.active } });
         } else if (request.op === 'reconcile') {
           if (request.generation !== snapshot.generation) {
             throw new CordisHostDaemonError('generation_mismatch', 'daemon generation mismatch');
@@ -497,6 +521,20 @@ export class CordisHostDaemonClient {
     const response = await request(this.#socketPath, { op: 'reconcile', generation, graphHash });
     this.#snapshot = validateSnapshot(response.snapshot);
     return { reconciled: response.reconciled, snapshot: this.#snapshot };
+  }
+
+  async admit({ generation, graphHash, manifestHash, epochId }) {
+    const response = await request(this.#socketPath, {
+      op: 'admission',
+      protocolVersion: CORDIS_HOST_PROTOCOL_VERSION,
+      generation,
+      graphHash,
+      manifestHash,
+      epochId,
+    });
+    this.#snapshot = validateSnapshot(response.admission.snapshot);
+    this.#activeEpoch = response.admission.active_epoch;
+    return response.admission;
   }
 
   async sendEpochControl(command) {

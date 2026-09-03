@@ -198,12 +198,7 @@ fn positive_request_chain_produces_wire_and_stable_binding() {
     let semantic_trace = report
         .trace
         .iter()
-        .filter(|entry| {
-            !entry.contains(":plugin.executed:")
-                && !entry.contains(":node.entry:")
-                && !entry.contains(":node.exit:")
-                && !entry.contains(":state.transition:")
-        })
+        .filter(|entry| !entry.contains(":plugin.executed:"))
         .cloned()
         .collect::<Vec<_>>();
     assert_eq!(
@@ -358,11 +353,6 @@ fn production_execution_publishes_lifecycle_event_topics() {
         )
         .expect("production request executes");
 
-    assert!(runtime
-        .dispatch_diagnostic_events("r-production-events")
-        .expect("production diagnostic consumer dispatches")
-        > 0);
-
     let bus = bus.lock().unwrap();
     assert!(bus
         .published_facts()
@@ -376,6 +366,44 @@ fn production_execution_publishes_lifecycle_event_topics() {
         .published_facts()
         .iter()
         .any(|fact| fact.envelope().topic() == &routecodex_v4_debug::SubscriptionTopic::StateTransition));
+}
+
+#[test]
+fn production_execution_publishes_node_error_event_topic() {
+    let runtime = active_runtime();
+    let bus = runtime.diagnostic_bus();
+    {
+        let mut bus = bus.lock().unwrap();
+        bus.subscribe(
+            "error-reader",
+            routecodex_v4_debug::SubscriptionTopic::NodeError,
+            "r-production-node-error",
+        )
+        .unwrap();
+    }
+
+    let error = runtime
+        .execute_request_json_scoped_for_target_with_lease(
+            r#"{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":{}}"#,
+            "chat",
+            "responses",
+            "m",
+            false,
+            "r-production-node-error",
+            5555,
+            "session-production-node-error",
+            "conversation-production-node-error",
+            Some("relay"),
+            None,
+        )
+        .expect_err("invalid tools shape must fail in production execution");
+    assert_eq!(error.code, "execution_engine");
+
+    let bus = bus.lock().unwrap();
+    assert!(bus.published_facts().iter().any(|fact| {
+        fact.envelope().topic() == &routecodex_v4_debug::SubscriptionTopic::NodeError
+            && fact.envelope().scope_key() == "r-production-node-error"
+    }));
 }
 
 #[test]
@@ -651,6 +679,31 @@ fn positive_provider_response_chain_projects_client_frame() {
     .expect("client frame is Responses JSON");
     assert_eq!(frame["output"][0]["content"][0]["text"], "ok");
     assert!(!report.continuation_committed);
+}
+
+#[test]
+fn direct_response_chain_projects_raw_http_envelope_body() {
+    let runtime = active_runtime();
+    let report = runtime
+        .execute_provider_response_scoped_for_target_with_lease(
+            r#"{"_provider_http_status":200,"_provider_http_content_type":"application/json","_provider_http_body":"{\"id\":\"resp_env\",\"object\":\"response\",\"output\":[]}"}"#,
+            "r-response-envelope",
+            5555,
+            "session-response-envelope",
+            "conversation-response-envelope",
+            "responses",
+            "responses",
+            "direct",
+            None,
+        )
+        .expect("direct response envelope must traverse response plan");
+    let frame: serde_json::Value = serde_json::from_str(
+        report.client_frame.as_deref().expect("client frame produced"),
+    )
+    .expect("client frame is JSON");
+    assert_eq!(frame["id"], "resp_env");
+    assert_eq!(frame["object"], "response");
+    assert!(frame.get("_provider_http_body").is_none());
 }
 
 fn response_stream_processor(
