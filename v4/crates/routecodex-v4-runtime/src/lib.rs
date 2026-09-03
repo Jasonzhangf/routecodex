@@ -1891,10 +1891,21 @@ impl SkeletonRuntime {
     /// the active epoch. Consumers cannot use this to execute or mutate the
     /// immutable bundle.
     pub fn epoch_plugin_ids(&self) -> Vec<String> {
-        self.epoch_store
+        let mut ids = self.epoch_store
             .active_bundle()
             .map(|bundle| bundle.plugin_ids())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // The immutable skeleton contract also pins externally-owned Cordis
+        // handles (for example router target selection). They are not copied
+        // into the standard registry, but remain part of the epoch identity.
+        ids.extend(self.plan.chains.iter().flat_map(|chain| {
+            chain.nodes.iter().flat_map(|node| {
+                node.plugins.iter().map(|binding| binding.plugin_id.clone())
+            })
+        }));
+        ids.sort();
+        ids.dedup();
+        ids
     }
 
     pub fn prepare_execution_epoch(
