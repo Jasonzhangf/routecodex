@@ -173,7 +173,11 @@ pub fn cordis_service_readiness(
     let mut bound_plugin_count = 0usize;
     let mut missing_plugin_ids = Vec::new();
     for plugin_id in &plugin_ids {
-        if registry.contains(plugin_id.as_str()) {
+        let cordis_service_bound = matches!(
+            plugin_id.as_str(),
+            TARGET_SELECTION_PLUGIN_ID | DIRECT_TARGET_SELECTION_PLUGIN_ID
+        );
+        if registry.contains(plugin_id.as_str()) || cordis_service_bound {
             bound_plugin_count += 1;
         } else {
             missing_plugin_ids.push(plugin_id.clone());
