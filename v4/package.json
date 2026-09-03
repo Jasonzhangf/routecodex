@@ -14,6 +14,7 @@
     "verify": "node scripts/verify.mjs",
     "verify:red": "node scripts/verify-red.mjs",
     "verify:ci": "node scripts/verify-ci.mjs",
+    "verify:local": "node scripts/verify-ci.mjs",
     "verify:isolation": "node scripts/verify-isolation.mjs",
     "verify:v4-active-link": "node scripts/architecture/verify-v4-active-link.mjs",
     "verify:v4-feature-layer-batches": "node scripts/architecture/verify-v4-feature-layer-batches.mjs",
