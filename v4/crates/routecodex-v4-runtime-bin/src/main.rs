@@ -401,31 +401,78 @@ fn start(intent: StartIntent) -> Result<String, String> {
     })?;
     if intent.foreground {
         let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
-        print_startup(&manifest);
         let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
+        let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
+        if let Err(error) = preflight_cordis_admission(&manifest) {
+            if let Some(mut child) = cordis_child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            return Err(error);
+        }
         release_for_foreground(&paths, Duration::from_secs(15))
             .map_err(|error| error.to_string())?;
-        run_foreground(manifest)?;
+        print_startup(&manifest);
+        let result = run_foreground(manifest);
+        if let Some(mut child) = cordis_child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        result?;
         return Ok("state=stopped identity=rccv4 foreground=true".to_string());
     }
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
+    let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
+    if let Err(error) = preflight_cordis_admission(&manifest) {
+        if let Some(mut child) = cordis_child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        return Err(error);
+    }
     print_startup(&manifest);
+    if routecodex_v4_lifecycle::read_record(&paths)
+        .map_err(|error| error.to_string())?
+        .is_none()
+    {
+        release_unmanaged_listeners(&manifest)?;
+    }
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    let record = start_managed(
+    let record = match start_managed(
         &paths,
         &executable,
         &config,
         &paths.manifest_path,
         &spawn_options(&intent.snapshot),
         Duration::from_secs(15),
-    )
-    .map_err(|error| error.to_string())?;
+    ) {
+        Ok(record) => record,
+        Err(error) => {
+            if let Some(mut child) = cordis_child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            return Err(error.to_string());
+        }
+    };
     println!(
         "state=running identity=rccv4 pid={} listeners={}",
         record.pid,
         record.listeners.join(",")
     );
     Ok(format_status("running", &record))
+}
+
+fn preflight_cordis_admission(manifest: &RuntimeConfigManifest) -> Result<(), String> {
+    let epoch_id = manifest.execution_epoch.candidate["epoch_id"]
+        .as_str()
+        .ok_or_else(|| "runtime candidate has no epoch_id".to_string())?;
+    CordisAdmission::admit(
+        &manifest.execution_epoch.graph_hash,
+        &manifest.execution_epoch.manifest_hash,
+        epoch_id,
+    )
+    .map(|_| ())
 }
 
 fn status(intent: ConfigPathIntent) -> Result<String, String> {
@@ -451,10 +498,19 @@ fn repair_stale_state(intent: ConfigPathIntent) -> Result<String, String> {
 
 fn restart(intent: RestartIntent) -> Result<String, String> {
     let (config, manifest, paths) = compile_for_lifecycle(intent.config)?;
+    let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
+    if let Err(error) = preflight_cordis_admission(&manifest) {
+        if let Some(mut child) = cordis_child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        return Err(error);
+    }
     let timeout = Duration::from_millis(intent.timeout_ms);
     match request_restart(&paths, &manifest.manifest_digest, timeout) {
         Ok(record) => Ok(format_status("restarted", &record)),
         Err(LifecycleError::NotRunning) => {
+            release_unmanaged_listeners(&manifest)?;
             let executable = std::env::current_exe().map_err(|error| error.to_string())?;
             let record = start_managed(
                 &paths,
@@ -467,8 +523,25 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
             .map_err(|error| error.to_string())?;
             Ok(format_status("running", &record))
         }
-        Err(error) => Err(error.to_string()),
+        Err(error) => {
+            if let Some(mut child) = cordis_child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            Err(error.to_string())
+        }
     }
+}
+
+fn release_unmanaged_listeners(manifest: &RuntimeConfigManifest) -> Result<(), String> {
+    for listener in &manifest.listeners {
+        routecodex_v4_lifecycle::release_unmanaged_listener(
+            &listener.address,
+            Duration::from_secs(15),
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn stop(intent: StopIntent) -> Result<String, String> {
@@ -489,13 +562,11 @@ fn server_start(intent: ServerStartIntent) -> Result<String, String> {
             snapshot: intent.snapshot,
         });
     }
-    let config = config_path(ConfigPathIntent {
+    start(StartIntent {
         config: intent.config,
-    })?;
-    let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
-    print_startup(&manifest);
-    run_foreground(manifest)?;
-    Ok("state=stopped identity=rccv4 foreground=true".to_string())
+        foreground: true,
+        snapshot: intent.snapshot,
+    })
 }
 
 fn print_startup(manifest: &RuntimeConfigManifest) {

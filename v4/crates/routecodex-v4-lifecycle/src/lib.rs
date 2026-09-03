@@ -275,13 +275,19 @@ pub fn status_managed(paths: &V4LifecyclePaths) -> Result<ManagedStatus, Lifecyc
 /// responsive control socket is never touched; callers must run the normal
 /// managed `restart` command after this explicit repair.
 pub fn repair_stale(paths: &V4LifecyclePaths) -> Result<(), LifecycleError> {
-    let record = read_record(paths)?.ok_or_else(|| {
-        if paths.control_socket.exists() {
-            LifecycleError::StaleState
-        } else {
-            LifecycleError::NotRunning
+    let record = read_record(paths)?;
+    if record.is_none() {
+        if !paths.control_socket.exists() {
+            return Err(LifecycleError::NotRunning);
         }
-    })?;
+        if request_control(paths, "status").is_ok() {
+            return Err(LifecycleError::AlreadyManaged);
+        }
+        fs::remove_file(&paths.control_socket)
+            .map_err(|error| io_error(&paths.control_socket, error))?;
+        return Ok(());
+    }
+    let record = record.expect("checked above");
     if request_control(paths, "status").is_ok() {
         return Err(LifecycleError::AlreadyManaged);
     }
@@ -342,6 +348,9 @@ pub fn start_managed(
             }
             _ => return Err(LifecycleError::AlreadyManaged),
         }
+    }
+    if paths.control_socket.exists() {
+        repair_stale(paths)?;
     }
     if paths.control_socket.exists() {
         return Err(LifecycleError::AlreadyManaged);
