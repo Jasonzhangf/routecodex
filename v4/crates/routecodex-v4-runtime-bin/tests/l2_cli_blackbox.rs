@@ -194,6 +194,24 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
         "listener not ready"
     );
     let first_pid = status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
+    // A dead/rejecting Cordis owner must not release the currently healthy
+    // managed child just because `start` was asked to replace it.
+    cordis.kill().expect("stop Cordis owner");
+    cordis.wait().expect("wait Cordis owner");
+    if socket.exists() {
+        fs::remove_file(&socket).expect("remove stopped Cordis socket");
+    }
+    let refused = run(&["start", "-c", config.to_str().expect("config"), "--snap"]);
+    assert!(!refused.status.success(), "start must fail closed without Cordis");
+    let preserved_pid = status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
+    assert_eq!(first_pid, preserved_pid, "failed admission must preserve old PID");
+
+    let (mut cordis, socket, _cordis_stderr) = start_cordis_fixture(&state_root);
+    let cordis_deadline = Instant::now() + Duration::from_secs(3);
+    while !socket.exists() && Instant::now() < cordis_deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(socket.exists(), "replacement Cordis daemon socket not ready");
     let takeover = run(&["start", "-c", config.to_str().expect("config"), "--snap"]);
     assert!(
         takeover.status.success(),
