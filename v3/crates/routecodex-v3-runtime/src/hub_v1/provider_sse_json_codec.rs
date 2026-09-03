@@ -548,6 +548,12 @@ pub(crate) fn classify_v3_provider_responses_json_event(
     ) {
         return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
     }
+    // Provider-owned Responses extensions are valid inbound data-plane events.
+    // Keep the complete frame available for normalization/observation, but do
+    // not abort a valid stream before its registered semantic terminal event.
+    if event_type.starts_with("codex.") {
+        return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
+    }
     Err(format!(
         "provider Responses SSE event type {event_type:?} is not registered"
     ))
@@ -1093,6 +1099,33 @@ mod provider_sse_json_codec_tests {
             })
         );
         assert_eq!(classify("ping"), None);
+    }
+
+    #[test]
+    fn responses_accepts_codex_rate_limits_extension_without_dropping_frame() {
+        let data = r#"{"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":12}}}"#;
+        assert_eq!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, data)
+                .expect("provider extension event must remain valid inbound data"),
+            Some(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
+        );
+        let normalized = normalize_v3_provider_sse_json_data_with_event_name(
+            V3HubProviderWireProtocol::Responses,
+            data,
+            Some("codex.rate_limits"),
+        )
+        .expect("provider extension frame must normalize");
+        assert_eq!(normalized, data);
+    }
+
+    #[test]
+    fn responses_extension_without_terminal_does_not_fake_success() {
+        let data = r#"{"type":"codex.rate_limits","rate_limits":{}}"#;
+        assert_eq!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, data)
+                .expect("extension frame itself is valid"),
+            Some(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
+        );
     }
 
     #[test]

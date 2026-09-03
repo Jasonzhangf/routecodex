@@ -1448,6 +1448,41 @@ async fn responses_provider_sse_unknown_response_event_fails_instead_of_discardi
 }
 
 #[tokio::test]
+async fn responses_provider_sse_codex_rate_limits_extension_does_not_abort_stream() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+        Ok(b"event: codex.rate_limits\ndata: {\"type\":\"codex.rate_limits\",\"rate_limits\":{\"primary\":{\"used_percent\":12}}}\n\n".to_vec()),
+        Ok(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n".to_vec()),
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_extension\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n".to_vec()),
+        Ok(b"data: [DONE]\n\n".to_vec()),
+    ]));
+    let response =
+        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
+            .await
+            .expect("provider extension must not turn a valid stream into a provider failure");
+
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output"][0]["content"][0]["text"], "ok");
+}
+
+#[tokio::test]
+async fn responses_provider_sse_codex_extension_without_terminal_still_fails() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![Ok(
+        b"event: codex.rate_limits\ndata: {\"type\":\"codex.rate_limits\",\"rate_limits\":{}}\n\n"
+            .to_vec(),
+    )]));
+    let error =
+        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
+            .await
+            .expect_err("an extension cannot manufacture a terminal response");
+
+    assert!(error
+        .to_string()
+        .contains("provider response event stream ended before response.completed"));
+}
+
+#[tokio::test]
 async fn anthropic_provider_sse_malformed_tool_json_fails_without_text_downgrade() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![
