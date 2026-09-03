@@ -17,6 +17,8 @@ const files = {
   directExactPinTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
   directSse: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs',
   providerSseJsonCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs',
+  providerResponsesEventClassification:
+    'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs',
   responses: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   responsesFailures: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs',
@@ -443,8 +445,8 @@ requireText(
 );
 requireText(text.responsesCodec, files.responsesCodec, '| "response.done"');
 requireText(
-  text.providerSseJsonCodec,
-  files.providerSseJsonCodec,
+  `${text.providerSseJsonCodec}\n${text.providerResponsesEventClassification}`,
+  `${files.providerSseJsonCodec} + ${files.providerResponsesEventClassification}`,
   'if event_type == "response.completed" {',
 );
 for (const forbidden of [
