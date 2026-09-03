@@ -279,6 +279,10 @@ fn restart_cold_starts_when_no_managed_instance_exists() {
         Command::new(env!("CARGO_BIN_EXE_rccv4"))
             .current_dir("/tmp")
             .env("RCCV4_STATE_ROOT", &state_root)
+            .env(
+                "RCCV4_CORDIS_HOST_RUNNER",
+                state_root.join("missing-cordis-runner.mjs"),
+            )
             .args(args)
             .output()
             .expect("lifecycle command")
@@ -287,6 +291,7 @@ fn restart_cold_starts_when_no_managed_instance_exists() {
     assert!(!restart.status.success());
     assert!(
         String::from_utf8_lossy(&restart.stderr).contains("Cordis admission")
+            || String::from_utf8_lossy(&restart.stderr).contains("Cordis host runner missing")
             || fs::read_to_string(state_root.join("logs/rccv4.log"))
                 .unwrap_or_default()
                 .contains("Cordis admission")
