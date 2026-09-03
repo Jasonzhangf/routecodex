@@ -112,10 +112,12 @@ const NODE_PERMISSIONS = new Map([
   ['V4DirectReq02RelayContainer', {
     reads: [
       'v4.direct.request.client_payload',
+      'v4.control.route_facts',
       'v4.information.client_protocol',
+      'v4.information.model',
       'v4.information.provider_protocol',
     ],
-    writes: ['v4.direct.request.provider_wire'],
+    writes: ['v4.direct.request.provider_wire', 'v4.control.target_selection'],
   }],
   ['V4DirectResp02RelayContainer', {
     reads: [
@@ -598,8 +600,8 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 39) {
-      failures.push(`${MODULE}: expected 39 active standard descriptors, got ${activeDescriptors.length}`);
+    if (activeDescriptors.length !== 41) {
+      failures.push(`${MODULE}: expected 41 active standard descriptors, got ${activeDescriptors.length}`);
     }
     if (!activeDescriptors.some(
       (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',
