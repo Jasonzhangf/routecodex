@@ -1040,6 +1040,7 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "controlled"
 endpoints = ["responses"]
+execution = {{ allowed_modes = ["relay"], allowed_invocation_sources = ["client", "servertool_followup", "dry_run"], allowed_transports = ["json", "sse"], continuation = {{ allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }}, attempt_store = {{ request_max_attempts = 8, attempt_max_bytes = 67108864, attempt_max_frames = 262144, request_max_bytes = 67108864, process_max_bytes = 536870912, residence_timeout_ms = 600000 }} }}
 [providers.controlled]
 type = "responses"
 base_url = "http://controlled.invalid/v1"
@@ -1070,6 +1071,7 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "controlled"
 endpoints = ["responses"]
+execution = { allowed_modes = ["relay"], allowed_invocation_sources = ["client", "servertool_followup", "dry_run"], allowed_transports = ["json", "sse"], continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }, attempt_store = { request_max_attempts = 8, attempt_max_bytes = 67108864, attempt_max_frames = 262144, request_max_bytes = 67108864, process_max_bytes = 536870912, residence_timeout_ms = 600000 } }
 [providers.controlled]
 type = "responses"
 base_url = "http://controlled.invalid/v1"
