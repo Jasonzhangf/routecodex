@@ -5515,7 +5515,7 @@ features:
   - continuation stores
   contract_version: tool_thinking_json_v2
   contract_rules:
-  - Req04 requires reason, goal_alignment_confidence, and the model's own true self-reported model_id in each eligible non-Gemini structured tool schema and wraps eligible free-form custom tools as request-local structured provider contracts; RouteCodex never binds, prefills, or derives model_id from request identity, requested/client model, route selection, or provider wire identity, while Resp03 separately accepts reason-only provider output for compatibility
+  - Req04 requires reason and goal_alignment_confidence in each eligible non-Gemini structured tool schema and wraps eligible free-form custom tools as request-local structured provider contracts; Req04 does not inject model_id into provider-facing guidance or schemas, while Resp03 separately accepts and strips legacy model_id when present
   - Req04 guidance is protocol-pure at the provider-facing slice: Anthropic native tools receive only tool_use/input three-field instructions, while Responses/OpenAI Chat tools receive only arguments three-field instructions; wire examples from another protocol are forbidden
   - Req04 records original custom-tool provenance only in v3.request.tool_thinking_turn_context; that resource never enters payload, metadata, history, or continuation
   - Req04 compilation is atomic and runs once per execution; Direct retries reuse its typed context and may not recompile from an already governed tool list

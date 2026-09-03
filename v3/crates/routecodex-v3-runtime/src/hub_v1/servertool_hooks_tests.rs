@@ -23,13 +23,13 @@ fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
         .expect("enabled tool-thinking must inject");
     let guidance = payload["tools"][0]["description"].as_str().unwrap();
     assert!(guidance.contains("工具调用协议"));
-    assert!(guidance.contains("工具参数顶层三字段缺一不可"));
+    assert!(guidance.contains("工具参数顶层补充"));
     assert!(guidance.contains("字段放工具参数 JSON 顶层"));
     assert!(!guidance.contains("Anthropic native"));
     assert!(!guidance.contains("tool_use.input"));
     assert!(guidance.contains("<= 50 字，只说动机"));
     assert!(guidance.contains("goal_alignment_confidence"));
-    assert!(guidance.contains("model_id"));
+    assert!(!guidance.contains("model_id"));
     assert!(!guidance.contains("可选"));
     assert!(!guidance.contains("如提供"));
     assert_eq!(payload["tools"][1]["description"], "internal");
@@ -296,7 +296,7 @@ fn req04_tool_thinking_reaches_anthropic_wire_system_field() {
         tool_description.contains("goal_alignment_confidence"),
         "wire: {wire}"
     );
-    assert!(tool_description.contains("model_id"), "wire: {wire}");
+    assert!(!tool_description.contains("model_id"), "wire: {wire}");
     assert!(!wire.to_string().contains("<legacy-control>"));
 }
 
@@ -321,12 +321,11 @@ fn req04_tool_thinking_injects_anthropic_tool_list_and_parameter_schema() {
     assert!(payload["tools"][0]["description"]
         .as_str()
         .unwrap()
-        .contains("model_id"));
+        .contains("goal_alignment_confidence"));
     assert!(payload["tools"][0]["input_schema"]["properties"]["reason"].is_object());
     assert!(
         payload["tools"][0]["input_schema"]["properties"]["goal_alignment_confidence"].is_object()
     );
-    assert!(payload["tools"][0]["input_schema"]["properties"]["model_id"].is_object());
     let required = payload["tools"][0]["input_schema"]["required"]
         .as_array()
         .unwrap();
@@ -336,9 +335,6 @@ fn req04_tool_thinking_injects_anthropic_tool_list_and_parameter_schema() {
     assert!(required
         .iter()
         .any(|value| value.as_str() == Some("goal_alignment_confidence")));
-    assert!(required
-        .iter()
-        .any(|value| value.as_str() == Some("model_id")));
 }
 
 #[test]
@@ -358,7 +354,7 @@ fn req04_tool_thinking_injects_every_present_native_schema_shape() {
         &payload["tools"][0]["parameters"],
         &payload["tools"][0]["function"]["parameters"],
     ] {
-        for field in ["reason", "goal_alignment_confidence", "model_id"] {
+        for field in ["reason", "goal_alignment_confidence"] {
             assert!(schema["properties"][field].is_object(), "schema={schema}");
         }
         assert!(schema["required"]
@@ -371,7 +367,8 @@ fn req04_tool_thinking_injects_every_present_native_schema_shape() {
             .is_some_and(|required| required
                 .iter()
                 .any(|value| value.as_str() == Some("goal_alignment_confidence"))));
-        assert!(schema["required"]
+        assert!(!schema["properties"].as_object().unwrap().contains_key("model_id"));
+        assert!(!schema["required"]
             .as_array()
             .is_some_and(|required| required
                 .iter()
@@ -401,7 +398,6 @@ fn req04_tool_thinking_recurses_into_namespace_tools_before_provider_flattening(
     let schema = &payload["tools"][0]["tools"][0]["parameters"];
     assert!(schema["properties"]["reason"].is_object());
     assert!(schema["properties"]["goal_alignment_confidence"].is_object());
-    assert!(schema["properties"]["model_id"].is_object());
     assert!(schema["required"]
         .as_array()
         .is_some_and(|required| required.iter().any(|value| value == "reason")));
@@ -412,7 +408,7 @@ fn req04_tool_thinking_recurses_into_namespace_tools_before_provider_flattening(
             .any(|value| value == "goal_alignment_confidence")));
     assert!(schema["required"]
         .as_array()
-        .is_some_and(|required| required.iter().any(|value| value == "model_id")));
+        .is_some_and(|required| required.iter().any(|value| value == "goal_alignment_confidence")));
 }
 
 #[test]
@@ -445,11 +441,11 @@ fn req04_tool_thinking_custom_tool_compiles_provider_wrapper() {
             .any(|value| value == "goal_alignment_confidence")));
     assert!(parameters["required"]
         .as_array()
-        .is_some_and(|required| required.iter().any(|value| value == "model_id")));
+        .is_some_and(|required| required.iter().any(|value| value == "goal_alignment_confidence")));
 }
 
 #[test]
-fn req04_tool_thinking_uses_short_model_id_description_without_request_identity_binding() {
+fn req04_tool_thinking_does_not_inject_model_id_or_request_identity() {
     let mut payload = json!({
         "model": "client-route-alias",
         "request_id": "request-identity-must-not-be-model-id",
@@ -465,23 +461,16 @@ fn req04_tool_thinking_uses_short_model_id_description_without_request_identity_
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject");
-    let native_description = payload["tools"][0]["parameters"]["properties"]["model_id"]
-        ["description"]
-        .as_str()
-        .expect("model_id description");
-    let custom_description = payload["tools"][1]["function"]["parameters"]["properties"]
-        ["model_id"]["description"]
-        .as_str()
-        .expect("custom model_id description");
-    for description in [native_description, custom_description] {
-        assert_eq!(description, "非空模型 ID");
-        assert!(!description.contains("client-route-alias"));
-        assert!(!description.contains("request-identity-must-not-be-model-id"));
-        assert!(!description.contains("必须填写你自身当前真实"));
-        assert!(!description.contains("不得复制或推导"));
-        assert!(!description.contains("provider-bound wire model"));
-    }
+    assert!(!payload["tools"][0]["parameters"]["properties"]
+        .as_object()
+        .unwrap()
+        .contains_key("model_id"));
+    assert!(!payload["tools"][1]["function"]["parameters"]["properties"]
+        .as_object()
+        .unwrap()
+        .contains_key("model_id"));
     let payload_text = payload.to_string();
+    assert!(!payload_text.contains("model_id"));
     assert!(!payload_text.contains("<本次 provider-bound 请求的精确 model 值>"));
 }
 
@@ -491,7 +480,7 @@ fn req04_tool_thinking_guidance_uses_short_neutral_form() {
         V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE,
         V3_TOOL_THINKING_ANTHROPIC_GUIDANCE,
     ] {
-        assert!(guidance.contains("`model_id`：非空模型 ID"));
+        assert!(!guidance.contains("model_id"));
         assert!(guidance.contains("`goal_alignment_confidence`：0 到 100 的整数"));
         assert!(guidance.contains("`reason`：非空，<= 50 字，只说动机"));
         assert!(!guidance.contains("必须填写你自身当前真实"));
@@ -512,7 +501,7 @@ fn req04_tool_thinking_guidance_stays_compact() {
         V3_TOOL_THINKING_ANTHROPIC_GUIDANCE,
     ] {
         assert!(guidance.len() <= 700, "guidance should be short, got {} chars", guidance.len());
-        assert!(guidance.contains("调用工具时立即返回原生"));
+        assert!(guidance.contains("调用工具时直接使用原生"));
         assert!(guidance.contains("普通回答保持自然语言"));
         assert!(guidance.contains("RouteCodex 执行前剥离"));
         assert!(guidance.contains("不要输出 fence"));

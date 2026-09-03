@@ -20,10 +20,10 @@ fn req04_tool_thinking_guidance_uses_native_anthropic_tool_use_and_bans_text_wra
     for provider_guidance in [guidance, tool_guidance] {
         assert!(provider_guidance.contains("Anthropic native"));
         assert!(provider_guidance.contains("tool_use"));
-        assert!(provider_guidance.contains("立即返回原生 `tool_use` 块"));
-        assert!(provider_guidance.contains("`tool_use.input` 顶层三字段缺一不可"));
+        assert!(provider_guidance.contains("直接使用原生 `tool_use` 块"));
+        assert!(provider_guidance.contains("`tool_use.input` 顶层补充"));
         assert!(provider_guidance.contains("goal_alignment_confidence"));
-        assert!(provider_guidance.contains("model_id"));
+        assert!(!provider_guidance.contains("model_id"));
         assert!(!provider_guidance.contains("可选"));
         assert!(!provider_guidance.contains("如提供"));
         assert!(!provider_guidance.contains("Responses/Chat"));

@@ -1155,7 +1155,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_compat_does_not_copy_selected_wire_model_into_tool_model_self_report_guidance() {
+    fn provider_compat_preserves_absence_of_model_identity_guidance() {
         let mut payload = json!({
             "model": "client-route-alias",
             "request_id": "request-identity-must-not-be-model-id",
@@ -1176,9 +1176,10 @@ mod tests {
             true,
         )
         .expect("Req04 Tool-Thinking guidance");
-        let before = payload["tools"][0]["parameters"]["properties"]["model_id"]
-            ["description"]
-            .clone();
+        assert!(!payload["tools"][0]["parameters"]["properties"]
+            .as_object()
+            .unwrap()
+            .contains_key("model_id"));
         let req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Responses,
             payload,
@@ -1187,13 +1188,10 @@ mod tests {
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("provider compat");
-        let after = &req_compat.provider_semantic_payload()["tools"][0]["parameters"]
-            ["properties"]["model_id"]["description"];
-        assert_eq!(after, &before);
-        assert!(!after
-            .as_str()
-            .expect("model_id description")
-            .contains("provider-wire-model"));
+        assert!(!req_compat.provider_semantic_payload()["tools"][0]["parameters"]["properties"]
+            .as_object()
+            .unwrap()
+            .contains_key("model_id"));
     }
 
     #[test]

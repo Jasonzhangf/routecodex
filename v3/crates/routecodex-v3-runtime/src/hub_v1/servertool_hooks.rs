@@ -19,14 +19,13 @@ const STOPLESS_CLI_COMMAND: &str = "routecodex hook run reasoningStop";
 
 pub(crate) const V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE: &str = r#"工具调用协议：
 
-调用工具时立即返回原生调用；普通回答保持自然语言。工具参数顶层三字段缺一不可：
+调用工具时直接使用原生调用；普通回答保持自然语言。工具参数顶层补充：
 
 `reason`：非空，<= 50 字，只说动机。
 `goal_alignment_confidence`：0 到 100 的整数。
-`model_id`：非空模型 ID。
 字段放工具参数 JSON 顶层；RouteCodex 执行前剥离。不要输出 fence、preamble 或解释。
 
-同轮多次调用每条都填三字段。
+同轮多次调用每条都填上述字段。
 
 例外：`apply_patch` 是 raw free-form，参数保持原始 patch 文本，不要把 `reason` 写入 patch。
 
@@ -35,12 +34,11 @@ pub(crate) const V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE: &str = r#"工具调�
 
 pub(crate) const V3_TOOL_THINKING_ANTHROPIC_GUIDANCE: &str = r#"Anthropic native 工具调用协议：
 
-调用工具时立即返回原生 `tool_use` 块；普通回答保持自然语言。`tool_use.input` 顶层三字段缺一不可：
+调用工具时直接使用原生 `tool_use` 块；普通回答保持自然语言。`tool_use.input` 顶层补充：
 `reason`：非空，<= 50 字，只说动机。
 `goal_alignment_confidence`：0 到 100 的整数。
-`model_id`：非空模型 ID。
 字段放 `tool_use.input` 顶层；RouteCodex 执行前剥离。不要输出 fence、preamble 或解释。
-同轮多次调用每个 `tool_use` 块都填三字段。
+同轮多次调用每个 `tool_use` 块都填上述字段。
 "#;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -198,9 +196,8 @@ fn wrap_v3_custom_tools_at_req04(
                 "input":{"type":"string","description":"原生 custom tool 的完整输入，原样填写"},
                 "reason":{"type":"string","minLength":1,"maxLength":50,"description":"非空，<= 50 字，只说动机"},
                 "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100,"description":"0 到 100 的整数"},
-                "model_id":{"type":"string","minLength":1,"description":"非空模型 ID"}
             },
-            "required":["input","reason","goal_alignment_confidence","model_id"],
+            "required":["input","reason","goal_alignment_confidence"],
             "additionalProperties":false
         });
         // Keep the provider-facing wrapper owned by Req04. Existing custom
@@ -294,7 +291,7 @@ pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> 
         let properties = properties
             .as_object()
             .ok_or_else(|| "tool-thinking schema properties must be an object".to_string())?;
-        for field in ["reason", "goal_alignment_confidence", "model_id"] {
+        for field in ["reason", "goal_alignment_confidence"] {
             if properties.contains_key(field) {
                 // A provider tool may already own one of these names as a
                 // business argument. Never overwrite or reinterpret that
@@ -338,20 +335,12 @@ pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> 
                 "description": "0 到 100 的整数"
             }),
         );
-        properties.insert(
-            "model_id".to_string(),
-            json!({
-                "type": "string",
-                "minLength": 1,
-                "description": "非空模型 ID"
-            }),
-        );
     }
     let required = schema
         .get_mut("required")
         .and_then(Value::as_array_mut)
         .expect("validated tool-thinking required array");
-    for field in ["reason", "goal_alignment_confidence", "model_id"] {
+    for field in ["reason", "goal_alignment_confidence"] {
         if !required.iter().any(|value| value.as_str() == Some(field)) {
             required.push(Value::String(field.to_string()));
         }
