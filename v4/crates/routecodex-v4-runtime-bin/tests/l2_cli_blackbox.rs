@@ -205,6 +205,11 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
     assert!(!refused.status.success(), "start must fail closed without Cordis");
     let preserved_pid = status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
     assert_eq!(first_pid, preserved_pid, "failed admission must preserve old PID");
+    let refused_restart = run(&["restart", "-c", config.to_str().expect("config")]);
+    assert!(!refused_restart.status.success(), "restart must fail closed without Cordis");
+    let preserved_after_restart =
+        status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
+    assert_eq!(first_pid, preserved_after_restart, "failed restart must preserve old PID");
 
     let (mut cordis, socket, _cordis_stderr) = start_cordis_fixture(&state_root);
     let cordis_deadline = Instant::now() + Duration::from_secs(3);

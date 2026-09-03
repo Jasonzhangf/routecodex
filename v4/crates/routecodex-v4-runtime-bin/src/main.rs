@@ -462,6 +462,9 @@ fn repair_stale_state(intent: ConfigPathIntent) -> Result<String, String> {
 
 fn restart(intent: RestartIntent) -> Result<String, String> {
     let (config, manifest, paths) = compile_for_lifecycle(intent.config)?;
+    // Admission must succeed before restart can stop the currently healthy
+    // child. This preserves the managed instance on Cordis failure.
+    preflight_cordis_admission(&manifest)?;
     let timeout = Duration::from_millis(intent.timeout_ms);
     match request_restart(&paths, &manifest.manifest_digest, timeout) {
         Ok(record) => Ok(format_status("restarted", &record)),
