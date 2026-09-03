@@ -43,7 +43,7 @@ const read = (file) => fs.readFileSync(path.join(root, file));
 const head = run('git', ['rev-parse', 'HEAD']).output;
 const base = run('git', ['rev-parse', 'HEAD^']).output;
 const tree = run('git', ['rev-parse', `${head}^{tree}`]).output;
-const ownedPaths = ['Cargo.toml', 'Cargo.lock', 'crates', 'cordis', 'scripts'];
+const ownedPaths = ['Cargo.toml', 'Cargo.lock', 'crates', 'cordis', 'scripts/architecture'];
 const scopeHash = sha(run('git', ['ls-tree', '-r', head, '--', ...ownedPaths]).output);
 const diffHash = sha(run('git', ['diff-tree', '--no-commit-id', '--raw', '-r', '-z', '--no-renames', base, head, '--', ...ownedPaths]).output);
 const inputHashes = ['Cargo.toml', 'Cargo.lock'].map(read).map(sha).sort();
