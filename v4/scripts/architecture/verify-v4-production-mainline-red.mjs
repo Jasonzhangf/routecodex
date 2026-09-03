@@ -37,8 +37,11 @@ for (const symbol of [
 ]) {
   if (productionSource.includes(symbol)) failures.push(`RUNTIME_BIN_DIRECT_BUSINESS_HELPER: ${symbol}`);
 }
-if (!productionSource.includes('send_protocol(')) {
-  failures.push('PROVIDER_TRANSPORT_UNBOUND: runtime-bin must use provider-owned protocol dispatch');
+if (!productionSource.includes('provider_send_target_nonstream(')
+    || !productionSource.includes('provider_send_target_streaming(')
+    || !providerSource.includes('pub fn send_target_nonstream(')
+    || !providerSource.includes('pub fn send_target_streaming(')) {
+  failures.push('PROVIDER_TRANSPORT_UNBOUND: runtime-bin must use provider-owned target transport dispatch');
 }
 if (!runtimeBin.includes('execute_provider_response_scoped')) {
   failures.push('RESPONSE_CHAIN_UNBOUND: runtime-bin does not consume response chain output');
