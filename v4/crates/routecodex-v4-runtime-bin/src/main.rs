@@ -661,13 +661,27 @@ fn ensure_cordis_host_socket(
     // The host process and socket are owned by this managed start attempt.
     // Readiness failure must be failure-atomic: do not leave a daemon or
     // socket that can poison the next lifecycle transaction.
+    let mut cleanup_errors = Vec::new();
     let mut child = child;
-    let _ = child.kill();
-    let _ = child.wait();
-    if socket.exists() {
-        let _ = std::fs::remove_file(&socket);
+    if let Err(error) = child.kill() {
+        cleanup_errors.push(format!("kill: {error}"));
     }
-    Err("Cordis host socket did not become ready".to_string())
+    if let Err(error) = child.wait() {
+        cleanup_errors.push(format!("wait: {error}"));
+    }
+    if socket.exists() {
+        if let Err(error) = std::fs::remove_file(&socket) {
+            cleanup_errors.push(format!("socket removal: {error}"));
+        }
+    }
+    if cleanup_errors.is_empty() {
+        Err("Cordis host socket did not become ready".to_string())
+    } else {
+        Err(format!(
+            "Cordis host socket did not become ready; cleanup failed: {}",
+            cleanup_errors.join(", ")
+        ))
+    }
 }
 
 fn prepare_existing_cordis_host(paths: &V4LifecyclePaths) -> Result<(), String> {

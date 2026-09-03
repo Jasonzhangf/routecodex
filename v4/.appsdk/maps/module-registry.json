@@ -670,6 +670,14 @@
       ]
     },
     {
+      "module_id": "routecodex-v4-runtime-bin",
+      "status": "active",
+      "owner": "routecodex-v4-runtime-bin",
+      "owned_paths": ["crates/routecodex-v4-runtime-bin/**"],
+      "forbidden_paths": ["v3/**", "active/lib/**", "protected/**", "generated/**"],
+      "verification_gates": ["v4_cordis_production_admission", "v4_cordis_lifecycle_failure_atomic", "v4_lifecycle_l2_regression"]
+    },
+    {
       "module_id": "routecodex-v4-parity",
       "status": "active",
       "owner": "routecodex-v4-parity",
