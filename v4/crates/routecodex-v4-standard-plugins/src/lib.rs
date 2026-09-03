@@ -848,7 +848,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::ControlOnly,
             PluginPhase::Semantic,
             361,
-            vec!["v4.information.model"],
+            vec!["v4.control.route_facts", "v4.information.model"],
             vec!["v4.control.target_selection"],
         ),
         plugin(

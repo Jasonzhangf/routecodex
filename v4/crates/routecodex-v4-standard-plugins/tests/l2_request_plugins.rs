@@ -235,3 +235,23 @@ fn direct_and_relay_model_hooks_are_protocol_scoped() {
     assert_eq!(relay["protocol"], json!("responses"));
     assert!(relay.get("messages").is_none());
 }
+
+#[test]
+fn direct_target_selection_declares_route_facts_control_read() {
+    let plan = compile_standard_plan(
+        "V4DirectReq02RelayContainer",
+        "request_outbound",
+        "request",
+        2,
+        &["v4.std.routing.target_selection.direct"],
+    )
+    .expect("direct target selection plan compiles");
+    let entry = &plan.entries[0];
+    assert!(
+        entry
+            .reads
+            .iter()
+            .any(|resource| resource == "v4.control.route_facts"),
+        "direct target selection must declare its typed route_facts control read"
+    );
+}
