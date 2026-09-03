@@ -42,7 +42,7 @@ use routecodex_v4_standard_plugins::sse_transport::{
     production_transport_pair, SseEgressPlugin, SseIngressPlugin,
 };
 use std::future::Future;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -50,6 +50,57 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CordisAdmission {
+    generation: u64,
+    graph_hash: String,
+}
+
+impl CordisAdmission {
+    fn admit(
+        expected_graph_hash: &str,
+        expected_manifest_hash: &str,
+        expected_epoch_id: &str,
+    ) -> Result<Self, String> {
+        use std::os::unix::net::UnixStream;
+        let socket_path = std::env::var("RCCV4_CORDIS_HOST_SOCKET")
+            .map_err(|_| "Cordis admission requires RCCV4_CORDIS_HOST_SOCKET".to_string())?;
+        let mut handshake_stream = UnixStream::connect(&socket_path)
+            .map_err(|error| format!("Cordis admission socket connect failed: {error}"))?;
+        handshake_stream
+            .write_all(format!("{{\"op\":\"handshake\",\"protocolVersion\":1,\"graphHash\":\"{expected_graph_hash}\"}}\n").as_bytes())
+            .map_err(|error| format!("Cordis admission request failed: {error}"))?;
+        let mut handshake = String::new();
+        handshake_stream.read_to_string(&mut handshake).map_err(|error| error.to_string())?;
+        let value: Value = serde_json::from_str(handshake.trim()).map_err(|error| error.to_string())?;
+        if value.get("ok") != Some(&Value::Bool(true)) {
+            return Err("Cordis admission handshake rejected".to_string());
+        }
+        let generation = value["snapshot"]["generation"]
+            .as_u64().ok_or_else(|| "Cordis admission snapshot has no generation".to_string())?;
+        let mut stream = UnixStream::connect(&socket_path).map_err(|error| error.to_string())?;
+        let request = serde_json::json!({
+            "op": "admission", "protocolVersion": 1, "generation": generation,
+            "graphHash": expected_graph_hash, "manifestHash": expected_manifest_hash,
+            "epochId": expected_epoch_id,
+        });
+        stream.write_all(format!("{request}\n").as_bytes()).map_err(|error| error.to_string())?;
+        let mut response = String::new();
+        stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
+        let response: Value = serde_json::from_str(response.trim()).map_err(|error| error.to_string())?;
+        if response.get("ok") != Some(&Value::Bool(true)) {
+            return Err(format!("Cordis admission rejected: {}", response["message"].as_str().unwrap_or("unknown error")));
+        }
+        let active = response["admission"]["active_epoch"].clone();
+        if active["graph_hash"].as_str() != Some(expected_graph_hash)
+            || active["manifest_hash"].as_str() != Some(expected_manifest_hash)
+            || active["epoch_id"].as_str() != Some(expected_epoch_id) {
+            return Err("Cordis admission active epoch identity mismatch".to_string());
+        }
+        Ok(Self { generation, graph_hash: expected_graph_hash.to_string() })
+    }
+}
 
 struct ProductionHandleRegistry {
     standard: StandardHandleRegistry,
@@ -560,7 +611,7 @@ fn spawn_servers(
                     .build()
                     .map_err(|error| error.to_string())?;
                 let result = runtime.block_on(async move {
-                    let handler = Arc::new(PipelineHandler::new(manifest)?);
+                    let handler = Arc::new(PipelineHandler::new_production(manifest)?);
                     let server = AsyncHttpServer::bind_persisted(&server)
                         .await
                         .map_err(|error| error.to_string())?;
@@ -621,6 +672,9 @@ fn spawn_options(snapshot: &SnapshotIntent) -> ManagedSpawnOptions {
         snap_stages: snapshot.snap_stages.clone(),
         debug: snapshot.debug,
         sse_dump: snapshot.sse_dump,
+        env: std::env::vars()
+            .filter(|(name, _)| name == "RCCV4_CORDIS_HOST_SOCKET")
+            .collect(),
     }
 }
 
@@ -644,8 +698,28 @@ struct PipelineHandler {
 
 impl PipelineHandler {
     fn new(manifest: RuntimeConfigManifest) -> Result<Self, String> {
+        Self::new_with_admission(manifest, false)
+    }
+
+    fn new_production(manifest: RuntimeConfigManifest) -> Result<Self, String> {
+        Self::new_with_admission(manifest, true)
+    }
+
+    fn new_with_admission(
+        manifest: RuntimeConfigManifest,
+        require_cordis_admission: bool,
+    ) -> Result<Self, String> {
         let registry = Arc::new(ProductionHandleRegistry::new(manifest.product.as_ref()));
-        cordis_service_readiness(&manifest.execution_epoch.skeleton, registry.as_ref(), 0)?;
+        let cordis_admission_receipt = if require_cordis_admission {
+            Some(CordisAdmission::admit(
+                &manifest.execution_epoch.graph_hash,
+                &manifest.execution_epoch.manifest_hash,
+                manifest.execution_epoch.candidate["epoch_id"].as_str()
+                    .ok_or_else(|| "runtime candidate has no epoch_id".to_string())?,
+            )?)
+        } else {
+            None
+        };
         let runtime =
             SkeletonRuntime::from_compiled_plan_with_registry(manifest.execution_epoch.skeleton.clone(), registry)
                 .map_err(|error| error.to_string())?;
@@ -660,6 +734,11 @@ impl PipelineHandler {
                 &manifest.execution_epoch.manifest_hash,
             )
             .map_err(|error| error.to_string())?;
+        if let Some(receipt) = cordis_admission_receipt {
+            if receipt.graph_hash != manifest.execution_epoch.graph_hash || receipt.generation == 0 {
+                return Err("Cordis admission receipt is invalid".to_string());
+            }
+        }
         runtime
             .commit_execution_epoch(&transaction_id)
             .map_err(|error| error.to_string())?;

@@ -39,6 +39,7 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-cli-plugin.mjs',
   'verify-v4-real-runtime-admission.mjs',
   'verify-v4-production-mainline-red.mjs',
+  'verify-v4-cordis-production-admission.mjs',
   'verify-v4-direct-relay-sse.mjs',
 ];
 
