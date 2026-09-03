@@ -556,7 +556,9 @@ fn ensure_cordis_host_socket(
         .map_err(|error| format!("Cordis host spawn failed: {error}"))?;
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while std::time::Instant::now() < deadline {
-        if socket.exists() {
+        // The daemon creates the filesystem entry before bind/listen completes.
+        // Admission must wait for an actual connectable endpoint, not existence.
+        if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
             std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
             return Ok(Some(child));
         }
