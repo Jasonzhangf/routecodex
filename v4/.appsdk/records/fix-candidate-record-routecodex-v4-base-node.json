@@ -1,15 +1,15 @@
 {
-  "fix_candidate_id": "fix-9887f10d2d38",
+  "fix_candidate_id": "fix-7ca307194724",
   "issue_id": "v4-cordis-production-wiring",
   "module_id": "routecodex-v4-base-node",
-  "worktree_id": "v4-cordis-9887f10d2d38",
-  "base_commit": "6e6b90001c193c83abe6dedaae5820351eb2cb64",
-  "head_commit": "9887f10d2d38e21b7e6667c7916f717ecac96315",
-  "tree_hash": "7fbd5ab04b962f87fb04dc0b663c9fc50a8aad39",
-  "diff_hash": "sha256:0929fc691123a924d149576e06a1777b3298c885701300ea4ace90052e7786e2",
+  "worktree_id": "v4-cordis-7ca307194724",
+  "base_commit": "9cccbeb05df4a63d899eeb57bc08ca3afa4985e0",
+  "head_commit": "7ca30719472474a7351e623cf00e04e50819b585",
+  "tree_hash": "544d1e713dc8f7883285dc9a837c4c5d84fdc95a",
+  "diff_hash": "sha256:247d09fb09ade5c5c9660f9948916bb252e191b2dd99b23b3adab8d1e25f4fce",
   "design_id": "v4-feature-completion-plan-28",
   "owner": "routecodex-v4-runtime",
-  "scope_hash": "sha256:5538824b5269a25301ca8066fb8252e12a4b540b246d8cc85f7fa5fc9d6a2a22",
+  "scope_hash": "sha256:3676ad01ecadf8ce2ea1440acf09c3d3276e9882c187d9b0aaa87cff98cce47e",
   "changed_paths": [
     "v4/scripts/appsdk-runtime-adapter.mjs"
   ],
@@ -18,5 +18,5 @@
     "positive-1",
     "negative-1"
   ],
-  "created_at": "2026-09-03T06:20:22.370Z"
+  "created_at": "2026-09-03T06:23:03.138Z"
 }

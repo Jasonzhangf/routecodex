@@ -1,9 +1,9 @@
 {
-  "reproduction_id": "reproduction-fix-9887f10d2d38",
+  "reproduction_id": "reproduction-fix-7ca307194724",
   "issue_id": "v4-cordis-production-wiring",
   "module_id": "routecodex-v4-base-node",
-  "worktree_id": "v4-cordis-9887f10d2d38",
-  "base_commit": "6e6b90001c193c83abe6dedaae5820351eb2cb64",
+  "worktree_id": "v4-cordis-7ca307194724",
+  "base_commit": "9cccbeb05df4a63d899eeb57bc08ca3afa4985e0",
   "input_hashes": [
     "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
     "sha256:b127c2535c22f61d066c05e08fbfd327703008cb988f45ec11b4c9eb71e1f6d7"
@@ -11,5 +11,5 @@
   "baseline_evidence_id": "negative-1",
   "first_divergence": "v4-production-route-facts-binding",
   "result": "reproduced",
-  "created_at": "2026-09-03T06:20:22.386Z"
+  "created_at": "2026-09-03T06:23:14.277Z"
 }
