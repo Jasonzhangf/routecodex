@@ -382,7 +382,7 @@ export function createCordisPluginFactory({ catalog, implementations }) {
 
 export function computeNodePluginPlanHash(plan) {
   const { hash: _hash, ...body } = plan;
-  return createHash('sha256').update(canonicalJson(body)).digest('hex');
+  return `sha256:${createHash('sha256').update(canonicalJson(body)).digest('hex')}`;
 }
 
 export class CordisHostError extends Error {
@@ -475,6 +475,10 @@ export class CordisNodeHost {
     return Object.freeze([...this.#fibers]);
   }
 
+  serviceBindings() {
+    return Object.freeze(['nodeControl', 'nodeInformation', 'nodeDiagnostics']);
+  }
+
   get disposed() {
     return this.#disposed;
   }
@@ -491,7 +495,14 @@ export class CordisNodeHost {
       for (const plugin of plugins) {
         const fiber = this.#node.plugin(plugin.factory, plugin.config);
         mounted.push({ id: plugin.id, fiber });
-        await fiber.await();
+        try {
+          await fiber.await();
+        } catch (error) {
+          throw new CordisHostError(
+            'plugin_not_active',
+            `plugin ${plugin.id} failed during mount: ${error.message}`,
+          );
+        }
         if (fiber.state !== FiberState.ACTIVE) {
           throw new CordisHostError(
             'plugin_not_active',
@@ -625,7 +636,10 @@ export class RustNodeContainerPort {
 
   executeNode(planHash, input, ...extra) {
     if (extra.length > 0) this.#rejectFields('execute_node');
-    if (typeof planHash !== 'string' || planHash.length !== 64) {
+    if (
+      typeof planHash !== 'string'
+      || !(/^[0-9a-f]{64}$/.test(planHash) || /^sha256:[0-9a-f]{64}$/.test(planHash))
+    ) {
       throw new CordisHostError('binding_protocol', 'execute_node requires a sha256 plan hash');
     }
     validateExecutionInput(input);
@@ -835,6 +849,16 @@ export class CordisBoundNodeHost extends CordisNodeHost {
   }
 
   #verifyGraph(plugins) {
+    for (const plugin of plugins) {
+      const injected = Array.isArray(plugin?.factory?.inject) ? plugin.factory.inject : [];
+      const undeclared = injected.find((name) => !NODE_SERVICES.includes(name));
+      if (undeclared) {
+        throw new CordisHostError(
+          'service_not_declared',
+          `node service ${undeclared} is not declared for ${this.nodeId}`,
+        );
+      }
+    }
     const entries = plugins.map((plugin) => plugin.planEntry);
     if (entries.some((entry) => !entry)) {
       throw new CordisHostError('graph_binding_missing', 'every plugin requires planEntry');

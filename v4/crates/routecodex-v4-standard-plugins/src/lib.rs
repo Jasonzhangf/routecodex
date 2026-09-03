@@ -407,6 +407,7 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.direct.request.client_payload".to_string(),
             "v4.control.route_facts".to_string(),
             "v4.information.client_protocol".to_string(),
+            "v4.information.model".to_string(),
             "v4.information.provider_protocol".to_string(),
         ],
         "V4DirectResp02RelayContainer" => vec![
@@ -845,7 +846,11 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::ControlOnly,
             PluginPhase::Semantic,
             360,
-            vec!["v4.control.route_facts"],
+            vec![
+                "v4.control.route_facts",
+                "v4.information.client_protocol",
+                "v4.information.model",
+            ],
             vec!["v4.control.target_selection"],
         ),
         plugin(
