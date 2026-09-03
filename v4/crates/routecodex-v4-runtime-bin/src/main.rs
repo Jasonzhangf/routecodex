@@ -442,14 +442,6 @@ fn start(intent: StartIntent) -> Result<String, String> {
             _ => {}
         }
     }
-    let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
-    if let Err(error) = preflight_cordis_admission(&manifest) {
-        if let Some(mut child) = cordis_child {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        return Err(error);
-    }
     print_startup(&manifest);
     if routecodex_v4_lifecycle::read_record(&paths)
         .map_err(|error| error.to_string())?
@@ -467,13 +459,7 @@ fn start(intent: StartIntent) -> Result<String, String> {
         Duration::from_secs(15),
     ) {
         Ok(record) => record,
-        Err(error) => {
-            if let Some(mut child) = cordis_child {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-            return Err(error.to_string());
-        }
+        Err(error) => return Err(error.to_string()),
     };
     println!(
         "state=running identity=rccv4 pid={} listeners={}",
@@ -555,14 +541,6 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
             }
             _ => {}
         }
-    }
-    let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
-    if let Err(error) = preflight_cordis_admission(&manifest) {
-        if let Some(mut child) = cordis_child {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        return Err(error);
     }
     release_unmanaged_listeners(&manifest)?;
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
@@ -734,6 +712,10 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
         return Err("managed manifest path does not match V4 lifecycle owner".to_string());
     }
     let mut cordis_child = ensure_cordis_host_socket(&intent.manifest, &paths)?;
+    if let Err(error) = preflight_cordis_admission(&manifest) {
+        terminate_cordis_child(&mut cordis_child);
+        return Err(error);
+    }
     let record = ManagedInstanceRecord {
         runtime_identity: manifest.runtime_identity.clone(),
         pid: std::process::id(),
@@ -750,7 +732,7 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
             .map(|listener| listener.address.clone())
             .collect(),
     };
-    let control = match ManagedControlPlane::bind(paths, record) {
+    let control = match ManagedControlPlane::bind(paths.clone(), record) {
         Ok(control) => control,
         Err(error) => {
             terminate_cordis_child(&mut cordis_child);
@@ -772,7 +754,52 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     let _ = std::io::stdout().flush();
     let stop = Arc::new(AtomicBool::new(false));
     let handles = spawn_servers(servers, manifest.clone(), Arc::clone(&stop));
+    let cordis_socket = std::env::var_os("RCCV4_CORDIS_HOST_SOCKET")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| paths.state_root.join("cordis.sock"));
+    let mut next_cordis_probe = std::time::Instant::now();
+    let mut cordis_probe_failures = 0u8;
     let action = loop {
+        if let Some(child) = cordis_child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    stop.store(true, Ordering::Release);
+                    let join_result = join_servers(handles);
+                    terminate_cordis_child(&mut cordis_child);
+                    control.clear_record().map_err(|error| error.to_string())?;
+                    join_result?;
+                    return Err(format!("Cordis host exited before lifecycle stop: {status}"));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    stop.store(true, Ordering::Release);
+                    let join_result = join_servers(handles);
+                    terminate_cordis_child(&mut cordis_child);
+                    control.clear_record().map_err(|clear| clear.to_string())?;
+                    join_result?;
+                    return Err(format!("Cordis host liveness check failed: {error}"));
+                }
+            }
+        }
+        if cordis_child.is_none() && std::time::Instant::now() >= next_cordis_probe {
+            next_cordis_probe = std::time::Instant::now() + Duration::from_millis(250);
+            if cordis_handshake_ready(
+                &cordis_socket,
+                &intent.manifest,
+                std::time::Instant::now() + Duration::from_millis(250),
+            ) {
+                cordis_probe_failures = 0;
+            } else {
+                cordis_probe_failures = cordis_probe_failures.saturating_add(1);
+            }
+            if cordis_probe_failures >= 3 {
+                stop.store(true, Ordering::Release);
+                let join_result = join_servers(handles);
+                control.clear_record().map_err(|error| error.to_string())?;
+                join_result?;
+                return Err("Cordis host became unavailable during managed run".to_string());
+            }
+        }
         if handles.iter().any(thread::JoinHandle::is_finished) {
             stop.store(true, Ordering::Release);
             let join_result = join_servers(handles);

@@ -386,8 +386,17 @@ pub fn start_managed(
     let mut child = command
         .spawn()
         .map_err(|error| io_error(executable, error))?;
-    let record = wait_child_ready(paths, &mut child, timeout)?;
-    Ok(record)
+    match wait_child_ready(paths, &mut child, timeout) {
+        Ok(record) => Ok(record),
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = wait_until(timeout, || {
+                !paths.record_path.exists() && !paths.control_socket.exists()
+            });
+            Err(error)
+        }
+    }
 }
 
 pub fn request_stop(paths: &V4LifecyclePaths, timeout: Duration) -> Result<(), LifecycleError> {
