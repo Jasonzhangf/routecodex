@@ -402,6 +402,8 @@ fn start(intent: StartIntent) -> Result<String, String> {
     if intent.foreground {
         let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
         let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
+        release_for_foreground(&paths, Duration::from_secs(15))
+            .map_err(|error| error.to_string())?;
         let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
         if let Err(error) = preflight_cordis_admission(&manifest) {
             if let Some(mut child) = cordis_child {
@@ -410,8 +412,6 @@ fn start(intent: StartIntent) -> Result<String, String> {
             }
             return Err(error);
         }
-        release_for_foreground(&paths, Duration::from_secs(15))
-            .map_err(|error| error.to_string())?;
         print_startup(&manifest);
         let result = run_foreground(manifest);
         if let Some(mut child) = cordis_child {
@@ -631,7 +631,10 @@ fn ensure_cordis_host_socket(
 ) -> Result<Option<Child>, String> {
     if let Some(existing) = std::env::var_os("RCCV4_CORDIS_HOST_SOCKET") {
         let existing = PathBuf::from(existing);
-        if std::os::unix::net::UnixStream::connect(&existing).is_ok() {
+        // An explicitly supplied socket is owned by the caller. Do not probe
+        // it with an empty or synthetic connection; admission performs the
+        // authoritative protocol handshake.
+        if existing.exists() {
             return Ok(None);
         }
         std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
@@ -645,14 +648,16 @@ fn ensure_cordis_host_socket(
         return Err(format!("Cordis host runner missing: {}", runner.display()));
     }
     if socket.exists() {
-        match std::os::unix::net::UnixStream::connect(&socket) {
-            Ok(_) => {
-                std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
-                return Ok(None);
-            }
-            Err(_) => std::fs::remove_file(&socket)
-                .map_err(|error| format!("Cordis stale socket cleanup failed: {error}"))?,
+        if cordis_handshake_ready(
+            &socket,
+            manifest_path,
+            std::time::Instant::now() + Duration::from_secs(1),
+        ) {
+            std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
+            return Ok(None);
         }
+        std::fs::remove_file(&socket)
+            .map_err(|error| format!("Cordis stale socket cleanup failed: {error}"))?;
     }
     let state = paths.state_root.clone();
     let child = Command::new("node")
@@ -666,7 +671,7 @@ fn ensure_cordis_host_socket(
         .spawn()
         .map_err(|error| format!("Cordis host spawn failed: {error}"))?;
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    if wait_for_cordis_socket(&socket, deadline) {
+    if cordis_handshake_ready(&socket, manifest_path, deadline) {
         std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
         return Ok(Some(child));
     }
@@ -682,12 +687,34 @@ fn prepare_existing_cordis_host(paths: &V4LifecyclePaths) -> Result<(), String> 
     Ok(())
 }
 
-fn wait_for_cordis_socket(socket: &std::path::Path, deadline: std::time::Instant) -> bool {
-    // The daemon can create the filesystem entry before bind/listen completes.
-    // Admission must wait for an actual connectable endpoint, not existence.
+fn cordis_handshake_ready(
+    socket: &std::path::Path,
+    manifest_path: &std::path::Path,
+    deadline: std::time::Instant,
+) -> bool {
+    let manifest = match load_runtime_manifest(manifest_path) {
+        Ok(manifest) => manifest,
+        Err(_) => return false,
+    };
     while std::time::Instant::now() < deadline {
-        if std::os::unix::net::UnixStream::connect(socket).is_ok() {
-            return true;
+        if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket) {
+            let request = format!(
+                "{{\"op\":\"handshake\",\"protocolVersion\":1,\"graphHash\":\"{}\"}}\n",
+                manifest.execution_epoch.graph_hash
+            );
+            if stream.write_all(request.as_bytes()).is_ok() {
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+                let mut response = String::new();
+                if stream.read_to_string(&mut response).is_ok() {
+                    if serde_json::from_str::<Value>(response.trim())
+                        .ok()
+                        .and_then(|value| value.get("ok").cloned())
+                        == Some(Value::Bool(true))
+                    {
+                        return true;
+                    }
+                }
+            }
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -2699,29 +2726,4 @@ targets = ["mock"]
         );
     }
 
-    #[test]
-    fn cordis_socket_readiness_requires_connectable_listener() {
-        use std::os::unix::net::UnixListener;
-        let socket = std::env::temp_dir().join(format!(
-            "rccv4-cordis-readiness-{}-{}.sock",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock must be valid")
-                .as_nanos()
-        ));
-        std::fs::write(&socket, b"placeholder").expect("placeholder path must be creatable");
-        let bind_path = socket.clone();
-        let listener = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(40));
-            std::fs::remove_file(&bind_path).expect("placeholder must be removed");
-            UnixListener::bind(bind_path).expect("listener must bind")
-        });
-        assert!(wait_for_cordis_socket(
-            &socket,
-            std::time::Instant::now() + std::time::Duration::from_secs(1)
-        ));
-        let _listener = listener.join().expect("listener thread must finish");
-        let _ = std::fs::remove_file(socket);
-    }
 }
