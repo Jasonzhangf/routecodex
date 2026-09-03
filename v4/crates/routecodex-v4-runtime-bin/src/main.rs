@@ -402,11 +402,24 @@ fn start(intent: StartIntent) -> Result<String, String> {
     })?;
     if intent.foreground {
         let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
-        print_startup(&manifest);
         let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
+        let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
+        if let Err(error) = preflight_cordis_admission(&manifest) {
+            if let Some(mut child) = cordis_child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            return Err(error);
+        }
         release_for_foreground(&paths, Duration::from_secs(15))
             .map_err(|error| error.to_string())?;
-        run_foreground(manifest)?;
+        print_startup(&manifest);
+        let result = run_foreground(manifest);
+        if let Some(mut child) = cordis_child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        result?;
         return Ok("state=stopped identity=rccv4 foreground=true".to_string());
     }
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
@@ -546,13 +559,11 @@ fn server_start(intent: ServerStartIntent) -> Result<String, String> {
             snapshot: intent.snapshot,
         });
     }
-    let config = config_path(ConfigPathIntent {
+    start(StartIntent {
         config: intent.config,
-    })?;
-    let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
-    print_startup(&manifest);
-    run_foreground(manifest)?;
-    Ok("state=stopped identity=rccv4 foreground=true".to_string())
+        foreground: true,
+        snapshot: intent.snapshot,
+    })
 }
 
 fn print_startup(manifest: &RuntimeConfigManifest) {
