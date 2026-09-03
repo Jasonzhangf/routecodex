@@ -162,49 +162,6 @@ mapping, or unauthorized cleanup/reset remain forbidden. The old valid state
 is accepted as evidence until the authorized migration completes; it is not
 silently reinterpreted under the new rules.
 
-### Residual state removal and idempotent cleanup
-
-Migration is not a sequence of ad-hoc patches. Before changing a legacy
-project, classify every old object and choose one canonical owner for the
-transition. Use the following disposition table:
-
-| Class | Disposition | Who may change it |
-|---|---|---|
-| Historical evidence, migration snapshots, source identities, task/claim/journal history | Retain immutably | Nobody during ordinary cleanup |
-| Active and Protected artifacts, Freeze/Promotion/Review records | Retain and rehydrate through their canonical lifecycle | Canonical lifecycle producer only |
-| Failed transaction staging, abandoned leases, duplicate runtime projections | Remove after ownership and staleness are proven | Owning transaction/cleanup adapter |
-| Generated or Active projections whose source binding is stale | Rebuild from the canonical source commit | Canonical compiler/rehydrate owner |
-| Unmapped legacy objects | Preserve, classify, and assign an explicit disposition | Authorized migration owner |
-
-The cleanup procedure is:
-
-```text
-inspect and snapshot -> classify -> authorize ownership transfer
-  -> canonical cleanup of only disposable state
-  -> verify cleanup is idempotent
-  -> regenerate projections from canonical source
-  -> run verify and continue the lifecycle
-```
-
-Cleanup must be safe to run twice: the second run reports no-op for already
-removed disposable state and never recreates, overwrites, or deletes immutable
-history. Do not delete a failed record merely because it blocks a retry; retain
-its audit snapshot and create a new transaction namespace bound to the new
-candidate. Do not hand-edit hashes, timestamps, lock fields, lifecycle JSON,
-or receipts. If a canonical cleanup command or adapter does not exist, add
-that capability at its owner before touching residual state; do not emulate it
-with shell deletion or repeated field patches. A cleanup failure must expose
-the first object and owner that blocked it, the retained evidence, whether a
-retry is safe, and the single next transition. `retry_allowed: false` means
-stop and change the route, never loop on the same command.
-
-For a combined AppSDK and Collab migration, clean the two planes separately:
-preserve independent snapshots, reconcile explicit mappings, then clean only
-authorized disposable state in each plane. Never merge roots, identities,
-mailboxes, records, or histories by concatenating files. After reconciliation,
-zero only approved runtime/temporary state and verify one owner/one truth for
-each retained object.
-
 ## Existing project bootstrap
 
 For an existing project, begin with a preparation record instead of manually creating governance directories:
@@ -271,10 +228,10 @@ preflight defect; implementation is not admitted until the chain is closed.
 9. Reproduce the issue at the base commit with the same recorded input hashes. Record the first divergence and baseline evidence before implementing the formal fix.
 10. Commit the fix candidate and bind its commit, tree hash, diff hash, design ID, owner, scope, changed paths, and positive/negative verification evidence in FixCandidateRecord.
 11. Before architecture review or delivery commit, run two distinct gates on the exact candidate: development whitebox verifies internal logic; deployment blackbox builds, installs, restarts, then verifies behavior only through the deployed public entrypoint. Unit tests, source-level CLI invocation, mocks, and relabeled whitebox evidence are not deployment blackbox evidence.
-12. Record PreReviewValidationRecord. Bind candidate commit/tree, deployed artifact hash, independent full whitebox producer identity, deployment environment/entrypoint/producer, and disjoint whitebox/blackbox evidence IDs. Install and restart receipt IDs must resolve to unexpired PASS EvidenceRecords for the same candidate, artifact, environment, entrypoint, and deployment producer. The shared machine gate verifies the candidate Git tree, controlled source, rebuilt artifact identity, whitebox producer/artifact, and candidate ≤ whitebox ≤ install ≤ restart ≤ blackbox ≤ validation time; review admission, normal verify, and architecture promotion all call this same gate, so post-admission drift fails closed. Missing deployment capability is a blocker, never a skipped gate. Then require `appsdk verify --review-admission <project> --module <id>` to PASS; an agent must not start review or create the delivery commit before this admission. AppSDK supplies the admission command and contract; the host CI/pre-commit adapter must invoke it when physical Git commit blocking is required.
+12. Record PreReviewValidationRecord. Bind candidate commit/tree, deployed artifact hash, independent full whitebox producer identity, deployment environment/entrypoint/producer, and disjoint whitebox/blackbox evidence IDs. Install and restart receipt IDs must resolve to unexpired PASS EvidenceRecords for the same candidate, artifact, environment, entrypoint, and deployment producer. The shared machine gate verifies the candidate Git tree, controlled source, rebuilt artifact identity, whitebox producer/artifact, and candidate ≤ whitebox ≤ install ≤ restart ≤ blackbox ≤ validation time; review admission and architecture promotion call this gate, so post-admission drift fails closed. Missing deployment capability is a release blocker, never a skipped gate. Then require `appsdk verify --review-admission <project> --module <id>` to PASS. The delivery commit is created only after admission, architecture review, and unchanged-source effectiveness.
 13. Run architecture review against that exact pre-review-validated candidate. ReviewRecord must reference the PreReviewValidationRecord, contain explicit PASS, AI confidence/rationale, and hashes of the resource, function, mainline-call, and verification maps.
 14. After architecture PASS, rerun the original reproduction inputs plus positive, negative, and blackbox checks without changing candidate source. Record EffectivenessRecord. Source/tree/scope changes invalidate pre-review validation, review, and effectiveness.
-15. Merge only after effectiveness PASS. For a single worker, MergeRecord proves the candidate commit is an ancestor of the recorded merge commit and that the merge commit remains on the declared mainline ref. For parallel development, follow the atomic scenario pair below.
+15. Create the delivery/integration commit only after admission, architecture review, and effectiveness PASS, then merge it. For a single worker, MergeRecord proves the candidate commit is an ancestor of the recorded merge commit and that the merge commit remains on the declared mainline ref. For parallel development, follow the atomic scenario pair below.
 16. Promote only when the complete worktree → reproduction → candidate → pre-review validation → architecture review → effectiveness → merge record graph is valid and evidence targets the exact module and candidate artifact.
 17. Before freeze, run the module's declared regression suite and create a RegressionReport bound to the exact merged source commit, artifact hash, public API hash, scope hash, and input hash. Regression and bug-reproduction evidence must combine whitebox and blackbox coverage; unit and focused tests may be whitebox only.
 18. Compile the merged source library, publish the immutable Active artifact, archive source/contracts to Protected, create FreezeRecord with the RegressionReport ID/hash, and verify.
@@ -296,9 +253,7 @@ preflight defect; implementation is not admitted until the chain is closed.
 
 For a frozen module change, run `appsdk begin-version <project> --module <id> --from <current> --to <new>` before formal source edits. The command must bind and preserve the current Active artifact, Protected archive, and record graph; direct edits to the old Active or Protected version are forbidden.
 
-When migrating a 0.1.5 project to AppSDK 0.1.6, run the 0.1.6 binary's `pin-lock` once. SDK canonical maps and project governance maps are separate resources: only maps that exactly match the 0.1.5 SDK canonical source are migrated to the 0.1.6 canonical target. Custom project maps are snapshotted, bound, and preserved in place; `pin-lock` must never overwrite them. Do not copy new maps or edit ReviewRecord hashes. Frozen ReviewRecord hashes resolve through the immutable migration snapshot. If an earlier 0.1.6 pin stopped after updating project/lock, rerun the same command; exact source maps or the existing migration record are required, and mixed/drifted state fails closed.
-
-Migration entry is intentionally less strict than delivery admission. A legacy project may enter the 0.1.6 governance environment when its project contract and maps are structurally readable, even if a non-frozen module has no passing ReviewRecord yet. Record that condition as `pending_reviews` and report `PASS_WITH_WARNINGS`; do not rewrite the module stage, fabricate a verdict, or block migration solely because adapter, deployment, review, or delivery evidence belongs to a later phase. Hash integrity, ownership, supported-version boundaries, immutable Active/Protected state, malformed existing records, and mixed migration state remain hard failures. `PASS_WITH_WARNINGS` permits only the next declared transition; it never permits review admission, merge, publish, or freeze before their own gates pass.
+When migrating a supported legacy project to AppSDK 0.1.6, run the explicit `pin-lock` route once. SDK canonical maps and project governance maps are separate resources: only maps that exactly match the source canonical contract are migrated to the target canonical contract. Custom project maps are snapshotted, bound, and preserved in place; `pin-lock` must never overwrite them. Do not copy new maps or edit ReviewRecord hashes. Frozen ReviewRecord hashes resolve through the immutable migration snapshot. Ordinary `verify`/`compile` may operate on a supported legacy contract and never require the current global binary, compiler, or bundle identity; only the explicit migration command applies the supported version transition.
 
 The ReviewRecord schema's canonical PASS value is lowercase `pass`. A historical migration record may retain the bundle digest used at migration time; the current `sdk.lock` owns the current bundle digest, while migration snapshots and map target hashes remain exact. Older 0.1.6 records that duplicated one source-stage review in both review lists may be accepted only when module, review ID, stage, snapshots, and map hashes all validate; new records must keep source-stage reviews only in `legacy_reconciled_reviews` and frozen/retired reviews only in `frozen_reviews`.
 
@@ -308,17 +263,17 @@ The canonical module build runner injects a Rust `--remap-path-prefix` for the c
 
 In a clean checkout, ignored generated and Active projections may be absent. Never copy them from another worktree or hand-build their records. Ensure the current Protected archive is not ignored, then run `appsdk rehydrate-frozen <project> --module <id>`. AppSDK derives the current version from FreezeRecord, rebuilds with the declared build command, requires the rebuilt artifact hash to match the immutable freeze/promotion graph, reconstructs Protected and Active projections, and runs full verification. Committed source drift, an ignored Protected archive, hash mismatch, or missing previous version history fails closed. Only after rehydrate passes may `begin-version` open the next version.
 
-When the project is pinned to AppSDK 0.1.5, execute the target 0.1.6 binary itself and pass that exact file to `pin-lock` before rehydrate. This is the only supported 0.1.5 → 0.1.6 migration; it advances Bundle resources, lock, and project version together. Never hand-edit version fields or run an older CLI against a newer `--binary`. Unsupported source versions and byte-mismatched binaries fail closed.
+When the project is pinned to a supported legacy AppSDK version, pass the selected migration input to `pin-lock`; the command advances resources, lock, and project version together. The executing CLI need not be byte-identical to that input, and changing PATH must not strand development. Never hand-edit version fields or migration snapshots. Unsupported source versions remain explicit migration errors, not ordinary development errors.
 
 A clean worktree may no longer contain the local issue branch named by an immutable MergeRecord. AppSDK resolves that recorded name only when the exact ref exists or exactly one remote-tracking ref has the same branch name. Missing or ambiguous matches fail closed; never create a local branch or choose a remote to make verification pass.
 
 For older supported locks, `pin-lock` performs the official ordered chain
 `0.1.3 -> 0.1.5 -> 0.1.6` or `0.1.4 -> 0.1.5 -> 0.1.6`. Each intermediate
 step snapshots the project's actual maps and is idempotent; never rewrite the
-lock by hand or retry after `retry_allowed: false`. Bind one selected executable
-path and verify its reported SDK version once at transaction start. Do not
-recheck binary content hashes at project gates or deployment gates; binary
-identity is not a reason to repeatedly stop an otherwise valid migration.
+lock by hand or retry after `retry_allowed: false`. Use the selected executable
+at the command boundary. Binary path, SHA-256, compiler digest, and bundle
+identity are not ordinary project-development blockers; project-owned
+governance truth remains the source of verify/compile decisions.
 
 ## Debug flow
 
@@ -344,7 +299,7 @@ gates is forbidden.
 ## Required checks
 
 - `appsdk verify <project>`
-- `appsdk verify --review-admission <project> --module <id>` before any architecture review or delivery commit
+- `appsdk verify --review-admission <project> --module <id>` before architecture review or delivery commit when release delivery is requested; base verify/compile remain ordinary development gates
 - project tests and required gates
 - candidate artifact hash and public API hash
 - record graph references, freshness, scope, module, and version relations
@@ -352,6 +307,34 @@ gates is forbidden.
 - RegressionReport whitebox + blackbox coverage, non-zero passing tests, exact input binding, and FreezeRecord report hash
 - Protected and Active immutability
 - final review with explicit PASS from Jason's selected review tool, or the default route when no tool was specified
+
+## Development versus release admission
+
+Base `appsdk verify` and `appsdk compile` are ordinary development gates. They
+must remain usable after an authorized governance reset and must not require
+release evidence or binary/compiler/bundle identity. `appsdk verify
+--review-admission` is a release-delivery gate only; run it after real project
+producers create candidate, whitebox, install, restart, deployed-blackbox,
+and pre-review records. Missing producers do not justify retries or hand-made
+records; continue development after base verify/compile pass.
+
+## Legacy reset and mid-project adoption
+
+After Jason authorizes abandoning old governance, use the idempotent command
+in a clean non-main owner worktree:
+
+```bash
+appsdk reset-governance <project-root> --discard-legacy
+appsdk verify <project-root>
+appsdk compile <project-root>
+```
+
+It removes only the exact `.appsdk/` and `.appsdk-control/` control-plane
+roots, preserves business source/runtime/Active/Protected, and writes a reset
+record. Never replace this route with shell deletion or record/hash patches.
+For a project already in development, stop only its own run, record dirty
+scope, create a clean worktree from latest `origin/main`, reset, verify/compile,
+then resume the current goal. Release admission remains optional until delivery.
 
 Do not claim lifecycle completion from unit tests alone. A missing external adapter, review verdict, installation, restart, or online evidence is an explicit remaining gap.
 

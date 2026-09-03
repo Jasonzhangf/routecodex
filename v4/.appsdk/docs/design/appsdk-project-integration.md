@@ -116,9 +116,9 @@ Ignore:
 
 消费者只使用全局安装的 AppSDK Bundle。Bundle 版本必须同时绑定 Rust CLI、machine contracts、文档、规则和 skills；不能让项目自行扫描一个不受版本控制的全局目录。Bundle manifest 是机器真源，`init`/`new` 将其中声明的 Skill、规则和文档安装到项目 `.appsdk/`，并生成 `.appsdk/sdk-resources.json`。
 
-项目中的手动合同（例如 `project.json`、records、maps）由 AI/开发者维护，SDK 只校验 schema、引用、owner、scope 和生命周期关系。`.appsdk/sdk-resources.json` 是自动生成文件，只能由 SDK 重建；`verify` 会校验资源文件摘要和 Bundle digest，发现手工改写立即 fail-fast。
+项目中的手动合同（例如 `project.json`、records、maps）由 AI/开发者维护，SDK 只校验 schema、引用、owner、scope 和生命周期关系。`.appsdk/sdk-resources.json` 是自动生成文件，只能由 SDK 重建；`verify` 会校验项目资源文件自身的摘要，发现手工改写立即 fail-fast，但不把当前全局 Bundle 身份当作项目开发门禁。
 
-`contracts/sdk-bundle.manifest.json` 声明当前 Bundle 的资源集合和安装位置；初始化后项目内的机器真源位于 `.appsdk/contracts/sdk-bundle.manifest.json`。它和 binary 同版本发布；`pin-lock` 把 binary digest、Bundle digest、manifest digest 和资源集合一起写入锁。执行 `pin-lock` 的 binary 必须与 `--binary` 指向的文件字节一致，防止旧 CLI 把新 binary 与旧 embedded Bundle 拼成伪锁。
+`contracts/sdk-bundle.manifest.json` 声明当前 Bundle 的资源集合和安装位置；初始化后项目内的机器真源位于 `.appsdk/contracts/sdk-bundle.manifest.json`。它和 binary 同版本发布；`pin-lock` 可把 binary digest、Bundle digest、manifest digest 和资源集合写入迁移审计锁。普通 `verify`/`compile` 不比较全局 binary、Bundle 或其摘要；`--binary` 文件只作为显式迁移输入，不得因当前执行文件不同而阻断项目开发。
 
 `.appsdk/sdk.lock` binds the project to the external implementation:
 
