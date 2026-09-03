@@ -16,7 +16,7 @@ use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
     exec_managed_restart, release_for_foreground, repair_stale, request_restart, request_stop,
     start_managed, status_managed, LifecycleError, ManagedAction, ManagedControlPlane,
-    ManagedInstanceRecord, ManagedSpawnOptions, V4LifecyclePaths,
+    ManagedInstanceRecord, ManagedSpawnOptions, ManagedStatus, V4LifecyclePaths,
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
@@ -422,6 +422,25 @@ fn start(intent: StartIntent) -> Result<String, String> {
         return Ok("state=stopped identity=rccv4 foreground=true".to_string());
     }
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
+    // Stop the exact previous V4 instance before creating a replacement
+    // Cordis host.  The managed child owns its Cordis child; starting the new
+    // host first lets the old child tear down the replacement socket during
+    // its normal shutdown.
+    if routecodex_v4_lifecycle::read_record(&paths)
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        match status_managed(&paths).map_err(|error| error.to_string())? {
+            ManagedStatus { state, .. } if state == "running" => {
+                release_for_foreground(&paths, Duration::from_secs(15))
+                    .map_err(|error| error.to_string())?;
+            }
+            ManagedStatus { state, .. } if state == "stale" => {
+                repair_stale(&paths).map_err(|error| error.to_string())?;
+            }
+            _ => {}
+        }
+    }
     let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
     if let Err(error) = preflight_cordis_admission(&manifest) {
         if let Some(mut child) = cordis_child {
@@ -498,6 +517,32 @@ fn repair_stale_state(intent: ConfigPathIntent) -> Result<String, String> {
 
 fn restart(intent: RestartIntent) -> Result<String, String> {
     let (config, manifest, paths) = compile_for_lifecycle(intent.config)?;
+    let timeout = Duration::from_millis(intent.timeout_ms);
+    if routecodex_v4_lifecycle::read_record(&paths)
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        match status_managed(&paths).map_err(|error| error.to_string())? {
+            ManagedStatus { state, .. } if state == "running" => {
+                if let Err(error) = preflight_cordis_admission(&manifest) {
+                    return Err(error);
+                }
+                match request_restart(&paths, &manifest.manifest_digest, timeout) {
+                    Ok(record) => return Ok(format_status("restarted", &record)),
+                    Err(LifecycleError::NotRunning) => {
+                        // The child may have exited between the status probe and
+                        // the control request. Continue through the cold-start
+                        // path instead of reporting a false lifecycle failure.
+                    }
+                    Err(error) => return Err(error.to_string()),
+                }
+            }
+            ManagedStatus { state, .. } if state == "stale" => {
+                repair_stale(&paths).map_err(|error| error.to_string())?;
+            }
+            _ => {}
+        }
+    }
     let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
     if let Err(error) = preflight_cordis_admission(&manifest) {
         if let Some(mut child) = cordis_child {
@@ -506,31 +551,18 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
         }
         return Err(error);
     }
-    let timeout = Duration::from_millis(intent.timeout_ms);
-    match request_restart(&paths, &manifest.manifest_digest, timeout) {
-        Ok(record) => Ok(format_status("restarted", &record)),
-        Err(LifecycleError::NotRunning) => {
-            release_unmanaged_listeners(&manifest)?;
-            let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-            let record = start_managed(
-                &paths,
-                &executable,
-                &config,
-                &paths.manifest_path,
-                &ManagedSpawnOptions::default(),
-                timeout,
-            )
-            .map_err(|error| error.to_string())?;
-            Ok(format_status("running", &record))
-        }
-        Err(error) => {
-            if let Some(mut child) = cordis_child {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-            Err(error.to_string())
-        }
-    }
+    release_unmanaged_listeners(&manifest)?;
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let record = start_managed(
+        &paths,
+        &executable,
+        &config,
+        &paths.manifest_path,
+        &ManagedSpawnOptions::default(),
+        timeout,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(format_status("running", &record))
 }
 
 fn release_unmanaged_listeners(manifest: &RuntimeConfigManifest) -> Result<(), String> {
