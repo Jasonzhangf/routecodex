@@ -5,8 +5,8 @@
       "function_id": "v4.cordis.production_admission",
       "owner": "routecodex-v4-runtime-bin",
       "status": "active",
-      "binding_status": "binding_pending",
-      "entry_symbols": ["PipelineHandler::new", "CordisAdmission"],
+      "binding_status": "active",
+      "entry_symbols": ["PipelineHandler::new", "CordisAdmission", "run_managed_child", "ensure_cordis_host_socket"],
       "entry_paths": [
         "crates/routecodex-v4-runtime-bin/src/main.rs",
         "scripts/architecture/verify-v4-cordis-production-admission.mjs"
