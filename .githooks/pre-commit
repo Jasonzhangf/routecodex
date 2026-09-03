@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+branch=$(git symbolic-ref --quiet --short HEAD || true)
+case "$branch" in
+  main|master)
+    echo "routecodex: commits on $branch are forbidden" >&2
+    exit 1
+    ;;
+esac
+
+# verify:local profile
+cd "$(git rev-parse --show-toplevel)/v4"
+appsdk verify .

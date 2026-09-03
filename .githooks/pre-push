@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+while read -r local_ref local_oid remote_ref remote_oid; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      echo "routecodex: pushes to $remote_ref are forbidden" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# verify:ci profile
+cd "$(git rev-parse --show-toplevel)/v4"
+appsdk verify .
