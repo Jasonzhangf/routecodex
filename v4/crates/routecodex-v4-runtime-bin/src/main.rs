@@ -20,8 +20,8 @@ use routecodex_v4_lifecycle::{
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
-    send_target_nonstream as provider_send_target_nonstream,
-    send_target_streaming as provider_send_target_streaming, write_provider_profile,
+    dispatch_nonstream as provider_send_target_nonstream,
+    dispatch_streaming as provider_send_target_streaming, write_provider_profile,
     ProviderInitAuth, ProviderInitOptions, ProviderResponseStream, V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
@@ -1407,7 +1407,7 @@ fn handle_responses(
     })?;
     let wire_body = semantic_body;
     if stream_mode {
-        let mut stream = provider_send_target_streaming(&target.protocol, &target.config_path, &target.wire_model, target.auth_alias.as_deref(), &wire_body).map_err(|error| {
+        let mut stream = provider_send_target_streaming(&target.protocol, &target.config_path, target.auth_alias.as_deref(), &target.wire_model, &wire_body).map_err(|error| {
             project_fault(
                 request,
                 RuntimeFault::new(error.code.as_str(), error.message)
@@ -1460,7 +1460,7 @@ fn handle_responses(
                             .map_err(|fault| project_fault(request, fault, 598))?;
                             target = candidate;
                             stream =
-                                provider_send_target_streaming(&target.protocol, &target.config_path, &target.wire_model, target.auth_alias.as_deref(), &retry_body).map_err(|error| {
+                                provider_send_target_streaming(&target.protocol, &target.config_path, target.auth_alias.as_deref(), &target.wire_model, &retry_body).map_err(|error| {
                                     project_provider_fault(
                                         request,
                                         RuntimeFault::new(&error.code, error.message),
@@ -1536,7 +1536,7 @@ fn handle_responses(
             Box::new(response_stream),
         ));
     }
-    let mut raw = provider_send_target_nonstream(&target.protocol, &target.config_path, &target.wire_model, target.auth_alias.as_deref(), &wire_body).map_err(|error| {
+    let mut raw = provider_send_target_nonstream(&target.protocol, &target.config_path, target.auth_alias.as_deref(), &target.wire_model, &wire_body).map_err(|error| {
         project_provider_fault(
             request,
             RuntimeFault::new(error.code.as_str(), error.message),
@@ -1597,7 +1597,7 @@ fn handle_responses(
                     .map_err(|fault| project_fault(request, fault, 598))?;
                     target = candidate;
                     reselected = true;
-                    raw = provider_send_target_nonstream(&target.protocol, &target.config_path, &target.wire_model, target.auth_alias.as_deref(), &retry_body).map_err(|error| {
+                    raw = provider_send_target_nonstream(&target.protocol, &target.config_path, target.auth_alias.as_deref(), &target.wire_model, &retry_body).map_err(|error| {
                         project_provider_fault(
                             request,
                             RuntimeFault::new(&error.code, error.message),
