@@ -27,6 +27,10 @@ const copied = [
   'scripts/architecture/mainline-call-map-lib.mjs',
   'scripts/architecture/v3-mainline-caller-flow-lib.mjs',
   'scripts/architecture/v3-req04-tool-governance-review-lib.mjs',
+  'v3/scripts/architecture/render-v3-stopless-state-machine-docs.mjs',
+  'v3/scripts/architecture/verify-v3-stopless-state-machine-docs.mjs',
+  'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs',
+  'v3/scripts/architecture/v3-req04-tool-governance-review-lib.mjs',
 ];
 
 const cases = [
@@ -110,9 +114,13 @@ const failures = [];
 for (const fixture of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-stopless-state-machine-red-'));
   try {
-    const repoNodeModules = resolve(repo, 'node_modules');
+    const repoNodeModules = existsSync(resolve(repo, 'node_modules'))
+      ? resolve(repo, 'node_modules')
+      : resolve(repo, '../..', 'node_modules');
     if (existsSync(repoNodeModules)) {
       symlinkSync(repoNodeModules, resolve(root, 'node_modules'), 'dir');
+      mkdirSync(resolve(root, 'v3'), { recursive: true });
+      symlinkSync(repoNodeModules, resolve(root, 'v3', 'node_modules'), 'dir');
     }
     for (const rel of copied) {
       const source = resolve(repo, rel);

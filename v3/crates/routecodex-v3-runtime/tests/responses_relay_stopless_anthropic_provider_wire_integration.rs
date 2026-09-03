@@ -145,6 +145,12 @@ port = 5555
 routing_group = "responses_v3_5555"
 endpoints = ["responses"]
 features = { stopless_center = true }
+[servers.responses_v3_5555.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.minimax_anthropic]
 type = "anthropic"
 base_url = "http://controlled.invalid/anthropic"

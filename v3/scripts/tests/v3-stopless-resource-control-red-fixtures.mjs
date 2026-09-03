@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -369,6 +369,12 @@ const failures = [];
 for (const fixture of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-stopless-resource-control-red-'));
   try {
+    const repoNodeModules = resolve(repo, 'node_modules');
+    if (existsSync(repoNodeModules)) {
+      symlinkSync(repoNodeModules, resolve(root, 'node_modules'), 'dir');
+      mkdirSync(resolve(root, 'v3'), { recursive: true });
+      symlinkSync(repoNodeModules, resolve(root, 'v3', 'node_modules'), 'dir');
+    }
     for (const rel of copied) cpSync(resolve(repo, rel), resolve(root, rel), { recursive: true });
     const target = resolve(root, fixture.path);
     const original = readFileSync(target, 'utf8');

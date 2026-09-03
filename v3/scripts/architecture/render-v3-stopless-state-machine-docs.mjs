@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import YAML from 'yaml';
-import { renderArchitectureWikiHtmlPages } from './wiki-html-lib.mjs';
+
+const wikiHtmlLibrary = fs.existsSync('scripts/architecture/wiki-html-lib.mjs')
+  ? path.resolve('scripts/architecture/wiki-html-lib.mjs')
+  : path.resolve('v3/scripts/architecture/wiki-html-lib.mjs');
+const { renderArchitectureWikiHtmlPages } = await import(pathToFileURL(wikiHtmlLibrary));
 
 const root = process.cwd();
 const check = process.argv.includes('--check');

@@ -1,7 +1,12 @@
 #!/usr/bin/env node
+import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
-const result = spawnSync(process.execPath, ['scripts/architecture/render-v3-stopless-state-machine-docs.mjs', '--check'], {
+const renderScript = existsSync('scripts/architecture/render-v3-stopless-state-machine-docs.mjs')
+  ? 'scripts/architecture/render-v3-stopless-state-machine-docs.mjs'
+  : 'v3/scripts/architecture/render-v3-stopless-state-machine-docs.mjs';
+
+const result = spawnSync(process.execPath, [renderScript, '--check'], {
   cwd: process.cwd(),
   encoding: 'utf8',
 });
