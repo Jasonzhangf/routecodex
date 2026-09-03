@@ -1,11 +1,11 @@
 {
   "evidence_id": "restart-1",
   "issue_id": "v4-cordis-production-wiring",
-  "experiment_id": "fix-b12750003101",
+  "experiment_id": "fix-f73e0037720b",
   "phase": "deployment_restart",
   "kind": "restart",
-  "source_commit": "b1275000310168c7b1f5ab7f53336c5f86343d5d",
-  "artifact_hash": "sha256:1d77cb4899adaafc0e48b498b3a4d08ba6ee2dd8b7d16bf7dcf98379904aea69",
+  "source_commit": "f73e0037720ba55fa3a5fde66308ac06f1585861",
+  "artifact_hash": "sha256:5a3d9c8537e589e0d16a9cd8c2ee424ebdc2c37e382fd3f8711b6156bcda635f",
   "execution_surface": "deployed_blackbox",
   "environment_id": "local-v4-5520",
   "entrypoint": "http://127.0.0.1:5520",
@@ -26,8 +26,8 @@
   ],
   "exit_status": 0,
   "result": "pass",
-  "created_at": "2026-09-03T09:33:54.228Z",
-  "expires_at": "2026-09-10T09:33:54.228Z",
+  "created_at": "2026-09-03T09:35:19.955Z",
+  "expires_at": "2026-09-10T09:35:19.955Z",
   "input_hashes": [
     "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
     "sha256:bd10c558d90956ee382b260984979b4dc106589a795a476d8ba5b49ec66980a6"

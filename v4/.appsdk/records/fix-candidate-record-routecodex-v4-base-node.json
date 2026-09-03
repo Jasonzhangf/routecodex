@@ -1,36 +1,20 @@
 {
-  "fix_candidate_id": "fix-b12750003101",
+  "fix_candidate_id": "fix-f73e0037720b",
   "issue_id": "v4-cordis-production-wiring",
   "module_id": "routecodex-v4-base-node",
-  "worktree_id": "v4-cordis-b12750003101",
-  "base_commit": "88b147e135dabe8825cdb83d913520d4bfc7deba",
-  "head_commit": "b1275000310168c7b1f5ab7f53336c5f86343d5d",
-  "tree_hash": "fbf1a757c38e860ab809956019fa27dc2e03ad00",
+  "worktree_id": "v4-cordis-f73e0037720b",
+  "base_commit": "b1275000310168c7b1f5ab7f53336c5f86343d5d",
+  "head_commit": "f73e0037720ba55fa3a5fde66308ac06f1585861",
+  "tree_hash": "f79258d5d331850d60177c4c85fd336f7b64249c",
   "diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "design_id": "v4-feature-completion-plan-28",
   "owner": "routecodex-v4-runtime",
   "scope_hash": "sha256:61114c81e76e622ea6219a07fbda6a8203ca94eaacf9fed4ac615eb56546b617",
-  "changed_paths": [
-    "v4/.appsdk/records/evidence-record-routecodex-v4-base-node.json",
-    "v4/.appsdk/records/evidence-record.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/blackbox-1.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/blackbox-models.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/blackbox-responses.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/install-1.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/negative-1.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/positive-1.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/restart-1.json",
-    "v4/.appsdk/records/evidence/routecodex-v4-base-node/whitebox-1.json",
-    "v4/.appsdk/records/fix-candidate-record-routecodex-v4-base-node.json",
-    "v4/.appsdk/records/pre-review-validation-record-routecodex-v4-base-node.json",
-    "v4/.appsdk/records/reproduction-record-routecodex-v4-base-node.json",
-    "v4/.appsdk/records/worktree-record-routecodex-v4-base-node.json",
-    "v4/scripts/appsdk-runtime-adapter.mjs"
-  ],
+  "changed_paths": [],
   "verification_evidence_ids": [
     "whitebox-1",
     "positive-1",
     "negative-1"
   ],
-  "created_at": "2026-09-03T09:33:45.646Z"
+  "created_at": "2026-09-03T09:35:05.317Z"
 }
