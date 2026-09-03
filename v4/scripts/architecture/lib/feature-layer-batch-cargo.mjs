@@ -19,7 +19,7 @@ function rejectLocalOverrides(source, relativePath) {
   let section = '';
   for (const rawLine of source.split(/\r?\n/)) {
     const line = rawLine.replace(/\s+#.*$/, '').trim();
-    const sectionMatch = line.match(/^\[([^\]]+)\]$/);
+    const sectionMatch = line.match(/^\[\[?([^\]]+)\]\]?$/);
     if (sectionMatch) {
       section = sectionMatch[1];
       continue;
@@ -85,7 +85,7 @@ function parseWorkspaceDependencies(source) {
   for (const rawLine of source.split(/\r?\n/)) {
     const line = rawLine.replace(/\s+#.*$/, '').trim();
     if (!line) continue;
-    const sectionMatch = line.match(/^\[([^\]]+)\]$/);
+    const sectionMatch = line.match(/^\[\[?([^\]]+)\]\]?$/);
     if (sectionMatch) {
       flushTable();
       section = sectionMatch[1];
@@ -125,7 +125,7 @@ function parseCargoManifest(relativePath, source, workspaceDependencies) {
   for (const rawLine of source.split(/\r?\n/)) {
     const line = rawLine.replace(/\s+#.*$/, '').trim();
     if (!line) continue;
-    const sectionMatch = line.match(/^\[([^\]]+)\]$/);
+    const sectionMatch = line.match(/^\[\[?([^\]]+)\]\]?$/);
     if (sectionMatch) {
       flushTable();
       section = sectionMatch[1];
