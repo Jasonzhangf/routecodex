@@ -56,7 +56,7 @@ fn log_classified_v3_toolreason_observation_at_resp03(
         V3ToolreasonObservationStatus::Misplaced => ("MISPLACED", "45"),
     };
     let line = format!(
-        "\x1b[1;{color};30m TOOLREASON {label} \x1b[0m source=provider_raw_tool_arguments stage={stage} session_id={} request_id={} tool={tool_name} confidence={} thinking={} model={}",
+        "\x1b[1;{color};30m TOOLREASON {label} \x1b[0m source=provider_raw_tool_arguments stage={stage} session_id={} request_id={} tool={tool_name} confidence={} thinking={}",
         context.session_id.unwrap_or("<missing>"),
         context.request_id.unwrap_or("<missing>"),
         fields
@@ -65,9 +65,6 @@ fn log_classified_v3_toolreason_observation_at_resp03(
         fields
             .map(|value| compact_v3_toolreason_observation_text(&value.reason))
             .unwrap_or_else(|| "<missing>".to_string()),
-        fields
-            .and_then(|value| value.model_id.as_deref())
-            .unwrap_or("<missing>"),
     );
     println!("{line}");
     let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -152,11 +149,10 @@ pub(crate) fn audit_v3_toolreason_dry_run_payloads(
 ) -> Value {
     let provider_text = provider_request.to_string();
     // Provider-facing guidance is intentionally stricter than Resp03
-    // compatibility: all three fields must reach the wire contract even
-    // though a reason-only provider response remains acceptable.
+    // compatibility: both active diagnostic fields must reach the wire
+    // contract even though a reason-only provider response remains acceptable.
     let request_reason_guidance_present = provider_text.contains("reason");
-    let request_required_diagnostics_present =
-        provider_text.contains("goal_alignment_confidence") && provider_text.contains("model_id");
+    let request_required_diagnostics_present = provider_text.contains("goal_alignment_confidence");
     let request_guidance_present =
         request_reason_guidance_present && request_required_diagnostics_present;
     let mut tool_call_count = 0usize;
@@ -216,7 +212,6 @@ fn collect_v3_toolreason_dry_run_counts(
 struct V3ToolreasonFields {
     reason: String,
     goal_alignment_confidence: Option<u8>,
-    model_id: Option<String>,
 }
 
 fn parse_v3_toolreason_fields_at_resp03(reason: &str) -> Option<V3ToolreasonFields> {
@@ -292,21 +287,9 @@ fn parse_v3_tool_thinking_fields_from_object_at_resp03(
         Some(_) => return Err("goal_alignment_confidence"),
         None => None,
     };
-    let model_id = match object.get("model_id") {
-        Some(value) => Some(
-            value
-                .as_str()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .ok_or("model_id")?,
-        ),
-        None => None,
-    };
     Ok(V3ToolreasonFields {
         reason,
         goal_alignment_confidence: confidence,
-        model_id,
     })
 }
 
@@ -613,7 +596,6 @@ fn emit_v3_toolreason_observation_at_resp03_with_expected_model_and_stream_obser
         confidence: fields
             .as_ref()
             .and_then(|value| value.goal_alignment_confidence),
-        model_id: fields.as_ref().and_then(|value| value.model_id.clone()),
     })?;
     log_classified_v3_toolreason_observation_at_resp03(
         tool_name,
@@ -2497,7 +2479,6 @@ pub(crate) fn record_v3_toolreason_observation_at_resp03(
         confidence: fields
             .as_ref()
             .and_then(|value| value.goal_alignment_confidence),
-        model_id: fields.as_ref().and_then(|value| value.model_id.clone()),
     })?;
     let mut emitted = false;
     emit_v3_toolreason_observation_at_resp03_with_expected_model(
@@ -4634,10 +4615,9 @@ mod tests {
 
     #[test]
     fn resp03_dry_run_audit_separates_request_and_response_contracts() {
-        let request =
-            json!({"tools": [{"description": "reason goal_alignment_confidence model_id"}]});
+        let request = json!({"tools": [{"description": "reason goal_alignment_confidence"}]});
         let provider_request =
-            json!({"tools": [{"description": "reason goal_alignment_confidence model_id"}]});
+            json!({"tools": [{"description": "reason goal_alignment_confidence"}]});
         let response = json!({
             "output": [{
                 "type": "function_call",
@@ -4677,6 +4657,24 @@ mod tests {
             missing["diagnosis"],
             "response_missing_toolreason_after_guidance"
         );
+    }
+
+    #[test]
+    fn resp03_toolreason_observation_does_not_require_or_publish_model_identity() {
+        let provider_request =
+            json!({"tools": [{"description": "reason goal_alignment_confidence"}]});
+        let response = json!({
+            "output": [{
+                "type": "function_call",
+                "name": "pwd",
+                "arguments": r#"{"reason":"确认目录","goal_alignment_confidence":100}"#
+            }]
+        });
+        let audit =
+            audit_v3_toolreason_dry_run_payloads(&Value::Null, &provider_request, &response);
+        assert_eq!(audit["request_guidance_present"], true);
+        assert_eq!(audit["request_required_diagnostics_present"], true);
+        assert!(!audit.to_string().contains("model_id"));
     }
 
     #[test]
