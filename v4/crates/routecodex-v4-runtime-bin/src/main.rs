@@ -598,18 +598,6 @@ fn wait_for_cordis_socket_with_child(
     Err("Cordis host socket did not become ready".to_string())
 }
 
-fn wait_for_cordis_socket(socket: &std::path::Path, deadline: std::time::Instant) -> bool {
-    // The daemon can create the filesystem entry before bind/listen completes.
-    // Admission must wait for an actual connectable endpoint, not existence.
-    while std::time::Instant::now() < deadline {
-        if std::os::unix::net::UnixStream::connect(socket).is_ok() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    false
-}
-
 fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     let manifest = load_runtime_manifest(&intent.manifest).map_err(|error| error.to_string())?;
     let servers = bind_servers(&manifest)?;
@@ -2608,32 +2596,6 @@ targets = ["mock"]
             error.contains("missing plugin handles"),
             "error must identify the readiness gap: {error}"
         );
-    }
-
-    #[test]
-    fn cordis_socket_readiness_requires_connectable_listener() {
-        use std::os::unix::net::UnixListener;
-        let socket = std::env::temp_dir().join(format!(
-            "rccv4-cordis-readiness-{}-{}.sock",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock must be valid")
-                .as_nanos()
-        ));
-        std::fs::write(&socket, b"placeholder").expect("placeholder path must be creatable");
-        let bind_path = socket.clone();
-        let listener = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(40));
-            std::fs::remove_file(&bind_path).expect("placeholder must be removed");
-            UnixListener::bind(bind_path).expect("listener must bind")
-        });
-        assert!(wait_for_cordis_socket(
-            &socket,
-            std::time::Instant::now() + std::time::Duration::from_secs(1)
-        ));
-        let _listener = listener.join().expect("listener thread must finish");
-        let _ = std::fs::remove_file(socket);
     }
 
     #[test]
