@@ -271,6 +271,66 @@ fn direct_provider_model_expands_pinned_provider_but_respects_health_cooldown() 
 }
 
 #[test]
+fn synthetic_direct_target_preserves_configured_priority_for_health_selection() {
+    let manifest = manifest();
+    let router = V3VirtualRouter::default();
+    let target = V3TargetInterpreter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("a.m".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 10,
+                route_classification: RouteClassification::default(),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.target_plan[0].priority, 1);
+    assert_eq!(hit.target_plan[0].weight, 1);
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    struct HealthyPriority;
+    impl V3ProviderSchedulingReader for HealthyPriority {
+        fn scheduling_projection(
+            &self,
+            provider_id: &str,
+            auth_alias: &str,
+            model_id: &str,
+            priority: i32,
+            base_weight: u32,
+            _now_ms: u64,
+        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+            let mut projection =
+                routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
+                    provider_id,
+                    auth_alias,
+                    model_id,
+                    priority,
+                    1_000,
+                    base_weight,
+                );
+            projection.available = priority > 0;
+            projection
+        }
+    }
+
+    let selected = target
+        .select_available_with_health(expanded, &HealthyPriority, 0, 0)
+        .expect("synthetic direct target priority must keep a healthy candidate available");
+    assert_eq!(selected.candidate.provider_id, "a");
+    assert_eq!(selected.candidate.priority, 1);
+}
+
+#[test]
 fn direct_provider_model_never_selects_an_unavailable_candidate_without_a_scope_label() {
     struct UnavailableWithoutScope;
     impl V3ProviderSchedulingReader for UnavailableWithoutScope {

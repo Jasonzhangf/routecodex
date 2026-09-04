@@ -90,6 +90,10 @@ pub struct V3Router07OpaqueTargetPlanEntry {
     pub target_index: usize,
     pub target_kind: V3RouteTargetKind,
     pub target_id: Option<String>,
+    /// Captured target scheduling controls for synthetic pools whose targets
+    /// do not have a manifest pool for Target to look up.
+    pub priority: i32,
+    pub weight: u32,
     /// Set only for `provider.model` direct routes: the resolved provider and
     /// canonical model, carried on the plan because the synthetic `direct`
     /// pool has no manifest declaration for Target to look up.
@@ -494,6 +498,8 @@ impl V3VirtualRouter {
                     target_index,
                     target_kind: target.kind.clone(),
                     target_id: target.id.clone(),
+                    priority: target.priority.unwrap_or(0),
+                    weight: target.weight.unwrap_or(1),
                     direct_provider_model: tier.direct_provider_model.clone().or_else(|| {
                         // 隐式能力池（implicit:*）是 synthetic pool，无 manifest
                         // 池声明；Target 展开时必须直接按 provider/model 解析，
