@@ -41,10 +41,8 @@ client request
 对真实客户端 payload 使用同一入口的 `x-routecodex-dry-run: provider-request`，检查最终 `providerRequest`：
 
 - 实际 provider/model/wire protocol 正确；
-- 当前轮 system/instructions 中有严格三字段 guidance，明确三项缺一不可；
-- 工具 description 与参数 schema 中有 `reason`、`goal_alignment_confidence`、`model_id`；
-- 三字段都位于 `properties`，并全部在 `required`；
-- `model_id.description` 强制要求模型填写自身当前真实 model ID，且没有从 `request_id`、客户端/请求 model、route alias、selected target 或 provider-bound wire model 绑定、预填或派生任何值；
+- 当前轮 system/instructions 只使用当前 V3 contract 的 guidance；
+- 工具 schema 只声明已注册的 reason 与 goal_alignment_confidence 字段；
 - 原始 system/history/tool 不被改写；
 - `providerNetworkSend=false`，且 provider pipeline 已执行。
 
@@ -54,7 +52,7 @@ guidance 只能落在当前 provider-facing slice；多 system history 不得用
 
 - provider raw 没有 reason：回请求构造和 A/B；禁止在响应端伪造、补值或 fallback。
 - provider raw 有 reason、client 没有：继续追 `ProviderResp14Raw → RespInbound → Resp03 → client projection`。
-- 请求 guidance/schema 强制三字段；响应兼容判罚只硬要求非空 `reason`。不得因 provider raw 缺少 `model_id` 或 `goal_alignment_confidence` 把有效 reason 判 invalid/missing。
+- 响应兼容判罚只按当前 V3 注册字段执行；缺少可选辅助字段不得拒绝合法 tool call。
 
 ### 5. V3 Rust 响应 dry-run
 
@@ -95,7 +93,7 @@ Anthropic Relay 使用 `path=/v1/messages`；JSON provider response 使用：
 - raw reason 被 Resp03 剥离，原生 tool call 仍可执行；
 - 客户端投影含对应 reasoning 或独立正文。
 
-只出现响应 node trace 不够：Direct SSE 是 lazy stream，未消费就不能证明 Resp03 执行。不得复活 V2 TS `convertProviderResponseIfNeeded` 或 `dry-run:codex-response`。
+只出现响应 node trace 不够：Direct SSE 是 lazy stream，未消费就不能证明 Resp03 执行。不得恢复已退休的旧响应 facade 或第二套 parser。
 
 ### 6. Direct 与 Relay 投影
 
@@ -106,7 +104,7 @@ Anthropic Relay 使用 `path=/v1/messages`；JSON provider response 使用：
 
 ### 7. 正反测试与在线闭环
 
-正向：raw 含三件套时，reason 被剥离、原工具可执行、client reasoning/正文可见；raw 只有合法 reason 时也必须完成同一剥离和投影。
+正向：raw 含合法 reason 与可选辅助字段时，reason 被剥离、原工具可执行、client reasoning/正文可见；raw 只有合法 reason 时也必须完成同一剥离和投影。
 
 反向：
 

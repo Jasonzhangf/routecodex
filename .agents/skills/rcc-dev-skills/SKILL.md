@@ -33,6 +33,19 @@ npm run verify:v3-architecture-ci
 9. Runtime-impacting change: load `references/50-rcc-config-ssot.md`; prove build, install, config check, managed restart, all-listener health, and same-entry replay.
 10. Replay exact old sample or same-entry semantic equivalent. Review only after verification.
 
+## Review Gate
+
+Before commit/merge, review the new or modified source against:
+
+- No side-channel control/config: no payload, metadata, debug log, or implicit context carries control truth.
+- One function, one owner, one implementation: no duplicate path, reroute, fallback, or dual implementation.
+- Ablation: not adding behavior unless required.
+- Configuration-first: if an operation/hook can be configured, do not add inline branching or new skeleton logic.
+- Shared functions: repeated semantics use one shared function; independent implementations exist only when genuinely different.
+- Missing operator/hook/gate fails explicitly or is skipped with a recorded reason; no mock success.
+
+Existing-code violations are advisory findings, not mandatory rewrites. New-code violations block review until fixed and affected gates are rerun.
+
 ## Routes
 
 | Need | Reference |

@@ -1,0 +1,44 @@
+{
+  "bundle_digest": "sha256:4813363da77e9eec678bb7e4bbc8664beec920479aa61677c5991d4e45f82018",
+  "created_at": "2026-09-04T10:45:40.588708+00:00",
+  "frozen_reviews": [],
+  "legacy_reconciled_reviews": [],
+  "maps": [
+    {
+      "canonical_source_digest": null,
+      "canonical_target_digest": null,
+      "name": "resource-map.json",
+      "snapshot_path": ".appsdk/migrations/0.1.5-to-0.1.6/maps/resource-map.json",
+      "source_digest": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
+      "target_digest": "sha256:373f7121a351f87c7126c7b163784190a0c5393edc9ddccb5c776a9c1224246b"
+    },
+    {
+      "canonical_source_digest": null,
+      "canonical_target_digest": null,
+      "name": "function-map.json",
+      "snapshot_path": ".appsdk/migrations/0.1.5-to-0.1.6/maps/function-map.json",
+      "source_digest": "sha256:69f16dfe5d056634f6164cd325dbdbdf134588890b69f101c0d9045e6a01d776",
+      "target_digest": "sha256:c0fbf20f6e697e3ea71d424f9d550eb22821eefeee2d7568447f2689a215c0d6"
+    },
+    {
+      "canonical_source_digest": null,
+      "canonical_target_digest": null,
+      "name": "mainline-call-map.json",
+      "snapshot_path": ".appsdk/migrations/0.1.5-to-0.1.6/maps/mainline-call-map.json",
+      "source_digest": "sha256:c36e4f9d5cff527d7f98b339772a53c87f420db58bb2215b6b68210e01124673",
+      "target_digest": "sha256:d8964f67c3d7e51e5131a0a5fffc011462198231328f7e5644de5740095ca8f6"
+    },
+    {
+      "canonical_source_digest": null,
+      "canonical_target_digest": null,
+      "name": "verification-map.json",
+      "snapshot_path": ".appsdk/migrations/0.1.5-to-0.1.6/maps/verification-map.json",
+      "source_digest": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230",
+      "target_digest": "sha256:f873ccad5a2590a1cec2a516a1ef9ebda36edab4023f18e4d69e211fe3ce7668"
+    }
+  ],
+  "migration_id": "appsdk-0.1.5-to-0.1.6",
+  "schema_version": 1,
+  "source_version": "0.1.5",
+  "target_version": "0.1.6"
+}
