@@ -17,7 +17,7 @@ const ratchetBaselineIds = [
   'discarded_node_output',
   'test_only_cordis_binding_in_production_shape',
 ];
-const ratchetCurrentExceptionIds = ['runtime_bin_direct_business_calls'];
+const ratchetCurrentExceptionIds = [];
 const ratchetCanonicalDocs = [
   'docs/architecture/v4-cordis-mainline-adr.md',
   'docs/goals/v4-cordis-mainline-migration-plan.md',
