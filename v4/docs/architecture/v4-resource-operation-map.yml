@@ -3302,6 +3302,25 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
+- resource_id: v4.cordis.production_admission
+  axis: control
+  verification_gate:
+  - v4_cordis_production_admission
+  resource_kind: cordis_admission_receipt
+  lifecycle: v4.cordis.production_admission
+  owner_crate: routecodex-v4-runtime-bin
+  owner_node: V4CordisNodeHost
+  owner_symbols:
+  - CordisAdmission
+  - run_managed_child
+  allowed_writers:
+  - routecodex-v4-cordis-host
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers: []
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
 forbidden_direct_edges:
 - from: v4.config.manifest
   to: v4.request.normal_payload
