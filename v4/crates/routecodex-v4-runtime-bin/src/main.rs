@@ -614,13 +614,31 @@ fn ensure_cordis_host_socket(
 ) -> Result<Option<Child>, String> {
     if let Some(existing) = std::env::var_os("RCCV4_CORDIS_HOST_SOCKET") {
         let existing = PathBuf::from(existing);
-        // An explicitly supplied socket is owned by the caller. Do not probe
-        // it with an empty or synthetic connection; admission performs the
-        // authoritative protocol handshake.
-        if existing.exists() {
+        // The lifecycle-owned canonical socket may outlive a crashed host.
+        // Validate it with the real manifest handshake; otherwise remove only
+        // that exact stale declaration and let this start create a fresh host.
+        // Foreign explicitly supplied sockets remain caller-owned and fail at
+        // the authoritative admission boundary.
+        if existing == paths.state_root.join("cordis.sock") {
+            if existing.exists()
+                && cordis_handshake_ready(
+                    &existing,
+                    manifest_path,
+                    std::time::Instant::now() + Duration::from_secs(1),
+                )
+            {
+                return Ok(None);
+            }
+            if existing.exists() {
+                std::fs::remove_file(&existing)
+                    .map_err(|error| format!("Cordis stale socket cleanup failed: {error}"))?;
+            }
+            std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
+        } else if existing.exists() {
             return Ok(None);
+        } else {
+            std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
         }
-        std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
     }
     let socket = paths.state_root.join("cordis.sock");
     let runner = std::env::var_os("RCCV4_CORDIS_HOST_RUNNER")
