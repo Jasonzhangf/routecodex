@@ -1,4 +1,4 @@
-// Test module for the Req04 Anthropic-native Tool-Thinking guidance contract.
+// Test module for the Req04 Anthropic-native Tool-Thinking schema contract.
 use super::*;
 use serde_json::json;
 
@@ -12,24 +12,9 @@ fn req04_tool_thinking_guidance_uses_native_anthropic_tool_use_and_bans_text_wra
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject");
-    let guidance = payload["system"].as_str().expect("system must be string");
-    let tool_guidance = payload["tools"][0]["description"]
-        .as_str()
-        .expect("tool description must be string");
-
-    for provider_guidance in [guidance, tool_guidance] {
-        assert!(provider_guidance.contains("Anthropic native"));
-        assert!(provider_guidance.contains("tool_use"));
-        assert!(provider_guidance.contains("直接使用原生 `tool_use` 块"));
-        assert!(provider_guidance.contains("`tool_use.input` 顶层补充"));
-        assert!(provider_guidance.contains("goal_alignment_confidence"));
-        assert!(!provider_guidance.contains("model_id"));
-        assert!(!provider_guidance.contains("可选"));
-        assert!(!provider_guidance.contains("如提供"));
-        assert!(!provider_guidance.contains("Responses/Chat"));
-        assert!(!provider_guidance.contains("\"arguments\""));
-        assert!(!provider_guidance.contains("\"name\":\"pwd\""));
-        assert!(!provider_guidance.contains("metadata.reason"));
-        assert!(!provider_guidance.contains("通用 JSON wrapper"));
-    }
+    assert_eq!(payload["system"], "client system");
+    assert!(payload["tools"][0]["input_schema"]["properties"]["reason"].is_object());
+    assert!(payload["tools"][0]["input_schema"]["properties"]["goal_alignment_confidence"].is_object());
+    assert!(!payload.to_string().contains("model_id"));
+    assert!(!payload.to_string().contains("RouteCodex"));
 }

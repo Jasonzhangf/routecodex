@@ -17,30 +17,6 @@ use std::sync::Arc;
 const STOPLESS_CALL_ID: &str = "call_stopless_reasoning";
 const STOPLESS_CLI_COMMAND: &str = "routecodex hook run reasoningStop";
 
-pub(crate) const V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE: &str = r#"工具调用协议：
-
-调用工具时直接使用原生调用；普通回答保持自然语言。工具参数顶层补充：
-
-`reason`：非空，<= 50 字，只说动机。
-`goal_alignment_confidence`：0 到 100 的整数。
-字段放工具参数 JSON 顶层；RouteCodex 执行前剥离。不要输出 fence、preamble 或解释。
-
-同轮多次调用每条都填上述字段。
-
-例外：`apply_patch` 是 raw free-form，参数保持原始 patch 文本，不要把 `reason` 写入 patch。
-
-
-"#;
-
-pub(crate) const V3_TOOL_THINKING_ANTHROPIC_GUIDANCE: &str = r#"Anthropic native 工具调用协议：
-
-调用工具时直接使用原生 `tool_use` 块；普通回答保持自然语言。`tool_use.input` 顶层补充：
-`reason`：非空，<= 50 字，只说动机。
-`goal_alignment_confidence`：0 到 100 的整数。
-字段放 `tool_use.input` 顶层；RouteCodex 执行前剥离。不要输出 fence、preamble 或解释。
-同轮多次调用每个 `tool_use` 块都填上述字段。
-"#;
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct V3ToolThinkingTurnContext {
     enabled: bool,
@@ -105,12 +81,9 @@ pub(crate) fn compile_v3_tool_thinking_turn_context_at_req04(
     {
         return Ok(V3ToolThinkingTurnContext::disabled());
     }
-    let provider_guidance = v3_tool_thinking_provider_guidance(payload);
     inject_v3_tool_thinking_fields_into_tool_schemas(payload)
         .map_err(|reason| V3HubRelayRequestError::ToolThinkingSchemaInvalid { reason })?;
     let original_custom_tool_names = wrap_v3_custom_tools_at_req04(payload)?;
-    inject_v3_tool_thinking_guidance_into_prompt(payload, current_payload_start, provider_guidance);
-    inject_tool_thinking_into_tool_list_guidance(payload, provider_guidance);
     if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
         if current_payload_start > messages.len() {
             return Err(V3HubRelayRequestError::CurrentPayloadBoundaryInvalid {
@@ -122,47 +95,6 @@ pub(crate) fn compile_v3_tool_thinking_turn_context_at_req04(
     Ok(V3ToolThinkingTurnContext::enabled(
         original_custom_tool_names,
     ))
-}
-
-fn v3_tool_thinking_provider_guidance(payload: &Value) -> &'static str {
-    if payload
-        .get("tools")
-        .and_then(Value::as_array)
-        .is_some_and(|tools| tools.iter().any(|tool| tool.get("input_schema").is_some()))
-    {
-        V3_TOOL_THINKING_ANTHROPIC_GUIDANCE
-    } else {
-        V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE
-    }
-}
-
-fn inject_v3_tool_thinking_guidance_into_prompt(
-    payload: &mut Value,
-    current_payload_start: usize,
-    provider_guidance: &'static str,
-) {
-    for key in ["instructions", "system"] {
-        if let Some(value) = payload.get_mut(key) {
-            append_v3_tool_thinking_guidance_to_text(value, provider_guidance);
-            return;
-        }
-    }
-    if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
-        if let Some(message) = messages
-            .iter_mut()
-            .skip(current_payload_start)
-            .find(|message| {
-                matches!(
-                    message.get("role").and_then(Value::as_str),
-                    Some("system" | "developer")
-                )
-            })
-        {
-            if let Some(content) = message.get_mut("content") {
-                append_v3_tool_thinking_guidance_to_text(content, provider_guidance);
-            }
-        }
-    }
 }
 
 fn wrap_v3_custom_tools_at_req04(
@@ -346,108 +278,6 @@ pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) -> 
         }
     }
     Ok(())
-}
-
-fn inject_tool_thinking_into_tool_list_guidance(
-    payload: &mut Value,
-    provider_guidance: &'static str,
-) {
-    let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
-        return;
-    };
-    let mut guidance_injected = false;
-    for tool in tools {
-        if guidance_injected || !is_v3_tool_thinking_guidance_anchor(tool) {
-            continue;
-        }
-        let tool_name = tool
-            .get("name")
-            .and_then(Value::as_str)
-            .or_else(|| tool.pointer("/function/name").and_then(Value::as_str));
-        if tool_name.is_some_and(|name| {
-            name.eq_ignore_ascii_case("reasoningStop")
-                || name.eq_ignore_ascii_case("noop")
-                || name.eq_ignore_ascii_case("apply_patch")
-        }) {
-            continue;
-        }
-        guidance_injected = true;
-        if let Some(function) = tool.get_mut("function") {
-            if let Some(description) = function.get_mut("description") {
-                append_v3_tool_thinking_guidance_to_text(description, provider_guidance);
-            } else if let Some(function) = function.as_object_mut() {
-                function.insert(
-                    "description".to_string(),
-                    Value::String(provider_guidance.to_string()),
-                );
-            }
-        } else if let Some(description) = tool.get_mut("description") {
-            append_v3_tool_thinking_guidance_to_text(description, provider_guidance);
-        } else if let Some(tool) = tool.as_object_mut() {
-            tool.insert(
-                "description".to_string(),
-                Value::String(provider_guidance.to_string()),
-            );
-        }
-    }
-}
-
-fn is_v3_tool_thinking_guidance_anchor(tool: &Value) -> bool {
-    let Some(object) = tool.as_object() else {
-        return false;
-    };
-    if matches!(
-        object.get("type").and_then(Value::as_str),
-        Some("web_search" | "web_search_preview" | "namespace" | "tool_search")
-    ) {
-        return false;
-    }
-    object.get("function").is_some()
-        || object.get("input_schema").is_some()
-        || object.get("parameters").is_some()
-        || matches!(
-            object.get("type").and_then(Value::as_str),
-            Some("function" | "custom")
-        )
-}
-
-fn append_v3_tool_thinking_guidance_to_text(value: &mut Value, provider_guidance: &'static str) {
-    if value
-        .to_string()
-        .contains("RouteCodex 执行前剥离")
-    {
-        return;
-    }
-    match value {
-        Value::String(existing) => {
-            if !existing.trim().is_empty() {
-                existing.push_str("\n\n");
-            }
-            existing.push_str(provider_guidance);
-        }
-        Value::Array(parts) => {
-            if let Some(text) = parts.iter_mut().find_map(|part| {
-                (part.get("type").and_then(Value::as_str) == Some("text"))
-                    .then(|| part.get_mut("text"))
-                    .flatten()
-                    .and_then(|text| match text {
-                        Value::String(text) => Some(text),
-                        _ => None,
-                    })
-            }) {
-                if !text.trim().is_empty() {
-                    text.push_str("\n\n");
-                }
-                text.push_str(provider_guidance);
-            } else {
-                parts.push(json!({
-                    "type": "text",
-                    "text": provider_guidance
-                }));
-            }
-        }
-        _ => *value = Value::String(provider_guidance.to_string()),
-    }
 }
 
 pub(crate) fn is_v3_stopless_internal_call_id(call_id: &str) -> bool {

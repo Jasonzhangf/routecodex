@@ -11,7 +11,7 @@ use crate::hub_v1::stopless_injection::{
 use serde_json::json;
 
 #[test]
-fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
+fn req04_tool_thinking_does_not_inject_model_guidance_into_payload() {
     let mut payload = json!({
         "tools": [
             {"type":"function","name":"exec","description":"run command","parameters":{"type":"object"}},
@@ -22,21 +22,11 @@ fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject");
     let guidance = payload["tools"][0]["description"].as_str().unwrap();
-    assert!(guidance.contains("工具调用协议"));
-    assert!(guidance.contains("工具参数顶层补充"));
-    assert!(guidance.contains("字段放工具参数 JSON 顶层"));
-    assert!(!guidance.contains("Anthropic native"));
-    assert!(!guidance.contains("tool_use.input"));
-    assert!(guidance.contains("<= 50 字，只说动机"));
-    assert!(guidance.contains("goal_alignment_confidence"));
+    assert_eq!(guidance, "run command");
+    assert!(!payload["instructions"].as_str().unwrap().contains("工具调用协议"));
+    assert!(!payload["instructions"].as_str().unwrap().contains("RouteCodex"));
     assert!(!guidance.contains("model_id"));
-    assert!(!guidance.contains("可选"));
-    assert!(!guidance.contains("如提供"));
     assert_eq!(payload["tools"][1]["description"], "internal");
-    assert!(payload["instructions"]
-        .as_str()
-        .unwrap()
-        .contains("<= 50 字，只说动机"));
 }
 
 #[test]
@@ -67,9 +57,7 @@ fn req04_tool_thinking_keeps_apply_patch_raw_and_outside_reason_contract() {
         .contains("工具调用协议"));
 
     let pwd = &payload["tools"][1];
-    assert!(pwd
-        .to_string()
-        .contains("工具调用协议"));
+    assert_eq!(pwd["description"], "Show the current directory");
 }
 
 #[test]
@@ -118,10 +106,7 @@ fn req04_tool_thinking_guidance_uses_one_external_tool_anchor_only() {
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject");
-    assert!(payload["tools"][0]["description"]
-        .as_str()
-        .unwrap()
-        .contains("工具调用协议"));
+    assert_eq!(payload["tools"][0]["description"], "first");
     assert_eq!(payload["tools"][1]["description"], "second");
     assert_eq!(payload["tools"][2]["description"], "internal");
     assert_eq!(payload["tools"][3]["description"], "internal");
@@ -138,10 +123,7 @@ fn req04_tool_thinking_does_not_mutate_builtin_web_search_anchor() {
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject into an eligible native tool");
     assert_eq!(payload["tools"][0]["description"], Value::Null);
-    assert!(payload["tools"][1]["description"]
-        .as_str()
-        .unwrap()
-        .contains("工具调用协议"));
+    assert_eq!(payload["tools"][1]["description"], "show cwd");
 }
 
 #[test]
@@ -164,8 +146,7 @@ fn req04_tool_thinking_guidance_mounts_anthropic_system_prompt() {
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject");
     let system = payload["system"].as_str().unwrap();
-    assert!(system.starts_with("existing system\n\n"));
-    assert!(system.contains("<= 50 字，只说动机"));
+    assert_eq!(system, "existing system");
 }
 
 #[test]
@@ -180,7 +161,7 @@ fn req04_tool_thinking_injects_into_canonical_chat_system_message() {
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject into canonical chat system");
     let content = payload["messages"][0]["content"].as_str().unwrap();
-    assert!(content.contains("工具调用协议"));
+    assert_eq!(content, "Anthropic system instructions");
     assert_eq!(payload["messages"].as_array().unwrap().len(), 2);
 }
 
@@ -192,10 +173,7 @@ fn req04_tool_thinking_does_not_require_system_message() {
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("tool-list guidance must not require a system surface");
-    assert!(payload["tools"][0]["description"]
-        .as_str()
-        .unwrap()
-        .contains("工具调用协议"));
+    assert_eq!(payload["tools"][0]["description"], "run");
 }
 
 #[test]
@@ -215,18 +193,9 @@ fn req04_tool_thinking_injects_only_current_system_message() {
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 2, true)
         .expect("current-turn tool-thinking guidance must inject");
-    assert!(payload["tools"][0]["description"]
-        .as_str()
-        .unwrap()
-        .contains("工具调用协议"));
-    assert!(!payload["messages"][0]["content"]
-        .as_str()
-        .unwrap()
-        .contains("工具调用协议"));
-    assert!(payload["messages"][2]["content"]
-        .as_str()
-        .unwrap()
-        .contains("工具调用协议"));
+    assert!(payload["tools"][0].get("description").is_none());
+    assert_eq!(payload["messages"][0]["content"], "historical system");
+    assert_eq!(payload["messages"][2]["content"], "current system");
 }
 
 #[test]
@@ -246,10 +215,7 @@ fn req04_tool_thinking_prefers_responses_instructions_over_input_surface() {
         .expect("enabled tool-thinking must inject");
     assert_eq!(payload["input"][0]["content"][0]["text"], "history system");
     assert_eq!(payload["input"].as_array().unwrap().len(), 3);
-    assert!(payload["tools"][0]["description"]
-        .as_str()
-        .unwrap()
-        .contains("工具调用协议"));
+    assert_eq!(payload["tools"][0]["description"], "run");
 }
 
 #[test]
@@ -281,21 +247,8 @@ fn req04_tool_thinking_reaches_anthropic_wire_system_field() {
     let wire = encode_v3_responses_semantic_as_anthropic_request(payload)
         .expect("canonical Chat payload must encode as Anthropic request");
     let tool_description = wire["tools"][0]["description"].to_string();
-    assert!(
-        tool_description.contains("工具调用协议"),
-        "wire: {wire}"
-    );
-    assert!(
-        wire["system"]
-            .as_str()
-            .unwrap()
-            .contains("<= 50 字，只说动机"),
-        "wire: {wire}"
-    );
-    assert!(
-        tool_description.contains("goal_alignment_confidence"),
-        "wire: {wire}"
-    );
+    assert_eq!(tool_description, "\"show cwd\"");
+    assert_eq!(wire["system"], "Anthropic system instructions");
     assert!(!tool_description.contains("model_id"), "wire: {wire}");
     assert!(!wire.to_string().contains("<legacy-control>"));
 }
@@ -310,18 +263,8 @@ fn req04_tool_thinking_injects_anthropic_tool_list_and_parameter_schema() {
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject into Anthropic system");
-    assert!(payload["system"]
-        .as_str()
-        .unwrap()
-        .contains("<= 50 字，只说动机"));
-    assert!(payload["tools"][0]["description"]
-        .as_str()
-        .unwrap()
-        .contains("goal_alignment_confidence"));
-    assert!(payload["tools"][0]["description"]
-        .as_str()
-        .unwrap()
-        .contains("goal_alignment_confidence"));
+    assert_eq!(payload["system"], "client system");
+    assert!(payload["tools"][0].get("description").is_none());
     assert!(payload["tools"][0]["input_schema"]["properties"]["reason"].is_object());
     assert!(
         payload["tools"][0]["input_schema"]["properties"]["goal_alignment_confidence"].is_object()
@@ -472,40 +415,6 @@ fn req04_tool_thinking_does_not_inject_model_id_or_request_identity() {
     let payload_text = payload.to_string();
     assert!(!payload_text.contains("model_id"));
     assert!(!payload_text.contains("<本次 provider-bound 请求的精确 model 值>"));
-}
-
-#[test]
-fn req04_tool_thinking_guidance_uses_short_neutral_form() {
-    for guidance in [
-        V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE,
-        V3_TOOL_THINKING_ANTHROPIC_GUIDANCE,
-    ] {
-        assert!(!guidance.contains("model_id"));
-        assert!(guidance.contains("`goal_alignment_confidence`：0 到 100 的整数"));
-        assert!(guidance.contains("`reason`：非空，<= 50 字，只说动机"));
-        assert!(!guidance.contains("必须填写你自身当前真实"));
-        assert!(!guidance.contains("不得复制或推导"));
-        assert!(!guidance.contains("不得读取或依据本轮上下文推断"));
-        assert!(!guidance.contains("无法确定时不得猜测"));
-        assert!(!guidance.contains("provider-bound wire model"));
-        assert!(!guidance.contains("request_id"));
-        assert!(!guidance.contains("逐字原样填写"));
-        assert!(!guidance.contains("精确填写本次 provider-bound wire model"));
-    }
-}
-
-#[test]
-fn req04_tool_thinking_guidance_stays_compact() {
-    for guidance in [
-        V3_TOOL_THINKING_JSON_ARGUMENTS_GUIDANCE,
-        V3_TOOL_THINKING_ANTHROPIC_GUIDANCE,
-    ] {
-        assert!(guidance.len() <= 700, "guidance should be short, got {} chars", guidance.len());
-        assert!(guidance.contains("调用工具时直接使用原生"));
-        assert!(guidance.contains("普通回答保持自然语言"));
-        assert!(guidance.contains("RouteCodex 执行前剥离"));
-        assert!(guidance.contains("不要输出 fence"));
-    }
 }
 
 #[test]
