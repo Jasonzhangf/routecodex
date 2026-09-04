@@ -7,8 +7,11 @@
     ]
   },
   "development_scenarios": {
-    "manifest": ".appsdk/contracts/development-scenarios.manifest.json",
-    "enabled": ["multi_worker_collaboration", "multi_worktree_merge_queue"]
+    "enabled": [
+      "multi_worker_collaboration",
+      "multi_worktree_merge_queue"
+    ],
+    "manifest": ".appsdk/contracts/development-scenarios.manifest.json"
   },
   "governance": {
     "active_kind": "immutable_consumable_library",
@@ -70,6 +73,41 @@
     "zone_transition_contract": "contracts/transitions/zone-transition-manifest.json",
     "zone_transition_manifest": "contracts/transitions/zone-transition-manifest.json"
   },
+  "guidance": {
+    "compiled_manifest": ".appsdk/guidance/compiled.json",
+    "enforcement": "advisory",
+    "rule_sources": [
+      {
+        "kind": "agents",
+        "path": "AGENTS.md",
+        "precedence": 100,
+        "required": true,
+        "source_id": "project-agents"
+      },
+      {
+        "contract_path": ".appsdk/guidance/project-guidance.json",
+        "kind": "skill",
+        "path": ".appsdk/skills/appsdk-project-governance/SKILL.md",
+        "precedence": 200,
+        "required": true,
+        "source_id": "appsdk-governance-skill"
+      },
+      {
+        "kind": "skill",
+        "path": ".agents/skills/rcc-dev-skills/SKILL.md",
+        "precedence": 300,
+        "required": true,
+        "source_id": "rcc-dev-skills"
+      },
+      {
+        "kind": "skill",
+        "path": ".agents/skills/rcc-v3-architecture/SKILL.md",
+        "precedence": 310,
+        "required": true,
+        "source_id": "rcc-v3-architecture"
+      }
+    ]
+  },
   "lifecycle": {
     "stage": "contract_bound"
   },
@@ -82,13 +120,21 @@
   "modules": [
     {
       "active_artifact": "active/lib/routecodex-governance/**",
-      "artifact_paths": ["routecodex-governance.contract.json"],
+      "artifact_paths": [
+        "routecodex-governance.contract.json"
+      ],
       "build": {
+        "args": [
+          "-c",
+          "mkdir -p generated/modules/routecodex-governance/lib && printf 'routecodex-governance contract bundle\\n' > generated/modules/routecodex-governance/lib/routecodex-governance.contract.json"
+        ],
         "program": "sh",
-        "args": ["-c", "mkdir -p generated/modules/routecodex-governance/lib && printf 'routecodex-governance contract bundle\\n' > generated/modules/routecodex-governance/lib/routecodex-governance.contract.json"],
         "working_directory": "."
       },
-      "contract_paths": [".appsdk/**", "contracts/**"],
+      "contract_paths": [
+        ".appsdk/**",
+        "contracts/**"
+      ],
       "dependency_modules": [],
       "generated_outputs": [
         "generated/routecodex-governance/**"
@@ -98,26 +144,42 @@
         ".appsdk/**",
         "docs/goals/routecodex-appsdk-migration-plan.md"
       ],
-      "source_owner": "routecodex-governance",
-      "stage": "contract_bound",
       "regression": {
-        "required_before_freeze": true,
-        "suite_id": "routecodex-governance-regression",
-        "command": {"program": "sh", "args": ["-c", "test -s .appsdk/project.json"], "working_directory": "."},
-        "input_paths": [".appsdk/**", "contracts/**"],
-        "minimum_test_count": 1,
         "allow_skipped": false,
+        "command": {
+          "args": [
+            "-c",
+            "test -s .appsdk/project.json"
+          ],
+          "program": "sh",
+          "working_directory": "."
+        },
+        "input_paths": [
+          ".appsdk/**",
+          "contracts/**"
+        ],
+        "minimum_test_count": 1,
         "ordinary_mode_after_freeze": "disabled",
-        "reenable_on": ["source_change", "contract_change", "public_api_change", "artifact_change", "dependency_change"]
-      }
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "routecodex-governance-regression"
+      },
+      "source_owner": "routecodex-governance",
+      "stage": "contract_bound"
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
   "sdk": {
-    "name": "appsdk",
-    "version": "0.1.5",
     "bundle_manifest": ".appsdk/contracts/sdk-bundle.manifest.json",
-    "resource_record": ".appsdk/sdk-resources.json"
+    "name": "appsdk",
+    "resource_record": ".appsdk/sdk-resources.json",
+    "version": "0.1.6"
   }
 }

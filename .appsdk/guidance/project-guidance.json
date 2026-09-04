@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "skill_id": "appsdk-project-governance",
+  "guidance_version": "1",
+  "rules": [
+    {"rule_id": "use-declared-sources", "severity": "forbidden", "description": "Read only rule sources declared by the project contract."},
+    {"rule_id": "adjacent-transition", "severity": "advisory", "description": "Prefer adjacent workflow transitions, but allow the agent to skip non-applicable detail and revise the plan."},
+    {"rule_id": "evidence-required", "severity": "forbidden", "description": "A passing required step must bind evidence."},
+    {"rule_id": "context-drift", "severity": "forbidden", "description": "Revise the plan after project, goal, source, scope, owner, or rule-context drift."},
+    {"rule_id": "append-only-history", "severity": "forbidden", "description": "Do not overwrite or delete plan revisions and execution events."},
+    {"rule_id": "lifecycle-truth", "severity": "forbidden", "description": "Do not claim lifecycle completion before canonical AppSDK gates pass."},
+    {"rule_id": "project-context-binding", "severity": "warning", "description": "Locate every feature or debug request inside the project function map and verification map before recommending implementation."},
+    {"rule_id": "debug-notes-required", "severity": "warning", "description": "During debug exploration, append observations, hypotheses, and evidence to active run notes before resolve."},
+    {"rule_id": "map-gate-update", "severity": "advisory", "description": "After a feature or fix changes ownership, paths, or regression gates, update the function map and verification map in the same change."},
+    {"rule_id": "no-side-channel-control", "severity": "forbidden", "description": "Control/config truth must use typed control resources, error chain, or declared config; never request/response payload, metadata, debug logs, or implicit context."},
+    {"rule_id": "unique-owner-implementation", "severity": "forbidden", "description": "Each function has one owner and one implementation; no duplicate path, reroute, fallback, or dual implementation."},
+    {"rule_id": "ablation-and-config-first", "severity": "warning", "description": "Do not add unnecessary behavior; prefer declared operation/hook/gate configuration and shared functions over inline branching or duplicate implementation."},
+    {"rule_id": "skeleton-operation-configuration", "severity": "warning", "description": "For Stopless and ToolReason, keep the lifecycle skeleton fixed; configure every skeleton operation, register hooks, and add or explicitly skip missing operators with a recorded reason. No inline bypass, side channel, fallback, or mock success."},
+    {"rule_id": "state-update-context", "severity": "warning", "description": "Every plan or status update states the current action/node, next action, owner, evidence, and blocker or explicitly records no blocker."},
+    {"rule_id": "review-boundary-existing-vs-new", "severity": "forbidden", "description": "New implementations must pass review on side-channel, unique-owner, fallback, ablation, config-first, and shared-function checks; existing-code violations are advisory suggestions only."},
+    {"rule_id": "recommended-design", "severity": "warning", "description": "Record requirement, architecture, and detailed-design closure before feature implementation."},
+    {"rule_id": "prior-record-search", "severity": "advisory", "description": "Check prior verified successes and failures before repeating exploration."}
+  ],
+  "workflows": [
+    {
+      "domain": "bootstrap",
+      "objective": "Enter AppSDK governance without destroying existing project truth.",
+      "entry_node": "prepare",
+      "nodes": [
+        {"node_id": "prepare", "instruction": "Run prepare and confirm scope, roots, boundaries, and acceptance.", "owner": "project", "evidence": ["preparation-record"]},
+        {"node_id": "initialize", "instruction": "Run idempotent initialization for the confirmed project root.", "owner": "project", "evidence": ["initialized-layout"]},
+        {"node_id": "baseline_verify", "instruction": "Verify the initialized governance baseline.", "owner": "project", "evidence": ["verify-result"]}
+      ],
+      "edges": [{"from": "prepare", "to": "initialize"}, {"from": "initialize", "to": "baseline_verify"}]
+    },
+    {
+      "domain": "migration",
+      "objective": "Reconcile or reset legacy governance through an explicit, auditable route.",
+      "entry_node": "inspect_legacy",
+      "nodes": [
+        {"node_id": "inspect_legacy", "instruction": "Inventory old governance truth and disposable runtime state.", "owner": "project", "evidence": ["legacy-inventory"]},
+        {"node_id": "choose_route", "instruction": "Choose preserve-and-migrate or authorized reset-and-reinitialize.", "owner": "project", "evidence": ["migration-route"]},
+        {"node_id": "apply_route", "instruction": "Execute the canonical migration or authorized reset once.", "owner": "project", "evidence": ["migration-record"]},
+        {"node_id": "migration_verify", "instruction": "Verify the resulting single governance truth.", "owner": "project", "evidence": ["verify-result"]}
+      ],
+      "edges": [{"from": "inspect_legacy", "to": "choose_route"}, {"from": "choose_route", "to": "apply_route"}, {"from": "apply_route", "to": "migration_verify"}]
+    },
+    {
+      "domain": "governance-preflight",
+      "objective": "Bind goal, module, owner, maps, worktree, and required gates before code work.",
+      "entry_node": "goal_scope",
+      "nodes": [
+        {"node_id": "goal_scope", "instruction": "Confirm objective, scope, acceptance, non-goals, and owner.", "owner": "project", "evidence": ["goal-record"]},
+        {"node_id": "architecture_maps", "instruction": "Bind resource, function, mainline, verification, and module maps.", "owner": "project", "evidence": ["map-check"]},
+        {"node_id": "owner_worktree", "instruction": "Create the clean owner worktree from latest origin/main.", "owner": "project", "evidence": ["worktree-record"]},
+        {"node_id": "preflight_verify", "instruction": "Run the applicable AppSDK and project preflight checks.", "owner": "project", "evidence": ["verify-result"]}
+      ],
+      "edges": [{"from": "goal_scope", "to": "architecture_maps"}, {"from": "architecture_maps", "to": "owner_worktree"}, {"from": "owner_worktree", "to": "preflight_verify"}]
+    },
+    {
+      "domain": "develop",
+      "objective": "Develop RouteCodex features incrementally: check existing function map coverage, bind gates, implement the smallest mapped-owner change, then update maps and regression gates when they change.",
+      "entry_node": "requirements",
+      "nodes": [
+        {"node_id": "requirements", "instruction": "Recommended: define feature goal, user-visible contract, scope, non-goals, acceptance, and needed evidence. If already defined, record the existing decision and continue.", "owner": "project", "evidence": ["requirements"]},
+        {"node_id": "map_check", "instruction": "Required before implementation: check docs/architecture/v3-function-map.yml and docs/architecture/v3-verification-map.yml for the requested feature. If it exists, read owner, allowed/forbidden paths, required_gates, and prior records. If it does not exist, plan to add the function map entry after the change.", "owner": "project", "evidence": ["function-map-binding", "map-check", "requirements"]},
+        {"node_id": "architecture", "instruction": "Optional: read AGENTS.md, mapped source, and review surface when the feature has meaningful complexity; bind one owner, boundaries, caller edges, and required gates.", "owner": "project", "evidence": ["architecture-design"]},
+        {"node_id": "implementation", "instruction": "Use a claimed clean worktree and make the smallest mapped-owner change. Preserve real payload semantics and keep control state out of payload or metadata.", "owner": "project", "evidence": ["source-diff", "worktree-record"]},
+        {"node_id": "candidate", "instruction": "Create and bind the exact candidate commit and tree.", "owner": "project", "evidence": ["candidate-record"]},
+        {"node_id": "validation", "instruction": "Run focused tests and mapped required_gates first; add build/install/restart/same-entry replay for runtime-impacting changes. If the fix introduces a regression gate, add it to docs/architecture/v3-verification-map.yml in the same change.", "owner": "project", "evidence": ["validation-record", "red-green-test", "blackbox-evidence", "verification-map-binding"]},
+        {"node_id": "map_update", "instruction": "Optional branch only when existing maps already cover the change and owner, paths, call edges, and gates are unchanged. If the feature is missing or any map truth changed, this node is required before review; update docs/architecture/v3-function-map.yml and docs/architecture/v3-verification-map.yml with the feature_id, owner, paths, and required_gates.", "owner": "project", "evidence": ["function-map-binding", "verification-map-binding"]},
+        {"node_id": "review", "instruction": "Pass architecture review on the unchanged validated candidate. Check side-channel control, unique owner and implementation, no fallback, ablation, fixed Stopless/ToolReason skeletons, configured operations, registered hooks, shared functions, and explicit missing operator/hook/gate behavior. New-code violations block; existing-code violations are advisory suggestions.", "owner": "project", "evidence": ["review-record"]},
+        {"node_id": "effectiveness", "instruction": "Replay effectiveness without changing candidate source.", "owner": "project", "evidence": ["effectiveness-record"]},
+        {"node_id": "integration", "instruction": "Integrate on latest main and verify the exact integration tree.", "owner": "project", "evidence": ["mainline-receipt"]},
+        {"node_id": "promotion", "instruction": "Compile, publish Active, archive Protected, and freeze when required.", "owner": "project", "evidence": ["freeze-record"]},
+        {"node_id": "cleanup", "instruction": "Close records, release claims, and remove the merged worktree.", "owner": "project", "evidence": ["cleanup-record"]}
+      ],
+      "edges": [
+        {"from": "requirements", "to": "map_check"}, {"from": "map_check", "to": "architecture"}, {"from": "map_check", "to": "implementation"},
+        {"from": "architecture", "to": "implementation"}, {"from": "implementation", "to": "candidate"},
+        {"from": "candidate", "to": "validation"}, {"from": "validation", "to": "map_update"}, {"from": "validation", "to": "review"}, {"from": "map_update", "to": "review"},
+        {"from": "review", "to": "effectiveness"}, {"from": "effectiveness", "to": "integration"},
+        {"from": "integration", "to": "promotion"}, {"from": "promotion", "to": "cleanup"}
+      ]
+    },
+    {
+      "domain": "debug",
+      "objective": "Debug RouteCodex by first orienting to architecture and records, exploring with notes, then resolving through the mapped owner and original path.",
+      "entry_node": "orient",
+      "nodes": [
+        {"node_id": "orient", "instruction": "Required: read AGENTS.md, relevant architecture maps, verification gates, and existing notes/records. Locate the debug request inside docs/architecture/v3-function-map.yml and docs/architecture/v3-verification-map.yml. If no matching feature_id exists, record that a map update will be needed after resolution.", "owner": "project", "evidence": ["orientation-record", "function-map-binding", "map-check"]},
+        {"node_id": "explore", "instruction": "Required: append observations, hypotheses, and evidence to active run notes while exploring. Reproduce when feasible, trace the relevant architecture path, keep one working hypothesis, and bind it to a feature_id and required_gates.", "owner": "project", "evidence": ["exploration-record", "debug-notes", "function-map-binding"]},
+        {"node_id": "resolve", "instruction": "After reproduction or equivalent evidence, resolve through the mapped architecture: patch one unique owner, add proportionate regression coverage, and keep control state out of payload/metadata. For Stopless or ToolReason, keep the skeleton fixed and use configured operations and registered hooks. Update docs/architecture/v3-function-map.yml and docs/architecture/v3-verification-map.yml when the fix changes owner, paths, or gates.", "owner": "project", "evidence": ["resolution-record", "map-gate-update", "function-map-binding", "red-green-test"]},
+        {"node_id": "candidate", "instruction": "Create and bind the exact fix candidate.", "owner": "project", "evidence": ["candidate-record"]},
+        {"node_id": "validation", "instruction": "Run affected focused tests, mapped gates, and architecture checks; then choose build/install/restart and original-input replay when the fix is runtime-impacting.", "owner": "project", "evidence": ["validation-record", "blackbox-evidence"]},
+        {"node_id": "review", "instruction": "Pass architecture review on the unchanged candidate. Check side-channel control, unique owner and implementation, no fallback, ablation, fixed Stopless/ToolReason skeletons, configured operations, registered hooks, shared functions, and explicit missing operator/hook/gate behavior. New-code violations block; existing-code violations are advisory suggestions.", "owner": "project", "evidence": ["review-record"]},
+        {"node_id": "integration", "instruction": "Integrate on latest main and verify the exact tree.", "owner": "project", "evidence": ["mainline-receipt"]},
+        {"node_id": "cleanup", "instruction": "Close evidence and remove the merged owner worktree.", "owner": "project", "evidence": ["cleanup-record"]}
+      ],
+      "edges": [
+        {"from": "orient", "to": "explore"}, {"from": "explore", "to": "resolve"},
+        {"from": "resolve", "to": "candidate"}, {"from": "candidate", "to": "validation"},
+        {"from": "validation", "to": "review"}, {"from": "review", "to": "integration"},
+        {"from": "integration", "to": "cleanup"}
+      ]
+    },
+    {
+      "domain": "review",
+      "objective": "Admit and review the exact evidence-bound candidate.",
+      "entry_node": "review_admission",
+      "nodes": [
+        {"node_id": "review_admission", "instruction": "Pass AppSDK review admission for the exact candidate.", "owner": "project", "evidence": ["pre-review-validation"]},
+        {"node_id": "architecture_review", "instruction": "Run the user-selected or configured review route. Apply the project checklist: no side-channel control, unique owner and implementation, no fallback, ablation, configuration-first operations/hooks, shared functions, and explicit missing operator/hook/gate behavior. New-code violations block; existing-code violations are advisory suggestions.", "owner": "project", "evidence": ["review-record"]},
+        {"node_id": "unchanged_effectiveness", "instruction": "Replay effectiveness without source drift.", "owner": "project", "evidence": ["effectiveness-record"]}
+      ],
+      "edges": [{"from": "review_admission", "to": "architecture_review"}, {"from": "architecture_review", "to": "unchanged_effectiveness"}]
+    },
+    {
+      "domain": "delivery",
+      "objective": "Prove the candidate through its real deployed entrypoint.",
+      "entry_node": "whitebox",
+      "nodes": [
+        {"node_id": "whitebox", "instruction": "Run project-owned internal validation.", "owner": "project", "evidence": ["whitebox-evidence"]},
+        {"node_id": "build", "instruction": "Build the exact candidate artifact.", "owner": "project", "evidence": ["artifact"]},
+        {"node_id": "install", "instruction": "Install the exact artifact into the declared environment.", "owner": "project", "evidence": ["install-receipt"]},
+        {"node_id": "restart", "instruction": "Restart the declared runtime when required.", "owner": "project", "evidence": ["restart-receipt"]},
+        {"node_id": "blackbox", "instruction": "Replay through the public deployed entrypoint.", "owner": "project", "evidence": ["blackbox-evidence"]},
+        {"node_id": "bind_validation", "instruction": "Bind whitebox, artifact, deployment, and blackbox evidence.", "owner": "project", "evidence": ["pre-review-validation"]}
+      ],
+      "edges": [{"from": "whitebox", "to": "build"}, {"from": "build", "to": "install"}, {"from": "install", "to": "restart"}, {"from": "restart", "to": "blackbox"}, {"from": "blackbox", "to": "bind_validation"}]
+    },
+    {
+      "domain": "integration",
+      "objective": "Merge only an exact candidate verified against latest main.",
+      "entry_node": "refresh_main",
+      "nodes": [
+        {"node_id": "refresh_main", "instruction": "Fetch latest origin/main and refresh the integration base.", "owner": "project", "evidence": ["main-base"]},
+        {"node_id": "integration_verify", "instruction": "Verify the exact integrated tree and affected gates.", "owner": "project", "evidence": ["integration-record"]},
+        {"node_id": "merge_push", "instruction": "Merge and push through the protected mainline route.", "owner": "project", "evidence": ["merge-record"]},
+        {"node_id": "remote_receipt", "instruction": "Observe the remote main ref and bind its receipt.", "owner": "project", "evidence": ["mainline-receipt"]}
+      ],
+      "edges": [{"from": "refresh_main", "to": "integration_verify"}, {"from": "integration_verify", "to": "merge_push"}, {"from": "merge_push", "to": "remote_receipt"}]
+    },
+    {
+      "domain": "promotion",
+      "objective": "Turn a verified mainline source into immutable consumable output.",
+      "entry_node": "regression",
+      "nodes": [
+        {"node_id": "regression", "instruction": "Run and bind the required merged-source regression suite.", "owner": "project", "evidence": ["regression-report"]},
+        {"node_id": "compile", "instruction": "Compile the canonical merged project artifact.", "owner": "project", "evidence": ["compiled-artifact"]},
+        {"node_id": "publish", "instruction": "Publish the immutable Active artifact.", "owner": "project", "evidence": ["promotion-record"]}
+      ],
+      "edges": [{"from": "regression", "to": "compile"}, {"from": "compile", "to": "publish"}]
+    },
+    {
+      "domain": "freeze",
+      "objective": "Protect the exact published source, contracts, and artifact.",
+      "entry_node": "archive",
+      "nodes": [
+        {"node_id": "archive", "instruction": "Create the canonical Protected archive.", "owner": "project", "evidence": ["protected-archive"]},
+        {"node_id": "freeze_record", "instruction": "Bind source, artifact, API, regression, and promotion truth.", "owner": "project", "evidence": ["freeze-record"]},
+        {"node_id": "freeze_verify", "instruction": "Verify Active and Protected immutability.", "owner": "project", "evidence": ["verify-result"]}
+      ],
+      "edges": [{"from": "archive", "to": "freeze_record"}, {"from": "freeze_record", "to": "freeze_verify"}]
+    },
+    {
+      "domain": "cleanup",
+      "objective": "Release only resources whose delivery and retention evidence is complete.",
+      "entry_node": "cleanup_record",
+      "nodes": [
+        {"node_id": "cleanup_record", "instruction": "Record retained evidence and disposable state.", "owner": "project", "evidence": ["cleanup-record"]},
+        {"node_id": "remove_worktree", "instruction": "Remove the merged clean owner worktree and branch.", "owner": "project", "evidence": ["worktree-removal"]},
+        {"node_id": "release_claim", "instruction": "Release the task claim after worktree cleanup.", "owner": "project", "evidence": ["claim-release"]}
+      ],
+      "edges": [{"from": "cleanup_record", "to": "remove_worktree"}, {"from": "remove_worktree", "to": "release_claim"}]
+    }
+  ]
+}
