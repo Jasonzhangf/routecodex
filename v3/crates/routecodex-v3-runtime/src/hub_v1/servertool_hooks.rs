@@ -904,18 +904,6 @@ fn strip_current_stopless_response_artifacts(
         }
         *output = retained;
         if let Some(evidence) = evidence {
-            let visible = collect_stopless_visible_text(output);
-            let completion = visible
-                .trim()
-                .is_empty()
-                .then_some(evidence.to_string())
-                .unwrap_or_else(|| {
-                    if visible.trim().ends_with('\n') {
-                        format!("{visible}{evidence}")
-                    } else {
-                        format!("{visible}\n\n{evidence}")
-                    }
-                });
             if let Some(message) = output.iter_mut().find(|item| {
                 item.get("type").and_then(Value::as_str) == Some("message")
                     && item.get("content").is_some()
@@ -928,7 +916,7 @@ fn strip_current_stopless_response_artifacts(
                 output.push(json!({
                     "type": "message",
                     "role": "assistant",
-                    "content": [{"type": "output_text", "text": completion}]
+                    "content": [{"type": "output_text", "text": evidence}]
                 }));
             }
         }
@@ -937,30 +925,6 @@ fn strip_current_stopless_response_artifacts(
     strip_current_stopless_control_text(&mut projected);
     finalize_current_stopless_response(&mut projected, keep_noop);
     projected
-}
-
-fn collect_stopless_visible_text(output: &[Value]) -> String {
-    let mut visible = String::new();
-    for item in output {
-        if item.get("type").and_then(Value::as_str) != Some("message") {
-            continue;
-        }
-        if let Some(parts) = item.get("content").and_then(Value::as_array) {
-            for part in parts {
-                if !matches!(
-                    part.get("type").and_then(Value::as_str),
-                    Some("output_text" | "text")
-                ) {
-                    continue;
-                }
-                if let Some(text) = part.get("text").and_then(Value::as_str) {
-                    visible.push_str(text);
-                    visible.push('\n');
-                }
-            }
-        }
-    }
-    visible
 }
 
 fn append_stopless_message_text(message: &mut Value, text: &str) {
@@ -972,27 +936,18 @@ fn append_stopless_message_text(message: &mut Value, text: &str) {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    if let Some(existing) = parts.iter_mut().rev().find_map(|part| {
+    if let Some(part) = parts.iter_mut().rev().find(|part| {
         matches!(
             part.get("type").and_then(Value::as_str),
             Some("output_text" | "text")
-        )
-        .then(|| part.get_mut("text"))
-        .flatten()
-        .and_then(|value| value.as_str())
-        .map(str::to_owned)
+        ) && part.get("text").and_then(Value::as_str).is_some()
     }) {
-        let index = parts
-            .iter()
-            .rposition(|part| {
-                matches!(
-                    part.get("type").and_then(Value::as_str),
-                    Some("output_text" | "text")
-                ) && part.get("text").and_then(Value::as_str) == Some(existing.as_str())
-            })
-            .expect("existing text part must remain addressable");
+        let existing = part
+            .get("text")
+            .and_then(Value::as_str)
+            .expect("text part was checked above");
         let separator = if existing.ends_with('\n') { "" } else { "\n\n" };
-        parts[index]["text"] = Value::String(format!("{existing}{separator}{text}"));
+        part["text"] = Value::String(format!("{existing}{separator}{text}"));
     } else {
         parts.push(json!({"type": "output_text", "text": text}));
     }
