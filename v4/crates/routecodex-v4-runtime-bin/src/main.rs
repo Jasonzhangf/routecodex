@@ -409,7 +409,6 @@ fn start(intent: StartIntent) -> Result<String, String> {
         return Ok("state=stopped identity=rccv4 foreground=true".to_string());
     }
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
-    print_startup(&manifest);
     preflight_cordis_admission(&manifest)?;
     if routecodex_v4_lifecycle::read_record(&paths)
         .map_err(|error| error.to_string())?
@@ -427,6 +426,10 @@ fn start(intent: StartIntent) -> Result<String, String> {
         Duration::from_secs(15),
     )
     .map_err(|error| error.to_string())?;
+    // Emit the started banner only after Cordis admission and the managed
+    // control record are ready. A failed admission/spawn must never look like
+    // a successful startup in the user's console.
+    print_startup(&manifest);
     println!(
         "state=running identity=rccv4 pid={} listeners={}",
         record.pid,
@@ -579,19 +582,6 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
             .collect(),
     };
     let control = ManagedControlPlane::bind(paths, record).map_err(|error| error.to_string())?;
-    let listeners = manifest
-        .listeners
-        .iter()
-        .map(|listener| listener.address.clone())
-        .collect::<Vec<_>>();
-    let binary = std::env::current_exe()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
-    let (headline, debug) =
-        diagnostic::format_startup(&manifest.runtime_identity, VERSION, &binary, &listeners);
-    println!("{headline}");
-    println!("{debug}");
-    let _ = std::io::stdout().flush();
     let stop = Arc::new(AtomicBool::new(false));
     let handles = spawn_servers(servers, manifest.clone(), Arc::clone(&stop));
     let action = loop {
