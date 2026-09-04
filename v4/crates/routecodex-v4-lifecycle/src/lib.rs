@@ -559,8 +559,20 @@ fn request_control(
     paths: &V4LifecyclePaths,
     command: &str,
 ) -> Result<serde_json::Value, LifecycleError> {
-    let mut stream = UnixStream::connect(&paths.control_socket)
-        .map_err(|error| io_error(&paths.control_socket, error))?;
+    // macOS can transiently return EAGAIN while the managed child is
+    // replacing its control listener. Treat that as a bounded handoff
+    // window, not as a lifecycle failure; all other errors remain fail-fast.
+    let deadline = Instant::now() + Duration::from_millis(750);
+    let mut stream = loop {
+        match UnixStream::connect(&paths.control_socket) {
+            Ok(stream) => break stream,
+            Err(error) if error.raw_os_error() == Some(libc::EAGAIN) && Instant::now() < deadline =>
+            {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => return Err(io_error(&paths.control_socket, error)),
+        }
+    };
     stream
         .write_all(command.as_bytes())
         .map_err(|error| io_error(&paths.control_socket, error))?;
