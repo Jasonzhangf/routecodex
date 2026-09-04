@@ -42,6 +42,7 @@ use routecodex_v4_standard_plugins::sse_transport::{
 };
 use std::future::Future;
 use std::io::{Read, Write};
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::process::{Child, Command, Stdio};
@@ -650,6 +651,11 @@ fn ensure_cordis_host_socket(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        // Keep the project-owned Cordis host independent from the invoking
+        // shell. Without its own process group, a non-interactive `start`
+        // returns with the daemon still attached to the shell's group; the
+        // shell then sends SIGHUP and leaves a dead listener pathname behind.
+        .process_group(0)
         .spawn()
         .map_err(|error| format!("Cordis host spawn failed: {error}"))?;
     if let Err(error) = wait_for_cordis_socket(&mut child, &socket, Duration::from_secs(5)) {

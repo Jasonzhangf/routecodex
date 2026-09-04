@@ -311,3 +311,62 @@ fn restart_cold_starts_when_no_managed_instance_exists() {
         "stop must close the project-owned Cordis host"
     );
 }
+
+#[test]
+fn detached_start_keeps_cordis_host_after_launcher_exit() {
+    let test_root = root("detached-cordis");
+    let state_root = std::path::PathBuf::from("/tmp").join(format!(
+        "rccv4-detached-cordis-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let config = initialize(&test_root, free_port());
+    let runner = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../cordis/routecodex-v4-cordis-host/src/daemon-runner.mjs"
+    );
+    let binary = env!("CARGO_BIN_EXE_rccv4");
+    let launcher = Command::new("sh")
+        .arg("-c")
+        .arg("exec \"$RCCV4_TEST_BINARY\" start -c \"$RCCV4_TEST_CONFIG\"")
+        .env("RCCV4_TEST_BINARY", binary)
+        .env("RCCV4_TEST_CONFIG", &config)
+        .env("RCCV4_STATE_ROOT", &state_root)
+        .env("RCCV4_CORDIS_HOST_RUNNER", runner)
+        .output()
+        .expect("detached start launcher");
+    assert!(
+        launcher.status.success(),
+        "detached start must succeed: {}",
+        String::from_utf8_lossy(&launcher.stderr)
+    );
+    std::thread::sleep(Duration::from_millis(150));
+    assert!(
+        state_root.join("cordis.sock").exists(),
+        "Cordis socket must survive launcher exit"
+    );
+    let status = Command::new(binary)
+        .env("RCCV4_STATE_ROOT", &state_root)
+        .args(["status", "-c", config.to_str().expect("config")])
+        .output()
+        .expect("detached status");
+    assert!(
+        status.status.success(),
+        "managed child must survive launcher exit: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let stop = Command::new(binary)
+        .env("RCCV4_STATE_ROOT", &state_root)
+        .args(["stop", "-c", config.to_str().expect("config")])
+        .output()
+        .expect("detached stop");
+    assert!(
+        stop.status.success(),
+        "detached stop must close managed host: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert!(!state_root.join("cordis.sock").exists());
+}
