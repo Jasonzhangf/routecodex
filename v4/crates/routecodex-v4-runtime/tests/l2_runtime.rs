@@ -283,7 +283,7 @@ fn relay_request_chat_to_responses_is_plugin_owned() {
         )
         .expect("chat to Responses request chain runs");
     let wire = report.provider_wire_value.expect("provider wire produced");
-    assert_eq!(wire["input"][0]["content"], "hello");
+    assert_eq!(wire["input"][0]["content"][0], json!({"type":"input_text","text":"hello"}));
     assert!(wire.get("messages").is_none());
     assert_eq!(wire["max_output_tokens"], 8);
     assert!(wire.get("codec").is_none(), "production wire must not use mock codec handle");
@@ -315,8 +315,8 @@ fn relay_request_runs_all_contract_bound_request_plugins() {
         .provider_wire_value
         .expect("provider wire produced");
     assert_eq!(
-        wire["input"][0]["content"],
-        json!("hello"),
+        wire["input"][0]["content"][0],
+        json!({"type":"input_text","text":"hello"}),
         "responses_normalize + responses_wire_build must execute in relay_request"
     );
 }
