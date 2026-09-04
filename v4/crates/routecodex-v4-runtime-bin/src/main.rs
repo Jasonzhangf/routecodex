@@ -409,7 +409,7 @@ fn start(intent: StartIntent) -> Result<String, String> {
         run_foreground(manifest)?;
         return Ok("state=stopped identity=rccv4 foreground=true".to_string());
     }
-    let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
+    let (config, _manifest, paths) = compile_for_lifecycle(Some(config))?;
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let record = start_managed(
         &paths,
