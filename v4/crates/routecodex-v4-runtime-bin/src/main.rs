@@ -423,7 +423,6 @@ fn start(intent: StartIntent) -> Result<String, String> {
         return Ok("state=stopped identity=rccv4 foreground=true".to_string());
     }
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
-    print_startup(&manifest);
     let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
     if let Err(error) = preflight_cordis_admission(&manifest) {
         if let Some(mut child) = cordis_child {
@@ -432,6 +431,7 @@ fn start(intent: StartIntent) -> Result<String, String> {
         }
         return Err(error);
     }
+    print_startup(&manifest);
     if routecodex_v4_lifecycle::read_record(&paths)
         .map_err(|error| error.to_string())?
         .is_none()
@@ -502,9 +502,16 @@ fn repair_stale_state(intent: ConfigPathIntent) -> Result<String, String> {
 
 fn restart(intent: RestartIntent) -> Result<String, String> {
     let (config, manifest, paths) = compile_for_lifecycle(intent.config)?;
+    let cordis_child = ensure_cordis_host_socket(&paths.manifest_path, &paths)?;
     // Admission must succeed before restart can stop the currently healthy
     // child. This preserves the managed instance on Cordis failure.
-    preflight_cordis_admission(&manifest)?;
+    if let Err(error) = preflight_cordis_admission(&manifest) {
+        if let Some(mut child) = cordis_child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        return Err(error);
+    }
     let timeout = Duration::from_millis(intent.timeout_ms);
     match request_restart(&paths, &manifest.manifest_digest, timeout) {
         Ok(record) => Ok(format_status("restarted", &record)),
@@ -522,7 +529,13 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
             .map_err(|error| error.to_string())?;
             Ok(format_status("running", &record))
         }
-        Err(error) => Err(error.to_string()),
+        Err(error) => {
+            if let Some(mut child) = cordis_child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            Err(error.to_string())
+        }
     }
 }
 
@@ -586,8 +599,17 @@ fn ensure_cordis_host_socket(
     manifest_path: &std::path::Path,
     paths: &V4LifecyclePaths,
 ) -> Result<Option<Child>, String> {
-    if std::env::var_os("RCCV4_CORDIS_HOST_SOCKET").is_some() {
-        return Ok(None);
+    if let Some(existing) = std::env::var_os("RCCV4_CORDIS_HOST_SOCKET") {
+        let existing = PathBuf::from(existing);
+        if std::os::unix::net::UnixStream::connect(&existing).is_ok() {
+            return Ok(None);
+        }
+        if std::env::var("RCCV4_CORDIS_HOST_AUTOSTARTED").as_deref() != Ok("1") {
+            return Err("Cordis admission socket connect failed: inherited socket is unavailable".to_string());
+        }
+        std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
+        std::env::remove_var("RCCV4_CORDIS_HOST_AUTOSTARTED");
+        std::env::remove_var("RCCV4_CORDIS_HOST_PID");
     }
     let socket = paths.state_root.join("cordis.sock");
     let runner = std::env::var_os("RCCV4_CORDIS_HOST_RUNNER")
