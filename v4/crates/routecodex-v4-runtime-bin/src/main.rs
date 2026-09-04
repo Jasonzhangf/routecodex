@@ -409,7 +409,16 @@ fn start(intent: StartIntent) -> Result<String, String> {
         run_foreground(manifest)?;
         return Ok("state=stopped identity=rccv4 foreground=true".to_string());
     }
-    let (config, _manifest, paths) = compile_for_lifecycle(Some(config))?;
+    let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
+    // Validate the existing Cordis owner before releasing a healthy managed
+    // child.  A replacement must never destroy the only serving instance and
+    // then discover that its admission socket is unavailable.
+    if routecodex_v4_lifecycle::read_record(&paths)
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        preflight_existing_cordis(&manifest, &paths)?;
+    }
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let record = start_managed(
         &paths,
@@ -453,6 +462,12 @@ fn repair_stale_state(intent: ConfigPathIntent) -> Result<String, String> {
 
 fn restart(intent: RestartIntent) -> Result<String, String> {
     let (config, manifest, paths) = compile_for_lifecycle(intent.config)?;
+    if routecodex_v4_lifecycle::read_record(&paths)
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        preflight_existing_cordis(&manifest, &paths)?;
+    }
     let timeout = Duration::from_millis(intent.timeout_ms);
     match request_restart(&paths, &manifest.manifest_digest, timeout) {
         Ok(record) => Ok(format_status("restarted", &record)),
@@ -471,6 +486,32 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
         }
         Err(error) => Err(error.to_string()),
     }
+}
+
+fn preflight_existing_cordis(
+    manifest: &RuntimeConfigManifest,
+    paths: &V4LifecyclePaths,
+) -> Result<(), String> {
+    let socket = std::env::var_os("RCCV4_CORDIS_HOST_SOCKET")
+        .map(PathBuf::from)
+        .filter(|path| std::os::unix::net::UnixStream::connect(path).is_ok())
+        .or_else(|| {
+            let path = paths.state_root.join("cordis.sock");
+            std::os::unix::net::UnixStream::connect(&path)
+                .is_ok()
+                .then_some(path)
+        })
+        .ok_or_else(|| "Cordis admission socket unavailable; existing V4 instance preserved".to_string())?;
+    std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", socket);
+    let epoch_id = manifest.execution_epoch.candidate["epoch_id"]
+        .as_str()
+        .ok_or_else(|| "runtime candidate has no epoch_id".to_string())?;
+    CordisAdmission::admit(
+        &manifest.execution_epoch.graph_hash,
+        &manifest.execution_epoch.manifest_hash,
+        epoch_id,
+    )
+    .map(|_| ())
 }
 
 fn stop(intent: StopIntent) -> Result<String, String> {
