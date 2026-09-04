@@ -1,5 +1,5 @@
 {
-  "bundle_digest": "sha256:304a51bd685baa4211b036d4b8d481004faf00b52e8950ba7933985f1c2103ef",
+  "bundle_digest": "sha256:0c1a89374554df6d5ea7ea6492a54bb3bc4f7946218b674c4a2b7c75dc0e1df3",
   "manifest_digest": "sha256:7d2b1ddb54d95f73fe4af5ce5a744def24eaa3f9371db6de3ea98ff7f5861710",
   "resources": [
     {
@@ -202,7 +202,7 @@
     },
     {
       "class": "docs",
-      "digest": "sha256:82d78e2773fc577e68adbc2e24ac31727eb68639d4d793b7bbc982f64ff3ed65",
+      "digest": "sha256:185f4202ace2320fda0a5fa4376bf5ea5b3afc63e500e8bcc4b5d20d6bf16dd4",
       "path": ".appsdk/docs/design/fix-lifecycle-v2.md",
       "source": "docs/design/fix-lifecycle-v2.md"
     },
@@ -220,13 +220,13 @@
     },
     {
       "class": "rules",
-      "digest": "sha256:94a84c754404cfe20bdb8a0ef5df9536abc73b25bef2f785d7c28e3c250da6ee",
+      "digest": "sha256:8fa3313ea5e6c09a4e03077a796cf6e4e17533d350f77e9ba7ccbc02cfe33b1a",
       "path": ".appsdk/rules/appsdk-project-governance.md",
       "source": "skills/appsdk-project-governance/SKILL.md"
     },
     {
       "class": "skills",
-      "digest": "sha256:94a84c754404cfe20bdb8a0ef5df9536abc73b25bef2f785d7c28e3c250da6ee",
+      "digest": "sha256:8fa3313ea5e6c09a4e03077a796cf6e4e17533d350f77e9ba7ccbc02cfe33b1a",
       "path": ".appsdk/skills/appsdk-project-governance/SKILL.md",
       "source": "skills/appsdk-project-governance/SKILL.md"
     }
