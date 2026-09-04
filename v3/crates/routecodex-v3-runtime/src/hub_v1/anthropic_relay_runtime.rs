@@ -796,11 +796,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         }
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
             Ok(req_compat) => req_compat,
-            Err(error) => handle_provider_request_failure!(
-                "ProviderReqCompat06ProviderCompat",
-                "provider_request_compat_error",
-                error
-            ),
+            Err(error) => {
+                trace.push("ProviderReqCompat06ProviderCompat");
+                return Ok(project_v3_anthropic_relay_runtime_failure_with_trace(
+                    V3AnthropicRelayRuntimeError::ProviderCompat(error),
+                    trace,
+                ));
+            }
         };
         trace.push("ProviderReqCompat06ProviderCompat");
         let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);

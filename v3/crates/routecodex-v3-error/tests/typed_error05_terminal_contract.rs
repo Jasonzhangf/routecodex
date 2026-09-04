@@ -101,8 +101,8 @@ fn provider_failure_projects_only_with_route_and_default_exhaustion_proof() {
         .expect("route and default exhaustion is terminal");
     let projected = build_v3_error_06_client_projected_from_v3_error_05(terminal);
     assert_eq!(projected.status, 502);
-    assert_eq!(projected.body["error"]["code"], "provider_malformed_sse");
-    assert_eq!(projected.body["error"]["message"], "provider_malformed_sse");
+    assert_eq!(projected.body["error"]["code"], "network_error");
+    assert_eq!(projected.body["error"]["message"], "network error");
     assert!(
         projected.body["error"]
             .get("route_pool_remaining_after_exclusion")

@@ -634,13 +634,13 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     )
     .await
     .unwrap();
-    assert_eq!(output.status, 429);
+    assert_eq!(output.status, 502);
     let client_response = match output.client_body {
         V3OpenAiChatRelayClientBody::Json(value) => value,
         V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON error body"),
     };
-    assert_eq!(client_response["error"]["message"], "rate_limit_error");
-    assert_eq!(client_response["error"]["code"], "rate_limit_error");
+    assert_eq!(client_response["error"]["message"], "network error");
+    assert_eq!(client_response["error"]["code"], "network_error");
     assert!(
         client_response["error"].get("stage").is_none()
             && client_response["error"].get("class").is_none()
@@ -1221,10 +1221,8 @@ async fn sse_done_before_terminal_fails_and_terminal_without_done_succeeds() {
         .unwrap();
         match output.client_body {
             V3OpenAiChatRelayClientBody::Json(body) => {
-                assert!(
-                    body.to_string().contains("provider"),
-                    "{body:?}; expected {expected}"
-                );
+                assert_eq!(body["error"]["code"], "network_error", "{expected}");
+                assert_eq!(body["error"]["message"], "network error", "{expected}");
             }
             V3OpenAiChatRelayClientBody::Sse(_) => {
                 panic!("failed provider attempt must not cross the Broker boundary: {expected}")
@@ -1906,10 +1904,8 @@ data: [DONE]
         .unwrap();
         match output.client_body {
             V3OpenAiChatRelayClientBody::Json(body) => {
-                assert!(
-                    body.to_string().contains("provider"),
-                    "{body:?}; expected {expected}"
-                );
+                assert_eq!(body["error"]["code"], "network_error", "{expected}");
+                assert_eq!(body["error"]["message"], "network error", "{expected}");
             }
             V3OpenAiChatRelayClientBody::Sse(_) => {
                 panic!("failed provider attempt must not cross the Broker boundary: {expected}")
@@ -2348,7 +2344,8 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
     .expect("terminal validation failure must be projected only after provider exhaustion");
     match output.client_body {
         V3OpenAiChatRelayClientBody::Json(body) => {
-            assert!(body.to_string().contains("provider"), "{body:?}");
+            assert_eq!(body["error"]["code"], "network_error");
+            assert_eq!(body["error"]["message"], "network error");
         }
         V3OpenAiChatRelayClientBody::Sse(_) => {
             panic!("incomplete Anthropic attempt must not cross the Broker boundary")

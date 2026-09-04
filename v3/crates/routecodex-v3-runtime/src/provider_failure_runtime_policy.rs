@@ -7,7 +7,7 @@ use routecodex_v3_config::{
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
     build_v3_error_02_classified_from_v3_error_01,
-    build_v3_provider_failure_action_from_v3_error_02,
+    build_v3_provider_failure_action_from_v3_error_02, is_v3_provider_pool_exhausted,
     V3Error01SourceRaised, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
     V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
     V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
@@ -1409,24 +1409,26 @@ fn terminal_projection_for(
         .try_into_terminal()
         .ok()
         .map(V3ErrorHandlingCenter::project_terminal_decision)?;
-    if let Some(V3ProviderDispositionStepManifest::Project { public_code, .. }) = matched_policy
-        .and_then(|policy| {
-            policy.path.iter().rev().find_map(|step| match step {
-                V3ProviderDispositionStepManifest::Project { .. } => Some(step),
-                _ => None,
+    if !is_v3_provider_pool_exhausted(&decision.exhaustion) {
+        if let Some(V3ProviderDispositionStepManifest::Project { public_code, .. }) = matched_policy
+            .and_then(|policy| {
+                policy.path.iter().rev().find_map(|step| match step {
+                    V3ProviderDispositionStepManifest::Project { .. } => Some(step),
+                    _ => None,
+                })
             })
-        })
-    {
-        // Error06 owns the terminal HTTP status. Policy projection may only
-        // customize the public error code without changing routing truth.
-        if let Some(public_code) = public_code {
-            if let Some(error) = projected
-                .body
-                .as_object_mut()
-                .and_then(|body| body.get_mut("error"))
-                .and_then(Value::as_object_mut)
-            {
-                error.insert("code".to_string(), Value::String(public_code.clone()));
+        {
+            // Error06 owns the terminal HTTP status. Policy projection may only
+            // customize the public error code without changing routing truth.
+            if let Some(public_code) = public_code {
+                if let Some(error) = projected
+                    .body
+                    .as_object_mut()
+                    .and_then(|body| body.get_mut("error"))
+                    .and_then(Value::as_object_mut)
+                {
+                    error.insert("code".to_string(), Value::String(public_code.clone()));
+                }
             }
         }
     }

@@ -121,6 +121,13 @@ fn build_v3_anthropic_client_sse_event_chunk(event: &Value) -> Result<Vec<u8>, S
 pub fn project_v3_anthropic_relay_runtime_failure(
     error: V3AnthropicRelayRuntimeError,
 ) -> V3AnthropicRelayRuntimeOutput {
+    project_v3_anthropic_relay_runtime_failure_with_trace(error, Vec::new())
+}
+
+pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
+    error: V3AnthropicRelayRuntimeError,
+    trace: Vec<&'static str>,
+) -> V3AnthropicRelayRuntimeOutput {
     let request_payload_invalid = matches!(
         &error,
         V3AnthropicRelayRuntimeError::ProviderCompat(error)
@@ -185,7 +192,7 @@ pub fn project_v3_anthropic_relay_runtime_failure(
         source,
         internal_status.unwrap_or(if request_payload_invalid { 400 } else { 500 }),
         "none",
-        Vec::new(),
+        trace,
     )
 }
 

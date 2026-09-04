@@ -44,7 +44,7 @@ fn project_exhausted_provider(
 }
 
 #[test]
-fn error_handling_center_owns_error01_06_and_projects_provider_429_as_429() {
+fn error_handling_center_projects_exhausted_provider_429_as_network_error() {
     let source = build_v3_error_01_source_raised_external(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderReqOutbound09TransportRequest",
@@ -67,8 +67,9 @@ fn error_handling_center_owns_error01_06_and_projects_provider_429_as_429() {
         Some(429),
     );
 
-    assert_eq!(projected.status, 429);
-    assert_eq!(projected.body["error"]["code"], "rate_limit_error");
+    assert_eq!(projected.status, 502);
+    assert_eq!(projected.body["error"]["code"], "network_error");
+    assert_eq!(projected.body["error"]["message"], "network error");
     assert!(
         projected.body["error"].get("error_node").is_none()
             && projected.body["error"].get("stage").is_none()
@@ -117,8 +118,9 @@ fn provider_error_client_projection_does_not_leak_runtime_details() {
         Some(502),
     );
 
-    assert_eq!(projected.body["error"]["code"], code);
-    assert_eq!(projected.body["error"]["message"], code);
+    assert_eq!(projected.status, 502);
+    assert_eq!(projected.body["error"]["code"], "network_error");
+    assert_eq!(projected.body["error"]["message"], "network error");
     let body = projected.body.to_string();
     assert!(!body.contains("req-secret-123"));
     assert!(!body.contains("upstream-secret-456"));
@@ -151,7 +153,8 @@ fn error_handling_center_never_projects_an_error_as_http_success() {
 
     assert_eq!(projected.status, 502);
     assert!(projected.status >= 400);
-    assert_eq!(projected.body["error"]["code"], "provider_business_error");
+    assert_eq!(projected.body["error"]["code"], "network_error");
+    assert_eq!(projected.body["error"]["message"], "network error");
     assert!(
         projected.body["error"].get("decision").is_none(),
         "Error06 body must not carry the execution decision: {}",
@@ -273,7 +276,7 @@ fn provider_failure_projects_only_after_selected_target_is_fully_exhausted() {
             .expect("exhausted provider failure is terminal"),
     );
     assert_eq!(projected.status, 502);
-    assert_eq!(projected.body["error"]["code"], "provider_http_429");
+    assert_eq!(projected.body["error"]["code"], "network_error");
     assert!(
         projected.body["error"].get("target_exhausted").is_none(),
         "Error06 body must not carry exhaustion state: {}",
@@ -305,8 +308,8 @@ fn external_provider_429_projects_external_link_without_internal_code() {
         None,
     );
 
-    assert_eq!(projected.status, 429);
-    assert_eq!(projected.body["error"]["code"], "provider_http_429");
+    assert_eq!(projected.status, 502);
+    assert_eq!(projected.body["error"]["code"], "network_error");
     assert!(
         projected.body["error"].get("external_error").is_none(),
         "Error06 body must not carry the external provider link: {}",
@@ -341,7 +344,7 @@ fn exhausted_provider_http_400_projects_as_bad_gateway() {
         Some(400),
     );
     assert_eq!(projected.status, 502);
-    assert_eq!(projected.body["error"]["code"], "provider_http_400");
+    assert_eq!(projected.body["error"]["code"], "network_error");
 }
 
 #[test]

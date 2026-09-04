@@ -669,6 +669,53 @@ targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
+fn anthropic_failure_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["anthropic"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["anthropic"]
+{hub_v1_server_execution}
+[providers.anthropic]
+type = "anthropic"
+base_url = "{provider_base_url}"
+default_model = "anthropic-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_ANTHROPIC_KEY" }}] }}
+[providers.anthropic.models.anthropic-wire]
+wire_name = "anthropic-wire"
+aliases = ["anthropic-client"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = false
+max_tokens = 4096
+max_context_tokens = 128000
+[route_groups.default.pools.anthropic_client]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "anthropic", models = ["anthropic-client"] }}
+targets = [{{ kind = "provider_model", provider = "anthropic", model = "anthropic-wire", key = "key", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "anthropic", model = "anthropic-wire", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
 #[derive(Debug)]
 struct ProviderCapture {
     authorization: Option<String>,
@@ -2223,6 +2270,64 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_relay_provider_exhaustion_projects_network_error_for_json_and_sse() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (failure_base_url, failure_shutdown) =
+        start_controlled_failure_upstream_all_protocols().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-relay-failure");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &failure_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+
+    let json_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test",
+            "input":"relay failure json",
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(json_response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(json_response.headers()["content-type"], "application/json");
+    let json_body: Value = json_response.json().await.unwrap();
+    assert_eq!(
+        json_body,
+        json!({"error":{"code":"network_error","message":"network error"}})
+    );
+
+    let sse_response = client
+        .post(&endpoint)
+        .header("accept", "text/event-stream")
+        .json(&json!({
+            "model":"client-test",
+            "input":"relay failure sse",
+            "stream":true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sse_response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(sse_response.headers()["content-type"], "application/json");
+    let sse_body: Value = sse_response.json().await.unwrap();
+    assert_eq!(
+        sse_body,
+        json!({"error":{"code":"network_error","message":"network error"}})
+    );
+
+    handle.shutdown().await;
+    failure_shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
 }
 
@@ -3916,7 +4021,10 @@ async fn p6_all_provider_failures_project_terminal_error_chain() {
         .unwrap();
     assert_eq!(response.status(), 502);
     let body: Value = response.json().await.unwrap();
-    assert_eq!(body["error"]["code"], "provider_transport_error");
+    assert_eq!(
+        body,
+        json!({"error":{"code":"network_error","message":"network error"}})
+    );
     assert!(
         body["error"].get("target_exhausted").is_none()
             && body["error"].get("candidates_remaining").is_none()
@@ -3928,6 +4036,104 @@ async fn p6_all_provider_failures_project_terminal_error_chain() {
     std::env::remove_var("V3_P6_EXHAUST_FIRST_KEY");
     std::env::remove_var("V3_P6_EXHAUST_SECOND_KEY");
     handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn p6_all_provider_failures_project_network_error_for_client_sse() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (failure_base_url, failure_shutdown) =
+        start_controlled_failure_upstream_all_protocols().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-direct-sse");
+    let handle = spawn_v3_server_aggregate(p6_manifest(
+        free_port(),
+        free_port(),
+        &failure_base_url,
+    ))
+    .await
+    .unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let response_body = response.text().await.unwrap();
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{response_body}");
+    let body: Value = serde_json::from_str(&response_body).unwrap();
+    assert_eq!(
+        body,
+        json!({"error":{"code":"network_error","message":"network error"}})
+    );
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    failure_shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn anthropic_messages_provider_failure_projects_network_error_to_real_client() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (failure_base_url, failure_shutdown) =
+        start_controlled_failure_upstream_all_protocols().await;
+    let provider_base_url = failure_base_url
+        .strip_suffix("/v1")
+        .expect("controlled provider base URL must end in /v1")
+        .to_string();
+    std::env::set_var("V3_P6_ANTHROPIC_KEY", "secret-anthropic");
+    let handle = spawn_v3_server_aggregate(anthropic_failure_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://{}/v1/messages", handle.listeners[0].addr))
+        .header("anthropic-version", "2023-06-01")
+        .json(&json!({
+            "model":"anthropic-client",
+            "max_tokens":64,
+            "messages":[{"role":"user","content":"provider is unavailable"}],
+            "stream":true
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let response_body = response.text().await.unwrap();
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{response_body}");
+    let body: Value = serde_json::from_str(&response_body).unwrap();
+    assert_eq!(
+        body,
+        json!({"error":{"code":"network_error","message":"network error"}})
+    );
+    assert!(!response_body.contains("controlled_unavailable"));
+
+    let json_response = client
+        .post(format!("http://{}/v1/messages", handle.listeners[0].addr))
+        .header("anthropic-version", "2023-06-01")
+        .json(&json!({
+            "model":"anthropic-client",
+            "max_tokens":64,
+            "messages":[{"role":"user","content":"provider is unavailable"}],
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(json_response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(json_response.headers()["content-type"], "application/json");
+    let json_body: Value = json_response.json().await.unwrap();
+    assert_eq!(
+        json_body,
+        json!({"error":{"code":"network_error","message":"network error"}})
+    );
+
+    std::env::remove_var("V3_P6_ANTHROPIC_KEY");
+    handle.shutdown().await;
+    failure_shutdown.send(()).unwrap();
 }
 
 #[tokio::test]

@@ -3723,6 +3723,33 @@ async fn responses_relay_json_error_projects_failure_terminal_with_done() {
     assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
 }
 
+#[tokio::test]
+async fn responses_relay_canonical_network_error_stays_json_for_stream_request() {
+    let output = V3ResponsesRelayRuntimeOutput {
+        status: 502,
+        client_body: V3ResponsesRelayClientBody::Json(json!({
+            "error": {
+                "code": "network_error",
+                "message": "network error"
+            }
+        })),
+        node_trace: vec!["V3Error04TargetPoolExhaustion", "V3Error06ClientProjected"],
+        error_chain: Some(vec!["V3Error01SourceRaised", "V3Error06ClientProjected"]),
+        observability: None,
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+
+    let response = responses_relay_output_response(output, None, None, true);
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(response.headers()["content-type"], "application/json");
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body, json!({"error":{"code":"network_error","message":"network error"}}));
+}
+
 #[test]
 fn relay_chat_sse_json_projection_has_explicit_terminal_marker() {
     let frame = build_v3_openai_chat_relay_json_sse_frame(&json!({

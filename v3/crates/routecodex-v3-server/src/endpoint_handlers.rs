@@ -1,74 +1,9 @@
 use crate::*;
 use axum::body::Body;
-use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, Response};
-use futures_util::{FutureExt, StreamExt};
 use serde_json::{json, Value};
-use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-
-fn v3_front_chunk_is_transport_keepalive(bytes: &[u8]) -> bool {
-    bytes == b": keepalive\n\n"
-}
-
-fn v3_front_non_sse_body_error_frame(protocol: V3SseClientProtocol, inner_status: u16) -> Vec<u8> {
-    v3_front_projected_error_sse_frame(
-        project_v3_post_commit_sse_source(
-            raise_v3_sse_runtime_failure(
-                "V3ServerRespOutbound05ClientFrame",
-                "front_sse_inner_response_not_sse",
-                format!(
-                    "accepted SSE channel received non-SSE inner response with status {inner_status}"
-                ),
-            ),
-            599,
-        ),
-        protocol,
-    )
-}
-
-fn v3_front_projected_error_sse_frame(
-    projected: routecodex_v3_error::V3Error06ClientProjected,
-    protocol: V3SseClientProtocol,
-) -> Vec<u8> {
-    let (code, message) = v3_error_body_code_message(&projected.body);
-    match protocol {
-        V3SseClientProtocol::Responses => {
-            v3_responses_sse_error_event_chunk(projected.status, &code, &message)
-        }
-        V3SseClientProtocol::OpenAiChat
-        | V3SseClientProtocol::Anthropic
-        | V3SseClientProtocol::Gemini => {
-            v3_sse_error_event_chunk(projected.status, &code, &message)
-        }
-    }
-}
-
-fn record_v3_front_client_disconnect() {
-    // Client disconnect is a complete Error01→Error06, health-neutral receipt.
-    // The receipt is intentionally client-suppressed after the transport closes;
-    // it must not trigger provider retry, reroute, or a synthetic client frame.
-    let receipt = project_v3_post_commit_sse_source(raise_v3_sse_client_disconnect(), 499);
-    eprintln!("V3 client disconnect Error06 client-suppressed receipt: {receipt:?}");
-}
-
-pub(crate) fn v3_front_sse_worker_panic_frame(
-    message: &str,
-    protocol: V3SseClientProtocol,
-) -> Vec<u8> {
-    v3_front_projected_error_sse_frame(
-        project_v3_post_commit_sse_source(
-            raise_v3_sse_runtime_failure(
-                "V3ServerRespOutbound05ClientFrame",
-                "front_sse_worker_panicked",
-                message,
-            ),
-            599,
-        ),
-        protocol,
-    )
-}
 
 pub(crate) async fn pending_endpoint_after_responses_admission(
     state: Arc<V3ListenerState>,
@@ -83,22 +18,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     request_purpose: V3RequestPurpose,
     payload: Value,
 ) -> Response<Body> {
-    if v3_entry_request_wants_sse(&request_headers, &payload) {
-        return V3FrontSseAcceptSkeleton::accept(
-            state,
-            front_connection_identity,
-            request_headers,
-            method,
-            path,
-            started_at,
-            entry_protocol,
-            execution_mode,
-            pending_owner_symbol,
-            request_purpose,
-            payload,
-        )
-        .await;
-    }
     pending_endpoint_after_responses_admission_inner(
         state,
         front_connection_identity,
@@ -111,191 +30,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
         pending_owner_symbol,
         request_purpose,
         payload,
-        false,
     )
     .await
 }
 
-struct V3FrontSseAcceptSkeleton;
-impl V3FrontSseAcceptSkeleton {
-    async fn accept(
-        state: Arc<V3ListenerState>,
-        front_connection_identity: Option<V3FrontConnectionIdentity>,
-        request_headers: HeaderMap,
-        method: String,
-        path: String,
-        started_at: Instant,
-        entry_protocol: String,
-        execution_mode: V3EntryProtocolExecutionMode,
-        pending_owner_symbol: Option<String>,
-        request_purpose: V3RequestPurpose,
-        payload: Value,
-    ) -> Response<Body> {
-        let client_protocol = match entry_protocol.as_str() {
-            "responses" => V3SseClientProtocol::Responses,
-            "openai_chat" => V3SseClientProtocol::OpenAiChat,
-            "anthropic" => V3SseClientProtocol::Anthropic,
-            "gemini" => V3SseClientProtocol::Gemini,
-            other => panic!("unsupported SSE client protocol: {other}"),
-        };
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(32);
-        let front_transport_broker = state.front_transport_broker.clone();
-        let keepalive_interval =
-            std::time::Duration::from_millis(state.server.http_sse_keepalive_ms);
-        tokio::spawn(async move {
-            let panic_tx = tx.clone();
-            let worker = async move {
-                let response = pending_endpoint_after_responses_admission_inner(
-                    state,
-                    front_connection_identity,
-                    request_headers,
-                    method,
-                    path,
-                    started_at,
-                    entry_protocol,
-                    execution_mode,
-                    pending_owner_symbol,
-                    request_purpose,
-                    payload,
-                    true,
-                )
-                .await;
-                let inner_status = response.status().as_u16();
-                let response_is_sse = response
-                    .headers()
-                    .get(axum::http::header::CONTENT_TYPE)
-                    .and_then(|value| value.to_str().ok())
-                    .is_some_and(|value| {
-                        value.to_ascii_lowercase().starts_with("text/event-stream")
-                    });
-                let mut body = response.into_body().into_data_stream();
-                let mut emitted_response_frame = false;
-                while let Some(chunk) = body.next().await {
-                    match chunk {
-                        Ok(bytes) => {
-                            if !response_is_sse {
-                                continue;
-                            }
-                            if !v3_front_chunk_is_transport_keepalive(&bytes) {
-                                emitted_response_frame = true;
-                            }
-                            if tx.send(Ok(bytes.to_vec())).await.is_err() {
-                                record_v3_front_client_disconnect();
-                                return;
-                            }
-                        }
-                        Err(error) => {
-                            let projected = project_v3_post_commit_sse_source(
-                                raise_v3_sse_runtime_failure(
-                                    "V3ServerRespOutbound05ClientFrame",
-                                    "front_sse_response_body_failed",
-                                    error.to_string(),
-                                ),
-                                599,
-                            );
-                            if tx
-                                .send(Ok(v3_front_projected_error_sse_frame(
-                                    projected,
-                                    client_protocol,
-                                )))
-                                .await
-                                .is_err()
-                            {
-                                record_v3_front_client_disconnect();
-                            }
-                            return;
-                        }
-                    }
-                }
-                if !response_is_sse {
-                    emitted_response_frame = true;
-                    if tx
-                        .send(Ok(v3_front_non_sse_body_error_frame(
-                            client_protocol,
-                            inner_status,
-                        )))
-                        .await
-                        .is_err()
-                    {
-                        record_v3_front_client_disconnect();
-                        return;
-                    }
-                }
-                if !emitted_response_frame {
-                    let projected = project_v3_post_commit_sse_source(
-                        raise_v3_sse_runtime_failure(
-                            "V3ServerRespOutbound05ClientFrame",
-                            "front_sse_response_empty",
-                            "Front SSE response ended without a response frame",
-                        ),
-                        599,
-                    );
-                    if tx
-                        .send(Ok(v3_front_projected_error_sse_frame(
-                            projected,
-                            client_protocol,
-                        )))
-                        .await
-                        .is_err()
-                    {
-                        record_v3_front_client_disconnect();
-                    }
-                }
-            };
-            if let Err(payload) = AssertUnwindSafe(worker).catch_unwind().await {
-                let message = payload
-                    .downcast_ref::<&str>()
-                    .copied()
-                    .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-                    .unwrap_or("Front SSE worker panicked");
-                if panic_tx
-                    .send(Ok(v3_front_sse_worker_panic_frame(
-                        message,
-                        client_protocol,
-                    )))
-                    .await
-                    .is_err()
-                {
-                    record_v3_front_client_disconnect();
-                }
-            }
-        });
-        let client_stream = futures_util::stream::unfold(rx, |mut rx| async move {
-            rx.recv().await.map(|item| (item, rx))
-        });
-        let body = v3_io_sse_body(Box::pin(client_stream), Some(keepalive_interval));
-        if let Some(identity) = front_connection_identity {
-            front_transport_broker.front_socket(identity).map(|socket| {
-                socket.set_exec_closeout_frame(match client_protocol {
-                    V3SseClientProtocol::Responses => v3_responses_sse_error_event_chunk(
-                        503,
-                        "server_restart_in_progress",
-                        "RouteCodex restarted before this response completed",
-                    ),
-                    V3SseClientProtocol::OpenAiChat
-                    | V3SseClientProtocol::Anthropic
-                    | V3SseClientProtocol::Gemini => v3_sse_error_event_chunk(
-                        503,
-                        "server_restart_in_progress",
-                        "RouteCodex restarted before this response completed",
-                    ),
-                })
-            });
-        }
-        Response::builder()
-            .status(axum::http::StatusCode::OK)
-            .header("content-type", "text/event-stream")
-            // The Front broker owns the client connection.  These headers are
-            // part of that transport contract: an intermediary must not buffer
-            // semantic frames or turn the broker's keepalive stream into an
-            // idle/closed response while the provider side is still running.
-            .header("cache-control", "no-cache, no-transform")
-            .header("connection", "keep-alive")
-            .header("x-accel-buffering", "no")
-            .body(body)
-            .expect("Direct SSE accept response")
-    }
-}
 pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     state: Arc<V3ListenerState>,
     front_connection_identity: Option<V3FrontConnectionIdentity>,
@@ -308,10 +46,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     pending_owner_symbol: Option<String>,
     request_purpose: V3RequestPurpose,
     payload: Value,
-    front_transport_owns_keepalive: bool,
 ) -> Response<Body> {
-    let client_keepalive_interval = (!front_transport_owns_keepalive)
-        .then_some(Duration::from_millis(state.server.http_sse_keepalive_ms));
+    let client_keepalive_interval = Some(Duration::from_millis(state.server.http_sse_keepalive_ms));
     let request_identity = match allocate_v3_console_request_identity(&state, &path, Some(&payload))
     {
         Ok(request_identity) => request_identity,
@@ -323,6 +59,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             .session_id;
     let responses_entry_facts = (entry_protocol == "responses")
         .then(|| V3ResponsesContinuationEntryFacts::project(&payload));
+    let requested_stream = v3_request_wants_sse(&request_headers, &payload);
     let execution_id = state.debug.next_execution_id(&state.server.id);
     let trace_scope = match state
         .debug
@@ -560,116 +297,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             v3_request_wants_sse(&request_headers, &payload),
             plan,
         );
-        if front_transport_owns_keepalive {
-            if let Some(connection_identity) = front_connection_identity {
-                // The request-stage plan is the only owner of the Front
-                // execution mode. The provider response is not consulted.
-                // The pipeline identity was allocated at request ingress and
-                // is carried beside the request id; it is not reconstructed
-                // from payload, provider response, or logs.
-                let lease = V3FrontRequestLease::from_responses_execution_plan(
-                    &metadata_plan,
-                    request_id.clone(),
-                    request_identity.pipeline_id.clone(),
-                    state.server.id.clone(),
-                    state.server.port,
-                    provider_failure_session_scope.session_id().to_string(),
-                    state.front_transport_broker.generation(),
-                    Instant::now(),
-                );
-                if let Err(error) = state.front_transport_broker.bind_connection_lease(
-                    connection_identity,
-                    lease,
-                    Instant::now(),
-                ) {
-                    let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                        project_v3_server_runtime_failure(
-                            "V3Server03HttpRequestRaw",
-                            "front_request_lease_binding_failed",
-                            error,
-                            598,
-                        ),
-                    );
-                    return responses_direct_output_response(
-                        project_v3_responses_error_frame_for_request_if_sse(
-                            frame,
-                            &request_headers,
-                            Some(&payload),
-                        ),
-                        client_keepalive_interval,
-                    );
-                }
-            }
-        }
         Some(metadata_plan)
     } else {
         None
     };
-    if entry_protocol == "responses"
-        && front_transport_owns_keepalive
-        && responses_protocol_plan.is_none()
-    {
-        if let Some(connection_identity) = front_connection_identity {
-            // Continuation owner resolution is a request-stage control
-            // decision too. It has no fresh provider target plan, so use the
-            // server's configured request deadline without consulting the
-            // provider response or reconstructing control state from payload.
-            let now = Instant::now();
-            let lease = V3FrontRequestLease::from_execution_mode(
-                match execution_mode {
-                    V3EntryProtocolExecutionMode::Direct => V3FrontExecutionMode::Direct,
-                    V3EntryProtocolExecutionMode::Relay => V3FrontExecutionMode::Relay,
-                    V3EntryProtocolExecutionMode::PendingNotImplemented => {
-                        return responses_direct_output_response(
-                            project_v3_responses_error_frame_for_request_if_sse(
-                                build_v3_server_16_http_frame_from_v3_error_06(
-                                    project_v3_server_runtime_failure(
-                                        "V3HubReqContinuation03Classified",
-                                        "front_execution_mode_missing",
-                                        "continuation request has no executable Direct/Relay mode",
-                                        598,
-                                    ),
-                                ),
-                                &request_headers,
-                                Some(&payload),
-                            ),
-                            client_keepalive_interval,
-                        );
-                    }
-                },
-                request_id.clone(),
-                request_identity.pipeline_id.clone(),
-                state.server.id.clone(),
-                state.server.port,
-                provider_failure_session_scope.session_id().to_string(),
-                state.front_transport_broker.generation(),
-                Duration::from_millis(routecodex_v3_config::default_provider_request_timeout_ms()),
-                Duration::from_millis(routecodex_v3_config::default_provider_request_timeout_ms()),
-                now,
-            );
-            if let Err(error) =
-                state
-                    .front_transport_broker
-                    .bind_connection_lease(connection_identity, lease, now)
-            {
-                return responses_direct_output_response(
-                    project_v3_responses_error_frame_for_request_if_sse(
-                        build_v3_server_16_http_frame_from_v3_error_06(
-                            project_v3_server_runtime_failure(
-                                "V3Server03HttpRequestRaw",
-                                "front_request_lease_binding_failed",
-                                error,
-                                598,
-                            ),
-                        ),
-                        &request_headers,
-                        Some(&payload),
-                    ),
-                    client_keepalive_interval,
-                );
-            }
-        }
-    }
     if let Some(response) = capture_v3_live_raw_request(
         &state,
         &trace_scope,
@@ -1076,7 +707,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             output,
             stream_console_finalizer,
             Duration::from_millis(state.server.http_sse_keepalive_ms),
-            front_transport_owns_keepalive,
+            requested_stream,
         );
     }
     if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -1199,7 +830,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 );
             }
         }
-        return anthropic_relay_output_response(output, front_transport_owns_keepalive);
+        return anthropic_relay_output_response(output, requested_stream);
     }
     if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let output = match execute_v3_gemini_relay_runtime_with_default_transport_provider_health(
@@ -1269,7 +900,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             output,
             stream_console_finalizer,
             Duration::from_millis(state.server.http_sse_keepalive_ms),
-            front_transport_owns_keepalive,
+            requested_stream,
         );
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -1878,70 +1509,3 @@ pub(crate) fn merge_v3_relay_handoff_provider_failure_events_into_direct_frame(
 #[path = "request_identity.rs"]
 mod request_identity;
 pub(crate) use request_identity::*;
-
-#[cfg(test)]
-mod front_sse_contract_tests {
-    use super::{
-        v3_front_chunk_is_transport_keepalive, v3_front_non_sse_body_error_frame,
-        v3_front_sse_worker_panic_frame, V3SseClientProtocol,
-    };
-
-    #[test]
-    fn front_sse_worker_panic_projects_internal_error_and_done() {
-        let frame =
-            v3_front_sse_worker_panic_frame("worker panic", V3SseClientProtocol::OpenAiChat);
-        let text = String::from_utf8(frame).expect("panic frame is UTF-8");
-        assert!(text.starts_with("event: error\n"), "{text}");
-        assert!(text.contains("front_sse_worker_panicked"), "{text}");
-        assert!(!text.contains("response.failed"), "{text}");
-        assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
-    }
-
-    #[test]
-    fn front_keepalive_does_not_commit_a_client_response_frame() {
-        assert!(v3_front_chunk_is_transport_keepalive(b": keepalive\n\n"));
-        assert!(!v3_front_chunk_is_transport_keepalive(
-            b"event: response.created\ndata: {}\n\n"
-        ));
-        assert!(!v3_front_chunk_is_transport_keepalive(
-            b"data: {\"error\":{\"code\":\"front_sse_response_empty\"}}\n\n"
-        ));
-    }
-
-    #[test]
-    fn front_json_error_is_projected_as_one_sse_failure_terminal() {
-        let frame = v3_front_non_sse_body_error_frame(V3SseClientProtocol::OpenAiChat, 502);
-        let text = String::from_utf8(frame).expect("terminal frame is UTF-8");
-        assert!(text.starts_with("event: error\n"), "{text}");
-        assert!(text.contains("front_sse_inner_response_not_sse"), "{text}");
-        assert!(!text.contains("response.failed"), "{text}");
-        assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
-    }
-
-    #[test]
-    fn malformed_error06_body_enters_typed_projection_without_front_json_error() {
-        let frame = v3_front_non_sse_body_error_frame(V3SseClientProtocol::OpenAiChat, 502);
-        let text = String::from_utf8(frame).expect("SSE frame is UTF-8");
-        assert!(text.contains("front_sse_inner_response_not_sse"));
-        assert!(!text.contains("front_json_error"));
-    }
-
-    #[test]
-    fn front_empty_json_body_does_not_fake_a_success_frame() {
-        assert!(
-            !v3_front_non_sse_body_error_frame(V3SseClientProtocol::OpenAiChat, 502).is_empty()
-        );
-        assert!(!v3_front_chunk_is_transport_keepalive(
-            &v3_front_non_sse_body_error_frame(V3SseClientProtocol::OpenAiChat, 200)
-        ));
-    }
-
-    #[test]
-    fn front_non_sse_success_enters_internal_error_chain_instead_of_reparsed_success() {
-        let frame = v3_front_non_sse_body_error_frame(V3SseClientProtocol::OpenAiChat, 200);
-        let text = String::from_utf8(frame).expect("contract failure frame is UTF-8");
-        assert!(text.starts_with("event: error\n"), "{text}");
-        assert!(text.contains("front_sse_inner_response_not_sse"), "{text}");
-        assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
-    }
-}

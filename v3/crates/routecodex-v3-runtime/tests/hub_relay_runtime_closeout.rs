@@ -2167,11 +2167,8 @@ async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malfo
         !message.contains("malformed SSE"),
         "SSE transport must not own provider response body/event codec failures: {message}"
     );
-    assert!(
-        message.contains("response body failed")
-            || message.contains("provider response event codec failed"),
-        "provider response failure must stay in response/body codec owner: {message}"
-    );
+    assert_eq!(body["error"]["code"], "network_error");
+    assert_eq!(message, "network error");
 }
 
 #[tokio::test]
@@ -2207,10 +2204,10 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
     let V3ResponsesRelayClientBody::Json(error_body) = failed.client_body else {
         panic!("terminal-missing provider stream must project an explicit JSON error")
     };
-    assert!(error_body
-        .pointer("/error/message")
-        .and_then(Value::as_str)
-        .is_some_and(|message| message.contains("response.completed")));
+    assert_eq!(
+        error_body,
+        json!({"error":{"code":"network_error","message":"network error"}})
+    );
 
     let success_transport = SingleJsonCaptureTransport {
         captures: Mutex::new(Vec::new()),
@@ -2466,10 +2463,10 @@ async fn provider_error_closeout_enters_error01_06_without_success_projection() 
     .await
     .unwrap();
     assert_eq!(output.status, 502);
-    assert_eq!(output.client_response["error"]["code"], "rate_limit_error");
+    assert_eq!(output.client_response["error"]["code"], "network_error");
     assert_eq!(
         output.client_response["error"]["message"],
-        "rate_limit_error"
+        "network error"
     );
     assert_eq!(
         output.error_chain.as_ref().unwrap(),
@@ -2490,6 +2487,12 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "__SCOPE__"
 endpoints = ["responses"]
+[servers.__SCOPE__.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.limited]
 type = "responses"
 base_url = "http://limited.invalid/v1"
@@ -2543,6 +2546,12 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "compat_reselect"
 endpoints = ["responses"]
+[servers.compat_reselect.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.limited]
 type = "anthropic"
 base_url = "http://limited.invalid/v1"
@@ -2595,6 +2604,12 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "compat_storm"
 endpoints = ["responses"]
+[servers.compat_storm.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.compat_storm_anthropic]
 type = "anthropic"
 base_url = "http://compat-storm-anthropic.invalid/v1"
@@ -2651,6 +2666,12 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "__SCOPE__"
 endpoints = ["responses"]
+[servers.__SCOPE__.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.limited]
 type = "responses"
 base_url = "http://limited.invalid/v1"
@@ -2710,6 +2731,12 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "__SCOPE__"
 endpoints = ["anthropic"]
+[servers.__SCOPE__.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.controlled]
 type = "responses"
 base_url = "http://controlled.invalid/v1"
@@ -2751,6 +2778,7 @@ allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
 continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.chat]
 type = "openai_chat"
 base_url = "http://controlled.invalid/v1"

@@ -408,12 +408,25 @@ async fn anthropic_structured_system_extension_is_not_silently_flattened_for_res
     .await
     .unwrap();
 
-    assert_eq!(output.status, 502, "runtime output: {output:?}");
+    assert_eq!(output.status, 598, "runtime output: {output:?}");
     assert!(transport.captured.lock().unwrap().is_none());
+    assert_eq!(
+        output.client_response["error"]["code"],
+        "provider_request_payload_invalid"
+    );
     assert!(
-        output.client_response.to_string().contains("anthropic_request"),
+        output.client_response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("UnmappedOutboundFields")),
         "structured Anthropic system semantics must fail explicitly when Responses has no exact field: {output:?}"
     );
+    assert!(output
+        .node_trace
+        .contains(&"ProviderReqCompat06ProviderCompat"));
+    assert!(!output.node_trace.contains(&"V3TargetPolicyRetriedSame"));
+    assert!(!output
+        .node_trace
+        .contains(&"V3ProviderReqOutbound09TransportRequest"));
 }
 
 #[test]
@@ -639,9 +652,9 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     assert_eq!(output.status, 502);
     assert_eq!(
         output.client_response["error"]["message"],
-        "rate_limit_error"
+        "network error"
     );
-    assert_eq!(output.client_response["error"]["code"], "rate_limit_error");
+    assert_eq!(output.client_response["error"]["code"], "network_error");
     assert!(
         output.client_response["error"].get("stage").is_none()
             && output.client_response["error"].get("class").is_none()

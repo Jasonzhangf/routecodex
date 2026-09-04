@@ -46,13 +46,24 @@ const mainlineMap = readFirst(admissionWorkspace
   : ['../docs/architecture/v3-mainline-call-map.yml']);
 
 for (const marker of [
-  'V3FrontSseAcceptSkeleton',
+  'pending_endpoint_after_responses_admission',
   'pending_endpoint_after_responses_admission_inner',
-  'tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(32)',
-  'v3_io_sse_body(Box::pin(client_stream), Some(keepalive_interval))',
+  'let client_keepalive_interval = Some(Duration::from_millis(state.server.http_sse_keepalive_ms));',
+  'let requested_stream = v3_request_wants_sse(&request_headers, &payload);',
   'v3_request_wants_sse(&request_headers, &payload)',
 ]) {
   if (!endpoint.includes(marker)) failures.push(`endpoint_handlers.rs: missing fixed skeleton marker ${marker}`);
+}
+
+for (const forbidden of [
+  'V3FrontSseAcceptSkeleton',
+  'tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(32)',
+  'front_transport_owns_keepalive',
+  'AssertUnwindSafe',
+]) {
+  if (endpoint.includes(forbidden)) {
+    failures.push(`endpoint_handlers.rs: obsolete pre-runtime client commit marker ${forbidden}`);
+  }
 }
 
 if (!serverLib.includes('fn v3_request_wants_sse(')) {
@@ -68,10 +79,10 @@ if (!frameBuilders.includes('v3_io_sse_body')) {
 
 const canonicalMapMarkers = [
   ['manifest', manifest, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame', 'v3-direct-sse-accept-skeleton-01', 'v3-direct-sse-accept-skeleton-02']],
-  ['resource map', resourceMap, ['v3.sse.direct.accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3FrontSseAcceptSkeleton', 'v3_request_wants_sse']],
-  ['function map', functionMap, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame', 'V3FrontSseAcceptSkeleton', 'v3_request_wants_sse']],
+  ['resource map', resourceMap, ['v3.sse.direct.accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'v3_request_wants_sse']],
+  ['function map', functionMap, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame', 'v3_request_wants_sse']],
   ['verification map', verificationMap, ['v3.direct_sse_accept_skeleton']],
-  ['mainline map', mainlineMap, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame', 'V3FrontSseAcceptSkeleton', 'v3_request_wants_sse', 'execute_responses_direct_server_outcome', 'v3-direct-sse-accept-skeleton-01', 'v3-direct-sse-accept-skeleton-02', 'v3-direct-sse-accept-skeleton-intent-01', 'v3-direct-sse-accept-skeleton-intent-02']],
+  ['mainline map', mainlineMap, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame', 'v3_request_wants_sse', 'execute_responses_direct_server_outcome', 'v3-direct-sse-accept-skeleton-01', 'v3-direct-sse-accept-skeleton-02', 'v3-direct-sse-accept-skeleton-intent-01', 'v3-direct-sse-accept-skeleton-intent-02']],
 ];
 
 for (const [name, document, markers] of canonicalMapMarkers) {
@@ -101,5 +112,5 @@ if (failures.length > 0) {
 }
 
 console.log('[verify:v3-direct-sse-accept-skeleton] ok');
-console.log('- direct SSE accept channel and runtime worker skeleton are map-locked');
-console.log('- feature hooks remain inside the existing runtime boundary');
+console.log('- Direct and Relay SSE requests stay buffered until runtime projection completes');
+console.log('- obsolete pre-runtime client commit paths remain absent');

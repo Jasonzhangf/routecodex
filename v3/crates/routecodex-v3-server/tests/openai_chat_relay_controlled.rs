@@ -225,10 +225,10 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .send()
         .await
         .unwrap();
-    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(error_response.status(), StatusCode::BAD_GATEWAY);
     let error_body: Value = error_response.json().await.unwrap();
-    assert_eq!(error_body["error"]["message"], "rate_limit_error");
-    assert_eq!(error_body["error"]["code"], "rate_limit_error");
+    assert_eq!(error_body["error"]["message"], "network error");
+    assert_eq!(error_body["error"]["code"], "network_error");
     assert!(
         error_body["error"].get("class").is_none()
             && error_body["error"].get("error_node").is_none()
@@ -252,6 +252,44 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         assert!(capture.body.get("metadata_center").is_none());
     }
 
+    let sse_error_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"chat-client-alias",
+            "messages":[{"role":"user","content":"fail"}],
+            "stream":true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sse_error_response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        sse_error_response.headers().get("content-type").unwrap(),
+        "application/json"
+    );
+    let sse_error_body: Value = sse_error_response.json().await.unwrap();
+    assert_eq!(
+        sse_error_body,
+        json!({"error":{"code":"network_error","message":"network error"}})
+    );
+    let mut sse_failure_attempts = 0;
+    while sse_failure_attempts < EXPECTED_DEFAULT_FLOOR_ERROR_ATTEMPTS {
+        let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        if capture
+            .body
+            .pointer("/messages/0/content")
+            .and_then(Value::as_str)
+            != Some("fail")
+        {
+            continue;
+        }
+        assert!(capture.body.get("metadata_center").is_none());
+        sse_failure_attempts += 1;
+    }
+
     let isolation_response = client
         .post(&endpoint)
         .json(&json!({
@@ -263,11 +301,18 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .await
         .unwrap();
     assert_eq!(isolation_response.status().as_u16(), 598);
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), captures_rx.recv())
-            .await
-            .is_err()
-    );
+    if let Ok(Some(capture)) =
+        tokio::time::timeout(Duration::from_millis(100), captures_rx.recv()).await
+    {
+        assert_ne!(
+            capture
+                .body
+                .pointer("/messages/0/content")
+                .and_then(Value::as_str),
+            Some("isolation"),
+            "client isolation request must not reach provider"
+        );
+    }
 
     handle.shutdown().await;
     upstream_shutdown_tx.send(()).unwrap();

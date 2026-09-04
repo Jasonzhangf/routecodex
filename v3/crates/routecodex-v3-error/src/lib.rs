@@ -915,19 +915,29 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
     V3Error05ExecutionDecision { exhaustion, action }
 }
 
+pub fn is_v3_provider_pool_exhausted(exhaustion: &V3Error04TargetExhaustionDecision) -> bool {
+    exhaustion.target_exhausted
+        && matches!(
+            exhaustion.local_action.classified.source.source_kind,
+            V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::TargetPoolExhausted
+        )
+}
+
 pub fn build_v3_error_06_client_projected_from_v3_error_05(
     terminal: V3Error05TerminalDecision,
 ) -> V3Error06ClientProjected {
     let execution = terminal.into_execution();
     let error_class = execution.exhaustion.local_action.classified.class;
     let source = &execution.exhaustion.local_action.classified.source;
-    let provider_pool_unavailable = source.source_kind == V3ErrorSourceKind::TargetPoolExhausted;
-    let error_detail = if provider_pool_unavailable {
+    let provider_pool_exhausted = is_v3_provider_pool_exhausted(&execution.exhaustion);
+    let error_detail = if provider_pool_exhausted
+        && source.source_kind == V3ErrorSourceKind::TargetPoolExhausted
+    {
         source.message.clone()
     } else {
         client_error_message(source)
     };
-    let status = if provider_pool_unavailable {
+    let status = if provider_pool_exhausted {
         502
     } else {
         match source.source_kind {
@@ -953,12 +963,12 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         .action
         .health_affecting
         .then(|| execution.exhaustion.local_action.action.clone());
-    let public_code = if provider_pool_unavailable {
+    let public_code = if provider_pool_exhausted {
         "network_error"
     } else {
         source.code.as_str()
     };
-    let public_message = if provider_pool_unavailable {
+    let public_message = if provider_pool_exhausted {
         "network error".to_owned()
     } else {
         client_error_message(source)

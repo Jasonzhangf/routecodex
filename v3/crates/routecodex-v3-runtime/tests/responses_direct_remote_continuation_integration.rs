@@ -1783,10 +1783,13 @@ async fn direct_provider_failed_terminal_enters_error_chain_before_client_stream
     let V3ClientBody::Json(body) = &output.client_payload.body else {
         panic!("provider terminal failed event must project JSON Error06 before client SSE starts")
     };
-    assert_eq!(body["error"]["code"], "provider_response_sse_event_invalid");
-    assert!(body["error"]["message"]
-        .as_str()
-        .is_some_and(|message| !message.is_empty()));
+    assert_eq!(output.client_payload.status, 502);
+    assert_eq!(body, &json!({
+        "error": {
+            "code": "network_error",
+            "message": "network error"
+        }
+    }));
     assert!(output.stream_observation.is_none());
     assert_eq!(state.len().unwrap(), 0);
 }
@@ -2267,18 +2270,13 @@ async fn malformed_sse_attempt_never_commits_partial_bytes_and_fresh_request_rem
         1_000,
     )
     .await;
-    assert_eq!(first.client_payload.status, 200, "{first:?}");
-    let stream_error = collect_sse_body_text(first.client_payload.body)
-        .await
-        .expect_err("malformed provider event must fail while the live stream is consumed");
-    let body_text = stream_error;
-    assert!(
-        body_text.contains("provider_response_sse_event_invalid"),
-        "{body_text}"
-    );
-    assert!(
-        !body_text.contains("partial"),
-        "failed-attempt diagnostics must not expose partial control state: {body_text}"
+    assert_eq!(first.client_payload.status, 502, "{first:?}");
+    let V3ClientBody::Json(body) = first.client_payload.body else {
+        panic!("exhausted malformed provider attempt must project JSON Error06")
+    };
+    assert_eq!(
+        body,
+        json!({"error":{"code":"network_error","message":"network error"}})
     );
 
     let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
@@ -2315,13 +2313,13 @@ async fn failed_terminal_sse_attempt_never_commits_partial_bytes_and_exhausts_to
         1_000,
     )
     .await;
-    assert_eq!(first.client_payload.status, 200, "{first:?}");
-    let body_text = collect_sse_body_text(first.client_payload.body)
-        .await
-        .expect_err("response.failed must fail while the live stream is consumed");
-    assert!(
-        !body_text.contains("partial"),
-        "failed-attempt diagnostics must not expose partial control state: {body_text}"
+    assert_eq!(first.client_payload.status, 502, "{first:?}");
+    let V3ClientBody::Json(body) = first.client_payload.body else {
+        panic!("exhausted response.failed attempt must project JSON Error06")
+    };
+    assert_eq!(
+        body,
+        json!({"error":{"code":"network_error","message":"network error"}})
     );
 
     let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
@@ -2358,11 +2356,14 @@ async fn terminal_sse_success_seals_replay_without_blocking_a_fresh_request() {
         1_000,
     )
     .await;
-    assert_eq!(failed.client_payload.status, 200, "{failed:?}");
-    let failed_error = collect_sse_body_text(failed.client_payload.body)
-        .await
-        .expect_err("failed provider attempt must fail while the live stream is consumed");
-    assert!(!failed_error.contains("partial"), "{failed_error}");
+    assert_eq!(failed.client_payload.status, 502, "{failed:?}");
+    let V3ClientBody::Json(body) = failed.client_payload.body else {
+        panic!("exhausted failed provider attempt must project JSON Error06")
+    };
+    assert_eq!(
+        body,
+        json!({"error":{"code":"network_error","message":"network error"}})
+    );
 
     let terminal = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &state,
@@ -2480,9 +2481,9 @@ async fn sse_stream_error_after_restore_releases_locator_after_terminal_error05(
     let V3ClientBody::Json(body) = &output.client_payload.body else {
         panic!("provider body stream failure before client bytes must project Error06 JSON")
     };
-    assert_eq!(body["error"]["code"], "provider_response_body_error");
+    assert_eq!(body["error"]["code"], "network_error");
     assert_eq!(
-        body["error"]["message"], "provider_response_body_error",
+        body["error"]["message"], "network error",
         "provider diagnostics remain on the error chain, not the client payload"
     );
     assert!(output
@@ -2765,6 +2766,12 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "g"
 endpoints = ["responses"]
+[servers.s.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.p]
 enabled = true
 type = "responses"
@@ -2800,6 +2807,12 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "{routing_group}"
 endpoints = ["responses"]
+[servers.s.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = {{ allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }}
+attempt_store = {{}}
 [providers.p]
 enabled = true
 type = "responses"
