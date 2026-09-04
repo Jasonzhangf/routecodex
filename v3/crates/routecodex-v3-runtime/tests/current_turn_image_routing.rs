@@ -194,3 +194,50 @@ fn v3_routing_facts_current_turn_gemini_image_routes_multimodal() {
     );
     assert!(facts.capabilities.contains("vision"));
 }
+
+#[test]
+fn v3_responses_trailing_tool_output_images_do_not_route_multimodal() {
+    let cases = [
+        (
+            "function_call_output",
+            json!([{"detail": "original", "image_url": "data:image/png;base64,FCO"}]),
+        ),
+        (
+            "custom_tool_call_output",
+            json!([{"detail": "original", "image_url": "data:image/png;base64,CUSTOM"}]),
+        ),
+        (
+            "tool_call_output",
+            json!([{"detail": "original", "image_url": "data:image/png;base64,TOOL"}]),
+        ),
+        (
+            "function_call_output",
+            json!("[{\"detail\":\"original\",\"image_url\":\"data:image/png;base64,STRING\"}]"),
+        ),
+    ];
+
+    for (output_type, output) in cases {
+        let request = json!({
+            "model": "gpt-5.6-sol",
+            "input": [
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "current turn"}
+                ]},
+                {"type": output_type, "call_id": "call_1", "output": output}
+            ]
+        });
+        let facts = build_v3_router_request_facts_for_entry(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        );
+
+        assert_ne!(
+            facts.route_classification.route_name, "multimodal",
+            "trailing {output_type} image must not activate multimodal: {:?}",
+            facts.route_classification
+        );
+        assert!(!facts.capabilities.contains("multimodal"));
+        assert!(!facts.capabilities.contains("vision"));
+    }
+}
