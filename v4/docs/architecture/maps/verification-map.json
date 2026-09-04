@@ -3002,6 +3002,22 @@
         "scripts/architecture/verify-v4-cordis-production-admission.mjs"
       ],
       "required_for": ["v4.cordis.production_admission:source_green"]
+    },
+    {
+      "gate_id": "v4_cordis_lifecycle_failure_atomic",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-runtime-bin",
+      "feature_ids": ["v4.lifecycle.failure_atomic"],
+      "command": "cargo test -p routecodex-v4-runtime-bin --test l2_cli_blackbox failed_cordis_readiness_reaps_owned_host_and_socket --locked --quiet",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-runtime-bin", "--test", "l2_cli_blackbox", "failed_cordis_readiness_reaps_owned_host_and_socket", "--locked", "--quiet"],
+      "producer": {"adapter": "cargo", "identity": "v4_runtime_bin_lifecycle_failure_atomic"},
+      "evidence_role": "positive_and_negative",
+      "input_paths": [
+        "crates/routecodex-v4-lifecycle/src/lib.rs",
+        "crates/routecodex-v4-runtime-bin/src/main.rs",
+        "crates/routecodex-v4-runtime-bin/tests/l2_cli_blackbox.rs"
+      ],
+      "required_for": ["v4.lifecycle.instance_state:source_green", "v4.lifecycle.control_socket:source_green"]
     }
   ]
 }
