@@ -770,6 +770,72 @@ fn resp03_matching_wire_model_strips_and_projects() {
 }
 
 #[test]
+fn resp03_model_id_only_is_removed_at_the_shared_response_owner() {
+    let mut openai_chat = json!({
+        "choices":[{"message":{
+            "role":"assistant",
+            "tool_calls":[{"id":"call_model_id_chat","type":"function","function":{
+                "name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"model_id\":\"wrong-model\"}"
+            }}]
+        }}]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut openai_chat,
+        true,
+        true,
+        Some("selected-model"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-model-id-chat"),
+            request_id: Some("request-model-id-chat"),
+        },
+    );
+    assert_eq!(
+        openai_chat["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"],
+        "{\"cmd\":\"pwd\"}"
+    );
+
+    let mut responses_sse = json!({
+        "type":"response.completed",
+        "response":{"output":[{"type":"function_call","call_id":"call_model_id_responses",
+            "name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"model_id\":\"wrong-model\"}"}]}
+    });
+    let mut pending_reasons = Vec::new();
+    let mut reason_emitted = false;
+    map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_and_expected_model(
+        &mut responses_sse,
+        true,
+        &["exec_command".to_string()],
+        &mut pending_reasons,
+        &mut reason_emitted,
+        true,
+        Some("session-model-id-responses"),
+        Some("request-model-id-responses"),
+        None,
+        Some("selected-model"),
+    );
+    assert_eq!(
+        responses_sse["response"]["output"][0]["arguments"],
+        "{\"cmd\":\"pwd\"}"
+    );
+
+    let mut anthropic = json!({
+        "content":[{"type":"tool_use","id":"call_model_id_anthropic",
+            "name":"exec_command","input":{"cmd":"pwd","model_id":"wrong-model"}}]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut anthropic,
+        true,
+        true,
+        Some("selected-model"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-model-id-anthropic"),
+            request_id: Some("request-model-id-anthropic"),
+        },
+    );
+    assert_eq!(anthropic["content"][0]["input"], json!({"cmd":"pwd"}));
+}
+
+#[test]
 fn resp03_phase1_reason_only_projects_without_optional_diagnostics() {
     let mut payload = json!({
         "output":[{"type":"custom_tool_call","call_id":"call_reason_only",
@@ -941,6 +1007,30 @@ fn resp03_custom_tool_malformed_nested_wrapper_is_left_byte_semantically_unchang
         V3ToolreasonObservationContext {
             session_id: Some("session-custom-invalid-nested"),
             request_id: Some("request-custom-invalid-nested"),
+        },
+    );
+
+    assert_eq!(payload, before);
+}
+
+#[test]
+fn resp03_custom_tool_malformed_json_wrapper_does_not_strip_nested_model_id() {
+    let wrapped_input =
+        r#"{"input":"native custom input","reason":42,"model_id":"wrong-model"}"#;
+    let mut payload = json!({
+        "output":[{"type":"custom_tool_call","call_id":"call_custom_invalid_model_id",
+            "name":"apply_patch","model_id":"wrong-envelope-model","input":wrapped_input}]
+    });
+    let before = payload.clone();
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("selected-model"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-custom-invalid-model-id"),
+            request_id: Some("request-custom-invalid-model-id"),
         },
     );
 

@@ -431,6 +431,9 @@ fn strip_v3_tool_thinking_fields_from_object_at_resp03(
             }
             return;
         }
+        // A legacy response may place model_id on the call envelope instead
+        // of its parameter object. It is still owned and removed here.
+        object.remove("model_id");
         if object.get("type").and_then(Value::as_str) == Some("tool_use") {
             if let Some(value) = object.get_mut("input") {
                 strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
@@ -457,28 +460,38 @@ fn strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
 ) {
     match value {
         Value::Object(object) => {
-            if v3_tool_thinking_object_reason_at_resp03(object, expected_model_id).is_none() {
-                return;
+            if v3_tool_thinking_object_reason_at_resp03(object, expected_model_id).is_some() {
+                object.remove("reason");
+                object.remove("goal_alignment_confidence");
             }
-            object.remove("reason");
-            object.remove("goal_alignment_confidence");
+            // `model_id` is a legacy Toolreason field. Req04 never injects it;
+            // Resp03 owns its compatibility removal even when the rest of the
+            // Toolreason object is missing or invalid.
             object.remove("model_id");
         }
         Value::String(text) => {
+            if json_object_has_duplicate_keys_at_resp03(text.trim()) {
+                return;
+            }
             let Ok(mut parsed) = serde_json::from_str::<Value>(text) else {
                 return;
             };
             let Some(parsed_object) = parsed.as_object() else {
                 return;
             };
-            if v3_tool_thinking_object_reason_at_resp03(parsed_object, expected_model_id).is_none()
-            {
+            let has_valid_toolreason =
+                v3_tool_thinking_object_reason_at_resp03(parsed_object, expected_model_id)
+                    .is_some();
+            if !has_valid_toolreason && !parsed_object.contains_key("model_id") {
                 return;
             }
-            strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
-                &mut parsed,
-                expected_model_id,
-            );
+            if let Some(parsed_object) = parsed.as_object_mut() {
+                if has_valid_toolreason {
+                    parsed_object.remove("reason");
+                    parsed_object.remove("goal_alignment_confidence");
+                }
+                parsed_object.remove("model_id");
+            }
             if let Ok(serialized) = serde_json::to_string(&parsed) {
                 *text = serialized;
             }
@@ -2793,10 +2806,11 @@ pub(crate) fn map_v3_anthropic_toolreason_stream_event_at_resp03(
             // fragment, preserving every non-toolreason argument.
             delta.insert("partial_json".to_string(), Value::String(String::new()));
             if let Ok(mut object) = serde_json::from_str::<Value>(buffer) {
-                if let Some(map) = object.as_object_mut() {
-                    map.remove("reason");
-                    map.remove("goal_alignment_confidence");
-                    map.remove("model_id");
+                if object.as_object().is_some() {
+                    strip_v3_tool_thinking_fields_from_parameter_value_at_resp03(
+                        &mut object,
+                        expected_model_id,
+                    );
                     if let Ok(redacted) = serde_json::to_string(&object) {
                         delta.insert("partial_json".to_string(), Value::String(redacted));
                     }

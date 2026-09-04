@@ -743,8 +743,8 @@ resources:
     identity: [requestId, pipelineId]
     semantic_contract:
       producer: Resp03 finalizes exactly one typed status for an observed native tool-call turn after protocol completion.
-      valid_shape: Phase 1 OK carries a trimmed nonempty reason and one formatted projection text; confidence and model ID are optional diagnostics validated when present.
-      invalid_shape: MISSING, INVALID, and MISPLACED carry no projection text and authorize no redaction or reasoning.
+      valid_shape: Phase 1 OK carries a trimmed nonempty reason and one formatted projection text; confidence is an optional diagnostic validated when present, and legacy model_id is never projected.
+      invalid_shape: MISSING, INVALID, and MISPLACED carry no projection text and authorize no reasoning or active reason/confidence redaction; Resp03 may still remove legacy model_id at an identified native tool-call envelope/parameter boundary, while malformed JSON/custom wrappers remain unchanged.
       projection_boundary: registered client-protocol projectors consume this typed result without inspecting visible IDs, prefixes, markers, ordinary reasoning, or history.
       observation_boundary: exactly one canonical terminal observation consumes the same finalized result; projection diagnostics do not create a second terminal status.
       payload_boundary: the typed result never enters provider/client payload, protocol metadata, history, continuation, debug payload, or MetadataCenter; only its registered normal reasoning projection may enter the client payload for OK.

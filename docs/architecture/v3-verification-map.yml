@@ -3444,7 +3444,7 @@ features:
   - provider-bound snapshots prove the governed contract survives every protocol projection, including Responses-to-OpenAI-Chat custom wrapping
   - RespInbound02 preserves the complete provider-native parameter container until Resp03
   - protocol adapters retain exact complete parameter JSON bytes and Resp03 rejects duplicate reserved keys without first-wins or last-wins collapse
-  - Resp03 alone validates reason and any supplied diagnostics; one valid reason authorizes all-or-nothing reserved-key removal and exactly one typed terminal turn result
+  - Resp03 alone validates reason and any supplied diagnostics; one valid reason authorizes all-or-nothing active reason/confidence removal and exactly one typed terminal turn result, while legacy model_id is independently removed only at an identified native tool-call envelope/parameter boundary
   - an OK result projects one separate normal reasoning item immediately before the first native tool call while every provider-native reasoning item remains byte-identical and ordered
   - every observed tool turn emits exactly one OK, MISSING, INVALID, or MISPLACED terminal observation with the existing canonical session_id and request_id
   - a parallel tool turn is OK only when every eligible call is valid; a mixed turn emits one deterministic non-OK status and no Tool-Thinking reasoning
@@ -3452,7 +3452,7 @@ features:
   - v3.response.tool_thinking_turn_result carries projection authorization only as a request-local typed resource and is released after observation/client projection
   required_negative:
   - provider-facing guidance never contains another protocol's wire wrapper, field container, or positive example
-  - missing, empty, or wrong-type reason; wrong-type or out-of-range supplied diagnostics; duplicate or misplaced reserved fields; malformed JSON; and incomplete native calls never authorize reasoning, reserved-key removal, or any tool-call rewrite; absent diagnostics alone remain response-compatible
+  - missing, empty, or wrong-type reason; wrong-type or out-of-range supplied diagnostics; duplicate or misplaced active reserved fields; malformed JSON; and incomplete native calls never authorize reasoning, active-field removal, or any tool-call rewrite; legacy model_id cleanup is response-only compatibility and malformed custom wrappers remain unchanged
   - malformed custom wrappers or non-string custom input are never guessed or repaired
   - ordinary model reasoning, thinking, text, history, descriptions, and legacy fences are never parsed as Tool-Thinking
   - visible rcc_reason_* IDs, 调用工具 prefixes, pending ordinary message text, marker characters, and content equality never authorize, replay, suppress, or deduplicate Tool-Thinking

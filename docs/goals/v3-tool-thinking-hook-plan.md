@@ -26,9 +26,12 @@ required to add the two auxiliary fields to its native parameter object:
 The response hook reads only those explicit fields from a complete native
 tool-call parameter container. For response compatibility, a non-empty valid
 `reason` authorizes one visible reasoning projection even when the provider omits
-the two diagnostics. Before client projection, every supplied reserved field is
-removed without changing any native tool name, call ID, command, input, argument,
-result, finish reason, or protocol structure.
+the optional diagnostic. Before client projection, Resp03 removes the two active
+Tool-Thinking fields only for a valid reason-bearing call; it separately removes
+legacy `model_id` from an identified native tool-call envelope or parameter
+object even when reason is absent or invalid. Malformed JSON and malformed custom
+wrappers remain unchanged. No cleanup changes any native tool name, call ID,
+command, input, argument, result, finish reason, or protocol structure.
 
 The feature is transparent to both endpoints:
 
@@ -54,11 +57,15 @@ The feature is transparent to both endpoints:
    compatibility-tolerant: an explicit non-empty `reason` authorizes projection;
    diagnostics are validated when present, but absence or model mismatch does
    not block that reason projection.
-5. Reserved-field removal is all-or-nothing per native call. A Phase 1 valid
-   parameter object has its recognized auxiliary keys removed; every rejected
-   object remains unchanged. Removing those keys must not modify any native
-   parameter. Turn-level reasoning authorization is still granted at most once
-   and only from explicit valid reason fields.
+5. Active Tool-Thinking-field removal is all-or-nothing per native call. A
+   Phase 1 valid parameter object has its `reason` and
+   `goal_alignment_confidence` keys removed; every rejected object keeps those
+   fields and all native parameters unchanged. Legacy `model_id` is a response-
+   compatibility field, not an authorization diagnostic: Resp03 removes it
+   only at the identified native tool-call envelope/parameter boundary, even
+   when the reason is missing or invalid, while malformed JSON/custom wrappers
+   remain unchanged. Turn-level reasoning authorization is still granted at
+   most once and only from explicit valid reason fields.
 6. Malformed or incomplete JSON is never repaired. It is classified and remains
    native provider output; it cannot authorize projection.
 7. One assistant tool turn produces exactly one terminal observation and at most
@@ -321,7 +328,7 @@ function `arguments` object into Resp03; extracting only its `input` field befor
 Resp03 is forbidden because it destroys the sole extractor's source.
 
 Every protocol adapter emits one complete typed native item without inspecting
-the three auxiliary names:
+the two active auxiliary names plus the legacy response-compatibility name:
 
 ```text
 V3NativeToolCallItem
@@ -420,12 +427,14 @@ reason-only projection. Otherwise the turn receives `MISSING`, `INVALID`, or
 ### 9.2 All-or-nothing redaction
 
 Redaction is part of the same strict parse transaction as authorization. Resp03
-removes the two reserved top-level keys only after one complete native tool
-parameter object passes the Phase 1 reason-only validator. Missing or invalid
-`reason`, invalid supplied diagnostics, misplaced or duplicate reserved fields,
-or malformed/incomplete native calls are not rewritten. Missing diagnostics
-alone remain valid. No second privacy parser, key-only scrubber, text search,
-or malformed-JSON repair is allowed.
+removes the two active reserved top-level keys only after one complete native
+tool parameter object passes the Phase 1 reason-only validator. Legacy
+`model_id` is removed independently at the identified native tool-call
+envelope/parameter boundary, including when `reason` is missing or invalid;
+malformed JSON, duplicate-key JSON, malformed custom wrappers, misplaced active
+fields, and incomplete native calls are not repaired or guessed. No second
+privacy parser, key-only scrubber, text search, or malformed-JSON repair is
+allowed.
 
 This ordering deliberately gives the explicit no-rewrite rule precedence for
 negative samples. “Zero auxiliary-field leakage” is therefore an acceptance
@@ -543,8 +552,8 @@ fabricated redacted object.
 Each observed assistant tool turn emits exactly one terminal line:
 
 ```text
-TOOLREASON OK        stage=<owner> session_id=<canonical> request_id=<canonical> tool=<names> confidence=<0-100> thinking=<bounded reason> model=<id>
-TOOLREASON MISSING   stage=<owner> session_id=<canonical> request_id=<canonical> tool=<names> confidence=<missing> thinking=<missing> model=<missing>
+TOOLREASON OK        stage=<owner> session_id=<canonical> request_id=<canonical> tool=<names> confidence=<0-100> thinking=<bounded reason>
+TOOLREASON MISSING   stage=<owner> session_id=<canonical> request_id=<canonical> tool=<names> confidence=<missing> thinking=<missing>
 TOOLREASON INVALID   stage=<owner> session_id=<canonical> request_id=<canonical> tool=<names> detail=<bounded classification>
 TOOLREASON MISPLACED stage=<owner> session_id=<canonical> request_id=<canonical> tool=<names> detail=<bounded classification>
 ```
@@ -654,7 +663,8 @@ forbidden:
 
 Protocol normalizers may select a preservation shape from typed provenance, but
 they must not validate, redact, restore, format, observe, or project. Resp03 is
-the only stage allowed to read the three reserved field names from a response.
+the only stage allowed to read or remove the reserved field names from a
+response.
 ReqOutbound is not allowed to call a Tool-Thinking schema helper. Direct retries
 are not allowed to call the Req04 compiler.
 
@@ -876,8 +886,8 @@ measured result, not permission to guess or rewrite the response.
 1. Refresh resource/function/mainline/verification maps and the local
    collaboration run record; verify the unique Req04/Resp03 owners and inspect
    all current dirty changes before editing.
-2. Add red tests for server-scoped enablement, true model self-report guidance
-   with no request/route/wire-derived binding, missing
+2. Add red tests for server-scoped enablement, no model-identity guidance or
+   request/route/wire-derived identity binding, missing
    and malformed fields, duplicate observations, multi-tool aggregation,
    custom `apply_patch`, native-payload identity, and no projection of natural
    reasoning. Then make only the unique hook owner green.
@@ -893,8 +903,8 @@ measured result, not permission to guess or rewrite the response.
    response dry-run are diagnostic stage proofs; neither replaces the real
    pipeline windows.
 6. For each group, calculate rather than eyeball: Req04 coverage, provider raw
-   field presence, valid/missing/invalid/misplaced rates, observed self-reported
-   model identity and request-derived contamination count,
+   field presence, valid/missing/invalid/misplaced rates, legacy `model_id`
+   presence/cleanup and request-derived contamination count,
    one terminal status per turn, projection rate for valid turns, native
    identity, duplicate count, leakage count, and 400/500/502/panic/SSE/tool
    mapping failures.
@@ -928,8 +938,11 @@ Req04 model-facing guidance and eligible tool schemas require `reason` and
 `goal_alignment_confidence` together. No model-identity field or instruction is
 injected into the provider-facing contract. Resp03 intentionally uses a
 looser compatibility gate: it must not reject, repair, infer, or block a valid
-reason projection because either diagnostic is absent or differs from the
-expected value. When supplied, diagnostics are type/range checked, logged, and
+reason projection because the optional confidence diagnostic is absent or
+differs from an expected value. Legacy `model_id` is never used for
+authorization or projection; when it occurs at an identified native
+tool-call envelope/parameter boundary, Resp03 removes it even without a
+valid reason. When supplied, confidence is type/range checked, logged, and
 discarded with the other internal fields.
 
 Phase 1 passes the current live adherence gate only when each required 4444

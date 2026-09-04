@@ -5522,8 +5522,8 @@ features:
   - downstream protocol projection preserves the Req04 contract mechanically and never performs a second semantic injection
   - RespInbound02 preserves the complete native parameter container; custom input is not unwrapped before Resp03
   - protocol adapters retain exact complete native parameter JSON bytes so Resp03 can reject duplicate reserved keys without first-wins or last-wins collapse
-  - Resp03 alone classifies reason and any supplied diagnostics; only one valid non-empty reason authorizes all-or-nothing removal of supplied auxiliary keys and one typed turn result
-  - missing, empty, or invalid reason; invalid supplied diagnostics; duplicate or misplaced reserved fields; and incomplete or malformed native calls never authorize reasoning or any tool-call rewrite; absent diagnostics alone remain response-compatible
+  - Resp03 alone classifies reason and any supplied diagnostics; only one valid non-empty reason authorizes reasoning and all-or-nothing removal of the active reason/confidence keys, while legacy model_id is independently removed only at an identified native tool-call envelope/parameter boundary
+  - missing, empty, or invalid reason; invalid supplied diagnostics; duplicate or misplaced active reserved fields; and incomplete native calls never authorize reasoning or active-field rewrite; legacy model_id cleanup remains response-only compatibility, and malformed JSON/custom wrappers stay unchanged
   - a parallel tool turn is OK only when every eligible native call is valid; mixed status produces one deterministic non-OK terminal result and no reasoning
   - provenance-matched custom restoration is an independent mechanical inverse and preserves valid custom input for every terminal status
   - the typed turn result projects one separate normal reasoning item before the first native tool call without changing provider-native reasoning
