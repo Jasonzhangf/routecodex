@@ -409,7 +409,6 @@ fn start(intent: StartIntent) -> Result<String, String> {
         return Ok("state=stopped identity=rccv4 foreground=true".to_string());
     }
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
-    print_startup(&manifest);
     preflight_cordis_admission(&manifest)?;
     if routecodex_v4_lifecycle::read_record(&paths)
         .map_err(|error| error.to_string())?
@@ -427,6 +426,7 @@ fn start(intent: StartIntent) -> Result<String, String> {
         Duration::from_secs(15),
     )
     .map_err(|error| error.to_string())?;
+    print_startup(&manifest);
     println!(
         "state=running identity=rccv4 pid={} listeners={}",
         record.pid,
