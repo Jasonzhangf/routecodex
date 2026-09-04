@@ -138,6 +138,12 @@ pub fn project_v3_anthropic_relay_runtime_failure(
             "direct_model_not_found",
             message,
         ),
+        V3AnthropicRelayRuntimeError::ProviderPoolExhausted {
+            attempted_candidates,
+        } => provider_pool_exhausted_source(
+            "V3Target10ConcreteProviderSelected",
+            &attempted_candidates,
+        ),
         V3AnthropicRelayRuntimeError::ProviderCompat(error) => match error.classification() {
             V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
                 super::provider_compat_boundary_source("ProviderRespCompat02ProviderCompat", &error)
@@ -307,6 +313,32 @@ fn extract_v3_anthropic_relay_usage_summary(
 #[cfg(test)]
 mod anthropic_client_sse_projection_tests {
     use super::*;
+
+    #[test]
+    fn provider_pool_exhaustion_projects_compact_network_error() {
+        let output = project_v3_anthropic_relay_runtime_failure(
+            V3AnthropicRelayRuntimeError::ProviderPoolExhausted {
+                attempted_candidates: vec![
+                    "provider-a:key-a:model-a:availability(cooldown)".to_string()
+                ],
+            },
+        );
+
+        assert_eq!(output.status, 502);
+        assert_eq!(
+            output.client_response,
+            json!({"error":{"code":"network_error","message":"network error"}})
+        );
+        assert_eq!(
+            output.error_chain.as_deref(),
+            Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        );
+        assert!(!output.client_response.to_string().contains("provider-a"));
+        assert!(!output
+            .client_response
+            .to_string()
+            .contains("selected_target_exhausted"));
+    }
 
     #[test]
     fn invalid_client_sse_event_is_rejected_before_stream_creation() {

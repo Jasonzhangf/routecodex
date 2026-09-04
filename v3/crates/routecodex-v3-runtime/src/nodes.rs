@@ -13,8 +13,12 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 pub(crate) use crate::execution_control::{
-    V3AttemptBudget, V3AttemptStoreError, V3CommittedClientSseBuilder,
+    V3AttemptBudget, V3AttemptStoreError, V3CommittedClientSseBuilder, V3SseAttemptFrame,
+    V3SseFrameDisposition,
 };
+
+pub(crate) type V3SseAttemptStream =
+    Pin<Box<dyn Stream<Item = Result<V3SseAttemptFrame, V3Error01SourceRaised>> + Send>>;
 pub use crate::execution_control::{
     V3AttemptSuccessReceipt, V3CommittedClientSseStream, V3CommittedSseTerminal,
     V3RequestExecutionControl,

@@ -175,7 +175,7 @@ fn persist_v3_direct_continuation_lifecycle(
 }
 
 fn wrap_v3_direct_sse_continuation_lifecycle(
-    stream: V3ClientSseStream,
+    stream: V3SseAttemptStream,
     observation_state: V3SseRemoteContinuationObservationState,
     continuation_state: Option<Arc<V3ResponsesDirectContinuationState>>,
     continuation_scope: Option<V3ResponsesDirectContinuationScope>,
@@ -183,9 +183,9 @@ fn wrap_v3_direct_sse_continuation_lifecycle(
     selected_pin: V3RemoteContinuationPin,
     selected_capability_revision: String,
     now_epoch_ms: u64,
-) -> V3ClientSseStream {
+) -> V3SseAttemptStream {
     struct State {
-        stream: V3ClientSseStream,
+        stream: V3SseAttemptStream,
         observation_state: V3SseRemoteContinuationObservationState,
         continuation_state: Option<Arc<V3ResponsesDirectContinuationState>>,
         continuation_scope: Option<V3ResponsesDirectContinuationScope>,

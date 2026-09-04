@@ -921,22 +921,31 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
     let execution = terminal.into_execution();
     let error_class = execution.exhaustion.local_action.classified.class;
     let source = &execution.exhaustion.local_action.classified.source;
-    let error_detail = client_error_message(source);
-    let status = match source.source_kind {
-        V3ErrorSourceKind::InvalidRequest => 400,
-        V3ErrorSourceKind::RequestConflict => 409,
-        V3ErrorSourceKind::UnsupportedMediaType => 415,
-        V3ErrorSourceKind::PayloadTooLarge => 413,
-        V3ErrorSourceKind::MethodNotAllowed => 405,
-        V3ErrorSourceKind::PathNotFound => 404,
-        V3ErrorSourceKind::ModelNotFound => 404,
-        V3ErrorSourceKind::PendingEndpoint => 501,
-        V3ErrorSourceKind::ProviderFailure => provider_client_status(source),
-        V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => 400,
-        V3ErrorSourceKind::TargetPoolExhausted => 503,
-        V3ErrorSourceKind::RuntimeFailure => internal_client_status(source),
-        V3ErrorSourceKind::ClientDisconnect => 499,
-        V3ErrorSourceKind::SuccessControl => 500,
+    let provider_pool_unavailable = source.source_kind == V3ErrorSourceKind::TargetPoolExhausted;
+    let error_detail = if provider_pool_unavailable {
+        source.message.clone()
+    } else {
+        client_error_message(source)
+    };
+    let status = if provider_pool_unavailable {
+        502
+    } else {
+        match source.source_kind {
+            V3ErrorSourceKind::InvalidRequest => 400,
+            V3ErrorSourceKind::RequestConflict => 409,
+            V3ErrorSourceKind::UnsupportedMediaType => 415,
+            V3ErrorSourceKind::PayloadTooLarge => 413,
+            V3ErrorSourceKind::MethodNotAllowed => 405,
+            V3ErrorSourceKind::PathNotFound => 404,
+            V3ErrorSourceKind::ModelNotFound => 404,
+            V3ErrorSourceKind::PendingEndpoint => 501,
+            V3ErrorSourceKind::ProviderFailure => provider_client_status(source),
+            V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => 400,
+            V3ErrorSourceKind::TargetPoolExhausted => 503,
+            V3ErrorSourceKind::RuntimeFailure => internal_client_status(source),
+            V3ErrorSourceKind::ClientDisconnect => 499,
+            V3ErrorSourceKind::SuccessControl => 500,
+        }
     };
     let health_action = execution
         .exhaustion
@@ -944,9 +953,19 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         .action
         .health_affecting
         .then(|| execution.exhaustion.local_action.action.clone());
+    let public_code = if provider_pool_unavailable {
+        "network_error"
+    } else {
+        source.code.as_str()
+    };
+    let public_message = if provider_pool_unavailable {
+        "network error".to_owned()
+    } else {
+        client_error_message(source)
+    };
     let error = serde_json::json!({
-        "code": source.code,
-        "message": client_error_message(source),
+        "code": public_code,
+        "message": public_message,
     });
     let body = routecodex_v3_debug::project_debug_value_verbatim(
         &routecodex_v3_debug::V3RedactionPolicy,
@@ -1027,6 +1046,8 @@ impl V3ErrorHandlingCenter {
         let source_status = input.source_status;
         let internal_runtime_failure =
             input.source.source_kind == V3ErrorSourceKind::RuntimeFailure;
+        let target_pool_exhausted =
+            input.source.source_kind == V3ErrorSourceKind::TargetPoolExhausted;
         let execution = Self::decide_provider(input, false, false, None);
         let mut projected = Self::project_terminal(execution);
         let linked_status = projected
@@ -1035,7 +1056,7 @@ impl V3ErrorHandlingCenter {
             .and_then(serde_json::Value::as_u64)
             .and_then(|status| u16::try_from(status).ok())
             .filter(|status| *status >= 400);
-        if !internal_runtime_failure {
+        if !internal_runtime_failure && !target_pool_exhausted {
             if let Some(status) = source_status
                 .filter(|status| *status >= 400)
                 .or(linked_status)

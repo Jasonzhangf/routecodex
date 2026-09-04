@@ -395,7 +395,8 @@ async fn direct_sse_retain_false_passes_cipher_free_frames_byte_for_byte() {
     );
     let first = observed.next().await.unwrap().unwrap();
     assert_eq!(
-        first, raw,
+        first.as_ref(),
+        raw.as_slice(),
         "retain=false 且帧无密文时必须逐字节透传（direct SSE 字节保真）"
     );
 }
@@ -1254,7 +1255,7 @@ async fn direct_sse_full_attempt_commit_reselects_after_partial_network_failure(
         )),
     ]));
     let error = collect_direct_sse_attempt_after_terminal(
-        source,
+        test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
         V3HubProviderWireProtocol::Responses,
         crate::nodes::V3AttemptBudget::process_default(),
     )
@@ -1265,7 +1266,7 @@ async fn direct_sse_full_attempt_commit_reselects_after_partial_network_failure(
         b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"recovered\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"recovered\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
     )]));
     let frames = collect_direct_sse_attempt_after_terminal(
-        replacement,
+        test_direct_sse_attempt_stream(replacement, V3HubProviderWireProtocol::Responses),
         V3HubProviderWireProtocol::Responses,
         crate::nodes::V3AttemptBudget::process_default(),
     )
@@ -1447,7 +1448,7 @@ async fn direct_sse_full_attempt_commit_rejects_eof_without_terminal() {
         b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
     )]));
     let error = collect_direct_sse_attempt_after_terminal(
-        source,
+        test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
         V3HubProviderWireProtocol::Responses,
         crate::nodes::V3AttemptBudget::process_default(),
     )
@@ -1470,7 +1471,7 @@ async fn direct_sse_full_attempt_commit_does_not_mix_failed_attempt_bytes() {
         )),
     ]));
     let error = collect_direct_sse_attempt_after_terminal(
-        source,
+        test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
         V3HubProviderWireProtocol::Responses,
         crate::nodes::V3AttemptBudget::process_default(),
     )
@@ -1481,7 +1482,7 @@ async fn direct_sse_full_attempt_commit_does_not_mix_failed_attempt_bytes() {
         b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider-b\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-b-only\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider-b\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
     )]));
     let committed = collect_direct_sse_attempt_after_terminal(
-        replacement,
+        test_direct_sse_attempt_stream(replacement, V3HubProviderWireProtocol::Responses),
         V3HubProviderWireProtocol::Responses,
         crate::nodes::V3AttemptBudget::process_default(),
     )
@@ -1514,7 +1515,7 @@ async fn direct_sse_full_attempt_commit_ignores_late_error_after_terminal() {
         )),
     ]));
     let frames = collect_direct_sse_attempt_after_terminal(
-        source,
+        test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
         V3HubProviderWireProtocol::Responses,
         crate::nodes::V3AttemptBudget::process_default(),
     )

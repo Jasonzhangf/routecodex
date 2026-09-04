@@ -296,27 +296,30 @@ pub fn project_v3_responses_relay_runtime_failure(
                 protocol_direct_handoff: None,
             };
         }
-        V3ResponsesRelayRuntimeError::Target(message) => {
-            let source = build_v3_error_01_source_raised(
-                V3ErrorSourceKind::TargetPoolExhausted,
+        V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
+            attempted_candidates,
+        } => {
+            let source = provider_pool_exhausted_source(
                 "V3Target10ConcreteProviderSelected",
-                "selected_target_exhausted",
-                message,
+                &attempted_candidates,
             );
-            let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-                source: source.clone(),
-                action_scope: V3ErrorActionScope::None,
-                candidates_remaining: 0,
-                source_status: None,
-            });
             error_output(
                 source,
-                projected.status,
+                502,
                 "none",
                 Vec::new(),
                 observability,
                 0,
             )
+        }
+        V3ResponsesRelayRuntimeError::Target(message) => {
+            let source = build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3HubRuntime",
+                "responses_relay_runtime_error",
+                message,
+            );
+            error_output(source, 500, "none", Vec::new(), observability, 0)
         }
         V3ResponsesRelayRuntimeError::ClientInboundCanonical(message) => {
             let source = routecodex_v3_error::build_v3_error_01_source_raised(

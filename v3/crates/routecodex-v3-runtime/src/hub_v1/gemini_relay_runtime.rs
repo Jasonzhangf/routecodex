@@ -119,6 +119,8 @@ pub enum V3GeminiRelayRuntimeError {
     StaticRegistry(String),
     #[error("V3 Gemini target resolution failed: {0}")]
     Target(String),
+    #[error("V3 Gemini provider pool exhausted after {attempted_candidates:?}")]
+    ProviderPoolExhausted { attempted_candidates: Vec<String> },
     #[error("V3 Gemini requested direct provider model not found: {0}")]
     ModelNotFound(String),
     #[error("V3 Gemini provider contract failed: {0}")]
@@ -227,6 +229,11 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
             V3GeminiRelayRuntimeError::ModelNotFound(message)
         }
         V3RelayCoreError::EndpointPath(message) => V3GeminiRelayRuntimeError::EndpointPath(message),
+        V3RelayCoreError::ProviderPoolExhausted {
+            attempted_candidates,
+        } => V3GeminiRelayRuntimeError::ProviderPoolExhausted {
+            attempted_candidates,
+        },
         // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
         V3RelayCoreError::Target(message)
         | V3RelayCoreError::StaticRegistry(message)
@@ -467,6 +474,12 @@ pub fn project_v3_gemini_relay_runtime_failure(
             "V3Target10ConcreteProviderSelected",
             "direct_model_not_found",
             message,
+        ),
+        V3GeminiRelayRuntimeError::ProviderPoolExhausted {
+            attempted_candidates,
+        } => provider_pool_exhausted_source(
+            "V3Target10ConcreteProviderSelected",
+            &attempted_candidates,
         ),
         V3GeminiRelayRuntimeError::ProviderCompat(error) => match error.classification() {
             V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {

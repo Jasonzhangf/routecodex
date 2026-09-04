@@ -164,6 +164,8 @@ pub enum V3AnthropicRelayRuntimeError {
     StaticRegistry(String),
     #[error("V3 Relay target resolution failed: {0}")]
     Target(String),
+    #[error("V3 Relay provider pool exhausted after {attempted_candidates:?}")]
+    ProviderPoolExhausted { attempted_candidates: Vec<String> },
     #[error("V3 Relay requested direct provider model not found: {0}")]
     ModelNotFound(String),
     #[error("V3 Relay provider contract failed: {0}")]
@@ -733,9 +735,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 V3RelayProviderTargetResolution::Exhausted {
                     attempted_candidates,
                 } => {
-                    return Err(V3AnthropicRelayRuntimeError::Target(format!(
-                        "selected target exhausted after {attempted_candidates:?}"
-                    )))
+                    return Err(V3AnthropicRelayRuntimeError::ProviderPoolExhausted {
+                        attempted_candidates,
+                    })
                 }
             }
         };

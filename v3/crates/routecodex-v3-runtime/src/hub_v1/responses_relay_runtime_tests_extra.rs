@@ -48,26 +48,24 @@ fn missing_usage_gets_request_tiktoken_input_estimate() {
 }
 
 #[test]
-fn explicit_target_exhaustion_projection_is_compact() {
+fn provider_pool_exhaustion_projection_is_compact() {
     let output =
             project_v3_responses_relay_runtime_failure(
-                V3ResponsesRelayRuntimeError::Target(
-                    "selected target exhausted after [\"routecodex:key1:deepseek-v4-flash:availability(cooldown)\"]"
-                        .to_string(),
-                ),
+                V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
+                    attempted_candidates: vec![
+                        "routecodex:key1:deepseek-v4-flash:availability(cooldown)".to_string(),
+                    ],
+                },
                 None,
             );
 
-    assert_eq!(output.status, 503);
+    assert_eq!(output.status, 502);
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => panic!("target exhaustion must project as JSON"),
     };
-    assert_eq!(body["error"]["code"], "selected_target_exhausted");
-    assert_eq!(
-            body["error"]["message"],
-            "selected target exhausted after [\"routecodex:key1:deepseek-v4-flash:availability(cooldown)\"]"
-        );
+    assert_eq!(body["error"]["code"], "network_error");
+    assert_eq!(body["error"]["message"], "network error");
     assert!(
         body["error"].get("class").is_none()
             && body["error"].get("target_exhausted").is_none()
@@ -76,11 +74,28 @@ fn explicit_target_exhaustion_projection_is_compact() {
         "Error06 body must not carry control-plane fields: {}",
         body["error"]
     );
-    assert!(!body.to_string().contains("V3TargetExhaustion"));
+    assert!(!body.to_string().contains("routecodex:key1"));
+    assert!(!body.to_string().contains("selected_target_exhausted"));
     assert_eq!(
         output.error_chain.as_deref(),
         Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
     );
+}
+
+#[test]
+fn generic_target_failure_does_not_become_provider_pool_exhaustion() {
+    let output = project_v3_responses_relay_runtime_failure(
+        V3ResponsesRelayRuntimeError::Target("target clock failed".to_string()),
+        None,
+    );
+
+    assert_eq!(output.status, 598);
+    let body = match &output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("target failure must project as JSON"),
+    };
+    assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
+    assert_ne!(body["error"]["code"], "network_error");
 }
 
 #[test]

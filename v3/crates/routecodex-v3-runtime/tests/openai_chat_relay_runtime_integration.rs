@@ -8,13 +8,16 @@ use routecodex_v3_provider_responses::{
 };
 use routecodex_v3_runtime::{
     execute_v3_openai_chat_relay_runtime as execute_v3_openai_chat_relay_runtime_impl,
-    execute_v3_openai_chat_relay_runtime_with_provider_health, V3OpenAiChatRelayClientBody,
+    execute_v3_openai_chat_relay_runtime_with_provider_health,
+    project_v3_openai_chat_relay_runtime_failure, V3OpenAiChatRelayClientBody,
     V3OpenAiChatRelayRuntimeError, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
     V3ResponsesRelayProviderHealthHandle,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 fn ensure_openai_chat_relay_test_state_dir() {
     static INITIALIZE: std::sync::Once = std::sync::Once::new();
@@ -35,6 +38,53 @@ fn ensure_openai_chat_relay_test_state_dir() {
             &state_dir.join("provider-cooldowns.json"),
         );
     });
+}
+
+async fn serve_one_openai_chat_probe(
+    listener: TcpListener,
+    status_line: &'static str,
+    body: &'static str,
+) -> String {
+    let (mut socket, _) = listener
+        .accept()
+        .await
+        .expect("provider probe listener must accept one request");
+    let mut request = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        let read = tokio::time::timeout(Duration::from_secs(1), socket.read(&mut chunk))
+            .await
+            .expect("provider probe request headers must arrive")
+            .expect("provider probe request must be readable");
+        if read == 0 {
+            break;
+        }
+        request.extend_from_slice(&chunk[..read]);
+        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+    let response = format!(
+        "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    socket
+        .write_all(response.as_bytes())
+        .await
+        .expect("provider probe response must be writable");
+    String::from_utf8_lossy(&request).into_owned()
+}
+
+struct UnexpectedProviderTransport;
+
+#[async_trait]
+impl ResponsesTransport for UnexpectedProviderTransport {
+    async fn send(
+        &self,
+        _request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        panic!("provider transport must not run after a failed global probe");
+    }
 }
 
 async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
@@ -1285,6 +1335,219 @@ async fn failed_sse_attempt_projects_only_error06_after_pool_exhaustion() {
     assert!(
         !error_text.contains("partial"),
         "failed-attempt business bytes crossed the Broker boundary: {error_text}"
+    );
+}
+
+#[tokio::test]
+async fn openai_chat_provider_pool_exhaustion_projects_network_error_without_provider_details() {
+    let scope = "openai_chat_pool_exhausted_network_error";
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("provider probe listener must bind");
+    let base_url = format!(
+        "http://{}/v1",
+        listener.local_addr().expect("probe listener address")
+    );
+    let mut manifest = manifest_with_identity(scope);
+    let provider = manifest
+        .providers
+        .get_mut(scope)
+        .expect("probe provider must exist");
+    provider.base_url = base_url;
+    provider.auth.entries[0].env = Some("ROUTECODEX_V3_POOL_PROBE_TEST_KEY".into());
+    std::env::set_var("ROUTECODEX_V3_POOL_PROBE_TEST_KEY", "routecodex-test-key");
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    provider_health
+        .store()
+        .record_provider_cooldown_failure(
+            scope,
+            Some(scope),
+            Some("chat-wire-model"),
+            "controlled network outage",
+            u64::MAX / 2,
+            900_000,
+        )
+        .expect("test provider must enter cooldown");
+    let probe_server = tokio::spawn(serve_one_openai_chat_probe(
+        listener,
+        "200 OK",
+        r#"{"choices":[{"finish_reason":null}]}"#,
+    ));
+
+    let runtime_result = tokio::time::timeout(
+        Duration::from_secs(3),
+        execute_v3_openai_chat_relay_runtime_with_provider_health(
+            &manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: scope.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    scope,
+                    "pool-exhausted-network-error",
+                )
+                .expect("test provider failure session scope"),
+                request_id: "req-pool-exhausted-network-error".into(),
+                payload: json!({
+                    "model": "chat-client-alias",
+                    "messages": [{"role":"user","content":"network"}],
+                    "stream": false
+                }),
+            },
+            &UnexpectedProviderTransport,
+            provider_health.runtime_health(),
+        ),
+    )
+    .await
+    .expect("provider-pool exhaustion must not hang");
+    let output = match runtime_result {
+        Ok(_) => panic!("provider-pool exhaustion must not reach provider execution"),
+        Err(V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
+            attempted_candidates,
+        }) => project_v3_openai_chat_relay_runtime_failure(
+            V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
+                attempted_candidates,
+            },
+        ),
+        Err(error) => panic!("unexpected runtime failure before Error06 projection: {error:?}"),
+    };
+    let request = tokio::time::timeout(Duration::from_secs(2), probe_server)
+        .await
+        .expect("failed probe must reach the local provider listener")
+        .expect("provider probe task must not panic");
+    assert!(
+        request.starts_with("POST /v1/chat/completions HTTP/1.1"),
+        "rescue must send the provider probe through the provider HTTP endpoint: {request:?}"
+    );
+
+    assert_eq!(output.status, 502);
+    assert_eq!(
+        output.error_chain,
+        Some(routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS.to_vec())
+    );
+    let body = match output.client_body {
+        V3OpenAiChatRelayClientBody::Json(body) => body,
+        V3OpenAiChatRelayClientBody::Sse(_) => {
+            panic!("provider-pool exhaustion must not produce a client SSE stream")
+        }
+    };
+    assert_eq!(
+        body,
+        json!({"error":{"code":"network_error","message":"network error"}})
+    );
+    let body_text = body.to_string();
+    assert!(
+        !body_text.contains("provider"),
+        "provider leaked: {body_text}"
+    );
+    assert!(
+        !body_text.contains("candidate"),
+        "candidate leaked: {body_text}"
+    );
+    assert!(
+        !body_text.contains("selected_target_exhausted"),
+        "internal exhaustion code leaked: {body_text}"
+    );
+    assert!(
+        output
+            .error_detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("selected target exhausted")),
+        "typed Error01 diagnostics must remain available outside the client body"
+    );
+}
+
+#[tokio::test]
+async fn openai_chat_provider_probe_success_reselects_and_connects_provider() {
+    let scope = "openai_chat_probe_recovery";
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("provider probe listener must bind");
+    let base_url = format!(
+        "http://{}/v1",
+        listener.local_addr().expect("probe listener address")
+    );
+    let mut manifest = manifest_with_identity(scope);
+    let provider = manifest
+        .providers
+        .get_mut(scope)
+        .expect("probe provider must exist");
+    provider.base_url = base_url.clone();
+    provider.auth.entries[0].env = Some("ROUTECODEX_V3_POOL_PROBE_TEST_KEY".into());
+    std::env::set_var("ROUTECODEX_V3_POOL_PROBE_TEST_KEY", "routecodex-test-key");
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    provider_health
+        .store()
+        .record_provider_cooldown_failure(
+            scope,
+            Some(scope),
+            Some("chat-wire-model"),
+            "controlled network outage",
+            u64::MAX / 2,
+            900_000,
+        )
+        .expect("test provider must enter cooldown");
+    let probe_server = tokio::spawn(serve_one_openai_chat_probe(
+        listener,
+        "200 OK",
+        r#"{"id":"probe","choices":[{"finish_reason":"stop"}]}"#,
+    ));
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(3),
+        execute_v3_openai_chat_relay_runtime_with_provider_health(
+            &manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: scope.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    scope,
+                    "probe-recovery",
+                )
+                .expect("test provider failure session scope"),
+                request_id: "req-probe-recovery".into(),
+                payload: json!({
+                    "model": "chat-client-alias",
+                    "messages": [{"role":"user","content":"recover"}],
+                    "stream": false
+                }),
+            },
+            &transport,
+            provider_health.runtime_health(),
+        ),
+    )
+    .await
+    .expect("successful provider probe must not hang")
+    .expect("provider probe recovery must connect the provider");
+    let request = tokio::time::timeout(Duration::from_secs(2), probe_server)
+        .await
+        .expect("successful probe must reach the local provider listener")
+        .expect("provider probe task must not panic");
+    assert!(
+        request.starts_with("POST /v1/chat/completions HTTP/1.1"),
+        "recovery must use the provider HTTP endpoint: {request:?}"
+    );
+
+    assert_eq!(output.status, 200);
+    assert!(output.error_chain.is_none());
+    let expected_url = format!("{base_url}/chat/completions");
+    assert_eq!(
+        transport.captured_url.lock().unwrap().as_deref(),
+        Some(expected_url.as_str()),
+        "a successful probe must be followed by the normal provider transport"
+    );
+    let availability =
+        provider_health
+            .store()
+            .availability(scope, Some(scope), Some("chat-wire-model"), u64::MAX);
+    assert!(
+        availability.available && availability.blocked_scopes.is_empty(),
+        "successful probe must clear the exact provider cooldown: {availability:?}"
     );
 }
 

@@ -210,6 +210,10 @@ pub fn build_v3_sse_transport_in_01_raw_chunk(bytes: &[u8]) -> SseTransportIn01R
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SseTransportIn02DecodedFrame {
     fields: Vec<SseField>,
+    /// Exact bytes consumed for this frame, when the frame came from the
+    /// incremental decoder. Synthetic field-built frames intentionally have
+    /// no raw provenance and must use the canonical encoder.
+    raw_bytes: Option<Vec<u8>>,
     /// 原始帧字节是否全部为合法 UTF-8。framing 层仍按 U+FFFD 修复保留帧结构
     /// （既有 transport 契约），但语义消费层必须能区分“合法 UTF-8 的 JSON
     /// 载荷错误”（codec 归属）与“帧字节本身非法 UTF-8”（transport 归属）。
@@ -225,6 +229,12 @@ impl SseTransportIn02DecodedFrame {
 
     pub fn raw_utf8_valid(&self) -> bool {
         self.raw_utf8_valid
+    }
+
+    /// Returns the exact provider bytes consumed for this frame, including
+    /// its final SSE delimiter, when raw provenance is available.
+    pub fn raw_bytes(&self) -> Option<&[u8]> {
+        self.raw_bytes.as_deref()
     }
 }
 
@@ -438,6 +448,7 @@ pub fn build_sse_transport_in_02_from_fields(
 ) -> Result<SseTransportIn02DecodedFrame, SseTransportError> {
     Ok(SseTransportIn02DecodedFrame {
         fields,
+        raw_bytes: None,
         raw_utf8_valid: true,
     })
 }
@@ -518,6 +529,7 @@ fn build_sse_transport_in_02_from_sse_transport_in_01(
     }
     Ok(SseTransportIn02DecodedFrame {
         fields,
+        raw_bytes: Some(raw.to_vec()),
         raw_utf8_valid: std::str::from_utf8(raw).is_ok(),
     })
 }

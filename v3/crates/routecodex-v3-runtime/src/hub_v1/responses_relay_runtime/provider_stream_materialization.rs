@@ -22,9 +22,12 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_responses_provider_stream_
             &mut reducer,
         )? {
             terminal_response = Some(response);
+            break;
         }
     }
-    finish_v3_responses_provider_sse_decoder_typed(decoder, observation, &mut reducer)?;
+    if terminal_response.is_none() {
+        finish_v3_responses_provider_sse_decoder_typed(decoder, observation, &mut reducer)?;
+    }
     terminal_response.ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             V3_RESPONSES_RELAY_PROVIDER_EVENT_EOF_WITHOUT_TERMINAL_MESSAGE.to_string(),
@@ -169,6 +172,7 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut typed_state = V3AnthropicSseReducerState::default();
     let mut done_seen = false;
+    let mut terminal_seen = false;
     while let Some(chunk) = provider.next().await {
         let chunk = chunk?;
         let frames = decoder
@@ -250,11 +254,20 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
             .map_err(|error| {
                 V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
             })?;
+            if typed_state.message_stop_seen {
+                terminal_seen = true;
+                break;
+            }
+        }
+        if terminal_seen {
+            break;
         }
     }
-    decoder
-        .finish()
-        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
+    if !terminal_seen {
+        decoder.finish().map_err(|error| {
+            V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string())
+        })?;
+    }
     if !typed_state.message_stop_seen {
         return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             "Anthropic provider event stream ended without message_stop".to_string(),
@@ -329,6 +342,7 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
     let mut reducer = V3OpenAiChatSseReducerState::default();
     let mut terminal_seen = false;
     let mut done_seen = false;
+    let mut stop_after_terminal = false;
 
     while let Some(chunk) = provider.next().await {
         let chunk = chunk?;
@@ -351,6 +365,10 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                 continue;
             }
             if !object.is_json_valid() {
+                if terminal_seen {
+                    stop_after_terminal = true;
+                    break;
+                }
                 return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                     "OpenAI Chat provider event stream event is malformed".to_string(),
                 ));
@@ -361,6 +379,10 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                 )
             })?;
             if !event.is_object() {
+                if terminal_seen {
+                    stop_after_terminal = true;
+                    break;
+                }
                 continue;
             }
             if done_seen {
@@ -369,9 +391,20 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                 ) {
                     continue;
                 }
+                if terminal_seen {
+                    stop_after_terminal = true;
+                    break;
+                }
                 return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                     "OpenAI Chat provider event stream emitted data after [DONE]".to_string(),
                 ));
+            }
+            if terminal_seen
+                && !is_v3_openai_chat_empty_sse_tail_sentinel(&event)
+                && !is_v3_openai_chat_usage_closeout_frame(&event)
+            {
+                stop_after_terminal = true;
+                break;
             }
             if let Some(error) = extract_v3_provider_event_error(&event) {
                 return Err(error);
@@ -426,10 +459,15 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
             })?;
             terminal_seen = reducer.terminal.is_some();
         }
+        if terminal_seen || stop_after_terminal {
+            break;
+        }
     }
-    decoder
-        .finish()
-        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
+    if !terminal_seen && !stop_after_terminal {
+        decoder.finish().map_err(|error| {
+            V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string())
+        })?;
+    }
     if !terminal_seen {
         return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             "OpenAI Chat provider stream reached EOF without a semantic terminal".to_string(),
@@ -472,6 +510,14 @@ fn is_v3_openai_chat_empty_sse_tail_sentinel(event: &Value) -> bool {
             .get("choices")
             .and_then(Value::as_array)
             .is_some_and(|choices| choices.is_empty())
+}
+
+fn is_v3_openai_chat_usage_closeout_frame(event: &Value) -> bool {
+    event
+        .get("choices")
+        .and_then(Value::as_array)
+        .is_some_and(|choices| choices.is_empty())
+        && event.get("usage").is_some_and(|usage| !usage.is_null())
 }
 
 fn openai_chat_provider_network_error_message(event: &Value) -> Option<String> {
@@ -683,5 +729,73 @@ mod tests {
             } if code == "network_error"
                 && message.contains("finish_reason=network_error")
         ));
+    }
+
+    #[tokio::test]
+    async fn responses_terminal_is_not_reopened_by_late_provider_read_error() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_late_error\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}}\n\n".to_vec()),
+            Err(routecodex_v3_provider_responses::V3ProviderError::ResponseBody {
+                request_id: "req-late-error".to_owned(),
+                provider_id: "provider-late-error".to_owned(),
+                reason: "provider read failed after terminal".to_owned(),
+            }),
+        ]));
+
+        let response = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect("a late provider read error cannot reopen a confirmed Responses terminal");
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["output"][0]["content"][0]["text"], "done");
+    }
+
+    #[tokio::test]
+    async fn anthropic_terminal_is_not_reopened_by_late_provider_read_error() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_late_error\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude\",\"content\":[]}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
+            Err(routecodex_v3_provider_responses::V3ProviderError::ResponseBody {
+                request_id: "req-anthropic-late-error".to_owned(),
+                provider_id: "provider-anthropic-late-error".to_owned(),
+                reason: "provider read failed after message_stop".to_owned(),
+            }),
+        ]));
+
+        let response = build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events_with_context(
+            provider,
+            &observation,
+            &V3AnthropicResponsesProjectionContext::default(),
+        )
+        .await
+        .expect("a late provider read error cannot reopen a confirmed Anthropic terminal");
+
+        assert_eq!(response["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn chat_terminal_is_not_reopened_by_late_provider_read_error() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"data: {\"id\":\"chatcmpl_late_error\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"chat-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"done\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl_late_error\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n".to_vec()),
+            Err(routecodex_v3_provider_responses::V3ProviderError::ResponseBody {
+                request_id: "req-chat-late-error".to_owned(),
+                provider_id: "provider-chat-late-error".to_owned(),
+                reason: "provider read failed after finish_reason".to_owned(),
+            }),
+        ]));
+
+        let response = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect("a late provider read error cannot reopen a confirmed Chat terminal");
+
+        assert_eq!(response["choices"][0]["finish_reason"], "stop");
     }
 }
