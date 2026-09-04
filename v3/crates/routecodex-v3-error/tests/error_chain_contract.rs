@@ -447,16 +447,18 @@ fn malformed_client_request_has_no_internal_or_external_identity() {
 
 #[test]
 fn already_terminal_target_exhaustion_and_success_control_never_become_success() {
-    for (kind, code, expected_status) in [
+    for (kind, code, expected_status, expected_public_code) in [
         (
             V3ErrorSourceKind::TargetPoolExhausted,
             "target_pool_exhausted",
-            503,
+            502,
+            "network_error",
         ),
         (
             V3ErrorSourceKind::SuccessControl,
             "success_entered_error_chain",
             500,
+            "success_entered_error_chain",
         ),
     ] {
         let source = build_v3_error_01_source_raised(kind, "test", code, "terminal");
@@ -480,6 +482,7 @@ fn already_terminal_target_exhaustion_and_success_control_never_become_success()
                 .expect("already-terminal non-provider error"),
         );
         assert_eq!(projected.status, expected_status);
+        assert_eq!(projected.body["error"]["code"], expected_public_code);
         assert!(projected.body.get("ok").is_none());
         assert!(projected.status >= 400);
     }

@@ -6,6 +6,7 @@ use crate::hub_v1::{
 use crate::kernel::direct_sse_consumers::{
     build_v3_sse_transport_error_source, V3DirectSseContentConsumer,
 };
+use crate::nodes::{V3SseAttemptFrame, V3SseAttemptStream, V3SseFrameDisposition};
 
 fn wrap_direct_sse_provider_event_json_observation_stream(
     source: V3ProviderAttemptSseStream,
@@ -14,7 +15,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
     strip_client_response_id: bool,
     retain_response_cipher: bool,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
-) -> V3ProviderAttemptSseStream {
+) -> V3SseAttemptStream {
     wrap_direct_sse_provider_event_json_observation_stream_with_compat(
         source,
         stream_observation,
@@ -50,16 +51,14 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     request_id: Option<String>,
     expected_model_id: Option<String>,
     client_responses_projection: bool,
-) -> V3ProviderAttemptSseStream {
+) -> V3SseAttemptStream {
     struct StreamState {
         source: V3ProviderAttemptSseStream,
         decoder: SseIncrementalDecoder,
         stream_observation: V3RuntimeStreamObservation,
         runtime_timing: V3RuntimeTimingState,
-        strip_client_response_id: bool,
-        retain_response_cipher: bool,
-        deepseek_console_go: bool,
         content_consumer: V3DirectSseContentConsumer,
+        semantic_state: V3DirectSseSemanticState,
         done: bool,
     }
 
@@ -68,15 +67,12 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     } else {
         source
     };
-    V3ProviderAttemptSseStream::new(Box::pin(stream::unfold(
+    Box::pin(stream::unfold(
         StreamState {
             source,
             decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
             stream_observation: stream_observation.clone(),
             runtime_timing,
-            strip_client_response_id,
-            retain_response_cipher,
-            deepseek_console_go,
             content_consumer: V3DirectSseContentConsumer {
                 provider_protocol: Some(provider_protocol),
                 retain_response_cipher,
@@ -91,240 +87,177 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
             .with_typed_hooks(typed_hooks)
             .with_tool_thinking(tool_thinking_enabled, toolreason_client_projection)
             .with_client_responses_projection(client_responses_projection),
+            semantic_state: V3DirectSseSemanticState::new(),
             done: false,
         },
         |mut state| async move {
             if state.done {
                 return None;
             }
-            match state.source.next().await {
-                Some(Ok(chunk)) => {
-                    let result = record_direct_sse_provider_event_json_chunk(
-                        &chunk,
-                        &mut state.decoder,
-                        &state.stream_observation,
-                        state.strip_client_response_id,
-                        state.retain_response_cipher,
-                        &mut state.content_consumer,
-                    );
-                    let terminal_observed = result
-                        .as_ref()
-                        .map(|(_, terminal_observed)| *terminal_observed)
-                        .unwrap_or(false);
-                    let result = result.map(|(out, _)| out.unwrap_or(chunk));
-                    if result.is_ok() && terminal_observed {
-                        if terminal_observed && !state.runtime_timing.is_finished().unwrap_or(false)
-                        {
-                            if let Err(error) = state.runtime_timing.finish_external_if_active() {
-                                return Some((
-                                    Err(runtime_source("V3RuntimeTimingExternal", error)),
-                                    state,
-                                ));
-                            }
-                            let timing = match state.runtime_timing.finish_runtime() {
-                                Ok(timing) => timing,
-                                Err(error) => {
-                                    return Some((
-                                        Err(runtime_source("V3RuntimeTimingTerminal", error)),
-                                        state,
-                                    ));
+            loop {
+                match state.source.next().await {
+                    Some(Ok(chunk)) => {
+                        let result = record_direct_sse_provider_event_json_chunk(
+                            &chunk,
+                            &mut state.decoder,
+                            &state.stream_observation,
+                            &mut state.content_consumer,
+                            &mut state.semantic_state,
+                        );
+                        match result {
+                            Ok(Some(frame)) => {
+                                let terminal_observed = matches!(
+                                    frame.disposition,
+                                    V3SseFrameDisposition::SemanticTerminal
+                                        | V3SseFrameDisposition::LegalCloseout
+                                );
+                                if terminal_observed {
+                                    state.done = true;
+                                    if !state.runtime_timing.is_finished().unwrap_or(false) {
+                                        if let Err(error) =
+                                            state.runtime_timing.finish_external_if_active()
+                                        {
+                                            return Some((
+                                                Err(runtime_source(
+                                                    "V3RuntimeTimingExternal",
+                                                    error,
+                                                )),
+                                                state,
+                                            ));
+                                        }
+                                        let timing = match state.runtime_timing.finish_runtime() {
+                                            Ok(timing) => timing,
+                                            Err(error) => {
+                                                return Some((
+                                                    Err(runtime_source(
+                                                        "V3RuntimeTimingTerminal",
+                                                        error,
+                                                    )),
+                                                    state,
+                                                ));
+                                            }
+                                        };
+                                        if let Err(error) =
+                                            state.stream_observation.record_timing(timing)
+                                        {
+                                            return Some((
+                                                Err(runtime_source(
+                                                    "V3RuntimeTimingObservation",
+                                                    error,
+                                                )),
+                                                state,
+                                            ));
+                                        }
+                                    }
                                 }
-                            };
-                            if let Err(error) = state.stream_observation.record_timing(timing) {
-                                return Some((
-                                    Err(runtime_source("V3RuntimeTimingObservation", error)),
-                                    state,
-                                ));
+                                return Some((Ok(frame), state));
+                            }
+                            Ok(None) => continue,
+                            Err(error) => {
+                                state.done = true;
+                                return Some((Err(error), state));
                             }
                         }
                     }
-                    if result.is_err() {
+                    Some(Err(error)) => {
                         state.done = true;
+                        return Some((Err(error), state));
                     }
-                    Some((result, state))
-                }
-                Some(Err(error)) => {
-                    state.done = true;
-                    Some((Err(error), state))
-                }
-                None => {
-                    state.done = true;
-                    let decoder = std::mem::replace(
-                        &mut state.decoder,
-                        SseIncrementalDecoder::new(SseTransportLimits::default()),
-                    );
-                    let decoder_result = decoder
-                        .finish()
-                        .map_err(build_v3_sse_transport_error_source);
-                    if let Err(error) = state.content_consumer.finalize_toolreason_observation() {
-                        return Some((
-                            Err(runtime_source("V3RuntimeToolreasonObservation", error)),
-                            state,
-                        ));
-                    }
-                    match decoder_result {
-                        Ok(()) if state.runtime_timing.is_finished().unwrap_or(false) => None,
-                        Ok(()) => {
-                            if let Err(error) = state.runtime_timing.finish_external_if_active() {
-                                return Some((
-                                    Err(runtime_source("V3RuntimeTimingExternal", error)),
-                                    state,
-                                ));
+                    None => {
+                        state.done = true;
+                        let decoder = std::mem::replace(
+                            &mut state.decoder,
+                            SseIncrementalDecoder::new(SseTransportLimits::default()),
+                        );
+                        let decoder_result = decoder
+                            .finish()
+                            .map_err(build_v3_sse_transport_error_source);
+                        if let Err(error) = state.content_consumer.finalize_toolreason_observation()
+                        {
+                            return Some((
+                                Err(runtime_source("V3RuntimeToolreasonObservation", error)),
+                                state,
+                            ));
+                        }
+                        match decoder_result {
+                            Ok(()) if state.runtime_timing.is_finished().unwrap_or(false) => {
+                                return None
                             }
-                            let timing = match state.runtime_timing.finish_runtime() {
-                                Ok(timing) => timing,
-                                Err(error) => {
+                            Ok(()) => {
+                                if let Err(error) = state.runtime_timing.finish_external_if_active()
+                                {
                                     return Some((
-                                        Err(runtime_source("V3RuntimeTimingTerminal", error)),
+                                        Err(runtime_source("V3RuntimeTimingExternal", error)),
                                         state,
                                     ));
                                 }
-                            };
-                            if let Err(error) = state.stream_observation.record_timing(timing) {
-                                return Some((
-                                    Err(runtime_source("V3RuntimeTimingObservation", error)),
-                                    state,
-                                ));
+                                let timing = match state.runtime_timing.finish_runtime() {
+                                    Ok(timing) => timing,
+                                    Err(error) => {
+                                        return Some((
+                                            Err(runtime_source("V3RuntimeTimingTerminal", error)),
+                                            state,
+                                        ));
+                                    }
+                                };
+                                if let Err(error) = state.stream_observation.record_timing(timing) {
+                                    return Some((
+                                        Err(runtime_source("V3RuntimeTimingObservation", error)),
+                                        state,
+                                    ));
+                                }
+                                return None;
                             }
-                            None
+                            Err(error) => return Some((Err(error), state)),
                         }
-                        Err(error) => Some((Err(error), state)),
                     }
                 }
             }
         },
-    )))
+    ))
 }
 
-struct V3DirectSseTerminalValidator {
-    protocol: V3HubProviderWireProtocol,
-    decoder: SseIncrementalDecoder,
+struct V3DirectSseSemanticState {
     done_seen: bool,
-    client_output_seen: bool,
+    terminal_seen: bool,
 }
 
-impl V3DirectSseTerminalValidator {
-    fn new(protocol: V3HubProviderWireProtocol) -> Self {
+impl V3DirectSseSemanticState {
+    fn new() -> Self {
         Self {
-            protocol,
-            decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
             done_seen: false,
-            client_output_seen: false,
+            terminal_seen: false,
         }
-    }
-
-    fn observe_chunk(&mut self, chunk: &[u8]) -> Result<bool, V3Error01SourceRaised> {
-        let frames = self
-            .decoder
-            .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
-            .map_err(build_v3_sse_transport_error_source)?;
-        let mut terminal = false;
-        for frame in frames {
-            let data = collect_v3_provider_sse_json_data(frame.frame().fields());
-            if data.trim() == "[DONE]" {
-                if self.protocol == V3HubProviderWireProtocol::OpenAiChat && !terminal {
-                    return Err(build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::ProviderFailure,
-                        "V3ProviderResp14Raw",
-                        "provider_response_sse_stream",
-                        "OpenAI Chat SSE emitted [DONE] before terminal finish_reason",
-                    ));
-                }
-                self.done_seen = true;
-                continue;
-            }
-            if is_v3_provider_sse_keepalive_text(&data) {
-                continue;
-            }
-            let Some(outcome) = classify_v3_provider_sse_json_data(self.protocol, &data)
-                .map_err(|message| {
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::ProviderFailure,
-                        "V3ProviderResp14Raw",
-                        "provider_response_sse_event_invalid",
-                        message,
-                    )
-                })?
-            else {
-                continue;
-            };
-            if self.protocol == V3HubProviderWireProtocol::OpenAiChat
-                && self.done_seen
-                && !matches!(
-                    outcome,
-                    V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
-                )
-            {
-                return Err(build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::ProviderFailure,
-                    "V3ProviderResp14Raw",
-                    "provider_response_sse_stream",
-                    "OpenAI Chat SSE emitted a semantic frame after [DONE]",
-                ));
-            }
-            match outcome {
-                V3ProviderResponsesJsonFrameOutcome::StartClientStream => {
-                    self.client_output_seen = true;
-                }
-                V3ProviderResponsesJsonFrameOutcome::Terminal => terminal = true,
-                V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput => {
-                    if self.client_output_seen {
-                        terminal = true;
-                    } else {
-                        return Err(build_v3_error_01_source_raised(
-                            V3ErrorSourceKind::ProviderFailure,
-                            "V3ProviderResp14Raw",
-                            "provider_response_sse_empty",
-                            "provider SSE reached terminal without client output",
-                        ));
-                    }
-                }
-                V3ProviderResponsesJsonFrameOutcome::ContinueBuffering => {}
-                V3ProviderResponsesJsonFrameOutcome::Failure { code, message } => {
-                    return Err(build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::ProviderFailure,
-                        "V3ProviderResp14Raw",
-                        code,
-                        message,
-                    ));
-                }
-            }
-        }
-        Ok(terminal)
-    }
-
-    fn finish(self) -> Result<(), V3Error01SourceRaised> {
-        self.decoder.finish().map_err(|error| {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::ProviderFailure,
-                "V3ProviderResp14Raw",
-                "provider_response_sse_transport_invalid",
-                error.to_string(),
-            )
-        })
     }
 }
 
 pub(crate) async fn collect_direct_sse_attempt_after_terminal(
-    mut stream: V3ClientSseStream,
-    provider_protocol: V3HubProviderWireProtocol,
+    mut stream: V3SseAttemptStream,
+    _provider_protocol: V3HubProviderWireProtocol,
     attempt_budget: crate::nodes::V3AttemptBudget,
 ) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
-    let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(
-        attempt_budget,
-    )
-    .map_err(|message| {
-        build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3ExecutionAttemptPayloadStore",
-            "direct_sse_attempt_store_rejected",
-            message.to_string(),
-        )
-    })?;
-    let mut terminal = V3DirectSseTerminalValidator::new(provider_protocol);
+    let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
+        .map_err(|message| {
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ExecutionAttemptPayloadStore",
+                "direct_sse_attempt_store_rejected",
+                message.to_string(),
+            )
+        })?;
+    let mut terminal_seen = false;
     while let Some(frame) = stream.next().await {
         let frame = frame?;
-        let terminal_observed = terminal.observe_chunk(&frame)?;
+        let disposition = frame.disposition;
+        if terminal_seen && disposition == V3SseFrameDisposition::Continue {
+            return Err(build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ExecutionAttemptPayloadStore",
+                "direct_sse_frame_after_terminal",
+                "Direct SSE projected a continuation frame after semantic terminal",
+            ));
+        }
+        let frame = frame.bytes;
         committed.push(frame).map_err(|message| {
             build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -333,7 +266,19 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal(
                 message.to_string(),
             )
         })?;
-        if terminal_observed {
+        if matches!(
+            disposition,
+            V3SseFrameDisposition::SemanticTerminal | V3SseFrameDisposition::LegalCloseout
+        ) {
+            if disposition == V3SseFrameDisposition::LegalCloseout && !terminal_seen {
+                return Err(build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "provider_response_sse_stream",
+                    "Direct SSE emitted legal closeout before semantic terminal",
+                ));
+            }
+            terminal_seen = true;
             committed.mark_last_frame_as_terminal().map_err(|message| {
                 build_v3_error_01_source_raised(
                     V3ErrorSourceKind::RuntimeFailure,
@@ -342,23 +287,53 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal(
                     message.to_string(),
                 )
             })?;
-            return committed.seal_after_validated_terminal().map_err(|message| {
-                build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::RuntimeFailure,
-                    "V3ExecutionAttemptPayloadStore",
-                    "direct_sse_terminal_seal_rejected",
-                    message.to_string(),
-                )
-            });
+            if disposition == V3SseFrameDisposition::LegalCloseout {
+                let sealed = committed.seal_after_validated_terminal();
+                let sealed = sealed.map_err(|message| {
+                    build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3ExecutionAttemptPayloadStore",
+                        "direct_sse_terminal_seal_rejected",
+                        message.to_string(),
+                    )
+                });
+                return sealed;
+            }
         }
     }
-    terminal.finish()?;
+    if terminal_seen {
+        let sealed = committed.seal_after_validated_terminal();
+        let sealed = sealed.map_err(|message| {
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ExecutionAttemptPayloadStore",
+                "direct_sse_terminal_seal_rejected",
+                message.to_string(),
+            )
+        });
+        return sealed;
+    }
     Err(build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderResp14Raw",
         "provider_response_sse_stream",
         "provider SSE ended without a protocol terminal",
     ))
+}
+
+#[cfg(test)]
+fn test_direct_sse_attempt_stream(
+    source: V3ClientSseStream,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+) -> V3SseAttemptStream {
+    wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(source),
+        V3RuntimeStreamObservation::default(),
+        V3RuntimeTimingState::start(),
+        false,
+        false,
+        provider_protocol,
+    )
 }
 
 pub(crate) async fn project_and_collect_direct_sse_attempt(
@@ -400,26 +375,26 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
         Some(compat_plan.canonical_model_id.clone()),
         true,
     );
-    let client_stream: V3ClientSseStream = Box::pin(projected);
-    let client_stream = if let (
-        false,
-        V3RemoteContinuationObservation::Streaming { state },
-        Some(scope),
-    ) = (continuation_disabled, remote_continuation, continuation_scope.as_ref())
-    {
-        wrap_v3_direct_sse_continuation_lifecycle(
-            client_stream,
-            state.clone(),
-            continuation_state,
-            Some(scope.clone()),
-            previous_response_id,
-            selected_pin,
-            selected_capability_revision,
-            now_epoch_ms,
-        )
-    } else {
-        client_stream
-    };
+    let client_stream = projected;
+    let client_stream =
+        if let (false, V3RemoteContinuationObservation::Streaming { state }, Some(scope)) = (
+            continuation_disabled,
+            remote_continuation,
+            continuation_scope.as_ref(),
+        ) {
+            wrap_v3_direct_sse_continuation_lifecycle(
+                client_stream,
+                state.clone(),
+                continuation_state,
+                Some(scope.clone()),
+                previous_response_id,
+                selected_pin,
+                selected_capability_revision,
+                now_epoch_ms,
+            )
+        } else {
+            client_stream
+        };
     collect_direct_sse_attempt_after_terminal(
         client_stream,
         compat_plan.provider_protocol,
@@ -466,7 +441,10 @@ mod direct_sse_timing_tests {
             )),
         ]));
         let error = collect_direct_sse_attempt_after_terminal(
-            source,
+            test_direct_sse_attempt_stream(
+                source,
+                crate::hub_v1::V3HubProviderWireProtocol::Responses,
+            ),
             crate::hub_v1::V3HubProviderWireProtocol::Responses,
             crate::nodes::V3AttemptBudget::process_default(),
         )
@@ -478,7 +456,10 @@ mod direct_sse_timing_tests {
             b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"recovered\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"recovered\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
         )]));
         let frames = collect_direct_sse_attempt_after_terminal(
-            replacement,
+            test_direct_sse_attempt_stream(
+                replacement,
+                crate::hub_v1::V3HubProviderWireProtocol::Responses,
+            ),
             crate::hub_v1::V3HubProviderWireProtocol::Responses,
             crate::nodes::V3AttemptBudget::process_default(),
         )
@@ -497,7 +478,7 @@ mod direct_sse_timing_tests {
                 .to_vec(),
         )])) as V3ClientSseStream;
         let result = collect_direct_sse_attempt_after_terminal(
-            source,
+            test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
             V3HubProviderWireProtocol::Responses,
             crate::nodes::V3AttemptBudget::process_default(),
         )
@@ -511,10 +492,13 @@ mod direct_sse_timing_tests {
     #[tokio::test]
     async fn openai_chat_direct_sse_rejects_done_before_finish_reason() {
         let source = Box::pin(stream::iter([
-            Ok(b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\ndata: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n".to_vec()),
+            Ok(b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\ndata: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n".to_vec()),
         ]));
         let error = collect_direct_sse_attempt_after_terminal(
-            Box::pin(source),
+            test_direct_sse_attempt_stream(
+                Box::pin(source),
+                crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            ),
             crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
             crate::nodes::V3AttemptBudget::process_default(),
         )
@@ -532,7 +516,10 @@ mod direct_sse_timing_tests {
             Ok(b"data: {\"id\":\"chatcmpl_direct\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".to_vec()),
         ]));
         let frames = collect_direct_sse_attempt_after_terminal(
-            Box::pin(source),
+            test_direct_sse_attempt_stream(
+                Box::pin(source),
+                crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            ),
             crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
             crate::nodes::V3AttemptBudget::process_default(),
         )
@@ -555,20 +542,22 @@ mod direct_sse_timing_tests {
             provider_protocol: Some(crate::hub_v1::V3HubProviderWireProtocol::Responses),
             ..Default::default()
         };
-        let (_, terminal) = record_direct_sse_provider_event_json_chunk(
+        let mut semantic_state = V3DirectSseSemanticState::new();
+        let frame = record_direct_sse_provider_event_json_chunk(
             br#"data: {"type":"response.done","response":{"status":"completed"}}
 
 "#,
             &mut decoder,
             &observation,
-            false,
-            false,
             &mut consumer,
+            &mut semantic_state,
         )
         .expect("provider codec should classify response.done without transport failure");
 
         assert!(
-            !terminal,
+            !frame.is_some_and(|frame| {
+                frame.disposition == V3SseFrameDisposition::SemanticTerminal
+            }),
             "response.done must not bypass the codec terminal contract"
         );
     }
@@ -582,13 +571,13 @@ mod direct_sse_timing_tests {
             ..Default::default()
         };
         let chunk = b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"raw\"}\n\n";
+        let mut semantic_state = V3DirectSseSemanticState::new();
         record_direct_sse_provider_event_json_chunk(
             chunk,
             &mut decoder,
             &observation,
-            false,
-            false,
             &mut consumer,
+            &mut semantic_state,
         )
         .expect("provider event should be observed");
         assert_eq!(
@@ -692,7 +681,11 @@ data: {"type":"response.completed","response":{"id":"resp_live_missing","status"
         );
         let mut client_sse = Vec::new();
         while let Some(chunk) = projected.next().await {
-            client_sse.extend(chunk.expect("missing Toolreason must preserve the native call"));
+            client_sse.extend_from_slice(
+                chunk
+                    .expect("missing Toolreason must preserve the native call")
+                    .as_ref(),
+            );
         }
 
         let client_sse = String::from_utf8(client_sse).unwrap();
@@ -725,17 +718,17 @@ data: {"type":"response.completed","response":{"id":"resp_live_missing","status"
             None
         }));
         let collect = collect_direct_sse_attempt_after_terminal(
-            Box::pin(provider),
+            test_direct_sse_attempt_stream(
+                Box::pin(provider),
+                crate::hub_v1::V3HubProviderWireProtocol::Responses,
+            ),
             crate::hub_v1::V3HubProviderWireProtocol::Responses,
             crate::nodes::V3AttemptBudget::process_default(),
         );
         assert!(
-            tokio::time::timeout(
-                std::time::Duration::from_millis(100),
-                collect
-            )
-            .await
-            .is_err(),
+            tokio::time::timeout(std::time::Duration::from_millis(100), collect)
+                .await
+                .is_err(),
             "partial provider bytes must remain buffered before protocol terminal"
         );
     }
@@ -743,7 +736,7 @@ data: {"type":"response.completed","response":{"id":"resp_live_missing","status"
     #[tokio::test]
     async fn direct_sse_seals_at_terminal_before_late_transport_close_error() {
         let provider = Box::pin(stream::iter(vec![
-            Ok(b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".to_vec()),
+            Ok(b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".to_vec()),
             Err(build_v3_error_01_source_raised(
                 V3ErrorSourceKind::ProviderFailure,
                 "test",
@@ -752,7 +745,10 @@ data: {"type":"response.completed","response":{"id":"resp_live_missing","status"
             )),
         ]));
         let frames = collect_direct_sse_attempt_after_terminal(
-            Box::pin(provider),
+            test_direct_sse_attempt_stream(
+                Box::pin(provider),
+                crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            ),
             crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
             crate::nodes::V3AttemptBudget::process_default(),
         )
@@ -761,6 +757,31 @@ data: {"type":"response.completed","response":{"id":"resp_live_missing","status"
         .collect::<Vec<_>>()
         .await;
         assert_eq!(frames.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn direct_sse_terminal_does_not_validate_same_chunk_tail() {
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: {not-json}\n\n"
+                .to_vec(),
+        )]));
+        let frames = collect_direct_sse_attempt_after_terminal(
+            test_direct_sse_attempt_stream(
+                Box::pin(provider),
+                crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            ),
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            crate::nodes::V3AttemptBudget::process_default(),
+        )
+        .await
+        .expect("same-chunk provider tail must not reopen a sealed attempt")
+        .collect::<Vec<_>>()
+        .await;
+
+        assert_eq!(frames.len(), 1);
+        let output = String::from_utf8(frames[0].clone()).expect("SSE output is UTF-8");
+        assert!(output.contains("finish_reason"));
+        assert!(!output.contains("not-json"));
     }
 
     #[tokio::test]
@@ -804,10 +825,9 @@ fn record_direct_sse_provider_event_json_chunk(
     chunk: &[u8],
     decoder: &mut SseIncrementalDecoder,
     stream_observation: &V3RuntimeStreamObservation,
-    strip_client_response_id: bool,
-    retain_response_cipher: bool,
     content_consumer: &mut V3DirectSseContentConsumer,
-) -> Result<(Option<Vec<u8>>, bool), V3Error01SourceRaised> {
+    semantic_state: &mut V3DirectSseSemanticState,
+) -> Result<Option<V3SseAttemptFrame>, V3Error01SourceRaised> {
     stream_observation
         .record_provider_raw_sse_chunk(chunk)
         .map_err(provider_sse_failure_source)?;
@@ -815,28 +835,66 @@ fn record_direct_sse_provider_event_json_chunk(
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
         .map_err(build_v3_sse_transport_error_source)?;
     if frames.is_empty() {
-        return Ok((None, false));
+        return Ok(None);
     }
-    let mut rewritten = Vec::new();
-    let mut any_rewritten = false;
-    let mut terminal_observed = false;
+    let mut accepted = Vec::new();
+    let mut disposition = V3SseFrameDisposition::Continue;
     for frame in frames {
         let data = collect_v3_provider_sse_json_data(frame.frame().fields());
-        if is_v3_provider_sse_keepalive_text(&data) {
-            continue;
+        if semantic_state.terminal_seen {
+            if data.trim() == "[DONE]" && !semantic_state.done_seen {
+                semantic_state.done_seen = true;
+                accepted.extend_from_slice(
+                    frame
+                        .frame()
+                        .raw_bytes()
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_else(|| {
+                            build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame)
+                                .into_bytes()
+                        })
+                        .as_slice(),
+                );
+                if disposition == V3SseFrameDisposition::Continue {
+                    disposition = V3SseFrameDisposition::LegalCloseout;
+                }
+            }
+            // The terminal frame is the last semantic input owned by this
+            // attempt.  Do not parse or retain any later provider tail.
+            break;
+        }
+        if data.trim() == "[DONE]" {
+            return Err(provider_sse_failure_source(
+                "[DONE] before terminal finish_reason",
+            ));
         }
         let provider_protocol = content_consumer
             .provider_protocol
             .ok_or_else(|| provider_sse_failure_source("provider protocol is missing"))?;
         let outcome = classify_v3_provider_sse_json_data(provider_protocol, &data)
             .map_err(provider_sse_failure_source)?;
-        terminal_observed |= matches!(
-            outcome,
-            Some(
-                V3ProviderResponsesJsonFrameOutcome::Terminal
-                    | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput
-            )
-        );
+        let frame_disposition = match outcome {
+            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream) => {
+                V3SseFrameDisposition::Continue
+            }
+            Some(V3ProviderResponsesJsonFrameOutcome::Terminal) => {
+                V3SseFrameDisposition::SemanticTerminal
+            }
+            Some(V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput) => {
+                V3SseFrameDisposition::SemanticTerminal
+            }
+            Some(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering) | None => {
+                V3SseFrameDisposition::Continue
+            }
+            Some(V3ProviderResponsesJsonFrameOutcome::Failure { code, message }) => {
+                return Err(build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    code,
+                    message,
+                ));
+            }
+        };
         record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
         let original =
             build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame).into_bytes();
@@ -845,19 +903,30 @@ fn record_direct_sse_provider_event_json_chunk(
             .into_bytes();
         let toolreason_reasoning_projection =
             content_consumer.take_toolreason_reasoning_projection();
-        if projected != original {
-            any_rewritten = true;
-        }
         if let Some(prefix) = toolreason_reasoning_projection {
-            any_rewritten = true;
-            rewritten.extend_from_slice(&prefix);
+            accepted.extend_from_slice(&prefix);
         }
-        rewritten.extend_from_slice(&projected);
+        if projected == original {
+            accepted.extend_from_slice(
+                frame
+                    .frame()
+                    .raw_bytes()
+                    .map(ToOwned::to_owned)
+                    .unwrap_or(original)
+                    .as_slice(),
+            );
+        } else {
+            accepted.extend_from_slice(&projected);
+        }
+        if frame_disposition == V3SseFrameDisposition::SemanticTerminal {
+            semantic_state.terminal_seen = true;
+            disposition = V3SseFrameDisposition::SemanticTerminal;
+        }
     }
-    if any_rewritten {
-        Ok((Some(rewritten), terminal_observed))
+    if accepted.is_empty() {
+        Ok(None)
     } else {
-        Ok((None, terminal_observed))
+        Ok(Some(V3SseAttemptFrame::new(accepted, disposition)))
     }
 }
 

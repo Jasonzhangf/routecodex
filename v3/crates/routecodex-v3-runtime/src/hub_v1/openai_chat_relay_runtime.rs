@@ -118,6 +118,8 @@ pub enum V3OpenAiChatRelayRuntimeError {
     StaticRegistry(String),
     #[error("V3 OpenAI Chat target resolution failed: {0}")]
     Target(String),
+    #[error("V3 OpenAI Chat provider pool exhausted after {attempted_candidates:?}")]
+    ProviderPoolExhausted { attempted_candidates: Vec<String> },
     #[error("V3 OpenAI Chat requested direct provider model not found: {0}")]
     ModelNotFound(String),
     #[error("V3 OpenAI Chat provider contract failed: {0}")]
@@ -292,6 +294,11 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         V3RelayCoreError::WebSearchIntercepted(_) => {
             V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected
         }
+        V3RelayCoreError::ProviderPoolExhausted {
+            attempted_candidates,
+        } => V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
+            attempted_candidates,
+        },
         // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
         V3RelayCoreError::Target(message)
         | V3RelayCoreError::StaticRegistry(message)
@@ -313,6 +320,12 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
             "V3Target10ConcreteProviderSelected",
             "direct_model_not_found",
             message,
+        ),
+        V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
+            attempted_candidates,
+        } => provider_pool_exhausted_source(
+            "V3Target10ConcreteProviderSelected",
+            &attempted_candidates,
         ),
         V3OpenAiChatRelayRuntimeError::ProviderCompat(error) => match error.classification() {
             V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {

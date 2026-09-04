@@ -209,9 +209,9 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport + ?Sized>
         V3RelayProviderTargetResolution::Exhausted {
             attempted_candidates,
         } => {
-            return Err(V3ResponsesRelayRuntimeError::Target(format!(
-                "selected target exhausted after {attempted_candidates:?}"
-            )))
+            return Err(V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
+                attempted_candidates,
+            })
         }
     };
     // 3. 搜索请求入站链（正常 Hub 链构造 req05，非 entry payload 重建）。

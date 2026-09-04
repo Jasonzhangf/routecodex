@@ -911,10 +911,10 @@ where
         );
         let committed_client_sse = matches!(&attempt_body, V3ProviderAttemptBody::Sse(_));
         let (client_body, attempt_success_receipt) = match attempt_body {
-            V3ProviderAttemptBody::Sse(mut stream) => {
+            V3ProviderAttemptBody::Sse(stream) => {
                 let target_observation =
                     bind_direct_sse_stream_observation(&mut response_projection.stream_observation);
-                stream = crate::kernel::wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook(
+                let projected = crate::kernel::wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook(
                     stream,
                     target_observation.clone(),
                     runtime_timing.clone(),
@@ -940,7 +940,7 @@ where
                     true,
                 );
                 let committed = match crate::kernel::direct_runtime_helpers_stream::collect_direct_sse_attempt_after_terminal(
-                    Box::pin(stream),
+                    projected,
                     response_projection.compat_plan.provider_protocol,
                     attempt_budget.clone(),
                 )

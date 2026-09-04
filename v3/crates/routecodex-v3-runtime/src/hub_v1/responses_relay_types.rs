@@ -1281,6 +1281,8 @@ pub enum V3ResponsesRelayRuntimeError {
     StaticRegistry(String),
     #[error("V3 Responses Relay target resolution failed: {0}")]
     Target(String),
+    #[error("V3 Responses Relay provider pool exhausted after {attempted_candidates:?}")]
+    ProviderPoolExhausted { attempted_candidates: Vec<String> },
     #[error("V3 Responses Relay requested direct provider model not found: {0}")]
     ModelNotFound(String),
     #[error("V3 Responses Relay provider contract failed: {0}")]

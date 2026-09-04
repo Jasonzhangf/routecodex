@@ -230,7 +230,10 @@ async fn direct_sse_completed_without_summary_passes_through_without_synthetic_s
     )
     .await;
     assert_eq!(first.client_payload.status, 200, "{:#?}", first);
-    assert!(matches!(&first.client_payload.body, V3ClientBody::Sse(_)));
+    assert!(matches!(
+        &first.client_payload.body,
+        V3ClientBody::CommittedSse(_)
+    ));
     assert_eq!(
         state.len().unwrap(),
         0,
@@ -643,7 +646,10 @@ async fn direct_sse_stopless_metadata_center_projects_terminal_frames_without_ss
     )
     .await;
     assert_eq!(first.client_payload.status, 200, "{first:#?}");
-    assert!(matches!(&first.client_payload.body, V3ClientBody::Sse(_)));
+    assert!(matches!(
+        &first.client_payload.body,
+        V3ClientBody::CommittedSse(_)
+    ));
     let first_body = collect_sse_body_text(first.client_payload.body)
         .await
         .expect("Direct SSE must remain valid while streaming");

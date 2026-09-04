@@ -62,6 +62,7 @@ pub(super) fn observe_v3_runtime_responses_sse_transport_chunk_typed_with_hook(
             hook,
         )? {
             terminal_response = Some(response);
+            break;
         }
     }
     Ok(terminal_response)

@@ -19,6 +19,47 @@ pub enum V3CommittedSseTerminal {
     Dropped,
 }
 
+/// Runtime-side disposition for one already projected SSE frame.
+///
+/// The disposition is control state, not protocol payload.  Protocol codecs
+/// classify it; the Runtime attempt collector consumes it to decide when the
+/// provider attempt may be sealed and released to the Front.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3SseFrameDisposition {
+    Continue,
+    SemanticTerminal,
+    LegalCloseout,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct V3SseAttemptFrame {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) disposition: V3SseFrameDisposition,
+}
+
+impl V3SseAttemptFrame {
+    pub(crate) fn new(bytes: Vec<u8>, disposition: V3SseFrameDisposition) -> Self {
+        Self {
+            bytes,
+            disposition,
+        }
+    }
+}
+
+impl AsRef<[u8]> for V3SseAttemptFrame {
+    fn as_ref(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+impl std::ops::Deref for V3SseAttemptFrame {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.bytes
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct V3AttemptStoreLimits {
     pub(crate) request_max_attempts: usize,

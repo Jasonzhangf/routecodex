@@ -265,9 +265,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         stopless_control.as_ref(),
                         stopless_state.as_ref(),
                     )?;
-                    return Err(V3ResponsesRelayRuntimeError::Target(format!(
-                        "selected target exhausted after {attempted_candidates:?}"
-                    )));
+                    return Err(V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
+                        attempted_candidates,
+                    });
                 }
             }
         };

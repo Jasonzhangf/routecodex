@@ -301,6 +301,7 @@ pub enum V3RelayCoreError {
     EndpointPath(String),
     ModelNotFound(String),
     Target(String),
+    ProviderPoolExhausted { attempted_candidates: Vec<String> },
     /// 治理层拦截但入口无投影路径（如 openai_chat 入口遇 Mode B web-search 剥离）：
     /// 非 provider 失败，禁止进入失败重试链，骨架 fail-fast 返回。
     WebSearchIntercepted(String),
@@ -313,6 +314,9 @@ impl fmt::Display for V3RelayCoreError {
             V3RelayCoreError::EndpointPath(message) => write!(f, "endpoint path: {message}"),
             V3RelayCoreError::ModelNotFound(message) => write!(f, "model not found: {message}"),
             V3RelayCoreError::Target(message) => write!(f, "target: {message}"),
+            V3RelayCoreError::ProviderPoolExhausted {
+                attempted_candidates,
+            } => write!(f, "provider pool exhausted after {attempted_candidates:?}"),
             V3RelayCoreError::WebSearchIntercepted(message) => {
                 write!(f, "web search intercepted unprojected: {message}")
             }
@@ -590,9 +594,9 @@ where
                 V3RelayProviderTargetResolution::Exhausted {
                     attempted_candidates,
                 } => {
-                    return Err(V3RelayCoreError::Target(format!(
-                        "selected target exhausted after {attempted_candidates:?}"
-                    )));
+                    return Err(V3RelayCoreError::ProviderPoolExhausted {
+                        attempted_candidates,
+                    });
                 }
             }
         };
