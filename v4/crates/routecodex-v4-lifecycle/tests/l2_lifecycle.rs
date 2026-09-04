@@ -1,6 +1,6 @@
 use routecodex_v4_lifecycle::{
-    release_unmanaged_listener, repair_stale, status_managed, ManagedAction, ManagedControlPlane,
-    ManagedInstanceRecord, V4LifecyclePaths,
+    release_for_foreground, release_unmanaged_listener, repair_stale, status_managed,
+    ManagedAction, ManagedControlPlane, ManagedInstanceRecord, V4LifecyclePaths,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -101,6 +101,26 @@ fn repair_stale_removes_socket_only_after_owner_probe_fails() {
     std::os::unix::net::UnixListener::bind(&paths.control_socket).expect("socket");
     repair_stale(&paths).expect("repair socket-only stale state");
     assert!(!paths.control_socket.exists());
+    fs::remove_dir_all(&paths.state_root).expect("cleanup exact test root");
+}
+
+#[test]
+fn stale_live_instance_is_released_before_cold_start_replacement() {
+    let paths = V4LifecyclePaths::for_state_root(test_root("release-stale-live"));
+    paths.prepare().expect("prepare");
+    let mut child = std::process::Command::new("sleep")
+        .arg("10")
+        .spawn()
+        .expect("live stale owner");
+    let mut stale = record();
+    stale.pid = child.id();
+    fs::write(&paths.record_path, serde_json::to_vec(&stale).expect("record")).expect("record");
+
+    release_for_foreground(&paths, Duration::from_millis(50)).expect("release stale owner");
+    assert!(!paths.record_path.exists(), "stale declaration must be cleared");
+    assert!(!paths.control_socket.exists(), "stale control socket must be cleared");
+    let status = child.wait().expect("wait stale owner");
+    assert!(!status.success(), "stale owner must receive termination");
     fs::remove_dir_all(&paths.state_root).expect("cleanup exact test root");
 }
 

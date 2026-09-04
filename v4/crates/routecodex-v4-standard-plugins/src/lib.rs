@@ -1209,6 +1209,7 @@ fn error_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .as_object_mut()
         .ok_or_else(|| "error_projection requires typed error object".to_string())?;
     object.insert("error_projection".to_string(), json!({"projected": true}));
+    object.insert("stage".to_string(), json!("client_projected"));
     ctx.write_control_resource("v4.control.error_chain", error_chain)
         .map_err(|error| error.to_string())
 }

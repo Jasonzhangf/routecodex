@@ -1,5 +1,5 @@
-use routecodex_v4_base_node::Scope;
 use routecodex_v4_cordis_bridge::{HandleRegistry, PluginHandle};
+#[cfg(test)]
 use routecodex_v4_skeleton::SkeletonPlan;
 use routecodex_v4_cli::{
     Cli, ConfigIntent, ConfigPathIntent, InitIntent, ManagedChildIntent, RestartIntent,
@@ -11,7 +11,6 @@ use routecodex_v4_config::{
     write_runtime_authoring, write_runtime_manifest_atomic, RuntimeConfigManifest,
     RuntimeInitOptions, RuntimeProductConfig, RuntimeProductRouteGroup,
 };
-use routecodex_v4_error::ErrorChain;
 use routecodex_v4_error::{DecisionAction, ExecutionDecision, RetryPolicy};
 use routecodex_v4_lifecycle::{
     exec_managed_restart, release_for_foreground, repair_stale, request_restart, request_stop,
@@ -28,8 +27,8 @@ use routecodex_v4_router::{
     TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
 };
 use routecodex_v4_runtime::{
-    parse_request_admission_facts, project_runtime_fault, project_runtime_fault_with_policy,
-    ResponseStreamDisposition, ResponseStreamProcessor, RuntimeFault, SkeletonRuntime,
+    parse_request_admission_facts, ResponseStreamDisposition, ResponseStreamProcessor,
+    RuntimeFault, RuntimeLease, SkeletonRuntime,
 };
 use routecodex_v4_server::{
     AsyncHttpHandler, AsyncHttpServer, HttpHandler, HttpRequest, HttpResponse, ResponseStream,
@@ -561,6 +560,7 @@ fn stop(intent: StopIntent) -> Result<String, String> {
     let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
     request_stop(&paths, Duration::from_millis(intent.timeout_ms))
         .map_err(|error| error.to_string())?;
+    shutdown_cordis_host(&paths, Duration::from_millis(intent.timeout_ms))?;
     Ok("state=stopped identity=rccv4".to_string())
 }
 
@@ -607,6 +607,18 @@ fn ensure_cordis_host_socket(
         if std::env::var("RCCV4_CORDIS_HOST_AUTOSTARTED").as_deref() != Ok("1") {
             return Err("Cordis admission socket connect failed: inherited socket is unavailable".to_string());
         }
+        if let Some(pid) = std::env::var("RCCV4_CORDIS_HOST_PID")
+            .ok()
+            .and_then(|value| value.parse::<libc::pid_t>().ok())
+        {
+            let alive = unsafe { libc::kill(pid, 0) == 0 }
+                || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
+            if alive {
+                return Err(format!(
+                    "Cordis admission socket unavailable while inherited owner pid {pid} is alive"
+                ));
+            }
+        }
         std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
         std::env::remove_var("RCCV4_CORDIS_HOST_AUTOSTARTED");
         std::env::remove_var("RCCV4_CORDIS_HOST_PID");
@@ -630,7 +642,7 @@ fn ensure_cordis_host_socket(
         }
     }
     let state = paths.state_root.clone();
-    let child = Command::new("node")
+    let mut child = Command::new("node")
         .arg(&runner)
         .arg(&state)
         .arg(&socket)
@@ -640,17 +652,88 @@ fn ensure_cordis_host_socket(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| format!("Cordis host spawn failed: {error}"))?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    if let Err(error) = wait_for_cordis_socket(&mut child, &socket, Duration::from_secs(5)) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+    std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
+    std::env::set_var("RCCV4_CORDIS_HOST_AUTOSTARTED", "1");
+    std::env::set_var("RCCV4_CORDIS_HOST_PID", child.id().to_string());
+    Ok(Some(child))
+}
+
+/// A filesystem socket is not a readiness signal: the pathname can exist
+/// while the Cordis listener is still binding or before it accepts clients.
+/// Admission must wait for a real connect, and a failed child must surface
+/// immediately instead of becoming a later, misleading connection refusal.
+fn wait_for_cordis_socket(
+    child: &mut Child,
+    socket: &std::path::Path,
+    timeout: Duration,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + timeout;
     while std::time::Instant::now() < deadline {
-        if socket.exists() {
-            std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
-            std::env::set_var("RCCV4_CORDIS_HOST_AUTOSTARTED", "1");
-            std::env::set_var("RCCV4_CORDIS_HOST_PID", child.id().to_string());
-            return Ok(Some(child));
+        if std::os::unix::net::UnixStream::connect(socket).is_ok() {
+            return Ok(());
+        }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("Cordis host readiness probe failed: {error}"))?
+        {
+            return Err(format!("Cordis host exited before socket became ready: {status}"));
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    Err("Cordis host socket did not become ready".to_string())
+    Err(format!(
+        "Cordis host socket did not become connectable within {}ms",
+        timeout.as_millis()
+    ))
+}
+
+/// Stop the project-owned Cordis host from the lifecycle command owner. The
+/// managed runtime child must never tear down an inherited host: a subsequent
+/// `start` may already have adopted the same socket, and an inherited PID in
+/// the old child's environment would otherwise kill the replacement's host.
+fn shutdown_cordis_host(paths: &V4LifecyclePaths, timeout: Duration) -> Result<(), String> {
+    let socket = paths.state_root.join("cordis.sock");
+    if !socket.exists() {
+        return Ok(());
+    }
+    let mut stream = std::os::unix::net::UnixStream::connect(&socket)
+        .map_err(|error| format!("Cordis shutdown socket connect failed: {error}"))?;
+    stream
+        .write_all(b"{\"op\":\"shutdown\"}\n")
+        .map_err(|error| format!("Cordis shutdown request failed: {error}"))?;
+    stream
+        .shutdown(std::net::Shutdown::Write)
+        .map_err(|error| format!("Cordis shutdown request close failed: {error}"))?;
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| format!("Cordis shutdown response failed: {error}"))?;
+    let response: Value = serde_json::from_str(response.trim())
+        .map_err(|error| format!("Cordis shutdown response invalid: {error}"))?;
+    if response.get("ok") != Some(&Value::Bool(true)) {
+        return Err(format!(
+            "Cordis shutdown rejected: {}",
+            response["message"].as_str().unwrap_or("unknown error")
+        ));
+    }
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if !socket.exists() && std::os::unix::net::UnixStream::connect(&socket).is_err() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if !socket.exists() {
+        return Ok(());
+    }
+    Err(format!(
+        "Cordis host socket did not close within {}ms",
+        timeout.as_millis()
+    ))
 }
 
 fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
@@ -711,12 +794,6 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     if let Some(mut child) = cordis_child.take() {
         let _ = child.kill();
         let _ = child.wait();
-    } else if std::env::var("RCCV4_CORDIS_HOST_AUTOSTARTED").as_deref() == Ok("1") {
-        if let Ok(pid) = std::env::var("RCCV4_CORDIS_HOST_PID") {
-            if let Ok(pid) = pid.parse::<libc::pid_t>() {
-                let _ = unsafe { libc::kill(pid, libc::SIGTERM) };
-            }
-        }
     }
     drop(control);
     if action == ManagedAction::Restart {
@@ -910,6 +987,10 @@ impl PipelineHandler {
             availability: Arc::new(Mutex::new(V4Availability01SessionScoped::new())),
         })
     }
+
+    fn project_fault(&self, request: &HttpRequest, fault: RuntimeFault, status: u16) -> HttpResponse {
+        project_fault_with_runtime(&self.runtime, request, fault, status)
+    }
 }
 
 impl PipelineHandler {
@@ -946,7 +1027,7 @@ impl PipelineHandler {
                 "relay",
             )
             .unwrap_or_else(|response| response),
-            _ => project_fault(
+            _ => self.project_fault(
                 &request,
                 RuntimeFault::new("route_not_found", "route not found"),
                 404,
@@ -968,12 +1049,13 @@ impl AsyncHttpHandler for PipelineHandler {
         _cancellation: CancellationToken,
     ) -> Pin<Box<dyn Future<Output = HttpResponse> + Send + 'a>> {
         let handler = self.clone();
+        let handler_for_task = handler.clone();
         let request_for_fault = request.clone();
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || handler.handle_request(request))
+            tokio::task::spawn_blocking(move || handler_for_task.handle_request(request))
                 .await
                 .unwrap_or_else(|error| {
-                    project_fault(
+                    handler.project_fault(
                         &request_for_fault,
                         RuntimeFault::new("request_worker_panicked", error.to_string()),
                         500,
@@ -1118,6 +1200,9 @@ fn handle_responses(
     continuation_owner: &str,
 ) -> Result<HttpResponse, HttpResponse> {
     let started_at = std::time::Instant::now();
+    let project_fault = |request: &HttpRequest, fault: RuntimeFault, status: u16| {
+        project_fault_with_runtime(runtime, request, fault, status)
+    };
     let admission = parse_request_admission_facts(
         &request.body,
         entry_protocol,
@@ -1271,6 +1356,28 @@ fn handle_responses(
     })?;
     let wire_body = semantic_body;
     if stream_mode {
+        let project_fault = |request: &HttpRequest, fault: RuntimeFault, status: u16| {
+            project_fault_with_runtime_lease(runtime, request, fault, status, &request_lease)
+        };
+        let project_provider_fault = |
+            request: &HttpRequest,
+            fault: RuntimeFault,
+            status: u16,
+            product: Option<&routecodex_v4_config::RuntimeProductConfig>,
+            provider_id: &str,
+            response_body: &str,
+        | {
+            project_provider_fault_with_runtime_lease(
+                runtime,
+                request,
+                fault,
+                status,
+                product,
+                provider_id,
+                response_body,
+                &request_lease,
+            )
+        };
         let mut stream = dispatch_streaming(&target.protocol, &target.config_path, target.auth_alias.as_deref(), &target.wire_model, &wire_body).map_err(|error| {
             project_fault(
                 request,
@@ -1288,6 +1395,8 @@ fn handle_responses(
                         .map_err(|error| project_fault(request, error, 500))?;
                     record_provider_failure(
                         availability,
+                        runtime,
+                        &request_lease,
                         request,
                         Some(route_group.route_group_id.as_str()),
                         session_scope,
@@ -1387,7 +1496,7 @@ fn handle_responses(
             session_scope,
             conversation_scope,
         )
-        .map_err(|fault| project_fault(request, fault, 599))?;
+        .map_err(|fault| project_fault_with_runtime(runtime, request, fault, 599))?;
         let response_stream = CordisSseTransportStream::new(
             stream,
             Arc::clone(runtime),
@@ -1402,6 +1511,28 @@ fn handle_responses(
             Box::new(response_stream),
         ));
     }
+    let project_fault = |request: &HttpRequest, fault: RuntimeFault, status: u16| {
+        project_fault_with_runtime_lease(runtime, request, fault, status, &request_lease)
+    };
+    let project_provider_fault = |
+        request: &HttpRequest,
+        fault: RuntimeFault,
+        status: u16,
+        product: Option<&routecodex_v4_config::RuntimeProductConfig>,
+        provider_id: &str,
+        response_body: &str,
+    | {
+        project_provider_fault_with_runtime_lease(
+            runtime,
+            request,
+            fault,
+            status,
+            product,
+            provider_id,
+            response_body,
+            &request_lease,
+        )
+    };
     let mut raw = dispatch_nonstream(&target.protocol, &target.config_path, target.auth_alias.as_deref(), &target.wire_model, &wire_body).map_err(|error| {
         project_provider_fault(
             request,
@@ -1427,6 +1558,8 @@ fn handle_responses(
                 .map_err(|error| project_fault(request, error, 500))?;
             record_provider_failure(
                 availability,
+                runtime,
+                &request_lease,
                 request,
                 Some(route_group.route_group_id.as_str()),
                 session_scope,
@@ -1829,8 +1962,9 @@ fn render_payload_console_event(
     let (plugin_id, rest) = trace_entry.split_once(':')?;
     let (kind, message) = rest.split_once(':')?;
     let direct_hook = matches!(plugin_id, "v4.hook.direct.request" | "v4.hook.direct.response");
-    if (!(plugin_id.ends_with("payload_console_render") || direct_hook)
-        || kind != "console.payload_ready") {
+    if !(plugin_id.ends_with("payload_console_render") || direct_hook)
+        || kind != "console.payload_ready"
+    {
         return None;
     }
     // TTY diagnostics may prefix the payload summary with ANSI color codes.
@@ -1893,10 +2027,31 @@ fn format_console_layered(headline: String, debug: String) -> String {
     }
 }
 
-fn project_fault(request: &HttpRequest, fault: RuntimeFault, status: u16) -> HttpResponse {
-    let scope = Scope::new(&request.request_id, "v4-pipeline", request.port, "", "");
-    let mut chain = ErrorChain::new(scope);
-    match project_runtime_fault(&mut chain, fault.clone()) {
+fn project_fault_with_runtime(
+    runtime: &Arc<Mutex<SkeletonRuntime>>,
+    request: &HttpRequest,
+    fault: RuntimeFault,
+    status: u16,
+) -> HttpResponse {
+    let session_scope = request
+        .header("x-rccv4-session-id")
+        .unwrap_or(&request.request_id);
+    let conversation_scope = request
+        .header("x-rccv4-conversation-id")
+        .unwrap_or(session_scope);
+    let projection = runtime
+        .lock()
+        .map_err(|_| RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"))
+        .and_then(|runtime| {
+            runtime.project_fault(
+                fault.clone(),
+                &request.request_id,
+                request.port,
+                session_scope,
+                conversation_scope,
+            )
+        });
+    match projection {
         Ok(projection) => HttpResponse::error(status, projection.message),
         Err(error) => HttpResponse::error(
             500,
@@ -1908,54 +2063,146 @@ fn project_fault(request: &HttpRequest, fault: RuntimeFault, status: u16) -> Htt
     }
 }
 
-fn project_provider_fault(
+fn project_fault_with_runtime_lease(
+    runtime: &Arc<Mutex<SkeletonRuntime>>,
+    request: &HttpRequest,
+    fault: RuntimeFault,
+    status: u16,
+    request_lease: &RuntimeLease,
+) -> HttpResponse {
+    let session_scope = request
+        .header("x-rccv4-session-id")
+        .unwrap_or(&request.request_id);
+    let conversation_scope = request
+        .header("x-rccv4-conversation-id")
+        .unwrap_or(session_scope);
+    let projection = runtime
+        .lock()
+        .map_err(|_| RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"))
+        .and_then(|runtime| {
+            runtime.project_fault_with_lease(
+                fault.clone(),
+                request_lease,
+                request.port,
+                session_scope,
+                conversation_scope,
+            )
+        });
+    match projection {
+        Ok(projection) => HttpResponse::error(status, projection.message),
+        Err(error) => HttpResponse::error(
+            500,
+            format!(
+                "error chain projection failed for {}: {error:?}",
+                fault.code
+            ),
+        ),
+    }
+}
+
+fn project_provider_fault_with_runtime_lease(
+    runtime: &Arc<Mutex<SkeletonRuntime>>,
     request: &HttpRequest,
     fault: RuntimeFault,
     status: u16,
     product: Option<&routecodex_v4_config::RuntimeProductConfig>,
     provider_id: &str,
     response_body: &str,
+    request_lease: &RuntimeLease,
+) -> HttpResponse {
+    project_provider_fault_with_optional_lease(
+        runtime,
+        request,
+        fault,
+        status,
+        product,
+        provider_id,
+        response_body,
+        Some(request_lease),
+    )
+}
+
+fn project_provider_fault_with_optional_lease(
+    runtime: &Arc<Mutex<SkeletonRuntime>>,
+    request: &HttpRequest,
+    fault: RuntimeFault,
+    status: u16,
+    product: Option<&routecodex_v4_config::RuntimeProductConfig>,
+    provider_id: &str,
+    response_body: &str,
+    request_lease: Option<&RuntimeLease>,
 ) -> HttpResponse {
     let Some(product) = product else {
-        return project_fault(request, fault, status);
+        return match request_lease {
+            Some(lease) => project_fault_with_runtime_lease(runtime, request, fault, status, lease),
+            None => project_fault_with_runtime(runtime, request, fault, status),
+        };
     };
-    let Some(policy) = apply_product_error_policy(product, provider_id, status, response_body)
+    let Some(product_policy) = apply_product_error_policy(product, provider_id, status, response_body)
     else {
-        return project_fault(request, fault, status);
+        return match request_lease {
+            Some(lease) => project_fault_with_runtime_lease(runtime, request, fault, status, lease),
+            None => project_fault_with_runtime(runtime, request, fault, status),
+        };
     };
-    let action = if policy.retry {
+    let action = if product_policy.retry {
         DecisionAction::Reroute
-    } else if policy.cooldown {
+    } else if product_policy.cooldown {
         DecisionAction::Cooldown
     } else {
         DecisionAction::Terminal
     };
-    let scope = Scope::new(&request.request_id, "v4-pipeline", request.port, "", "");
-    let mut chain = ErrorChain::new(scope);
-    let projection = project_runtime_fault_with_policy(
-        &mut chain,
-        fault.clone(),
-        RetryPolicy {
-            policy_id: policy.policy_id.clone(),
+    let session_scope = request
+        .header("x-rccv4-session-id")
+        .unwrap_or(&request.request_id);
+    let conversation_scope = request
+        .header("x-rccv4-conversation-id")
+        .unwrap_or(session_scope);
+    let projection = runtime
+        .lock()
+        .map_err(|_| RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"))
+        .and_then(|runtime| {
+            let policy = RetryPolicy {
+            policy_id: product_policy.policy_id.clone(),
             provider_scope: provider_id.to_string(),
             matcher: format!("http_status={status}"),
-            action_class: if policy.retry { "retry" } else { "terminal" }.to_string(),
-            reason_code: policy
+            action_class: if product_policy.retry { "retry" } else { "terminal" }.to_string(),
+            reason_code: product_policy
                 .reason_code
                 .clone()
                 .unwrap_or_else(|| fault.code.clone()),
-        },
-        ExecutionDecision {
-            decision_id: format!("decision.{}", policy.policy_id),
+            };
+            let decision = ExecutionDecision {
+            decision_id: format!("decision.{}", product_policy.policy_id),
             action,
-            reason_code: policy
+            reason_code: product_policy
                 .reason_code
                 .clone()
                 .unwrap_or_else(|| fault.code.clone()),
-        },
-    );
+            };
+            match request_lease {
+                Some(lease) => runtime.project_fault_with_policy_lease(
+                    fault.clone(),
+                    policy,
+                    decision,
+                    lease,
+                    request.port,
+                    session_scope,
+                    conversation_scope,
+                ),
+                None => runtime.project_fault_with_policy(
+                    fault.clone(),
+                    policy,
+                    decision,
+                    &request.request_id,
+                    request.port,
+                    session_scope,
+                    conversation_scope,
+                ),
+            }
+        });
     match projection {
-        Ok(value) => HttpResponse::error(policy.project_status.unwrap_or(status), value.message),
+        Ok(value) => HttpResponse::error(product_policy.project_status.unwrap_or(status), value.message),
         Err(error) => HttpResponse::error(
             500,
             format!("provider error policy projection failed: {error:?}"),
@@ -1966,6 +2213,8 @@ fn project_provider_fault(
 
 fn record_provider_failure(
     availability: &Arc<Mutex<V4Availability01SessionScoped>>,
+    runtime: &Arc<Mutex<SkeletonRuntime>>,
+    request_lease: &RuntimeLease,
     request: &HttpRequest,
     route_group: Option<&str>,
     session_scope: &str,
@@ -1977,10 +2226,12 @@ fn record_provider_failure(
         return Ok(());
     };
     let mut guard = availability.lock().map_err(|_| {
-        project_fault(
+        project_fault_with_runtime_lease(
+            runtime,
             request,
             RuntimeFault::new("availability_lock", "provider availability lock poisoned"),
             500,
+            request_lease,
         )
     })?;
     let previous = guard
@@ -2004,10 +2255,12 @@ fn record_provider_failure(
             consecutive_errors,
         )
         .map_err(|error| {
-            project_fault(
+            project_fault_with_runtime_lease(
+                runtime,
                 request,
                 RuntimeFault::new("availability_record", error.to_string()),
                 500,
+                request_lease,
             )
         })
 }
@@ -2022,6 +2275,8 @@ mod tests {
     use super::*;
     use routecodex_v4_config::compile_runtime_config;
     use std::collections::VecDeque;
+    use std::os::unix::net::UnixListener;
+    use std::time::Instant;
 
     fn diagnostic_request() -> HttpRequest {
         HttpRequest {
@@ -2033,6 +2288,61 @@ mod tests {
             server_id: "rccv4".to_string(),
             port: 5520,
         }
+    }
+
+    #[test]
+    fn cordis_start_waits_for_connectable_socket_not_path_only() {
+        let state_root = std::path::PathBuf::from("/tmp").join(format!(
+            "rccv4-cordis-readiness-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&state_root).expect("readiness state root");
+        let socket = state_root.join("cordis.sock");
+        let mut child = Command::new("sleep")
+            .arg("1")
+            .spawn()
+            .expect("readiness owner");
+        let delayed_socket = socket.clone();
+        let listener_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(75));
+            let listener = UnixListener::bind(delayed_socket).expect("delayed socket bind");
+            let _ = listener.accept();
+        });
+        let started = Instant::now();
+        wait_for_cordis_socket(&mut child, &socket, Duration::from_secs(1))
+            .expect("socket readiness must require a successful connect");
+        assert!(
+            started.elapsed() >= Duration::from_millis(50),
+            "readiness returned before the delayed listener accepted connections"
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+        listener_thread.join().expect("readiness listener");
+        let _ = std::fs::remove_dir_all(state_root);
+    }
+
+    #[test]
+    fn cordis_start_surfaces_owner_exit_before_readiness() {
+        let state_root = std::path::PathBuf::from("/tmp").join(format!(
+            "rccv4-cordis-readiness-exit-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&state_root).expect("readiness state root");
+        let socket = state_root.join("cordis.sock");
+        let mut child = Command::new("true").spawn().expect("readiness owner");
+        let error = wait_for_cordis_socket(&mut child, &socket, Duration::from_secs(1))
+            .expect_err("exited owner must not be considered ready");
+        assert!(error.contains("exited before socket became ready"));
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(state_root);
     }
 
     #[test]

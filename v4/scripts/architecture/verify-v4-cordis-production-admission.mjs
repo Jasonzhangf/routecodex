@@ -13,7 +13,13 @@ const source = fs.readFileSync(
   path.join(root, 'crates/routecodex-v4-runtime-bin/src/main.rs'),
   'utf8',
 );
-const productionSource = source.split('#[cfg(test)]', 1)[0];
+// `#[cfg(test)]` imports may appear near the top of the Rust entrypoint. The
+// production boundary is the test module itself, not the first test-only
+// import; use the final module marker so the real admission code is scanned.
+const testModuleBoundary = source.lastIndexOf('\n#[cfg(test)]');
+const productionSource = testModuleBoundary === -1
+  ? source
+  : source.slice(0, testModuleBoundary);
 const failures = [];
 
 if (/\n\s*cordis_service_readiness\(/.test(productionSource)) {

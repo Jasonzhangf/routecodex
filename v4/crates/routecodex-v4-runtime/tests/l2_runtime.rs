@@ -1002,6 +1002,37 @@ fn red_invalid_input_flows_typed_error_path_to_terminal_projection() {
 }
 
 #[test]
+fn production_error_projection_runs_error_node_plan_before_projection() {
+    let runtime = active_runtime();
+    let fault = routecodex_v4_runtime::RuntimeFault::new(
+        "provider_http_502",
+        "upstream unavailable",
+    )
+    .with_node("V4ProviderReqOutbound09TransportRequest");
+    let report = runtime
+        .execute_error_node_chain(
+            &fault,
+            "r-production-error-plan",
+            5520,
+            "session-production-error",
+            "conversation-production-error",
+        )
+        .expect("error NodePluginPlan must complete");
+    let chain = report
+        .error_chain
+        .as_ref()
+        .expect("error plan must preserve typed error resource");
+    assert_eq!(chain.get("code").and_then(serde_json::Value::as_str), Some("provider_http_502"));
+    assert_eq!(
+        chain.get("stage").and_then(serde_json::Value::as_str),
+        Some("client_projected")
+    );
+    assert_eq!(chain.get("kind").and_then(serde_json::Value::as_str), Some("keyless_mock"));
+    assert!(report.provider_wire.is_none(), "error chain cannot produce business wire data");
+    assert!(report.client_frame.is_none(), "error chain cannot produce response payload data");
+}
+
+#[test]
 fn provider_policy_decision_enters_error_chain_without_payload_control() {
     let mut chain = ErrorChain::new(scope("r-error-policy"));
     let projection = project_runtime_fault_with_policy(

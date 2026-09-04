@@ -54,6 +54,14 @@ if (!runtimeBin.includes('execute_provider_response_scoped')) {
 if (!/execute_provider_response_scoped[\s\S]*?report\.client_frame/.test(productionSource)) {
   failures.push('RESPONSE_JSON_FRAME_DISCARDED: JSON response chain output is not consumed');
 }
+if (productionSource.includes('ErrorChain::new')
+    || productionSource.includes('project_runtime_fault')) {
+  failures.push('ERROR_CHAIN_DIRECT_BYPASS: runtime-bin must route faults through the runtime error NodePluginPlan');
+}
+if (!productionSource.includes('project_fault_with_runtime')
+    || !runtimeSource.includes('execute_error_node_chain')) {
+  failures.push('ERROR_CHAIN_PLAN_UNBOUND: production error paths lack the runtime-owned error NodePluginPlan boundary');
+}
 if (runtimeSource.includes('decode_provider_sse_frame(')
     || runtimeSource.includes('encode_client_sse_frame(')) {
   failures.push('SSE_SEMANTIC_BYPASS: runtime directly invokes SSE semantic codec outside NodePluginPlan');

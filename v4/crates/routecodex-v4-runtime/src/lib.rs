@@ -9,11 +9,11 @@
 //! - request/response chain execution for the minimal slice.
 //!
 //! Hard boundaries:
-//! - error chain and config chain plugins are owned by routecodex-v4-error /
-//!   routecodex-v4-config; the runtime never executes them inline
-//!   (`external_owner_violation` fail-fast);
-//! - faults route into `routecodex_v4_error::ErrorChain` via
-//!   `project_runtime_fault` (01 -> 02 -> 03 -> 04 -> 05 -> 06, terminal);
+//! - the error NodePluginPlan is traversed only through the explicit
+//!   `execute_error_node_chain` boundary; error policy/projection remains owned
+//!   by `routecodex-v4-error`, while config chains stay external;
+//! - faults route through the typed error plan and then
+//!   `routecodex_v4_error::ErrorChain` (01 -> 02 -> 03 -> 04 -> 05 -> 06);
 //! - no fallback, no silent strip, no payload reconstruction of control state;
 //! - control fields never enter provider/client wire.
 
@@ -31,7 +31,7 @@ use routecodex_v4_standard_plugins::{
     sse_transport::SseTransportFrame, StandardHandleRegistry,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -787,6 +787,8 @@ struct ControlFrame {
     route_exit: Option<String>,
     continuation_committed: bool,
     continuation_restored: bool,
+    #[serde(default)]
+    error_chain: Option<Value>,
 }
 
 /// Control plane view: typed side-channel only; never projected into payload.
@@ -805,6 +807,8 @@ pub struct ControlView {
     pub route_exit: Option<String>,
     pub continuation_committed: bool,
     pub continuation_restored: bool,
+    /// Typed error-chain resource carried between error NodeContainer stages.
+    pub error_chain: Option<Value>,
     pub metadata: MetadataCenter,
 }
 
@@ -900,6 +904,7 @@ impl ExecutionContext {
                 route_exit: None,
                 continuation_committed: false,
                 continuation_restored: false,
+                error_chain: None,
                 metadata: MetadataCenter::new(scope),
             },
             information: InformationView::default(),
@@ -960,6 +965,11 @@ impl ExecutionContext {
             "response" | "direct_response" | "relay_response" => {
                 context.data.client_frame = Some(encoded)
             }
+            "error" => {
+                // Error chains carry no business payload. Their data frame is
+                // an empty object; all state remains on the typed control
+                // resource parsed below.
+            }
             other => {
                 return Err(RuntimeFault::new(
                     "execution_chain_external_owner",
@@ -1002,6 +1012,7 @@ impl ExecutionContext {
                 .get("continuation_restored")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            error_chain: control_object.get("error_chain").cloned(),
         };
         context.control.continuation_scope = control.continuation_scope;
         context.control.continuation_owner = control.continuation_owner;
@@ -1014,6 +1025,7 @@ impl ExecutionContext {
         context.control.route_exit = control.route_exit;
         context.control.continuation_committed = control.continuation_committed;
         context.control.continuation_restored = control.continuation_restored;
+        context.control.error_chain = control.error_chain;
         context.information = serde_json::from_value(frame.information.clone())
             .map_err(|error| RuntimeFault::new("execution_frame_information", error.to_string()))?;
         for event in &frame.events {
@@ -1045,10 +1057,12 @@ impl ExecutionContext {
             route_exit: self.control.route_exit,
             continuation_committed: self.control.continuation_committed,
             continuation_restored: self.control.continuation_restored,
+            error_chain: self.control.error_chain,
         };
         let raw_payload = match chain_id {
             "request" | "direct_request" | "relay_request" => self.data.raw_entry.as_deref(),
             "response" | "direct_response" | "relay_response" => self.data.provider_raw.as_deref(),
+            "error" => Some("{}"),
             other => {
                 return Err(RuntimeFault::new(
                     "execution_chain_external_owner",
@@ -1579,6 +1593,9 @@ pub struct ExecutionReport {
     /// reconstruct protocol payloads from the original client body.
     pub provider_wire_value: Option<Value>,
     pub client_frame: Option<String>,
+    /// Typed error-chain resource produced by the error NodePluginPlan. It is
+    /// never projected into request/response payloads.
+    pub error_chain: Option<Value>,
     pub continuation_scope: Option<String>,
     pub continuation_owner: Option<String>,
     pub execution_mode: Option<String>,
@@ -1662,6 +1679,19 @@ impl ResponseStreamProcessor {
         session_scope: &str,
         conversation_scope: &str,
     ) -> Result<Self, RuntimeFault> {
+        let expected_scope = Scope::new(
+            request_lease.request_id(),
+            "v4-skeleton",
+            port,
+            session_scope,
+            conversation_scope,
+        );
+        if request_scope != expected_scope {
+            return Err(RuntimeFault::new(
+                "response_scope_mismatch",
+                "response stream scope does not match its admitted request lease",
+            ));
+        }
         let entry_protocol = match canonical_protocol_information(entry_protocol)? {
             "openai-responses" => "responses",
             "openai-chat" => "chat",
@@ -1813,17 +1843,37 @@ impl ResponseStreamProcessor {
         runtime: &SkeletonRuntime,
         fault: RuntimeFault,
     ) -> Result<ResponseStreamDisposition, RuntimeFault> {
+        let expected_scope = Scope::new(
+            self.request_lease.request_id(),
+            "v4-skeleton",
+            self.port,
+            &self.session_scope,
+            &self.conversation_scope,
+        );
+        if self.request_scope != expected_scope {
+            return Err(RuntimeFault::new(
+                "response_scope_mismatch",
+                "response stream scope no longer matches its admitted request lease",
+            ));
+        }
         if self.failure_projected {
             return Err(RuntimeFault::new(
                 "response_stream_failure_duplicate",
                 "response stream failure was already projected",
             ));
         }
-        let mut chain = ErrorChain::new(self.request_scope.clone());
-        let projection = project_runtime_fault(&mut chain, fault).map_err(|error| {
+        let projection = runtime
+            .project_fault_with_lease(
+                fault,
+                &self.request_lease,
+                self.port,
+                &self.session_scope,
+                &self.conversation_scope,
+            )
+            .map_err(|error| {
             RuntimeFault::new(
                 "response_error_projection",
-                format!("error chain projection failed: {error:?}"),
+                format!("error NodePluginPlan projection failed: {error:?}"),
             )
         })?;
         let encoded = runtime
@@ -2488,6 +2538,231 @@ impl SkeletonRuntime {
             .map_err(|error| RuntimeFault::new("payload_cycle", error.to_string()))
     }
 
+    /// Execute the canonical error NodePluginPlan before the typed ErrorChain
+    /// projects a client fault. The plan owns stage traversal and emits the
+    /// immutable control resource; ErrorChain remains the sole policy and
+    /// projection owner. No request/response payload is read or rewritten.
+    pub fn execute_error_node_chain(
+        &self,
+        fault: &RuntimeFault,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> Result<ExecutionReport, RuntimeFault> {
+        self.execute_error_node_chain_with_lease(
+            fault,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            None,
+        )
+    }
+
+    fn execute_error_node_chain_with_lease(
+        &self,
+        fault: &RuntimeFault,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        request_lease: Option<&RuntimeLease>,
+    ) -> Result<ExecutionReport, RuntimeFault> {
+        if let Some(lease) = request_lease {
+            if lease.request_id() != request_id {
+                return Err(RuntimeFault::new(
+                    "execution_epoch_scope",
+                    "request lease id mismatch",
+                ));
+            }
+        }
+        let owns_claim = request_lease.is_none();
+        if owns_claim {
+            self.claim(request_id)?;
+        }
+        let payload_hash = sha256_control_digest(&format!("fault:{}", fault.code));
+        let typed_context = fault
+            .node_id
+            .as_deref()
+            .map(|node| format!("node:{node}"));
+        let result = self.execute_path(
+            "error",
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            |ctx| {
+                ctx.control.error_chain = Some(json!({
+                    "code": fault.code,
+                    "payload_hash": payload_hash,
+                    "typed_context": typed_context,
+                    "stage": "source_raised"
+                }));
+            },
+            request_lease.map(RuntimeLease::epoch_lease),
+        );
+        if owns_claim {
+            self.release(request_id);
+        }
+        let report = result?;
+        let stage = report
+            .error_chain
+            .as_ref()
+            .and_then(|value| value.get("stage"))
+            .and_then(Value::as_str);
+        if stage != Some("client_projected") {
+            return Err(RuntimeFault::new(
+                "error_chain_incomplete",
+                "error NodePluginPlan did not reach client_projected",
+            ));
+        }
+        Ok(report)
+    }
+
+    /// Route a fault through the production error NodePluginPlan and then the
+    /// canonical typed ErrorChain policy/projection owner.
+    pub fn project_fault(
+        &self,
+        fault: RuntimeFault,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> Result<ClientProjection, RuntimeFault> {
+        self.project_fault_with_optional_lease(
+            fault,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            None,
+        )
+    }
+
+    pub fn project_fault_with_lease(
+        &self,
+        fault: RuntimeFault,
+        request_lease: &RuntimeLease,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> Result<ClientProjection, RuntimeFault> {
+        self.project_fault_with_optional_lease(
+            fault,
+            request_lease.request_id(),
+            port,
+            session_scope,
+            conversation_scope,
+            Some(request_lease),
+        )
+    }
+
+    fn project_fault_with_optional_lease(
+        &self,
+        fault: RuntimeFault,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        request_lease: Option<&RuntimeLease>,
+    ) -> Result<ClientProjection, RuntimeFault> {
+        self.execute_error_node_chain_with_lease(
+            &fault,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            request_lease,
+        )?;
+        let scope = Scope::new(
+            request_id,
+            "v4-pipeline",
+            port,
+            session_scope,
+            conversation_scope,
+        );
+        let mut chain = ErrorChain::new(scope);
+        project_runtime_fault(&mut chain, fault)
+            .map_err(|error| RuntimeFault::new("error_chain_projection", format!("{error:?}")))
+    }
+
+    /// Same as [`project_fault`] with a typed provider policy and decision.
+    pub fn project_fault_with_policy(
+        &self,
+        fault: RuntimeFault,
+        policy: RetryPolicy,
+        decision: ExecutionDecision,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> Result<ClientProjection, RuntimeFault> {
+        self.project_fault_with_policy_optional_lease(
+            fault,
+            policy,
+            decision,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            None,
+        )
+    }
+
+    pub fn project_fault_with_policy_lease(
+        &self,
+        fault: RuntimeFault,
+        policy: RetryPolicy,
+        decision: ExecutionDecision,
+        request_lease: &RuntimeLease,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> Result<ClientProjection, RuntimeFault> {
+        self.project_fault_with_policy_optional_lease(
+            fault,
+            policy,
+            decision,
+            request_lease.request_id(),
+            port,
+            session_scope,
+            conversation_scope,
+            Some(request_lease),
+        )
+    }
+
+    fn project_fault_with_policy_optional_lease(
+        &self,
+        fault: RuntimeFault,
+        policy: RetryPolicy,
+        decision: ExecutionDecision,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        request_lease: Option<&RuntimeLease>,
+    ) -> Result<ClientProjection, RuntimeFault> {
+        self.execute_error_node_chain_with_lease(
+            &fault,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            request_lease,
+        )?;
+        let scope = Scope::new(
+            request_id,
+            "v4-pipeline",
+            port,
+            session_scope,
+            conversation_scope,
+        );
+        let mut chain = ErrorChain::new(scope);
+        project_runtime_fault_with_policy(&mut chain, fault, policy, decision)
+            .map_err(|error| RuntimeFault::new("error_chain_projection", format!("{error:?}")))
+    }
+
     /// Generic chain execution. External-owned chains (error/config) must not
     /// be executed here; invoking them fails fast.
     pub fn execute_chain(
@@ -2495,6 +2770,12 @@ impl SkeletonRuntime {
         chain_id: &str,
         request_id: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
+        if matches!(chain_id, "error" | "config") {
+            return Err(RuntimeFault::new(
+                "execution_chain_external_owner",
+                format!("chain {chain_id} is not callable through the generic runtime API"),
+            ));
+        }
         self.claim(request_id)?;
         let result = self.execute_path(chain_id, request_id, 0, "", "", |_| {}, None);
         self.release(request_id);
@@ -2674,6 +2955,7 @@ impl SkeletonRuntime {
                 .transpose()
                 .map_err(|error| RuntimeFault::new("provider_wire_decode", error.to_string()))?,
             client_frame: ctx.data.client_frame.clone(),
+            error_chain: ctx.control.error_chain.clone(),
             continuation_scope: ctx.control.continuation_scope.clone(),
             continuation_owner: ctx.control.continuation_owner.clone(),
             execution_mode: ctx.control.execution_mode.clone(),

@@ -280,9 +280,34 @@ fn restart_cold_starts_when_no_managed_instance_exists() {
         "restart must cold-start after bootstrapping the project-owned Cordis host: {}",
         String::from_utf8_lossy(&restart.stderr)
     );
+    let first_pid = status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
+    assert!(
+        state_root.join("cordis.sock").exists(),
+        "cold start must retain a connectable Cordis host"
+    );
+
+    // `start` is the V3-compatible cold-start/takeover operation. Reusing
+    // the same Cordis socket must not let the old managed child kill the host
+    // before the replacement child completes admission.
+    let takeover = run(&["start", "-c", config.to_str().expect("config")]);
+    assert!(
+        takeover.status.success(),
+        "start takeover must preserve the Cordis owner: {}",
+        String::from_utf8_lossy(&takeover.stderr)
+    );
+    let second_pid = status_pid(&run(&["status", "-c", config.to_str().expect("config")]).stdout);
+    assert_ne!(first_pid, second_pid, "start takeover must cold-start a new managed child");
+    assert!(
+        state_root.join("cordis.sock").exists(),
+        "takeover must keep the Cordis host available"
+    );
     let status = run(&["status", "-c", config.to_str().expect("config")]);
     assert!(status.status.success());
     assert!(String::from_utf8_lossy(&status.stdout).contains("state=running"));
     let stop = run(&["stop", "-c", config.to_str().expect("config")]);
     assert!(stop.status.success());
+    assert!(
+        !state_root.join("cordis.sock").exists(),
+        "stop must close the project-owned Cordis host"
+    );
 }

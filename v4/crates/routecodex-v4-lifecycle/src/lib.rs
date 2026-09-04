@@ -348,7 +348,11 @@ pub fn start_managed(
                 state,
                 record: Some(_),
             } if state == "stale" => {
-                repair_stale(paths)?;
+                // `start` is the V3-compatible cold-start operation. A stale
+                // declaration with a live exact PID is still this runtime's
+                // instance, so release that recorded owner before replacing
+                // it; do not leave the user stuck behind `AlreadyManaged`.
+                release_for_foreground(paths, timeout)?;
             }
             _ => return Err(LifecycleError::AlreadyManaged),
         }
@@ -428,10 +432,18 @@ pub fn release_for_foreground(
     let Some(record) = read_record(paths)? else {
         return Ok(());
     };
-    let _ = request_control(paths, "stop");
+    let control_result = request_control(paths, "stop");
+    if control_result.is_err() && !process_alive(record.pid) {
+        clear_stale_declaration(paths)?;
+        return Ok(());
+    }
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if read_record(paths)?.is_none() {
+            return Ok(());
+        }
+        if !process_alive(record.pid) {
+            clear_stale_declaration(paths)?;
             return Ok(());
         }
         thread::sleep(Duration::from_millis(25));
@@ -442,7 +454,47 @@ pub fn release_for_foreground(
             return Err(io_error(&paths.record_path, error));
         }
     }
-    wait_until(timeout, || !paths.record_path.exists())
+    match wait_until(timeout, || !paths.record_path.exists()) {
+        Ok(()) => Ok(()),
+        Err(_error) if !process_alive(record.pid) => {
+            clear_stale_declaration(paths)?;
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    if unsafe { libc::kill(pid as libc::pid_t, 0) } == -1 {
+        return std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
+    }
+    // A terminated child can remain as a zombie until its original parent
+    // reaps it. Treat that exact PID as no longer running; otherwise a stale
+    // declaration can survive a successful SIGTERM forever.
+    std::process::Command::new("/bin/ps")
+        .args(["-p", &pid.to_string(), "-o", "stat="])
+        .output()
+        .map(|output| {
+            !String::from_utf8_lossy(&output.stdout)
+                .trim_start()
+                .starts_with('Z')
+        })
+        .unwrap_or(true)
+}
+
+fn clear_stale_declaration(paths: &V4LifecyclePaths) -> Result<(), LifecycleError> {
+    if paths.record_path.exists() {
+        fs::remove_file(&paths.record_path)
+            .map_err(|error| io_error(&paths.record_path, error))?;
+    }
+    if paths.control_socket.exists() {
+        fs::remove_file(&paths.control_socket)
+            .map_err(|error| io_error(&paths.control_socket, error))?;
+    }
+    write_status_atomic(paths, "stopped", None)
 }
 
 /// Release an unmanaged listener only when the OS identifies one exact rccv4
