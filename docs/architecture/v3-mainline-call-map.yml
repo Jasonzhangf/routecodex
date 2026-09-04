@@ -7614,6 +7614,8 @@ chains:
     status: anchored
     behavior_gap: Relay response profiles carry the request-local context; remaining gap is complete multi-tool/custom live matrix evidence
     owner_feature_id: v3.tool_thinking_hook_skeleton
+    semantic_owner_symbol: scrub_v3_provider_model_identity_instructions
+    semantic_owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
     resource_flow:
       consumes: [v3.hub.response_semantic, v3.request.tool_thinking_turn_context]
       produces: [v3.response.client_payload]
@@ -7629,6 +7631,8 @@ chains:
     status: anchored
     behavior_gap: Direct JSON response path is hook-owned and context-aware; remaining gap is complete current-binary Direct evidence across all applicable providers
     owner_feature_id: v3.tool_thinking_hook_skeleton
+    semantic_owner_symbol: scrub_v3_provider_model_identity_instructions
+    semantic_owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
     resource_flow:
       consumes: [v3.response.client_payload, v3.request.tool_thinking_turn_context, v3.response.tool_thinking_turn_result]
       produces: [v3.response.client_payload]
@@ -7644,6 +7648,8 @@ chains:
     status: anchored
     behavior_gap: Direct SSE response path is hook-owned and typed-fragment driven; remaining gap is complete current-binary Direct evidence and negative terminal coverage
     owner_feature_id: v3.tool_thinking_hook_skeleton
+    semantic_owner_symbol: scrub_v3_provider_model_identity_instructions_from_typed_sse
+    semantic_owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
     resource_flow:
       consumes: [v3.response.client_payload, v3.request.tool_thinking_turn_context]
       produces: [v3.response.client_payload]
@@ -7941,6 +7947,9 @@ chains:
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs
     status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    semantic_owner_feature_id: v3.tool_thinking_hook_skeleton
+    semantic_owner_symbol: scrub_v3_provider_model_identity_instructions_from_typed_sse
+    semantic_owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
     resource_flow:
       consumes: [v3.sse.relay.typed_hook_catalog, v3.sse.responses.semantic_tree]
       produces: [v3.sse.responses.hook_effect]
@@ -8063,6 +8072,9 @@ chains:
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
     status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    semantic_owner_feature_id: v3.tool_thinking_hook_skeleton
+    semantic_owner_symbol: scrub_v3_provider_model_identity_instructions_from_typed_sse
+    semantic_owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
     resource_flow:
       consumes: [v3.sse.direct.typed_hook_catalog, v3.sse.responses.semantic_tree]
       produces: [v3.sse.responses.hook_effect]

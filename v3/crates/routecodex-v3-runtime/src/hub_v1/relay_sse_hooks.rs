@@ -34,7 +34,8 @@ impl V3RelaySseHookCatalog {
     pub(crate) const fn new() -> Self {
         Self {
             responses_notify: noop_responses_notify,
-            responses_rewrite: noop_responses_rewrite,
+            responses_rewrite:
+                crate::hub_v1::scrub_v3_provider_model_identity_instructions_from_typed_sse,
             chat_notify: noop_chat_notify,
             chat_rewrite: noop_chat_rewrite,
         }

@@ -386,6 +386,7 @@ pub struct V3ResponsesSseResponseContainer {
     pub id: Option<String>,
     pub status: Option<String>,
     pub model: Option<String>,
+    pub instructions: Option<Value>,
     pub output: Option<Vec<V3ResponsesSseOutputItem>>,
     pub usage: Option<V3ResponsesSseUsage>,
     pub error: Option<V3ResponsesSseResponseError>,
@@ -403,6 +404,9 @@ impl V3ResponsesSseResponseContainer {
         }
         if let Some(model) = &self.model {
             value.insert("model".to_owned(), Value::String(model.clone()));
+        }
+        if let Some(instructions) = &self.instructions {
+            value.insert("instructions".to_owned(), instructions.clone());
         }
         if let Some(output) = &self.output {
             value.insert(
@@ -576,7 +580,7 @@ impl V3ResponsesJsonDocument {
         response.extensions.retain(|extension| {
             matches!(
                 extension.name.as_str(),
-                "id" | "status" | "model" | "usage" | "error"
+                "id" | "status" | "model" | "instructions" | "usage" | "error"
             )
         });
         let output_present = object.contains_key("output");
@@ -595,7 +599,7 @@ impl V3ResponsesJsonDocument {
         let extensions = event_extensions(
             object,
             &[
-                "object", "id", "status", "model", "usage", "error", "output",
+                "object", "id", "status", "model", "instructions", "usage", "error", "output",
             ],
         );
         Ok(Self {
@@ -1514,7 +1518,15 @@ pub(crate) fn parse_response_container(
     let object = response
         .as_object()
         .ok_or(V3ResponsesSseTreeError::EventNotObject)?;
-    let known = ["id", "status", "model", "output", "usage", "error"];
+    let known = [
+        "id",
+        "status",
+        "model",
+        "instructions",
+        "output",
+        "usage",
+        "error",
+    ];
     let extensions = object
         .iter()
         .filter(|(name, _)| !known.contains(&name.as_str()))
@@ -1549,6 +1561,10 @@ pub(crate) fn parse_response_container(
         id: string_field(object, "id"),
         status: string_field(object, "status"),
         model: string_field(object, "model"),
+        instructions: object
+            .get("instructions")
+            .filter(|value| !value.is_null())
+            .cloned(),
         output,
         usage,
         error,

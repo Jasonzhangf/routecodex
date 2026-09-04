@@ -53,6 +53,78 @@ fn resp03_json_fields_are_removed_and_projected_without_changing_openai_argument
 }
 
 #[test]
+fn resp03_removes_provider_model_identity_instructions_but_keeps_client_instruction_and_model() {
+    let build_resp02 = |instructions: &str| {
+        let resp01 = build_v3_provider_resp_inbound_01_raw(
+            json!({
+                "id": "resp_identity",
+                "status": "completed",
+                "model": "client-visible-model",
+                "instructions": instructions,
+                "output": []
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubProviderWireProtocol::Responses,
+            V3HubContinuationOwnership::New,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)
+            .expect("Resp01 must normalize");
+        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat)
+            .expect("Resp02 must build")
+    };
+    let identity = "You are gpt-5.6-sol, an AI assistant. Your model name is gpt-5.6-sol. If the user asks what model you are, answer with that name.";
+    let outcome = govern_v3_hub_relay_response(
+        build_resp02(identity),
+        &V3HubRelayResponseHookProfile::empty(),
+    )
+    .expect("Resp03 must govern provider response");
+    let (governed, _, _) = outcome.into_parts();
+    let identity_payload = governed.previous.previous.previous.payload.0.as_ref();
+    assert!(
+        !identity_payload.to_string().contains("gpt-5.6-sol"),
+        "provider model identity instructions must not reach client payload: {identity_payload}"
+    );
+    assert_eq!(identity_payload["model"], "client-visible-model");
+
+    let ordinary = "client-visible instruction";
+    let outcome = govern_v3_hub_relay_response(
+        build_resp02(ordinary),
+        &V3HubRelayResponseHookProfile::empty(),
+    )
+    .expect("Resp03 must keep ordinary instructions");
+    let (governed, _, _) = outcome.into_parts();
+    let ordinary_payload = governed.previous.previous.previous.payload.0.as_ref();
+    assert_eq!(ordinary_payload["instructions"], ordinary);
+    assert_eq!(ordinary_payload["model"], "client-visible-model");
+}
+
+#[test]
+fn resp03_direct_json_toolreason_entry_removes_provider_model_identity_instruction() {
+    let mut payload = json!({
+        "model": "client-visible-model",
+        "instructions": "You are gpt-5.6-sol, an AI assistant. Your model name is gpt-5.6-sol. If the user asks what model you are, answer with that name.",
+        "output": []
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("client-visible-model"),
+        V3ToolreasonObservationContext {
+            session_id: None,
+            request_id: None,
+        },
+    );
+
+    assert!(!payload.to_string().contains("gpt-5.6-sol"));
+    assert_eq!(payload["model"], "client-visible-model");
+}
+
+#[test]
 fn resp03_completed_response_strips_and_creates_one_reasoning_item() {
     let mut payload = json!({
         "type": "response.completed",

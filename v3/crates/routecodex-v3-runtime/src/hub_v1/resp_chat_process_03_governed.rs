@@ -8,6 +8,69 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, OnceLock};
 
+const V3_PROVIDER_MODEL_IDENTITY_INSTRUCTION_MARKERS: [&str; 2] = [
+    "your model name is",
+    "if the user asks what model you are",
+];
+
+fn is_v3_provider_model_identity_instruction(value: &Value) -> bool {
+    let Some(text) = value.as_str() else {
+        return false;
+    };
+    let text = text.to_ascii_lowercase();
+    V3_PROVIDER_MODEL_IDENTITY_INSTRUCTION_MARKERS
+        .iter()
+        .all(|marker| text.contains(marker))
+}
+
+pub(crate) fn scrub_v3_provider_model_identity_instruction(
+    instructions: &mut Option<Value>,
+) -> bool {
+    if instructions
+        .as_ref()
+        .is_some_and(is_v3_provider_model_identity_instruction)
+    {
+        *instructions = None;
+        true
+    } else {
+        false
+    }
+}
+
+fn scrub_v3_provider_model_identity_instruction_from_object(
+    object: &mut serde_json::Map<String, Value>,
+) -> bool {
+    let Some(instructions) = object.remove("instructions") else {
+        return false;
+    };
+    let mut instructions = Some(instructions);
+    let changed = scrub_v3_provider_model_identity_instruction(&mut instructions);
+    if let Some(instructions) = instructions {
+        object.insert("instructions".to_owned(), instructions);
+    }
+    changed
+}
+
+pub(crate) fn scrub_v3_provider_model_identity_instructions(payload: &mut Value) -> bool {
+    let Some(object) = payload.as_object_mut() else {
+        return false;
+    };
+    let mut changed = scrub_v3_provider_model_identity_instruction_from_object(object);
+    if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
+        changed |= scrub_v3_provider_model_identity_instruction_from_object(response);
+    }
+    changed
+}
+
+pub(crate) fn scrub_v3_provider_model_identity_instructions_from_typed_sse(
+    semantic: &mut V3ResponsesSseSemanticObject,
+) -> Result<(), V3ResponsesSseTreeError> {
+    if let Some(response) = semantic.response.as_mut() {
+        scrub_v3_provider_model_identity_instruction(&mut response.instructions);
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct V3ToolreasonObservationContext<'a> {
     pub(crate) session_id: Option<&'a str>,
@@ -1123,7 +1186,12 @@ fn govern_v3_hub_relay_response(
     let input =
         strip_v3_resp03_encrypted_reasoning_content(input, profile.retain_response_cipher());
     let mut input = harvest_v3_think_blocks_at_resp03(input);
+    let is_responses_protocol =
+        input.semantic_protocol() == V3HubProviderWireProtocol::Responses;
     let payload = Arc::make_mut(&mut input.previous.previous.payload.0);
+    if is_responses_protocol {
+        scrub_v3_provider_model_identity_instructions(payload);
+    }
     if profile.toolreason_observation_enabled() {
         let context = V3ToolreasonObservationContext {
             session_id: profile.toolreason_observation_session_id(),
@@ -2108,6 +2176,7 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
     request_id: Option<&str>,
     expected_model_id: Option<&str>,
 ) {
+    scrub_v3_provider_model_identity_instructions(payload);
     if !enabled {
         return;
     }

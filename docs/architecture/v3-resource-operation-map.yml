@@ -2109,7 +2109,12 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3ResponsesSseSemanticObject
     identity: [responseId, outputIndex, itemId, contentIndex]
-    allowed_writers: [classify_v3_responses_sse_output_item, rewrite_v3_responses_sse_content, V3ResponsesSseReducerState::apply_event]
+    semantic_contract:
+      response_instructions: Responses response.instructions is carried as a typed optional field; ordinary client instructions remain visible.
+      model_identity_instruction_owner: Resp03 exclusively removes provider model-identity instruction text identified by both canonical markers; the legal response model field is preserved.
+      typed_projection_paths: Relay and Direct catalogs invoke the same Resp03 rewrite function; no provider, generic SSE, handler, or client projection scrubber exists.
+      payload_boundary: provider model-identity instructions do not enter the client business payload, while ordinary instructions and the legal model field remain protocol-visible.
+    allowed_writers: [classify_v3_responses_sse_output_item, rewrite_v3_responses_sse_content, V3ResponsesSseReducerState::apply_event, scrub_v3_provider_model_identity_instructions_from_typed_sse]
     allowed_readers: [V3ResponsesSseHookInput, responses_provider_event_codec]
     forbidden_writers: [routecodex-v3-sse, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload]
     may_enter_provider_body: false
@@ -2124,7 +2129,7 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3ResponsesJsonDocument
     identity: [responseId, outputIndex, itemId]
-    allowed_writers: [V3ResponsesJsonDocument::from_json, V3ResponsesJsonDocument::to_normalized_value]
+    allowed_writers: [V3ResponsesJsonDocument::from_json, V3ResponsesJsonDocument::to_normalized_value, scrub_v3_provider_model_identity_instructions]
     allowed_readers: [run_json_response_hooks]
     forbidden_writers: [routecodex-v3-sse, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload]
     may_enter_provider_body: false
@@ -2307,6 +2312,9 @@ resources:
     owner_module: relay_sse_hooks
     owner_node: V3RelaySseHookCatalog
     identity: [protocol, hook_kind, registration_revision]
+    semantic_contract:
+      responses_rewrite_owner: Resp03's scrub_v3_provider_model_identity_instructions_from_typed_sse is the single registered Responses rewrite owner; this catalog only stores and invokes it.
+      preservation_rule: Ordinary response.instructions and the legal response.model field are preserved.
     allowed_writers: [V3RelaySseHookCatalog::new, V3RelaySseHookCatalog::with_responses, V3RelaySseHookCatalog::with_chat]
     allowed_readers: [responses_provider_event_codec, provider_stream_materialization, openai_chat_relay_runtime]
     forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, request.normal_payload, provider.wire_payload]
@@ -2323,6 +2331,9 @@ resources:
     owner_module: direct_sse_consumers
     owner_node: V3DirectSseTypedHookCatalog
     identity: [protocol, hook_kind, registration_revision]
+    semantic_contract:
+      responses_rewrite_owner: Resp03's scrub_v3_provider_model_identity_instructions_from_typed_sse is the single registered Responses rewrite owner; this catalog only stores and invokes it.
+      preservation_rule: Ordinary response.instructions and the legal response.model field are preserved.
     allowed_writers: [V3DirectSseTypedHookCatalog::new, V3DirectSseTypedHookCatalog::with_responses, V3DirectSseTypedHookCatalog::with_chat]
     allowed_readers: [V3DirectSseContentConsumer::consume, project_direct_typed_protocol_data]
     forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, request.normal_payload, provider.wire_payload]

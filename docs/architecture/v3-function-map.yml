@@ -5421,6 +5421,7 @@ features:
   status: source_controlled_pending_online_matrix
   change_risk: high
   owner_kind: rust_v3_chat_process_tool_thinking_hook
+  owner_scope: Resp03 is the sole semantic owner for Toolreason response compatibility, including provider model-identity instruction cleanup; Direct and Relay response paths only invoke or register this owner.
   owner_modules:
   - routecodex-v3-runtime
   owner_files:
@@ -5446,6 +5447,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
   test_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_anthropic_native_tests.rs
@@ -5460,6 +5462,9 @@ features:
   - v3.response.client_payload
   entry_symbols:
   - inject_v3_tool_thinking_guidance_at_req04
+  - scrub_v3_provider_model_identity_instruction
+  - scrub_v3_provider_model_identity_instructions
+  - scrub_v3_provider_model_identity_instructions_from_typed_sse
   - map_v3_toolreason_to_reasoning_content_at_resp03
   - map_v3_toolreason_stream_event_at_resp03
   - V3DirectSseContentConsumer::take_toolreason_reasoning_projection
@@ -5528,6 +5533,8 @@ features:
   - provenance-matched custom restoration is an independent mechanical inverse and preserves valid custom input for every terminal status
   - the typed turn result projects one separate normal reasoning item before the first native tool call without changing provider-native reasoning
   - visible IDs, 调用工具 text, ordinary reasoning, pending message text, and legacy fences are not identity or active sources; their parsers and replay paths are physically removed
+  - Resp03 removes only the provider model-identity instruction shape identified by both canonical identity markers; ordinary client instructions and the legal response model field remain unchanged
+  - Relay and Direct typed Responses SSE catalogs register the same Resp03 model-identity cleanup function; provider, generic SSE framing, handler, and client projection layers do not implement a second scrubber
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib req04_tool_thinking -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib resp03_ -- --nocapture
@@ -5594,6 +5601,7 @@ features:
   - v3.sse.responses.protocol_metadata
   - v3.sse.responses.hook_effect
   - v3.sse.chat.json_document
+  - v3.sse.relay.typed_hook_catalog
   - v3.sse.direct.typed_hook_catalog
   entry_symbols:
   - classify_v3_responses_sse_output_item
@@ -5603,7 +5611,10 @@ features:
   - V3OpenAiChatJsonDocument::from_json
   - V3OpenAiChatJsonDocument::to_normalized_value
   - V3ResponsesSseHookInput
+  - V3ResponsesSseResponseContainer
+  - parse_response_container
   - V3HubRelayResponseHookRegistry::typed_sse_catalog
+  - V3RelaySseHookCatalog::rewrite_responses
   - V3DirectSseTypedHookCatalog::new
   - V3DirectSseTypedHookCatalog::with_responses
   - V3DirectSseTypedHookCatalog::with_chat

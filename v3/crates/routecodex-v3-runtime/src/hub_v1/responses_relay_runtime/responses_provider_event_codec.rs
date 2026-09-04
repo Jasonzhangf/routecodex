@@ -524,6 +524,52 @@ data: {"type":"response.output_item.done","output_index":0,"item":{"type":"funct
     }
 
     #[test]
+    fn relay_removes_provider_model_identity_instructions_from_typed_response() {
+        let observation = V3RuntimeStreamObservation::default();
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let chunk = br#"data: {"type":"response.in_progress","response":{"id":"resp_relay_identity","status":"in_progress","model":"client-visible-model","instructions":"You are gpt-5.6-sol, an AI assistant. Your model name is gpt-5.6-sol. If the user asks what model you are, answer with that name."}}
+
+"#;
+
+        observe_v3_runtime_responses_sse_transport_chunk_typed(
+            chunk,
+            &mut decoder,
+            &observation,
+            &mut reducer,
+        )
+        .expect("provider identity instruction must be handled by typed hook");
+
+        let response = reducer.response.expect("response.in_progress response");
+        let projected = response.to_normalized_value();
+        assert!(!projected.to_string().contains("gpt-5.6-sol"));
+        assert_eq!(projected["model"], "client-visible-model");
+    }
+
+    #[test]
+    fn relay_keeps_ordinary_response_instructions_in_typed_projection() {
+        let observation = V3RuntimeStreamObservation::default();
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let chunk = br#"data: {"type":"response.in_progress","response":{"id":"resp_relay_instruction","status":"in_progress","model":"client-visible-model","instructions":"client-visible instruction"}}
+
+"#;
+
+        observe_v3_runtime_responses_sse_transport_chunk_typed(
+            chunk,
+            &mut decoder,
+            &observation,
+            &mut reducer,
+        )
+        .expect("ordinary instructions must remain in typed projection");
+
+        let response = reducer.response.expect("response.in_progress response");
+        let projected = response.to_normalized_value();
+        assert_eq!(projected["instructions"], "client-visible instruction");
+        assert_eq!(projected["model"], "client-visible-model");
+    }
+
+    #[test]
     fn response_incomplete_is_terminal_typed_response_not_provider_error() {
         let mut reducer = V3ResponsesSseReducerState::default();
         let terminal = apply_v3_typed_responses_event(

@@ -115,7 +115,8 @@ impl V3DirectSseTypedHookCatalog {
     pub(crate) const fn new() -> Self {
         Self {
             responses_notify: noop_responses_notify,
-            responses_rewrite: noop_responses_rewrite,
+            responses_rewrite:
+                crate::hub_v1::scrub_v3_provider_model_identity_instructions_from_typed_sse,
             chat_notify: noop_chat_notify,
             chat_rewrite: noop_chat_rewrite,
             toolreason: noop_toolreason,
@@ -1038,6 +1039,38 @@ mod tests {
     }
 
     #[test]
+    fn direct_responses_sse_removes_provider_model_identity_instructions() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.in_progress","response":{"id":"resp_direct_identity","status":"in_progress","model":"client-visible-model","instructions":"You are gpt-5.6-sol, an AI assistant. Your model name is gpt-5.6-sol. If the user asks what model you are, answer with that name."}}"#,
+        )
+        .unwrap();
+
+        consumer.consume(&mut object).unwrap();
+
+        let projected = object.data_value().unwrap();
+        assert!(!projected.to_string().contains("gpt-5.6-sol"));
+        assert_eq!(projected["response"]["model"], "client-visible-model");
+    }
+
+    #[test]
+    fn direct_responses_sse_keeps_ordinary_response_instructions() {
+        let mut consumer = V3DirectSseContentConsumer::default()
+            .with_provider_protocol(V3HubProviderWireProtocol::Responses);
+        let mut object = SseObjectFrame::from_json(
+            r#"{"type":"response.in_progress","response":{"id":"resp_direct_instruction","status":"in_progress","model":"client-visible-model","instructions":"client-visible instruction"}}"#,
+        )
+        .unwrap();
+
+        consumer.consume(&mut object).unwrap();
+
+        let projected = object.data_value().unwrap();
+        assert_eq!(projected["response"]["instructions"], "client-visible instruction");
+        assert_eq!(projected["response"]["model"], "client-visible-model");
+    }
+
+    #[test]
     fn direct_sse_toolreason_observation_failure_is_explicit() {
         let mut consumer = V3DirectSseContentConsumer::default()
             .with_provider_protocol(V3HubProviderWireProtocol::Responses)
@@ -1458,7 +1491,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             arguments,
-            "{\"cmd\":\"pwd\",\"goal_alignment_confidence\":\"100\",\"model_id\":null,\"reason\":\"读取工作目录\"}"
+            "{\"cmd\":\"pwd\",\"goal_alignment_confidence\":\"100\",\"reason\":\"读取工作目录\"}"
         );
         assert!(consumer.take_toolreason_reasoning_projection().is_none());
     }
