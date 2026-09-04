@@ -36144,3 +36144,11 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - 修复：configured priority 保持静态；Provider Health 是唯一状态 owner；Runtime 只有一个 generation-guarded probe owner；scheduled/rescue probe 共用 typed permit 和原子 success/failure transition；probe 与 business cooldown 使用独立 deadline；503 改为三次计数恢复；2xx probe 必须通过 provider 协议终态。
 - 证据：provider/error/target/runtime/server 定向与回归测试、resource/function/mainline 及 scoped owner gates、canonical build/install 通过；全局安装 `0.90.4739`，聚合 restart 后 7777/4444 health 200。安装入口真实 Responses 请求完成，并自然观测到 429 进入 typed Error 链。AGY review `v3-health-scheduler-failback-20260830` PASS，零 findings。全量 module-boundary gate 仍被三个未修改文件中的既有 fallback 文案阻断。
 - 在线缺口：当前 cooldown pool 为空，真实 429 分散在不同 auth key；未通过修改 live config/health 或故意压测制造同一 generation 三次失败，因此 scheduled probe 后 failback 未做生产态故障注入重放。
+
+## 2026-09-04 V3 SSE provider/client decoupling delivery
+
+- Candidate commit: `7832d389b` (`fix(v3): isolate provider errors from clients`); AGY review passed with no findings.
+- Integration commit: `d22546b75`; parents are the clean main before integration and candidate `7832d389b`. Package conflict kept main's version truth `0.90.4762`.
+- Main closeout: candidate is an ancestor of main; tracked status and `git diff --check` are clean. `./.appsdk/sdk.bin` is ignored by `.gitignore` and is not source dirty. Operator closeout reports pinned SDK `0.1.6`, verify, guide develop, and guide debug passed.
+- File-size baseline gap remains at `verify:v3-file-size`: provider-compat-core `2234/2136`, config v2_compat `1520/1506`, config validate `1813/1759`, provider-responses health `2661/2411`, runtime hooks `1626/1587`, anthropic relay `1607/1521`, openai chat relay `1597/1586`, relay core `1515/1500`, resp_chat_process `5012/4663`, responses relay tests extra `1643/1500`, direct runtime helpers `1510/1500`, direct SSE consumers `1558/1500`, server endpoint handlers `1947/1905`, restart handoff `1515/1507`. No unrelated split was made.
+- Cleanup: collab receipt `cleanup-v3-sse-provider-client-decoupling-20260903-1788530243630` verified; feature worktree, local branch, and claim released. Remote push was not performed.
