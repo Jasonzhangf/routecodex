@@ -93,3 +93,15 @@ fn repair_stale_removes_dead_instance_record_and_socket() {
     assert!(!paths.control_socket.exists());
     fs::remove_dir_all(&paths.state_root).expect("cleanup exact test root");
 }
+
+#[test]
+fn repair_stale_removes_orphan_socket_without_record() {
+    let paths = V4LifecyclePaths::for_state_root(test_root("orphan-socket"));
+    paths.prepare().expect("prepare");
+    let _listener = std::os::unix::net::UnixListener::bind(&paths.control_socket)
+        .expect("orphan socket");
+    drop(_listener);
+    repair_stale(&paths).expect("orphan repair");
+    assert!(!paths.control_socket.exists());
+    fs::remove_dir_all(&paths.state_root).expect("cleanup exact test root");
+}
