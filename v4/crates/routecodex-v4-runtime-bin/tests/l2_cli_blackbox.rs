@@ -160,6 +160,10 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
         .output()
         .expect("manifest preflight");
     assert!(!preflight.status.success(), "preflight must fail without Cordis admission");
+    assert!(
+        !String::from_utf8_lossy(&preflight.stdout).contains("Server started"),
+        "failed admission must not emit a started banner"
+    );
     assert!(state_root.join("manifest.compiled.json").exists(), "preflight must publish the compiled manifest");
     assert!(!state_root.join("instance.json").exists(), "failed admission must not declare a managed instance");
     let (mut cordis, socket, cordis_stderr) = start_cordis_fixture(&state_root);
