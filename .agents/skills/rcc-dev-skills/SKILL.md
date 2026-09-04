@@ -1,61 +1,52 @@
 ---
 name: rcc-dev-skills
-description: RouteCodex debug and development routing. Find root cause, owner, evidence.
+description: "RouteCodex V3 evidence-first development: query resource/function/mainline/verification maps, prove first divergence, patch one owner, then run mapped gates and installed same-entry replay. Use for debug, protocol, provider, routing, continuation, SSE, servertool, or runtime changes."
 ---
 
-# RCC Dev Skill
+# RouteCodex V3 Development
 
-## Trigger
+## Command-First Flow
 
-RouteCodex development, debug, architecture, provider, SSE, protocol, routing, continuation, or runtime work.
+1. Read `AGENTS.md`.
+2. Query maps before source:
 
-## Order
+```bash
+rcc_task_feature='<feature_id>'
+rg -n "feature_id: ${rcc_task_feature}" \
+  docs/architecture/v3-resource-operation-map.yml \
+  docs/architecture/v3-function-map.yml \
+  docs/architecture/v3-mainline-call-map.yml \
+  docs/architecture/v3-verification-map.yml
+```
 
-1. Read `AGENTS.md` and `docs/agent-routing/05-foundation-contract.md`.
-2. Resolve feature, resource, function, mainline, and verification maps.
-3. Read mainline source and review surface.
-4. Check history for prior fix and regression point.
-5. Capture request id, entry, port, direct/relay, full raw request, provider request/response, client projection.
-6. Lock one hypothesis and first divergence.
-7. Write red test or failing sample.
-8. Patch unique owner; test positive and negative paths.
-9. Runtime change: build -> install -> `routecodex restart` -> all health -> same-entry replay.
-10. Review after validation only.
+3. Lock resource edge, owner, allowed/forbidden paths, caller/callee, and required gates. Missing or ambiguous binding blocks edits.
+4. Read mapped source, generated review surface, current run notes, project `MEMORY.md`, and relevant history.
+5. For defects, capture one request id and find first semantic divergence. Keep one active hypothesis.
+6. Record red evidence: focused failing test, saved failing shape, or controlled replay.
+7. Patch only mapped owner. Run positive and negative tests.
+8. Run feature `required_gates`, then project architecture gate:
 
-## Hard Rules
+```bash
+npm run verify:v3-architecture-ci
+```
 
-- No fallback, downgrade, silent drop, guessed repair, or compensation.
-- No semantic bulk replacement scripts. Use read -> context check -> `apply_patch`.
-- Control state stays in typed side-channel / MetadataCenter / Error chain.
-- Payload never reconstructs control state.
-- One owner. Adjacent conversion only.
-- Do not edit `main`, dirty worktrees, or another worker's files.
+9. Runtime-impacting change: load `references/50-rcc-config-ssot.md`; prove build, install, config check, managed restart, all-listener health, and same-entry replay.
+10. Replay exact old sample or same-entry semantic equivalent. Review only after verification.
 
-## Provider A/B/C
+## Routes
 
-- A: minimal direct provider request.
-- B: exact failed `provider-request.json` direct to same provider.
-- C: exact client request through RouteCodex.
-
-A fail -> provider/key/model/endpoint. A pass + B fail -> provider-bound construction. A+B pass + C fail -> transport/parse/projection. Missing B or raw response -> no attribution.
-
-## Boundaries
-
-Rust Chat Process owns semantic governance. Virtual Router selects. Provider runtime handles transport/auth/compatibility. Adjacent codecs convert protocol. SSE frames/parses syntax. Handler/outbound transports/projects. Direct preserves protocol. Relay uses adjacent codecs.
-
-## References
-
-| Topic | Reference |
+| Need | Reference |
 | --- | --- |
-| owner/gates | `references/21-change-workflow.md`, `references/40-owner-registry.md` |
-| pipe debug | `references/10-pipedebug-flow.md` |
-| SSE/continuation | `references/25-protocol-sse-continuation-boundary.md` |
-| servertool/stopless | `references/22-servertool-hook-skeleton-workflow.md`, `references/95-v3-stopless-sop.md` |
-| config truth | `references/50-rcc-config-ssot.md` |
-| error path | `references/96-unified-error-path-audit.md` |
-| provider dry-run | `references/98-provider-request-dryrun-and-request-error-debug.md` |
+| owner and gates | `references/40-owner-registry.md` |
+| first-divergence pipe debug | `references/10-pipedebug-flow.md` |
+| protocol/SSE/continuation | `references/25-protocol-sse-continuation-boundary.md` |
+| config/install/runtime replay | `references/50-rcc-config-ssot.md` |
+| servertool/Stopless | `references/95-v3-stopless-sop.md` |
+| error chain | `references/96-unified-error-path-audit.md` |
+| selected provider model | `references/96-v3-selected-provider-model-binding-sop.md` |
 | continuation cache | `references/97-continuation-cache-compliance.md` |
-| V3 invariant index | `references/90-invariant-index.md` |
-| memory/skill | `references/60-note-memory-flow.md`, `references/80-skill-routing-convention.md` |
+| provider request/error | `references/98-provider-request-dryrun-and-request-error-debug.md` |
 
-Report owner, first divergence, patch, positive/negative validation, proven runtime level, remaining gap.
+## Report
+
+Report goal, owner, first divergence, changed paths, red/green evidence, mapped gates, installed runtime evidence, review result, remaining gap, and next transition. State why edited owner is unique and which adjacent layers were ruled out.

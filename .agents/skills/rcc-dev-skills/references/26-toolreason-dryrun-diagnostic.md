@@ -32,18 +32,9 @@ client request
 
 只看 console、最终 200、node trace 或另一次成功请求都不算同请求证据。
 
-### 2. Provider CURL A/B/C
+### 2. Provider A/B/C 增量
 
-1. A：同 provider/model/key 的最小工具请求，验证 provider 基线。
-2. B：把失败请求的完整 `provider-request.json` body 原样直连同一 provider；只补 transport auth/header，不改 body。
-3. C：同一客户端 payload 经过 RouteCodex 真实入口。
-4. A/B 至少各重复五次，记录原始响应中 reason 的命中率；不得用另一个 provider、模型、协议或路由成功替代。
-
-判定：
-
-- A 失败：provider/key/model/endpoint 基线问题。
-- A 成功、B 失败：provider-bound 请求的历史、role、guidance 位置、schema 或序列化问题。
-- A/B 成功、C 失败：RouteCodex transport、响应 inbound、Resp03 或 client projection 问题。
+先执行 `98-provider-request-dryrun-and-request-error-debug.md` 的 A/B/C。Toolreason 额外要求：A/B 各重复五次，记录 raw reason 命中率；provider、model、key、endpoint、协议、body 和路由保持不变。
 
 ### 3. 请求 dry-run
 
@@ -124,7 +115,7 @@ Anthropic Relay 使用 `path=/v1/messages`；JSON provider response 使用：
 - Direct message lifecycle 不完整：测试必须红；
 - Relay 路径不能由 Direct fixture 代替。
 
-源码绿后按项目合同：从最新 main 构建 → 全局安装 → 一次聚合 `routecodex restart -c <active-config>` → 只验证任务指定端口 → 同一真实 artifact 响应回放 → Direct 五轮 → Relay 五轮。每轮按 request_id 核对四件套和客户端证据。
+源码绿后执行 `50-rcc-config-ssot.md`，再做同一真实 artifact 响应回放、Direct 五轮、Relay 五轮。每轮按 request_id 核对四件套和客户端证据。
 
 ## 首次偏离判定
 

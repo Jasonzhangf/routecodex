@@ -31,4 +31,4 @@ The error chain is a control-plane side channel. It must not be copied into requ
 
 ## Evidence format
 
-Record the exact path, owner, command, result, and remaining gap in `note.md`; do not claim closure without installed-version live evidence.
+Record exact path, owner, command, result, and remaining gap in current run `notes.jsonl`; do not claim closure without installed-version live evidence.
