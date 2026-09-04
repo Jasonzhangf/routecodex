@@ -219,8 +219,8 @@ impl V3TargetInterpreter {
                     Some(provider_id),
                     Some(model_id),
                     None,
-                    0,
-                    1,
+                    entry.priority,
+                    entry.weight,
                     deterministic_sample,
                     V3TargetExpansionScope {
                         path: vec![format!("direct:{provider_id}.{model_id}")],
