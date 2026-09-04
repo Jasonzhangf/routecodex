@@ -40,7 +40,36 @@ pub fn project_chat_request_to_responses(body: &Value) -> Result<Value, String> 
         .ok_or_else(|| "Chat request messages must be an array".to_string())?;
     let mut projected = object;
     projected.remove("messages");
-    projected.insert("input".to_string(), Value::Array(messages));
+    let input = messages
+        .into_iter()
+        .map(|mut message| {
+            let content = message
+                .get("content")
+                .cloned()
+                .ok_or_else(|| "Chat message content is required".to_string())?;
+            let responses_content = match content {
+                Value::String(text) => json!([{"type":"input_text","text":text}]),
+                Value::Array(parts) => Value::Array(
+                    parts
+                        .into_iter()
+                        .map(|mut part| {
+                            if part.get("type").and_then(Value::as_str) == Some("text") {
+                                if let Some(text) = part.get("text").cloned() {
+                                    part["type"] = Value::String("input_text".to_string());
+                                    part["text"] = text;
+                                }
+                            }
+                            part
+                        })
+                        .collect(),
+                ),
+                other => other,
+            };
+            message["content"] = responses_content;
+            Ok(message)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    projected.insert("input".to_string(), Value::Array(input));
     if let Some(max_tokens) = projected.remove("max_tokens") {
         projected.insert("max_output_tokens".to_string(), max_tokens);
     }

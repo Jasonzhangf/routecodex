@@ -60,7 +60,10 @@ fn positive_provider_wire_build_uses_typed_protocol_pair() {
     )
     .expect("wire build executes");
     assert_eq!(output.data["protocol"], json!("responses"));
-    assert_eq!(output.data["input"][0]["content"], json!("hi"));
+    assert_eq!(
+        output.data["input"][0]["content"][0],
+        json!({"type": "input_text", "text": "hi"})
+    );
     assert!(output.data.get("messages").is_none());
     assert!(output.data.get("route_facts").is_none());
 }
