@@ -535,6 +535,59 @@ fn resp03_stopless_reasoning_stop_projects_to_noop_with_visible_text() {
 }
 
 #[test]
+fn resp03_stopless_reasoning_stop_preserves_markdown_summary_bytes() {
+    let markdown = "## 完成\n\n- 第一项\n- 第二项\n\n```text\nresult: ok\n```";
+    let payload = json!({
+        "id": "resp_stopless_markdown_1",
+        "status": "completed",
+        "finish_reason": "stop",
+        "output": [{"type":"function_call","call_id":"call_stop_markdown","name":"exec_command","arguments":"{}"}]
+    });
+    let projected = strip_current_stopless_response_artifacts(
+        &payload,
+        "call_stop_markdown",
+        Some(markdown),
+        false,
+    );
+    let text = projected["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|item| {
+            (item.get("type").and_then(Value::as_str) == Some("message"))
+                .then(|| item.pointer("/content/0/text").and_then(Value::as_str))
+                .flatten()
+        })
+        .expect("terminal stop must expose summary as assistant text");
+    assert_eq!(text, markdown);
+}
+
+#[test]
+fn resp03_stopless_reasoning_stop_merges_markdown_into_existing_message_text() {
+    let markdown = "## 证据\n\n- 保留列表\n\n```sh\nprintf ok\n```";
+    let payload = json!({
+        "id": "resp_stopless_markdown_2",
+        "status": "completed",
+        "finish_reason": "stop",
+        "output": [
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"前置结论"}]},
+            {"type":"function_call","call_id":"call_stop_markdown_2","name":"exec_command","arguments":"{}"}
+        ]
+    });
+    let projected = strip_current_stopless_response_artifacts(
+        &payload,
+        "call_stop_markdown_2",
+        Some(markdown),
+        false,
+    );
+    assert_eq!(
+        projected["output"][0]["content"][0]["text"],
+        format!("前置结论\n\n{markdown}")
+    );
+    assert_eq!(projected["output"][0]["content"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn dynamic_stopless_cli_pairs_are_exact_json_cmd_only() {
     let call = response_call("call-dynamic", CMD_ARGS);
     assert!(output_pairs_immediately_after_stopless_cli_call(

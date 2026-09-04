@@ -920,7 +920,10 @@ fn strip_current_stopless_response_artifacts(
                 item.get("type").and_then(Value::as_str) == Some("message")
                     && item.get("content").is_some()
             }) {
-                append_stopless_message_text(message, &completion);
+                // Existing message text is already present in the output. Append only
+                // the new summary/evidence; appending `completion` would duplicate
+                // the existing message and flatten the Markdown into a repeated blob.
+                append_stopless_message_text(message, evidence);
             } else {
                 output.push(json!({
                     "type": "message",
@@ -969,7 +972,30 @@ fn append_stopless_message_text(message: &mut Value, text: &str) {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    parts.push(json!({"type": "output_text", "text": text}));
+    if let Some(existing) = parts.iter_mut().rev().find_map(|part| {
+        matches!(
+            part.get("type").and_then(Value::as_str),
+            Some("output_text" | "text")
+        )
+        .then(|| part.get_mut("text"))
+        .flatten()
+        .and_then(|value| value.as_str())
+        .map(str::to_owned)
+    }) {
+        let index = parts
+            .iter()
+            .rposition(|part| {
+                matches!(
+                    part.get("type").and_then(Value::as_str),
+                    Some("output_text" | "text")
+                ) && part.get("text").and_then(Value::as_str) == Some(existing.as_str())
+            })
+            .expect("existing text part must remain addressable");
+        let separator = if existing.ends_with('\n') { "" } else { "\n\n" };
+        parts[index]["text"] = Value::String(format!("{existing}{separator}{text}"));
+    } else {
+        parts.push(json!({"type": "output_text", "text": text}));
+    }
     object.insert("content".to_string(), Value::Array(parts));
 }
 
