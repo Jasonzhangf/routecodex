@@ -34,7 +34,8 @@ const required = [
   '.isolate(',
   'fiber.dispose()',
   'plugin_not_active',
-  'mounted.push({ id: plugin.id, fiber });\n        await fiber.await();',
+  'mounted.push({ id: plugin.id, fiber });',
+  'await fiber.await();',
   'export class CordisBoundNodeHost',
   'export class RustNodeContainerPort',
   'computeNodePluginPlanHash',
@@ -69,6 +70,11 @@ const forbidden = [
 
 function validate(source, daemonSource, tests, bindingTests, daemonTests, bindingContract, functionMap, mainline, resourceMap) {
   const failures = required.filter((token) => !source.includes(token));
+  const mountedIndex = source.indexOf('mounted.push({ id: plugin.id, fiber });');
+  const awaitIndex = source.indexOf('await fiber.await();');
+  if (mountedIndex < 0 || awaitIndex < 0 || mountedIndex > awaitIndex) {
+    failures.push('mounted fiber must be tracked before await');
+  }
   failures.push(...[
     'startCordisHostDaemon',
     'CordisHostDaemonClient',
@@ -278,8 +284,8 @@ function runSelfTest() {
     ['real Cordis import removed', (candidate) => candidate.replace("from 'cordis'", "from 'fake-cordis'")],
     ['real Context removed', (candidate) => candidate.replace('new Context()', 'new FakeContext()')],
     ['failed Fiber tracking moved after await', (candidate) => candidate.replace(
-      'mounted.push({ id: plugin.id, fiber });\n        await fiber.await();',
-      'await fiber.await();\n        mounted.push({ id: plugin.id, fiber });',
+      'mounted.push({ id: plugin.id, fiber });\n        try {\n          await fiber.await();',
+      'try {\n          await fiber.await();\n          mounted.push({ id: plugin.id, fiber });',
     )],
     ['generic execution payload surface restored', (candidate) => candidate.replace(
       "const allowedKeys = new Set(['data', 'control', 'information', 'diagnostics']);",
@@ -314,8 +320,8 @@ function runSelfTest() {
   if (missed > 0) process.exit(1);
   const ratchetCases = [
     ['new bypass exception', (candidate) => ({ ratchet: { ...candidate, known_exceptions: [...candidate.known_exceptions, { id: 'new_bypass', evidence: { path: 'new', symbols: ['new'] } }] } })],
-    ['retired bypass restored', (candidate) => ({ ratchet: { ...candidate, known_exceptions: [...candidate.known_exceptions, { id: 'static_plugin_registry', evidence: candidate.known_exceptions[0].evidence }] } })],
-    ['evidence symbol missing', (candidate) => ({ ratchet: { ...candidate, known_exceptions: candidate.known_exceptions.map((entry) => ({ ...entry, evidence: { ...entry.evidence, symbols: ['missing_symbol'] } })) } })],
+    ['retired bypass restored', (candidate) => ({ ratchet: { ...candidate, known_exceptions: [...candidate.known_exceptions, { id: 'static_plugin_registry', evidence: { path: 'contracts/cordis-mainline-ratchet.json', symbols: ['contract_id'] } }] } })],
+    ['evidence symbol missing', (candidate) => ({ ratchet: { ...candidate, known_exceptions: [{ id: 'runtime_bin_direct_business_calls', evidence: { path: 'contracts/cordis-mainline-ratchet.json', symbols: ['missing_symbol'] } }] } })],
     ['baseline drift', (candidate) => ({ ratchet: { ...candidate, baseline_exception_ids: ['new_bypass'] } })],
     ['plan reintroduces test bypass', (candidate) => ({ ratchet: candidate, migrationPlan: 'v4.test.fake production plan' })],
   ];
