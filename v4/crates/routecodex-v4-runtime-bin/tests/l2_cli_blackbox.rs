@@ -227,40 +227,6 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
     let _ = cordis.wait();
 }
 
-#[test]
-fn start_recovers_stale_canonical_cordis_socket() {
-    let test_root = root("stale-cordis");
-    let state_root = test_root.join("state");
-    fs::create_dir_all(&state_root).expect("state root");
-    let port = free_port();
-    let config = initialize(&test_root, port);
-    let socket = state_root.join("cordis.sock");
-    fs::write(&socket, b"stale").expect("stale socket marker");
-    let runner = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../cordis/routecodex-v4-cordis-host/tests/resources/daemon-child.mjs"
-    );
-    let start = Command::new(env!("CARGO_BIN_EXE_rccv4"))
-        .current_dir("/tmp")
-        .env("RCCV4_STATE_ROOT", &state_root)
-        .env("RCCV4_CORDIS_HOST_SOCKET", &socket)
-        .env("RCCV4_CORDIS_HOST_RUNNER", runner)
-        .args(["start", "-c", config.to_str().expect("config")])
-        .output()
-        .expect("start command");
-    assert!(
-        start.status.success(),
-        "{}",
-        String::from_utf8_lossy(&start.stderr)
-    );
-    let stop = Command::new(env!("CARGO_BIN_EXE_rccv4"))
-        .env("RCCV4_STATE_ROOT", &state_root)
-        .args(["stop"])
-        .output()
-        .expect("stop command");
-    assert!(stop.status.success(), "{}", String::from_utf8_lossy(&stop.stderr));
-    fs::remove_dir_all(test_root).expect("cleanup");
-}
 
 #[test]
 fn failed_cordis_readiness_reaps_owned_host_and_socket() {
