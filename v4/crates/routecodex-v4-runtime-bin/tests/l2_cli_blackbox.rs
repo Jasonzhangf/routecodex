@@ -275,11 +275,14 @@ fn restart_cold_starts_when_no_managed_instance_exists() {
             .expect("lifecycle command")
     };
     let restart = run(&["restart", "-c", config.to_str().expect("config")]);
-    assert!(!restart.status.success());
     assert!(
-        String::from_utf8_lossy(&restart.stderr).contains("Cordis admission")
-            || fs::read_to_string(state_root.join("logs/rccv4.log"))
-                .unwrap_or_default()
-                .contains("Cordis admission")
+        restart.status.success(),
+        "restart must cold-start after bootstrapping the project-owned Cordis host: {}",
+        String::from_utf8_lossy(&restart.stderr)
     );
+    let status = run(&["status", "-c", config.to_str().expect("config")]);
+    assert!(status.status.success());
+    assert!(String::from_utf8_lossy(&status.stdout).contains("state=running"));
+    let stop = run(&["stop", "-c", config.to_str().expect("config")]);
+    assert!(stop.status.success());
 }
