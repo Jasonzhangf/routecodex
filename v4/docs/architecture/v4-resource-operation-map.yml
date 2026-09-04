@@ -34,7 +34,7 @@ resources:
   resource_kind: admission_contract
   lifecycle: v4.cordis.admission
   owner_crate: routecodex-v4-runtime-bin
-  owner_node: CordisAdmission
+  owner_node: V4Runtime01MainlineKernel
   owner_symbols:
   - CordisAdmission
   allowed_writers:
