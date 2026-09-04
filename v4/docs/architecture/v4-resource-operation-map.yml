@@ -27,6 +27,32 @@ notes: '本注册表是 V4 真源资源图，binding_status 已按机器 gate
 
   '
 resources:
+- resource_id: v4.cordis.production_admission
+  axis: control
+  verification_gate:
+  - v4_cordis_production_admission
+  resource_kind: admission_contract
+  lifecycle: v4.cordis.admission
+  owner_crate: routecodex-v4-runtime-bin
+  owner_node: CordisAdmission
+  owner_symbols:
+  - CordisAdmission
+  allowed_writers:
+  - CordisAdmission
+  allowed_readers:
+  - V4Runtime01MainlineKernel
+  forbidden_writers:
+  - V4HubReqInbound02Normalized
+  - V4HubRespInbound03Normalized
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  semantic_contract:
+    admission_before_runtime: true
+    cordis_host_required: true
+    failure_must_be_explicit: true
+    may_enter_provider_body: false
+    may_enter_client_body: false
+  binding_status: anchored
 - resource_id: v4.direct.request.client_payload
   axis: data
   verification_gate:
