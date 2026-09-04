@@ -543,7 +543,7 @@ fn wait_child_ready(
             .try_wait()
             .map_err(|error| LifecycleError::ChildExited(error.to_string()))?
         {
-            return Err(LifecycleError::ChildExited(status.to_string()));
+            return Err(LifecycleError::ChildExited(child_exit_reason(paths, &status)));
         }
         if request_control(paths, "status").is_ok() {
             return read_record(paths)?.ok_or_else(|| {
@@ -553,6 +553,31 @@ fn wait_child_ready(
         thread::sleep(Duration::from_millis(25));
     }
     Err(LifecycleError::StartTimeout(timeout.as_millis() as u64))
+}
+
+fn child_exit_reason(paths: &V4LifecyclePaths, status: &std::process::ExitStatus) -> String {
+    let Ok(log) = fs::read_to_string(&paths.log_path) else {
+        return status.to_string();
+    };
+    let detail = log.trim();
+    if detail.is_empty() {
+        return status.to_string();
+    }
+    // Keep the lifecycle error bounded while preserving the child’s
+    // authoritative admission/bind failure for the operator.
+    let detail = if detail.chars().count() > 2048 {
+        detail
+            .chars()
+            .rev()
+            .take(2048)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect::<String>()
+    } else {
+        detail.to_string()
+    };
+    format!("{status}: {detail}")
 }
 
 fn open_log(paths: &V4LifecyclePaths) -> Result<File, LifecycleError> {
