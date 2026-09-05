@@ -216,7 +216,9 @@ test('Cordis mount failure fails and disposes the Rust candidate', async (t) => 
   });
   const failing = createNodePlugin(
     entry.plugin_id,
-    Object.assign(() => {}, { inject: ['missingService'] }),
+    // Keep the graph declaration valid, then fail during Cordis activation
+    // because this host intentionally does not provide nodeExecution.
+    Object.assign(() => {}, { inject: ['nodeExecution'] }),
     undefined,
     entry,
   );

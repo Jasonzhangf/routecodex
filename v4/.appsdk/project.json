@@ -69,8 +69,22 @@
     ],
     "zone_transition_contract": "contracts/transitions/zone-transition-manifest.json"
   },
+  "guidance": {
+    "compiled_manifest": ".appsdk/guidance/compiled.json",
+    "enforcement": "advisory",
+    "rule_sources": [
+      {
+        "contract_path": ".appsdk/skills/appsdk-project-governance/appsdk-guidance.json",
+        "kind": "skill",
+        "path": ".appsdk/skills/appsdk-project-governance/SKILL.md",
+        "precedence": 200,
+        "required": true,
+        "source_id": "appsdk-governance-skill"
+      }
+    ]
+  },
   "lifecycle": {
-    "stage": "contract_bound"
+    "stage": "controlled_verified"
   },
   "lifecycles": {
     "artifact": "generated",
@@ -203,12 +217,12 @@
     {
       "active_artifact": "active/lib/routecodex-v4-base-node/**",
       "artifact_paths": [
-        "base-node.contract.json"
+        "libroutecodex_v4_base_node.rlib"
       ],
       "build": {
         "args": [
           "-c",
-          "mkdir -p generated/modules/routecodex-v4-base-node/lib && printf '{\"module_id\":\"routecodex-v4-base-node\"}\\n' > generated/modules/routecodex-v4-base-node/lib/base-node.contract.json"
+          "cargo build --release --locked -p routecodex-v4-base-node && mkdir -p generated/modules/routecodex-v4-base-node/lib && cp target/release/libroutecodex_v4_base_node.rlib generated/modules/routecodex-v4-base-node/lib/libroutecodex_v4_base_node.rlib"
         ],
         "program": "sh",
         "working_directory": "."
@@ -260,12 +274,12 @@
     {
       "active_artifact": "active/lib/routecodex-v4-edge/**",
       "artifact_paths": [
-        "edge.contract.json"
+        "libroutecodex_v4_edge.rlib"
       ],
       "build": {
         "args": [
           "-c",
-          "mkdir -p generated/modules/routecodex-v4-edge/lib && printf '{\"module_id\":\"routecodex-v4-edge\"}\\n' > generated/modules/routecodex-v4-edge/lib/edge.contract.json"
+          "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-edge --deps routecodex-v4-base-node --out generated/modules/routecodex-v4-edge/lib/libroutecodex_v4_edge.rlib"
         ],
         "program": "sh",
         "working_directory": "."
@@ -274,7 +288,9 @@
         "contracts/node-graph.contract.json",
         "contracts/data-control-boundary.contract.json"
       ],
-      "dependency_modules": [],
+      "dependency_modules": [
+        "routecodex-v4-base-node"
+      ],
       "generated_outputs": [
         "generated/modules/routecodex-v4-edge/**"
       ],
@@ -316,12 +332,12 @@
     {
       "active_artifact": "active/lib/routecodex-v4-control/**",
       "artifact_paths": [
-        "control.contract.json"
+        "libroutecodex_v4_control.rlib"
       ],
       "build": {
         "args": [
           "-c",
-          "mkdir -p generated/modules/routecodex-v4-control/lib && printf '{\"module_id\":\"routecodex-v4-control\"}\\n' > generated/modules/routecodex-v4-control/lib/control.contract.json"
+          "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-control --deps routecodex-v4-base-node --out generated/modules/routecodex-v4-control/lib/libroutecodex_v4_control.rlib"
         ],
         "program": "sh",
         "working_directory": "."
@@ -330,7 +346,9 @@
         "contracts/data-control-boundary.contract.json",
         "contracts/cordis-runtime-control.schema.json"
       ],
-      "dependency_modules": [],
+      "dependency_modules": [
+        "routecodex-v4-base-node"
+      ],
       "generated_outputs": [
         "generated/modules/routecodex-v4-control/**"
       ],
@@ -372,12 +390,12 @@
     {
       "active_artifact": "active/lib/routecodex-v4-error/**",
       "artifact_paths": [
-        "error.contract.json"
+        "libroutecodex_v4_error.rlib"
       ],
       "build": {
         "args": [
           "-c",
-          "mkdir -p generated/modules/routecodex-v4-error/lib && printf '{\"module_id\":\"routecodex-v4-error\"}\\n' > generated/modules/routecodex-v4-error/lib/error.contract.json"
+          "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-error --deps routecodex-v4-base-node --out generated/modules/routecodex-v4-error/lib/libroutecodex_v4_error.rlib"
         ],
         "program": "sh",
         "working_directory": "."
@@ -386,7 +404,9 @@
         "contracts/node-outcome.schema.json",
         "contracts/data-control-boundary.contract.json"
       ],
-      "dependency_modules": [],
+      "dependency_modules": [
+        "routecodex-v4-base-node"
+      ],
       "generated_outputs": [
         "generated/modules/routecodex-v4-error/**"
       ],
@@ -498,12 +518,12 @@
     {
       "active_artifact": "active/lib/routecodex-v4-plugin-contract/**",
       "artifact_paths": [
-        "plugin-contract.contract.json"
+        "libroutecodex_v4_plugin_contract.rlib"
       ],
       "build": {
         "args": [
           "-c",
-          "mkdir -p generated/modules/routecodex-v4-plugin-contract/lib && printf '{\"module_id\":\"routecodex-v4-plugin-contract\"}\\n' > generated/modules/routecodex-v4-plugin-contract/lib/plugin-contract.contract.json"
+          "cargo build --release --locked -p routecodex-v4-plugin-contract && mkdir -p generated/modules/routecodex-v4-plugin-contract/lib && cp target/release/libroutecodex_v4_plugin_contract.rlib generated/modules/routecodex-v4-plugin-contract/lib/libroutecodex_v4_plugin_contract.rlib"
         ],
         "program": "sh",
         "working_directory": "."
