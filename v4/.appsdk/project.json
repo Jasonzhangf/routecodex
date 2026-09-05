@@ -569,7 +569,7 @@
         "suite_id": "v4-plugin-contract-regression"
       },
       "source_owner": "routecodex-v4-plugin-contract",
-      "stage": "architecture_stable"
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-plugin-plan/**",

@@ -1,0 +1,56 @@
+{
+  "active_artifact": "active/lib/routecodex-v4-plugin-contract/**",
+  "artifact_paths": [
+    "libroutecodex_v4_plugin_contract.rlib"
+  ],
+  "build": {
+    "args": [
+      "-c",
+      "cargo build --release --locked -p routecodex-v4-plugin-contract && mkdir -p generated/modules/routecodex-v4-plugin-contract/lib && cp target/release/libroutecodex_v4_plugin_contract.rlib generated/modules/routecodex-v4-plugin-contract/lib/libroutecodex_v4_plugin_contract.rlib"
+    ],
+    "program": "sh",
+    "working_directory": "."
+  },
+  "contract_paths": [
+    "contracts/node-plugin.contract.json",
+    "contracts/plugin-catalog.contract.json"
+  ],
+  "dependency_modules": [],
+  "generated_outputs": [
+    "generated/modules/routecodex-v4-plugin-contract/**"
+  ],
+  "module_id": "routecodex-v4-plugin-contract",
+  "owned_paths": [
+    "crates/routecodex-v4-plugin-contract/**"
+  ],
+  "regression": {
+    "allow_skipped": false,
+    "command": {
+      "args": [
+        "test",
+        "-p",
+        "routecodex-v4-plugin-contract",
+        "--locked"
+      ],
+      "program": "cargo",
+      "working_directory": "."
+    },
+    "input_paths": [
+      "crates/routecodex-v4-plugin-contract/**",
+      "contracts/node-plugin.contract.json"
+    ],
+    "minimum_test_count": 1,
+    "ordinary_mode_after_freeze": "disabled",
+    "reenable_on": [
+      "source_change",
+      "contract_change",
+      "public_api_change",
+      "artifact_change",
+      "dependency_change"
+    ],
+    "required_before_freeze": true,
+    "suite_id": "v4-plugin-contract-regression"
+  },
+  "source_owner": "routecodex-v4-plugin-contract",
+  "stage": "frozen"
+}
