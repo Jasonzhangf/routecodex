@@ -1,10 +1,10 @@
 {
   "evidence_id": "candidate-artifact",
   "issue_id": "v4-cordis-routecodex-v4-base-node-active-recovery",
-  "experiment_id": "fix-routecodex-v4-base-node-029db82edaa6",
+  "experiment_id": "fix-routecodex-v4-base-node-929e256973a6",
   "phase": "fix_candidate",
   "kind": "artifact",
-  "source_commit": "029db82edaa63e67ccbf27f7bf2a7991a824cc9c",
+  "source_commit": "929e256973a6b8556982148c12a8291c076380ec",
   "artifact_hash": "sha256:8c19706a91ebc182e9de7b9c21082666241c8b666f7234273dbea1468a1ffa68",
   "execution_surface": "development_whitebox",
   "environment_id": "local-artifact-routecodex-v4-base-node",
@@ -16,7 +16,7 @@
   },
   "producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-base-node:029db82edaa63e67ccbf27f7bf2a7991a824cc9c"
+    "identity": "routecodex-v4-base-node:929e256973a6b8556982148c12a8291c076380ec"
   },
   "command_argv": [
     "/Users/fanzhang/.cargo/bin/appsdk",
@@ -28,8 +28,8 @@
   "exit_status": 0,
   "output_hash": "sha256:58442e7fe7685091dfcaac42a1d17dc02fae619615e97b3c61dede35ee2a64b7",
   "result": "pass",
-  "created_at": "2026-09-05T05:31:04.666Z",
-  "expires_at": "2026-09-12T05:31:04.602Z",
+  "created_at": "2026-09-05T05:32:09.603Z",
+  "expires_at": "2026-09-12T05:32:09.545Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
     "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",

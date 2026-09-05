@@ -262,6 +262,12 @@ evidence('post-positive-intervention', 'positive_intervention', 'positive_test',
 const postNegativeAt = now();
 const postNegative = run('node', ['scripts/architecture/verify-v4-production-mainline-red.mjs']);
 evidence('post-negative-intervention', 'negative_intervention', 'negative_test', postNegative, postNegative.output, 'development_whitebox', postNegativeAt);
+const postBlackboxAt = now();
+const postBlackbox = run('node', ['-e', verifier, installedArtifact, fileHash(installedArtifact)]);
+evidence('post-deployed-blackbox', 'deployed_blackbox', 'runtime', postBlackbox, postBlackbox.output, 'deployed_blackbox', postBlackboxAt);
+const postEffectivenessAt = now();
+const postEffectiveness = run(regressionSpec.program, regressionSpec.args, { timeout: 1_800_000 });
+evidence('post-effectiveness-replay', 'post_architecture_effectiveness', 'sample_replay', postEffectiveness, postEffectiveness.output, 'development_whitebox', postEffectivenessAt);
 const regressionOutput = whitebox.output;
 const countMatch = regressionOutput.match(/(\d+) passed/);
 const testCount = Math.max(1, Number(countMatch?.[1] ?? 1));
@@ -297,10 +303,10 @@ writeJson(path.join(records, `effectiveness-record-${moduleId}.json`), {
   reviewed_tree_hash: treeHash,
   reproduction_input_hashes: inputHashes,
   baseline_evidence_id: 'baseline-reproduction',
-  fixed_replay_evidence_id: 'effectiveness-replay',
+  fixed_replay_evidence_id: 'post-effectiveness-replay',
   positive_evidence_ids: ['post-positive-intervention'],
   negative_evidence_ids: ['post-negative-intervention'],
-  blackbox_evidence_ids: ['deployed-blackbox'],
+  blackbox_evidence_ids: ['post-deployed-blackbox'],
   source_unchanged_since_review: true,
   result: 'pass',
   created_at: effectivenessAt,
