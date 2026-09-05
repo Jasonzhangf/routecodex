@@ -1,12 +1,13 @@
 {
   "binary_ref": "project-sdk",
-  "bundle_digest": "sha256:0c1a89374554df6d5ea7ea6492a54bb3bc4f7946218b674c4a2b7c75dc0e1df3",
-  "bundle_manifest_digest": "sha256:7d2b1ddb54d95f73fe4af5ce5a744def24eaa3f9371db6de3ea98ff7f5861710",
+  "bundle_digest": "sha256:91f1db23322fe3c8a20e5d27d24f3d5e540fdb101f401da1714ef45497ed7429",
+  "bundle_manifest_digest": "sha256:13fc02fb5a413309603cdb870d8e8d6d3201360bb361a3fd05708ca17bc1d768",
   "bundle_resources": {
     "contracts": [
       "contracts/sdk-bundle.manifest.json",
       "contracts/project.schema.json",
       "contracts/development-scenarios.manifest.json",
+      "contracts/guidance/guidance-manifest.schema.json",
       "contracts/maps/resource-map.json",
       "contracts/maps/function-map.json",
       "contracts/maps/mainline-call-map.json",
@@ -35,24 +36,38 @@
       "contracts/records/merge-record.schema.json",
       "contracts/records/promotion-record.schema.json",
       "contracts/records/freeze-record.schema.json",
-      "contracts/records/regression-report.schema.json"
+      "contracts/records/regression-report.schema.json",
+      "contracts/records/plan-record.schema.json",
+      "contracts/records/plan-revision-record.schema.json",
+      "contracts/records/step-execution-record.schema.json"
     ],
     "docs": [
       "docs/design/appsdk-project-integration.md",
       "docs/design/fix-lifecycle-v2.md",
       "docs/design/development-scenarios.md",
+      "docs/design/appsdk-guidance-framework.md",
+      "docs/test-design/appsdk-guidance-framework.md",
+      "docs/architecture/development-process-control-harness.md",
       "docs/architecture/appsdk-governance-architecture.md"
     ],
     "rules": [
       "skills/appsdk-project-governance/SKILL.md"
     ],
     "skills": [
-      "skills/appsdk-project-governance/SKILL.md"
+      "skills/appsdk-project-governance/SKILL.md",
+      "skills/appsdk-project-governance/agents/openai.yaml",
+      "skills/appsdk-project-governance/appsdk-guidance.json",
+      "skills/appsdk-project-governance/references/bootstrap-migration.md",
+      "skills/appsdk-project-governance/references/contracts-and-failures.md",
+      "skills/appsdk-project-governance/references/development-debug.md",
+      "skills/appsdk-project-governance/references/goal-prompt.md",
+      "skills/appsdk-project-governance/references/process-control-harness.md",
+      "skills/appsdk-project-governance/references/review-delivery.md"
     ]
   },
-  "compiler_digest": "sha256:791959be40af225717a2a12d5bd0c4ecef72928864292a375dae97dc27539490",
+  "compiler_digest": "sha256:7d8c9c1216e536837418018e3327be2eb077c1b95809c5e60f61afbf26c9c97b",
   "contract_schema": 1,
-  "digest": "sha256:791959be40af225717a2a12d5bd0c4ecef72928864292a375dae97dc27539490",
+  "digest": "sha256:7d8c9c1216e536837418018e3327be2eb077c1b95809c5e60f61afbf26c9c97b",
   "sdk": "appsdk",
   "version": "0.1.6"
 }
