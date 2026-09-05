@@ -9,7 +9,10 @@ import { run } from './_common.mjs';
 
 run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
 // V4-LAYER-PREFLIGHT-END
+// Clean-checkout CI verifies the runtime admission contract. Deployed probes
+// remain in the explicit `verify`/release entrypoint after installation.
+process.env.RCCV4_REAL_RUNTIME_ADMISSION_MODE = 'contract';
 run('node scripts/test.mjs');
 run('node scripts/verify.mjs');
 run('node scripts/verify-red.mjs');
-console.log('[v4 verify:ci] OK complete admission matrix');
+console.log('[v4 verify:ci] OK source matrix; deployed release admission is separate');

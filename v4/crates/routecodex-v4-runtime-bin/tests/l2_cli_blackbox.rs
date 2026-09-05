@@ -156,6 +156,7 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
     let preflight = Command::new(env!("CARGO_BIN_EXE_rccv4"))
         .current_dir("/tmp")
         .env("RCCV4_STATE_ROOT", &state_root)
+        .env("RCCV4_CORDIS_HOST_SOCKET", state_root.join("missing-admission.sock"))
         .args(["start", "-c", config.to_str().expect("config")])
         .output()
         .expect("manifest preflight");
@@ -266,6 +267,7 @@ fn restart_cold_starts_when_no_managed_instance_exists() {
         Command::new(env!("CARGO_BIN_EXE_rccv4"))
             .current_dir("/tmp")
             .env("RCCV4_STATE_ROOT", &state_root)
+            .env("RCCV4_CORDIS_HOST_SOCKET", state_root.join("missing-admission.sock"))
             .args(args)
             .output()
             .expect("lifecycle command")

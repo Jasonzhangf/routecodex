@@ -87,18 +87,18 @@ export const RED_SUITES = [
 
 export const CONSUMER_REGRESSIONS = [
   ['routecodex-v4-edge', 'routecodex-v4-base-node'],
-  ['routecodex-v4-config', 'routecodex-v4-base-node,routecodex-v4-edge'],
+  ['routecodex-v4-config', 'routecodex-v4-base-node,routecodex-v4-edge', '--source-deps', 'routecodex-v4-skeleton,routecodex-v4-standard-plugins'],
   ['routecodex-v4-control', 'routecodex-v4-base-node'],
   ['routecodex-v4-error', 'routecodex-v4-base-node'],
-  ['routecodex-v4-runtime', 'routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control', '--source-deps', 'routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-skeleton,routecodex-v4-plugin-contract'],
+  ['routecodex-v4-runtime', 'routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control,routecodex-v4-edge', '--source-deps', 'routecodex-v4-cordis-bridge,routecodex-v4-debug,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-skeleton,routecodex-v4-plugin-contract,routecodex-v4-standard-plugins', '--rlib-deps', 'routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib,routecodex_v4_provider=build-control/routecodex-v4-provider/libroutecodex_v4_provider.rlib,routecodex_v4_router=build-control/routecodex-v4-router/libroutecodex_v4_router.rlib,routecodex_v4_server=build-control/routecodex-v4-server/libroutecodex_v4_server.rlib'],
   ['routecodex-v4-debug', 'routecodex-v4-base-node'],
-  ['routecodex-v4-router', 'routecodex-v4-base-node,routecodex-v4-edge', '--rlib-deps', 'routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib'],
+  ['routecodex-v4-router', 'routecodex-v4-base-node,routecodex-v4-edge', '--source-deps', 'routecodex-v4-cordis-bridge', '--rlib-deps', 'routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib'],
   ['routecodex-v4-provider', 'routecodex-v4-base-node'],
   ['routecodex-v4-server', 'routecodex-v4-base-node'],
   ['routecodex-v4-plugin-manager', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog'],
   ['routecodex-v4-runtime-inspector', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-manager,routecodex-v4-plugin-contract,routecodex-v4-plugin-plan'],
   ['routecodex-v4-admin', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-manager,routecodex-v4-runtime-inspector,routecodex-v4-plugin-contract,routecodex-v4-plugin-plan'],
-  ['routecodex-v4-node-container', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-cordis-bridge,routecodex-v4-plugin-plan'],
-  ['routecodex-v4-standard-plugins', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container'],
+  ['routecodex-v4-node-container', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-cordis-bridge,routecodex-v4-plugin-plan,routecodex-v4-plugin-contract,routecodex-v4-standard-plugins'],
+  ['routecodex-v4-standard-plugins', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-skeleton'],
   ['routecodex-v4-cli-plugin', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-standard-plugins'],
 ];

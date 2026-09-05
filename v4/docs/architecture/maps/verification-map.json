@@ -113,7 +113,7 @@
     },
     {
       "gate_id": "v4_config_l2_regression",
-      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-config --deps routecodex-v4-base-node,routecodex-v4-edge",
+      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-config --deps routecodex-v4-base-node,routecodex-v4-edge --source-deps routecodex-v4-skeleton,routecodex-v4-standard-plugins",
       "required_for": [
         "routecodex-v4-config:architecture_stable",
         "routecodex-v4-config:freeze"
@@ -179,6 +179,14 @@
     {
       "gate_id": "v4_parity_gate_semantic_parity",
       "command": "node scripts/architecture/verify-v4-semantic-parity.mjs",
+      "required_for": [
+        "routecodex-v4-skeleton:architecture_stable",
+        "routecodex-v4-runtime:architecture_stable"
+      ]
+    },
+    {
+      "gate_id": "v4_parity_gate_semantic_parity_red",
+      "command": "node scripts/architecture/verify-v4-semantic-parity-red.mjs",
       "required_for": [
         "routecodex-v4-skeleton:architecture_stable",
         "routecodex-v4-runtime:architecture_stable"
@@ -666,7 +674,7 @@
     },
     {
       "gate_id": "v4_runtime_l2_regression",
-      "command": "cargo build --release --manifest-path Cargo.toml --locked -p routecodex-v4-skeleton && cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-skeleton,routecodex-v4-plugin-contract",
+      "command": "cargo build --release --manifest-path Cargo.toml --locked -p routecodex-v4-skeleton && cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control,routecodex-v4-edge --source-deps routecodex-v4-cordis-bridge,routecodex-v4-debug,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-skeleton,routecodex-v4-plugin-contract,routecodex-v4-standard-plugins --rlib-deps routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib,routecodex_v4_provider=build-control/routecodex-v4-provider/libroutecodex_v4_provider.rlib,routecodex_v4_router=build-control/routecodex-v4-router/libroutecodex_v4_router.rlib,routecodex_v4_server=build-control/routecodex-v4-server/libroutecodex_v4_server.rlib",
       "required_for": [
         "routecodex-v4-runtime:architecture_stable",
         "routecodex-v4-runtime:freeze",
@@ -684,7 +692,7 @@
     },
     {
       "gate_id": "v4_router_l2_regression",
-      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-router --deps routecodex-v4-base-node,routecodex-v4-edge",
+      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-router --deps routecodex-v4-base-node,routecodex-v4-edge --source-deps routecodex-v4-cordis-bridge --rlib-deps routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib",
       "required_for": [
         "routecodex-v4-router:architecture_stable",
         "routecodex-v4-router:freeze",
@@ -970,7 +978,7 @@
     },
     {
       "gate_id": "v4_node_container_test_consumer",
-      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-node-container --deps routecodex-v4-base-node --source-deps routecodex-v4-cordis-bridge,routecodex-v4-plugin-plan",
+      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-node-container --deps routecodex-v4-base-node --source-deps routecodex-v4-cordis-bridge,routecodex-v4-plugin-plan,routecodex-v4-plugin-contract,routecodex-v4-standard-plugins",
       "required_for": [
         "routecodex-v4-node-container:architecture_stable"
       ]
@@ -1019,7 +1027,7 @@
     },
     {
       "gate_id": "v4_standard_plugins_test_consumer",
-      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-standard-plugins --deps routecodex-v4-base-node --source-deps routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container",
+      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-standard-plugins --deps routecodex-v4-base-node --source-deps routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-skeleton",
       "required_for": [
         "routecodex-v4-standard-plugins:architecture_stable"
       ]
@@ -1265,7 +1273,7 @@
     {
       "gate_id": "v4_real_runtime_compiled_manifest",
       "status": "active",
-      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-config --deps routecodex-v4-base-node,routecodex-v4-edge",
+      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-config --deps routecodex-v4-base-node,routecodex-v4-edge --source-deps routecodex-v4-skeleton,routecodex-v4-standard-plugins",
       "required_for": [
         "routecodex-v4-runtime-bin:active"
       ]

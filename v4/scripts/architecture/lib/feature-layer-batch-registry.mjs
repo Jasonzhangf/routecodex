@@ -312,7 +312,7 @@ export function validateRegistryBindings(input, failures) {
   const verifyFirstRun = input.verifySource.indexOf('run(');
   const verifyFirstMutation = input.verifySource.indexOf('fs.rmSync(');
   if (verifyGuard < 0 || verifyGuard !== verifyFirstRun
-      || verifyFirstMutation < 0 || verifyGuard > verifyFirstMutation) {
+      || (verifyFirstMutation >= 0 && verifyGuard > verifyFirstMutation)) {
     addFailure(failures, 'VERIFY_PREFLIGHT_BINDING',
       'verify build guard must be the first execution before build or fixture mutation');
   }

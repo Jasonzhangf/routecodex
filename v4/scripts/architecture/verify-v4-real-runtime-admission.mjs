@@ -22,7 +22,8 @@ const routerPath = path.join(root, 'crates/routecodex-v4-router/src/lib.rs');
 
 const BINARY_PATH = path.join(root, 'target/release/rccv4');
 const COMPILED_MANIFEST = process.env.RCCV4_MANIFEST
-  ?? path.join(process.env.HOME ?? '', '.rcc/v4/manifest.compiled.json');
+  ?? path.join(process.env.RCCV4_STATE_ROOT
+    ?? path.join(process.env.HOME ?? '', '.rcc/state/runtime-lifecycle/v4'), 'manifest.compiled.json');
 let RCCV4_HOST = process.env.RCCV4_LISTEN;
 let ADMISSION_MODEL = process.env.RCCV4_ADMISSION_MODEL;
 // Every live admission run needs a fresh continuation scope. Reusing a fixed
@@ -258,11 +259,14 @@ try {
   if (!healthJson.id || !healthJson.version || !healthJson.manifest_digest) {
     throw new Error('health body missing id/version/manifest_digest fields');
   }
+  if (healthJson.manifest_digest !== compiledManifest.manifest_digest) {
+    throw new Error('live manifest differs from the admission manifest');
+  }
   console.log(`[v4_real_runtime_admission] /health OK: id=${healthJson.id} version=${healthJson.version}`);
   passed++;
 } catch (e) {
   console.error(`[v4_real_runtime_admission] /health FAIL: ${e.message}`);
-  failed++;
+  process.exit(1);
 }
 
 try {

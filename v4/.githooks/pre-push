@@ -5,4 +5,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     refs/heads/main|refs/heads/master) echo "pushes to protected ref $remote_ref are forbidden" >&2; exit 1 ;;
   esac
 done
+# Git's hook-local paths must not be reinterpreted after entering v4 or test repositories.
+git_local_env=$(git rev-parse --local-env-vars)
+unset $git_local_env
+cd -- "$(dirname -- "$0")/.."
 exec npm run verify:ci --silent

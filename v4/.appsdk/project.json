@@ -773,9 +773,15 @@
       },
       "contract_paths": [
         "contracts/cli-plugin.contract.json",
-        "contracts/plugin-library.contract.json"
+        "contracts/plugin-library.contract.json",
+        "scripts/appsdk-project-lifecycle-adapter.mjs",
+        "scripts/test-lifecycle-adapter.test.mjs",
+        "scripts/test-cli-plugin.mjs"
       ],
       "dependency_modules": [],
+      "deployment_operations": [
+        "install"
+      ],
       "generated_outputs": [
         "generated/modules/routecodex-v4-cli-plugin/**"
       ],
@@ -788,7 +794,7 @@
         "command": {
           "args": [
             "-c",
-            "cargo test --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && cargo build --release --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && node scripts/test-cli-plugin.mjs"
+            "node --test scripts/test-lifecycle-adapter.test.mjs && cargo test --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && cargo build --release --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && node scripts/test-cli-plugin.mjs"
           ],
           "program": "sh",
           "working_directory": "."

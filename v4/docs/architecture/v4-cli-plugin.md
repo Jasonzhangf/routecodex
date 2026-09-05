@@ -40,3 +40,36 @@ from the Cargo release binary and copied to
   commands plus unknown-plugin/node failures.
 - `v4_parity_gate_cli_plugin`
 - `v4_parity_gate_cli_plugin_red`
+
+## Review evidence producer
+
+`scripts/appsdk-project-lifecycle-adapter.mjs --module routecodex-v4-cli-plugin`
+owns pre-review observations for this CLI. It requires a clean named owner
+worktree, compiles through AppSDK, runs the declared regression, installs the
+compiled executable into an isolated prefix, then runs all command smoke tests
+against that installed path. `deployment_operations` is `["install"]`: this
+read-only command has no daemon or restart operation.
+
+The producer retains transcripts with the installed executable and binds the
+candidate, compiled artifact, environment and entrypoint into its evidence.
+It refuses existing candidate/validation records rather than overwriting
+history. Other modules fail before any mutation until their real producer is
+implemented. Review, merge, promotion and freeze remain separate operations;
+this adapter does not emit their records or infer their success.
+
+Run `node --test scripts/test-lifecycle-adapter.test.mjs` for failure-boundary
+regressions. The command smoke test accepts `--binary <installed-path>` and
+fails if that file cannot execute; it never substitutes the source binary.
+# Source integration and release evidence
+
+`verify:ci` / `verify:local` select contract-mode runtime admission and AppSDK
+`verify --admission`. They run the full workspace, architecture/red, Active-linked
+consumer and index/isolation matrix, but do not certify historical deployment or
+publish/freeze evidence. Explicit `verify` retains full AppSDK `verify` and live
+runtime admission. Source merge is not release/freeze approval.
+
+During the 2026-09-05 integration, the unchanged base-node EffectivenessRecord
+predates its referenced replay evidence. Full SDK verification correctly rejects
+that history with `POST_ARCHITECTURE_EFFECTIVENESS_EVIDENCE_MISMATCH`. The record
+and Protected archives are preserved; source integration must not describe this
+as repaired, grant publication, or rewrite historical timestamps.

@@ -4,4 +4,8 @@ branch=$(git symbolic-ref --short HEAD 2>/dev/null || true)
 case "$branch" in
   main|master) echo "commits to protected branch $branch are forbidden" >&2; exit 1 ;;
 esac
+# Git's hook-local paths must not be reinterpreted after entering v4 or test repositories.
+git_local_env=$(git rev-parse --local-env-vars)
+unset $git_local_env
+cd -- "$(dirname -- "$0")/.."
 exec npm run verify:local --silent

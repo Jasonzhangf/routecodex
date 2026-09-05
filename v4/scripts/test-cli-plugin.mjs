@@ -6,7 +6,11 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const binary = path.join(root, 'target/release/rccv4-plugin');
+const binaryFlag = process.argv.indexOf('--binary');
+if (binaryFlag >= 0 && !process.argv[binaryFlag + 1]) throw new Error('--binary requires an installed executable path');
+const binary = binaryFlag >= 0
+  ? path.resolve(process.argv[binaryFlag + 1])
+  : path.join(root, 'target/release/rccv4-plugin');
 
 if (!fs.existsSync(binary)) {
   throw new Error(`CLI release artifact missing: ${binary}`);

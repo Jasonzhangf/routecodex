@@ -17,14 +17,22 @@ run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard
 // V4-LAYER-PREFLIGHT-END
 
 function restoreHermeticActive() {
-  const fixture = path.join(v4Root, 'tests/resources/active-link-fixture/active/lib');
-  const target = path.join(v4Root, 'active/lib');
-  if (!fs.existsSync(fixture)) {
-    throw new Error(`[v4 verify] hermetic Active fixture missing: ${fixture}`);
+  const project = JSON.parse(fs.readFileSync(path.join(v4Root, '.appsdk/project.json'), 'utf8'));
+  for (const module of project.modules.filter((entry) => entry.stage === 'frozen')) {
+    // Active is immutable. Only the lifecycle owner can reconstruct its
+    // missing projection from the bound archive; fixtures never replace it.
+    if (!/^[a-z0-9-]+$/.test(module.module_id)) throw new Error('invalid module id');
+    const current = path.join(v4Root, 'active/lib', module.module_id, 'current.json');
+    if (!fs.existsSync(current)) {
+      run(`/Users/fanzhang/.cargo/bin/appsdk rehydrate-frozen . --module ${module.module_id}`);
+    }
   }
-  fs.rmSync(target, { recursive: true, force: true });
-  fs.mkdirSync(target, { recursive: true });
-  fs.cpSync(fixture, target, { recursive: true });
+  // Source CI does not republish frozen modules or certify their historical
+  // deployment evidence. Active integrity remains enforced by build-link,
+  // its consumers and index verification below. Explicit release verification
+  // keeps the full SDK lifecycle check; failures are never downgraded there.
+  const sourceOnly = process.env.RCCV4_REAL_RUNTIME_ADMISSION_MODE === 'contract';
+  run(`/Users/fanzhang/.cargo/bin/appsdk verify ${sourceOnly ? '--admission ' : ''}.`);
 }
 
 run('cargo run --quiet --manifest-path Cargo.toml -p routecodex-v4-skeleton --bin routecodex-v4-plan-hash -- contracts/skeleton-plan.contract.json --check');

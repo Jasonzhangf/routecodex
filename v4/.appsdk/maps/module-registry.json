@@ -7,6 +7,13 @@
       "owner": "routecodex-v4-governance",
       "owned_paths": [
         ".appsdk/**",
+        ".appsdk-prepare.json",
+        ".githooks/**",
+        "architecture-maps-result-v4-feature-owner-r1.json",
+        "goal-scope-result-v4-feature-owner-r1.json",
+        "owner-worktree-result-v4-feature-owner-r1.json",
+        "plan-v4-feature-owner-r1.json",
+        "preflight-verify-result-v4-feature-owner-r1.json",
         ".appsdk/goal.json",
         ".appsdk/project.json",
         ".appsdk/sdk.lock",

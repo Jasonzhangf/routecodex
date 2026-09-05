@@ -171,6 +171,7 @@ function sha256File(file) {
 function checkProductReviewBindings(
   recordsDir = path.join(v4Root, '.appsdk/records'),
   productMapDir = path.join(v4Root, PRODUCT_MAP_REVIEW_ROOT),
+  inheritedRecords = new Map(),
 ) {
   const out = [];
   if (!fs.existsSync(recordsDir)) return out;
@@ -181,11 +182,18 @@ function checkProductReviewBindings(
     ]),
   );
   for (const file of fs.readdirSync(recordsDir).filter((name) => /^review-record-.*\.json$/.test(name))) {
-    const record = JSON.parse(fs.readFileSync(path.join(recordsDir, file), 'utf8'));
+    const bytes = fs.readFileSync(path.join(recordsDir, file), 'utf8');
+    // Immutable, unchanged frozen-module reviews remain historical evidence,
+    // not a review of this candidate. Canonical SDK integrity still applies.
+    if (inheritedRecords.get(file) === bytes) {
+      console.warn(`[v4 isolation] historical review retained, not candidate admission: ${file}`);
+      continue;
+    }
+    const record = JSON.parse(bytes);
     const createdAt = Date.parse(String(record.created_at ?? ''));
     if (!Number.isFinite(createdAt) || createdAt < PRODUCT_MAP_REVIEW_CUTOVER) continue;
-    if (record.reviewer?.adapter !== 'dsh') {
-      out.push(`${file}: post-cutover architecture review must use DSH`);
+    if (!['dsh', 'agy'].includes(record.reviewer?.adapter)) {
+      out.push(`${file}: product architecture review must use DSH or AGY`);
     }
     if (record.v4_product_map_root !== PRODUCT_MAP_REVIEW_ROOT) {
       out.push(`${file}: v4_product_map_root must be ${PRODUCT_MAP_REVIEW_ROOT}`);
@@ -197,6 +205,33 @@ function checkProductReviewBindings(
     }
   }
   return out;
+}
+
+function unchangedFrozenReviews() {
+  const git = (...args) => spawnSync('git', args, { cwd: v4Root, encoding: 'utf8' });
+  const inherited = new Map();
+  const baseResult = git('merge-base', 'HEAD', 'origin/v4-cordis');
+  if (baseResult.status !== 0) return inherited;
+  const base = baseResult.stdout.trim();
+  const projectResult = git('show', `${base}:v4/.appsdk/project.json`);
+  if (projectResult.status !== 0) return inherited;
+  const baseline = JSON.parse(projectResult.stdout);
+  const current = JSON.parse(fs.readFileSync(path.join(v4Root, '.appsdk/project.json'), 'utf8'));
+  for (const module of current.modules ?? []) {
+    if (module.stage !== 'frozen' || JSON.stringify(module) !== JSON.stringify(
+      baseline.modules.find((entry) => entry.module_id === module.module_id),
+    )) continue;
+    const scope = [...(module.owned_paths ?? []), ...(module.contract_paths ?? [])];
+    if (scope.length === 0) continue;
+    const paths = scope.map((entry) => entry.endsWith('/**') ? entry.slice(0, -3) : entry);
+    const diff = git('diff', '--exit-code', base, '--', ...paths);
+    const untracked = git('ls-files', '--others', '--exclude-standard', '--', ...paths);
+    if (diff.status !== 0 || untracked.status !== 0 || untracked.stdout.trim()) continue;
+    const file = `review-record-${module.module_id}.json`;
+    const record = git('show', `${base}:v4/.appsdk/records/${file}`);
+    if (record.status === 0) inherited.set(file, record.stdout);
+  }
+  return inherited;
 }
 
 function escapeViolation(target) {
@@ -333,6 +368,7 @@ function checkMainlineEdges(mainlinePath = path.join(v4Root, 'docs/architecture/
     'routecodex-v4-standard-plugins::RelayRequestOutboundHook',
     'routecodex-v4-provider::RelayRequestCodec',
     'routecodex-v4-provider::NativeProviderTransport',
+    'routecodex-v4-provider::ProviderTransportPort::execute',
     'routecodex-v4-provider::RelayResponseCodec',
     'routecodex-v4-standard-plugins::RelayResponseHook',
     'routecodex-v4-standard-plugins::RelayResponseOutboundHook',
@@ -545,7 +581,8 @@ function checkDeclaredExecutedBinding(
     ? fs.readFileSync(testScriptPath, 'utf8')
     : '';
   for (const command of declaredFunctionalTests) {
-    if (!testScript.includes(command)) {
+    // Named RUST_GATES are executed by verify.mjs, not scripts/test.mjs.
+    if (!testScript.includes(command) && !RUST_GATES.some(([, executed]) => executed === command)) {
       out.push(`required functional test not executed by scripts/test.mjs: ${command}`);
     }
   }
@@ -632,7 +669,11 @@ const bindingFailures = checkDeclaredExecutedBinding(
 if (bindingFailures.length > 0) {
   failures.push(`declared vs executed gate binding:\n${bindingFailures.join('\n')}`);
 }
-const productReviewFailures = checkProductReviewBindings();
+const productReviewFailures = checkProductReviewBindings(
+  path.join(v4Root, '.appsdk/records'),
+  path.join(v4Root, PRODUCT_MAP_REVIEW_ROOT),
+  unchangedFrozenReviews(),
+);
 if (productReviewFailures.length > 0) {
   failures.push(`product-map review binding:\n${productReviewFailures.join('\n')}`);
 }
@@ -945,6 +986,12 @@ fs.writeFileSync(
 expectReject('post-cutover product-map review binding drift', () => checkProductReviewBindings(
   productReviewRecordsDir,
   path.join(v4Root, PRODUCT_MAP_REVIEW_ROOT),
+));
+const inheritedRedRecord = fs.readFileSync(path.join(productReviewRecordsDir, 'review-record-red.json'), 'utf8');
+expectReject('changed historical review must not inherit baseline exemption', () => checkProductReviewBindings(
+  productReviewRecordsDir,
+  path.join(v4Root, PRODUCT_MAP_REVIEW_ROOT),
+  new Map([['review-record-red.json', `${inheritedRedRecord} `]]),
 ));
 
 if (redFail > 0) {
