@@ -1,24 +1,24 @@
 {
-  "review_id": "review-fix-routecodex-v4-control-e3c72cc7c9fa",
+  "review_id": "review-fix-routecodex-v4-control-0bbb36550d47",
   "review_kind": "architecture",
   "issue_id": "v4-cordis-routecodex-v4-control-active-recovery",
-  "promotion_id": "promotion-fix-routecodex-v4-control-e3c72cc7c9fa",
-  "fix_candidate_id": "fix-routecodex-v4-control-e3c72cc7c9fa",
-  "pre_review_validation_id": "pre-review-fix-routecodex-v4-control-e3c72cc7c9fa",
+  "promotion_id": "promotion-fix-routecodex-v4-control-0bbb36550d47",
+  "fix_candidate_id": "fix-routecodex-v4-control-0bbb36550d47",
+  "pre_review_validation_id": "pre-review-fix-routecodex-v4-control-0bbb36550d47",
   "reviewer": {
     "adapter": "project::architecture_review",
-    "identity": "routecodex-v4-control:e3c72cc7c9fa5626473837b8f1cde7f923fc7487"
+    "identity": "routecodex-v4-control:0bbb36550d47c2fd3df60e9d4679a52576bf7157"
   },
   "verdict": "pass",
   "evidence_ids": [
-    "evidence-fix-routecodex-v4-control-e3c72cc7c9fa",
+    "evidence-fix-routecodex-v4-control-0bbb36550d47",
     "candidate-artifact",
     "development-whitebox",
     "positive-intervention",
     "negative-intervention"
   ],
-  "reviewed_commit": "e3c72cc7c9fa5626473837b8f1cde7f923fc7487",
-  "reviewed_tree_hash": "e082273ae0eb30af7b36f6df4cf797ed4c170f32",
+  "reviewed_commit": "0bbb36550d47c2fd3df60e9d4679a52576bf7157",
+  "reviewed_tree_hash": "b42fe7b0afbd0806e431d991042b98cfa3d75cbf",
   "reviewed_diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "reviewed_artifact_hash": "sha256:b77a0edf18e2f20e413cc9818332713575d20199e693eb6e9f516eb05301fb5f",
   "reviewed_scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -28,5 +28,5 @@
   "verification_map_hash": "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
   "ai_confidence": 1,
   "confidence_rationale": "Current-tree architecture gates and mapped module regression passed.",
-  "created_at": "2026-09-05T07:46:23.692Z"
+  "created_at": "2026-09-05T07:50:10.306Z"
 }

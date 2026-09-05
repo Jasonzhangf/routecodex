@@ -54,6 +54,16 @@ for (const relative of module.artifact_paths) {
   const source = path.join(moduleArtifactRoot, relative);
   if (!fs.existsSync(source)) throw new Error(`module artifact missing: ${source}`);
 }
+const currentActiveFile = path.join(root, 'active', 'lib', moduleId, 'current.json');
+const currentActive = fs.existsSync(currentActiveFile)
+  ? JSON.parse(fs.readFileSync(currentActiveFile, 'utf8'))
+  : null;
+const previousActiveVersion = currentActive?.version ?? null;
+const previousActiveHash = currentActive?.artifact_hash ?? null;
+const nextActiveVersion = (() => {
+  const match = previousActiveVersion?.match(/^active-v(\d+)$/);
+  return match ? `active-v${Number(match[1]) + 1}` : 'active-v1';
+})();
 
 const records = path.join(root, '.appsdk', 'records');
 const evidenceRoot = path.join(records, 'evidence', moduleId);
@@ -357,9 +367,9 @@ const promotion = {
   candidate_commit: head,
   merged_commit: head,
   source_commit: head,
-  previous_active_version: null,
-  new_active_version: 'active-v1',
-  base_artifact_hash: null,
+  previous_active_version: previousActiveVersion,
+  new_active_version: nextActiveVersion,
+  base_artifact_hash: previousActiveHash,
   artifact_hash: artifactHash,
   scope_hash: scopeHash,
   public_api_hash: publicApiHash,
@@ -392,8 +402,8 @@ writeJson(path.join(records, `freeze-record-${moduleId}.json`), {
   regression_report_id: regressionId,
   regression_report_hash: regressionHash,
   source_commit_or_tag: head,
-  active_version: 'active-v1',
-  previous_active_version: null,
+  active_version: nextActiveVersion,
+  previous_active_version: previousActiveVersion,
   library_hash: artifactHash,
   public_api_hash: publicApiHash,
   review_id: reviewId,

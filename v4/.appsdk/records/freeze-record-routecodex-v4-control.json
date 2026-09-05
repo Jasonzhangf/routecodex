@@ -1,18 +1,18 @@
 {
-  "freeze_id": "freeze-fix-routecodex-v4-control-e3c72cc7c9fa",
+  "freeze_id": "freeze-fix-routecodex-v4-control-0bbb36550d47",
   "issue_id": "v4-cordis-routecodex-v4-control-active-recovery",
   "module_id": "routecodex-v4-control",
-  "promotion_id": "promotion-fix-routecodex-v4-control-e3c72cc7c9fa",
-  "promotion_record_hash": "sha256:f85189b07f993a0405cba11a68dd9c32ac29f9a379afb9dcd03f63f248282d0f",
-  "artifact_record_id": "evidence-fix-routecodex-v4-control-e3c72cc7c9fa",
-  "regression_report_id": "regression-fix-routecodex-v4-control-e3c72cc7c9fa",
-  "regression_report_hash": "sha256:1445b1ad4817fd59f06b9a9839fe8e88d14281a400fc3f67a9efc5126847c105",
-  "source_commit_or_tag": "e3c72cc7c9fa5626473837b8f1cde7f923fc7487",
-  "active_version": "active-v1",
-  "previous_active_version": null,
+  "promotion_id": "promotion-fix-routecodex-v4-control-0bbb36550d47",
+  "promotion_record_hash": "sha256:a08d751b91655e0850a553f1eb07a95b6fb1f5ae1244e044d06e808aff6cda21",
+  "artifact_record_id": "evidence-fix-routecodex-v4-control-0bbb36550d47",
+  "regression_report_id": "regression-fix-routecodex-v4-control-0bbb36550d47",
+  "regression_report_hash": "sha256:e62e4cfd49959aecb8ac9a74520b0aa2a730b22d66a3fa6bda69b0c88977ea20",
+  "source_commit_or_tag": "0bbb36550d47c2fd3df60e9d4679a52576bf7157",
+  "active_version": "active-v4",
+  "previous_active_version": "active-v3",
   "library_hash": "sha256:b77a0edf18e2f20e413cc9818332713575d20199e693eb6e9f516eb05301fb5f",
   "public_api_hash": "sha256:1105562d84253eecb09d20605cf84245f606879a87a4cce10f4f14c547307823",
-  "review_id": "review-fix-routecodex-v4-control-e3c72cc7c9fa",
+  "review_id": "review-fix-routecodex-v4-control-0bbb36550d47",
   "previous_active_immutable": false,
   "git_clean": true,
   "clean_scope": {
@@ -32,5 +32,5 @@
     "review": "project::architecture_review",
     "artifact_registry": "appsdk::lifecycle"
   },
-  "created_at": "2026-09-05T07:46:23.692Z"
+  "created_at": "2026-09-05T07:50:10.306Z"
 }
