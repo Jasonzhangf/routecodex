@@ -116,7 +116,7 @@ fn success_increases_score_but_probe_success_controls_cooldown_recovery() {
     }
 
     let blocked_success = store
-        .record_provider_success("provider-a", "key-a", "model-a", 103)
+        .record_provider_key_success("provider-a", "key-a", "model-a", 103)
         .expect("success evidence");
     assert_eq!(blocked_success.score_milli, 1);
     assert_eq!(blocked_success.success_streak, 1);
@@ -129,7 +129,7 @@ fn success_increases_score_but_probe_success_controls_cooldown_recovery() {
     assert!(recovered.available);
     assert_eq!(recovered.score_milli, 100);
     let post_probe_success = store
-        .record_provider_success("provider-a", "key-a", "model-a", 105)
+        .record_provider_key_success("provider-a", "key-a", "model-a", 105)
         .expect("post-probe success");
     assert_eq!(post_probe_success.score_milli, 101);
 }
@@ -148,12 +148,12 @@ fn health_score_uses_only_the_latest_100_calls() {
         .expect("projection");
     assert_eq!(before.score_milli, 0);
     let success = store
-        .record_provider_success("p", "k", "m", 101)
+        .record_provider_key_success("p", "k", "m", 101)
         .expect("success");
     assert_eq!(success.score_milli, 0);
     for now_ms in 102..202 {
         store
-            .record_provider_success("p", "k", "m", now_ms)
+            .record_provider_key_success("p", "k", "m", now_ms)
             .expect("success");
     }
     let after = store
@@ -210,7 +210,7 @@ fn successful_calls_cap_health_at_150() {
     let store = V3ProviderHealthStore::default();
     for now_ms in 0..100 {
         store
-            .record_provider_success("p", "k", "m", now_ms)
+            .record_provider_key_success("p", "k", "m", now_ms)
             .expect("success");
     }
     assert_eq!(
@@ -226,10 +226,10 @@ fn successful_calls_cap_health_at_150() {
 fn success_streak_increments_and_failure_resets_it() {
     let store = V3ProviderKeyHealthStore::default();
     let first = store
-        .record_provider_success("provider-a", "key-a", "model-a", 100)
+        .record_provider_key_success("provider-a", "key-a", "model-a", 100)
         .unwrap();
     let second = store
-        .record_provider_success("provider-a", "key-a", "model-a", 101)
+        .record_provider_key_success("provider-a", "key-a", "model-a", 101)
         .unwrap();
     assert_eq!(first.success_streak, 1);
     assert_eq!(second.success_streak, 2);

@@ -447,9 +447,9 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                 hook,
                 Some(observation),
             )
-                .map_err(|error| {
-                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
-                })?;
+            .map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+            })?;
             let projected = project_v3_openai_chat_sse_chunk_json(&semantic);
             observation
                 .record_provider_event_json(&projected)
@@ -766,13 +766,14 @@ mod tests {
             }),
         ]));
 
-        let response = build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events_with_context(
-            provider,
-            &observation,
-            &V3AnthropicResponsesProjectionContext::default(),
-        )
-        .await
-        .expect("a late provider read error cannot reopen a confirmed Anthropic terminal");
+        let response =
+            build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events_with_context(
+                provider,
+                &observation,
+                &V3AnthropicResponsesProjectionContext::default(),
+            )
+            .await
+            .expect("a late provider read error cannot reopen a confirmed Anthropic terminal");
 
         assert_eq!(response["status"], "completed");
     }

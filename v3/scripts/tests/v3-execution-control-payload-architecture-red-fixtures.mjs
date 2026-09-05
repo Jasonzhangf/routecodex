@@ -196,6 +196,13 @@ const cases = [
     diagnostic: /attempt-store policy compiler missing/u,
   },
   {
+    name: 'config validation stops consuming the attempt-store policy compiler',
+    file: 'v3/crates/routecodex-v3-config/src/validate.rs',
+    marker: 'crate::attempt_store::compile_attempt_store_policy(',
+    replacement: 'crate::attempt_store::compile_attempt_store_policy_removed(',
+    diagnostic: /config validation must consume the attempt-store policy compiler/u,
+  },
+  {
     name: 'health persistence enqueues while the write guard is live',
     file: 'v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs',
     marker: '    drop(state);\n    if let Some(ticket) = ticket {\n',

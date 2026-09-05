@@ -346,8 +346,7 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
                 .ok_or(V3AnthropicCodecError::MalformedField {
                     field: "metadata.user_id",
                 })?;
-            responses_request_extension
-                .insert("client_metadata".to_string(), json!({"user_id": user_id}));
+            responses_request_extension.insert("metadata".to_string(), json!({"user_id": user_id}));
         }
     }
     if let Some(format) = object

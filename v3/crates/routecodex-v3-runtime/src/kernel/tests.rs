@@ -23,14 +23,14 @@ fn direct_provider_failure_uses_health_score_without_legacy_threshold_cooldown()
         .get_mut("default")
         .expect("default pool")
         .targets[0] = V3RoutePoolTargetManifest {
-            kind: V3RouteTargetKind::ProviderModel,
-            id: None,
-            provider: Some("openai".to_string()),
-            model: Some("gpt-test".to_string()),
-            key: Some("key1".to_string()),
-            priority: Some(100),
-            weight: Some(1),
-        };
+        kind: V3RouteTargetKind::ProviderModel,
+        id: None,
+        provider: Some("openai".to_string()),
+        model: Some("gpt-test".to_string()),
+        key: Some("key1".to_string()),
+        priority: Some(100),
+        weight: Some(1),
+    };
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_failure_session_scope_for("default", "direct-health-single-owner");
     let plan = plan_v3_responses_protocol_execution_with_provider_health(
@@ -70,15 +70,10 @@ fn direct_provider_failure_uses_health_score_without_legacy_threshold_cooldown()
         .expect("direct failure must be recorded");
     }
 
-    let projection = health.store().scheduling_projection(
-        "openai",
-        "key1",
-        "gpt-test",
-        100,
-        100,
-        200,
-    )
-    .expect("direct health projection");
+    let projection = health
+        .store()
+        .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 200)
+        .expect("direct health projection");
     assert_eq!(projection.score_milli, 85);
     assert!(
         projection.available,

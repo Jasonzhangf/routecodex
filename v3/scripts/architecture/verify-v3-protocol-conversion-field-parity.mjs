@@ -31,7 +31,7 @@ const paths = {
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesRuntimeInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   responsesRuntimeTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
-  responsesRuntimeTestsExtra: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs',
+  responsesRuntimeTestsExtra: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs',
   responsesRelayDryRun: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
   responsesRelayTypes: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs',
   webSearchHop: 'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs',
@@ -116,7 +116,7 @@ requireText(text.responsesRelayTypes, `${paths.responsesRelayTypes}::client_inpu
 requireText(text.responsesRelayDryRun, `${paths.responsesRelayDryRun}::client_input_error_projection`, 'V3ResponsesRelayRuntimeError::ClientInboundCanonical(message)');
 requireText(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::provider_response_projection_error`, 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(');
 requireText(text.webSearchHop, `${paths.webSearchHop}::internal_hop_error`, 'V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(format!(');
-requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'provider_response_projection_failure_is_not_client_invalid_request');
+requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'provider_response_projection_failure_projects_internal_599');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'internal_web_search_canonicalization_failure_is_not_client_invalid_request');
 forbid(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
 forbid(text.webSearchHop, `${paths.webSearchHop}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
@@ -373,7 +373,8 @@ const responsesProviderRequestBuilder = functionSlice(
   'fn build_v3_openai_responses_request_from_chat_canonical',
   'fn normalize_responses_payload_for_provider_standard',
 );
-requireText(responsesProviderRequestBuilder, `${paths.requestOutboundFormat}::responses_client_metadata_preserved`, '"metadata",\n        "client_metadata",');
+requireText(responsesProviderRequestBuilder, `${paths.requestOutboundFormat}::responses_metadata_preserved`, '"metadata",');
+forbid(responsesProviderRequestBuilder, `${paths.requestOutboundFormat}::responses_client_metadata_local`, [/"client_metadata"/u]);
 const outboundProjectionTransforms = functionSlice(
   text.requestOutboundFormat,
   paths.requestOutboundFormat,
@@ -388,7 +389,7 @@ requireText(text.requestOutboundMetadata, `${paths.requestOutboundMetadata}::ope
 requireText(text.requestFieldProjectionManifest, `${paths.requestFieldProjectionManifest}::openai_chat_reasoning_summary_compatible_projection`, 'compatible_reasoning_effort_auto_medium_concise_low_detailed_high_merge_higher');
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::openai_chat_registered_client_metadata_local_context`, 'openai_chat_wire_consumes_registered_codex_client_metadata_as_local_context');
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::openai_chat_unknown_client_metadata_rejected`, 'openai_chat_wire_rejects_unknown_client_metadata_before_provider_wire');
-requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::responses_client_metadata_target_validation_lock`, 'codex_client_metadata_remains_client_metadata_on_responses_wire');
+requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::responses_client_metadata_target_validation_lock`, 'codex_client_metadata_does_not_reach_responses_wire');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_reasoning_projection`, 'fn project_openai_responses_reasoning_extensions_to_reasoning');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
 for (const phrase of [
@@ -482,7 +483,7 @@ for (const phrase of [
   '"responses:deepseek-console-go"',
   'serde_json::json!({"type":"adaptive"})',
   '"xhigh" | "max" => "max"',
-  '"none" | "minimal" => "low"',
+  '"none" | "minimal" | "low" | "medium" | "high" | "xhigh" => effort.as_str()',
   '_ => "medium"',
 ]) requireText(targetReasoningEffortProjection, `${paths.providerReqCompat}::target_protocol_reasoning_effort_projection`, phrase);
 forbid(targetReasoningEffortProjection, `${paths.providerReqCompat}::target_protocol_reasoning_effort_projection`, [/thinking_budget|budget_tokens|MetadataCenter|metadata_center/i]);
@@ -549,8 +550,8 @@ for (const phrase of [
   '"type":"custom_tool_call"',
 ]) requireText(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, phrase);
 forbid(text.responsesRuntime, `${paths.responsesRuntime}::no_function_relabel_for_openai_chat_custom`, [/extract_v3_responses_custom_tool_input_from_openai_chat_arguments/]);
-requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider`, 'target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider');
-requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider`, 'the incompatible Anthropic candidate must receive no wire request');
+requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_no_switch`, 'target_protocol_unmapped_field_projects_internal_598_without_switching_provider');
+requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_no_switch`, 'a request-shape error must not send or switch provider');
 requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::responses_metadata_projection_context`, 'pub struct V3AnthropicResponsesProjectionContext');
 for (const phrase of ['custom_tool_names: BTreeSet<String>', 'governed_custom_tool_names']) requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::anthropic_custom_reverse_guard`, phrase);
 requireText(text.anthropicCodecToolProjection, `${paths.anthropicCodecToolProjection}::anthropic_custom_reverse_guard`, 'anthropic_tool_use_as_responses_call');
@@ -1210,8 +1211,11 @@ for (const token of [
 
 const pkg = JSON.parse(text.packageJson);
 const v3Pkg = JSON.parse(text.v3PackageJson);
-if (pkg.scripts?.['test:v3-protocol-conversion-field-parity'] !== 'npm --prefix v3 run test:v3-protocol-conversion-field-parity') {
-  failures.push(`${paths.packageJson}: test:v3-protocol-conversion-field-parity must dispatch exactly to the V3 package script`);
+const expectedParityCommand = pkg.name === 'routecodex-v3'
+  ? v3Pkg.scripts?.['test:v3-protocol-conversion-field-parity']
+  : 'npm --prefix v3 run test:v3-protocol-conversion-field-parity';
+if (!expectedParityCommand || pkg.scripts?.['test:v3-protocol-conversion-field-parity'] !== expectedParityCommand) {
+  failures.push(`${paths.packageJson}: test:v3-protocol-conversion-field-parity must match its root dispatcher or V3 admission package`);
 }
 for (const scriptName of [
   'render:v3-protocol-semantic-field-matrix',

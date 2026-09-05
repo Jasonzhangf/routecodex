@@ -95,6 +95,12 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "chatwire"
 endpoints = ["responses"]
+[servers.chatwire.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.chatwire]
 type = "openai_chat"
 base_url = "http://chatwire.invalid/v1"

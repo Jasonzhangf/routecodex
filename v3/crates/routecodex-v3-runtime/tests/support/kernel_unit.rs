@@ -502,7 +502,8 @@ async fn provider_error_enters_error_chain_not_success() {
     assert_eq!(output.error_chain.unwrap()[0], "V3Error01SourceRaised");
     match output.client_payload.body {
         V3ClientBody::Json(body) => {
-            assert_eq!(body["error"]["message"], "provider_transport_error")
+            assert_eq!(body["error"]["code"], "network_error");
+            assert_eq!(body["error"]["message"], "network error");
         }
         V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => panic!("error response must be JSON"),
         V3ClientBody::CommittedSse(_) => panic!("error response must be JSON"),
@@ -1582,7 +1583,8 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
     let V3ClientBody::Json(body) = output.client_payload.body else {
         panic!("exhausted pre-terminal SSE failure must be a typed terminal error: {output:?}");
     };
-    assert_eq!(body["error"]["code"], "provider_response_sse_stream");
+    assert_eq!(body["error"]["code"], "network_error");
+    assert_eq!(body["error"]["message"], "network error");
     assert!(
         !body.to_string().contains("partial"),
         "failed attempt bytes must never enter the terminal client payload: {body}"

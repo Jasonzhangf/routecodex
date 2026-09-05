@@ -49,7 +49,13 @@ function edge(document, stepId) {
 }
 
 const cases = [
-
+  {
+    name: 'Stopless procedure loses its activation contract owner reference',
+    path: '.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md',
+    marker: 'docs/design/v3-stopless-schema-guidance-activation-contract.md',
+    replacement: 'docs/design/removed-contract.md',
+    diagnostic: /95-v3-stopless-sop\.md missing docs\/design\/v3-stopless-schema-guidance-activation-contract\.md/u,
+  },
   {
     name: 'Resp03 data node carries StoplessCenter control state',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',

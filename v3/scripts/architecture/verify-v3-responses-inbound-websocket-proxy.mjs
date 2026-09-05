@@ -83,7 +83,7 @@ for (const phrase of [
   'if let Some(handoff) = relay_output.protocol_direct_handoff.take()',
   'send_responses_relay_websocket_output(',
   'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(',
-  'send_responses_websocket_sse_stream(',
+  'send_responses_websocket_committed_sse_stream(',
   'SseIncrementalDecoder::new(SseTransportLimits::default())',
   'client_message = socket.next() =>',
   'response.create is already in flight',
@@ -124,7 +124,7 @@ for (const phrase of [
   'execute_responses_direct_server_outcome',
   'execute_responses_relay_websocket_output',
   'send_responses_relay_websocket_output',
-  'send_responses_websocket_sse_stream',
+  'send_responses_websocket_committed_sse_stream',
   'v3.responses.inbound_websocket_client_connection',
   'v3.responses.inbound_websocket_frame_projection',
 ]) requireText(files.functionMap, text.functionMap, phrase);
@@ -175,7 +175,7 @@ for (const script of [
 }
 
 const wsStart = text.websocket.indexOf('async fn responses_websocket_endpoint(');
-const wsEnd = text.websocket.indexOf('pub(crate) async fn send_responses_websocket_sse_stream(');
+const wsEnd = text.websocket.indexOf('pub(crate) async fn send_responses_websocket_committed_sse_stream(');
 if (wsStart < 0 || wsEnd <= wsStart) {
   failures.push(files.websocket + ': missing WebSocket owner boundary');
 } else {
@@ -198,7 +198,7 @@ const clientSocketPolls = text.websocket.match(/client_message = socket\.next\(\
 if (clientSocketPolls.length !== 2) {
   failures.push(files.websocket + ': expected Direct and Relay WebSocket stream client disconnect polling, got ' + clientSocketPolls.length);
 }
-const runtimeSseDecodeGuards = text.websocket.match(/runtime SSE decode failed/g) ?? [];
+const runtimeSseDecodeGuards = text.websocket.match(/match decoder\.push\(build_v3_sse_transport_in_01_raw_chunk\(&chunk\)\) \{\s*Ok\(frames\) => frames,\s*Err\(error\) => \{\s*return send_responses_websocket_error\(\s*socket,\s*"runtime_stream_error",/g) ?? [];
 if (runtimeSseDecodeGuards.length !== 2) {
   failures.push(files.websocket + ': expected Direct and Relay runtime SSE decode guards, got ' + runtimeSseDecodeGuards.length);
 }

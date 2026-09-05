@@ -208,4 +208,3 @@ pub(crate) fn classify_v3_provider_responses_json_event(
         "provider Responses SSE event type {event_type:?} is not registered"
     ))
 }
-

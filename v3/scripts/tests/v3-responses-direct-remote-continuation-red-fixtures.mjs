@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 const repo = process.cwd();
 const verifier = resolve(repo, 'scripts/architecture/verify-v3-responses-direct-remote-continuation.mjs');
 const runtime = 'v3/crates/routecodex-v3-runtime/src/kernel.rs';
+const continuationOwner = 'v3/crates/routecodex-v3-runtime/src/responses_continuation_owner.rs';
 const runtimeCommit = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_continuation_commit.rs';
 const runtimeHelpers = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs';
 const runtimeHelpersStream = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs';
@@ -20,14 +21,14 @@ const providerTransport = 'v3/crates/routecodex-v3-provider-responses/src/transp
 const providerWebsocket = 'v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs';
 const cases = [
   ['Req03 load removed', runtime, '.load_for_req03(response_id, &scope.key, now_epoch_ms)', '.load(response_id)', /forbidden|load_for_req03/],
-  ['Default transport session state removed', runtime, 'static DEFAULT_RESPONSES_TRANSPORT', 'static REMOVED_DEFAULT_RESPONSES_TRANSPORT', /DEFAULT_RESPONSES_TRANSPORT/],
+  ['Default transport session state removed', 'v3/crates/routecodex-v3-runtime/src/kernel/default_transport.rs', 'static DEFAULT_RESPONSES_TRANSPORT', 'static REMOVED_DEFAULT_RESPONSES_TRANSPORT', /DEFAULT_RESPONSES_TRANSPORT/],
   ['second response exit', runtimeHelpers, 'fn release_terminal_failure_locator(', 'async fn execute_selected_continuation() {}\nfn release_terminal_failure_locator(', /execute_selected_continuation/],
   ['scope-only terminal release', runtimeHelpers, 'store.release_bound(response_id, &scope.key, selected_pin)', 'store.release_for_req03(response_id, &scope.key)', /release_bound|release_for_req03/],
-  ['ambiguous provider binding becomes internal failure', continuationOwner, 'AmbiguousProviderBinding { .. } =>', 'ScopeMismatch { .. } =>', /AmbiguousProviderBinding/],
+  ['ambiguous provider binding becomes internal failure', continuationOwner, 'AmbiguousProviderBinding {', 'ScopeMismatch {', /AmbiguousProviderBinding/],
   ['Router reentry marker', runtime, 'trace.push("V3HubReqTarget06Resolved");', 'trace.push("V3HubReqTarget06Resolved");\n        let fallback_router = V3VirtualRouter::default();', /fallback/],
   ['control payload leak', runtime, 'let policy = hook_registry.run_route(selected, &standardized);', 'let mut policy = hook_registry.run_route(selected, &standardized);\n        policy.request_body["provider_id"] = serde_json::json!("leak");', /provider_id/],
-  ['HTTP V2 direct capability gate reintroduced', runtimeHelpersStream, 'let input = V3RemoteContinuationCommitInput::locator_only(locator);', 'let remote_capability_error = "provider p model m lacks required remote_continuation capability";\n        let input = V3RemoteContinuationCommitInput::locator_only(locator);', /remote_capability_error|lacks required remote_continuation/],
-  ['non-atomic Resp04 rebind', runtimeHelpersStream, 'store.rebind_for_resp04(previous_response_id, input)', '{ store.release(previous_response_id); store.commit(input) }', /rebind_for_resp04/],
+  ['HTTP V2 direct capability gate reintroduced', runtimeCommit, 'let input = V3RemoteContinuationCommitInput::locator_only(locator);', 'let remote_capability_error = "provider p model m lacks required remote_continuation capability";\n        let input = V3RemoteContinuationCommitInput::locator_only(locator);', /remote_capability_error|lacks required remote_continuation/],
+  ['non-atomic Resp04 rebind', runtimeCommit, 'store.rebind_for_resp04(previous_response_id, input)', '{ store.release(previous_response_id); store.commit(input) }', /rebind_for_resp04/],
   ['SSE stream materialized before projection', response, 'let provider_body = raw.into_body();', 'let body_bytes = raw.into_body_bytes().await.unwrap();\n    let provider_body = V3ProviderResponseBody::Json(body_bytes);', /into_body_bytes/],
   ['structured SSE pending record removed', response, 'observation_state.record_pending_response_id(&response_id)?;', '// structured pending record removed', /record_pending_response_id/],
   ['Server store owner', 'v3/crates/routecodex-v3-server/src/scope_metadata.rs', 'fn build_responses_direct_continuation_scope(', 'fn forbidden(store: V3RemoteContinuationStore) {}\nfn build_responses_direct_continuation_scope(', /V3RemoteContinuationStore/],
@@ -37,7 +38,9 @@ const cases = [
   ['WebSocket fallback marker', 'v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs', 'fn websocket_sse_stream(', 'fn fallback_http_retry() {}\nfn websocket_sse_stream(', /fallback/i],
 ];
 const copied = [
+  continuationOwner,
   runtime,
+  'v3/crates/routecodex-v3-runtime/src/kernel/default_transport.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs',
   runtimeCommit,
   runtimeHelpers,
@@ -51,6 +54,7 @@ const copied = [
   'v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs',
   'v3/crates/routecodex-v3-target/src/lib.rs',
   server,
+  'v3/crates/routecodex-v3-server/src/frame_builders.rs',
   'v3/crates/routecodex-v3-server/src/scope_metadata.rs',
   'v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs',
   'v3/crates/routecodex-v3-server/src/websocket.rs',

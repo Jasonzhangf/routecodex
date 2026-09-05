@@ -264,7 +264,8 @@ impl V3WebuiObservabilityPersistenceWriter {
                 while let Ok(command) = receiver.recv() {
                     match command {
                         V3WebuiObservabilityPersistenceCommand::Append(row) => {
-                            if let Err(error) = V3WebuiObservability::append_persisted_row(&path, &row)
+                            if let Err(error) =
+                                V3WebuiObservability::append_persisted_row(&path, &row)
                             {
                                 set_v3_webui_observability_alarm(
                                     &writer_alarm,
@@ -289,7 +290,9 @@ impl V3WebuiObservabilityPersistenceWriter {
                     }
                 }
             })
-            .unwrap_or_else(|error| panic!("observability persistence writer start failed: {error}"));
+            .unwrap_or_else(|error| {
+                panic!("observability persistence writer start failed: {error}")
+            });
         Self { sender, alarm }
     }
 
@@ -308,7 +311,9 @@ impl V3WebuiObservabilityPersistenceWriter {
     fn flush(&self) -> Result<(), String> {
         let (receipt_sender, receipt_receiver) = mpsc::channel();
         self.sender
-            .send(V3WebuiObservabilityPersistenceCommand::Flush(receipt_sender))
+            .send(V3WebuiObservabilityPersistenceCommand::Flush(
+                receipt_sender,
+            ))
             .map_err(|error| format!("observability persistence writer unavailable: {error}"))?;
         receipt_receiver
             .recv()
@@ -352,7 +357,7 @@ impl V3WebuiObservability {
             path,
             V3_WEBUI_RECENT_REQUEST_CAPACITY,
         )
-            .map_err(|error| format!("read observability store {}: {error}", path.display()))?;
+        .map_err(|error| format!("read observability store {}: {error}", path.display()))?;
         let mut inner = handle
             .inner
             .lock()
@@ -590,9 +595,7 @@ impl V3WebuiObservability {
 }
 
 fn v3_runtime_usage_is_zero_issue(usage: &crate::V3RuntimeUsageSummary) -> bool {
-    usage.input_tokens == Some(0)
-        && usage.output_tokens == Some(0)
-        && usage.total_tokens == Some(0)
+    usage.input_tokens == Some(0) && usage.output_tokens == Some(0) && usage.total_tokens == Some(0)
 }
 
 #[cfg(test)]

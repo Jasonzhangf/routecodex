@@ -1045,13 +1045,15 @@ where
             service.call(request).await
         }
     });
-    let connection = hyper::server::conn::http1::Builder::new().serve_connection(
-        TokioIo::new(V3FrontHttpIo {
-            read_half,
-            front_socket: front_socket.clone(),
-        }),
-        hyper_service,
-    );
+    let connection = hyper::server::conn::http1::Builder::new()
+        .serve_connection(
+            TokioIo::new(V3FrontHttpIo {
+                read_half,
+                front_socket: front_socket.clone(),
+            }),
+            hyper_service,
+        )
+        .with_upgrades();
     tokio::select! {
         _ = front_socket.closeout_state.wait_peer_disconnected() => {
             front_socket.close();

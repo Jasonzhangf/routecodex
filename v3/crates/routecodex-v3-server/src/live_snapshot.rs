@@ -114,22 +114,22 @@ impl V3LiveSnapSseRecorderCore {
         }
         if let Some(observation) = self.provider_observation.as_ref() {
             let snapshot = observation.snapshot()?;
-                if !snapshot.provider_raw_sse.is_empty() {
-                    let provider_payload = self.state.debug.project_payload_verbatim(json!({
-                        "object": "routecodex.v3.provider_response_snapshot",
-                        "stage": "provider-response",
-                        "bodyKind": "sse",
-                        "rawSse": snapshot.provider_raw_sse,
-                    }));
-                    persist_v3_codex_sample_payload(
-                        &self.state,
-                        &self.entry_protocol,
-                        &self.endpoint,
-                        &self.request_id,
-                        "provider-response.json",
-                        &provider_payload,
-                    )?;
-                }
+            if !snapshot.provider_raw_sse.is_empty() {
+                let provider_payload = self.state.debug.project_payload_verbatim(json!({
+                    "object": "routecodex.v3.provider_response_snapshot",
+                    "stage": "provider-response",
+                    "bodyKind": "sse",
+                    "rawSse": snapshot.provider_raw_sse,
+                }));
+                persist_v3_codex_sample_payload(
+                    &self.state,
+                    &self.entry_protocol,
+                    &self.endpoint,
+                    &self.request_id,
+                    "provider-response.json",
+                    &provider_payload,
+                )?;
+            }
         }
         Ok(())
     }
@@ -184,8 +184,8 @@ impl V3LiveSnapClientResponseSseRecorder {
             move |terminal| {
                 let disconnect = matches!(terminal, V3CommittedSseTerminal::Dropped)
                     .then_some("client disconnected before SSE replay completed");
-                if let Err(error) = terminal_recorder
-                    .persist_current(disconnect, V3RecorderPersistPhase::Terminal)
+                if let Err(error) =
+                    terminal_recorder.persist_current(disconnect, V3RecorderPersistPhase::Terminal)
                 {
                     eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
                 }
@@ -248,8 +248,8 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
             move |terminal| {
                 let disconnect = matches!(terminal, V3CommittedSseTerminal::Dropped)
                     .then_some("client disconnected before SSE replay completed");
-                if let Err(error) = terminal_recorder
-                    .persist_current(disconnect, V3RecorderPersistPhase::Terminal)
+                if let Err(error) =
+                    terminal_recorder.persist_current(disconnect, V3RecorderPersistPhase::Terminal)
                 {
                     eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
                 }
@@ -280,12 +280,10 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
                             Some((Ok(bytes), (stream, false)))
                         }
                         Some(Err(error)) => {
-                            if let Err(capture_error) =
-                                recorder.persist_current(
-                                    Some(error.message.as_str()),
-                                    V3RecorderPersistPhase::Terminal,
-                                )
-                            {
+                            if let Err(capture_error) = recorder.persist_current(
+                                Some(error.message.as_str()),
+                                V3RecorderPersistPhase::Terminal,
+                            ) {
                                 return Some((
                                     Err(raise_v3_debug_artifact_failure(format!(
                                         "client response finalize failed: {capture_error}"
@@ -296,8 +294,8 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
                             Some((Err(error), (stream, true)))
                         }
                         None => {
-                            if let Err(error) = recorder
-                                .persist_current(None, V3RecorderPersistPhase::Terminal)
+                            if let Err(error) =
+                                recorder.persist_current(None, V3RecorderPersistPhase::Terminal)
                             {
                                 return Some((
                                     Err(raise_v3_debug_artifact_failure(format!(
@@ -642,8 +640,8 @@ impl V3LiveSnapOpenAiChatClientResponseSseRecorder {
                 }
             },
             move |_terminal| {
-                if let Err(error) = terminal_recorder
-                    .persist_current(None, V3RecorderPersistPhase::Terminal)
+                if let Err(error) =
+                    terminal_recorder.persist_current(None, V3RecorderPersistPhase::Terminal)
                 {
                     eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
                 }

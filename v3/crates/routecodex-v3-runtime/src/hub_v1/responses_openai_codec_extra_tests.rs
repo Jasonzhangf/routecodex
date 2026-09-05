@@ -380,8 +380,12 @@ fn responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext(
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0]["role"], json!("user"));
     let content = msgs[0]["content"].to_string();
-    assert!(content.contains("Message Type: MESSAGE"),
-            "input_text part must be preserved: {content}");
-    assert!(!content.contains("rsn_FERNET_CIPHERTEXT_PAYLOAD"),
-            "Fernet ciphertext must be discarded before provider wire: {content}");
+    assert!(
+        content.contains("Message Type: MESSAGE"),
+        "input_text part must be preserved: {content}"
+    );
+    assert!(
+        !content.contains("rsn_FERNET_CIPHERTEXT_PAYLOAD"),
+        "Fernet ciphertext must be discarded before provider wire: {content}"
+    );
 }

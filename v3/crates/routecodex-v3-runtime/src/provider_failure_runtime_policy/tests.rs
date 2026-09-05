@@ -313,7 +313,7 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
     for now_ms in 105..155 {
         health
             .store
-            .record_provider_success("first", "key1", "gpt-test", now_ms)
+            .record_provider_key_success("first", "key1", "gpt-test", now_ms)
             .expect("stable backup success");
     }
     let permit = health
@@ -1254,12 +1254,12 @@ message_mode = "code_only"
         .terminal_projection
         .expect("default-floor exhausted 429 must be terminal");
     assert_eq!(
-        projection.status, 429,
-        "recoverable provider HTTP 429 must preserve its external status"
+        projection.status, 502,
+        "terminal pool exhaustion must use the declared public network error"
     );
     assert_eq!(
-        projection.body["error"]["code"], "E_PATH_RATE_LIMIT",
-        "project step public_code must override the projected client code"
+        projection.body["error"]["code"], "network_error",
+        "project step public_code must not override terminal pool exhaustion"
     );
 }
 

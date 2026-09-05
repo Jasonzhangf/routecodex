@@ -89,14 +89,26 @@ pub(super) async fn execute_responses_direct_server_outcome(
             );
         }
     };
-    let provider_failure_session_scope = get_failure_session_scope(
-        &state.server,
-        request_headers,
-        &payload,
-        "responses",
-        &request_id,
-    )
-    .expect("responses continuation requires session-id for failure scope");
+    let provider_failure_session_scope =
+        match get_failure_session_scope(&state.server, request_headers, &request_id) {
+            Ok(scope) => scope,
+            Err(message) => {
+                let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                    project_v3_server_runtime_failure(
+                        "V3Server03HttpRequestRaw",
+                        "provider_transport_handoff_scope_incomplete",
+                        message,
+                        598,
+                    ),
+                );
+                return V3ResponsesDirectServerOutcome::DirectFrame(
+                    project_v3_responses_direct_stream_error_frame_if_requested(
+                        frame,
+                        requested_stream,
+                    ),
+                );
+            }
+        };
     let pipeline_id = match pipeline_id {
         Some(pipeline_id) if !pipeline_id.trim().is_empty() => pipeline_id,
         _ => {

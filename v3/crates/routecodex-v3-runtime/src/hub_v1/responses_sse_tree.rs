@@ -599,7 +599,14 @@ impl V3ResponsesJsonDocument {
         let extensions = event_extensions(
             object,
             &[
-                "object", "id", "status", "model", "instructions", "usage", "error", "output",
+                "object",
+                "id",
+                "status",
+                "model",
+                "instructions",
+                "usage",
+                "error",
+                "output",
             ],
         );
         Ok(Self {

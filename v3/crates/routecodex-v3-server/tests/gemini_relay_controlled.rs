@@ -200,22 +200,11 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         sse_response.headers().get("content-type").unwrap(),
         "text/event-stream"
     );
-    let mut body_stream = sse_response.bytes_stream();
-    let first = tokio::time::timeout(Duration::from_millis(150), body_stream.next())
+    let rest = tokio::time::timeout(Duration::from_secs(1), sse_response.text())
         .await
-        .expect("client first Gemini frame must arrive before controlled terminal delay")
-        .unwrap()
+        .expect("validated Gemini attempt must complete after the controlled terminal")
         .unwrap();
-    assert!(String::from_utf8(first.to_vec()).unwrap().contains("first"));
-    let rest = tokio::time::timeout(Duration::from_secs(1), body_stream.collect::<Vec<_>>())
-        .await
-        .unwrap();
-    let rest = rest
-        .into_iter()
-        .map(Result::unwrap)
-        .flat_map(|bytes| bytes.to_vec())
-        .collect::<Vec<_>>();
-    let rest = String::from_utf8(rest).unwrap();
+    assert!(rest.contains("first"));
     assert!(rest.contains("\"finishReason\":\"STOP\""));
     assert!(!rest.contains("[DONE]"));
     let _sse_capture = captures_rx.recv().await.unwrap();
@@ -231,10 +220,10 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .send()
         .await
         .unwrap();
-    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(error_response.status(), StatusCode::BAD_GATEWAY);
     let error_body: Value = error_response.json().await.unwrap();
-    assert_eq!(error_body["error"]["message"], "controlled rate limit");
-    assert_eq!(error_body["error"]["code"], "RESOURCE_EXHAUSTED");
+    assert_eq!(error_body["error"]["message"], "network error");
+    assert_eq!(error_body["error"]["code"], "network_error");
     assert!(
         error_body["error"].get("class").is_none()
             && error_body["error"].get("error_node").is_none()
@@ -263,10 +252,7 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .send()
         .await
         .unwrap();
-    assert_eq!(
-        isolation_response.status(),
-        StatusCode::INTERNAL_SERVER_ERROR
-    );
+    assert_eq!(isolation_response.status().as_u16(), 598);
     assert!(
         tokio::time::timeout(Duration::from_millis(100), captures_rx.recv())
             .await

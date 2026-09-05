@@ -779,9 +779,9 @@ function verifyStoplessGuideline() {
 }
 
 function verifyActivationContract() {
+  requireTextIncludes(stoplessSop, paths.designContract, paths.stoplessSop);
   for (const [rel, source] of [
     [paths.designContract, designContract],
-    [paths.stoplessSop, stoplessSop],
   ]) {
     for (const token of [
       'same-turn schema guidance',

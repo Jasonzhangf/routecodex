@@ -66,7 +66,7 @@ const fixtures = [
   {
     name: 'Responses Relay SSE observer removed',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs',
-    marker: 'fn observe_v3_runtime_responses_sse_transport_chunk(',
+    marker: 'fn observe_v3_runtime_responses_sse_transport_chunk_typed(',
     mutation: 'fn observe_v3_runtime_responses_sse_transport_chunk_removed(',
     diagnostic: /missing fn observe_v3_runtime_responses_sse_transport_chunk/,
   },

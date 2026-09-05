@@ -199,15 +199,15 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
     );
 
     assert_eq!(
-        output.status, 429,
-        "Error06 terminal exhaustion projection preserves the upstream provider status"
+        output.status, 502,
+        "Error06 terminal exhaustion uses the declared public network error"
     );
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => panic!("provider error must project as JSON"),
     };
-    assert_eq!(body["error"]["code"], "rate_limit_error");
-    assert_eq!(body["error"]["message"], "rate_limit_error");
+    assert_eq!(body["error"]["code"], "network_error");
+    assert_eq!(body["error"]["message"], "network error");
     assert!(
         body["error"].get("stage").is_none()
             && body["error"].get("class").is_none()

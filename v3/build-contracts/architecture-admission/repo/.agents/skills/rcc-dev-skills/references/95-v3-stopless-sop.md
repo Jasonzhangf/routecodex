@@ -15,6 +15,8 @@ Current CLI source registers `servertool run` and requires `--input-json`; it do
 
 ## Owner Lookup
 
+Read `docs/design/v3-stopless-schema-guidance-activation-contract.md` for the activation and schema-evidence contract before tracing Stopless state.
+
 ```bash
 rg -n 'stopless|reasoningStop|servertool' \
   docs/architecture/v3-resource-operation-map.yml \

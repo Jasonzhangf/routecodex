@@ -65,7 +65,10 @@ async fn missing_exact_pin_is_provider_availability_error05_without_router_reent
             port: None,
             pipeline_id: None,
             server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope("test"),
+            failure_session_scope: test_failure_session_scope_for(
+                "missing_exact_pin",
+                "request-control-session",
+            ),
             request_id: "req-missing-exact-pin".to_string(),
             execution_id: "exec-missing-exact-pin".to_string(),
             method: "POST".to_string(),
@@ -96,7 +99,8 @@ async fn missing_exact_pin_is_provider_availability_error05_without_router_reent
     );
     match output.client_payload.body {
         V3ClientBody::Json(value) => {
-            assert_eq!(value["error"]["code"], "continuation_exact_pin_unavailable");
+            assert_eq!(value["error"]["code"], "network_error");
+            assert_eq!(value["error"]["message"], "network error");
             assert!(
                 value.pointer("/error/external_error").is_none()
                     && value.pointer("/error/class").is_none()

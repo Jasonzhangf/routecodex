@@ -31,6 +31,7 @@ const copied = [
   "v3/crates/routecodex-v3-runtime/src/nodes.rs",
   "v3/crates/routecodex-v3-runtime/src/shared.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs",
+  "v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs",
@@ -138,12 +139,12 @@ const cases = [
     path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
     mutate: (source) => source
       .replace(
-        "                            if let Err(error) = state.runtime_timing.finish_external_if_active() {",
-        "                            if let Err(error) = state.runtime_timing.finish_external_if_active_removed() {",
+        "state.runtime_timing.finish_external_if_active()",
+        "state.runtime_timing.finish_external_if_active_removed()",
       )
       .replace(
-        "                            if let Err(error) = state.runtime_timing.finish_external_if_active() {",
-        "                            if let Err(error) = state.runtime_timing.finish_external_if_active_removed() {",
+        "state.runtime_timing.finish_external_if_active()",
+        "state.runtime_timing.finish_external_if_active_removed()",
       ),
     diagnostic: /external timing must close only after decoder clean EOF/u,
   },
@@ -169,7 +170,7 @@ const cases = [
   },
   {
     name: "Direct SSE provider failure restores invented error fields",
-    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs",
+    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs",
     mutate: (source) =>
       source.replace(
         '.ok_or_else(|| format!("{event_type} requires a non-empty error code"))?;',
@@ -179,7 +180,7 @@ const cases = [
   },
   {
     name: "Direct SSE provider failure restores alternate top-level envelope",
-    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs",
+    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs",
     mutate: (source) =>
       source.replace(
         '.pointer("/response/error")',

@@ -153,31 +153,6 @@ fn blank_snap_stages_is_rejected_before_snapshot_authorization() {
 }
 
 #[test]
-fn cli_defaults_to_home_rcc_config_v3_toml() {
-    let source = write_config();
-    let home = source.parent().unwrap().join("home");
-    let default_config = home.join(".rcc").join("config.v3.toml");
-    fs::create_dir_all(default_config.parent().unwrap()).unwrap();
-    fs::copy(&source, &default_config).unwrap();
-
-    let check = Command::new(env!("CARGO_BIN_EXE_rccv3"))
-        .env("HOME", &home)
-        .args(["config", "check"])
-        .output()
-        .unwrap();
-
-    assert!(
-        check.status.success(),
-        "{}",
-        String::from_utf8_lossy(&check.stderr)
-    );
-    assert!(String::from_utf8(check.stdout)
-        .unwrap()
-        .contains("servers=2"));
-    fs::remove_dir_all(source.parent().unwrap()).unwrap();
-}
-
-#[test]
 fn cli_without_explicit_config_or_home_fails_fast() {
     let check = Command::new(env!("CARGO_BIN_EXE_rccv3"))
         .env_remove("HOME")
@@ -188,7 +163,7 @@ fn cli_without_explicit_config_or_home_fails_fast() {
     assert!(!check.status.success());
     assert!(String::from_utf8(check.stderr)
         .unwrap()
-        .contains("HOME is required to resolve config.v3.toml"));
+        .contains("HOME is required to resolve config.toml"));
 }
 
 #[test]

@@ -29,7 +29,8 @@ const wikiPath = 'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md';
 const packagePath = 'package.json';
 const workflowPath = '.github/workflows/test.yml';
 
-const runtime = readFileSync(runtimePath, 'utf8');
+const runtime = readFileSync(runtimePath, 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs', 'utf8');
 const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs', 'utf8')
@@ -243,12 +244,12 @@ for (const phrase of [
   'V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame',
 ]) requireText(responsesRuntime, responsesRuntimePath, phrase);
 for (const phrase of [
-  'fn observe_v3_runtime_responses_sse_transport_chunk(',
-  'fn apply_responses_stream_protocol_events_to_terminal_response(',
+  'fn observe_v3_runtime_responses_sse_transport_chunk_typed(',
+  'fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(',
 ]) requireText(responsesProviderEventCodec, responsesProviderEventCodecPath, phrase);
 for (const phrase of [
   'build_v3_hub_resp_inbound_02_from_responses_provider_stream_events',
-  'observe_v3_runtime_responses_sse_transport_chunk(',
+  'observe_v3_runtime_responses_sse_transport_chunk_typed(',
 ]) {
   requireText(
     responsesProviderStreamMaterialization,
@@ -373,7 +374,7 @@ requireText(
 for (const phrase of [
   'pub(crate) async fn run_v3_relay_provider_failure_policy(',
   'pub(crate) fn resolve_v3_relay_target',
-  'struct V3RelayExcludedAvailability',
+  'struct V3SessionGlobalSchedulingReader',
   'pub struct V3ProviderFailureRuntimeHealth',
   'V3RelayProviderFailurePolicyResult',
   'build_v3_relay_provider_error_05_decision',
@@ -401,8 +402,9 @@ for (const phrase of [
   'project_v3_responses_relay_runtime_failure',
   'is_provider_request_dry_run(&request_headers)',
   'execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control',
-  'wrap_v3_relay_sse_console_stream',
-  'V3SseConsoleCloseoutStream',
+  'wrap_v3_committed_relay_sse_console_stream',
+  'V3CommittedSseTerminal::Completed => finalizer.complete_relay_sse()',
+  'V3CommittedSseTerminal::Dropped => finalizer.client_disconnected()',
 ]) requireText(server, serverPath, phrase);
 const relayServerFinalizerBody = functionBody(
   server,

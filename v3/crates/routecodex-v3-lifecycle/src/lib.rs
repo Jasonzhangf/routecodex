@@ -684,8 +684,10 @@ impl V3ManagedLifecycle {
                                     .to_string(),
                             ));
                         }
-                        if matches!(status.state, V3ManagedRunState::Stopped | V3ManagedRunState::Failed)
-                            && listener_set_is_available(&declaration.listeners)
+                        if matches!(
+                            status.state,
+                            V3ManagedRunState::Stopped | V3ManagedRunState::Failed
+                        ) && listener_set_is_available(&declaration.listeners)
                         {
                             validate_auth_handles(&manifest)?;
                             reap_inactive_runtime_files(&instance_dir, &declaration)?;
@@ -1178,18 +1180,6 @@ impl V3ManagedLifecycle {
             detail: None,
         })
     }
-}
-
-fn listener_sets_overlap(
-    left: &[V3ManagedListenerDeclaration],
-    right: &[V3ManagedListenerDeclaration],
-) -> bool {
-    let right_ports = right
-        .iter()
-        .map(|listener| listener.port)
-        .collect::<BTreeSet<_>>();
-    left.iter()
-        .any(|listener| right_ports.contains(&listener.port))
 }
 
 fn control_restart_plan(

@@ -243,8 +243,8 @@ async fn direct_sse_completed_without_summary_passes_through_without_synthetic_s
         .await
         .expect("Direct SSE must remain valid while streaming");
     assert!(first_body.contains("response.completed"), "{first_body}");
-    assert!(first_body.contains("response.done"), "{first_body}");
-    assert!(first_body.contains("data: [DONE]"), "{first_body}");
+    assert!(!first_body.contains("response.done"), "{first_body}");
+    assert!(!first_body.contains("data: [DONE]"), "{first_body}");
     assert!(
         first_body.contains("\"status\":\"completed\""),
         "{first_body}"
@@ -654,11 +654,11 @@ async fn direct_sse_stopless_metadata_center_projects_terminal_frames_without_ss
         .await
         .expect("Direct SSE must remain valid while streaming");
     assert!(first_body.contains("response.completed"), "{first_body}");
-    assert!(first_body.contains("response.done"), "{first_body}");
+    assert!(!first_body.contains("response.done"), "{first_body}");
     assert!(first_body.contains("partial direct SSE answer without summary"));
     assert!(!first_body.contains("call_stopless_reasoning"));
     assert!(!first_body.contains("routecodex hook run reasoningStop"));
-    assert!(first_body.contains("data: [DONE]"));
+    assert!(!first_body.contains("data: [DONE]"));
     assert_eq!(state.len().unwrap(), 0);
     assert_eq!(stopless.len().unwrap(), 1);
 
@@ -1572,15 +1572,15 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
     assert_eq!(count(&first.node_trace, "V3Router07OpaqueTargetHitOnce"), 1);
     assert_eq!(
         state.len().unwrap(),
-        0,
-        "an incremental client broker must not commit continuation before terminal provider SSE"
+        1,
+        "a committed attempt must save continuation after provider terminal and before client replay"
     );
     let first_body = collect_sse_body_text(first.client_payload.body)
         .await
         .expect("first Direct SSE must remain valid while streaming");
     assert!(first_body.contains("resp_sse_1"));
     assert!(first_body.contains("call_sse_1"));
-    assert!(first_body.contains("[DONE]"));
+    assert!(first_body.contains("response.completed"));
     assert_eq!(state.len().unwrap(), 1);
 
     let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
@@ -1611,12 +1611,16 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
         .node_trace
         .contains(&"V3HubReqContinuation03Classified"));
     assert!(second.node_trace.contains(&"V3HubReqTarget06Resolved"));
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(
+        state.len().unwrap(),
+        0,
+        "validated terminal releases the locator before replay"
+    );
     let second_body = collect_sse_body_text(second.client_payload.body)
         .await
         .expect("Direct SSE continuation must remain valid while streaming");
     assert!(second_body.contains("resp_sse_2"));
-    assert!(second_body.contains("[DONE]"));
+    assert!(second_body.contains("response.completed"));
     assert_eq!(state.len().unwrap(), 0);
 
     let requests = transport.requests.lock().unwrap();
@@ -1784,12 +1788,15 @@ async fn direct_provider_failed_terminal_enters_error_chain_before_client_stream
         panic!("provider terminal failed event must project JSON Error06 before client SSE starts")
     };
     assert_eq!(output.client_payload.status, 502);
-    assert_eq!(body, &json!({
-        "error": {
-            "code": "network_error",
-            "message": "network error"
-        }
-    }));
+    assert_eq!(
+        body,
+        &json!({
+            "error": {
+                "code": "network_error",
+                "message": "network error"
+            }
+        })
+    );
     assert!(output.stream_observation.is_none());
     assert_eq!(state.len().unwrap(), 0);
 }
@@ -1924,15 +1931,15 @@ async fn http_only_sse_function_call_uses_v2_direct_http_continuation_without_re
     assert_eq!(first.client_payload.status, 200);
     assert_eq!(
         state.len().unwrap(),
-        0,
-        "an incremental client broker must not commit continuation before terminal provider SSE"
+        1,
+        "a committed attempt must save continuation after provider terminal and before client replay"
     );
     let first_body = collect_sse_body_text(first.client_payload.body)
         .await
         .expect("first Direct SSE must remain valid while streaming");
     assert!(first_body.contains("resp_http_sse_pending"));
     assert!(first_body.contains("call_http_sse_pending"));
-    assert!(first_body.contains("[DONE]"));
+    assert!(first_body.contains("response.completed"));
     assert_eq!(state.len().unwrap(), 1);
 
     let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
@@ -2531,10 +2538,19 @@ async fn pinned_failed_sse_attempt_terminates_without_front_leak_or_reroute() {
         !body_text.contains("partial"),
         "the failed pinned attempt must not expose partial control state: {body_text}"
     );
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(
+        state.len().unwrap(),
+        0,
+        "terminal failure must release its pinned locator"
+    );
     let requests = transport.requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests.len(),
+        3,
+        "Error05 retries the uncommitted attempt on the exact pin"
+    );
     assert_eq!(requests[1]["previous_response_id"], "resp_pinned_attempt");
+    assert_eq!(requests[2]["previous_response_id"], "resp_pinned_attempt");
 }
 
 #[tokio::test]

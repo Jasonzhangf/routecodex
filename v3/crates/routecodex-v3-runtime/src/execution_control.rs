@@ -39,10 +39,7 @@ pub(crate) struct V3SseAttemptFrame {
 
 impl V3SseAttemptFrame {
     pub(crate) fn new(bytes: Vec<u8>, disposition: V3SseFrameDisposition) -> Self {
-        Self {
-            bytes,
-            disposition,
-        }
+        Self { bytes, disposition }
     }
 }
 

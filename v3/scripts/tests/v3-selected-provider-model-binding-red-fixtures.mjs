@@ -65,10 +65,14 @@ const cases = [
   {
     name: 'build stops running model-binding gate',
     path: 'package.json',
-    mutate: (source) => source.replace(
-      '"build:v3-cli": "npm run verify:v3-architecture-ci && npm run verify:v3-debug-payload-budget && npm run verify:v3-selected-provider-model-binding',
-      '"build:v3-cli": "npm run verify:v3-architecture-ci && npm run verify:v3-debug-payload-budget',
-    ),
+    mutate: (source) => {
+      const packageJson = JSON.parse(source);
+      const command = packageJson.scripts['build:v3-cli'];
+      const mutated = command.replace(' && npm run verify:v3-selected-provider-model-binding', '');
+      if (mutated === command) return source;
+      packageJson.scripts['build:v3-cli'] = mutated;
+      return `${JSON.stringify(packageJson, null, 2)}\n`;
+    },
     diagnostic: /build:v3-cli must run npm run verify:v3-selected-provider-model-binding/u,
   },
 ];

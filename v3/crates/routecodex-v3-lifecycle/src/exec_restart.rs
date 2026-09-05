@@ -1,5 +1,17 @@
 use super::*;
 
+fn listener_sets_overlap(
+    left: &[V3ManagedListenerDeclaration],
+    right: &[V3ManagedListenerDeclaration],
+) -> bool {
+    let right_ports = right
+        .iter()
+        .map(|listener| listener.port)
+        .collect::<BTreeSet<_>>();
+    left.iter()
+        .any(|listener| right_ports.contains(&listener.port))
+}
+
 pub(crate) fn instance_has_control_truth(instance_dir: &Path) -> bool {
     instance_dir.join("instance.json").exists()
         && instance_dir.join("pid.cache").exists()

@@ -23,8 +23,14 @@ fn req04_tool_thinking_does_not_inject_model_guidance_into_payload() {
         .expect("enabled tool-thinking must inject");
     let guidance = payload["tools"][0]["description"].as_str().unwrap();
     assert_eq!(guidance, "run command");
-    assert!(!payload["instructions"].as_str().unwrap().contains("工具调用协议"));
-    assert!(!payload["instructions"].as_str().unwrap().contains("RouteCodex"));
+    assert!(!payload["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("工具调用协议"));
+    assert!(!payload["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("RouteCodex"));
     assert!(!guidance.contains("model_id"));
     assert_eq!(payload["tools"][1]["description"], "internal");
 }
@@ -52,9 +58,7 @@ fn req04_tool_thinking_keeps_apply_patch_raw_and_outside_reason_contract() {
     assert_eq!(apply_patch["type"], "custom");
     assert_eq!(apply_patch["name"], "apply_patch");
     assert!(!apply_patch.to_string().contains("\"reason\""));
-    assert!(!apply_patch
-        .to_string()
-        .contains("工具调用协议"));
+    assert!(!apply_patch.to_string().contains("工具调用协议"));
 
     let pwd = &payload["tools"][1];
     assert_eq!(pwd["description"], "Show the current directory");
@@ -310,7 +314,10 @@ fn req04_tool_thinking_injects_every_present_native_schema_shape() {
             .is_some_and(|required| required
                 .iter()
                 .any(|value| value.as_str() == Some("goal_alignment_confidence"))));
-        assert!(!schema["properties"].as_object().unwrap().contains_key("model_id"));
+        assert!(!schema["properties"]
+            .as_object()
+            .unwrap()
+            .contains_key("model_id"));
         assert!(!schema["required"]
             .as_array()
             .is_some_and(|required| required
@@ -351,7 +358,9 @@ fn req04_tool_thinking_recurses_into_namespace_tools_before_provider_flattening(
             .any(|value| value == "goal_alignment_confidence")));
     assert!(schema["required"]
         .as_array()
-        .is_some_and(|required| required.iter().any(|value| value == "goal_alignment_confidence")));
+        .is_some_and(|required| required
+            .iter()
+            .any(|value| value == "goal_alignment_confidence")));
 }
 
 #[test]
@@ -384,7 +393,9 @@ fn req04_tool_thinking_custom_tool_compiles_provider_wrapper() {
             .any(|value| value == "goal_alignment_confidence")));
     assert!(parameters["required"]
         .as_array()
-        .is_some_and(|required| required.iter().any(|value| value == "goal_alignment_confidence")));
+        .is_some_and(|required| required
+            .iter()
+            .any(|value| value == "goal_alignment_confidence")));
 }
 
 #[test]
@@ -584,7 +595,10 @@ fn resp03_stopless_reasoning_stop_merges_markdown_into_existing_message_text() {
         projected["output"][0]["content"][0]["text"],
         format!("前置结论\n\n{markdown}")
     );
-    assert_eq!(projected["output"][0]["content"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        projected["output"][0]["content"].as_array().unwrap().len(),
+        1
+    );
 }
 
 #[test]

@@ -555,7 +555,8 @@ impl V3ProviderFailureRuntimeHealth {
         );
         let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified);
-        let request_local_provider_error = status == 400 || error_type == Some("invalid_request_error");
+        let request_local_provider_error =
+            status == 400 || error_type == Some("invalid_request_error");
         if !request_local_provider_error {
             self.record_provider_key_failure_action(
                 provider_id,
@@ -821,7 +822,6 @@ impl V3ProviderFailureRuntimeHealth {
         }
     }
 }
-
 
 impl From<V3ProviderHealthStore> for V3ProviderFailureRuntimeHealth {
     fn from(store: V3ProviderHealthStore) -> Self {

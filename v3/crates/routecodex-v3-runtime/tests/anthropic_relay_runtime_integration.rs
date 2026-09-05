@@ -362,8 +362,8 @@ async fn anthropic_responses_field_parity_request_matrix() {
         json!({"type":"function","name":"lookup"})
     );
     assert_eq!(body["reasoning"]["effort"], "medium");
-    assert_eq!(body["client_metadata"], json!({"user_id":"opaque-user"}));
-    assert!(body.get("metadata").is_none(), "{body}");
+    assert_eq!(body["metadata"], json!({"user_id":"opaque-user"}));
+    assert!(body.get("client_metadata").is_none(), "{body}");
     assert_eq!(body["temperature"], 0.2);
     assert_eq!(body["top_p"], 0.9);
     assert_eq!(body["top_k"], 5);
@@ -650,10 +650,7 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     .await
     .unwrap();
     assert_eq!(output.status, 502);
-    assert_eq!(
-        output.client_response["error"]["message"],
-        "network error"
-    );
+    assert_eq!(output.client_response["error"]["message"], "network error");
     assert_eq!(output.client_response["error"]["code"], "network_error");
     assert!(
         output.client_response["error"].get("stage").is_none()
@@ -706,6 +703,14 @@ async fn sse_projection_accepts_live_data_only_text_delta_frames() {
 
 "#
         .to_vec()),
+        Ok(br#"data: {"type":"response.content_part.done","item_id":"msg_live","output_index":0,"content_index":0,"part":{"type":"output_text","text":"V3_COMPAT_ANTHROPIC_SSE_OK"}}
+
+"#
+        .to_vec()),
+        Ok(br#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_live","role":"assistant","content":[{"type":"output_text","text":"V3_COMPAT_ANTHROPIC_SSE_OK"}]}}
+
+"#
+        .to_vec()),
         Ok(br#"data: {"type":"response.completed","response":{"id":"resp_live_sse","status":"completed"}}
 
 "#
@@ -717,9 +722,12 @@ async fn sse_projection_accepts_live_data_only_text_delta_frames() {
             .await
             .unwrap();
     assert_eq!(canonical_response["output"][0]["type"], "message");
-    assert_eq!(canonical_response["output"][1]["type"], "output_text");
     assert_eq!(
-        canonical_response["output"][1]["text"],
+        canonical_response["output"][0]["content"][0]["type"],
+        "output_text"
+    );
+    assert_eq!(
+        canonical_response["output"][0]["content"][0]["text"],
         "V3_COMPAT_ANTHROPIC_SSE_OK"
     );
     let client_events = project_v3_responses_json_as_anthropic_events(&canonical_response).unwrap();
@@ -735,10 +743,11 @@ async fn sse_projection_accepts_live_data_only_text_delta_frames() {
 #[tokio::test]
 async fn structured_sse_contract_preserves_reasoning_tool_and_terminal_order() {
     let stream = futures_util::stream::iter([
+        Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[]}}\n\n".to_vec()),
         Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"Need\"}\n\n".to_vec()),
         Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\" beta\"}\n\n".to_vec()),
-        Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_sse_1\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n".to_vec()),
-        Ok(b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\\\"q\\\":\\\"beta\\\"}\"}\n\n".to_vec()),
+        Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_sse_1\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n".to_vec()),
+        Ok(b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":1,\"item_id\":\"fc_1\",\"delta\":\"{\\\"q\\\":\\\"beta\\\"}\"}\n\n".to_vec()),
         Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse_1\",\"status\":\"completed\"}}\n\n".to_vec()),
     ]);
     let canonical_response =
@@ -933,14 +942,8 @@ async fn responses_sse_without_terminal_fails_before_anthropic_success_projectio
     .expect("provider codec failure must project through the standard error chain");
 
     assert_eq!(output.status, 502);
-    assert!(
-        output
-            .client_response
-            .to_string()
-            .contains("before response.completed"),
-        "incomplete provider stream must not be wrapped as Anthropic success: {}",
-        output.client_response
-    );
+    assert_eq!(output.client_response["error"]["code"], "network_error");
+    assert_eq!(output.client_response["error"]["message"], "network error");
     assert_eq!(
         output.error_chain.as_deref(),
         Some(
@@ -1031,14 +1034,14 @@ capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reaso
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
 targets = [
-  { kind = "provider_model", provider = "primary", model = "responses-wire-model", key = "primary", priority = 1 },
-  { kind = "provider_model", provider = "secondary", model = "responses-wire-model", key = "secondary", priority = 2 }
+  { kind = "provider_model", provider = "primary", model = "responses-wire-model", key = "primary", priority = 2 },
+  { kind = "provider_model", provider = "secondary", model = "responses-wire-model", key = "secondary", priority = 1 }
 ]
 [route_groups.__SCOPE__.pools.default]
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "primary", model = "responses-wire-model", key = "primary", priority = 1 },
-  { kind = "provider_model", provider = "secondary", model = "responses-wire-model", key = "secondary", priority = 2 }
+  { kind = "provider_model", provider = "primary", model = "responses-wire-model", key = "primary", priority = 2 },
+  { kind = "provider_model", provider = "secondary", model = "responses-wire-model", key = "secondary", priority = 1 }
 ]
 "#
             .replace("__SCOPE__", scope),

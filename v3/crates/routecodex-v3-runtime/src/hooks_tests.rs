@@ -235,7 +235,7 @@ fn direct_request_key_catalog_effect_reaches_responses_provider_wire_body() {
 }
 
 #[test]
-fn direct_responses_projection_applies_selected_target_image_session_compat() {
+fn direct_responses_projection_preserves_current_image_for_selected_target() {
     let mut policy = direct_policy_with_models(
         "client-route-alias",
         "canonical-provider-model",
@@ -251,10 +251,7 @@ fn direct_responses_projection_applies_selected_target_image_session_compat() {
     let catalog = default_v3_direct_request_key_hook_catalog();
     let wire = responses_direct_request_projection_hook_with_key_catalog(&policy, &catalog)
         .expect("Direct request projection must use the selected target compat owner");
-    assert_eq!(
-        wire.body()["input"][0],
-        json!({"type": "input_text", "text": "[Image]"})
-    );
+    assert_eq!(wire.body()["input"][0], policy.request_body["input"][0]);
 }
 
 #[test]

@@ -385,8 +385,8 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         V3GeminiRelayClientBody::Json(value) => value,
         V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON error body"),
     };
-    assert_eq!(client_response["error"]["message"], "RESOURCE_EXHAUSTED");
-    assert_eq!(client_response["error"]["code"], "RESOURCE_EXHAUSTED");
+    assert_eq!(client_response["error"]["message"], "network error");
+    assert_eq!(client_response["error"]["code"], "network_error");
     assert_eq!(
         output
             .node_trace
@@ -440,10 +440,7 @@ async fn malformed_provider_error_body_projects_explicit_error_not_fallback() {
         V3GeminiRelayClientBody::Json(value) => value,
         V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON error body"),
     };
-    assert_eq!(
-        client_response["error"]["code"],
-        "provider_error_body_malformed"
-    );
+    assert_eq!(client_response["error"]["code"], "network_error");
     assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
 }
 
@@ -781,9 +778,13 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
         assert_eq!(status, 502, "{label}: {client_response}");
         assert_eq!(error_chain.len(), 6, "{label}: {error_chain:?}");
         assert_eq!(node_trace.last(), Some(&"V3Error06ClientProjected"));
-        assert!(
-            client_response.to_string().contains(expected),
-            "{label}: expected Error06 containing {expected}, got {client_response}"
+        assert_eq!(
+            client_response["error"]["code"], "network_error",
+            "{label}: {expected}"
+        );
+        assert_eq!(
+            client_response["error"]["message"], "network error",
+            "{label}: {expected}"
         );
     }
 }
@@ -1308,7 +1309,7 @@ async fn response_side_channel_is_rejected_for_json_and_sse_before_client_succes
         V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON error body"),
     };
     assert!(
-        json_client_response.to_string().contains("provider_error")
+        json_client_response["error"]["code"] == "network_error"
             && !json_client_response.to_string().contains("metadata_center")
             && !json_client_response.to_string().contains("hidden"),
         "side-channel-contaminated provider response must not be projected as client success"
@@ -1323,7 +1324,7 @@ async fn response_side_channel_is_rejected_for_json_and_sse_before_client_succes
     assert_eq!(error_chain.len(), 6);
     assert_eq!(node_trace.last(), Some(&"V3Error06ClientProjected"));
     assert!(
-        sse_client_response.to_string().contains("provider_error")
+        sse_client_response["error"]["code"] == "network_error"
             && !sse_client_response.to_string().contains("metadata_center")
             && !sse_client_response.to_string().contains("hidden"),
         "SSE side-channel payload must not be projected as a client success"
@@ -1561,15 +1562,15 @@ capabilities = ["text", "tools"]
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, entry_protocol = "gemini", models = ["gemini-client"] }}
 targets = [
-  {{ kind = "provider_model", provider = "primary", model = "gemini-wire", key = "primary", priority = 1 }},
-  {{ kind = "provider_model", provider = "secondary", model = "gemini-wire", key = "secondary", priority = 2 }}
+  {{ kind = "provider_model", provider = "primary", model = "gemini-wire", key = "primary", priority = 2 }},
+  {{ kind = "provider_model", provider = "secondary", model = "gemini-wire", key = "secondary", priority = 1 }}
 ]
 
 [route_groups.{scope}.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [
-  {{ kind = "provider_model", provider = "primary", model = "gemini-wire", key = "primary", priority = 1 }},
-  {{ kind = "provider_model", provider = "secondary", model = "gemini-wire", key = "secondary", priority = 2 }}
+  {{ kind = "provider_model", provider = "primary", model = "gemini-wire", key = "primary", priority = 2 }},
+  {{ kind = "provider_model", provider = "secondary", model = "gemini-wire", key = "secondary", priority = 1 }}
 ]
 "#,
         hub_v1_declaration = hub_v1_test_declaration(),

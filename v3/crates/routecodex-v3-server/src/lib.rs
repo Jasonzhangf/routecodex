@@ -114,8 +114,8 @@ use routecodex_v3_runtime::{
     V3FoundationRuntimeOutput, V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput,
     V3GeminiRelayRuntimeOutput, V3HubExecutionMode, V3OpenAiChatClientStream,
     V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput,
-    V3OpenAiChatRelayRuntimeOutput, V3RelayProviderSnapshots, V3Resp15ClientPayload,
-    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3OpenAiChatRelayRuntimeOutput, V3RelayProviderSnapshots, V3RequestExecutionControl,
+    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayDryRunOutcome, V3ResponsesRelayLocalContinuationScope,
@@ -125,8 +125,7 @@ use routecodex_v3_runtime::{
     V3ResponsesRelayStoplessControlState, V3RuntimeObservability,
     V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
-    V3RequestExecutionControl, V3RuntimeStreamObservation, V3RuntimeTimingSummary,
-    V3RuntimeUsageSummary,
+    V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -655,9 +654,8 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         )
         .route(
             "/_routecodex/health/cooldown-pool",
-            get(webui_observability_endpoints::cooldown_pool).post(
-                webui_observability_endpoints::remove_cooldown,
-            ),
+            get(webui_observability_endpoints::cooldown_pool)
+                .post(webui_observability_endpoints::remove_cooldown),
         )
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(path_not_found)
@@ -1125,32 +1123,27 @@ fn v3_entry_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool {
 fn build_v3_provider_failure_session_scope_for_request(
     server: &V3ServerManifest,
     headers: &HeaderMap,
-    payload: &Value,
-) -> Option<V3ProviderFailureSessionScope> {
-    provider_failure_session_id_from_request(headers, payload)
-        .ok()
-        .flatten()
-        .and_then(|session_id| {
-            V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, &session_id).ok()
+) -> Result<Option<V3ProviderFailureSessionScope>, String> {
+    let (session_id, _) = responses_control_scope_headers(headers)?;
+    session_id
+        .map(|session_id| {
+            V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, &session_id)
         })
+        .transpose()
 }
 
 /// Get the provider-failure control scope without changing the client request.
 ///
-/// A client session header or registered body session is optional request data.
+/// A client session control header is optional request data.
 /// It is useful when present, but it is not a prerequisite for an ordinary
 /// request. Requests without one use their already allocated internal request
 /// id as a request-local control-scope key.
 fn get_failure_session_scope(
     server: &V3ServerManifest,
     headers: &HeaderMap,
-    payload: &Value,
-    _entry_protocol: &str,
     request_id: &str,
 ) -> Result<V3ProviderFailureSessionScope, String> {
-    if let Some(scope) =
-        build_v3_provider_failure_session_scope_for_request(server, headers, payload)
-    {
+    if let Some(scope) = build_v3_provider_failure_session_scope_for_request(server, headers)? {
         return Ok(scope);
     }
     V3ProviderFailureSessionScope::new(
@@ -1158,34 +1151,6 @@ fn get_failure_session_scope(
         &server.routing_group,
         format!("request-local-{request_id}"),
     )
-}
-
-fn provider_failure_session_id_from_request(
-    headers: &HeaderMap,
-    payload: &Value,
-) -> Result<Option<String>, String> {
-    let header_session_id = responses_control_scope_headers(headers)
-        .map(|(session_id, _conversation_id)| session_id)?;
-    if header_session_id.is_some() {
-        return Ok(header_session_id);
-    }
-    let body_session_id = read_first_scope_value(Some(payload), BODY_SESSION_PATHS);
-    if body_session_id.is_some() {
-        return Ok(body_session_id);
-    }
-    let turn_metadata = payload
-        .get("client_metadata")
-        .and_then(|metadata| metadata.get("x-codex-turn-metadata"))
-        .and_then(Value::as_str)
-        .map(serde_json::from_str::<Value>)
-        .transpose()
-        .map_err(|error| {
-            format!("client_metadata.x-codex-turn-metadata is not valid JSON: {error}")
-        })?;
-    Ok(read_first_scope_value(
-        turn_metadata.as_ref(),
-        TURN_METADATA_SESSION_PATHS,
-    ))
 }
 
 #[cfg(test)]

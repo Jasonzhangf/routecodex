@@ -167,7 +167,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     assert!(sse_body.contains(
         "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\"}}"
     ));
-    assert!(sse_body.contains("data: [DONE]"));
+    assert!(!sse_body.contains("data: [DONE]"), "{sse_body}");
     let sse_capture = next_capture(&mut success.captures, "sse success").await;
     assert_eq!(sse_capture.accept.as_deref(), Some("text/event-stream"));
     assert_eq!(sse_capture.body["model"], "wire-success");
@@ -212,8 +212,8 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         .unwrap();
     assert_eq!(exhausted_response.status(), ReqwestStatusCode::BAD_GATEWAY);
     let exhausted_body: Value = exhausted_response.json().await.unwrap();
-    assert_eq!(exhausted_body["error"]["code"], "provider_http_503");
-    assert_eq!(exhausted_body["error"]["message"], "provider_http_503");
+    assert_eq!(exhausted_body["error"]["code"], "network_error");
+    assert_eq!(exhausted_body["error"]["message"], "network error");
     assert!(exhausted_body["error"].get("internal_code").is_none());
     assert!(
         exhausted_body["error"].get("target_exhausted").is_none()
@@ -571,6 +571,16 @@ auth = {{ type = "api_key", entries = [{{ alias = "failure-a", env = "ROUTECODEX
 wire_name = "wire-failure-a"
 supports_streaming = true
 
+[providers.failure_a_reselect]
+type = "responses"
+base_url = "{failure_a_base}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "failure-a", env = "ROUTECODEX_V3_H2_FAILURE_A_KEY" }}] }}
+
+[providers.failure_a_reselect.models.test]
+wire_name = "wire-failure-a"
+supports_streaming = true
+
 [providers.failure_b]
 type = "responses"
 base_url = "{failure_b_base}"
@@ -594,8 +604,8 @@ model = "test"
 aliases = ["client-test"]
 selection = {{ strategy = "priority" }}
 targets = [
-  {{ kind = "provider_model", provider = "failure_a", model = "test", key = "failure-a", priority = 1 }},
-  {{ kind = "provider_model", provider = "success", model = "test", key = "success", priority = 2 }}
+  {{ kind = "provider_model", provider = "failure_a_reselect", model = "test", key = "failure-a", priority = 2 }},
+  {{ kind = "provider_model", provider = "success", model = "test", key = "success", priority = 1 }}
 ]
 
 [forwarders.h2_exhausted]
@@ -603,8 +613,8 @@ model = "test"
 aliases = ["client-test"]
 selection = {{ strategy = "priority" }}
 targets = [
-  {{ kind = "provider_model", provider = "failure_a", model = "test", key = "failure-a", priority = 1 }},
-  {{ kind = "provider_model", provider = "failure_b", model = "test", key = "failure-b", priority = 2 }}
+  {{ kind = "provider_model", provider = "failure_a", model = "test", key = "failure-a", priority = 2 }},
+  {{ kind = "provider_model", provider = "failure_b", model = "test", key = "failure-b", priority = 1 }}
 ]
 
 [route_groups.h2_success.pools.default]

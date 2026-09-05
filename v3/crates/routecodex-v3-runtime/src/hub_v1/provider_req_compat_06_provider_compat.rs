@@ -1188,10 +1188,12 @@ mod tests {
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("provider compat");
-        assert!(!req_compat.provider_semantic_payload()["tools"][0]["parameters"]["properties"]
-            .as_object()
-            .unwrap()
-            .contains_key("model_id"));
+        assert!(
+            !req_compat.provider_semantic_payload()["tools"][0]["parameters"]["properties"]
+                .as_object()
+                .unwrap()
+                .contains_key("model_id")
+        );
     }
 
     #[test]

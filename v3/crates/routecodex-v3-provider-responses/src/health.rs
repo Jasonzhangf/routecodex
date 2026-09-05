@@ -370,11 +370,7 @@ impl V3ProviderHealthStore {
             if priority <= 0 {
                 continue;
             }
-            let key = provider_cooldown_probe_key(
-                &provider_id,
-                Some(&auth_alias),
-                Some(&model_id),
-            );
+            let key = provider_cooldown_probe_key(&provider_id, Some(&auth_alias), Some(&model_id));
             let history = V3ProviderAdaptiveHistory {
                 configured_priority: priority,
                 score_milli: priority.clamp(0, 150) as u32,
@@ -1050,10 +1046,10 @@ impl V3ProviderHealthStore {
             history.score_generation = history.score_generation.saturating_add(1);
             (history.attempts, history.failures)
         };
-            // Probe retry cadence is a fixed, observable contract: 30s/1m/3m/15m/1h/3h,
-            // looping after the 3h step. Health history still records adaptive
-            // diagnostics, but must not reschedule the ladder.
-            let next_interval = probe_backoff_ms(next_probe_failure_count);
+        // Probe retry cadence is a fixed, observable contract: 30s/1m/3m/15m/1h/3h,
+        // looping after the 3h step. Health history still records adaptive
+        // diagnostics, but must not reschedule the ladder.
+        let next_interval = probe_backoff_ms(next_probe_failure_count);
         let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
             return Ok(());
         };
@@ -1156,16 +1152,6 @@ impl V3ProviderHealthStore {
             state.auth_key_consecutive_failures.remove(&key);
         }
         Ok(key_health_projection(&state, &key, now_ms))
-    }
-
-    pub fn record_provider_success(
-        &self,
-        provider_id: &str,
-        auth_alias: &str,
-        model_id: &str,
-        now_ms: u64,
-    ) -> Result<V3ProviderKeyHealthProjection, String> {
-        self.record_provider_key_success(provider_id, auth_alias, model_id, now_ms)
     }
 
     pub fn complete_probe_success(

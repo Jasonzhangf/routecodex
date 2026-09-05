@@ -24,6 +24,7 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/sse_object_pipeline.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/tests.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
@@ -495,12 +496,12 @@ const cases = [
   },
   {
     name: 'Direct provider outcome accepts response.done as provider semantic terminal',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs',
     mutate: (source) => source.replace(
       'if event_type == "response.completed" {',
       'if matches!(event_type, "response.completed" | "response.done") {',
     ),
-    diagnostic: /provider response\.done must not satisfy the response\.completed terminal contract/u,
+    diagnostic: /missing if event_type == "response\.completed" \{/u,
   },
   {
     name: 'Relay target-resolution source errors are swallowed as exhaustion',

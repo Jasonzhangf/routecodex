@@ -296,10 +296,7 @@ impl V3AnthropicSseReducerState {
         // business content; consume it without inventing a block, then keep
         // strict ordering for every delta that carries content.
         if !self.blocks.contains_key(&index)
-            && event
-                .pointer("/delta/type")
-                .and_then(Value::as_str)
-                == Some("signature_delta")
+            && event.pointer("/delta/type").and_then(Value::as_str) == Some("signature_delta")
         {
             return Ok(());
         }

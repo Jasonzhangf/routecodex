@@ -133,16 +133,14 @@ pub(crate) fn responses_relay_output_response(
             wrap_v3_responses_relay_sse_console_stream(client_stream, stream_console_finalizer),
             successful_sse.then_some(keepalive_interval).flatten(),
         ),
-        (V3ResponsesRelayClientBody::Json(_), Some(frame)) => {
-            match frame.body {
-                V3Server16Body::CommittedSse(stream) => v3_client_sse_body(stream, None),
-                V3Server16Body::Sse(stream) => v3_live_client_sse_body(stream, None),
-                V3Server16Body::Json(value) => Body::from(
-                    serde_json::to_vec(&value).expect("typed V3 Responses Relay error projection"),
-                ),
-                V3Server16Body::Bytes(bytes) => Body::from(bytes),
-            }
-        }
+        (V3ResponsesRelayClientBody::Json(_), Some(frame)) => match frame.body {
+            V3Server16Body::CommittedSse(stream) => v3_client_sse_body(stream, None),
+            V3Server16Body::Sse(stream) => v3_live_client_sse_body(stream, None),
+            V3Server16Body::Json(value) => Body::from(
+                serde_json::to_vec(&value).expect("typed V3 Responses Relay error projection"),
+            ),
+            V3Server16Body::Bytes(bytes) => Body::from(bytes),
+        },
         (V3ResponsesRelayClientBody::Json(client_response), None) => Body::from(
             serde_json::to_vec(&client_response).expect("typed V3 Responses Relay projection"),
         ),

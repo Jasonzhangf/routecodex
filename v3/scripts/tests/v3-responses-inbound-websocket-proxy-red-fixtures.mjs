@@ -56,8 +56,8 @@ const cases = [
   {
     name: 'SSE event accumulation added',
     file: 'v3/crates/routecodex-v3-server/src/websocket.rs',
-    from: 'pub(crate) async fn send_responses_websocket_sse_stream(',
-    to: 'fn forbidden_collect() { let mut events = Vec::new(); events.push(1); }\npub(crate) async fn send_responses_websocket_sse_stream(',
+    from: 'pub(crate) async fn send_responses_websocket_committed_sse_stream(',
+    to: 'fn forbidden_collect() { let mut events = Vec::new(); events.push(1); }\npub(crate) async fn send_responses_websocket_committed_sse_stream(',
     diagnostic: /Vec|events/,
   },
   {
@@ -92,8 +92,8 @@ const cases = [
   {
     name: 'runtime SSE decode error hidden',
     file: 'v3/crates/routecodex-v3-server/src/websocket.rs',
-    from: 'runtime SSE decode failed',
-    to: 'runtime stream closed',
+    from: 'let frames = match decoder.push(build_v3_sse_transport_in_01_raw_chunk(&chunk)) {',
+    to: 'let frames = match decoder.push_without_error_guard(build_v3_sse_transport_in_01_raw_chunk(&chunk)) {',
     diagnostic: /runtime SSE decode failed|runtime SSE decode guards/,
   },
   {

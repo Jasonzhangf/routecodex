@@ -410,8 +410,13 @@ fn assert_provider_chat_stopless_guidance(body: &Value) {
     assert!(exec_description.contains("Execute freeform script"));
     assert_eq!(
         exec_function.get("parameters"),
-        Some(&json!({"type": "object"})),
-        "custom exec grammar degrades to plain object parameters on OpenAI Chat wire: {exec_tool}"
+        Some(&json!({
+            "type": "object",
+            "properties": {"input": {"type": "string", "description": "Raw free-form tool input."}},
+            "required": ["input"],
+            "additionalProperties": false
+        })),
+        "custom exec must preserve raw input through the OpenAI Chat function schema: {exec_tool}"
     );
     let serialized = serde_json::to_string(body).unwrap();
     for forbidden in [
@@ -504,8 +509,13 @@ fn assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
             );
             assert_eq!(
                 function.get("parameters"),
-                Some(&json!({"type": "object"})),
-                "custom grammar format degrades to plain object parameters on OpenAI Chat wire: actual={actual}"
+                Some(&json!({
+                    "type": "object",
+                    "properties": {"input": {"type": "string", "description": "Raw free-form tool input."}},
+                    "required": ["input"],
+                    "additionalProperties": false
+                })),
+                "custom tool must preserve raw input through the OpenAI Chat function schema: actual={actual}"
             );
         }
     }
@@ -1256,8 +1266,7 @@ async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() 
     .expect_err("selected target exhaustion must remain a real runtime error");
     let error_text = second.to_string();
     assert!(
-        error_text.contains("target resolution failed")
-            || error_text.contains("V3TargetExhaustion"),
+        error_text.contains("provider_protocol_unresolved"),
         "unexpected terminal route error: {second}"
     );
     assert!(
@@ -1271,8 +1280,8 @@ async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() 
     );
     assert_eq!(
         stopless_control.len().unwrap(),
-        1,
-        "target selection failed before any stopless no-op submit was consumed, so the existing side-channel state must remain untouched"
+        0,
+        "terminal protocol selection failure must clear the existing Stopless control state"
     );
 }
 
@@ -4427,8 +4436,15 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "controlled"
 endpoints = ["responses"]
+[servers.controlled.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.controlled]
 type = "responses"
+responses = { process = "chat", streaming = "client" }
 base_url = "http://controlled.invalid/v1"
 default_model = "responses-wire-model"
 auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_KEY" }] }
@@ -4539,6 +4555,7 @@ allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
 continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.chatwire]
 type = "openai_chat"
 base_url = "http://chatwire.invalid/v1"
@@ -4575,6 +4592,7 @@ allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
 continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.chatwire]
 type = "openai_chat"
 base_url = "http://chatwire.invalid/v1"
@@ -4598,8 +4616,8 @@ capabilities = ["text", "tools", "tool_outputs", "reasoning"]
 [route_groups.chatwire.pools.default]
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "chatwire", model = "chat-wire-model", key = "controlled", priority = 1 },
-  { kind = "provider_model", provider = "responseswire", model = "responses-wire-model", key = "controlled", priority = 2 }
+  { kind = "provider_model", provider = "chatwire", model = "chat-wire-model", key = "controlled", priority = 2 },
+  { kind = "provider_model", provider = "responseswire", model = "responses-wire-model", key = "controlled", priority = 1 }
 ]
 "#,
         )

@@ -1125,8 +1125,7 @@ fn govern_v3_hub_relay_response(
     let input =
         strip_v3_resp03_encrypted_reasoning_content(input, profile.retain_response_cipher());
     let mut input = harvest_v3_think_blocks_at_resp03(input);
-    let is_responses_protocol =
-        input.semantic_protocol() == V3HubProviderWireProtocol::Responses;
+    let is_responses_protocol = input.semantic_protocol() == V3HubProviderWireProtocol::Responses;
     let payload = Arc::make_mut(&mut input.previous.previous.payload.0);
     if is_responses_protocol {
         scrub_v3_provider_model_identity_instructions(payload);

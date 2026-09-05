@@ -212,7 +212,10 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     })
                     .map(Value::Array);
                 let (content, _) = build_v3_openai_chat_content_from_responses_content(
-                    parts_value.as_ref().or(item.get("content")).or(Some(&Value::Null)),
+                    parts_value
+                        .as_ref()
+                        .or(item.get("content"))
+                        .or(Some(&Value::Null)),
                 )?;
                 append_v3_openai_chat_message_preserving_tool_adjacency(
                     &mut messages,

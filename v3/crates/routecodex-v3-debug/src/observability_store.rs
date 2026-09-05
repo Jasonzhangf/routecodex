@@ -549,8 +549,14 @@ mod tests {
 
         let rows = v3_webui_observability_read_rows_bounded(&path, 2).unwrap();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].get("request_key").and_then(Value::as_str), Some("r2"));
-        assert_eq!(rows[1].get("request_key").and_then(Value::as_str), Some("r3"));
+        assert_eq!(
+            rows[0].get("request_key").and_then(Value::as_str),
+            Some("r2")
+        );
+        assert_eq!(
+            rows[1].get("request_key").and_then(Value::as_str),
+            Some("r3")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

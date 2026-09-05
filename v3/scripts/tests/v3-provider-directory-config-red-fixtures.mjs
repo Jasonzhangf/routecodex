@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const repo = process.cwd();
-const verifier = resolve(repo, 'scripts/architecture/verify-v3-provider-directory-config.mjs');
+const verifier = 'v3/scripts/architecture/verify-v3-provider-directory-config.mjs';
 const copied = [
+  verifier,
   'v3/package.json',
   'v3/crates/routecodex-v3-config/src/provider_directory.rs',
   'v3/crates/routecodex-v3-config/src/v2_compat.rs',
@@ -47,6 +48,7 @@ for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-provider-directory-red-'));
   try {
     for (const relative of copied) cpSync(resolve(repo, relative), resolve(root, relative), { recursive: true });
+    symlinkSync(resolve(repo, 'node_modules'), resolve(root, 'node_modules'), 'dir');
     const target = resolve(root, testCase.path);
     const original = readFileSync(target, 'utf8');
     const mutated = testCase.mutate(original);
@@ -55,7 +57,7 @@ for (const testCase of cases) {
       continue;
     }
     writeFileSync(target, mutated);
-    const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [resolve(root, verifier)], { cwd: root, encoding: 'utf8' });
     const output = `${result.stdout || ''}\n${result.stderr || ''}`;
     if (result.status === 0) failures.push(`${testCase.name}: verifier unexpectedly passed`);
     else if (!testCase.diagnostic.test(output)) failures.push(`${testCase.name}: wrong diagnostic: ${output.slice(-1200)}`);

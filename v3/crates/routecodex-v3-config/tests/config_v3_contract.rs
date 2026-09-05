@@ -721,10 +721,7 @@ fn compact_native_hub_v1_authoring_derives_closed_internal_defaults() {
     assert_eq!(execution.attempt_store.attempt_max_bytes, 64 * 1024 * 1024);
     assert_eq!(execution.attempt_store.attempt_max_frames, 262_144);
     assert_eq!(execution.attempt_store.request_max_bytes, 64 * 1024 * 1024);
-    assert_eq!(
-        execution.attempt_store.process_max_bytes,
-        512 * 1024 * 1024
-    );
+    assert_eq!(execution.attempt_store.process_max_bytes, 512 * 1024 * 1024);
     assert_eq!(execution.attempt_store.residence_timeout_ms, 600_000);
 }
 

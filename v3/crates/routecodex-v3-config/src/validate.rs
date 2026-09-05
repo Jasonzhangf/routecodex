@@ -594,7 +594,10 @@ fn compile_server_execution(
                 scope_keys
             },
         },
-            attempt_store: crate::attempt_store::compile_attempt_store_policy(server_id, authoring.attempt_store)?,
+        attempt_store: crate::attempt_store::compile_attempt_store_policy(
+            server_id,
+            authoring.attempt_store,
+        )?,
     })
 }
 

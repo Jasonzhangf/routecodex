@@ -303,14 +303,7 @@ pub fn project_v3_responses_relay_runtime_failure(
                 "V3Target10ConcreteProviderSelected",
                 &attempted_candidates,
             );
-            error_output(
-                source,
-                502,
-                "none",
-                Vec::new(),
-                observability,
-                0,
-            )
+            error_output(source, 502, "none", Vec::new(), observability, 0)
         }
         V3ResponsesRelayRuntimeError::Target(message) => {
             let source = build_v3_error_01_source_raised(

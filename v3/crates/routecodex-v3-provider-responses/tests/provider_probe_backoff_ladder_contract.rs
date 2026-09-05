@@ -7,13 +7,13 @@ use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_provider_responses::V3ProviderHealthStore;
 
 const LADDER_MS: [u64; 7] = [
-    30_000, // first probe after block (probe failure count 0)
-    60_000, // after probe failure 1
-    180_000, // after probe failure 2
-    900_000, // after probe failure 3
-    3_600_000, // after probe failure 4
+    30_000,     // first probe after block (probe failure count 0)
+    60_000,     // after probe failure 1
+    180_000,    // after probe failure 2
+    900_000,    // after probe failure 3
+    3_600_000,  // after probe failure 4
     10_800_000, // after probe failure 5
-    30_000, // after probe failure 6: the ladder loops
+    30_000,     // after probe failure 6: the ladder loops
 ];
 
 fn scope() -> V3ProviderFailureSessionScope {
@@ -49,7 +49,10 @@ fn first_probe_is_due_exactly_30s_after_block_and_only_probe_resurrects() {
         "first probe must not be due before 30s"
     );
     assert_eq!(
-        store.provider_cooldown_probe_keys_due(first_due).unwrap().len(),
+        store
+            .provider_cooldown_probe_keys_due(first_due)
+            .unwrap()
+            .len(),
         1,
         "first probe must be due at 30s"
     );
@@ -67,7 +70,7 @@ fn first_probe_is_due_exactly_30s_after_block_and_only_probe_resurrects() {
             .available
     );
     store
-        .record_provider_success("provider-a", "key-a", "model-a", first_due)
+        .record_provider_key_success("provider-a", "key-a", "model-a", first_due)
         .unwrap();
     assert!(
         !store
@@ -82,18 +85,12 @@ fn first_probe_is_due_exactly_30s_after_block_and_only_probe_resurrects() {
         "business success must not resurrect a key that still owns a probe entry"
     );
     // The probe itself is the only in-code resurrection path.
-    assert!(
-        store
-            .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
-            .unwrap()
-            .is_some()
-    );
+    assert!(store
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+        .unwrap()
+        .is_some());
     store
-        .complete_provider_cooldown_probe_success(
-            "provider-a",
-            Some("key-a"),
-            Some("model-a"),
-        )
+        .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("model-a"))
         .unwrap();
     assert!(
         store

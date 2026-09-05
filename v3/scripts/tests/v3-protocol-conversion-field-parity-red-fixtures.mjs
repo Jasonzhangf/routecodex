@@ -37,7 +37,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs',
@@ -104,11 +104,11 @@ const cases = [
     diagnostic: /native_openai_chat_custom_tool_tests/u,
   },
   {
-    name: 'Responses outbound drops its protocol client_metadata field',
+    name: 'Responses outbound leaks local client_metadata onto provider wire',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
-    from: '        "reasoning",\n        "thinking",\n        "metadata",\n        "client_metadata",\n        "safety_identifier",',
-    to: '        "reasoning",\n        "thinking",\n        "metadata",\n        "safety_identifier",',
-    diagnostic: /responses_client_metadata_preserved/u,
+    from: '        "reasoning",\n        "thinking",\n        "metadata",\n        "safety_identifier",',
+    to: '        "reasoning",\n        "thinking",\n        "metadata",\n        "client_metadata",\n        "safety_identifier",',
+    diagnostic: /responses_client_metadata_local/u,
   },
   {
     name: 'Responses target token/logprob normalizer stops mapping Chat max_completion_tokens',
@@ -836,7 +836,7 @@ const cases = [
   {
     name: 'Provider outbound drops Responses client_metadata preservation regression lock',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
-    from: 'codex_client_metadata_remains_client_metadata_on_responses_wire',
+    from: 'codex_client_metadata_does_not_reach_responses_wire',
     to: 'codex_client_metadata_target_validation_lock_removed',
     diagnostic: /responses_client_metadata_target_validation_lock|codex_client_metadata_remains_client_metadata_on_responses_wire/u,
   },

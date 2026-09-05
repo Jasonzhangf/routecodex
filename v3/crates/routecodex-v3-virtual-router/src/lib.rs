@@ -841,7 +841,11 @@ pub fn priority_tier_indices<T>(
             .or_default()
             .push(index);
     }
-    tiers.into_iter().rev().map(|(_, indices)| indices).collect()
+    tiers
+        .into_iter()
+        .rev()
+        .map(|(_, indices)| indices)
+        .collect()
 }
 
 /// Smooth weighted round-robin (nginx SWRR), ported from the V2 engine: each

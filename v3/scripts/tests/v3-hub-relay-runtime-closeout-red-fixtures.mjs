@@ -19,7 +19,7 @@ const verifier = resolve(
 const cases = [
   {
     name: 'runtime drops servertool response profile',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs',
     marker: 'hooks.govern(resp02, response_hook_profile)?',
     mutation: 'hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty())?',
     diagnostic: /expected 1 occurrences|forbidden|missing ordered SSE response path phrase/,
@@ -40,14 +40,14 @@ const cases = [
   },
   {
     name: 'continuation commit moves after Resp05',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs',
     marker: 'let resp04 = hooks.commit(resp03)?;',
     mutation: 'let _forbidden_resp05_before_commit = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(resp04, client_payload);\n    let resp04 = hooks.commit(resp03)?;',
     diagnostic: /expected 1 occurrences|forbidden/,
   },
   {
     name: 'second response exit appears',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs',
     marker: 'let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);',
     mutation: 'let _second_resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);\n    let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);',
     diagnostic: /expected 1 occurrences/,
@@ -132,9 +132,9 @@ const cases = [
   {
     name: 'responses relay provider event codec owner is removed',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs',
-    marker: 'pub(super) fn observe_v3_runtime_responses_sse_transport_chunk(',
+    marker: 'pub(super) fn observe_v3_runtime_responses_sse_transport_chunk_typed(',
     mutation: 'pub(super) fn removed_v3_runtime_responses_sse_transport_chunk(',
-    diagnostic: /missing fn observe_v3_runtime_responses_sse_transport_chunk\(/,
+    diagnostic: /missing fn observe_v3_runtime_responses_sse_transport_chunk_typed\(/,
   },
   {
     name: 'responses relay parent resurrects provider event codec owner',
@@ -258,14 +258,15 @@ const cases = [
   {
     name: 'shared relay Error01 builder call removed',
     file: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
-    marker: 'let source = build_v3_error_01_source_raised_external(',
-    mutation: 'let source = removed_v3_error_01_source_raised_external(',
+    marker: 'let code = error_type.unwrap_or("provider_failure").to_string();\n    let source = build_v3_error_01_source_raised_external(',
+    mutation: 'let code = error_type.unwrap_or("provider_failure").to_string();\n    let source = removed_v3_error_01_source_raised_external(',
     diagnostic: /missing build_v3_error_01_source_raised_external\(/,
   },
 ];
 
 const copyPaths = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs',

@@ -255,7 +255,8 @@ impl ResponsesTransport for RecordingChatTransport {
 async fn target_protocol_unmapped_field_projects_internal_598_without_switching_provider() {
     std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
     std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
-    let manifest = anthropic_then_openai_chat_manifest();
+    let mut manifest = anthropic_then_openai_chat_manifest();
+    manifest.forwarders.get_mut("mixed").unwrap().targets[0].priority = Some(3);
     let session_scope =
         V3ProviderFailureSessionScope::new("test", "default", "protocol-incompatible-session")
             .expect("session scope");

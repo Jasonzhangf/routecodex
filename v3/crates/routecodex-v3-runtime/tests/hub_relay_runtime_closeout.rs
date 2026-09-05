@@ -1643,8 +1643,8 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         provider_event.next_provider_key.as_deref(),
         Some("minimax:key1:MiniMax-M3")
     );
-    assert_eq!(provider_event.failure_count, 0);
-    assert_eq!(provider_event.health_state, "transient_exhausted");
+    assert_eq!(provider_event.failure_count, 3);
+    assert_eq!(provider_event.health_state, "healthy");
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 4);
@@ -1756,10 +1756,15 @@ async fn responses_relay_provider_duplicate_tool_identity_projects_typed_error_a
     let V3ResponsesRelayClientBody::Json(error_body) = output.client_body else {
         panic!("terminal provider response failure must project standard Responses JSON error")
     };
-    assert!(error_body
-        .pointer("/error/message")
-        .and_then(Value::as_str)
-        .is_some_and(|message| message.contains("duplicate call_id/id")));
+    assert_eq!(error_body["error"]["code"], "network_error");
+    assert_eq!(error_body["error"]["message"], "network error");
+    assert!(output
+        .observability
+        .as_ref()
+        .unwrap()
+        .provider_failure_events
+        .iter()
+        .any(|event| event.message.contains("duplicate call_id/id")));
     assert!(error_body.pointer("/error/stage").is_none());
     assert_eq!(transport.captures.lock().unwrap().len(), 1);
 }
@@ -2027,7 +2032,7 @@ async fn responses_relay_default_floor_retry_wait_blocks_between_errors() {
 }
 
 #[tokio::test]
-async fn responses_relay_provider_request_compat_failure_reselects_without_action_gate() {
+async fn responses_relay_provider_request_compat_failure_stops_without_send_or_reselect() {
     let transport = ResponsesContextErrorThenSuccessTransport {
         captures: Mutex::new(Vec::new()),
     };
@@ -2056,28 +2061,27 @@ async fn responses_relay_provider_request_compat_failure_reselects_without_actio
         },
     )
     .await
-    .expect("provider-bound request compat failure must reselect instead of bypassing Error05");
+    .expect("request projection failure must use the error chain");
 
-    assert_eq!(output.status, 200);
-    assert_eq!(output.error_chain, None);
+    assert_eq!(output.status, 598);
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+    );
     assert!(
         started.elapsed() < Duration::from_millis(1_000),
-        "request-local provider compat reselect must not consume provider action gate delay"
+        "request projection failure must not consume provider action gate delay"
     );
-    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(
-        captures
-            .iter()
-            .map(|(provider_id, _)| provider_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["minimax"],
-        "the incompatible Anthropic request must fail before send and only the reselected Responses provider may reach transport"
+    assert!(
+        captures.is_empty(),
+        "request projection cannot send to a backup provider"
     );
 }
 
 #[tokio::test]
-async fn concurrent_provider_request_compat_failures_do_not_serialize_request_local_reselects() {
+async fn concurrent_provider_request_compat_failures_do_not_send_or_reselect() {
     let manifest = responses_request_compat_storm_manifest();
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
@@ -2111,20 +2115,22 @@ async fn concurrent_provider_request_compat_failures_do_not_serialize_request_lo
         )
     };
 
+    let started = Instant::now();
     let (first, second) = tokio::join!(run("req-compat-storm-a"), run("req-compat-storm-b"));
-    let first = first.expect("first compat failure must reselect through Error05");
-    let second = second.expect("second compat failure must reselect through Error05");
-    assert_eq!(first.status, 200);
-    assert_eq!(second.status, 200);
-    assert!(first.error_chain.is_none());
-    assert!(second.error_chain.is_none());
-
-    let sends = transport.sends.lock().unwrap();
-    assert_eq!(sends.len(), 2, "only the compatible provider may be sent");
-    let separation = sends[1].duration_since(sends[0]);
+    let first = first.expect("first compat failure must reach the error chain");
+    let second = second.expect("second compat failure must reach the error chain");
+    for output in [first, second] {
+        assert_eq!(output.status, 598);
+        assert_eq!(
+            output.error_chain.as_deref(),
+            Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        );
+        assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+    }
+    assert!(transport.sends.lock().unwrap().is_empty());
     assert!(
-        separation < Duration::from_millis(1_000),
-        "request-local compat reselects must not be serialized by provider action gate; observed {separation:?}"
+        started.elapsed() < Duration::from_millis(1_000),
+        "request-local projection failures must not enter provider action waits"
     );
 }
 
@@ -2285,8 +2291,16 @@ async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
         .and_then(Value::as_str)
         .expect("projected provider error message");
     assert!(
-        message.contains("provider response event codec failed"),
-        "frame/UTF-8 decode failures are projected through the provider event codec owner: {message}"
+        output
+            .observability
+            .as_ref()
+            .unwrap()
+            .provider_failure_events
+            .iter()
+            .any(|event| event
+                .message
+                .contains("provider response event codec failed")),
+        "frame/UTF-8 diagnostics must remain in the provider failure observation"
     );
     assert!(
         !message.contains("provider SSE transport failed"),
@@ -2334,8 +2348,16 @@ async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse
         "provider event payload JSON/schema failures are codec-owned, not SSE transport-owned: {message}"
     );
     assert!(
-        message.contains("provider response event codec failed"),
-        "event payload JSON/schema failures must name provider event codec owner: {message}"
+        output
+            .observability
+            .as_ref()
+            .unwrap()
+            .provider_failure_events
+            .iter()
+            .any(|event| event
+                .message
+                .contains("provider response event codec failed")),
+        "JSON/schema diagnostics must remain in the provider failure observation"
     );
 }
 
@@ -2464,10 +2486,7 @@ async fn provider_error_closeout_enters_error01_06_without_success_projection() 
     .unwrap();
     assert_eq!(output.status, 502);
     assert_eq!(output.client_response["error"]["code"], "network_error");
-    assert_eq!(
-        output.client_response["error"]["message"],
-        "network error"
-    );
+    assert_eq!(output.client_response["error"]["message"], "network error");
     assert_eq!(
         output.error_chain.as_ref().unwrap(),
         &V3_ERROR_CHAIN_NODE_IDS
@@ -2519,14 +2538,14 @@ capabilities = ["text", "tools", "reasoning"]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
 targets = [
-  { kind = "provider_model", provider = "limited", model = "gpt-5.5", key = "key1", priority = 1 },
-  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 2 }
+  { kind = "provider_model", provider = "limited", model = "gpt-5.5", key = "key1", priority = 2 },
+  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 1 }
 ]
 [route_groups.__SCOPE__.pools.default]
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "limited", model = "gpt-5.5", key = "key1", priority = 1 },
-  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 2 }
+  { kind = "provider_model", provider = "limited", model = "gpt-5.5", key = "key1", priority = 2 },
+  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 1 }
 ]
 "#;
     compile_v3_config_05_manifest(
@@ -2578,14 +2597,14 @@ capabilities = ["text", "tools", "reasoning"]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
 targets = [
-  { kind = "provider_model", provider = "limited", model = "claude-fable-5", key = "key1", priority = 1 },
-  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 2 }
+  { kind = "provider_model", provider = "limited", model = "claude-fable-5", key = "key1", priority = 2 },
+  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 1 }
 ]
 [route_groups.compat_reselect.pools.default]
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "limited", model = "claude-fable-5", key = "key1", priority = 1 },
-  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 2 }
+  { kind = "provider_model", provider = "limited", model = "claude-fable-5", key = "key1", priority = 2 },
+  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 1 }
 ]
 "#,
         )
@@ -2636,14 +2655,14 @@ capabilities = ["text", "tools", "reasoning"]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
 targets = [
-  { kind = "provider_model", provider = "compat_storm_anthropic", model = "claude-fable-5", key = "key1", priority = 1 },
-  { kind = "provider_model", provider = "compat_storm_responses", model = "MiniMax-M3", key = "key1", priority = 2 }
+  { kind = "provider_model", provider = "compat_storm_anthropic", model = "claude-fable-5", key = "key1", priority = 2 },
+  { kind = "provider_model", provider = "compat_storm_responses", model = "MiniMax-M3", key = "key1", priority = 1 }
 ]
 [route_groups.compat_storm.pools.default]
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "compat_storm_anthropic", model = "claude-fable-5", key = "key1", priority = 1 },
-  { kind = "provider_model", provider = "compat_storm_responses", model = "MiniMax-M3", key = "key1", priority = 2 }
+  { kind = "provider_model", provider = "compat_storm_anthropic", model = "claude-fable-5", key = "key1", priority = 2 },
+  { kind = "provider_model", provider = "compat_storm_responses", model = "MiniMax-M3", key = "key1", priority = 1 }
 ]
 "#,
         )
@@ -2739,6 +2758,7 @@ continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"
 attempt_store = {}
 [providers.controlled]
 type = "responses"
+responses = { process = "chat", streaming = "client" }
 base_url = "http://controlled.invalid/v1"
 default_model = "responses-wire-model"
 auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_KEY" }] }

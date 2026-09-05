@@ -495,23 +495,21 @@ fn request_counter_suffix_from_line(line: &str) -> Option<(u64, u64)> {
 }
 
 fn http_get_json(port: u16, path: &str) -> Value {
-    let request =
-        format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    stream.write_all(request.as_bytes()).unwrap();
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .unwrap();
-    let mut response = String::new();
-    stream.read_to_string(&mut response).unwrap();
-    assert!(
-        response.starts_with("HTTP/1.1 200"),
-        "GET {path} must succeed, got:\n{response}"
-    );
-    let (_, body) = response
-        .split_once("\r\n\r\n")
-        .expect("HTTP response must contain a body separator");
-    serde_json::from_str(body).unwrap()
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap()
+            .get(format!("http://127.0.0.1:{port}{path}"))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap()
+    })
 }
 
 fn wait_port(port: u16, open: bool) {
@@ -997,10 +995,16 @@ supportsStreaming = true
         config_root.join("config.toml"),
         r#"version = 3
 
-[route_groups.routecodex_v3_4444.default]
+[servers.routecodex_v3_4444]
+bind = "127.0.0.1"
+port = 4444
+[servers.routecodex_v3_4444.routes.default]
 tiers = [[{ use = "test/test" }]]
 
-[route_groups.responses_v3_7777.default]
+[servers.responses_v3_7777]
+bind = "127.0.0.1"
+port = 7777
+[servers.responses_v3_7777.routes.default]
 tiers = [[{ use = "test/test" }]]
 "#,
     )
@@ -1669,7 +1673,7 @@ fn start_force_releases_occupied_admin_webui_port_before_server_bind() {
     let config = write_config(&root, ports);
     let binary = env!("CARGO_BIN_EXE_rccv3");
     let admin_bind = format!("127.0.0.1:{admin_port}");
-    let mut start = Command::new(binary)
+    let mut start = managed_test_command(binary)
         .args(["start", "--config"])
         .arg(&config)
         .env("ROUTECODEX_V3_STATE_DIR", &state_root)
@@ -1702,12 +1706,25 @@ fn start_force_releases_occupied_admin_webui_port_before_server_bind() {
         "SIGTERM-resistant admin listener must be force-killed"
     );
 
-    for port in ports {
-        wait_port(port, true);
+    let deadline = Instant::now() + PORT_STATE_TIMEOUT;
+    let listener_ports = [ports[0], ports[1], admin_port];
+    while !listener_ports
+        .iter()
+        .all(|port| TcpStream::connect(("127.0.0.1", *port)).is_ok())
+    {
+        if Instant::now() >= deadline || start.try_wait().unwrap().is_some() {
+            let _ = start.kill();
+            let output = start.wait_with_output().unwrap();
+            panic!(
+                "admin lifecycle listeners {listener_ports:?} did not start: stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        sleep(Duration::from_millis(50));
     }
-    wait_port(admin_port, true);
 
-    let stop = Command::new(binary)
+    let stop = managed_test_command(binary)
         .args(["stop", "--config"])
         .arg(&config)
         .env("ROUTECODEX_V3_STATE_DIR", &state_root)
@@ -1858,6 +1875,7 @@ fn foreign_background_start_releasing_all_ports_disconnects_foreground_owner() {
 
     let mut foreground = spawn_top_level_start(binary, &state_root, &foreground_config);
     wait_port(shared_port, true);
+    wait_status_file_state(&single_instance_dir(&state_root), "running");
     assert_eq!(
         top_level_status_json(binary, &state_root, &foreground_config)["state"],
         "running"

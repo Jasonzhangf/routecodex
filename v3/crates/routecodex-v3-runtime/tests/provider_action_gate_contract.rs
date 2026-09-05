@@ -241,9 +241,9 @@ async fn scopes_are_isolated_and_success_does_not_reset_other_error_family() {
 async fn reselected_provider_action_consumes_failed_scope_gate_and_success_releases_waiters() {
     let gate = V3ProviderActionGate::default();
     let failed = key("provider_http_500");
+    let started = Instant::now();
     gate.record_failure(&failed).expect("record failure");
 
-    let started = Instant::now();
     let admission = gate
         .wait_for_provider_action(&provider_scope("provider-b:key-b:model-b"))
         .await
@@ -504,6 +504,7 @@ async fn process_shared_handles_observe_the_same_cross_request_generation() {
         "provider_http_503",
     );
 
+    let started = Instant::now();
     first_request_gate
         .record_failure(&scope)
         .expect("first request records provider failure");
@@ -514,7 +515,6 @@ async fn process_shared_handles_observe_the_same_cross_request_generation() {
         0
     );
 
-    let started = Instant::now();
     let admission = second_request_gate
         .wait_for_active_failure(scope.clone())
         .await

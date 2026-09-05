@@ -10,10 +10,12 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const repo = process.cwd();
+const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const repo = resolve(v3Root, "..");
 const verifier = resolve(
-  repo,
+  v3Root,
   "scripts/architecture/verify-v3-provider-session-cooldown.mjs",
 );
 const copied = [
@@ -24,7 +26,7 @@ const copied = [
   "v3/crates/routecodex-v3-runtime/src/nodes.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs",
-  "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
+  "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs",
@@ -45,6 +47,7 @@ const copied = [
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs",
   "v3/crates/routecodex-v3-server/src/executors.rs",
+  "v3/crates/routecodex-v3-server/src/scope_metadata.rs",
 ];
 
 const cases = [
@@ -242,7 +245,7 @@ const cases = [
     path: copied[13],
     mutate: (source) =>
       source.replace(
-        "fn provider_failure_scope_uses_internal_request_id_without_client_session_header()",
+        "fn provider_failure_scope_never_rejects_missing_session_identity()",
         "fn provider_failure_scope_drops_headerless_request_scope()",
       ),
     diagnostic: /Server must isolate headerless requests with their existing internal request id/u,
@@ -279,8 +282,8 @@ const cases = [
     path: copied[12],
     mutate: (source) =>
       source.replace(
-        "provider_failure_session_id_from_request_headers(headers)",
-        "provider_failure_session_id_from_request_headers(headers).or_else(|| Some(request_id.to_string()))",
+        "let (session_id, _) = responses_control_scope_headers(headers)?;",
+        "let session_id = Some(request_id.to_string());",
       ),
     diagnostic: /must not derive control identity from request identity/u,
   },
@@ -289,10 +292,10 @@ const cases = [
     path: copied[7],
     mutate: (source) =>
       source.replace(
-        "    pub(super) failure_session_scope: V3ProviderFailureSessionScope,",
-        "    pub(super) failure_session_scope_removed: V3ProviderFailureSessionScope,",
+        "    failure_session_scope: &V3ProviderFailureSessionScope,",
+        "    failure_session_scope_removed: &V3ProviderFailureSessionScope,",
       ),
-    diagnostic: /Direct SSE post-commit outcome must retain/u,
+    diagnostic: /Direct SSE projection must receive/u,
   },
   {
     name: "Cooldown rescue drops successful provider probe requirement",
@@ -346,27 +349,41 @@ const cases = [
   },
 ];
 
+function runVerifier(root) {
+  const result = spawnSync(process.execPath, [verifier], {
+    cwd: repo,
+    env: { ...process.env, V3_PROVIDER_SESSION_COOLDOWN_ROOT: root },
+    encoding: "utf8",
+  });
+  if (result.error) throw result.error;
+  if (result.signal) throw new Error(`verifier terminated by ${result.signal}`);
+  return { status: result.status, output: `${result.stdout}\n${result.stderr}` };
+}
+
 let rejected = 0;
 for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), "v3-provider-session-cooldown-"));
   try {
     for (const relativePath of copied) {
       const destination = join(root, relativePath);
-      cpSync(join(repo, relativePath), destination, { recursive: true });
+      const source = relativePath === "package.json"
+        ? join(v3Root, relativePath)
+        : join(repo, relativePath);
+      cpSync(source, destination, { recursive: true });
     }
     const target = join(root, testCase.path);
     const original = readFileSync(target, "utf8");
+    const baseline = runVerifier(root);
+    if (testCase.diagnostic.test(baseline.output)) {
+      throw new Error(`${testCase.name}: expected diagnostic already exists before mutation\n${baseline.output}`);
+    }
     const mutated = testCase.mutate(original);
     if (mutated === original) {
       throw new Error(`${testCase.name}: mutation did not change source`);
     }
     writeFileSync(target, mutated);
-    const result = spawnSync(process.execPath, [verifier], {
-      cwd: repo,
-      env: { ...process.env, V3_PROVIDER_SESSION_COOLDOWN_ROOT: root },
-      encoding: "utf8",
-    });
-    const output = `${result.stdout}\n${result.stderr}`;
+    const result = runVerifier(root);
+    const output = result.output;
     if (result.status === 0 || !testCase.diagnostic.test(output)) {
       throw new Error(
         `${testCase.name}: verifier did not reject mutation with expected diagnostic\n${output}`,

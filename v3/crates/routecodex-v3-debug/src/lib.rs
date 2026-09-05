@@ -6,14 +6,14 @@ use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
-pub mod sample_store;
 pub mod observability_store;
+pub mod sample_store;
 
 pub use observability_store::{
     v3_webui_observability_append_row, v3_webui_observability_append_row_with_retention,
-    v3_webui_observability_read_raw_rows,
-    v3_webui_observability_read_rows, v3_webui_observability_read_rows_bounded,
-    V3WebuiObservabilityStoreError, V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION,
+    v3_webui_observability_read_raw_rows, v3_webui_observability_read_rows,
+    v3_webui_observability_read_rows_bounded, V3WebuiObservabilityStoreError,
+    V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION,
 };
 pub use sample_store::{V3CodexSampleStore, V3_CODEX_SAMPLE_REQUEST_RETENTION};
 

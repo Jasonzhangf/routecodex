@@ -13,6 +13,13 @@ const copyScript = read('scripts/copy-cli-bin.mjs');
 const installScript = read('scripts/install-cli.mjs');
 const packScript = read('scripts/pack-release.mjs');
 
+test('CI build consumes version truth without running the release version operation', () => {
+  const buildScript = read('scripts/build.mjs');
+  assert.equal(buildScript.includes('bump-version.mjs'), false);
+  assert.ok(buildScript.includes('ROUTECODEX_BUILD_VERSION: pkg.version'));
+  assert.equal(packageJson.scripts['bump-version'], 'node scripts/bump-version.mjs');
+});
+
 test('V3 owns one local runtime binary, Admin host, and command alias contract', () => {
   assert.deepEqual(packageJson.bin, {
     routecodex: 'dist/bin/rccv3',

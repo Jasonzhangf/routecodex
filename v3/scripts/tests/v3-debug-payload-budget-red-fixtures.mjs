@@ -107,24 +107,24 @@ const cases = [
     diagnostic: /CI must dispatch the canonical V3 verification stack/u,
   },
   {
-    name: "codex-sample retention is lowered below 200",
+    name: "codex-sample retention is lowered below 100",
     path: "v3/crates/routecodex-v3-debug/src/sample_store.rs",
     mutate: (source) =>
       source.replace(
-        "pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 200;",
         "pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 100;",
+        "pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 50;",
       ),
-    diagnostic: /must default to 200 requests/u,
+    diagnostic: /must default to 100 requests/u,
   },
   {
-    name: "config compilation authorizes live samples",
+    name: "config compilation authorizes live samples without explicit authoring",
     path: "v3/crates/routecodex-v3-config/src/validate.rs",
     mutate: (source) =>
       source.replace(
-        "codex_samples: false,",
+        "codex_samples: authoring.codex_samples.unwrap_or(false),",
         "codex_samples: true,",
       ),
-    diagnostic: /must not authorize live codex samples/u,
+    diagnostic: /must preserve explicit codex samples authorization/u,
   },
   {
     name: "server reimplements its own sample persistence",

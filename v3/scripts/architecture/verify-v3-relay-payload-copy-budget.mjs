@@ -105,8 +105,8 @@ requireAll(text.responsesRelayRuntime, paths.responsesRelayRuntime, [
   'ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)',
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
   'V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame',
-  'fn observe_v3_runtime_responses_sse_transport_chunk(',
-  'fn apply_responses_stream_protocol_events_to_terminal_response(',
+  'fn observe_v3_runtime_responses_sse_transport_chunk_typed(',
+  'fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(',
 ]);
 requireAll(text.providerResponsesTransport, paths.providerResponsesTransport, [
   'V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER',

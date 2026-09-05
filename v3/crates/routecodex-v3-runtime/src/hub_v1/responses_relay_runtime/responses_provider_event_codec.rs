@@ -143,9 +143,7 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
         hook,
         Some(observation),
     )
-        .map_err(|error| {
-            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
-        })?;
+    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()))?;
     let projected_event = project_v3_responses_sse_event_json(&semantic);
     observation
         .record_provider_event_json(&projected_event)

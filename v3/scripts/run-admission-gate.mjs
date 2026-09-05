@@ -94,7 +94,7 @@ try {
     resolve(workspace, 'build-contracts'),
     'dir',
   );
-  for (const name of ['crates', 'fixtures']) {
+  for (const name of ['crates', 'fixtures', 'admin-webui']) {
     cpSync(resolve(v3Root, name), resolve(workspace, 'v3', name), { recursive: true });
   }
   cpSync(

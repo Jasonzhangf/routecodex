@@ -10,21 +10,40 @@ fn resp03_records_typed_toolreason_observation_for_relay_missing_and_ok() {
         "output": [{"type":"function_call","name":"exec","arguments":"{\"cmd\":\"pwd\"}"}]
     });
     record_v3_toolreason_observation_at_resp03(
-        &missing, &observation, Some("s"), Some("r"), Some("m"),
-    ).expect("missing observation");
+        &missing,
+        &observation,
+        Some("s"),
+        Some("r"),
+        Some("m"),
+    )
+    .expect("missing observation");
     let snapshot = observation.snapshot().expect("snapshot");
-    assert_eq!(snapshot.toolreason.as_ref().map(|v| v.status.as_str()), Some("MISSING"));
-    assert_eq!(snapshot.toolreason.as_ref().map(|v| v.stage.as_str()), Some("resp03_json"));
+    assert_eq!(
+        snapshot.toolreason.as_ref().map(|v| v.status.as_str()),
+        Some("MISSING")
+    );
+    assert_eq!(
+        snapshot.toolreason.as_ref().map(|v| v.stage.as_str()),
+        Some("resp03_json")
+    );
 
     let ok = serde_json::json!({
         "output": [{"type":"function_call","name":"exec","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认目录\"}"}]
     });
-    record_v3_toolreason_observation_at_resp03(
-        &ok, &observation, Some("s"), Some("r2"), Some("m"),
-    ).expect("ok observation");
+    record_v3_toolreason_observation_at_resp03(&ok, &observation, Some("s"), Some("r2"), Some("m"))
+        .expect("ok observation");
     let snapshot = observation.snapshot().expect("snapshot");
-    assert_eq!(snapshot.toolreason.as_ref().map(|v| v.status.as_str()), Some("OK"));
-    assert_eq!(snapshot.toolreason.as_ref().and_then(|v| v.reason.as_deref()), Some("确认目录"));
+    assert_eq!(
+        snapshot.toolreason.as_ref().map(|v| v.status.as_str()),
+        Some("OK")
+    );
+    assert_eq!(
+        snapshot
+            .toolreason
+            .as_ref()
+            .and_then(|v| v.reason.as_deref()),
+        Some("确认目录")
+    );
 }
 
 #[test]
@@ -971,9 +990,7 @@ fn resp03_custom_tool_wrapper_strips_only_toolreason_fields_and_preserves_raw_in
         .expect("custom tool call");
     assert_eq!(tool_call["input"], raw_patch);
     assert!(tool_call.get("reason").is_none());
-    assert!(tool_call
-        .get("goal_alignment_confidence")
-        .is_none());
+    assert!(tool_call.get("goal_alignment_confidence").is_none());
     assert!(tool_call.get("model_id").is_none());
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],
@@ -1052,9 +1069,7 @@ fn resp03_custom_tool_nested_json_wrapper_projects_reason_and_restores_native_in
         .expect("custom tool call");
     assert_eq!(tool_call["input"], raw_patch);
     assert!(tool_call.get("reason").is_none());
-    assert!(tool_call
-        .get("goal_alignment_confidence")
-        .is_none());
+    assert!(tool_call.get("goal_alignment_confidence").is_none());
     assert!(tool_call.get("model_id").is_none());
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],
@@ -1087,8 +1102,7 @@ fn resp03_custom_tool_malformed_nested_wrapper_is_left_byte_semantically_unchang
 
 #[test]
 fn resp03_custom_tool_malformed_json_wrapper_does_not_strip_nested_model_id() {
-    let wrapped_input =
-        r#"{"input":"native custom input","reason":42,"model_id":"wrong-model"}"#;
+    let wrapped_input = r#"{"input":"native custom input","reason":42,"model_id":"wrong-model"}"#;
     let mut payload = json!({
         "output":[{"type":"custom_tool_call","call_id":"call_custom_invalid_model_id",
             "name":"apply_patch","model_id":"wrong-envelope-model","input":wrapped_input}]
@@ -1163,9 +1177,7 @@ fn resp03_apply_patch_double_encoded_wrapper_restores_native_patch_bytes() {
         .find(|item| item["type"] == "custom_tool_call")
         .expect("custom tool call");
     assert!(tool_call.get("reason").is_none());
-    assert!(tool_call
-        .get("goal_alignment_confidence")
-        .is_none());
+    assert!(tool_call.get("goal_alignment_confidence").is_none());
     assert!(tool_call.get("model_id").is_none());
     assert_eq!(
         payload["output"][0]["summary"][0]["text"],

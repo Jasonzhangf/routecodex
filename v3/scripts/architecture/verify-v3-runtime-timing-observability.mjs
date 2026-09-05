@@ -169,7 +169,8 @@ const directSseOutcome = readRequired(directSseRuntimePath)
   + readRequired(directSseConsumerPath)
   + '\n'
   + readRequired(path.join(root, 'v3/crates/routecodex-v3-runtime/src/shared.rs'));
-const providerSseJsonCodec = readRequired(providerSseJsonCodecPath);
+const providerSseJsonCodec = readRequired(providerSseJsonCodecPath)
+  + "\n" + readRequired(path.join(root, "v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs"));
 const directRuntimeHelpers = readRequired(directRuntimeHelpersPath)
   + '\n'
   + readRequired(

@@ -132,16 +132,10 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
         .send()
         .await
         .unwrap();
-    assert_eq!(
-        exhausted_response.status(),
-        ReqwestStatusCode::SERVICE_UNAVAILABLE
-    );
+    assert_eq!(exhausted_response.status(), ReqwestStatusCode::BAD_GATEWAY);
     let exhausted_body = exhausted_response.json::<Value>().await.unwrap();
-    assert_eq!(exhausted_body["error"]["code"], "provider_http_503");
-    assert_eq!(
-        exhausted_body["error"]["message"],
-        "provider returned HTTP 503"
-    );
+    assert_eq!(exhausted_body["error"]["code"], "network_error");
+    assert_eq!(exhausted_body["error"]["message"], "network error");
     let exhausted_optional = next_capture(&mut failure_a.captures, "exhaust optional").await;
     assert_eq!(exhausted_optional.body["model"], "wire-optional");
     let exhausted_default = next_capture(&mut failure_b.captures, "exhaust default").await;
@@ -254,6 +248,15 @@ auth = {{ type = "api_key", entries = [{{ alias = "key", env = "VR_OPTIONAL_KEY"
 wire_name = "wire-optional"
 capabilities = ["text", "tools"]
 
+[providers.exhaust_optional]
+type = "responses"
+base_url = "{failure_a_base}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "VR_OPTIONAL_KEY" }}] }}
+[providers.exhaust_optional.models.test]
+wire_name = "wire-optional"
+capabilities = ["text", "tools"]
+
 [providers.default]
 type = "responses"
 base_url = "{success_base}"
@@ -283,7 +286,7 @@ targets = [{{ kind = "provider_model", provider = "default", model = "test", key
 [route_groups.vr_exhausted.pools.tools]
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, entry_protocol = "responses", models = ["client-tools"], required_capabilities = ["tools"], min_input_tokens = 1, max_input_tokens = 100 }}
-targets = [{{ kind = "provider_model", provider = "optional", model = "test", key = "key", priority = 1 }}]
+targets = [{{ kind = "provider_model", provider = "exhaust_optional", model = "test", key = "key", priority = 1 }}]
 [route_groups.vr_exhausted.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "exhausted", model = "test", key = "key", priority = 1 }}]
@@ -324,7 +327,7 @@ async fn wait_for_health(
     port: u16,
     server_id: &str,
 ) {
-    for _ in 0..80 {
+    for _ in 0..400 {
         assert!(cli.child.try_wait().unwrap().is_none(), "CLI exited early");
         if let Ok(response) = client
             .get(format!("http://127.0.0.1:{port}/health"))

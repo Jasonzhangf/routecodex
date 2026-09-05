@@ -83,6 +83,7 @@ features:
   - Command aliases do not fall back to a repository build, npm global package, or release snapshot.
   - Installation state never enters request, response, provider wire, MetadataCenter, or Error payloads.
   - Direct binary installation is not blocked by unrelated in-progress provider/runtime feature gates; full architecture CI remains required by the build chain.
+  - CI build consumes the declared package version without changing package.json or package-lock.json; version mutation belongs to the explicit release operation.
   required_gates:
   - npm --prefix v3 run test:distribution
   - npm --prefix v3 run test:install-cleanup
@@ -2193,6 +2194,8 @@ features:
   owner_scope: Client-facing /v1/responses WebSocket upgrade and frame projection shell into the configured Responses Direct or Relay Runtime and Provider path.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/websocket.rs
+  - v3/crates/routecodex-v3-server/src/restart_handoff.rs
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - scripts/architecture/verify-v3-responses-inbound-websocket-proxy.mjs
@@ -2209,7 +2212,7 @@ features:
   - WebSocket handshake rejects plain GET without upgrade and missing OpenAI-Beta responses_websockets=2026-02-06 while preserving ping/pong transport behavior
   - controlled JSON WebSocket response.create enters the configured Responses Runtime and returns response.completed
   - Relay-to-Direct typed provider reselection handoff is executed before WebSocket projection and can never emit the handoff placeholder as response.completed null
-  - controlled binary JSON response.create enters the same Runtime path
+  - controlled binary JSON response.create enters the same Runtime path within a bounded deadline; Front Hyper connection must drive upgrades after the 101 handshake
   - controlled stream=true response.create projects Runtime SSE output as WebSocket events without full materialization
   - malformed client WebSocket event fails before provider send; missing type, unsupported response.cancel, and nested response.create response payload also fail before provider send
   - same client WebSocket can send a second response.create with previous_response_id and function_call_output through the existing continuation owner without Router re-entry
@@ -3158,7 +3161,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_applies_selected_target_image_session_compat
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_projects_image_to_session_placeholder
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib transient_stage_code_classifier

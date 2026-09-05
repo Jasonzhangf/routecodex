@@ -14,7 +14,9 @@ fn req04_tool_thinking_guidance_uses_native_anthropic_tool_use_and_bans_text_wra
         .expect("enabled tool-thinking must inject");
     assert_eq!(payload["system"], "client system");
     assert!(payload["tools"][0]["input_schema"]["properties"]["reason"].is_object());
-    assert!(payload["tools"][0]["input_schema"]["properties"]["goal_alignment_confidence"].is_object());
+    assert!(
+        payload["tools"][0]["input_schema"]["properties"]["goal_alignment_confidence"].is_object()
+    );
     assert!(!payload.to_string().contains("model_id"));
     assert!(!payload.to_string().contains("RouteCodex"));
 }

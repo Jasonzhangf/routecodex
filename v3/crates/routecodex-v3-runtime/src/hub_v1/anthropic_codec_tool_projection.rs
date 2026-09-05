@@ -66,9 +66,14 @@ pub(super) fn anthropic_tool_use_as_responses_call(
             field: "tool_use.input",
         })?;
     if context.is_governed_custom_tool(name) {
-        let wrapper = input.as_object().filter(|value| value.contains_key("input"));
+        let wrapper = input
+            .as_object()
+            .filter(|value| value.contains_key("input"));
         let mut output = Map::from_iter([
-            ("type".to_string(), Value::String("custom_tool_call".to_string())),
+            (
+                "type".to_string(),
+                Value::String("custom_tool_call".to_string()),
+            ),
             ("call_id".to_string(), Value::String(call_id.to_owned())),
             ("name".to_string(), Value::String(name.to_owned())),
         ]);
@@ -95,10 +100,8 @@ pub(super) fn anthropic_tool_use_as_responses_call(
                 .expect("validated custom wrapper input")
                 .to_owned()
         } else {
-            serde_json::to_string(input).map_err(|_| {
-                V3AnthropicCodecError::MalformedField {
-                    field: "custom tool_use.input",
-                }
+            serde_json::to_string(input).map_err(|_| V3AnthropicCodecError::MalformedField {
+                field: "custom tool_use.input",
             })?
         };
         output.insert("input".to_string(), Value::String(raw));
@@ -135,7 +138,10 @@ mod tests {
         .expect("unwrapped custom input must remain projectable");
 
         assert_eq!(call["type"], "custom_tool_call");
-        assert_eq!(call["input"], "{\"patch\":\"*** Begin Patch\\n*** End Patch\"}");
+        assert_eq!(
+            call["input"],
+            "{\"patch\":\"*** Begin Patch\\n*** End Patch\"}"
+        );
         assert!(call.get("model_id").is_none());
     }
 

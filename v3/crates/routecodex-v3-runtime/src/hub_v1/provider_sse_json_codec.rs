@@ -1382,7 +1382,10 @@ mod provider_sse_json_codec_tests {
         assert_eq!(data, r#"{"delta":"recovered"}"#);
         let error = classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
             .expect_err("missing provider JSON type must fail at the codec");
-        assert!(error.contains("requires a non-empty type"), "unexpected error: {error}");
+        assert!(
+            error.contains("requires a non-empty type"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -1429,7 +1432,10 @@ mod provider_sse_json_codec_tests {
         .expect("unknown event transport metadata remains observable");
         let error = classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
             .expect_err("unknown event payload must remain fail-fast");
-        assert!(error.contains("requires a non-empty type"), "unexpected error: {error}");
+        assert!(
+            error.contains("requires a non-empty type"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -1440,10 +1446,16 @@ mod provider_sse_json_codec_tests {
             None,
         )
         .expect("JSON normalization must preserve the missing type");
-        assert_eq!(data, r#"{"event":"response.output_text.delta","delta":"recovered"}"#);
+        assert_eq!(
+            data,
+            r#"{"event":"response.output_text.delta","delta":"recovered"}"#
+        );
         let error = classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
             .expect_err("missing provider JSON type must fail at the codec");
-        assert!(error.contains("requires a non-empty type"), "unexpected error: {error}");
+        assert!(
+            error.contains("requires a non-empty type"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

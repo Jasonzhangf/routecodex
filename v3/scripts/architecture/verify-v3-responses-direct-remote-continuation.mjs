@@ -29,6 +29,13 @@ const planPath = 'docs/goals/v3-responses-direct-remote-continuation-integration
 const runtime = readSurface(runtimePath);
 const runtimeHelpers = readFileSync(runtimeHelpersPath, 'utf8');
 const continuationOwner = readFileSync(continuationOwnerPath, 'utf8');
+const relayTypes = readFileSync(relayTypesPath, 'utf8');
+const serverFrames = readFileSync(serverFramesPath, 'utf8');
+const committedBody = serverFrames.slice(
+  serverFrames.indexOf('pub(crate) fn v3_client_sse_body('),
+  serverFrames.indexOf('pub(crate) fn v3_live_client_sse_body('),
+);
+const relayWebsocketFunction = readFileSync(serverWebsocketPath, 'utf8');
 const store = readFileSync(storePath, 'utf8');
 const response = readFileSync(responsePath, 'utf8');
 const target = readFileSync(targetPath, 'utf8');
@@ -55,7 +62,7 @@ const failures = [];
 
 for (const [owner, text, phrases] of [
   [runtimePath, runtime, [
-    'execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(',
+    'execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport + ?Sized>(',
     'static DEFAULT_RESPONSES_TRANSPORT',
     'fn default_responses_transport()',
     'execute_v3_responses_direct_runtime_kernel_with_continuation<T: ResponsesTransport>(',
@@ -73,7 +80,7 @@ for (const [owner, text, phrases] of [
     'store.release_bound(response_id, &scope.key, selected_pin)',
   ]],
   [continuationOwnerPath, continuationOwner, [
-    'AmbiguousProviderBinding { .. } =>',
+    'AmbiguousProviderBinding {',
     'ambiguous_provider_binding_is_request_classified_not_internal_state_failure',
   ]],
   [runtimeHelpersPath, runtimeHelpers, [
@@ -88,7 +95,8 @@ for (const [owner, text, phrases] of [
   ]],
   [responsePath, response, [
     'V3RemoteContinuationObservation',
-    'V3ProviderResponseBody::Sse(stream) => project_sse_stream(&provider_id, stream).await?',
+    'let (stream, remote_continuation, stream_observation) = process_direct_sse_stream(',
+    'V3ProviderAttemptBody::Sse(stream)',
     'SseIncrementalDecoder::new(SseTransportLimits::default())',
     'build_v3_sse_transport_in_01_raw_chunk(chunk)',
     'observe_sse_frame_remote_continuation(',
@@ -133,18 +141,19 @@ for (const [owner, text, phrases] of [
     'build_responses_direct_continuation_scope(',
     'request_local_continuation_scope(',
     'request payload and client metadata cannot construct continuation control identity',
-    'entry_facts.previous_response_id.is_some() || entry_facts.has_function_call_output',
+    'entry_facts.previous_response_id.is_some() || entry_facts.has_unpaired_function_call_output',
     'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(',
   ]],
   [relayTypesPath, relayTypes, [
-    'Stream<Item = Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>>',
+    'pub type V3ResponsesRelayClientStream = crate::nodes::V3CommittedClientSseStream;',
   ]],
-  [serverFramesPath, serverFrames, [
-    'Some(Err(source)) if is_v3_client_disconnect_source(&source)',
-    'Ok(v3_post_commit_sse_error_event_chunk(source))',
+  [serverFramesPath, committedBody, [
+    'stream: V3CommittedClientSseStream',
+    'Some(chunk) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false)))',
   ]],
   [`${serverWebsocketPath}#send_responses_relay_websocket_sse_stream`, relayWebsocketFunction, [
-    'Err(error) if is_v3_client_disconnect_source(&error) => return Err(())',
+    'mut stream: V3ResponsesRelayClientStream',
+    'Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return Err(())',
   ]],
   [testPath, tests, [
     'json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry',
@@ -185,16 +194,16 @@ for (const [owner, text, phrases] of [
 
 const coreDefinitions = runtime.match(/async fn execute_v3_responses_direct_runtime_kernel_core</g) ?? [];
 if (coreDefinitions.length !== 1) failures.push(`${runtimePath}: expected one Runtime kernel core, got ${coreDefinitions.length}`);
-const projectSseStreamStart = response.indexOf('async fn project_sse_stream(');
+const projectSseStreamStart = response.indexOf('async fn process_direct_sse_stream(');
 const projectSseStreamEnd = response.indexOf('fn observed_sse_client_stream(');
 if (projectSseStreamStart < 0 || projectSseStreamEnd < 0 || projectSseStreamEnd <= projectSseStreamStart) {
-  failures.push(`${responsePath}: missing project_sse_stream streaming handoff boundary`);
+  failures.push(`${responsePath}: missing process_direct_sse_stream streaming handoff boundary`);
 } else {
   const projectSseStream = response.slice(projectSseStreamStart, projectSseStreamEnd);
   for (const phrase of [
-    'observed_sse_client_stream(',
+    'observed_sse_client_stream_with_timeout_and_projection_and_request_id(',
     'usage_observation.clone()',
-    'V3ClientBody::Sse(client_stream)',
+    'V3ProviderAttemptSseStream',
     'V3RemoteContinuationObservation::Streaming',
   ]) {
     requireText(projectSseStream, `${responsePath}: project_sse_stream`, phrase);
@@ -242,7 +251,7 @@ forbid(relayTypes, relayTypesPath, [
 forbid(runtimeHelpers, runtimeHelpersPath, [
   /release_for_req03/,
 ]);
-forbid(serverFrames, serverFramesPath, [
+forbid(committedBody, `${serverFramesPath}#v3_client_sse_body`, [
   /\.code\s*==\s*"client_disconnect"/,
   /v3_sse_error_event_chunk\(projected\.status/,
 ]);

@@ -293,8 +293,17 @@ pub(crate) async fn execute_responses_relay_websocket_output(
         }
     };
     let provider_failure_session_scope =
-        get_failure_session_scope(&state.server, headers, &payload, "responses", &request_id)
-            .expect("responses requests must have session-id for failure isolation");
+        match get_failure_session_scope(&state.server, headers, &request_id) {
+            Ok(scope) => scope,
+            Err(message) => {
+                return V3ResponsesDirectServerOutcome::RelayOutput(
+                    project_v3_responses_relay_runtime_failure(
+                        V3ResponsesRelayRuntimeError::ProviderWireEncoding(message),
+                        None,
+                    ),
+                );
+            }
+        };
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(duration) => duration.as_millis() as u64,
         Err(error) => {

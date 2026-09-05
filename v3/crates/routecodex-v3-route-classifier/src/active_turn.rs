@@ -139,7 +139,9 @@ pub fn build_v3_current_turn_route_facts(entries: &V3CurrentTurnEntries) -> V3Cu
 
 fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
     let latest_role = entries.iter().rev().map(|entry| entry.role).next();
-    let latest_user_index = entries.iter().rposition(|entry| matches!(entry.role, ChatTurnRole::User));
+    let latest_user_index = entries
+        .iter()
+        .rposition(|entry| matches!(entry.role, ChatTurnRole::User));
     let Some(segment) = chat_active_segment(entries, latest_user_index, latest_role) else {
         let latest_user = latest_user_index.and_then(|index| entries.get(index));
         return V3CurrentTurnSignals {
@@ -221,7 +223,9 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
             latest_message_from_user: matches!(latest_role, Some(ResponsesTurnRole::User)),
             current_user_text: String::new(),
             is_compaction: latest_user_index.is_some_and(|index| {
-                entries[index..].iter().any(|entry| entry.kind == ResponsesTurnKind::Compaction)
+                entries[index..]
+                    .iter()
+                    .any(|entry| entry.kind == ResponsesTurnKind::Compaction)
             }),
             has_current_turn_web_search: latest_user_index.is_some_and(|index| {
                 entries[current_turn_start..=index]
@@ -229,7 +233,9 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
                     .any(|entry| entry.has_web_search)
             }),
             has_current_turn_image: latest_user_index.is_some_and(|index| {
-                entries[current_turn_start..=index].iter().any(|entry| entry.has_image)
+                entries[current_turn_start..=index]
+                    .iter()
+                    .any(|entry| entry.has_image)
             }),
             ..Default::default()
         };
@@ -238,8 +244,8 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
     let mut has_current_turn_tool_execution_error = false;
     let mut is_compaction = false;
     let mut has_current_turn_web_search = false;
-    let mut has_current_turn_image = latest_user_index
-        .is_some_and(|index| entries[index..].iter().any(|entry| entry.has_image));
+    let mut has_current_turn_image =
+        latest_user_index.is_some_and(|index| entries[index..].iter().any(|entry| entry.has_image));
     let mut last_assistant_tool = None;
     for entry in segment {
         if entry.has_image {
@@ -290,7 +296,9 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
 
 fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
     let latest_role = entries.iter().rev().map(|entry| entry.role).next();
-    let latest_user_index = entries.iter().rposition(|entry| matches!(entry.role, GeminiTurnRole::User));
+    let latest_user_index = entries
+        .iter()
+        .rposition(|entry| matches!(entry.role, GeminiTurnRole::User));
     let segment_start = latest_user_index.unwrap_or(0);
     let mut has_current_turn_image = false;
     let mut has_current_turn_web_search = false;
@@ -439,7 +447,10 @@ fn project_chat_tool_calls(value: Option<&Value>) -> Vec<ChatToolCall> {
 }
 
 fn chat_role(role: Option<&str>) -> ChatTurnRole {
-    match role.map(|value| value.trim().to_ascii_lowercase()).as_deref() {
+    match role
+        .map(|value| value.trim().to_ascii_lowercase())
+        .as_deref()
+    {
         Some("user") => ChatTurnRole::User,
         Some("assistant") => ChatTurnRole::Assistant,
         Some("tool") => ChatTurnRole::Tool,
@@ -449,7 +460,9 @@ fn chat_role(role: Option<&str>) -> ChatTurnRole {
 }
 
 fn project_chat_parts(value: Option<&Value>) -> Vec<TurnPart> {
-    let Some(value) = value else { return Vec::new() };
+    let Some(value) = value else {
+        return Vec::new();
+    };
     match value {
         Value::String(text) => vec![TurnPart {
             kind: TurnPartKind::Text,
@@ -477,10 +490,16 @@ fn project_chat_part(value: &Value) -> TurnPart {
             part.kind = TurnPartKind::WebSearch;
             part.has_web_search = true;
         }
-        if matches!(type_value.as_str(), "tool_call" | "tool_use" | "function_call") {
+        if matches!(
+            type_value.as_str(),
+            "tool_call" | "tool_use" | "function_call"
+        ) {
             part.kind = TurnPartKind::ToolCall;
         }
-        if matches!(type_value.as_str(), "tool_result" | "tool_output" | "function_call_output") {
+        if matches!(
+            type_value.as_str(),
+            "tool_result" | "tool_output" | "function_call_output"
+        ) {
             part.kind = TurnPartKind::ToolOutput;
         }
         if part.kind == TurnPartKind::Text || part.kind == TurnPartKind::Other {
@@ -501,7 +520,9 @@ fn project_chat_part(value: &Value) -> TurnPart {
 fn project_responses_entries(value: &Value) -> Vec<ResponsesTurnEntry> {
     let items = match value {
         Value::Array(items) => items.clone(),
-        Value::String(text) if !text.trim().is_empty() => vec![json!({"type": "input_text", "text": text})],
+        Value::String(text) if !text.trim().is_empty() => {
+            vec![json!({"type": "input_text", "text": text})]
+        }
         _ => return Vec::new(),
     };
     project_responses_entries_from_array(&items)
@@ -519,8 +540,8 @@ fn project_responses_entry(value: &Value) -> ResponsesTurnEntry {
     entry.kind = kind;
     entry.has_image = value_contains_image(value);
     entry.has_web_search = responses_entry_has_web_search(value);
-    entry.is_tool_output_error = matches!(kind, ResponsesTurnKind::ToolOutput)
-        && tool_output_is_error(value);
+    entry.is_tool_output_error =
+        matches!(kind, ResponsesTurnKind::ToolOutput) && tool_output_is_error(value);
     if matches!(
         kind,
         ResponsesTurnKind::ToolCall | ResponsesTurnKind::WebSearch
@@ -545,9 +566,9 @@ fn responses_role_for_value(value: &Value) -> ResponsesTurnRole {
     let kind = responses_kind_for_value(value);
     match kind {
         ResponsesTurnKind::Text | ResponsesTurnKind::Image => ResponsesTurnRole::User,
-        ResponsesTurnKind::WebSearch | ResponsesTurnKind::ToolCall | ResponsesTurnKind::Reasoning => {
-            ResponsesTurnRole::Assistant
-        }
+        ResponsesTurnKind::WebSearch
+        | ResponsesTurnKind::ToolCall
+        | ResponsesTurnKind::Reasoning => ResponsesTurnRole::Assistant,
         ResponsesTurnKind::ToolOutput => ResponsesTurnRole::Tool,
         _ => ResponsesTurnRole::Other,
     }
@@ -559,7 +580,10 @@ fn responses_kind_for_value(value: &Value) -> ResponsesTurnKind {
         .and_then(Value::as_str)
         .map(|value| value.trim().to_ascii_lowercase())
         .unwrap_or_default();
-    if type_value == "image" || type_value.contains("input_image") || type_value.contains("output_image") {
+    if type_value == "image"
+        || type_value.contains("input_image")
+        || type_value.contains("output_image")
+    {
         return ResponsesTurnKind::Image;
     }
     if type_value == "input_text" || type_value == "output_text" || type_value == "text" {

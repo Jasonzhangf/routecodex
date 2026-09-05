@@ -1031,7 +1031,7 @@ resources:
       cross_session_same_model: shared
       cross_model_same_key: isolated
       revival_rule: only matching-model probe success removes cooldown
-    allowed_writers: [V3ProviderHealthStore::record_provider_failure_action, V3ProviderHealthStore::record_provider_success, V3ProviderHealthStore::complete_probe_success, V3ProviderHealthStore::complete_probe_failure]
+    allowed_writers: [V3ProviderHealthStore::record_provider_failure_action, V3ProviderHealthStore::record_provider_key_success, V3ProviderHealthStore::complete_probe_success, V3ProviderHealthStore::complete_probe_failure]
     allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
     may_enter_provider_body: false

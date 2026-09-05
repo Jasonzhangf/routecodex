@@ -301,7 +301,9 @@ pub enum V3RelayCoreError {
     EndpointPath(String),
     ModelNotFound(String),
     Target(String),
-    ProviderPoolExhausted { attempted_candidates: Vec<String> },
+    ProviderPoolExhausted {
+        attempted_candidates: Vec<String>,
+    },
     /// 治理层拦截但入口无投影路径（如 openai_chat 入口遇 Mode B web-search 剥离）：
     /// 非 provider 失败，禁止进入失败重试链，骨架 fail-fast 返回。
     WebSearchIntercepted(String),

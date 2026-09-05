@@ -89,8 +89,8 @@ requireMatch(
 );
 requireMatch(
   sampleStore,
-  /pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 200;/,
-  "Codex-sample retention must default to 200 requests",
+  /pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 100;/,
+  "Codex-sample retention must default to 100 requests",
 );
 requireMatch(
   sampleStore,
@@ -159,8 +159,8 @@ requireMatch(
 );
 requireMatch(
   configValidate,
-  /codex_samples:\s*false,/,
-  "Config compilation must not authorize live codex samples; lifecycle must opt in explicitly",
+  /codex_samples:\s*authoring\.codex_samples\.unwrap_or\(false\),/,
+  "Config compilation must preserve explicit codex samples authorization and default to false",
 );
 
 // 保真语义必须存在：全量捕获 + 原样诊断投影。
@@ -185,7 +185,7 @@ requireMatch(
 );
 requireMatch(
   serverLiveSnapshot,
-  /stream\.observe\([\s\S]*move \|terminal\|[\s\S]*persist_current\(disconnect\)/,
+  /stream\.observe\([\s\S]*move \|terminal\|[\s\S]*persist_current\(disconnect,\s*V3RecorderPersistPhase::Terminal\)/,
   "Recorded stream sample persistence must finalize at the shared stream terminal callback",
 );
 requireMatch(
@@ -251,7 +251,7 @@ requireMatch(
 requireMatch(
   sampleStore,
   /retention_caps_samples_at_configured_limit[\s\S]*V3_CODEX_SAMPLE_REQUEST_RETENTION/,
-  "Sample store must have a retention-cap test at 200",
+  "Sample store must have a retention-cap test at the configured default",
 );
 for (const [source, label] of [
   [v3FunctionMap, "V3 function map"],

@@ -281,7 +281,7 @@ function validateRuntimeIsolationSource() {
   requireValue(attemptStorePolicy.includes('pub struct V3AttemptStorePolicyAuthoringConfig'), `${configAttemptStoreRel}: attempt-store authoring policy owner missing`);
   requireValue(attemptStorePolicy.includes('pub struct V3AttemptStorePolicyManifest'), `${configAttemptStoreRel}: attempt-store manifest policy owner missing`);
   requireValue(attemptStorePolicy.includes('pub(crate) fn compile_attempt_store_policy('), `${configAttemptStoreRel}: attempt-store policy compiler missing`);
-  requireValue(configValidate.includes('compile_attempt_store_policy(server_id, authoring.attempt_store)?'), `${configValidateRel}: config validation must consume the attempt-store policy compiler`);
+  requireValue(/compile_attempt_store_policy\(\s*server_id,\s*authoring\.attempt_store,?\s*\)\?/u.test(configValidate), `${configValidateRel}: config validation must consume the attempt-store policy compiler`);
   requireValue(!configTypes.includes('pub struct V3AttemptStorePolicyAuthoringConfig') && !configTypes.includes('pub struct V3AttemptStorePolicyManifest'), `${configTypesRel}: aggregate config types must not own attempt-store policy implementations`);
 
   const webui = readText(webuiObservabilityRel);

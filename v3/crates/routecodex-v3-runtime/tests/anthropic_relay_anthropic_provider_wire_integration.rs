@@ -493,7 +493,8 @@ async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() 
         "Anthropic SSE failure must reach typed Error06 projection"
     );
     let message = output.client_response["error"]["message"].as_str().unwrap();
-    assert_eq!(message, "provider_error");
+    assert_eq!(message, "network error");
+    assert_eq!(output.client_response["error"]["code"], "network_error");
     assert!(
         !message.contains("not implemented"),
         "runtime must execute the Anthropic provider SSE decoder, not the old unimplemented branch"
@@ -540,7 +541,8 @@ async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_
         "Anthropic codec failure must reach typed Error06 projection"
     );
     let message = output.client_response["error"]["message"].as_str().unwrap();
-    assert_eq!(message, "provider_error");
+    assert_eq!(message, "network error");
+    assert_eq!(output.client_response["error"]["code"], "network_error");
 }
 
 fn manifest(server_id: &str) -> routecodex_v3_config::V3Config05ManifestPublished {

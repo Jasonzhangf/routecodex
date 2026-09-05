@@ -123,9 +123,9 @@ const cases = [
     name: 'Responses client SSE done terminal removed',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     marker:
-      'frames.push(Ok(build_v3_runtime_sse_json_frame(\n            "response.done",\n            &json!({\n                "type": "response.done",',
+      'frames.push(build_v3_runtime_sse_json_frame(\n            "response.done",\n            &json!({\n                "type": "response.done",',
     mutation:
-      'frames.push(Ok(build_v3_runtime_sse_json_frame(\n            "response.closed",\n            &json!({\n                "type": "response.closed",',
+      'frames.push(build_v3_runtime_sse_json_frame(\n            "response.closed",\n            &json!({\n                "type": "response.closed",',
     diagnostic: /response\.done/,
   },
   {

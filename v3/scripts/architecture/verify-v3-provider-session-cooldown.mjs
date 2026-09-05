@@ -3,10 +3,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const root = process.env.V3_PROVIDER_SESSION_COOLDOWN_ROOT
   ? path.resolve(process.env.V3_PROVIDER_SESSION_COOLDOWN_ROOT)
-  : process.cwd();
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const failures = [];
 
 function readRequired(relativePath) {
@@ -106,7 +107,7 @@ const files = {
   directRuntimeHelpers:
     "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs",
   directSse:
-    "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
+    "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
   responses:
     "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
   responsesTypes:
@@ -118,6 +119,7 @@ const files = {
   gemini:
     "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs",
   server: "v3/crates/routecodex-v3-server/src/lib.rs",
+  scopeMetadata: "v3/crates/routecodex-v3-server/src/scope_metadata.rs",
   serverTests: "v3/crates/routecodex-v3-server/src/tests/mod.rs",
   serverBlackbox: "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
   packageJson: "package.json",
@@ -198,14 +200,20 @@ requireMatch(
   /resource_id:\s*v3\.provider\.health_state[\s\S]*allowed_readers:\s*\[[^\]]*V3ProviderHealthStore::availability_for_session[^\]]*V3ProviderSessionAvailabilityReader::availability[^\]]*V3ProviderHealthStore::wait_for_provider_cooldown_probe_completion[^\]]*\]/u,
   "Resource map provider health readers must name the session-bound availability projection owner",
 );
-forbidMatch(
+const providerHealthStateResource = extractYamlItem(
   source.resourceMap,
+  "resource_id",
+  "v3.provider.health_state",
+  "v3.provider.health_state resource",
+);
+forbidBlockLine(
+  providerHealthStateResource,
   /allowed_writers:\s*\[[^\]]*V3ProviderFailureRuntimeHealth::record_provider_failure_record[^\]]*\]/u,
   "Resource map must not register Runtime wrappers as provider health state writers",
 );
-forbidMatch(
-  source.resourceMap,
-  /resource_id:\s*v3\.provider\.health_state[\s\S]*\bV3ProviderHealthStore::record_provider_failure\b|resource_id:\s*v3\.provider\.health_state[\s\S]*\bV3ProviderHealthStore::record_provider_success\b/u,
+forbidBlockLine(
+  providerHealthStateResource,
+  /\bV3ProviderHealthStore::record_provider_(failure|success)\b/u,
   "Resource map must not retain legacy provider-global health mutation owners",
 );
 requireMatch(
@@ -296,9 +304,9 @@ requireMatch(
   /feature_id:\s*v3\.debug_error_foundation[\s\S]*V3ProviderFailureRuntimeHealth::record_provider_failure_record[\s\S]*V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope[\s\S]*V3ProviderFailureRuntimeHealth::session_bound_availability[\s\S]*V3ProviderSessionAvailabilityReader::availability[\s\S]*V3ProviderHealthStore::record_provider_failure_in_session[\s\S]*V3ProviderHealthStore::record_provider_success_in_session[\s\S]*V3ProviderHealthStore::availability_for_session[\s\S]*build_v3_provider_failure_session_scope_for_request/u,
   "Function map must bind the session health owner, scoped availability, and request scope builder",
 );
-forbidMatch(
-  source.functionMap,
-  /feature_id:\s*v3\.debug_error_foundation[\s\S]*V3ProviderHealthStore::record_provider_failure\n|feature_id:\s*v3\.debug_error_foundation[\s\S]*V3ProviderHealthStore::record_provider_success\n/u,
+forbidBlockLine(
+  debugErrorFunction,
+  /\bV3ProviderHealthStore::record_provider_(failure|success)\b/u,
   "Function map must not retain removed provider-global health entry symbols",
 );
 requireMatch(
@@ -436,7 +444,7 @@ requireMatch(
 );
 requireMatch(
   source.serverTests,
-  /fn provider_failure_scope_uses_internal_request_id_without_client_session_header\(\)/u,
+  /fn provider_failure_scope_never_rejects_missing_session_identity\(\)/u,
   "Server must isolate headerless requests with their existing internal request id",
 );
 requireMatch(
@@ -460,8 +468,8 @@ const serverFailureSessionScopeBuilder = extractBracedBlock(
   "Server provider failure session scope builder",
 );
 const serverFailureSessionHeaderReader = extractBracedBlock(
-  source.server,
-  "fn provider_failure_session_id_from_request_headers",
+  source.scopeMetadata,
+  "pub(crate) fn responses_control_scope_headers",
   "Server provider failure session header reader",
 );
 requireMatch(
@@ -491,7 +499,7 @@ forbidMatch(
 );
 requireMatch(
   `${source.kernel}\n${source.directSse}\n${source.responses}\n${source.openaiChat}\n${source.anthropic}\n${source.gemini}`,
-  /record_post_commit_provider_stream_failure\([\s\S]*failure_session_scope/u,
+  /record_post_commit_provider_stream_failure_from_source\([\s\S]*failure_session_scope/u,
   "post-commit failure handling must receive the same typed session scope",
 );
 requireMatch(
@@ -564,20 +572,31 @@ requireMatch(
   /select_v3_expanded_target_with_exhaustion_rescue/u,
   "Direct provider selection must consume the shared exhaustion rescue owner",
 );
-const directSseOutcomeStruct = extractBracedBlock(
+const directSseMarker = "pub(crate) async fn project_and_collect_direct_sse_attempt";
+const directSseProjector = extractBracedBlock(
   source.directSse,
-  "pub(super) struct V3DirectSseProviderOutcome",
-  "Direct SSE provider outcome",
+  directSseMarker,
+  "Direct SSE provider stream projector",
+);
+const directSseStart = source.directSse.indexOf(directSseMarker);
+const directSseBodyStart = source.directSse.indexOf("{", directSseStart + directSseMarker.length);
+const directSseSignature = directSseStart < 0 || directSseBodyStart < 0
+  ? ""
+  : source.directSse.slice(directSseStart, directSseBodyStart);
+requireMatch(
+  directSseSignature,
+  /\bfailure_session_scope:\s*&V3ProviderFailureSessionScope,/u,
+  "Direct SSE projection must receive the original typed failure session scope",
 );
 requireMatch(
-  directSseOutcomeStruct,
-  /failure_session_scope:\s*V3ProviderFailureSessionScope/u,
-  "Direct SSE post-commit outcome must retain the original typed failure session scope",
+  directSseProjector,
+  /Some\(failure_session_scope\.session_id\(\)\.to_owned\(\)\)/u,
+  "Direct SSE projection must retain the original typed failure session scope",
 );
 const kernelProductionSource = source.kernel.split("#[cfg(test)]", 1)[0];
-forbidMatch(
+requireMatch(
   kernelProductionSource,
-  /direct_failure_session_id|continuation_scope[\s\S]{0,240}failure_session_scope/u,
+  /let direct_failure_session_scope = standardized\.failure_session_scope\.clone\(\);/u,
   "Direct runtime must not derive provider failure scope from continuation state",
 );
 

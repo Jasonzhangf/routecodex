@@ -1139,7 +1139,7 @@ flowchart TD
     c_29_v3_debug_error_foundation_mainline_30["v3-runtime::hub_v1<br/>V3ProviderRequestDryRunNoNetworkTransport::send<br/><small>routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs</small>"]
     c_29_v3_debug_error_foundation_mainline_31["v3-runtime::hub_v1<br/>captured_provider_response_for_dry_run<br/><small>routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs</small>"]
     c_29_v3_debug_error_foundation_mainline_32["v3-runtime::hub_v1<br/>execute_v3_anthropic_relay_response_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small>"]
-    c_29_v3_debug_error_foundation_mainline_33["v3-runtime::hub_v1<br/>V3AnthropicRelayRuntimeOutput::client_response<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small>"]
+    c_29_v3_debug_error_foundation_mainline_33["v3-runtime::hub_v1<br/>V3AnthropicRelayRuntimeOutput::client_response<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs</small>"]
   end
   subgraph c_29_v3_debug_error_foundation_mainline_m_v3_server["v3-server"]
     c_29_v3_debug_error_foundation_mainline_25["v3-server<br/>build_v3_provider_failure_session_scope_for_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
@@ -1191,7 +1191,7 @@ flowchart TD
 | `v3-de-19` | `V3DryRunFixture` → `V3ProviderResp14Raw` | anchored | V3DryRunNoNetworkTransport::send<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | V3ProviderResp14Raw::from_sse<br/><small>routecodex-v3-provider-responses/src/raw_response.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-20` | `V3Resp15ClientPayload` → `V3DryRunResponseReplayCaptured` | anchored | execute_v3_responses_direct_dry_run_runtime<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | collect_v3_response_dry_run_client_payload<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-21` | `V3DryRunFixture` → `V3ProviderResp14Raw` | anchored | V3ProviderRequestDryRunNoNetworkTransport::send<br/><small>routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs</small> | captured_provider_response_for_dry_run<br/><small>routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs</small> | `v3.debug_error_foundation` |
-| `v3-de-22` | `V3AnthropicRelayRuntimeOutput` → `V3DryRunResponseReplayCaptured` | anchored | execute_v3_anthropic_relay_response_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | V3AnthropicRelayRuntimeOutput::client_response<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-22` | `V3AnthropicRelayRuntimeOutput` → `V3DryRunResponseReplayCaptured` | anchored | execute_v3_anthropic_relay_response_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | V3AnthropicRelayRuntimeOutput::client_response<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs</small> | `v3.debug_error_foundation` |
 
 ## v3.responses_continuation.remote_contract_store
 
@@ -2853,7 +2853,7 @@ flowchart TD
     c_70_v3_responses_chat_sse_typed_tree_3["v3-runtime::hub_v1<br/>V3ResponsesSseProtocolMetadata::from_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small>"]
     c_70_v3_responses_chat_sse_typed_tree_4["v3-runtime::hub_v1<br/>V3ResponsesSseReducerState::apply_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small>"]
     c_70_v3_responses_chat_sse_typed_tree_5["v3-runtime::hub_v1<br/>classify_v3_responses_sse_output_item<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small>"]
-    c_70_v3_responses_chat_sse_typed_tree_6["v3-runtime::hub_v1<br/>rewrite_v3_responses_sse_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small>"]
+    c_70_v3_responses_chat_sse_typed_tree_6["v3-runtime::hub_v1<br/>rewrite_v3_responses_sse_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree_projection.rs</small>"]
     c_70_v3_responses_chat_sse_typed_tree_7["v3-runtime::hub_v1<br/>V3HubRelayResponseHookRegistry::typed_sse_catalog<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
     c_70_v3_responses_chat_sse_typed_tree_8["v3-runtime::hub_v1<br/>V3RelaySseHookCatalog::rewrite_responses<br/><small>routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs</small>"]
   end
@@ -2869,7 +2869,7 @@ flowchart TD
 | `v3-responses-json-document-01` | `ProviderRespInbound01Raw` → `HubRespInbound02Parsed` | anchored | run_json_response_hooks<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs</small> | V3ResponsesJsonDocument::from_json<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 | `v3-responses-sse-tree-01` | `ProviderRespInbound01Raw` → `HubRespInbound02Parsed` | anchored | observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs</small> | V3ResponsesSseProtocolMetadata::from_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 | `v3-responses-sse-tree-02` | `HubRespInbound02Parsed` → `HubRespChatProcess03Governed` | anchored | V3ResponsesSseReducerState::apply_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small> | classify_v3_responses_sse_output_item<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
-| `v3-responses-sse-tree-03` | `HubRespChatProcess03Governed` → `HubRespOutbound04ClientSemantic` | binding_pending | rewrite_v3_responses_sse_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small> | rewrite_v3_responses_sse_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
+| `v3-responses-sse-tree-03` | `HubRespChatProcess03Governed` → `HubRespOutbound04ClientSemantic` | binding_pending | rewrite_v3_responses_sse_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree_projection.rs</small> | rewrite_v3_responses_sse_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree_projection.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 | `v3-responses-relay-typed-hook-catalog-01` | `HubRespInbound02Parsed` → `HubRespOutbound04ClientSemantic` | anchored | V3HubRelayResponseHookRegistry::typed_sse_catalog<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | V3RelaySseHookCatalog::rewrite_responses<br/><small>routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 
 ## v3.openai_chat_sse_typed_tree

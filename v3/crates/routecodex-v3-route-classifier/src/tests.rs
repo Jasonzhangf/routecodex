@@ -590,8 +590,10 @@ fn live_responses_history_image_attachment_drives_multimodal_route_via_typed_car
     });
     let entries = project_v3_current_turn_entries_from_value(&request);
     let signals = build_v3_current_turn_route_facts(&entries);
-    assert!(signals.has_current_turn_image,
-        "current-turn image must activate multimodal route fact via typed carrier");
+    assert!(
+        signals.has_current_turn_image,
+        "current-turn image must activate multimodal route fact via typed carrier"
+    );
     let route = classify_route(&RouteClassifierInput {
         latest_message_from_user: signals.latest_message_from_user,
         has_image_attachment: signals.has_current_turn_image,
@@ -605,7 +607,6 @@ fn live_responses_history_image_attachment_drives_multimodal_route_via_typed_car
         route.reasoning
     );
 }
-
 
 // Negative regression: historical input_image must NOT drive the multimodal
 // route when the current-turn message carries only text. Mirrors the
@@ -639,8 +640,11 @@ fn live_responses_history_image_no_current_image_does_not_route_multimodal() {
         has_current_turn_tool_output: signals.has_current_turn_tool_output,
         ..Default::default()
     });
-    assert_ne!(route.route_name, "multimodal",
-        "text-only current turn must not pick multimodal; route={:?}", route);
+    assert_ne!(
+        route.route_name, "multimodal",
+        "text-only current turn must not pick multimodal; route={:?}",
+        route
+    );
     assert!(
         !route.reasoning.contains("multimodal:metadata-attachment"),
         "negative case must not log multimodal:metadata-attachment; route={:?}",
@@ -706,11 +710,24 @@ fn responses_role_for_value_distinguishes_tool_and_function_call_output_from_sys
     });
     let entries = project_v3_current_turn_entries_from_value(&thread);
     if let V3CurrentTurnEntries::Responses(es) = entries {
-        let system_count = es.iter().filter(|e| e.role == ResponsesTurnRole::System).count();
-        assert_eq!(system_count, 0,
-            "role=tool / tool_output must not project as System; got entries={:?}", es);
-        let tool_count = es.iter().filter(|e| e.role == ResponsesTurnRole::Tool).count();
-        assert!(tool_count >= 1, "tool side should map to Tool role; entries={:?}", es);
+        let system_count = es
+            .iter()
+            .filter(|e| e.role == ResponsesTurnRole::System)
+            .count();
+        assert_eq!(
+            system_count, 0,
+            "role=tool / tool_output must not project as System; got entries={:?}",
+            es
+        );
+        let tool_count = es
+            .iter()
+            .filter(|e| e.role == ResponsesTurnRole::Tool)
+            .count();
+        assert!(
+            tool_count >= 1,
+            "tool side should map to Tool role; entries={:?}",
+            es
+        );
     } else {
         panic!("expected Responses typed entries for fixture thread");
     }

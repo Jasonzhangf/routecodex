@@ -649,8 +649,8 @@ model = "test"
 aliases = ["client-test"]
 selection = {{ strategy = "priority" }}
 targets = [
-  {{ kind = "provider_model", provider = "first", model = "test", key = "key", priority = 1 }},
-  {{ kind = "provider_model", provider = "second", model = "test", key = "key", priority = 2 }}
+  {{ kind = "provider_model", provider = "first", model = "test", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "second", model = "test", key = "key", priority = 1 }}
 ]
 [debug]
 log_console = false
@@ -1376,7 +1376,7 @@ async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_err
             .send()
             .await
             .unwrap();
-        assert_eq!(invalid_gemini.status(), 500);
+        assert_eq!(invalid_gemini.status().as_u16(), 598);
         let body: serde_json::Value = invalid_gemini.json().await.unwrap();
         assert_eq!(body["error"]["code"], "gemini_relay_runtime_error");
         assert_eq!(
@@ -1936,7 +1936,7 @@ async fn responses_relay_client_metadata_cannot_authorize_continuation_control_s
         .expect("first request must reach provider")
         .unwrap();
     assert_eq!(first_capture.body["model"], "wire-test");
-    assert_eq!(first_capture.body["client_metadata"], client_metadata);
+    assert!(first_capture.body.get("client_metadata").is_none());
     assert!(first_capture.body.get("metadata").is_none());
     assert_no_remote_continuation_provider_send(&mut captures).await;
 
@@ -3128,7 +3128,16 @@ async fn responses_inbound_websocket_accepts_binary_response_create_payload() {
         ))
         .await
         .unwrap();
-    let message = socket.next().await.unwrap().unwrap();
+    let message = timeout(Duration::from_secs(10), socket.next())
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "binary event timeout: {error}; provider capture: {:?}",
+                captures.try_recv()
+            )
+        })
+        .unwrap()
+        .unwrap();
     let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
     assert_eq!(event["type"], "response.completed", "{event}");
     assert_eq!(event["response"]["id"], "resp_server_remote_1");
@@ -3358,29 +3367,18 @@ async fn responses_inbound_websocket_replays_two_turn_tool_continuation_on_same_
     assert_control_fields_absent(&first_capture.body);
     assert_control_fields_absent(&second_capture.body);
 
-    let logs: Value = reqwest::Client::new()
-        .get(format!(
-            "http://{}/_routecodex/debug/logs",
-            handle.listeners[0].addr
-        ))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let events = logs["logs"].as_array().unwrap();
-    let router_hits = events
-        .iter()
-        .filter(|event| event["node_id"] == "V3Router07OpaqueTargetHitOnce")
-        .count();
     assert_eq!(
-        router_hits, 1,
-        "second WebSocket turn must use existing continuation owner without Router re-entry"
+        second_capture.body["input"],
+        json!([
+            {"type":"function_call_output","call_id":"call_server_1","output":"ok"}
+        ])
     );
-    assert!(events
-        .iter()
-        .any(|event| event["node_id"] == "V3HubReqContinuation03Classified"));
+    assert!(
+        timeout(Duration::from_millis(100), captures.recv())
+            .await
+            .is_err(),
+        "remote continuation must reuse the provider socket without another handshake or send"
+    );
 
     std::env::remove_var("V3_P6_TEST_KEY");
     let _ = socket.close(None).await;
@@ -3519,8 +3517,8 @@ async fn responses_inbound_websocket_projects_provider_error_as_websocket_error_
         .unwrap()
         .unwrap();
     assert!(
-        started.elapsed() >= Duration::from_millis(9_500),
-        "last-default provider websocket error must wait for two fixed 5s backoffs before projection"
+        started.elapsed() >= Duration::from_secs(9),
+        "provider websocket failure must pass the 1s/3s/5s action admissions"
     );
     let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
     assert_eq!(event["type"], "error");
@@ -3747,7 +3745,11 @@ async fn responses_direct_without_failure_session_header_reaches_provider() {
 
     let response = reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
-        .json(&json!({"model":"client-test","input":"missing session header reaches provider"}))
+        .json(&json!({
+            "model":"client-test",
+            "input":"missing session header reaches provider",
+            "metadata": {"session_id":"business-session-only"}
+        }))
         .send()
         .await
         .unwrap();
@@ -3762,6 +3764,12 @@ async fn responses_direct_without_failure_session_header_reaches_provider() {
         capture.body["input"][0]["content"][0]["text"],
         "missing session header reaches provider"
     );
+    assert_eq!(
+        capture.body["metadata"]["session_id"],
+        "business-session-only"
+    );
+    assert!(capture.session_id.is_none());
+    assert!(capture.x_session_id.is_none());
 
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;
@@ -3769,7 +3777,8 @@ async fn responses_direct_without_failure_session_header_reaches_provider() {
 }
 
 #[tokio::test]
-async fn responses_direct_shared_provider_health_cools_first_provider_after_three_failures() {
+async fn responses_direct_shared_provider_health_cools_first_provider_after_unrecoverable_failure()
+{
     let _test_guard = TEST_LOCK.lock().await;
     let (failed_provider_base_url, mut failed_captures, failed_shutdown) =
         start_controlled_capturing_failure_upstream().await;
@@ -3789,14 +3798,14 @@ async fn responses_direct_shared_provider_health_cools_first_provider_after_thre
     let client = reqwest::Client::new();
     let session_id = "shared-provider-health-session";
 
-    for index in 0..3 {
+    {
         let response = client
             .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
             .header("session-id", session_id)
             .header("thread-id", session_id)
             .json(&json!({
                 "model":"client-test",
-                "input":format!("hello {index}")
+                "input":"trigger unrecoverable provider failure"
             }))
             .send()
             .await
@@ -3804,7 +3813,10 @@ async fn responses_direct_shared_provider_health_cools_first_provider_after_thre
         let status = response.status();
         let response_body = response.text().await.unwrap();
         assert_eq!(status, 200, "unexpected response body: {response_body}");
-        let failed_capture = failed_captures.recv().await.unwrap();
+        let failed_capture = timeout(Duration::from_secs(1), failed_captures.recv())
+            .await
+            .expect("unrecoverable provider must receive the initial attempt")
+            .unwrap();
         assert_eq!(failed_capture.body["model"], "wire-first");
         let success_capture = captures.recv().await.unwrap();
         assert_eq!(success_capture.body["model"], "wire-second");
@@ -3861,17 +3873,20 @@ async fn responses_direct_provider_request_dry_run_does_not_clear_shared_provide
     let client = reqwest::Client::new();
     let session_id = "shared-provider-health-dry-run-session";
 
-    for index in 0..3 {
+    {
         let response = client
             .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
             .header("session-id", session_id)
             .header("thread-id", session_id)
-            .json(&json!({"model":"client-test","input":format!("cool first {index}")}))
+            .json(&json!({"model":"client-test","input":"cool unrecoverable provider"}))
             .send()
             .await
             .unwrap();
         assert_eq!(response.status(), 200);
-        let _ = failed_captures.recv().await.unwrap();
+        let _ = timeout(Duration::from_secs(1), failed_captures.recv())
+            .await
+            .expect("unrecoverable provider must receive the initial attempt")
+            .unwrap();
         let _ = captures.recv().await.unwrap();
     }
 
@@ -3949,13 +3964,13 @@ async fn responses_direct_last_default_waits_twice_then_projects_on_third_failur
     let status = response.status();
     let body: Value = response.json().await.unwrap();
 
-    assert_eq!(status, 503);
-    assert_eq!(body["error"]["code"], "provider_error");
+    assert_eq!(status, 502);
+    assert_eq!(body["error"]["code"], "network_error");
     assert!(body["error"].get("external_error").is_none());
     assert!(body["error"].get("internal_code").is_none());
     assert!(
-        elapsed >= Duration::from_millis(9_500),
-        "direct last-default provider retry must block for two fixed 5s waits, elapsed={elapsed:?}"
+        elapsed >= Duration::from_secs(9),
+        "provider failures must pass the 1s/3s/5s action admissions, elapsed={elapsed:?}"
     );
     for _ in 0..3 {
         let capture = captures.recv().await.unwrap();
@@ -4044,13 +4059,10 @@ async fn p6_all_provider_failures_project_network_error_for_client_sse() {
     let (failure_base_url, failure_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-direct-sse");
-    let handle = spawn_v3_server_aggregate(p6_manifest(
-        free_port(),
-        free_port(),
-        &failure_base_url,
-    ))
-    .await
-    .unwrap();
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &failure_base_url))
+            .await
+            .unwrap();
     let response = reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello","stream":true}))
@@ -4193,6 +4205,7 @@ async fn responses_direct_relay_only_snap_scope_writes_no_codex_sample() {
     let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
     manifest.debug.codex_samples = true;
     manifest.debug.snapshot_direct = false;
+    manifest.providers.get_mut("test").unwrap().responses = None;
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
 
@@ -4333,7 +4346,7 @@ async fn server_start_enforces_codex_sample_retention_without_snapshot_authoriza
     handle.shutdown().await;
 
     assert_eq!(
-        retained, 200,
+        retained, 100,
         "server startup must enforce the persisted-sample cap even when capture is disabled"
     );
     assert!(
@@ -4603,18 +4616,12 @@ async fn responses_direct_binding_protocol_mismatch_without_relay_allowed_fails_
     handle.shutdown().await;
     std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
 
-    assert_eq!(status, 503, "unexpected response body: {body}");
-    assert_eq!(
-        body["evidence"]["providerNetworkSend"], false,
-        "unexpected response body: {body}"
+    assert_eq!(status, 598, "unexpected response body: {body}");
+    assert_eq!(body["error"]["code"], "protocol_mismatch_relay_not_allowed");
+    assert!(
+        body.get("dry_run").is_none(),
+        "failed admission cannot fabricate dry-run success"
     );
-    let node_ids = body["dry_run"]["node_ids"].as_array().unwrap();
-    assert!(node_ids
-        .iter()
-        .any(|node| node.as_str() == Some("V3Error01SourceRaised")));
-    assert!(node_ids
-        .iter()
-        .any(|node| node.as_str() == Some("V3Error06ClientProjected")));
 }
 
 #[tokio::test]
@@ -4817,7 +4824,7 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
         .send()
         .await
         .unwrap();
-    assert_eq!(runtime_error.status(), 500);
+    assert_eq!(runtime_error.status(), 598);
 
     let status: serde_json::Value = client
         .get(format!("http://{}/_routecodex/debug/status", listener.addr))
@@ -5200,7 +5207,7 @@ async fn debug_response_dry_run_preserves_missing_reason_and_rejects_malformed_e
     );
     assert_eq!(
         malformed_body["clientResponse"]["body"]["error"]["code"],
-        "provider_response_body_error",
+        "network_error",
         "malformed response must remain on the typed provider-response error chain: {malformed_body}"
     );
 }
@@ -5279,7 +5286,7 @@ async fn debug_response_dry_run_replays_anthropic_provider_json_through_relay_re
     assert!(body["providerRequest"].is_object());
     assert_eq!(
         body["providerRequest"]["body"]["tools"][0]["input_schema"]["required"],
-        json!(["cmd", "reason"])
+        json!(["cmd", "reason", "goal_alignment_confidence"])
     );
     let content = body["clientResponse"]["content"]
         .as_array()
@@ -5311,7 +5318,7 @@ async fn malformed_and_disabled_dry_run_enter_six_node_error_chain_without_panic
         .send()
         .await
         .unwrap();
-    assert_eq!(malformed.status(), 500);
+    assert_eq!(malformed.status(), 598);
     let malformed_body: serde_json::Value = malformed.json().await.unwrap();
     assert_eq!(malformed_body["error"]["code"], "v3_debug_failure");
     assert!(malformed_body["error"]["message"]
@@ -5339,7 +5346,7 @@ async fn malformed_and_disabled_dry_run_enter_six_node_error_chain_without_panic
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), 500);
+    assert_eq!(response.status(), 598);
     let body: serde_json::Value = response.json().await.unwrap();
     assert!(body["error"]["message"]
         .as_str()

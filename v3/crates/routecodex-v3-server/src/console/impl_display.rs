@@ -49,7 +49,10 @@ fn format_v3_console_cache_summary(usage: &V3RuntimeUsageSummary) -> Option<Stri
     } else {
         // Anthropic-compatible usage reports the uncached increment separately.
         let cached = usage.cache_read_input_tokens?;
-        (cached, usage.input_tokens.map(|input| cached as f64 + input as f64))
+        (
+            cached,
+            usage.input_tokens.map(|input| cached as f64 + input as f64),
+        )
     };
     Some(match denominator {
         Some(denominator) if denominator > 0.0 => {

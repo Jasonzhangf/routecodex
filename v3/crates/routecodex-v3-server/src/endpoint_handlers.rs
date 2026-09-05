@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub(crate) async fn pending_endpoint_after_responses_admission(
+pub(crate) fn pending_endpoint_after_responses_admission(
     state: Arc<V3ListenerState>,
     front_connection_identity: Option<V3FrontConnectionIdentity>,
     request_headers: HeaderMap,
@@ -17,8 +17,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     pending_owner_symbol: Option<String>,
     request_purpose: V3RequestPurpose,
     payload: Value,
-) -> Response<Body> {
-    pending_endpoint_after_responses_admission_inner(
+) -> std::pin::Pin<Box<impl std::future::Future<Output = Response<Body>> + Send>> {
+    // Avoid a second poll frame for the large protocol-dispatch future.
+    Box::pin(pending_endpoint_after_responses_admission_inner(
         state,
         front_connection_identity,
         request_headers,
@@ -30,8 +31,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
         pending_owner_symbol,
         request_purpose,
         payload,
-    )
-    .await
+    ))
 }
 
 pub(crate) async fn pending_endpoint_after_responses_admission_inner(
@@ -199,29 +199,24 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         }
     }
-    let provider_failure_session_scope = match get_failure_session_scope(
-        &state.server,
-        &request_headers,
-        &payload,
-        &entry_protocol,
-        &request_id,
-    ) {
-        Ok(scope) => scope,
-        Err(message) => {
-            return error_output_response_for_server_with_project_path(
-                &state.server,
-                &path,
-                &request_id,
-                project_v3_server_runtime_failure(
-                    "V3Server03HttpRequestRaw",
-                    "provider_transport_handoff_scope_incomplete",
-                    message,
-                    598,
-                ),
-                None,
-            );
-        }
-    };
+    let provider_failure_session_scope =
+        match get_failure_session_scope(&state.server, &request_headers, &request_id) {
+            Ok(scope) => scope,
+            Err(message) => {
+                return error_output_response_for_server_with_project_path(
+                    &state.server,
+                    &path,
+                    &request_id,
+                    project_v3_server_runtime_failure(
+                        "V3Server03HttpRequestRaw",
+                        "provider_transport_handoff_scope_incomplete",
+                        message,
+                        598,
+                    ),
+                    None,
+                );
+            }
+        };
     let provider_failure_session_scope = match provider_failure_session_scope
         .with_transport_handoff_scope(
             request_identity.pipeline_id.clone(),
@@ -373,31 +368,33 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             output.status,
             output.node_trace.len(),
         );
-        if let Err(error) = persist_v3_codex_sample_payload(
-            &state,
-            &entry_protocol,
-            &path,
-            &request_id,
-            "request.json",
-            &payload,
-        ) {
-            return foundation_output_response(project_v3_debug_failure(
-                "V3DebugProviderRequestCaptured",
-                V3DebugError::Sink(error),
-            ));
-        }
-        if let Err(error) = persist_v3_codex_sample_payload(
-            &state,
-            &entry_protocol,
-            &path,
-            &request_id,
-            "response.json",
-            &output.body,
-        ) {
-            return foundation_output_response(project_v3_debug_failure(
-                "V3DebugProviderResponseCaptured",
-                V3DebugError::Sink(error),
-            ));
+        if v3_codex_sample_scope_allows(&state, execution_mode) {
+            if let Err(error) = persist_v3_codex_sample_payload(
+                &state,
+                &entry_protocol,
+                &path,
+                &request_id,
+                "request.json",
+                &payload,
+            ) {
+                return foundation_output_response(project_v3_debug_failure(
+                    "V3DebugProviderRequestCaptured",
+                    V3DebugError::Sink(error),
+                ));
+            }
+            if let Err(error) = persist_v3_codex_sample_payload(
+                &state,
+                &entry_protocol,
+                &path,
+                &request_id,
+                "response.json",
+                &output.body,
+            ) {
+                return foundation_output_response(project_v3_debug_failure(
+                    "V3DebugProviderResponseCaptured",
+                    V3DebugError::Sink(error),
+                ));
+            }
         }
         if let Some(response) = record_v3_live_snapshot_projection(
             &state,

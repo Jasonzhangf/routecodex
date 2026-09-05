@@ -14,7 +14,7 @@ features:
   - v3.provider.key_health_state
   entry_symbols:
   - V3ProviderHealthStore::record_provider_failure_action
-  - V3ProviderHealthStore::record_provider_success
+  - V3ProviderHealthStore::record_provider_key_success
   - V3ProviderHealthStore::complete_probe_success
   - V3ProviderHealthStore::complete_probe_failure
   - V3ProviderHealthStore::scheduling_projection
@@ -3315,6 +3315,8 @@ features:
   - routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/websocket.rs
+  - v3/crates/routecodex-v3-server/src/restart_handoff.rs
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - scripts/architecture/verify-v3-responses-inbound-websocket-proxy.mjs
@@ -3337,7 +3339,7 @@ features:
   - execute_responses_direct_server_outcome
   - execute_responses_relay_websocket_output
   - send_responses_relay_websocket_output
-  - send_responses_websocket_sse_stream
+  - send_responses_websocket_committed_sse_stream
   allowed_paths:
   - v3/crates/routecodex-v3-server/Cargo.toml
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -4724,6 +4726,9 @@ features:
   - routecodex-v3-cli
   owner_files:
   - scripts/install-v3-cli.mjs
+  - v3/scripts/build.mjs
+  - v3/scripts/install-cli.mjs
+  - v3/tests/scripts/v3-cli-distribution.spec.mjs
   - scripts/ensure-cli-command-shim.mjs
   - scripts/install-global.sh
   - v3/crates/routecodex-v3-config/Cargo.toml
@@ -4740,6 +4745,8 @@ features:
   - installAliasAtomic
   allowed_paths:
   - scripts/install-v3-cli.mjs
+  - v3/scripts/build.mjs
+  - v3/tests/scripts/v3-cli-distribution.spec.mjs
   - scripts/ensure-cli-command-shim.mjs
   - scripts/install-global.sh
   - tests/scripts/v3-cli-distribution.spec.mjs
@@ -4919,7 +4926,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_applies_selected_target_image_session_compat
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_projects_image_to_session_placeholder
   - npm run verify:responses-continuation-immutable-boundary
@@ -5409,7 +5416,7 @@ features:
   entry_symbols:
   - build_v3_provider_failure_action_from_v3_error_02
   - V3ProviderHealthStore::record_provider_failure_action
-  - V3ProviderHealthStore::record_provider_success
+  - V3ProviderHealthStore::record_provider_key_success
   - V3ProviderHealthStore::complete_probe_success
   - V3ProviderHealthStore::complete_probe_failure
   - V3ProviderHealthStore::complete_probe_success_at_generation

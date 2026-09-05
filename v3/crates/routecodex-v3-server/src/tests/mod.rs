@@ -3,28 +3,15 @@ use crate::webui_observability::V3WebuiObservability;
 use routecodex_v3_error::V3ErrorSourceKind;
 use routecodex_v3_runtime::V3AnthropicRelayClientBody;
 use std::collections::BTreeMap;
-use std::sync::{Mutex as StdMutex, OnceLock};
+use std::sync::Mutex as StdMutex;
 
 static TEST_TZ_LOCK: StdMutex<()> = StdMutex::new(());
 static TEST_HOME_LOCK: StdMutex<()> = StdMutex::new(());
-static TEST_PROVIDER_STATE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 fn test_v3_provider_health(
     manifest: &V3Config05ManifestPublished,
 ) -> V3ResponsesRelayProviderHealthHandle {
-    TEST_PROVIDER_STATE_DIR.get_or_init(|| {
-        if let Some(configured) = std::env::var_os("ROUTECODEX_V3_STATE_DIR") {
-            return PathBuf::from(configured);
-        }
-        let directory = std::env::temp_dir().join(format!(
-            "routecodex-v3-server-tests-state-{}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&directory).expect("test provider state directory must be creatable");
-        std::env::set_var("ROUTECODEX_V3_STATE_DIR", &directory);
-        directory
-    });
-    V3ResponsesRelayProviderHealthHandle::from_manifest(manifest)
+    V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest)
 }
 
 fn test_committed_anthropic_sse(events: Value) -> V3CommittedClientSseStream {
@@ -1877,12 +1864,9 @@ fn provider_failure_scope_uses_existing_session_header() {
         "session-id",
         HeaderValue::from_static("existing-session-id"),
     );
-    let scope = build_v3_provider_failure_session_scope_for_request(
-        &state.server,
-        &headers,
-        &serde_json::json!({}),
-    )
-    .expect("existing session header must construct the control scope");
+    let scope = build_v3_provider_failure_session_scope_for_request(&state.server, &headers)
+        .expect("valid control header")
+        .expect("existing session header must construct the control scope");
 
     assert_eq!(scope.session_id(), "existing-session-id");
     let _ = fs::remove_file(log_file);
@@ -1897,39 +1881,37 @@ fn provider_failure_scope_reads_canonical_session_from_codex_turn_metadata() {
         "x-codex-turn-metadata",
         HeaderValue::from_static(r#"{"session_id":"dsh-session-id","thread_id":"dsh-session-id"}"#),
     );
-    let scope = get_failure_session_scope(
-        &state.server,
-        &headers,
-        &serde_json::json!({}),
-        "responses",
-        "request-123",
-    )
-    .expect("canonical session in codex turn metadata must construct the control scope");
+    let scope = get_failure_session_scope(&state.server, &headers, "request-123")
+        .expect("canonical session in codex turn metadata must construct the control scope");
 
     assert_eq!(scope.session_id(), "dsh-session-id");
     let _ = fs::remove_file(log_file);
 }
 
 #[test]
-fn provider_failure_scope_accepts_dsh_body_session_identity() {
+fn provider_failure_scope_allocates_distinct_request_local_identities() {
     let log_file = test_v3_console_log_file("provider-failure-session-header-missing");
     let state = test_v3_listener_state(&log_file, 5555);
-    let payload = serde_json::json!({
-        "client_metadata": {
-            "session_id": "dsh-body-session",
-            "x-codex-turn-metadata": "{\"session_id\":\"dsh-turn-session\",\"turn_id\":\"dsh-turn-id\"}"
-        }
-    });
-    let scope = get_failure_session_scope(
-        &state.server,
-        &HeaderMap::new(),
-        &payload,
-        "responses",
-        "request-123",
-    )
-    .expect("registered DSH body session identity must be accepted");
+    let scope = get_failure_session_scope(&state.server, &HeaderMap::new(), "request-123")
+        .expect("body metadata must not prevent request-local scope allocation");
 
-    assert_eq!(scope.session_id(), "dsh-body-session");
+    assert_eq!(scope.session_id(), "request-local-request-123");
+    let other = get_failure_session_scope(&state.server, &HeaderMap::new(), "request-456")
+        .expect("another request-local scope");
+    assert_ne!(scope.session_id(), other.session_id());
+    let _ = fs::remove_file(log_file);
+}
+
+#[test]
+fn provider_failure_scope_rejects_malformed_control_header() {
+    let log_file = test_v3_console_log_file("provider-failure-invalid-control-header");
+    let state = test_v3_listener_state(&log_file, 5555);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-codex-turn-metadata",
+        HeaderValue::from_static("not-json"),
+    );
+    assert!(get_failure_session_scope(&state.server, &headers, "request-123").is_err());
     let _ = fs::remove_file(log_file);
 }
 
@@ -1937,14 +1919,8 @@ fn provider_failure_scope_accepts_dsh_body_session_identity() {
 fn provider_failure_scope_never_rejects_missing_session_identity() {
     let log_file = test_v3_console_log_file("provider-failure-session-missing-local");
     let state = test_v3_listener_state(&log_file, 5555);
-    let scope = get_failure_session_scope(
-        &state.server,
-        &HeaderMap::new(),
-        &serde_json::json!({}),
-        "responses",
-        "request-123",
-    )
-    .expect("ordinary requests must remain admissible without a session header");
+    let scope = get_failure_session_scope(&state.server, &HeaderMap::new(), "request-123")
+        .expect("ordinary requests must remain admissible without a session header");
 
     assert_eq!(scope.session_id(), "request-local-request-123");
     let _ = fs::remove_file(log_file);
@@ -3747,7 +3723,10 @@ async fn responses_relay_canonical_network_error_stays_json_for_stream_request()
     assert_eq!(response.headers()["content-type"], "application/json");
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(body, json!({"error":{"code":"network_error","message":"network error"}}));
+    assert_eq!(
+        body,
+        json!({"error":{"code":"network_error","message":"network error"}})
+    );
 }
 
 #[test]

@@ -25,8 +25,10 @@ fn build_v3_server_03_http_request_raw(
         "test-group",
         format!("test-session:{request_id}"),
     )
-    .expect("test provider failure session scope");
-    build_v3_server_03_http_request_raw_with_scope(
+    .expect("test provider failure session scope")
+    .with_transport_handoff_scope("test-pipeline", 5555, 1)
+    .expect("test provider transport handoff scope");
+    let mut raw = build_v3_server_03_http_request_raw_with_scope(
         server_id,
         failure_session_scope,
         request_id,
@@ -34,7 +36,10 @@ fn build_v3_server_03_http_request_raw(
         method,
         path,
         body,
-    )
+    );
+    raw.port = Some(5555);
+    raw.pipeline_id = Some("test-pipeline".to_string());
+    raw
 }
 
 #[derive(Default)]
@@ -106,6 +111,12 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "g"
 endpoints = ["responses"]
+[servers.s.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+attempt_store = {}
 [providers.p]
 enabled = true
 type = "responses"
