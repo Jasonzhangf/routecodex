@@ -722,8 +722,7 @@
         "crates/routecodex-v4-cli/**",
         "crates/routecodex-v4-lifecycle/**",
         "crates/routecodex-v4-admin/**",
-        "crates/routecodex-v4-runtime-inspector/**",
-        "crates/routecodex-v4-cli-plugin/**"
+        "crates/routecodex-v4-runtime-inspector/**"
       ],
       "regression": {
         "allow_skipped": false,
@@ -757,6 +756,64 @@
         "suite_id": "v4-runtime-regression"
       },
       "source_owner": "routecodex-v4-runtime",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/routecodex-v4-cli-plugin/**",
+      "artifact_paths": [
+        "rccv4-plugin"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo build --release --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && mkdir -p generated/modules/routecodex-v4-cli-plugin/lib && cp target/release/rccv4-plugin generated/modules/routecodex-v4-cli-plugin/lib/rccv4-plugin"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        "contracts/cli-plugin.contract.json",
+        "contracts/plugin-library.contract.json"
+      ],
+      "dependency_modules": [],
+      "generated_outputs": [
+        "generated/modules/routecodex-v4-cli-plugin/**"
+      ],
+      "module_id": "routecodex-v4-cli-plugin",
+      "owned_paths": [
+        "crates/routecodex-v4-cli-plugin/**"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "-c",
+            "cargo test --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && cargo build --release --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && node scripts/test-cli-plugin.mjs"
+          ],
+          "program": "sh",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "crates/routecodex-v4-cli-plugin/Cargo.toml",
+          "crates/routecodex-v4-cli-plugin/src/main.rs",
+          "contracts/cli-plugin.contract.json",
+          "docs/architecture/v4-cli-plugin.md",
+          "scripts/test-cli-plugin.mjs",
+          "crates/routecodex-v4-cli-plugin/src/lib.rs"
+        ],
+        "minimum_test_count": 8,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-cli-plugin-l2-regression"
+      },
+      "source_owner": "routecodex-v4-cli-plugin",
       "stage": "source_implemented"
     }
   ],

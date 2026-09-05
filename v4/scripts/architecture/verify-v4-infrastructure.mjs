@@ -157,7 +157,14 @@ async function verifyRuntimeBinary() {
   const config = path.join(tempRoot, 'config.v4.toml');
   const stateRoot = path.join(tempRoot, 'state');
   const port = await reservePort();
-  const env = { ...process.env, RCCV4_STATE_ROOT: stateRoot };
+  const env = {
+    ...process.env,
+    RCCV4_STATE_ROOT: stateRoot,
+    RCCV4_CORDIS_HOST_RUNNER: path.join(
+      root,
+      'cordis/routecodex-v4-cordis-host/src/daemon-runner.mjs',
+    ),
+  };
   let started = false;
   try {
     runBinary(binary, ['--version'], { cwd: tempRoot, env });

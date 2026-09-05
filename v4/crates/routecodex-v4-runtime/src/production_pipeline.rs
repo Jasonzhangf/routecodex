@@ -802,12 +802,37 @@ pub(crate) fn emit_payload_console_events(
     status: Option<u16>,
     elapsed: std::time::Duration,
 ) {
+    let mut stdout = std::io::stdout().lock();
+    emit_payload_console_events_to(
+        &mut stdout,
+        trace,
+        request,
+        endpoint,
+        provider,
+        model,
+        stream,
+        status,
+        elapsed,
+    );
+}
+
+pub(crate) fn emit_payload_console_events_to<W: Write>(
+    writer: &mut W,
+    trace: &[String],
+    request: &HttpRequest,
+    endpoint: &str,
+    provider: &str,
+    model: &str,
+    stream: bool,
+    status: Option<u16>,
+    elapsed: std::time::Duration,
+) {
     for event in trace {
         if let Some(line) = render_payload_console_event(
             event, request, endpoint, provider, model, stream, status, elapsed,
         ) {
-            println!("{line}");
-            let _ = std::io::stdout().flush();
+            let _ = writeln!(writer, "{line}");
+            let _ = writer.flush();
         }
     }
 }
@@ -896,8 +921,49 @@ pub fn json_response(status: u16, value: serde_json::Value) -> HttpResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::mark_provider_success_for_route;
+    use super::{emit_payload_console_events_to, mark_provider_success_for_route};
     use routecodex_v4_provider::V4Availability01SessionScoped;
+    use routecodex_v4_server::HttpRequest;
+    use std::io::{self, Write};
+
+    struct FailingWriter;
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed console"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed console"))
+        }
+    }
+
+    #[test]
+    fn console_projection_ignores_closed_stdout() {
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+            request_id: "closed-console-request".to_string(),
+            server_id: "rccv4".to_string(),
+            port: 5520,
+        };
+        let trace = vec![
+            "v4.std.diagnostic.request_payload_console_render:console.payload_ready:▶ [req] model=gpt-5.5 stream=true messages=1 tools=0".to_string(),
+        ];
+        emit_payload_console_events_to(
+            &mut FailingWriter,
+            &trace,
+            &request,
+            "/v1/responses",
+            "cc-sol",
+            "gpt-5.5",
+            true,
+            None,
+            std::time::Duration::from_millis(1),
+        );
+    }
 
     #[test]
     fn provider_success_clears_only_the_selected_route_group() {

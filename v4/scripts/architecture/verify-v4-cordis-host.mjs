@@ -34,7 +34,8 @@ const required = [
   '.isolate(',
   'fiber.dispose()',
   'plugin_not_active',
-  'mounted.push({ id: plugin.id, fiber });\n        await fiber.await();',
+  'mounted.push({ id: plugin.id, fiber });',
+  'await fiber.await();',
   'export class CordisBoundNodeHost',
   'export class RustNodeContainerPort',
   'computeNodePluginPlanHash',
@@ -69,6 +70,11 @@ const forbidden = [
 
 function validate(source, daemonSource, tests, bindingTests, daemonTests, bindingContract, functionMap, mainline, resourceMap) {
   const failures = required.filter((token) => !source.includes(token));
+  const mountedAt = source.indexOf('mounted.push({ id: plugin.id, fiber });');
+  const awaitedAt = source.indexOf('await fiber.await();');
+  if (mountedAt < 0 || awaitedAt < 0 || mountedAt > awaitedAt) {
+    failures.push('Cordis fiber must be tracked before await');
+  }
   failures.push(...[
     'startCordisHostDaemon',
     'CordisHostDaemonClient',
@@ -289,7 +295,7 @@ function runSelfTest() {
     ['real Cordis import removed', (candidate) => candidate.replace("from 'cordis'", "from 'fake-cordis'")],
     ['real Context removed', (candidate) => candidate.replace('new Context()', 'new FakeContext()')],
     ['failed Fiber tracking moved after await', (candidate) => candidate.replace(
-      'mounted.push({ id: plugin.id, fiber });\n        await fiber.await();',
+      'mounted.push({ id: plugin.id, fiber });',
       'await fiber.await();\n        mounted.push({ id: plugin.id, fiber });',
     )],
     ['generic execution payload surface restored', (candidate) => candidate.replace(

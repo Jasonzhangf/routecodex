@@ -62,8 +62,8 @@ function validate(candidate = source) {
   if (!module || module.status !== 'active' || !module.owned_paths?.includes('crates/routecodex-v4-cli-plugin/**')) {
     failures.push('CLI module registry binding missing');
   }
-  if (!projectModule?.artifact_paths?.includes('bin/rccv4-plugin')) {
-    failures.push('CLI module artifact path must be bin/rccv4-plugin');
+  if (!projectModule?.artifact_paths?.includes('rccv4-plugin')) {
+    failures.push('CLI module artifact path must be rccv4-plugin under AppSDK lib root');
   }
   if (!projectModule?.generated_outputs?.includes('generated/modules/routecodex-v4-cli-plugin/**')) {
     failures.push('CLI generated output path drifted');

@@ -33,7 +33,7 @@ use routecodex_v4_standard_plugins::StandardHandleRegistry;
 use serde_json::Value;
 use std::future::Future;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -303,7 +303,7 @@ fn start(intent: StartIntent) -> Result<String, String> {
     }
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
     print_startup(&manifest);
-    preflight_cordis_admission(&manifest)?;
+    let _cordis_child = ensure_cordis_admission(&paths.manifest_path, &manifest, &paths)?;
     if routecodex_v4_lifecycle::read_record(&paths)
         .map_err(|error| error.to_string())?
         .is_none()
@@ -343,6 +343,16 @@ fn preflight_cordis_admission(manifest: &RuntimeConfigManifest) -> Result<(), St
     .map(|_| ())
 }
 
+fn ensure_cordis_admission(
+    manifest_path: &Path,
+    manifest: &RuntimeConfigManifest,
+    paths: &V4LifecyclePaths,
+) -> Result<Option<Child>, String> {
+    let child = ensure_cordis_host_socket(manifest_path, paths)?;
+    preflight_cordis_admission(manifest)?;
+    Ok(child)
+}
+
 fn status(intent: ConfigPathIntent) -> Result<String, String> {
     if let Some(path) = intent.config {
         compile_runtime_config_file(&path).map_err(|error| error.to_string())?;
@@ -368,7 +378,7 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
     let (config, manifest, paths) = compile_for_lifecycle(intent.config)?;
     // Admission must succeed before restart can stop the currently healthy
     // child. This preserves the managed instance on Cordis failure.
-    preflight_cordis_admission(&manifest)?;
+    let _cordis_child = ensure_cordis_admission(&paths.manifest_path, &manifest, &paths)?;
     let timeout = Duration::from_millis(intent.timeout_ms);
     match request_restart(&paths, &manifest.manifest_digest, timeout) {
         Ok(record) => Ok(format_status("restarted", &record)),
@@ -428,6 +438,8 @@ fn server_start(intent: ServerStartIntent) -> Result<String, String> {
     })?;
     let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
     print_startup(&manifest);
+    let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
+    let _cordis_child = ensure_cordis_admission(&paths.manifest_path, &manifest, &paths)?;
     run_foreground(manifest)?;
     Ok("state=stopped identity=rccv4 foreground=true".to_string())
 }
@@ -664,7 +676,9 @@ fn spawn_options(snapshot: &SnapshotIntent) -> ManagedSpawnOptions {
         debug: snapshot.debug,
         sse_dump: snapshot.sse_dump,
         env: std::env::vars()
-            .filter(|(name, _)| name == "RCCV4_CORDIS_HOST_SOCKET")
+            .filter(|(name, _)| {
+                name == "RCCV4_CORDIS_HOST_SOCKET" || name == "RCCV4_CORDIS_HOST_RUNNER"
+            })
             .collect(),
     }
 }

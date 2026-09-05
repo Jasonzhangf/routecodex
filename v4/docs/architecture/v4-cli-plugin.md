@@ -29,8 +29,9 @@ rccv4-plugin surface
 rccv4-plugin categories
 ```
 
-The build artifact is `bin/rccv4-plugin`, produced from the Cargo release
-binary and copied to `generated/modules/routecodex-v4-cli-plugin/bin/`.
+The build artifact is `rccv4-plugin` under AppSDK's module `lib` root, produced
+from the Cargo release binary and copied to
+`generated/modules/routecodex-v4-cli-plugin/lib/`.
 
 ## Verification
 
