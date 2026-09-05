@@ -208,6 +208,7 @@ const moduleEvidence = {
 };
 writeJson(path.join(records, `evidence-record-${moduleId}.json`), moduleEvidence);
 writeJson(path.join(records, 'evidence-record.json'), moduleEvidence);
+writeJson(path.join(evidenceRoot, `${moduleEvidence.evidence_id}.json`), moduleEvidence);
 const validationId = `pre-review-${candidateId}`;
 writeJson(path.join(records, `pre-review-validation-record-${moduleId}.json`), {
   validation_id: validationId,
