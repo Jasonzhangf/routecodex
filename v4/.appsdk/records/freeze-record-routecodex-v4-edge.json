@@ -1,0 +1,36 @@
+{
+  "freeze_id": "freeze-fix-routecodex-v4-edge-e3c72cc7c9fa",
+  "issue_id": "v4-cordis-routecodex-v4-edge-active-recovery",
+  "module_id": "routecodex-v4-edge",
+  "promotion_id": "promotion-fix-routecodex-v4-edge-e3c72cc7c9fa",
+  "promotion_record_hash": "sha256:687e5c22670aec66eadf223db53c6ba6ac4a29fc83454448b6251bd80a1de47b",
+  "artifact_record_id": "evidence-fix-routecodex-v4-edge-e3c72cc7c9fa",
+  "regression_report_id": "regression-fix-routecodex-v4-edge-e3c72cc7c9fa",
+  "regression_report_hash": "sha256:a951c654f5e75808f73d188e662e07a6cb26d05866b00c7615697047be0c700a",
+  "source_commit_or_tag": "e3c72cc7c9fa5626473837b8f1cde7f923fc7487",
+  "active_version": "active-v1",
+  "previous_active_version": null,
+  "library_hash": "sha256:e91d1efa513b4b6b64681eb5a6c6de791a98a166afd699245c827970ec624619",
+  "public_api_hash": "sha256:04f0f7fdae3ab4c13a9c3180427c8cf9e73d035aeef536a94b5d4951e9f919a2",
+  "review_id": "review-fix-routecodex-v4-edge-e3c72cc7c9fa",
+  "previous_active_immutable": false,
+  "git_clean": true,
+  "clean_scope": {
+    "base_commit": "e3c72cc7c9fa5626473837b8f1cde7f923fc7487",
+    "changed_paths": [],
+    "ignored_paths": [
+      "v4/generated/**",
+      "v4/active/**",
+      "v4/target/**"
+    ],
+    "generated_policy": "excluded_from_source_clean"
+  },
+  "owners": {
+    "vcs": "git",
+    "compiler": "appsdk-0.1.6",
+    "api_extractor": "appsdk-0.1.6",
+    "review": "project::architecture_review",
+    "artifact_registry": "appsdk::lifecycle"
+  },
+  "created_at": "2026-09-05T07:44:33.652Z"
+}

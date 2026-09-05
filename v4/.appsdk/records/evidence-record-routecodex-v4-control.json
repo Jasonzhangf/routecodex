@@ -1,24 +1,24 @@
 {
-  "evidence_id": "evidence-fix-routecodex-v4-error-e3c72cc7c9fa",
-  "issue_id": "v4-cordis-routecodex-v4-error-active-recovery",
-  "experiment_id": "fix-routecodex-v4-error-e3c72cc7c9fa",
+  "evidence_id": "evidence-fix-routecodex-v4-control-e3c72cc7c9fa",
+  "issue_id": "v4-cordis-routecodex-v4-control-active-recovery",
+  "experiment_id": "fix-routecodex-v4-control-e3c72cc7c9fa",
   "phase": "artifact",
   "kind": "artifact",
   "source_commit": "e3c72cc7c9fa5626473837b8f1cde7f923fc7487",
-  "artifact_hash": "sha256:e6d25210cd117eda15d8a83a8ce62a93802bd15ec7ef331e1b263f8bbe10c269",
+  "artifact_hash": "sha256:b77a0edf18e2f20e413cc9818332713575d20199e693eb6e9f516eb05301fb5f",
   "execution_surface": "development_whitebox",
   "scope": {
-    "module_id": "routecodex-v4-error",
-    "feature_id": "v4-cordis-routecodex-v4-error-active-recovery",
-    "entrypoint": "artifact://routecodex-v4-error"
+    "module_id": "routecodex-v4-control",
+    "feature_id": "v4-cordis-routecodex-v4-control-active-recovery",
+    "entrypoint": "artifact://routecodex-v4-control"
   },
   "producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-error:e3c72cc7c9fa5626473837b8f1cde7f923fc7487"
+    "identity": "routecodex-v4-control:e3c72cc7c9fa5626473837b8f1cde7f923fc7487"
   },
   "result": "pass",
-  "created_at": "2026-09-05T07:46:24.318Z",
-  "expires_at": "2026-09-12T07:46:24.256Z",
+  "created_at": "2026-09-05T07:46:20.420Z",
+  "expires_at": "2026-09-12T07:46:20.358Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
     "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",

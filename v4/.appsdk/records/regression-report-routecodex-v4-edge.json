@@ -1,0 +1,34 @@
+{
+  "regression_report_id": "regression-fix-routecodex-v4-edge-e3c72cc7c9fa",
+  "module_id": "routecodex-v4-edge",
+  "source_commit": "e3c72cc7c9fa5626473837b8f1cde7f923fc7487",
+  "artifact_hash": "sha256:e91d1efa513b4b6b64681eb5a6c6de791a98a166afd699245c827970ec624619",
+  "public_api_hash": "sha256:04f0f7fdae3ab4c13a9c3180427c8cf9e73d035aeef536a94b5d4951e9f919a2",
+  "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "input_hash": "sha256:e91d1efa513b4b6b64681eb5a6c6de791a98a166afd699245c827970ec624619",
+  "suite_id": "v4-edge-regression",
+  "command": {
+    "args": [
+      "test",
+      "-p",
+      "routecodex-v4-edge",
+      "--locked"
+    ],
+    "program": "cargo",
+    "working_directory": "."
+  },
+  "test_count": 1,
+  "passed": 1,
+  "failed": 0,
+  "skipped": 0,
+  "result": "pass",
+  "producer": {
+    "adapter": "project::lifecycle_adapter",
+    "identity": "routecodex-v4-edge:e3c72cc7c9fa5626473837b8f1cde7f923fc7487"
+  },
+  "test_characteristics": {
+    "whitebox": true,
+    "blackbox": true
+  },
+  "created_at": "2026-09-05T07:44:33.652Z"
+}

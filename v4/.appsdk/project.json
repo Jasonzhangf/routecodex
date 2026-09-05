@@ -269,7 +269,7 @@
         "suite_id": "v4-base-node-regression"
       },
       "source_owner": "routecodex-v4-base-node",
-      "stage": "architecture_stable"
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-edge/**",
@@ -327,7 +327,7 @@
         "suite_id": "v4-edge-regression"
       },
       "source_owner": "routecodex-v4-edge",
-      "stage": "source_implemented"
+      "stage": "architecture_stable"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-control/**",
@@ -385,7 +385,7 @@
         "suite_id": "v4-control-regression"
       },
       "source_owner": "routecodex-v4-control",
-      "stage": "source_implemented"
+      "stage": "architecture_stable"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-error/**",
@@ -443,7 +443,7 @@
         "suite_id": "v4-error-regression"
       },
       "source_owner": "routecodex-v4-error",
-      "stage": "source_implemented"
+      "stage": "architecture_stable"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-plugin-runtime/**",

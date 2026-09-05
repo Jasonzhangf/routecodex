@@ -1,0 +1,15 @@
+{
+  "merge_id": "merge-fix-routecodex-v4-error-e3c72cc7c9fa",
+  "issue_id": "v4-cordis-routecodex-v4-error-active-recovery",
+  "module_id": "routecodex-v4-error",
+  "fix_candidate_id": "fix-routecodex-v4-error-e3c72cc7c9fa",
+  "effectiveness_id": "effectiveness-fix-routecodex-v4-error-e3c72cc7c9fa",
+  "mainline_ref": "refs/remotes/origin/v4-cordis",
+  "candidate_commit": "e3c72cc7c9fa5626473837b8f1cde7f923fc7487",
+  "merge_commit": "e3c72cc7c9fa5626473837b8f1cde7f923fc7487",
+  "candidate_tree_hash": "e082273ae0eb30af7b36f6df4cf797ed4c170f32",
+  "merged_tree_hash": "e082273ae0eb30af7b36f6df4cf797ed4c170f32",
+  "change_identity": "exact",
+  "result": "pass",
+  "created_at": "2026-09-05T07:46:27.198Z"
+}

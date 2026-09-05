@@ -1,36 +1,36 @@
 {
-  "freeze_id": "freeze-fix-routecodex-v4-base-node-eec6ff23bc8e",
-  "issue_id": "v4-cordis-routecodex-v4-base-node-active-recovery",
-  "module_id": "routecodex-v4-base-node",
-  "promotion_id": "promotion-fix-routecodex-v4-base-node-eec6ff23bc8e",
-  "promotion_record_hash": "sha256:e5e8fef8dd4c796a95e7c0b91df00c8c89b3a701d794b0f25c68bb71743c3b62",
-  "artifact_record_id": "evidence-fix-routecodex-v4-base-node-eec6ff23bc8e",
-  "regression_report_id": "regression-fix-routecodex-v4-base-node-eec6ff23bc8e",
-  "regression_report_hash": "sha256:391d54931e1858f858fc97f436b27e2fb55b61e588fab60ce229d93b8bf7d99b",
-  "source_commit_or_tag": "eec6ff23bc8e44d336af13da5f44c3a494cdcf3e",
   "active_version": "active-v1",
-  "previous_active_version": null,
-  "library_hash": "sha256:8c19706a91ebc182e9de7b9c21082666241c8b666f7234273dbea1468a1ffa68",
-  "public_api_hash": "sha256:7ea54624ce8b9e1bbf64281a86251ec51ce6ee24ead640eaa98432b257717ab7",
-  "review_id": "review-fix-routecodex-v4-base-node-eec6ff23bc8e",
-  "previous_active_immutable": false,
-  "git_clean": true,
+  "artifact_record_id": "evidence-fix-routecodex-v4-base-node-eec6ff23bc8e",
   "clean_scope": {
     "base_commit": "32f02ffeacbbeb715c0096817f049164f9656624",
     "changed_paths": [],
+    "generated_policy": "excluded_from_source_clean",
     "ignored_paths": [
       "v4/generated/**",
       "v4/active/**",
       "v4/target/**"
-    ],
-    "generated_policy": "excluded_from_source_clean"
+    ]
   },
+  "created_at": "2026-09-05T06:37:45.688Z",
+  "freeze_id": "freeze-fix-routecodex-v4-base-node-eec6ff23bc8e",
+  "git_clean": true,
+  "issue_id": "v4-cordis-routecodex-v4-base-node-active-recovery",
+  "library_hash": "sha256:8c19706a91ebc182e9de7b9c21082666241c8b666f7234273dbea1468a1ffa68",
+  "module_id": "routecodex-v4-base-node",
   "owners": {
-    "vcs": "git",
-    "compiler": "appsdk-0.1.6",
     "api_extractor": "appsdk-0.1.6",
+    "artifact_registry": "appsdk::lifecycle",
+    "compiler": "appsdk-0.1.6",
     "review": "project::architecture_review",
-    "artifact_registry": "appsdk::lifecycle"
+    "vcs": "git"
   },
-  "created_at": "2026-09-05T06:37:45.688Z"
+  "previous_active_immutable": false,
+  "previous_active_version": null,
+  "promotion_id": "promotion-fix-routecodex-v4-base-node-eec6ff23bc8e",
+  "promotion_record_hash": "sha256:1bab128c51730eba8736a239062f42381efc98503a9dacac536a2e3cb7d3851b",
+  "public_api_hash": "sha256:7ea54624ce8b9e1bbf64281a86251ec51ce6ee24ead640eaa98432b257717ab7",
+  "regression_report_hash": "sha256:7b9fd28dc85200716159eca98036c14aa0439158a92356d12506d5592b0ba491",
+  "regression_report_id": "regression-fix-routecodex-v4-base-node-eec6ff23bc8e",
+  "review_id": "review-fix-routecodex-v4-base-node-eec6ff23bc8e",
+  "source_commit_or_tag": "eec6ff23bc8e44d336af13da5f44c3a494cdcf3e"
 }
