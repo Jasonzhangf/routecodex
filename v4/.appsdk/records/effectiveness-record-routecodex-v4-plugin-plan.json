@@ -1,11 +1,11 @@
 {
-  "effectiveness_id": "effectiveness-fix-routecodex-v4-plugin-plan-6f4a8a4a1bf0",
+  "effectiveness_id": "effectiveness-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
   "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
   "module_id": "routecodex-v4-plugin-plan",
-  "fix_candidate_id": "fix-routecodex-v4-plugin-plan-6f4a8a4a1bf0",
-  "architecture_review_id": "review-fix-routecodex-v4-plugin-plan-6f4a8a4a1bf0",
-  "reviewed_commit": "6f4a8a4a1bf040fa32a36c4f269dfb391fc6303e",
-  "reviewed_tree_hash": "8062c800e4c812a301e4051e6f2728e5c80c9852",
+  "fix_candidate_id": "fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "architecture_review_id": "review-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "reviewed_commit": "da219c1f2fcd3bade4eb00f9c1c8d98398894462",
+  "reviewed_tree_hash": "e94a5d3677c0d858c6f243cbdb35aef9d467bc09",
   "reproduction_input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
     "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
@@ -27,5 +27,5 @@
   ],
   "source_unchanged_since_review": true,
   "result": "pass",
-  "created_at": "2026-09-05T08:30:14.620Z"
+  "created_at": "2026-09-05T08:38:09.623Z"
 }

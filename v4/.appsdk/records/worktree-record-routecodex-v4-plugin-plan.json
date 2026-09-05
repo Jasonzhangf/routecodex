@@ -1,14 +1,14 @@
 {
-  "worktree_id": "v4-cordis-merge-routecodex-v4-plugin-plan-6f4a8a4a1bf0",
+  "worktree_id": "v4-cordis-merge-routecodex-v4-plugin-plan-da219c1f2fcd",
   "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
   "module_id": "routecodex-v4-plugin-plan",
   "base_ref": "origin/v4-cordis",
-  "base_commit": "438b92f4fba705c546f939d10bb9fe9362418c71",
+  "base_commit": "c47a8736afa0b3202527133cb5537033522899eb",
   "branch": "codex/v4-cordis-integration-20260905-r5",
-  "head_commit": "6f4a8a4a1bf040fa32a36c4f269dfb391fc6303e",
+  "head_commit": "da219c1f2fcd3bade4eb00f9c1c8d98398894462",
   "initial_clean": true,
   "final_clean": true,
   "isolation_mode": "isolated_worktree",
   "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "created_at": "2026-09-05T08:30:14.126Z"
+  "created_at": "2026-09-05T08:38:09.124Z"
 }

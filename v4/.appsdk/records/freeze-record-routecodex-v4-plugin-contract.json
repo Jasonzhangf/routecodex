@@ -1,22 +1,22 @@
 {
-  "freeze_id": "freeze-fix-routecodex-v4-plugin-contract-6f4a8a4a1bf0",
+  "freeze_id": "freeze-fix-routecodex-v4-plugin-contract-da219c1f2fcd",
   "issue_id": "v4-cordis-routecodex-v4-plugin-contract-active-recovery",
   "module_id": "routecodex-v4-plugin-contract",
-  "promotion_id": "promotion-fix-routecodex-v4-plugin-contract-6f4a8a4a1bf0",
-  "promotion_record_hash": "sha256:8b308cb07680b686fbd8801731ab1d7c3714ec5868f78bfadee013a41a86fd15",
-  "artifact_record_id": "evidence-fix-routecodex-v4-plugin-contract-6f4a8a4a1bf0",
-  "regression_report_id": "regression-fix-routecodex-v4-plugin-contract-6f4a8a4a1bf0",
-  "regression_report_hash": "sha256:afa6f79091cc97ee21041f7a63bdd845c9c4def47c4bbaa98d2477439fa79185",
-  "source_commit_or_tag": "6f4a8a4a1bf040fa32a36c4f269dfb391fc6303e",
-  "active_version": "active-v1",
+  "promotion_id": "promotion-fix-routecodex-v4-plugin-contract-da219c1f2fcd",
+  "promotion_record_hash": "sha256:652a814bf280ead8e48cc581116afe0720c5b24267e47f6379bea6e3d5b99098",
+  "artifact_record_id": "evidence-fix-routecodex-v4-plugin-contract-da219c1f2fcd",
+  "regression_report_id": "regression-fix-routecodex-v4-plugin-contract-da219c1f2fcd",
+  "regression_report_hash": "sha256:6a1d79cdad5e64423952c51956d520a0a09a98ce87b48321745bd4191164fe8d",
+  "source_commit_or_tag": "da219c1f2fcd3bade4eb00f9c1c8d98398894462",
+  "active_version": "active-v2",
   "previous_active_version": null,
   "library_hash": "sha256:b6f875325045eec547de561a61409cf7b3e385081dbf42acd8de27cf5a9a8070",
   "public_api_hash": "sha256:fb8faa92119ee44988d49cf95cd90b364b6cf72e90d8cd014d11a3f44991fe96",
-  "review_id": "review-fix-routecodex-v4-plugin-contract-6f4a8a4a1bf0",
+  "review_id": "review-fix-routecodex-v4-plugin-contract-da219c1f2fcd",
   "previous_active_immutable": false,
   "git_clean": true,
   "clean_scope": {
-    "base_commit": "438b92f4fba705c546f939d10bb9fe9362418c71",
+    "base_commit": "c47a8736afa0b3202527133cb5537033522899eb",
     "changed_paths": [],
     "ignored_paths": [
       "v4/generated/**",
@@ -32,5 +32,5 @@
     "review": "project::architecture_review",
     "artifact_registry": "appsdk::lifecycle"
   },
-  "created_at": "2026-09-05T08:30:05.564Z"
+  "created_at": "2026-09-05T08:38:01.171Z"
 }

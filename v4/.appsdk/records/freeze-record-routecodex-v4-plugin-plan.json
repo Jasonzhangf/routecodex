@@ -1,22 +1,22 @@
 {
-  "freeze_id": "freeze-fix-routecodex-v4-plugin-plan-6f4a8a4a1bf0",
+  "freeze_id": "freeze-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
   "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
   "module_id": "routecodex-v4-plugin-plan",
-  "promotion_id": "promotion-fix-routecodex-v4-plugin-plan-6f4a8a4a1bf0",
-  "promotion_record_hash": "sha256:b91074e08981d22a48314980f5e4d5af49319fb0e1b7a2a181c9119f20b8ad67",
-  "artifact_record_id": "evidence-fix-routecodex-v4-plugin-plan-6f4a8a4a1bf0",
-  "regression_report_id": "regression-fix-routecodex-v4-plugin-plan-6f4a8a4a1bf0",
-  "regression_report_hash": "sha256:0ca2ad3d22cdf610f16e24e0e73a059639ad55e6f697cfb5fa6410a514db44fa",
-  "source_commit_or_tag": "6f4a8a4a1bf040fa32a36c4f269dfb391fc6303e",
+  "promotion_id": "promotion-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "promotion_record_hash": "sha256:627eaca8ff9ae163747a02a7f137a09c3d8fad7b86f414e5be6c613172114d4b",
+  "artifact_record_id": "evidence-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "regression_report_id": "regression-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "regression_report_hash": "sha256:1a3d3db19d2b44a04f9eebca7020932274120c8642e7a7e3f958ea57a2508b49",
+  "source_commit_or_tag": "da219c1f2fcd3bade4eb00f9c1c8d98398894462",
   "active_version": "active-v1",
   "previous_active_version": null,
   "library_hash": "sha256:d89871886da0445fcd3e5cc77818c6088e0e5d74bdff4b2ab2e617c18dfc61ae",
   "public_api_hash": "sha256:02680f3f193e4d01e65c8241ec5e152b98680cf40f5ee245d79562e38a196351",
-  "review_id": "review-fix-routecodex-v4-plugin-plan-6f4a8a4a1bf0",
+  "review_id": "review-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
   "previous_active_immutable": false,
   "git_clean": true,
   "clean_scope": {
-    "base_commit": "438b92f4fba705c546f939d10bb9fe9362418c71",
+    "base_commit": "c47a8736afa0b3202527133cb5537033522899eb",
     "changed_paths": [],
     "ignored_paths": [
       "v4/generated/**",
@@ -32,5 +32,5 @@
     "review": "project::architecture_review",
     "artifact_registry": "appsdk::lifecycle"
   },
-  "created_at": "2026-09-05T08:30:14.620Z"
+  "created_at": "2026-09-05T08:38:09.623Z"
 }
