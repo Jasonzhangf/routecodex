@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "v4-feature-owner-r1-goal-scope-20260904",
+  "step_id": "goal-scope",
+  "result": "pass",
+  "observations": [
+    "Goal is V4 feature completion and Cordis production wiring; V3 remains read-only baseline.",
+    "Canonical owner is routecodex-v4-governance in keeper worktree /Users/fanzhang/Documents/github/routecodex/playground/v4-feature-completion-owner-20260904-r4.",
+    "AppSDK default is 0.1.6; no main, foreign worktree, foreign claim, daemon, or process is in scope.",
+    "Acceptance requires source/test/build/verify/admission evidence; no fabricated lifecycle artifacts or local continuation."
+  ],
+  "evidence": ["goal-record"]
+}

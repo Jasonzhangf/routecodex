@@ -68,6 +68,20 @@
     ],
     "zone_transition_contract": "contracts/transitions/zone-transition-manifest.json"
   },
+  "guidance": {
+    "compiled_manifest": ".appsdk/guidance/compiled.json",
+    "enforcement": "advisory",
+    "rule_sources": [
+      {
+        "contract_path": ".appsdk/skills/appsdk-project-governance/appsdk-guidance.json",
+        "kind": "skill",
+        "path": ".appsdk/skills/appsdk-project-governance/SKILL.md",
+        "precedence": 200,
+        "required": true,
+        "source_id": "appsdk-governance-skill"
+      }
+    ]
+  },
   "lifecycle": {
     "stage": "controlled_verified"
   },

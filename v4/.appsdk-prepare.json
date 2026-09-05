@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "preparation_id": "prepare-routecodex-v4-governance-reset-20260904",
+  "status": "confirmed",
+  "objective": "将 RouteCodex v4 在独立 keeper worktree 中收敛到 AppSDK 0.1.6 治理面，并继续完成 Cordis 生产插件接线；保留业务源码、Protected、Active 与历史证据，不清理其他 worker 状态。",
+  "change_kind": "project_refactor",
+  "project_root": "v4",
+  "legacy_roots": [
+    ".appsdk/migrations/0.1.5-to-0.1.6/**",
+    ".appsdk/records/**",
+    "generated/**",
+    "active/**"
+  ],
+  "new_roots": [
+    ".appsdk/**",
+    "contracts/**",
+    "docs/**",
+    "scripts/**",
+    "crates/**"
+  ],
+  "protected_roots": [
+    "protected/source/**",
+    "protected/contracts/**",
+    "protected/history/**",
+    "protected/history-versions/**",
+    "active/lib/**"
+  ],
+  "runtime_forbidden_roots": [
+    "playground/**",
+    "generated/**",
+    "protected/source/**"
+  ],
+  "boundary": {
+    "allowed_paths": [],
+    "forbidden_paths": [],
+    "payload_control_separation": "must be confirmed"
+  },
+  "acceptance_criteria": [
+    "AppSDK 0.1.6 official verify/compile path is used.",
+    "Request admission facts are emitted and consumed through typed NodePluginPlan control resource.",
+    "No local continuation, payload control leakage, fallback, or duplicate runtime path is introduced.",
+    "Keeper worktree remains isolated from main and other worker worktrees."
+  ],
+  "non_goals": [
+    "Do not modify main, V3, other worktrees, or other worker claims.",
+    "Do not delete historical evidence, migration records, Protected, or Active artifacts.",
+    "Do not hand-write lifecycle hashes, ReviewRecord, EvidenceRecord, receipt, or Active projection."
+  ],
+  "assumptions": [],
+  "questions": [
+    {"question_id":"scope-kind","question":"Is this a new project, module refactor, project refactor, or debug task?","status":"open"},
+    {"question_id":"project-root","question":"Which relative directory is the new AppSDK project root?","status":"open"},
+    {"question_id":"legacy-boundary","question":"Which existing directories remain read-only and outside the new project?","status":"open"},
+    {"question_id":"new-boundary","question":"Which directories may the new project create or modify?","status":"open"}
+  ],
+  "confirmed_by": "Jason",
+  "confirmed_at": "2026-09-04T16:00:00-07:00",
+  "created_at": "2026-01-01T00:00:00Z"
+}

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "mode": "governance-preflight",
+  "goal_id": "goal-routecodex-v4-foundation",
+  "task_id": "v4-feature-completion-owner-r4",
+  "module_id": "routecodex-v4-governance",
+  "objective": "Bind the V4 completion owner worktree to the current governance surface, preserve V3 and all other worker state, and drive the remaining V4 architecture, lifecycle, verification, review, and delivery gates without fabricating artifacts.",
+  "scope_paths": [
+    ".appsdk/**",
+    "contracts/**",
+    "docs/**",
+    "scripts/**",
+    ".gitignore"
+  ],
+  "steps": [
+    {
+      "step_id": "scope-owner",
+      "node_id": "goal_scope",
+      "action": "Confirm the V4 goal, acceptance evidence, non-goals, canonical governance owner, keeper worktree, maps, and required gates from the declared project sources.",
+      "owner": "routecodex-v4-governance",
+      "expected_evidence": ["goal-record"]
+    },
+    {
+      "step_id": "architecture-maps",
+      "node_id": "architecture_maps",
+      "action": "Bind the V4 resource, function, mainline, verification, and module maps to the keeper scope and record any drift without fabricating hashes or ownership.",
+      "owner": "routecodex-v4-governance",
+      "expected_evidence": ["map-check"]
+    },
+    {
+      "step_id": "owner-worktree",
+      "node_id": "owner_worktree",
+      "action": "Verify the existing clean-owner keeper worktree and branch boundary; preserve all other worktrees, processes, claims, and dirty state.",
+      "owner": "routecodex-v4-governance",
+      "expected_evidence": ["worktree-record"]
+    },
+    {
+      "step_id": "preflight-verify",
+      "node_id": "preflight_verify",
+      "action": "Run the applicable AppSDK and project preflight checks, record the first failing gate and canonical owner, and retain the exact next action.",
+      "owner": "routecodex-v4-governance",
+      "expected_evidence": ["verify-result"]
+    }
+  ]
+}

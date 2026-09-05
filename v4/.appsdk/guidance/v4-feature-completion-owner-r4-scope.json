@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "v4-feature-completion-owner-r4-scope-20260904",
+  "step_id": "scope-owner",
+  "result": "pass",
+  "observations": [
+    "Goal remains V4 Cordis foundation/completion with V3 read-only compatibility baseline.",
+    "Keeper worktree is /Users/fanzhang/Documents/github/routecodex/playground/v4-feature-completion-owner-20260904-r4 on branch codex/v4-feature-completion-owner-20260904-r4.",
+    "Acceptance requires architecture gates, focused and workspace tests, canonical AppSDK lifecycle evidence, installed runtime replay, review, delivery, and remote receipt.",
+    "Non-goals remain modifying V3, switching online traffic, copying V3 implementation, or adding provider-specific branches to the V4 kernel."
+  ],
+  "evidence": ["keeper-selection-and-goal-scope"]
+}

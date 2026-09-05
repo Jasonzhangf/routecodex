@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "v4-feature-owner-r1-preflight-verify-20260904",
+  "step_id": "preflight-verify",
+  "result": "fail",
+  "observations": [
+    "AppSDK binary is /Users/fanzhang/.local/bin/appsdk 0.1.6 (rust).",
+    "appsdk verify v4 returned ACTIVE_ARTIFACT_MISSING.",
+    "The canonical current Active record remains active-v2 while the existing freeze record names active-v3; protected active-v3 artifact hash does not match a fresh workspace build.",
+    "No artifact, Active, Protected, lifecycle record, hash, or evidence record was copied, hand-written, symlinked, or otherwise fabricated.",
+    "retry_allowed=false for the unchanged verify path; canonical lifecycle owner must resolve Active artifact admission before compile, review, install, restart, or publish."
+  ],
+  "evidence": ["verify-result"]
+}

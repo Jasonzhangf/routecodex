@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "v4-feature-owner-r1-owner-worktree-20260904",
+  "step_id": "owner-worktree",
+  "result": "pass",
+  "observations": [
+    "Keeper branch codex/v4-feature-completion-owner-20260904-r4 is at c0907547c75d93e24b01d386aec149d246c9cf1c, equal to origin/v4-cordis and separate from origin/main 53e458e7681e07ec824a4b3fd16185213885df43.",
+    "Only the keeper worktree is used for this task; the main worktree and all foreign worktrees, claims, daemons, and dirty files remain untouched.",
+    "Keeper dirty scope is pre-existing task-owned V4 governance/source work and is preserved; no reset, restore, stash, or cleanup was performed."
+  ],
+  "evidence": ["worktree-record"]
+}

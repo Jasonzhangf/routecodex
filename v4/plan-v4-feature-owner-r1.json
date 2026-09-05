@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "mode": "governance-preflight",
+  "goal_id": "goal-routecodex-v4-foundation",
+  "task_id": "v4-feature-owner-r1",
+  "module_id": "routecodex-v4-governance",
+  "objective": "在唯一 V4 keeper worktree 中以 AppSDK 0.1.6 收敛治理前置，绑定当前 goal/module/maps/owner/worktree，并为后续 Cordis 生产接线保留可验证的生命周期路径。",
+  "scope_paths": [
+    ".appsdk/**",
+    "contracts/**",
+    "docs/**",
+    "scripts/**",
+    ".gitignore"
+  ],
+  "steps": [
+    {
+      "step_id": "goal-scope",
+      "node_id": "goal_scope",
+      "action": "确认当前 goal、owner、keeper worktree、非目标、验收证据与 V4-only 边界。",
+      "owner": "routecodex-v4-governance",
+      "expected_evidence": ["goal-record"]
+    },
+    {
+      "step_id": "architecture-maps",
+      "node_id": "architecture_maps",
+      "action": "核对 resource/function/mainline/verification maps 与模块 allowed/forbidden scope，记录唯一 owner 与相邻调用边。",
+      "owner": "routecodex-v4-governance",
+      "expected_evidence": ["map-check"]
+    },
+    {
+      "step_id": "owner-worktree",
+      "node_id": "owner_worktree",
+      "action": "核对唯一 keeper worktree、分支、owner 边界与其他 worktree 隔离。",
+      "owner": "routecodex-v4-governance",
+      "expected_evidence": ["worktree-record"]
+    },
+    {
+      "step_id": "preflight-verify",
+      "node_id": "preflight_verify",
+      "action": "使用 AppSDK 0.1.6 运行 verify 前置，保留 ACTIVE/Protected/历史 evidence，不伪造 artifact/hash/record。",
+      "owner": "routecodex-v4-governance",
+      "expected_evidence": ["verify-result"]
+    }
+  ]
+}
