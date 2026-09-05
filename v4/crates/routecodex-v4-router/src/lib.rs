@@ -41,7 +41,24 @@ impl PluginHandle for TargetSelectionHandle {
             .map_err(|error| error.to_string())?
             .cloned()
             .unwrap_or_else(|| Value::Object(Default::default()));
-        let facts = facts.as_object().expect("route facts object");
+        let facts = if facts.is_null() {
+            Value::Object(Default::default())
+        } else {
+            facts
+        };
+        let decoded_facts;
+        let facts = match &facts {
+            Value::Object(object) => object,
+            // Runtime control frames preserve legacy scalar fields while the
+            // typed route-facts resource itself is JSON. Decode only this
+            // control resource at its owning boundary; payload is untouched.
+            Value::String(encoded) => {
+                decoded_facts = serde_json::from_str::<Value>(encoded)
+                    .map_err(|error| format!("route facts encoding: {error}"))?;
+                decoded_facts.as_object().ok_or_else(|| format!("route facts object: {encoded}"))?
+            }
+            other => return Err(format!("route facts object: {other}")),
+        };
         let protocol = if let Some(protocol) = facts.get("entry_protocol").and_then(Value::as_str) {
             protocol.to_string()
         } else {
