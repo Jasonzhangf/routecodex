@@ -19,20 +19,16 @@ use routecodex_v3_provider_responses::{
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, VecDeque};
 use std::pin::Pin;
-
 pub type V3OpenAiChatClientStream = V3RelayProjectedSseStream;
 pub type V3OpenAiChatCommittedStream = V3RelayCommittedSseStream;
-
 pub enum V3OpenAiChatRelayClientBody {
     Json(Value),
     Sse(V3OpenAiChatCommittedStream),
 }
-
 impl V3OpenAiChatRelayClientBody {
     pub fn is_sse(&self) -> bool {
         matches!(self, Self::Sse(_))
     }
-
     pub fn into_v3_client_body(self) -> V3ClientBody {
         match self {
             Self::Json(value) => V3ClientBody::Json(value),
@@ -40,13 +36,11 @@ impl V3OpenAiChatRelayClientBody {
         }
     }
 }
-
 impl From<String> for V3OpenAiChatRelayRuntimeError {
     fn from(value: String) -> Self {
         Self::Target(value)
     }
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3OpenAiChatRelayRuntimeInput {
     pub server_id: String,
@@ -54,7 +48,6 @@ pub struct V3OpenAiChatRelayRuntimeInput {
     pub request_id: String,
     pub payload: Value,
 }
-
 pub struct V3OpenAiChatRelayRuntimeOutput {
     pub status: u16,
     pub client_body: V3OpenAiChatRelayClientBody,
@@ -66,7 +59,6 @@ pub struct V3OpenAiChatRelayRuntimeOutput {
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub provider_snapshots: Option<V3RelayProviderSnapshots>,
 }
-
 impl V3OpenAiChatRelayRuntimeOutput {
     pub fn into_v3_resp_15_client_payload(self) -> V3Resp15ClientPayload {
         let content_type = if self.client_body.is_sse() {
@@ -81,7 +73,6 @@ impl V3OpenAiChatRelayRuntimeOutput {
         }
     }
 }
-
 impl std::fmt::Debug for V3OpenAiChatRelayRuntimeOutput {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -105,7 +96,6 @@ impl std::fmt::Debug for V3OpenAiChatRelayRuntimeOutput {
             .finish()
     }
 }
-
 #[derive(Debug, thiserror::Error)]
 pub enum V3OpenAiChatRelayRuntimeError {
     #[error(transparent)]
@@ -136,7 +126,6 @@ pub enum V3OpenAiChatRelayRuntimeError {
     )]
     WebSearchInterceptedUnprojected,
 }
-
 pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport(
     manifest: &V3Config05ManifestPublished,
     input: V3OpenAiChatRelayRuntimeInput,

@@ -4038,11 +4038,29 @@ features:
   owner_crates:
   - routecodex-v3-server
   - routecodex-v3-runtime
+  - provider-compat-core
+  - routecodex-v3-config
+  - routecodex-v3-provider-responses
   owner_files:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/provider-compat-core/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/validate.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+  - v3/crates/routecodex-v3-server/src/restart_handoff.rs
   - v3/scripts/architecture/verify-v3-file-size.mjs
   - v3/scripts/tests/v3-file-size-red-fixtures.mjs
   - v3/config/v3-file-size-policy.json
@@ -4068,6 +4086,9 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-server
   - v3/crates/routecodex-v3-runtime
+  - v3/crates/provider-compat-core
+  - v3/crates/routecodex-v3-config
+  - v3/crates/routecodex-v3-provider-responses
   - docs/goals/v3-god-file-decomposition-plan.md
   - docs/architecture/wiki/v3-module-decomposition-sop.md
   - docs/architecture/v3-function-map.yml
@@ -4081,8 +4102,6 @@ features:
   forbidden_paths:
   - src
   - sharedmodule
-  - v3/crates/routecodex-v3-config
-  - v3/crates/routecodex-v3-provider-responses
   required_gates:
   - npm run verify:v3-file-size
   - npm run test:v3-file-size-red-fixtures

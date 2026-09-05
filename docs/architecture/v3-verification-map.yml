@@ -2585,6 +2585,9 @@ features:
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/provider-compat-core
+  - v3/crates/routecodex-v3-config
+  - v3/crates/routecodex-v3-provider-responses
   design:
   - docs/goals/v3-god-file-decomposition-plan.md
   - docs/architecture/wiki/v3-module-decomposition-sop.md

@@ -406,3 +406,88 @@ fn v3_anthropic_relay_sse_event_semantic(event: &Value) -> &Value {
         .filter(|data| data.is_object())
         .unwrap_or(event)
 }
+
+impl V3AnthropicRelayClientHeader {
+    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            value: value.into(),
+        }
+    }
+
+    pub fn is_provider_protocol_header_name(name: &str) -> bool {
+        is_v3_anthropic_provider_request_header_name(name)
+    }
+
+    pub fn provider_protocol(name: impl Into<String>, value: impl Into<String>) -> Option<Self> {
+        build_v3_anthropic_provider_request_header(name, value).map(|header| Self {
+            name: header.name().to_string(),
+            value: header.value().to_string(),
+        })
+    }
+}
+
+impl V3AnthropicRelayLocalContinuationScope {
+    pub fn anthropic(
+        entry_endpoint: impl Into<String>,
+        session_id: impl Into<String>,
+        conversation_id: impl Into<String>,
+        port: u16,
+        routing_group: impl Into<String>,
+    ) -> Self {
+        Self {
+            entry_endpoint: entry_endpoint.into(),
+            session_id: session_id.into(),
+            conversation_id: conversation_id.into(),
+            port,
+            routing_group: routing_group.into(),
+        }
+    }
+
+    fn local_key(&self) -> V3LocalContinuationScopeKey {
+        V3LocalContinuationScopeKey::anthropic(
+            self.entry_endpoint.clone(),
+            self.session_id.clone(),
+            self.conversation_id.clone(),
+            self.port,
+            self.routing_group.clone(),
+        )
+    }
+
+    fn hub_scope(&self, server_id: &str) -> V3HubContinuationScope {
+        V3HubContinuationScope::new(
+            V3HubEntryProtocol::Anthropic,
+            server_id,
+            self.routing_group.clone(),
+            self.session_id.clone(),
+        )
+    }
+}
+
+impl V3AnthropicRelayLocalContinuationState {
+    pub fn len(&self) -> Result<usize, V3AnthropicRelayRuntimeError> {
+        Ok(self.lock_store()?.len())
+    }
+
+    pub fn is_empty(&self) -> Result<bool, V3AnthropicRelayRuntimeError> {
+        Ok(self.lock_store()?.is_empty())
+    }
+
+    fn lock_store(
+        &self,
+    ) -> Result<MutexGuard<'_, V3LocalContinuationStore>, V3AnthropicRelayRuntimeError> {
+        self.store
+            .lock()
+            .map_err(|_| V3AnthropicRelayRuntimeError::LocalContinuationStatePoisoned)
+    }
+}
+
+async fn collect_v3_anthropic_relay_provider_sse_chunks(
+    mut stream: V3ProviderSseStream,
+) -> Result<Vec<Vec<u8>>, V3ProviderError> {
+    let mut chunks = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        chunks.push(chunk?);
+    }
+    Ok(chunks)
+}

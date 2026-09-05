@@ -61,26 +61,6 @@ pub struct V3AnthropicRelayClientHeader {
     pub value: String,
 }
 
-impl V3AnthropicRelayClientHeader {
-    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            value: value.into(),
-        }
-    }
-
-    pub fn is_provider_protocol_header_name(name: &str) -> bool {
-        is_v3_anthropic_provider_request_header_name(name)
-    }
-
-    pub fn provider_protocol(name: impl Into<String>, value: impl Into<String>) -> Option<Self> {
-        build_v3_anthropic_provider_request_header(name, value).map(|header| Self {
-            name: header.name().to_string(),
-            value: header.value().to_string(),
-        })
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3AnthropicRelayLocalContinuationScope {
     entry_endpoint: String,
@@ -90,64 +70,9 @@ pub struct V3AnthropicRelayLocalContinuationScope {
     routing_group: String,
 }
 
-impl V3AnthropicRelayLocalContinuationScope {
-    pub fn anthropic(
-        entry_endpoint: impl Into<String>,
-        session_id: impl Into<String>,
-        conversation_id: impl Into<String>,
-        port: u16,
-        routing_group: impl Into<String>,
-    ) -> Self {
-        Self {
-            entry_endpoint: entry_endpoint.into(),
-            session_id: session_id.into(),
-            conversation_id: conversation_id.into(),
-            port,
-            routing_group: routing_group.into(),
-        }
-    }
-
-    fn local_key(&self) -> V3LocalContinuationScopeKey {
-        V3LocalContinuationScopeKey::anthropic(
-            self.entry_endpoint.clone(),
-            self.session_id.clone(),
-            self.conversation_id.clone(),
-            self.port,
-            self.routing_group.clone(),
-        )
-    }
-
-    fn hub_scope(&self, server_id: &str) -> V3HubContinuationScope {
-        V3HubContinuationScope::new(
-            V3HubEntryProtocol::Anthropic,
-            server_id,
-            self.routing_group.clone(),
-            self.session_id.clone(),
-        )
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct V3AnthropicRelayLocalContinuationState {
     store: Mutex<V3LocalContinuationStore>,
-}
-
-impl V3AnthropicRelayLocalContinuationState {
-    pub fn len(&self) -> Result<usize, V3AnthropicRelayRuntimeError> {
-        Ok(self.lock_store()?.len())
-    }
-
-    pub fn is_empty(&self) -> Result<bool, V3AnthropicRelayRuntimeError> {
-        Ok(self.lock_store()?.is_empty())
-    }
-
-    fn lock_store(
-        &self,
-    ) -> Result<MutexGuard<'_, V3LocalContinuationStore>, V3AnthropicRelayRuntimeError> {
-        self.store
-            .lock()
-            .map_err(|_| V3AnthropicRelayRuntimeError::LocalContinuationStatePoisoned)
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1376,16 +1301,6 @@ fn find_anthropic_tool_result_ids(
     Ok(ids)
 }
 
-async fn collect_v3_anthropic_relay_provider_sse_chunks(
-    mut stream: V3ProviderSseStream,
-) -> Result<Vec<Vec<u8>>, V3ProviderError> {
-    let mut chunks = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        chunks.push(chunk?);
-    }
-    Ok(chunks)
-}
-
 async fn closeout_anthropic_relay_sse_response<F>(
     resp01: V3ProviderRespInbound01Raw,
     response_hook_profile: &V3HubRelayResponseHookProfile,
@@ -1603,7 +1518,4 @@ fn record_provider_success_after_resp04(
         .map_err(|error| V3AnthropicRelayRuntimeError::Target(error.to_string()))
 }
 
-// Anthropic relay 失败投影与 usage/finish_reason 提取 helper 保持文件尺寸
-// 门限（v3.module_decomposition <=1500）：逻辑仍属于 anthropic relay runtime
-// owner，include! 到同一模块，无独立模块边界。
 include!("anthropic_relay_runtime_helpers.rs");
