@@ -1,22 +1,22 @@
 {
-  "freeze_id": "freeze-fix-routecodex-v4-control-636fa58b9d17",
+  "freeze_id": "freeze-fix-routecodex-v4-control-9c43b56939bc",
   "issue_id": "v4-cordis-routecodex-v4-control-active-recovery",
   "module_id": "routecodex-v4-control",
-  "promotion_id": "promotion-fix-routecodex-v4-control-636fa58b9d17",
-  "promotion_record_hash": "sha256:21b45b452fe8e645c3b3f0d1f9b1e461df105bd2acaad73c8915576ba2a01502",
-  "artifact_record_id": "evidence-fix-routecodex-v4-control-636fa58b9d17",
-  "regression_report_id": "regression-fix-routecodex-v4-control-636fa58b9d17",
-  "regression_report_hash": "sha256:4331044af95c8106d705a76032ba3e7e8d69f8593a3501e58bb05f978c062a58",
-  "source_commit_or_tag": "636fa58b9d171df3c1370137d311d69c277bf05c",
+  "promotion_id": "promotion-fix-routecodex-v4-control-9c43b56939bc",
+  "promotion_record_hash": "sha256:07da61c2244b96d9725ac2ba9c582da4e38121b6b009c912238a8c1b89b94955",
+  "artifact_record_id": "evidence-fix-routecodex-v4-control-9c43b56939bc",
+  "regression_report_id": "regression-fix-routecodex-v4-control-9c43b56939bc",
+  "regression_report_hash": "sha256:e9f82b6f4d0dbcaca5dfc9f182d4d42c80f249f0e6366ac08db8e043f177a29d",
+  "source_commit_or_tag": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
   "active_version": "active-v4",
   "previous_active_version": "active-v3",
-  "library_hash": "sha256:b77a0edf18e2f20e413cc9818332713575d20199e693eb6e9f516eb05301fb5f",
-  "public_api_hash": "sha256:1105562d84253eecb09d20605cf84245f606879a87a4cce10f4f14c547307823",
-  "review_id": "review-fix-routecodex-v4-control-636fa58b9d17",
+  "library_hash": "sha256:5d6f11f28ba16d06c555e03db4fd725b0c38615805ecec26007f9be36b831811",
+  "public_api_hash": "sha256:fb96f2db57588b5c28dc3cd96535d4375f03a1e1d23d71cfde7ceccb19d0c9ef",
+  "review_id": "review-fix-routecodex-v4-control-9c43b56939bc",
   "previous_active_immutable": false,
   "git_clean": true,
   "clean_scope": {
-    "base_commit": "e3c72cc7c9fa5626473837b8f1cde7f923fc7487",
+    "base_commit": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
     "changed_paths": [],
     "ignored_paths": [
       "v4/generated/**",
@@ -32,5 +32,5 @@
     "review": "project::architecture_review",
     "artifact_registry": "appsdk::lifecycle"
   },
-  "created_at": "2026-09-05T07:52:31.517Z"
+  "created_at": "2026-09-05T07:59:50.439Z"
 }

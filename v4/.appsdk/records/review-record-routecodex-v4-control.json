@@ -1,26 +1,26 @@
 {
-  "review_id": "review-fix-routecodex-v4-control-636fa58b9d17",
+  "review_id": "review-fix-routecodex-v4-control-9c43b56939bc",
   "review_kind": "architecture",
   "issue_id": "v4-cordis-routecodex-v4-control-active-recovery",
-  "promotion_id": "promotion-fix-routecodex-v4-control-636fa58b9d17",
-  "fix_candidate_id": "fix-routecodex-v4-control-636fa58b9d17",
-  "pre_review_validation_id": "pre-review-fix-routecodex-v4-control-636fa58b9d17",
+  "promotion_id": "promotion-fix-routecodex-v4-control-9c43b56939bc",
+  "fix_candidate_id": "fix-routecodex-v4-control-9c43b56939bc",
+  "pre_review_validation_id": "pre-review-fix-routecodex-v4-control-9c43b56939bc",
   "reviewer": {
     "adapter": "project::architecture_review",
-    "identity": "routecodex-v4-control:636fa58b9d171df3c1370137d311d69c277bf05c"
+    "identity": "routecodex-v4-control:9c43b56939bc466c928ea3ad97cc75a141bc6ffe"
   },
   "verdict": "pass",
   "evidence_ids": [
-    "evidence-fix-routecodex-v4-control-636fa58b9d17",
+    "evidence-fix-routecodex-v4-control-9c43b56939bc",
     "candidate-artifact",
     "development-whitebox",
     "positive-intervention",
     "negative-intervention"
   ],
-  "reviewed_commit": "636fa58b9d171df3c1370137d311d69c277bf05c",
-  "reviewed_tree_hash": "ce6ee4bb6fa01a0007964be09178d8789174492c",
+  "reviewed_commit": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
+  "reviewed_tree_hash": "253720ea286e061fd2e4e82de63760d85f469f8f",
   "reviewed_diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "reviewed_artifact_hash": "sha256:b77a0edf18e2f20e413cc9818332713575d20199e693eb6e9f516eb05301fb5f",
+  "reviewed_artifact_hash": "sha256:5d6f11f28ba16d06c555e03db4fd725b0c38615805ecec26007f9be36b831811",
   "reviewed_scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "resource_map_hash": "sha256:f6acff041c1826b3108e51bd0327074edec380e72f9a0c5aa217bdf7321663b0",
   "function_map_hash": "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
@@ -28,5 +28,5 @@
   "verification_map_hash": "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
   "ai_confidence": 1,
   "confidence_rationale": "Current-tree architecture gates and mapped module regression passed.",
-  "created_at": "2026-09-05T07:52:31.517Z"
+  "created_at": "2026-09-05T07:59:50.439Z"
 }

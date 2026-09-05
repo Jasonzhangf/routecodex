@@ -1,11 +1,11 @@
 {
   "evidence_id": "post-deployed-blackbox",
   "issue_id": "v4-cordis-routecodex-v4-edge-active-recovery",
-  "experiment_id": "fix-routecodex-v4-edge-636fa58b9d17",
+  "experiment_id": "fix-routecodex-v4-edge-9c43b56939bc",
   "phase": "deployed_blackbox",
   "kind": "runtime",
-  "source_commit": "636fa58b9d171df3c1370137d311d69c277bf05c",
-  "artifact_hash": "sha256:e91d1efa513b4b6b64681eb5a6c6de791a98a166afd699245c827970ec624619",
+  "source_commit": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
+  "artifact_hash": "sha256:64a9d127228cc987890d0f759dff38da4131db060b4be457afe65be80b26c44e",
   "execution_surface": "deployed_blackbox",
   "environment_id": "local-artifact-routecodex-v4-edge",
   "entrypoint": "artifact://routecodex-v4-edge",
@@ -16,20 +16,20 @@
   },
   "producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-edge:636fa58b9d171df3c1370137d311d69c277bf05c"
+    "identity": "routecodex-v4-edge:9c43b56939bc466c928ea3ad97cc75a141bc6ffe"
   },
   "command_argv": [
     "node",
     "-e",
     "const fs=require(\"node:fs\"); const crypto=require(\"node:crypto\"); const p=process.argv[1]; const expected=process.argv[2]; const got=\"sha256:\"+crypto.createHash(\"sha256\").update(fs.readFileSync(p)).digest(\"hex\"); if(got!==expected) process.exit(1); console.log(got);",
-    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/routecodex-v4-routecodex-v4-edge-aJk8Fu/libroutecodex_v4_edge.rlib",
-    "sha256:244e8f9a5cf11a5eb7fe0b4844ffec24a6229c55ef00ead03307f8c55b4bd9c3"
+    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/routecodex-v4-routecodex-v4-edge-M933uc/libroutecodex_v4_edge.rlib",
+    "sha256:14fd0d434307f233fc3939138323443dc777c9cd9b8a7bafc60fae2f344d3c6e"
   ],
   "exit_status": 0,
-  "output_hash": "sha256:e290550e8ca78418bca2c7c27a2102a55296de32f428fee4b1e1d2f6e5f75521",
+  "output_hash": "sha256:0a26e80896c9508e12ed6fedeee60ccb15390f75736a6428773686264e64c8c8",
   "result": "pass",
-  "created_at": "2026-09-05T07:52:30.128Z",
-  "expires_at": "2026-09-12T07:52:28.505Z",
+  "created_at": "2026-09-05T07:59:46.900Z",
+  "expires_at": "2026-09-12T07:59:35.268Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
     "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",

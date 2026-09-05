@@ -1,11 +1,11 @@
 {
-  "effectiveness_id": "effectiveness-fix-routecodex-v4-error-636fa58b9d17",
+  "effectiveness_id": "effectiveness-fix-routecodex-v4-error-9c43b56939bc",
   "issue_id": "v4-cordis-routecodex-v4-error-active-recovery",
   "module_id": "routecodex-v4-error",
-  "fix_candidate_id": "fix-routecodex-v4-error-636fa58b9d17",
-  "architecture_review_id": "review-fix-routecodex-v4-error-636fa58b9d17",
-  "reviewed_commit": "636fa58b9d171df3c1370137d311d69c277bf05c",
-  "reviewed_tree_hash": "ce6ee4bb6fa01a0007964be09178d8789174492c",
+  "fix_candidate_id": "fix-routecodex-v4-error-9c43b56939bc",
+  "architecture_review_id": "review-fix-routecodex-v4-error-9c43b56939bc",
+  "reviewed_commit": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
+  "reviewed_tree_hash": "253720ea286e061fd2e4e82de63760d85f469f8f",
   "reproduction_input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
     "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
@@ -27,5 +27,5 @@
   ],
   "source_unchanged_since_review": true,
   "result": "pass",
-  "created_at": "2026-09-05T07:52:33.146Z"
+  "created_at": "2026-09-05T07:59:53.476Z"
 }

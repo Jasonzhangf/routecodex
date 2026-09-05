@@ -1,11 +1,11 @@
 {
   "evidence_id": "deployment-install",
   "issue_id": "v4-cordis-routecodex-v4-control-active-recovery",
-  "experiment_id": "fix-routecodex-v4-control-636fa58b9d17",
+  "experiment_id": "fix-routecodex-v4-control-9c43b56939bc",
   "phase": "deployment_install",
   "kind": "install",
-  "source_commit": "636fa58b9d171df3c1370137d311d69c277bf05c",
-  "artifact_hash": "sha256:b77a0edf18e2f20e413cc9818332713575d20199e693eb6e9f516eb05301fb5f",
+  "source_commit": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
+  "artifact_hash": "sha256:5d6f11f28ba16d06c555e03db4fd725b0c38615805ecec26007f9be36b831811",
   "execution_surface": "deployed_blackbox",
   "environment_id": "local-artifact-routecodex-v4-control",
   "entrypoint": "artifact://routecodex-v4-control",
@@ -16,21 +16,21 @@
   },
   "producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-control:636fa58b9d171df3c1370137d311d69c277bf05c"
+    "identity": "routecodex-v4-control:9c43b56939bc466c928ea3ad97cc75a141bc6ffe"
   },
   "command_argv": [
     "/bin/sh",
     "-c",
     "test -f \"$1\" && cmp -s \"$2\" \"$1\"",
     "artifact-install",
-    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/routecodex-v4-routecodex-v4-control-WapzLV/libroutecodex_v4_control.rlib",
-    "/Users/fanzhang/Documents/github/routecodex/playground/v4-cordis-merge-20260905-r5/v4/generated/modules/routecodex-v4-control/lib/libroutecodex_v4_control.rlib"
+    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/routecodex-v4-routecodex-v4-control-frCcGj/libroutecodex_v4_control.rlib",
+    "/Users/fanzhang/Documents/github/routecodex/playground/v4-cordis-integration-20260905-r5/v4/generated/modules/routecodex-v4-control/lib/libroutecodex_v4_control.rlib"
   ],
   "exit_status": 0,
   "output_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "result": "pass",
-  "created_at": "2026-09-05T07:52:31.399Z",
-  "expires_at": "2026-09-12T07:52:30.447Z",
+  "created_at": "2026-09-05T07:59:50.322Z",
+  "expires_at": "2026-09-12T07:59:47.223Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
     "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
