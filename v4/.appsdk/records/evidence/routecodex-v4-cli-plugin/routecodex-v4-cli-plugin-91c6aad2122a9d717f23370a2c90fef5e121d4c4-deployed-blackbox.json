@@ -1,0 +1,39 @@
+{
+  "evidence_id": "routecodex-v4-cli-plugin-91c6aad2122a9d717f23370a2c90fef5e121d4c4-deployed-blackbox",
+  "issue_id": "v4-cli-governance-closeout",
+  "experiment_id": "routecodex-v4-cli-plugin-91c6aad2122a9d717f23370a2c90fef5e121d4c4",
+  "phase": "deployed_blackbox",
+  "kind": "runtime",
+  "source_commit": "91c6aad2122a9d717f23370a2c90fef5e121d4c4",
+  "artifact_hash": "sha256:6e85a2b62721b69f4c6e2e08e9f15fb174171b3bfa257aaca5c95a1e955ce1e9",
+  "execution_surface": "deployed_blackbox",
+  "environment_id": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-gBnlR4",
+  "entrypoint": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-gBnlR4/bin/rccv4-plugin",
+  "scope": {
+    "module_id": "routecodex-v4-cli-plugin",
+    "feature_id": "v4-cli-governance-closeout",
+    "entrypoint": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-gBnlR4/bin/rccv4-plugin"
+  },
+  "producer": {
+    "adapter": "project::deployment_adapter",
+    "identity": "routecodex-v4-cli-plugin:91c6aad2122a9d717f23370a2c90fef5e121d4c4"
+  },
+  "command_argv": [
+    "/opt/homebrew/Cellar/node@22/22.22.2_2/bin/node",
+    "scripts/test-cli-plugin.mjs",
+    "--binary",
+    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-gBnlR4/bin/rccv4-plugin"
+  ],
+  "exit_status": 0,
+  "output_hash": "sha256:5e4e9e9b98e87d89c63280e838f8c12efd5377fdfe61b2bb975dc076a298e060",
+  "result": "pass",
+  "created_at": "2026-09-05T13:07:26.026Z",
+  "expires_at": "2026-09-06T13:07:26.084Z",
+  "input_hashes": [
+    "sha256:c39a60422beb5e0f69ab2710b4ed2882154464657cab301435509f7821fbc4c5",
+    "sha256:bae31c2a59ec817425dce44b576f343bd9f66874ea00f48cb7afd509e0adfbb4",
+    "sha256:88d94f35b9c3bbc61981245ab47a60301bc643269cf16bd6f70a960ed632c596",
+    "sha256:0a91e448c11a257b3c5dccd4d703570fe2ab20606ac7de0fec5f8da6042c6c22"
+  ],
+  "scope_hash": "sha256:1eb9af0c33d3119ae45f53428517c74ee36ca17eef33af166be8ab248ee72cf2"
+}
