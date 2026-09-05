@@ -1,0 +1,33 @@
+{
+  "validation_id": "pre-review-fix-routecodex-v4-base-node-ca3804923302",
+  "issue_id": "v4-cordis-routecodex-v4-base-node-active-recovery",
+  "module_id": "routecodex-v4-base-node",
+  "fix_candidate_id": "fix-routecodex-v4-base-node-ca3804923302",
+  "candidate_commit": "ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b",
+  "candidate_tree_hash": "10efca7c4331c3da4ee3177411b4602758d54431",
+  "artifact_hash": "sha256:8c19706a91ebc182e9de7b9c21082666241c8b666f7234273dbea1468a1ffa68",
+  "whitebox_producer": {
+    "adapter": "project::lifecycle_adapter",
+    "identity": "routecodex-v4-base-node:ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b"
+  },
+  "whitebox_evidence_ids": [
+    "development-whitebox"
+  ],
+  "blackbox_evidence_ids": [
+    "deployed-blackbox"
+  ],
+  "deployment": {
+    "environment_id": "local-artifact-routecodex-v4-base-node",
+    "install_receipt_id": "deployment-install",
+    "restart_receipt_id": "deployment-restart",
+    "entrypoint": "artifact://routecodex-v4-base-node",
+    "producer": {
+      "adapter": "project::lifecycle_adapter",
+      "identity": "routecodex-v4-base-node:ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b"
+    },
+    "observed_at": "2026-09-05T05:27:16.201Z"
+  },
+  "source_unchanged": true,
+  "result": "pass",
+  "created_at": "2026-09-05T05:27:16.201Z"
+}

@@ -1,0 +1,14 @@
+{
+  "worktree_id": "v4-cordis-merge-routecodex-v4-base-node-ca3804923302",
+  "issue_id": "v4-cordis-routecodex-v4-base-node-active-recovery",
+  "module_id": "routecodex-v4-base-node",
+  "base_ref": "origin/v4-cordis",
+  "base_commit": "c0907547c75d93e24b01d386aec149d246c9cf1c",
+  "branch": "codex/v4-cordis-merge-20260905",
+  "head_commit": "ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b",
+  "initial_clean": true,
+  "final_clean": true,
+  "isolation_mode": "isolated_worktree",
+  "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "created_at": "2026-09-05T05:27:15.731Z"
+}

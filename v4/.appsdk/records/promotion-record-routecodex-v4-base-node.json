@@ -1,0 +1,54 @@
+{
+  "promotion_id": "promotion-fix-routecodex-v4-base-node-ca3804923302",
+  "issue_id": "v4-cordis-routecodex-v4-base-node-active-recovery",
+  "experiment_id": "fix-routecodex-v4-base-node-ca3804923302",
+  "module_id": "routecodex-v4-base-node",
+  "worktree_record_id": "v4-cordis-merge-routecodex-v4-base-node-ca3804923302",
+  "reproduction_record_id": "reproduction-fix-routecodex-v4-base-node-ca3804923302",
+  "fix_candidate_id": "fix-routecodex-v4-base-node-ca3804923302",
+  "architecture_review_id": "review-fix-routecodex-v4-base-node-ca3804923302",
+  "effectiveness_record_id": "effectiveness-fix-routecodex-v4-base-node-ca3804923302",
+  "merge_record_id": "merge-fix-routecodex-v4-base-node-ca3804923302",
+  "base_commit": "c0907547c75d93e24b01d386aec149d246c9cf1c",
+  "candidate_commit": "ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b",
+  "merged_commit": "ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b",
+  "source_commit": "ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b",
+  "previous_active_version": null,
+  "new_active_version": "active-v1",
+  "base_artifact_hash": null,
+  "artifact_hash": "sha256:8c19706a91ebc182e9de7b9c21082666241c8b666f7234273dbea1468a1ffa68",
+  "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "public_api_hash": "sha256:7ea54624ce8b9e1bbf64281a86251ec51ce6ee24ead640eaa98432b257717ab7",
+  "review_id": "review-fix-routecodex-v4-base-node-ca3804923302",
+  "evidence_ids": [
+    "baseline-reproduction",
+    "candidate-artifact",
+    "development-whitebox",
+    "positive-intervention",
+    "negative-intervention",
+    "deployment-install",
+    "deployment-restart",
+    "deployed-blackbox",
+    "effectiveness-replay"
+  ],
+  "required_gate_results": [
+    {
+      "gate_id": "v4-base-node-regression",
+      "result": "pass",
+      "producer": "routecodex-v4-base-node:ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b"
+    },
+    {
+      "gate_id": "v4-node-graph",
+      "result": "pass",
+      "producer": "routecodex-v4-base-node:ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b"
+    }
+  ],
+  "change_set_id": "fix-routecodex-v4-base-node-ca3804923302",
+  "migration_id": null,
+  "compatibility_level": "compatible",
+  "root_cause": "governance reset removed current candidate lifecycle records and Active-linked module artifact bindings.",
+  "design_id": "v4-cordis-mainline-migration-plan",
+  "change_reason_comment": "Rebuild current-tree lifecycle evidence through the project-owned adapter.",
+  "playground_cleanup_record_id": "cleanup-fix-routecodex-v4-base-node-ca3804923302",
+  "created_at": "2026-09-05T05:27:16.201Z"
+}
